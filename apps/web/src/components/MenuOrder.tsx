@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { api, DishNote, HouseholdResponse, Member, MenuItem, MenuLink, Order, OrderItem, ReadMenu } from '../api';
+import { api, DishNote, HouseholdResponse, Learned, Member, MenuItem, MenuLink, Order, OrderItem, ReadMenu } from '../api';
 import { colors, radius, spacing, TARGET, type } from '../theme';
 import { useViewport } from '../hooks/useViewport';
 import { Icon } from './Icon';
 import { Button, Card, Chip, Row, Segmented, Wrap } from './ui';
 import { QrCode } from './QrCode';
 import { paths } from '../routes';
+import { useRouter } from '../router';
 
 /**
  * The table half of an evening (owner, 4 Sep 2026): "surface the functionality
@@ -65,7 +66,16 @@ type Line = {
   itemId: string; key: string; who: string; kind: Diner['kind']; memberId: string | null; guestRef: string | null;
   name: string; price: number | null; priceText: string | null; note: string;
 };
+/**
+ * A star belongs to a person and a plate, not to a plate (owner, 7 Sep 2026).
+ *
+ * Keyed `<orderItemId>:<memberId>`, because a plate for the table is eaten by
+ * everybody and each of them has their own answer about it — and because the
+ * phone is handed round, so one person's marks must never overwrite another's.
+ */
 type Marks = Record<string, { stars: number; notGreat: boolean; comment: string; concept: boolean }>;
+const markKey = (orderItemId: string, memberId: string) => `${orderItemId}:${memberId}`;
+const NO_MARK = { stars: 0, notGreat: false, comment: '', concept: false };
 
 /** Ingredients that carry an allergen without naming it. A prompt, never a clearance. */
 const HIDDEN: Record<string, string[]> = {
@@ -196,6 +206,14 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   const [staff, setStaff] = useState(false);
   // Where the Order tab is: the order itself, the stars afterwards, what was kept.
   const [phase, setPhase] = useState<'order' | 'rate' | 'saved'>('order');
+  // Whose hands the phone is in (owner, 7 Sep 2026: "I can give it to Phoenix…
+  // and then I can give it to Gina"). Null is the board, where it is handed on.
+  const [turn, setTurn] = useState<string | null>(null);
+  // Who has had their turn, and what they said, so the board can show it.
+  const [tookATurn, setTookATurn] = useState<Record<string, boolean>>({});
+  // What the household's stars have added up to, per person per dish — the
+  // answer to "how are you going to use them" (routes/household.js `learned`).
+  const [learned, setLearned] = useState<Learned[] | null>(null);
   // An order that was already here when the drawer opened is one the table has
   // placed; the meal comes after it, so that is the only one offered "we ate
   // it" (owner, 4 Sep 2026). One being written now is still being written.
@@ -432,28 +450,97 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     setBusy(true);
     try {
       if (order && !order.visitId) await api.clearOrder(order.id);
-      setOrder(null); setPicks({}); setGuests([]); setMarks({}); setResumed(false); setPhase('order'); setAdded(null); setPeek(false);
+      setOrder(null); setPicks({}); setGuests([]); setMarks({}); setResumed(false); setPhase('order');
+      setAdded(null); setPeek(false); setTurn(null); setTookATurn({});
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  async function weAteIt() {
+  /**
+   * What one person ate: their own plates, and everything the table shared.
+   *
+   * A plate for the middle of the table is eaten by all of them, so it is
+   * offered to each of them in turn and each gets their own answer about it —
+   * which is also the only way a shared plate could ever be rated at all.
+   */
+  const platesFor = (memberId: string): OrderItem[] =>
+    (order?.items ?? []).filter((i) => i.memberId === memberId || (!i.memberId && !i.guestId));
+
+  /**
+   * Who is handed the phone: everybody with a plate of their own.
+   *
+   * If the whole order was for the middle of the table, everybody in the
+   * household who was there gets a turn instead — otherwise a shared meal
+   * would have nobody to rate it.
+   */
+  const raters = useMemo(() => {
+    const own = new Set((order?.items ?? []).map((i) => i.memberId).filter(Boolean) as string[]);
+    return own.size ? members.filter((m) => own.has(m.id)) : members;
+  }, [order, members]);
+
+  /** Stars already given, so coming back to a meal shows what was said before. */
+  function marksOf(from: Order): Marks {
+    const next: Marks = {};
+    for (const i of from.items) {
+      for (const r of i.ratings ?? []) {
+        if (!r.memberId) continue;
+        next[markKey(i.id, r.memberId)] = {
+          stars: r.score ?? 0,
+          notGreat: r.take === 'not_for_me',
+          comment: r.comment ?? '',
+          concept: Boolean(i.concept),
+        };
+      }
+    }
+    return next;
+  }
+
+  const markOf = (orderItemId: string, memberId: string) => marks[markKey(orderItemId, memberId)] ?? NO_MARK;
+  const setMark = (orderItemId: string, memberId: string, next: Partial<Marks[string]>) =>
+    setMarks((s) => ({ ...s, [markKey(orderItemId, memberId)]: { ...markOf(orderItemId, memberId), ...next } }));
+
+  /**
+   * "Rate the meal" (owner, 7 Sep 2026: "what I'd like is an actual call to
+   * action, like 'Rate the meal', that I can give to Phoenix").
+   *
+   * The meal becomes a visit here, because the stars hang off the visit — and
+   * it is dated from the order rather than from now, so a table rated over
+   * breakfast is still recorded as having eaten last night.
+   */
+  async function rateTheMeal() {
     if (!order) return;
     setBusy(true);
     try {
-      const d = order.visitId ? { order } : await api.orderEaten(order.id);
+      const ate = new Set(order.items.map((i) => i.memberId).filter(Boolean) as string[]);
+      const d = order.visitId ? { order } : await api.orderEaten(order.id, {
+        visitedOn: (order.createdAt ?? '').slice(0, 10) || undefined,
+        attendeeIds: ate.size ? [...ate] : undefined,
+      });
       setOrder(d.order);
+      setMarks(marksOf(d.order));
+      setTookATurn(Object.fromEntries((d.order.items.flatMap((i) => i.ratings ?? [])).map((r) => [r.memberId, true])));
       setPhase('rate');
+      setTurn(null);
+      api.learned().then((l) => setLearned(l.learned)).catch(() => {});
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  async function saveStars() {
-    if (!order) return;
+  /** Hand it over. Nobody sees anybody else's plates on their turn. */
+  const handTo = (memberId: string) => { setTurn(memberId); setError(null); };
+
+  /**
+   * One person's turn is over: what they said is written now rather than at the
+   * end, so a phone put down halfway round the table keeps what it was given.
+   */
+  async function finishTurn() {
+    if (!order || !turn) return;
+    const memberId = turn;
     setBusy(true);
     try {
-      const d = await api.rateOrder(order.id, order.items.map((i) => {
-        const m = marks[i.id] ?? { stars: 0, notGreat: false, comment: '', concept: false };
+      const d = await api.rateOrder(order.id, platesFor(memberId).map((i) => {
+        const m = markOf(i.id, memberId);
         return {
           orderItemId: i.id,
+          memberId,
           score: m.stars || null,
           notGreat: m.notGreat,
           comment: m.comment || null,
@@ -461,9 +548,17 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
         };
       }));
       setOrder(d.order);
-      setPhase('saved');
+      setTookATurn((t) => ({ ...t, [memberId]: true }));
+      setTurn(null);
+      api.learned().then((l) => setLearned(l.learned)).catch(() => {});
       api.orderHistory(venueRef).then((h) => setHistory(h.orders)).catch(() => {});
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  /** Everybody has had a go. */
+  function finishRating() {
+    setPhase('saved');
+    api.orderHistory(venueRef).then((h) => setHistory(h.orders)).catch(() => {});
   }
 
   /**
@@ -527,9 +622,10 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   return {
     venueRef, venueLabel, menu, link, reading, error, held, how, members, sections, shown, section, setSection, itemsById,
     picks, pickOf, setPick, togglePick, onThis, diners, guests, seating, setSeating, addGuest, removeGuest,
-    peek, setPeek, added, chosen, total, dropLine, order, resumed, marks, setMarks, busy, staff, setStaff, phase, setPhase,
+    peek, setPeek, added, chosen, total, dropLine, order, resumed, marks, setMarks, markOf, setMark, busy, staff, setStaff, phase, setPhase,
     noting, setNoting, asked, groups, allergenLines, dietLines, history, again, setAgain,
-    readTheMenu, toTheOrder, removeFromOrder, noteOnOrder, startAgain, weAteIt, saveStars, whatIsThis, orderAgain,
+    turn, setTurn, tookATurn, raters, platesFor, learned, handTo, finishTurn, finishRating, rateTheMeal,
+    readTheMenu, toTheOrder, removeFromOrder, noteOnOrder, startAgain, whatIsThis, orderAgain,
   };
 }
 
@@ -627,6 +723,182 @@ function BasketPeek({ ctl }: { ctl: MenuOrderCtl }) {
         ))}
       </ScrollView>
     </View>
+  );
+}
+
+/* -------------------------------------------------- the phone, going round */
+
+/**
+ * Where the phone is handed on (owner, 7 Sep 2026: "I can give it to Phoenix…
+ * and then I can give it to Gina").
+ *
+ * One row per person who ate, with what they have already said. A guest is not
+ * on it: there is nowhere to put a guest's stars, because Roam only learns from
+ * the household's own palate.
+ */
+function RatingBoard({ ctl, footer }: { ctl: MenuOrderCtl; footer?: React.ReactNode }) {
+  const { order, raters, tookATurn, busy } = ctl;
+  if (!order) return null;
+  const guests = [...new Set(order.items.filter((i) => i.guestId).map((i) => i.guest ?? ''))].filter(Boolean);
+  const left = raters.filter((m) => !tookATurn[m.id]).length;
+  return (
+    <>
+      <ScrollView contentContainerStyle={styles.body}>
+        <Text style={type.h3}>Pass the phone round</Text>
+        <Text style={type.small}>
+          Give it to each of them in turn. They see their own plates and nothing else of yours, star whatever they would
+          have again, and hand it back.
+        </Text>
+        {raters.map((m) => {
+          const first = m.name.split(' ')[0];
+          const plates = ctl.platesFor(m.id);
+          const stars = plates.filter((i) => (i.ratings ?? []).some((r) => r.memberId === m.id && r.score)).length;
+          const said = Boolean(tookATurn[m.id]);
+          return (
+            <Pressable
+              key={m.id}
+              onPress={() => ctl.handTo(m.id)}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={said ? `${first} has rated their meal — go again` : `Give the phone to ${first}`}
+              style={[styles.handRow, said && styles.handRowDone]}
+            >
+              {/* Filled in once they have had their turn, so the board can be
+                  read across a table at a glance. */}
+              <View style={[styles.face, { width: 40, height: 40, borderRadius: 20 }, said && styles.faceOn]}>
+                <Text style={[styles.faceText, said && styles.faceTextOn, { fontSize: 16 }]}>{first[0]?.toUpperCase()}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={type.h3}>{first}</Text>
+                <Text style={type.tiny}>
+                  {plates.length} {plates.length === 1 ? 'plate' : 'plates'}
+                  {said ? ` · ${stars ? `starred ${stars}` : 'nothing starred, so all fine'}` : ''}
+                </Text>
+              </View>
+              {said
+                ? <Icon name="check" size={20} color={colors.accent} />
+                : <Chip label="Give it to them" icon="forward" />}
+            </Pressable>
+          );
+        })}
+        {guests.length ? (
+          <Text style={type.tiny}>
+            {guests.join(' and ')} {guests.length === 1 ? 'was a guest, so that plate is' : 'were guests, so those plates are'} not
+            rated — Roam only learns your family's taste.
+          </Text>
+        ) : null}
+        {ctl.error ? <Text style={[type.tiny, { color: colors.allergen }]}>{ctl.error}</Text> : null}
+        {footer}
+      </ScrollView>
+      <View style={styles.bar}>
+        <Button label="The order" icon="back" kind="ghost" style={styles.barBtn} onPress={() => ctl.setPhase('order')} disabled={busy} />
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          {left ? <Text style={type.tiny}>{left} still to go</Text> : null}
+        </View>
+        <Button label="That's everyone" icon="check" style={styles.barBtn} onPress={ctl.finishRating} disabled={busy} />
+      </View>
+    </>
+  );
+}
+
+/**
+ * One person's meal, in their hands.
+ *
+ * Their own plates and whatever the table shared, and nothing anybody else had.
+ * The rating rule is the owner's and stays sparse (4 Sep 2026): stars mean
+ * good, a plate left alone counts as fine and writes nothing at all, and "not
+ * great" is one tap that only then asks why.
+ */
+function Turn({ ctl, memberId, footer }: { ctl: MenuOrderCtl; memberId: string; footer?: React.ReactNode }) {
+  const { order, busy, venueLabel } = ctl;
+  const member = ctl.members.find((m) => m.id === memberId);
+  const first = member?.name.split(' ')[0] ?? 'Your';
+  const plates = ctl.platesFor(memberId);
+  const starred = plates.filter((i) => ctl.markOf(i.id, memberId).stars).length;
+  const bad = plates.filter((i) => ctl.markOf(i.id, memberId).notGreat).length;
+  if (!order) return null;
+  return (
+    <>
+      <ScrollView contentContainerStyle={styles.body}>
+        <Row style={{ alignItems: 'center' }}>
+          <View style={[styles.face, styles.faceOn, { width: 44, height: 44, borderRadius: 22 }]}>
+            <Text style={[styles.faceText, styles.faceTextOn, { fontSize: 18 }]}>{first[0]?.toUpperCase()}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={type.h2}>{first}</Text>
+            <Text style={type.small}>{venueLabel ? `your dinner at ${venueLabel}` : 'your dinner'}</Text>
+          </View>
+        </Row>
+        <Card>
+          <Text style={type.small}>
+            <Text style={{ fontWeight: '700' }}>Star anything you would have again.</Text> Leave the rest alone — that means it
+            was fine, which is the answer for most plates. Say so only when it was not.
+          </Text>
+        </Card>
+        {plates.map((i) => {
+          const m = ctl.markOf(i.id, memberId);
+          const set = (next: Partial<typeof m>) => ctl.setMark(i.id, memberId, next);
+          const shared = !i.memberId;
+          return (
+            <View key={i.id} style={styles.row}>
+              <Row style={{ alignItems: 'center' }}>
+                <Text style={[type.body, { flex: 1, fontWeight: '700' }]}>{i.name}</Text>
+                {shared ? <Text style={type.tiny}>shared</Text> : null}
+              </Row>
+              {i.note ? <Text style={type.tiny}>{i.note}</Text> : null}
+              <Row style={{ gap: spacing.md, flexWrap: 'wrap' }}>
+                <Row style={{ gap: 3 }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Pressable key={n} onPress={() => set({ stars: m.stars === n ? 0 : n, notGreat: false })}
+                      accessibilityRole="button" accessibilityLabel={`${n} star${n > 1 ? 's' : ''} for ${i.name}`} hitSlop={6}>
+                      <Icon name="favourite" size={30} fill={m.stars >= n} color={m.stars >= n ? colors.rating : colors.inkFaint} />
+                    </Pressable>
+                  ))}
+                </Row>
+                <Chip label="Not great" icon="close" selected={m.notGreat} onPress={() => set({ notGreat: !m.notGreat, stars: 0 })} />
+              </Row>
+              {m.stars || m.notGreat ? (
+                <>
+                  <TextInput
+                    value={m.comment}
+                    onChangeText={(t) => set({ comment: t })}
+                    placeholder={m.notGreat ? 'what was wrong with it?' : 'what made it good?'}
+                    placeholderTextColor={colors.inkFaint}
+                    style={[styles.noteInput, { flex: 1, width: '100%' }]}
+                    accessibilityLabel={`A word about ${i.name}`}
+                  />
+                  {/*
+                    A star on a plate is a star on the dish itself, and that is
+                    what Roam plans from — so a menu's own words are matched to
+                    the family's ("Spaghettoni al Ragù" → bolognese) on a tap,
+                    never silently (Epic 2 C7).
+                  */}
+                  {i.conceptSuggestion ? (
+                    <Chip
+                      label={`This is ${i.conceptSuggestion.label.toLowerCase()}`}
+                      icon={m.concept ? 'check' : 'add'}
+                      selected={m.concept}
+                      onPress={() => set({ concept: !m.concept })}
+                    />
+                  ) : i.concept ? (
+                    <Text style={type.tiny}>→ {i.concept.label}, so it counts everywhere</Text>
+                  ) : null}
+                </>
+              ) : null}
+            </View>
+          );
+        })}
+        {ctl.error ? <Text style={[type.tiny, { color: colors.allergen }]}>{ctl.error}</Text> : null}
+        {footer}
+      </ScrollView>
+      <View style={styles.bar}>
+        <View style={{ flex: 1 }}>
+          <Text style={type.body}>{starred} starred · {bad} not great</Text>
+          <Text style={type.tiny}>{plates.length - starred - bad} left as fine</Text>
+        </View>
+        <Button label="Done — pass it back" icon="check" style={styles.barBtn} onPress={ctl.finishTurn} disabled={busy} />
+      </View>
+    </>
   );
 }
 
@@ -837,7 +1109,10 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
 /* --------------------------------------------------------------- the order */
 
 export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu: () => void; footer?: React.ReactNode }) {
-  const { order, groups, busy, phase, marks, setMarks, noting, setNoting, allergenLines, dietLines, resumed } = ctl;
+  const { order, groups, busy, phase, turn, noting, setNoting, allergenLines, dietLines, resumed } = ctl;
+  // The drawer sits inside the app's own router, so "go and look at it" can be
+  // an actual button rather than a sentence naming a screen (§13.14).
+  const { navigate } = useRouter();
 
   if (!order || !order.items.length) {
     const last = ctl.history[0];
@@ -911,120 +1186,147 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
     );
   }
 
+  /**
+   * Rating a meal is the phone going round the table (owner, 7 Sep 2026).
+   *
+   *   > "What I'd like is an actual call to action, like 'Rate the meal', that
+   *   > I can give to Phoenix. It can show Phoenix his meal, and then I can
+   *   > give it to Gina, and it can show Gina her meal."
+   *
+   * So there are two screens, not one list of everybody's dinner: the board,
+   * where the phone is handed on, and one person's turn, which shows their
+   * plates and nobody else's. Each turn is written when it ends, so a phone put
+   * down halfway round the table keeps what it has already been given.
+   */
   if (phase === 'rate') {
-    const starred = Object.values(marks).filter((m) => m.stars).length;
-    const bad = Object.values(marks).filter((m) => m.notGreat).length;
-    return (
-      <>
-        <ScrollView contentContainerStyle={styles.body}>
-          <Card>
-            <Text style={type.small}>
-              <Text style={{ fontWeight: '700' }}>Only star what stood out.</Text> Anything you leave alone is taken as fine —
-              that is the answer for most plates. Say so only when it was not.
-            </Text>
-          </Card>
-          {order.items.map((i) => {
-            const m = marks[i.id] ?? { stars: 0, notGreat: false, comment: '', concept: false };
-            const set = (next: Partial<typeof m>) => setMarks((s) => ({ ...s, [i.id]: { ...m, ...next } }));
-            // A guest's plate is listed, so the meal reads whole, and carries no
-            // stars: what somebody who came once thought of a dish is not a fact
-            // about this family's taste, and Roam plans from the family's.
-            if (i.guestId) {
-              return (
-                <View key={i.id} style={styles.row}>
-                  <Row>
-                    <Face label={i.guest ?? '?'} on guest onPress={() => {}} size={26} />
-                    <Text style={[type.body, { flex: 1 }]}>{i.name}</Text>
-                  </Row>
-                  <Text style={type.tiny}>{i.guest}'s, and a guest's plate is not scored into your family's taste.</Text>
-                </View>
-              );
-            }
-            return (
-              <View key={i.id} style={styles.row}>
-                <Row>
-                  {i.member ? <Face label={i.member} on onPress={() => {}} size={26} /> : <Icon name="household" size={16} />}
-                  <Text style={[type.body, { flex: 1 }]}>{i.name}</Text>
-                </Row>
-                <Row style={{ gap: spacing.md }}>
-                  <Row style={{ gap: 2 }}>
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <Pressable key={n} onPress={() => set({ stars: m.stars === n ? 0 : n, notGreat: false })}
-                        accessibilityRole="button" accessibilityLabel={`${n} star${n > 1 ? 's' : ''} for ${i.name}`} hitSlop={4}>
-                        <Icon name="favourite" size={24} fill={m.stars >= n} color={m.stars >= n ? colors.rating : colors.inkFaint} />
-                      </Pressable>
-                    ))}
-                  </Row>
-                  <Chip label="Not great" icon="close" selected={m.notGreat} onPress={() => set({ notGreat: !m.notGreat, stars: 0 })} />
-                </Row>
-                {m.stars || m.notGreat ? (
-                  <>
-                    <TextInput
-                      value={m.comment}
-                      onChangeText={(t) => set({ comment: t })}
-                      placeholder={m.notGreat ? 'what was wrong with it?' : 'what made it good?'}
-                      placeholderTextColor={colors.inkFaint}
-                      style={[styles.noteInput, { flex: 1, width: '100%' }]}
-                      accessibilityLabel={`A word about ${i.name}`}
-                    />
-                    {i.conceptSuggestion ? (
-                      <Chip
-                        label={`This is ${i.conceptSuggestion.label.toLowerCase()}`}
-                        icon={m.concept ? 'check' : 'add'}
-                        selected={m.concept}
-                        onPress={() => set({ concept: !m.concept })}
-                      />
-                    ) : i.concept ? (
-                      <Text style={type.tiny}>→ {i.concept.label}, so it counts everywhere</Text>
-                    ) : null}
-                  </>
-                ) : null}
-              </View>
-            );
-          })}
-          {footer}
-        </ScrollView>
-        <View style={styles.bar}>
-          <View style={{ flex: 1 }}>
-            <Text style={type.body}>{starred} starred · {bad} not great</Text>
-            <Text style={type.tiny}>{order.items.filter((i) => !i.guestId).length - starred - bad} left as fine</Text>
-          </View>
-          <Button label="Save" icon="check" style={styles.barBtn} onPress={ctl.saveStars} disabled={busy} />
-        </View>
-      </>
-    );
+    if (!turn) return <RatingBoard ctl={ctl} footer={footer} />;
+    return <Turn ctl={ctl} memberId={turn} footer={footer} />;
   }
-
+  /**
+   * What the stars did, said plainly (owner, 7 Sep 2026: "I'd like to see how I
+   * can then find those ratings and how you're going to be using them").
+   *
+   * Three things, in the order they matter: what each person said, what it adds
+   * up to for that person and that dish — the count toward the threshold at
+   * which Roam starts planning around it — and where to go and look at it later.
+   */
   if (phase === 'saved') {
+    const rated = order.items.flatMap((i) => (i.ratings ?? []).map((r) => ({ item: i, r })));
+    const loved = rated.filter((x) => x.r.score);
+    // Two people starring one shared plate is two stars and one plate.
+    const platesStarred = new Set(loved.map((x) => x.item.id)).size;
+    // Every dish this meal could have taught Roam something about: the ones a
+    // menu names outright, and the ones somebody matched by hand on their turn.
+    const concepts = [...new Set(order.items.flatMap((i) => [i.concept?.key, i.conceptSuggestion?.key]).filter(Boolean) as string[])];
+    const counting = (ctl.learned ?? []).filter((l) => concepts.includes(l.conceptKey));
+    // Starred, but not a dish Roam has a name for — so the star is kept against
+    // this plate and this place, and cannot follow the dish anywhere else. Said
+    // out loud, because the alternative is wondering why a five-star plate
+    // never turned up in what Roam thinks you like.
+    const unknown = [...new Set(order.items
+      .filter((i) => !i.concept && !i.conceptSuggestion && (i.ratings ?? []).some((r) => r.score))
+      .map((i) => i.name))];
+    const yetToGo = ctl.raters.filter((m) => !ctl.tookATurn[m.id]).map((m) => m.name.split(' ')[0]);
+    const nameOf = (memberId: string | null) => ctl.members.find((m) => m.id === memberId)?.name.split(' ')[0] ?? 'the table';
     return (
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={type.h3}>Saved</Text>
-        <Text style={type.small}>The visit is in Places, with the order and what everyone thought under it.</Text>
+        <Text style={type.h3}>{platesStarred ? `${platesStarred} ${platesStarred === 1 ? 'plate' : 'plates'} starred` : 'Saved'}</Text>
+        <Text style={type.small}>
+          The meal is a visit now, kept under this place in Places, with the order and what each of you said under it.
+        </Text>
         {order.items.map((i) => {
-          const r = i.ratings[0];
-          const who = whoHad(i);
+          const rs = (i.ratings ?? []).filter((r) => r.score || r.take === 'not_for_me');
           return (
-            <Row key={i.id} style={styles.orderRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={type.body}>{i.name}</Text>
-                <Text style={type.tiny}>
-                  {i.guestId ? `${who}'s, a guest`
-                    : r?.score ? `liked by ${who}` : r?.take === 'not_for_me' ? `${who} would not have it again` : 'nothing said, so it counts as fine'}
-                  {r?.comment ? ` — “${r.comment}”` : ''}
-                </Text>
-              </View>
-              {r?.score ? (
-                <Row style={{ gap: 1 }}>
-                  {[1, 2, 3, 4, 5].map((n) => <Icon key={n} name="favourite" size={13} fill={(r.score ?? 0) >= n} color={(r.score ?? 0) >= n ? colors.rating : colors.inkFaint} />)}
+            <View key={i.id} style={styles.orderRow}>
+              <Row style={{ alignItems: 'flex-start' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={type.body}>{i.name}</Text>
+                  {i.guestId ? <Text style={type.tiny}>{i.guest}'s, a guest — not scored</Text> : null}
+                  {!i.guestId && !rs.length ? <Text style={type.tiny}>nothing said, so it counts as fine</Text> : null}
+                </View>
+              </Row>
+              {rs.map((r, n) => (
+                <Row key={n} style={{ alignItems: 'center' }}>
+                  <Text style={[type.tiny, { flex: 1 }]}>
+                    {nameOf(r.memberId)}
+                    {r.take === 'not_for_me' ? ' would not have it again' : ''}
+                    {r.comment ? ` — “${r.comment}”` : ''}
+                  </Text>
+                  {r.score ? (
+                    <Row style={{ gap: 1 }}>
+                      {[1, 2, 3, 4, 5].map((n2) => <Icon key={n2} name="favourite" size={13} fill={(r.score ?? 0) >= n2} color={(r.score ?? 0) >= n2 ? colors.rating : colors.inkFaint} />)}
+                    </Row>
+                  ) : null}
                 </Row>
-              ) : null}
-            </Row>
+              ))}
+            </View>
           );
         })}
-        <Text style={type.tiny}>
-          A star goes to the dish as well as to the plate you had, so it counts the next time you are anywhere that serves it.
-          “Not great” lowers that one dish and nothing else. Fine changes nothing.
-        </Text>
+
+        {/*
+          What it counts toward. A star is not filed away — it is one of three
+          before Roam will plan around it (routes/household.js LEARN_THRESHOLD),
+          and saying which number you are on is the difference between a rating
+          somebody keeps giving and a rating that feels like it went nowhere.
+        */}
+        {counting.length || unknown.length ? (
+          <Card>
+            <Text style={type.h3}>What this counts toward</Text>
+            {counting.map((l) => (
+              <Row key={`${l.memberId}:${l.conceptKey}`} style={{ alignItems: 'center' }}>
+                <Text style={[type.small, { flex: 1 }]}>
+                  {l.name.split(' ')[0]} · {l.label}
+                </Text>
+                <Text style={type.tiny}>
+                  {l.confirmed
+                    ? `${l.kind === 'like' ? 'Roam plans around it' : 'ranked lower'} · ${l.count} meals`
+                    : `${l.count} of ${l.threshold}`}
+                </Text>
+              </Row>
+            ))}
+            {counting.length ? (
+              <Text style={type.tiny}>
+                A star goes to the dish as well as to the plate, so it counts the next time you are anywhere that serves it —
+                at {counting[0].threshold} it becomes a reason on a card and a table of its own on the home screen.
+                “Not great” lowers that one dish and nothing else. Fine changes nothing.
+              </Text>
+            ) : null}
+            {unknown.length ? (
+              <Text style={type.tiny}>
+                {unknown.join(', ')} — {unknown.length === 1 ? 'not a dish' : 'not dishes'} Roam has a name for yet, so
+                {unknown.length === 1 ? ' that star stays' : ' those stars stay'} with this plate and this place rather than
+                following the dish to anywhere else that serves it.
+              </Text>
+            ) : null}
+          </Card>
+        ) : null}
+
+        {/* Where to find it again, in the two places it actually lives — and a
+            way to go straight there, because "it is in Household somewhere" is
+            not an answer to "how do I find these" (owner, 7 Sep 2026). */}
+        <Card>
+          <Text style={type.h3}>Where to find this</Text>
+          <Text style={type.small}>· Here, under “What we had here”: every meal at this place, and who loved what.</Text>
+          <Text style={type.small}>· Household → the person → Food → “Learned from visits”: what their stars add up to.</Text>
+          <Wrap><Button label="Open Household" icon="household" kind="secondary" onPress={() => navigate(paths.household())} /></Wrap>
+          <Text style={type.tiny}>
+            Roam uses it when it ranks anywhere to eat: a dish somebody has starred enough times becomes a reason on the card
+            (“Phoenix loves this”) and a table of its own on the home screen, and one they would not have again ranks a place
+            lower without ever hiding it.
+          </Text>
+        </Card>
+
+        {yetToGo.length ? (
+          <Text style={type.small}>{yetToGo.join(' and ')} {yetToGo.length === 1 ? 'has' : 'have'} not had a go yet.</Text>
+        ) : null}
+        <Wrap>
+          <Button
+            label={yetToGo.length ? 'Pass it round again' : 'Rate it again'}
+            icon="favourite"
+            kind={yetToGo.length ? 'primary' : 'secondary'}
+            onPress={() => { ctl.setTurn(null); ctl.setPhase('rate'); }}
+          />
+        </Wrap>
         {footer}
       </ScrollView>
     );
@@ -1033,6 +1335,29 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
   return (
     <>
       <ScrollView contentContainerStyle={styles.body}>
+        {/*
+          The call to action the owner asked for (7 Sep 2026): "there is no
+          option to rate this, and I think what I'd like is an actual call to
+          action, like 'Rate the meal'". It used to appear only on an order that
+          was already on the server when the drawer opened — which is never the
+          one you have just written at the table, so a meal ordered and eaten in
+          one sitting could not be rated at all.
+        */}
+        {order.items.length ? (
+          <Card>
+            <Row style={{ alignItems: 'center' }}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={type.h3}>{order.visitId ? 'What did everyone think?' : 'Eaten it?'}</Text>
+                <Text style={type.tiny}>
+                  {order.visitId
+                    ? 'Hand the phone round — anybody who has not had a go still can.'
+                    : 'Hand the phone round the table and each of you stars your own plates.'}
+                </Text>
+              </View>
+              <Button label="Rate the meal" icon="favourite" onPress={ctl.rateTheMeal} disabled={busy} />
+            </Row>
+          </Card>
+        ) : null}
         <WhoIsHere ctl={ctl} />
         {groups.map((g) => (
           <View key={g.key} style={{ gap: 4 }}>
@@ -1097,12 +1422,6 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
           </View>
         ) : null}
         {dietLines.length ? <Text style={type.tiny}>{dietLines.join(' ')}</Text> : null}
-        {resumed ? (
-          <Card>
-            <Text style={type.small}>This order was already here. When you have eaten it, say so and star whatever stood out.</Text>
-            <Wrap><Button label="We ate it" icon="favourite" kind="secondary" onPress={ctl.weAteIt} disabled={busy} /></Wrap>
-          </Card>
-        ) : null}
         {footer}
       </ScrollView>
       <View style={styles.bar}>
@@ -1127,35 +1446,44 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
     <View style={{ gap: spacing.sm }}>
       <Text style={type.h3}>What we had here</Text>
       {ctl.history.map((meal) => {
-        const loved = meal.items.filter((i) => i.ratings[0]?.score);
+        // A plate for the table is rated by everybody who ate it, so a meal is
+        // counted in stars given rather than in plates starred.
+        const stars = meal.items.flatMap((i) => i.ratings ?? []).filter((r) => r.score).length;
         return (
           <View key={meal.id} style={{ gap: 4 }}>
-            <Text style={styles.mealWhen}>{meal.visitedOn ?? 'A visit'}{loved.length ? ` · ${loved.length} starred` : ''}</Text>
+            <Text style={styles.mealWhen}>{meal.visitedOn ?? 'A visit'}{stars ? ` · ${stars} starred` : ''}</Text>
             {meal.items.map((i) => {
-              const r = i.ratings[0];
+              const rs = (i.ratings ?? []).filter((r) => r.score || r.take === 'not_for_me');
               const who = whoHad(i);
               return (
-                <Row key={i.id} style={styles.orderRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={type.body}>{i.name}</Text>
-                    <Text style={type.tiny}>
-                      {who}
-                      {r?.score ? ' · loved it' : r?.take === 'not_for_me' ? ' · not great' : ''}
-                      {r?.comment ? ` — “${r.comment}”` : ''}
-                    </Text>
-                  </View>
-                  {r?.score ? (
-                    <Row style={{ gap: 1 }}>
-                      {[1, 2, 3, 4, 5].map((n) => <Icon key={n} name="favourite" size={12} fill={(r.score ?? 0) >= n} color={(r.score ?? 0) >= n ? colors.rating : colors.inkFaint} />)}
+                <View key={i.id} style={styles.orderRow}>
+                  <Row style={{ alignItems: 'flex-start' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={type.body}>{i.name}</Text>
+                      <Text style={type.tiny}>{who}{rs.length ? '' : ' · nobody said, so it was fine'}</Text>
+                    </View>
+                  </Row>
+                  {rs.map((r, n) => (
+                    <Row key={n} style={{ alignItems: 'center' }}>
+                      <Text style={[type.tiny, { flex: 1 }]}>
+                        {ctl.members.find((m) => m.id === r.memberId)?.name.split(' ')[0] ?? who}
+                        {r.take === 'not_for_me' ? ' · not great' : ''}
+                        {r.comment ? ` — “${r.comment}”` : ''}
+                      </Text>
+                      {r.score ? (
+                        <Row style={{ gap: 1 }}>
+                          {[1, 2, 3, 4, 5].map((n2) => <Icon key={n2} name="favourite" size={12} fill={(r.score ?? 0) >= n2} color={(r.score ?? 0) >= n2 ? colors.rating : colors.inkFaint} />)}
+                        </Row>
+                      ) : null}
                     </Row>
-                  ) : null}
-                </Row>
+                  ))}
+                </View>
               );
             })}
           </View>
         );
       })}
-      <Text style={type.tiny}>A plate nobody starred was fine. Stars are given on the order, after the meal.</Text>
+      <Text style={type.tiny}>A plate nobody starred was fine. Stars are given on the order, after the meal — “Rate the meal” on the Order tab.</Text>
     </View>
   );
 }
@@ -1309,6 +1637,14 @@ const styles = StyleSheet.create({
   },
   // The basket opened out, sitting on the bar it belongs to.
   peek: { borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surfaceMuted },
+  // One person on the board where the phone is handed round: a big target,
+  // because it is tapped by whoever is holding it and passed across a table.
+  handRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, minHeight: TARGET + 12,
+  },
+  handRowDone: { backgroundColor: colors.surfaceMuted, borderColor: colors.accentSoft },
   // Three labelled buttons on one row inside 390px: tighter padding than the
   // standard button, and the bar's own gap trimmed to match (owner, 4 Sep 2026).
   barBtn: { paddingHorizontal: 10 },

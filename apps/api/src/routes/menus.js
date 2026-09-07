@@ -26,7 +26,7 @@ import { recallVenue } from '../sources/index.js';
 import { findMenuUrl } from '../sources/menuLink.js';
 import { ownedRecord } from '../sources/own.js';
 import { readMenu, chromePath, renderProbe, describeDish } from '../sources/menuRead.js';
-import { resolveConcept, matchConcepts, conceptByKey } from '../domain/concepts.js';
+import { resolveConcept, suggestConcept, conceptByKey } from '../domain/concepts.js';
 import { upsertHouseholdPlace } from './atlas.js';
 
 export const menu = Router();
@@ -89,8 +89,8 @@ async function menuPayload(menuId) {
 function conceptOf(name) {
   const sure = resolveConcept(name, { kinds: ['dish'] });
   if (sure) return { concept: { key: sure.key, label: sure.label }, conceptSuggestion: null };
-  const [near] = matchConcepts(name, { kinds: ['dish'], limit: 1 });
-  return { concept: null, conceptSuggestion: near && near.score >= 0.6 ? { key: near.key, label: near.label, score: near.score } : null };
+  const near = suggestConcept(name, { kinds: ['dish'] });
+  return { concept: null, conceptSuggestion: near ? { key: near.key, label: near.label, score: near.score } : null };
 }
 
 async function orderPayload(orderId) {

@@ -16,13 +16,13 @@
 import { Router } from 'express';
 import * as planSessions from '../repositories/planSessions.js';
 import * as tripsRepo from '../repositories/trips.js';
-import { currentHousehold, loadMembers, toAttendees } from './household.js';
+import { currentHousehold, loadMembers, toAttendees, loadLearnedPreferences } from './household.js';
 import { searchCached } from '../sources/cache.js';
 import { defaultSourceKeys, sourceHasKey, sourceOff } from '../sources/index.js';
 import { applyConstraints } from '../domain/ranking.js';
 import { estimateTravelMinutes, kmBetween } from '../domain/travel.js';
 import { routingEnabled, routingPaused, travelMatrixMinutes } from '../sources/routing.js';
-import { foodTastes, likedConcepts, whyForUs, dishEvidence, driveRadiusKm, firstName, capFromText, foodLeads } from '../domain/tastes.js';
+import { foodTastes, withStarredFoods, likedConcepts, whyForUs, dishEvidence, driveRadiusKm, firstName, capFromText, foodLeads } from '../domain/tastes.js';
 import { checkMenu, menuCheckEnabled, menuCheckUsage } from '../sources/menu.js';
 import { createTripFromIntent, seedShortlistFromIdea, thingsAround, THINGS_RADIUS_KM } from './plan.js';
 import { addShortlistItem } from './trips.js';
@@ -207,8 +207,13 @@ async function buildTable({ household, attending, attendees, session, taste, hom
     notFor: taste.notFor,
     named: taste.named,
     // "Roger and Gina both love it" / "Phoenix's favourite"
+    // Why this food is on the screen. A food nobody typed in is here because
+    // of what they gave it at the table, and saying so is what makes a star
+    // feel like it went somewhere (owner, 7 Sep 2026).
     because: taste.loved.length
-      ? `${namesOf(taste.loved)} love${taste.loved.length === 1 ? 's' : ''} ${taste.label.toLowerCase()}${taste.loved.some((l) => l.favourite) ? ` — ${namesOf(taste.loved.filter((l) => l.favourite))}'s favourite` : ''}`
+      ? taste.loved.every((l) => l.starred)
+        ? `${namesOf(taste.loved)} ${taste.loved.length === 1 ? 'has' : 'have'} starred ${taste.label.toLowerCase()} at the table`
+        : `${namesOf(taste.loved)} love${taste.loved.length === 1 ? 's' : ''} ${taste.label.toLowerCase()}${taste.loved.some((l) => l.favourite) ? ` — ${namesOf(taste.loved.filter((l) => l.favourite))}'s favourite` : ''}`
       : `You asked for ${taste.label.toLowerCase()}`,
     searched: params.query,
     radiusKm: Number(radiusKm.toFixed(1)),
@@ -284,7 +289,10 @@ router.post('/tastes', async (req, res, next) => {
     const members = await loadMembers(household.id);
     const { brief = '', moods = [], maxTravelMinutes = null, budget = 'any', attendingMemberIds } = req.body || {};
     const attending = Array.isArray(attendingMemberIds) && attendingMemberIds.length ? members.filter((m) => attendingMemberIds.includes(m.id)) : members;
-    const attendees = toAttendees(attending);
+    // Their own lists, and what the table has starred enough times to count
+    // (owner, 7 Sep 2026). A dish nobody thought to write down but everybody
+    // keeps ordering is exactly the one the home screen should be finding.
+    const attendees = withStarredFoods(toAttendees(attending), await loadLearnedPreferences(household.id));
     // A cap said in words wins over the chip: "no more than an hour away" is
     // a statement, not a preference left on a default.
     const said = capFromText(brief);

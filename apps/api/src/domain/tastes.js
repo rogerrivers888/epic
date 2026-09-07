@@ -29,6 +29,28 @@ const conceptFor = (pref) => (pref.conceptKey ? conceptByKey(pref.conceptKey) : 
  * more than a like) and anyone coming who would rather not — Roam says both
  * rather than quietly dropping the food someone else's favourite clashes with.
  */
+/**
+ * What the family's stars have earned, offered as likes (owner, 7 Sep 2026:
+ * "I'd like to see how I can then find those ratings and how you're going to be
+ * using them").
+ *
+ * A dish somebody has starred enough times to be confirmed
+ * (`loadLearnedPreferences`, the threshold is three) becomes a food the family
+ * loves, so it gets a table of its own on the home screen exactly as a like
+ * typed into a profile does — the difference is only that nobody had to type
+ * it. It is added, never substituted: a like somebody wrote down themselves
+ * always wins, and an unconfirmed one is still learning and stays out.
+ */
+export function withStarredFoods(attendees, learned = []) {
+  return attendees.map((a) => {
+    const already = new Set((a.likes || []).map((l) => l.conceptKey).filter(Boolean));
+    const earned = learned
+      .filter((l) => l.memberId === a.id && l.confirmed && l.kind === 'like' && FOOD_KINDS.has(l.conceptKind) && !already.has(l.conceptKey))
+      .map((l) => ({ value: l.label, conceptKey: l.conceptKey, maxMinutes: null, favourite: false, starred: l.count }));
+    return earned.length ? { ...a, likes: [...(a.likes || []), ...earned] } : a;
+  });
+}
+
 export function foodTastes(attendees, { brief = '' } = {}) {
   const byKey = new Map();
   const add = (concept, member, pref) => {
@@ -36,7 +58,12 @@ export function foodTastes(attendees, { brief = '' } = {}) {
     if (!byKey.has(concept.key)) byKey.set(concept.key, { key: concept.key, kind: concept.kind, label: concept.label, concept, loved: [], notFor: [], named: false });
     const taste = byKey.get(concept.key);
     if (member && !taste.loved.some((l) => l.memberId === member.id)) {
-      taste.loved.push({ memberId: member.id, name: member.name, first: firstName(member.name), favourite: Boolean(pref?.favourite), said: pref?.value ?? concept.label });
+      taste.loved.push({
+        memberId: member.id, name: member.name, first: firstName(member.name),
+        favourite: Boolean(pref?.favourite), said: pref?.value ?? concept.label,
+        // How many meals put it there, when nobody typed it in (withStarredFoods).
+        starred: pref?.starred ?? null,
+      });
     }
     return taste;
   };

@@ -357,6 +357,30 @@ export function matchConcepts(text, { kinds = null, limit = 8 } = {}) {
 // kept as written and offered as a suggestion (Epic 2 C7 — no silent merges).
 export const RESOLVE_THRESHOLD = 0.8;
 
+// The little words a menu strings its dishes together with. Two names sharing
+// "alla" have nothing in common.
+const JOINING = new Set(['alla', 'allo', 'all', 'con', 'del', 'della', 'delle', 'dei', 'and', 'with', 'the', 'style', 'sauce', 'fresh', 'house', 'kids', 'classica', 'mista']);
+
+const meaningfulWords = (text) => norm(text).split(' ').filter((w) => w.length >= 4 && !JOINING.has(w));
+
+/**
+ * The dish a menu's name suggests, when it is not certain enough to resolve.
+ *
+ * A near match has to be a match on a *word*, not on a spelling. "Spaghettoni
+ * al Ragù" and "tagliatelle al ragù" share ragù and are the same dish; burrata
+ * and burrito share nothing but four letters, and offering "this is a burrito"
+ * on a rating screen is worse than offering nothing at all — it is the kind of
+ * wrong answer somebody taps through and then finds in their profile.
+ *
+ * Returned for a person to accept or ignore, never applied on its own.
+ */
+export function suggestConcept(name, { kinds = ['dish'], min = 0.6 } = {}) {
+  const [near] = matchConcepts(name, { kinds, limit: 1 });
+  if (!near || near.score < min) return null;
+  const said = new Set(meaningfulWords(near.via ?? near.label));
+  return meaningfulWords(name).some((w) => said.has(w)) ? near : null;
+}
+
 // "not fried chicken", "no seafood", "anything but pubs": a negation is a
 // dislike wearing a like's clothes. It is never linked; the caller is told.
 const NEGATION = /^(not|no|never|without|anything but|nothing)\b/i;
