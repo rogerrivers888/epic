@@ -658,6 +658,28 @@ Files: `api/migrations/060_order_guests_and_share.sql`, `api/src/repositories/me
 
 Files: `web/src/components/MenuOrder.tsx`, `api/src/domain/concepts.js`, `api/src/domain/tastes.js`, `api/src/routes/tastes.js`, `api/src/routes/menus.js`, `api/test/dishSuggestion.test.js`, `api/test/starredFoods.test.js`.
 
+### 13.17 What a place is worth to this family — **built** (owner, 7 Sep 2026)
+
+> "It's asking me to rate again on the overview. You have been here, and I've got an option to rate again. I'm not sure why I need that… maybe the Been again goes in the reviews section. I feel like the review of the dishes should then blend into an overall review from the family review stars. I can just see collapsed review stars, and then I can expand it to see the meal."
+
+> "Now, if I'm back again, I need a means to create a new order or reuse the previous order in a fresh order. I can say who's dining, or is it the same people? Do you want to add new ones? Then I can reuse the order."
+
+**A place you have been to opens with what you made of it, not with a question you have already answered.** The drawer's overview led with "you have been here — Been again", which is the one thing the screen already knew, while the stars given to five plates appeared nowhere on it. The overview now opens with the family's own line; saying you have been again lives in Reviews with the rest of the record.
+
+**One number, from every star, and it is arithmetic anybody at the table can follow** (`web/src/components/verdict.ts`, tested in `web/test/verdict.test.ts`):
+
+ - *A star is a star wherever it was given.* The one given to the place after a visit and the one given to a plate are the same act, and both count.
+ - *A person is the unit, not a plate.* Four courses do not outvote somebody who had one: each person's stars average into their own score, and the people average into the family's.
+ - *Silence stays silent.* A plate nobody starred was fine and writes nothing (§13.16), so it is not averaged in as a middling score — and "not great" is not a number either. It is carried through by name under the person who said it rather than turned into a figure nobody chose.
+
+Collapsed it is one line; opened it is each person's own number and then the meals, most recent first. A place with visits but no stars still says so — "you have been here · nothing starred yet" — because a place you have been to must not look like one you have not.
+
+**Coming back asks who is eating before it asks what.** The Order tab opens on the table you had last time, so the common case is no taps at all. Taking somebody off takes their plates off the order with them; a guest from that night is offered by name and never assumed, and seating her again brings back what she ordered, because `addGuest(name, ref)` re-seats her under the id she already had. Then the order you had, to reuse or untick, and the menu to add anything else.
+
+**A dish is no longer dropped because the menu we hold does not list it.** Rebuilding an order from last time kept only the dishes that could be matched to the current menu — which lost three plates out of four in testing, and *every* plate at a place whose menu Roam has never read. A plate with no menu item behind it is carried by its own name (`Carried`, `past:<id>` keys) and can still be removed, noted and rated like any other.
+
+Files: `web/src/components/verdict.ts`, `web/src/components/FamilyVerdict.tsx`, `web/src/components/VenueDrawer.tsx`, `web/src/components/MenuOrder.tsx`, `web/test/verdict.test.ts`.
+
 ### 13.5 Closed-vocabulary matching for voice
 
 Used twice, for the same reason: rating capture interprets against known attendees and known ordered items; trip assembly interprets against the stops on screen. Constraining to a small known set matters more than ASR vendor choice.
