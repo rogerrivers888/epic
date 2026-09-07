@@ -646,6 +646,8 @@ Files: `api/migrations/060_order_guests_and_share.sql`, `api/src/repositories/me
 
 **Guests are not rated.** There is nowhere to put a guest's stars (§13.15) and Roam only learns the household's own palate; the board says so rather than leaving a name off with no explanation.
 
+**A meal that is already history can still be rated.** Saying "we ate it" turns the order into a visit, and the drawer stops treating a visit as "the order" — so the plates became unrateable the moment the drawer closed, and the only chance to rate a meal was the sitting in which you said you had eaten it. The Order tab now offers the last meal at this place ("Nobody has rated this meal · you ate here on Sunday 6 September") and hands the phone round for it exactly as for tonight's, which is also how somebody who missed their turn gets one. Such a meal is read-only otherwise: no removing a plate, no rewriting a word for the waiter. The stars are the only thing about a visit that can still change.
+
 **Where a star goes, in three layers.** This is the part that had never been said on a screen:
 
 1. *The plate.* A `ratings` row against the order item and the visit — what "What we had here" in the drawer shows, per person, per meal.
