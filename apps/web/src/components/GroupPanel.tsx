@@ -907,6 +907,9 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
     if (!label.trim()) { setSaid('Give it a name.'); setPage(0); return; }
     if (price === 'fixed' && !pence(amount)) { setSaid('Say what it costs each, or make it free.'); return; }
     if (price === 'variable' && !pence(total)) { setSaid('Say what the whole thing costs.'); return; }
+    // A price worked out on a headcount has to have a day it is worked out on,
+    // or it never settles and nobody is ever billed.
+    if (price === 'variable' && !deadline) { setSaid('Give it a deadline — that is the day the price is fixed and the bill goes out.'); return; }
     onSave(body());
   };
 
