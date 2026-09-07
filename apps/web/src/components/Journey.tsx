@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Linking, Modal, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BrowseItem, Endpoint, HouseholdResponse, Journey, JourneyLeg, JourneyStop, LegMode, Place, ShortlistItem, ShortlistStatus, TripDay, TripDetail, Venue } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Wrap, minutes as fmtMinutes } from './ui';
 import { CategoryIcon, Icon, IconName } from './Icon';
 import { MapLine, MapPin, MapView } from './MapView';
@@ -539,7 +539,7 @@ export function TripJourneyDay({ d, day, onChangePlan, onChanged, wide }: { d: T
 const clock24 = (iso: string) => { const t = new Date(iso); return Number.isNaN(t.getTime()) ? iso.slice(0, 5) : `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; };
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surface },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.surface },
   grip: { width: 18, alignItems: 'center', justifyContent: 'center', gap: 2 },
   time: { width: 42, fontSize: 12, color: colors.inkMuted, fontVariant: ['tabular-nums'] },
   num: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
@@ -554,8 +554,8 @@ const styles = StyleSheet.create({
   underL: { backgroundColor: colors.like, justifyContent: 'flex-start' },
   underR: { backgroundColor: colors.overrun, justifyContent: 'flex-end' },
   underText: { color: colors.bg, fontWeight: '800', fontSize: 13 },
-  modebar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 6, paddingHorizontal: 10, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  timeInput: { minHeight: 32, width: 64, paddingHorizontal: 8, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 13, fontWeight: '700', color: colors.ink, textAlign: 'center' },
+  modebar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 6, paddingHorizontal: 10, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line },
+  timeInput: { minHeight: 32, width: 64, paddingHorizontal: 8, borderRadius: radius.sm, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 13, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   warn: { flexDirection: 'row', gap: 6, alignItems: 'flex-start', padding: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: colors.overrunSoft },
   ok: { flexDirection: 'row', gap: 6, alignItems: 'center', padding: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: colors.accentSoft },
   fold: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
@@ -563,11 +563,11 @@ const styles = StyleSheet.create({
   modalWrap: { flex: 1, justifyContent: 'center', padding: spacing.lg },
   modal: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm, maxWidth: 420, width: '100%', alignSelf: 'center' },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center', marginRight: -12, marginTop: -12 },
-  opt: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line },
+  opt: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line },
   optOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  optIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  booking: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 38, paddingHorizontal: 10, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.bg },
+  optIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  booking: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 38, paddingHorizontal: 10, borderRadius: radius.sm, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.bg },
   fieldInput: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.ink, minHeight: 34 },
   tlStop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4 },
   tlLeg: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 11 },

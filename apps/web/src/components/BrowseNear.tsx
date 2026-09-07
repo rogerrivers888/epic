@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
 import { api, AtlasPlace, BrowseItem, HouseholdResponse, SketchEvent, TripDetail, Venue } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Chip, Row, StatusLine, Wrap, minutes as fmtMinutes } from './ui';
 import { Icon } from './Icon';
 import { VenuePhoto } from './VenuePhoto';
@@ -469,30 +469,30 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
 }
 
 const styles = StyleSheet.create({
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surface },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface },
   input: { flex: 1, fontSize: 15, color: colors.ink, minHeight: TARGET - 2 },
-  iconBtn: { width: 38, height: 38, borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  iconBtn: { width: 38, height: 38, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
   tiles: { flexDirection: 'row', gap: 8 },
   tile: { flex: 1, borderRadius: radius.md, padding: 10, paddingBottom: 8, gap: 6, backgroundColor: colors.surfaceMuted },
   tileOn: { backgroundColor: colors.primary },
   tileN: { fontSize: 22, fontWeight: '800', color: colors.ink, lineHeight: 24 },
   tileL: { fontSize: 12, fontWeight: '600', color: colors.inkMuted },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 34, paddingHorizontal: 12, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 34, paddingHorizontal: 12, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   pillText: { fontSize: 12, fontWeight: '600', color: colors.ink },
-  card: { flexDirection: 'row', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.line, alignItems: 'flex-start' },
+  card: { flexDirection: 'row', gap: 12, paddingVertical: 12, borderTopWidth: BORDER, borderTopColor: colors.line, alignItems: 'flex-start' },
   photo: { width: 88, height: 88, borderRadius: radius.md, backgroundColor: colors.lime, overflow: 'visible' },
   heart: { position: 'absolute', right: -6, top: -6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.loved, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.surface },
   name: { fontSize: 15, fontWeight: '800', color: colors.ink },
   when: { fontSize: 12, fontWeight: '700', color: colors.ink },
-  why: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 9, paddingVertical: 2, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, marginTop: 2, maxWidth: '100%' },
+  why: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 9, paddingVertical: 2, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, marginTop: 2, maxWidth: '100%' },
   whyText: { fontSize: 12, fontWeight: '600', color: colors.ink, flexShrink: 1 },
-  save: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  save: { width: 36, height: 36, borderRadius: 18, borderWidth: BORDER, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
   saveOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   label: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.7, color: colors.inkMuted },
-  trouble: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surfaceMuted },
-  panel: { backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: spacing.md },
-  seg: { flexDirection: 'row', gap: 3, padding: 3, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  trouble: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surfaceMuted },
+  panel: { backgroundColor: colors.panel, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: spacing.md },
+  seg: { flexDirection: 'row', gap: 3, padding: 3, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   segItem: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: radius.md },
   segOn: { backgroundColor: colors.primary },
   segText: { fontSize: 12, fontWeight: '700', color: colors.inkMuted },

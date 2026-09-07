@@ -27,7 +27,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BenchResult, BenchRun, MenuCause, ScoutArea, ScoutMenuMiss, ScoutPlace } from '../../api';
-import { colors, radius, spacing, type } from '../../theme';
+import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -606,36 +606,36 @@ function AreaPicker({ areas, chosen, onChoose }: {
 
 const styles = StyleSheet.create({
   input: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, paddingVertical: 8, color: colors.ink, backgroundColor: colors.surface,
   },
   areaRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   areaRowOn: { backgroundColor: colors.headerBg },
   areaCode: { ...type.body, fontWeight: '800' },
   placeRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   rank: { ...type.tiny, width: 22, textAlign: 'right', color: colors.inkMuted },
   score: { ...type.body, fontWeight: '800', width: 40, textAlign: 'right' },
   causeRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap',
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   causeCount: { ...type.body, fontWeight: '800', width: 44, textAlign: 'right' },
   benchRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   delta: { ...type.body, fontWeight: '800', width: 40, textAlign: 'right' },
   missRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   link: { ...type.tiny, color: colors.accent, textDecorationLine: 'underline' },
 });

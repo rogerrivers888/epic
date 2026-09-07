@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, Place, API_URL } from '../api';
 import { useHere } from '../hooks/useHere';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName, iconFor } from '../components/Icon';
 import { Chip, minutes } from '../components/ui';
 import { VenueDrawer } from '../components/VenueDrawer';
@@ -892,14 +892,14 @@ const styles = StyleSheet.create({
   search: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
     minHeight: 52, paddingHorizontal: spacing.lg, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
     boxShadow: '0 2px 10px rgba(32,30,29,0.10)',
   },
   searchWide: { maxWidth: 560, width: '100%', alignSelf: 'center' },
   hereOffer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 34, marginTop: 6 },
   foodDoor: {
     flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 12,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surfaceMuted,
   },
   foodDoorText: { fontSize: 13, fontWeight: '600', color: colors.ink },
   searchText: { fontSize: 15, fontWeight: '700', color: colors.ink },
@@ -908,7 +908,7 @@ const styles = StyleSheet.create({
   filters: { gap: 6, paddingHorizontal: spacing.lg, paddingVertical: 2 },
   filter: {
     flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 12,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   filterOpen: { backgroundColor: colors.primary, borderColor: colors.primary },
   filterText: { fontSize: 12.5, fontWeight: '600', color: colors.ink, maxWidth: 140 },
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
   panelHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   panelTitle: { fontSize: 13, fontWeight: '700', color: colors.ink },
   bands: { flexDirection: 'row', gap: 6 },
-  band: { minHeight: 38, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  band: { minHeight: 38, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   bandWrap: { flexGrow: 0 },
   bandOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   bandText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },

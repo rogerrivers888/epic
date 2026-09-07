@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, PrototypeStatus } from '../api';
-import { colors, fonts, radius, spacing, type } from '../theme';
+import { colors, fonts, radius, spacing, type, BORDER } from '../theme';
 import { Button, Card, Row, Wrap } from '../components/ui';
 import { Icon, IconName } from '../components/Icon';
 import { useViewport } from '../hooks/useViewport';
@@ -260,7 +260,7 @@ const styles = StyleSheet.create({
   tab: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, minHeight: 34,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   tabWide: { justifyContent: 'flex-start', minHeight: 38, borderRadius: radius.md, borderColor: 'transparent', backgroundColor: 'transparent' },
   tabHover: { backgroundColor: colors.surfaceMuted, borderColor: colors.line },
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
   verdict: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, minHeight: 36,
-    borderRadius: radius.md, borderWidth: 1,
+    borderRadius: radius.md, borderWidth: BORDER,
   },
   verdictText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700' },
   tabText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, flexShrink: 1 },

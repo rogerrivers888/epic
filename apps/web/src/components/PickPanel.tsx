@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { Chip } from './ui';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 
 /**
  * A dropdown that opens where it was tapped.
@@ -61,7 +61,7 @@ export function PickPanel({ open, title, options, value, empty, onPick, onClose 
 }
 
 const styles = StyleSheet.create({
-  panel: { backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
+  panel: { backgroundColor: colors.panel, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   title: { ...type.small, color: colors.inkMuted, fontWeight: '600' },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },

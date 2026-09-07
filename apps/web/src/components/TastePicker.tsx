@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Row, Wrap } from './ui';
 import { Icon } from './Icon';
 
@@ -112,8 +112,8 @@ export function TastePicker({
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.line },
-  pill: { minHeight: 36, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, justifyContent: 'center' },
+  panel: { gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, borderWidth: BORDER, borderColor: colors.line },
+  pill: { minHeight: 36, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line, justifyContent: 'center' },
   pillLeft: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
   pillRight: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingHorizontal: 8 },
   pillExpanded: { backgroundColor: colors.accentSoft },

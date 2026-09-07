@@ -7,7 +7,7 @@ import { api, ApiError, HouseholdResponse, Place, PlanAction, PlanResponse, Plan
 import { DateRangePicker } from '../components/DateRangePicker';
 import { RangeSlider } from '../components/RangeSlider';
 import { IconName } from '../components/Icon';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, minutes, clock } from '../components/ui';
 import { TimeBar } from '../components/TimeBar';
 import { PricePointControl, ChainsControl } from '../components/PlanControls';
@@ -803,7 +803,7 @@ const styles = StyleSheet.create({
   bubbleAssistant: { backgroundColor: colors.surfaceMuted, alignSelf: 'flex-start' },
   input: {
     minHeight: 72, padding: spacing.md, borderRadius: radius.md, textAlignVertical: 'top',
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 16, lineHeight: 22, color: colors.ink,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 16, lineHeight: 22, color: colors.ink,
   },
   whoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 32, paddingHorizontal: 4 },
   inputLive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
@@ -811,25 +811,25 @@ const styles = StyleSheet.create({
   stopText: { color: colors.bg, fontWeight: '700', fontSize: 15 },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 10, paddingHorizontal: 6, borderRadius: radius.sm },
   well: { width: 32, height: 32, borderRadius: 4, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' },
-  panel: { gap: spacing.sm, padding: spacing.md, marginHorizontal: -6, marginBottom: 4, backgroundColor: colors.panel, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line },
-  hit: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  panel: { gap: spacing.sm, padding: spacing.md, marginHorizontal: -6, marginBottom: 4, backgroundColor: colors.panel, borderTopWidth: BORDER, borderBottomWidth: BORDER, borderColor: colors.line },
+  hit: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, borderTopWidth: BORDER, borderTopColor: colors.line },
   h: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: colors.inkMuted },
-  rowLine: { borderTopWidth: 1, borderTopColor: colors.line },
+  rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
   rowCheck: { backgroundColor: colors.panel },
   rowEditing: { backgroundColor: colors.accentSoft },
   rowKey: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: colors.inkMuted },
   travel: { paddingVertical: 10 },
-  flag: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.ink, paddingHorizontal: 9, paddingVertical: 3, borderRadius: radius.pill },
+  flag: { backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.ink, paddingHorizontal: 9, paddingVertical: 3, borderRadius: radius.pill },
   flagText: { fontSize: 11, fontWeight: '700', color: colors.dislike, letterSpacing: 0.2 },
   editor: { gap: spacing.sm, padding: spacing.sm, marginBottom: 4, borderWidth: 2, borderColor: colors.accent, borderRadius: radius.md, backgroundColor: colors.surface },
-  editInput: { minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink },
+  editInput: { minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink },
   checks: { borderLeftWidth: 3, borderLeftColor: colors.dislike, gap: spacing.sm },
   check: { gap: 6, paddingTop: 6 },
   num: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   numText: { color: colors.bg, fontSize: 11, fontWeight: '700' },
   mic: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.ink,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.ink,
   },
   optionsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
   toggle: { minHeight: TARGET, justifyContent: 'center', paddingHorizontal: spacing.sm },

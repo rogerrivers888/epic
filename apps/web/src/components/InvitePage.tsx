@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { API_URL, GroupItem, GroupItemKind, GroupPricing, JoinView, TripGroup } from '../api';
-import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Row, Segmented, StatusLine, Wrap } from './ui';
 import { Icon, IconName } from './Icon';
 import { Wordmark } from './Wordmark';
@@ -469,9 +469,9 @@ const styles = StyleSheet.create({
   fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, marginBottom: 4 },
   dropdown: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET,
-    paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  dropdownList: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, overflow: 'hidden' },
+  dropdownList: { borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, overflow: 'hidden' },
   dropdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET, paddingHorizontal: spacing.md },
   hero: { borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.lime },
   heroImg: { width: '100%' },
@@ -479,21 +479,21 @@ const styles = StyleSheet.create({
   heroText: { padding: spacing.md, gap: 2 },
   heroOver: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   heroUnder: { backgroundColor: colors.lime },
-  getRow: { alignItems: 'flex-start', paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  getRow: { alignItems: 'flex-start', paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   tile: { width: 34, height: 34, borderRadius: radius.sm, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' },
-  totals: { gap: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm },
+  totals: { gap: 4, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm },
   numDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   numDotText: { color: colors.primaryFg, fontFamily: fonts.body, fontSize: 12, fontWeight: '700' },
   coverNow: { width: 104, height: 68, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   coverNowImg: { width: '100%', height: '100%' },
   thumb: { width: 84, height: 56, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted, borderWidth: 2, borderColor: 'transparent' },
   thumbOn: { borderColor: colors.ink },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   pillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body,
     outlineColor: colors.accent as any, outlineWidth: 2 as any, outlineOffset: 1 as any,
   },
 });

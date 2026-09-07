@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, DishNote, HouseholdResponse, Learned, Member, MenuItem, MenuLink, Order, OrderItem, ReadMenu } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { useViewport } from '../hooks/useViewport';
 import { Icon } from './Icon';
 import { Button, Card, Chip, Row, Segmented, Wrap } from './ui';
@@ -1887,62 +1887,62 @@ export function StaffSheet({ ctl }: { ctl: MenuOrderCtl }) {
 const styles = StyleSheet.create({
   body: { padding: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xl },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
-  row: { gap: 6, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  row: { gap: 6, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   rowPicked: { backgroundColor: colors.surfaceMuted, borderRadius: radius.sm, paddingHorizontal: spacing.sm },
   itemName: { flex: 1, fontWeight: '700' },
   veg: { color: colors.accent, fontWeight: '800', fontSize: 13 },
   price: { ...type.body, fontWeight: '700' },
-  flag: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  flag: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: BORDER, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   flagText: { fontSize: 11, fontWeight: '700' },
-  face: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  face: { alignItems: 'center', justifyContent: 'center', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   // A guest is here for one meal: the same face, drawn with a dashed edge.
   faceGuest: { borderStyle: 'dashed', borderColor: colors.inkMuted },
   faceOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   faceText: { fontSize: 12, fontWeight: '800', color: colors.inkMuted },
   faceTextOn: { color: colors.primaryFg },
   whatIs: { backgroundColor: colors.surfaceMuted, borderRadius: radius.sm, padding: spacing.sm, gap: 2 },
-  rowBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15, borderWidth: 1, borderColor: colors.line, marginLeft: 6 },
+  rowBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 15, borderWidth: BORDER, borderColor: colors.line, marginLeft: 6 },
   noteInput: {
-    height: 32, minWidth: 120, borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm,
+    height: 32, minWidth: 120, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
     paddingHorizontal: 10, color: colors.ink, backgroundColor: colors.surface, fontSize: 13,
   },
   // The two ways to the menu, side by side: ours on the left with what is in
   // it, theirs as a button. One line on a phone, still one line at 390px.
   twoWays: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap',
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
   },
   // Who is at the table, above the menu: the family in a line, tonight's guests
   // as chips, and the one control that adds another.
   who: {
-    gap: 6, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    gap: 6, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
   },
   bar: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surface,
+    padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.surface,
   },
   // The basket opened out, sitting on the bar it belongs to.
-  peek: { borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surfaceMuted },
+  peek: { borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.surfaceMuted },
   // One person on the board where the phone is handed round: a big target,
   // because it is tapped by whoever is holding it and passed across a table.
   handRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, minHeight: TARGET + 12,
   },
   handRowDone: { backgroundColor: colors.surfaceMuted, borderColor: colors.accentSoft },
   // Three labelled buttons on one row inside 390px: tighter padding than the
   // standard button, and the bar's own gap trimmed to match (owner, 4 Sep 2026).
   barBtn: { paddingHorizontal: 10 },
-  orderRow: { paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.line },
-  tick: { width: 22, height: 22, borderRadius: 4, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  orderRow: { paddingVertical: 6, borderTopWidth: BORDER, borderTopColor: colors.line },
+  tick: { width: 22, height: 22, borderRadius: 4, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   tickOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   mealWhen: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '800', marginTop: spacing.sm },
-  totalRow: { borderTopWidth: 1, borderTopColor: colors.ink, paddingTop: spacing.sm, justifyContent: 'space-between' },
+  totalRow: { borderTopWidth: BORDER, borderTopColor: colors.ink, paddingTop: spacing.sm, justifyContent: 'space-between' },
   warn: {
-    flexDirection: 'row', gap: 8, alignItems: 'flex-start', borderWidth: 1, borderColor: colors.allergen,
+    flexDirection: 'row', gap: 8, alignItems: 'flex-start', borderWidth: BORDER, borderColor: colors.allergen,
     backgroundColor: colors.allergenSoft, borderRadius: radius.sm, padding: spacing.sm,
   },
   staffWrap: { flex: 1, backgroundColor: colors.bg },

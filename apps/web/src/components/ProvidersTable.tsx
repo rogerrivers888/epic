@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { api, KeyReport, SourcesStatus, SpendLine, SpendResponse, SpendSeries } from '../api';
 import { Comparison, MonthBars } from './SpendChart';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, FoldLine, Meter, Row, Segmented, StatusLine, Wrap } from './ui';
 import { useViewport } from '../hooks/useViewport';
 
@@ -360,17 +360,17 @@ function ProviderDrawer({ line, period, spend, series, initialMonth, source, onC
 }
 
 const styles = StyleSheet.create({
-  tr: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.md, borderTopWidth: 1, borderTopColor: colors.line, minHeight: TARGET },
-  tr2: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  tr: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line, minHeight: TARGET },
+  tr2: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 8, borderTopWidth: BORDER, borderTopColor: colors.line },
   th: { flex: 1, fontSize: 11, fontWeight: '700', color: colors.inkMuted, textAlign: 'right' },
   td: { fontSize: 13, color: colors.inkMuted, textAlign: 'right', flex: 1 },
-  table: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, overflow: 'hidden' },
-  stack: { gap: 4, padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.line },
+  table: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm, overflow: 'hidden' },
+  stack: { gap: 4, padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
   backdropWrap: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
   panel: { backgroundColor: colors.bg },
-  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: 1, borderLeftColor: colors.line },
+  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: BORDER, borderLeftColor: colors.line },
   panelSheet: { width: '100%', height: '100%' },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
-  activityRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 4, borderTopWidth: 1, borderTopColor: colors.line },
+  activityRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 4, borderTopWidth: BORDER, borderTopColor: colors.line },
 });

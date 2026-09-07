@@ -1,7 +1,7 @@
 import React from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import { OwnedRecord } from '../api';
-import { colors, spacing, type } from '../theme';
+import { colors, spacing, type, BORDER } from '../theme';
 import { Chip, Wrap } from './ui';
 import { IconText } from './Icon';
 
@@ -56,7 +56,7 @@ export function OwnedFacts({ record, offline = false, onResearch }: {
   const anything = record.address || record.phone || record.openingHours || record.menuUrl || record.bookingUrl || record.summary || record.cuisines?.length;
 
   return (
-    <View style={{ gap: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.md }}>
+    <View style={{ gap: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.md }}>
       <View style={{ gap: 1 }}>
         <Text style={[type.body, { fontWeight: '700' }]}>Ours to keep</Text>
         <Text style={type.tiny}>

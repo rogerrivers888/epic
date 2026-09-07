@@ -27,7 +27,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { MapCaliper, MapGLProps, MapMarker, MapShade, Point } from './MapGL';
 import { circleRing } from './searchGround';
 import { epicMapStyle } from './mapStyle';
-import { colors } from '../theme';
+import { colors, BORDER } from '../theme';
 
 /** The Lucide paths the markers use, inlined: a marker is drawn before React has a chance to. */
 const GLYPH: Record<string, string> = {
@@ -139,7 +139,7 @@ const KIND: Record<MapMarker['kind'], { size: number; bg: string; border: string
   dest: { size: 30, bg: '#C8F542', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D', halo: true },
   browse: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2, fg: '#201E1D' },
   added: { size: 28, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, fg: '#FFFDF9' },
-  saved: { size: 22, bg: '#FFFDF9', border: '#201E1D', borderWidth: 1.5, dashed: true, fg: '#201E1D' },
+  saved: { size: 22, bg: '#FFFDF9', border: '#201E1D', borderWidth: BORDER, dashed: true, fg: '#201E1D' },
 };
 
 function markerEl(m: MapMarker): HTMLElement {

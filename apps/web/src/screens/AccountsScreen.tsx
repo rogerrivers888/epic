@@ -22,7 +22,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, Account, AccountsResponse, ApiError, Invitation } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, SectionTitle, StatusLine, Wrap, Meter, FoldLine } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { useViewport } from '../hooks/useViewport';
@@ -534,17 +534,17 @@ const styles = StyleSheet.create({
   headings: { gap: spacing.sm, paddingHorizontal: spacing.md },
   rowWide: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowNarrow: { gap: 6 },
-  details: { gap: spacing.md, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.line },
+  details: { gap: spacing.md, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
   input: {
-    minHeight: TARGET, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    minHeight: TARGET, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.md, color: colors.ink, backgroundColor: colors.surface,
   },
   numberBox: {
-    width: 92, minHeight: TARGET, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    width: 92, minHeight: TARGET, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, textAlign: 'right', color: colors.ink, backgroundColor: colors.surface,
   },
   noteBox: {
-    minHeight: TARGET * 1.6, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    minHeight: TARGET * 1.6, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     padding: spacing.sm, color: colors.ink, backgroundColor: colors.surface,
   },
   link: {

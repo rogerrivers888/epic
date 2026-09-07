@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Member, Visit } from '../api';
 import { firstName, mean, verdictOf } from './verdict';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Icon, Stars } from './Icon';
 import { Row } from './ui';
 
@@ -137,9 +137,9 @@ export function FamilyVerdict({ visits, members, label = 'your family' }: { visi
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface },
+  wrap: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm },
-  body: { gap: spacing.sm, paddingHorizontal: spacing.sm, paddingBottom: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm },
+  body: { gap: spacing.sm, paddingHorizontal: spacing.sm, paddingBottom: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm },
   face: {
     width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.primary,

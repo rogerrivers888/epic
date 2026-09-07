@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { hasFlag } from 'country-flag-icons';
-import { colors, fonts, radius as r } from '../theme';
+import { colors, fonts, radius as r, BORDER } from '../theme';
 
 /**
  * A country's flag.
@@ -52,7 +52,7 @@ export function Flag({ code, width = 44, height = 32, rounded = r.sm }: {
 
 const styles = StyleSheet.create({
   tile: {
-    borderWidth: 1,
+    borderWidth: BORDER,
     borderColor: colors.line,
     backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
