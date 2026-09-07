@@ -620,7 +620,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     };
     const teardown = () => {
       clearMarks();
-      if (m.getLayer('roam-caliper')) m.removeLayer('roam-caliper');
+      for (const id of ['roam-caliper', 'roam-caliper-casing']) if (m.getLayer(id)) m.removeLayer(id);
       if (m.getSource('roam-caliper')) m.removeSource('roam-caliper');
     };
 
@@ -636,10 +636,18 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
         }],
       } as any;
       m.addSource('roam-caliper', { type: 'geojson', data: line });
+      // A white casing under the dashes, the same trick the route uses, so the
+      // measurement reads over the shaded ground and between the pins rather
+      // than being lost among sixty of them.
+      m.addLayer({
+        id: 'roam-caliper-casing', type: 'line', source: 'roam-caliper',
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.85 },
+      });
       m.addLayer({
         id: 'roam-caliper', type: 'line', source: 'roam-caliper',
         layout: { 'line-cap': 'butt' },
-        paint: { 'line-color': '#201E1D', 'line-width': 1.6, 'line-opacity': 0.75, 'line-dasharray': [2.5, 2.5] },
+        paint: { 'line-color': '#201E1D', 'line-width': 2, 'line-opacity': 0.9, 'line-dasharray': [2.4, 2.2] },
       });
 
       // An arrowhead on each edge of the band, pointing out of it. A filled
