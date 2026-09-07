@@ -10,6 +10,7 @@ import { Wheel, slots, timeLabel } from '../components/TimePicker';
 import { useViewport } from '../hooks/useViewport';
 import { TOP_INSET } from '../components/InspireHeader';
 import { firstName } from '../components/Faces';
+import { PlacePicker } from '../components/PlacePicker';
 
 /**
  * Making a trip (trip rebuild, 7 Sep 2026, screens 5a and 5b).
@@ -117,6 +118,13 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
 
   const [attending, setAttending] = useState<Set<string>>(new Set(members.map((m) => m.id)));
   const [whoOpen, setWhoOpen] = useState(false);
+  /**
+   * Where they are staying (5b). A typed name was not a search — "Hilton"
+   * matched nothing, because nothing was looking (owner, 7 Sep 2026). This is
+   * the picker Epic already has, in lodging mode and biased to where the trip
+   * is going, so "Hilton" for Rome is Rome's Hiltons and not London's.
+   */
+  const [stay, setStay] = useState<Place | null>(null);
   const [stayText, setStayText] = useState('');
   const [stayOpen, setStayOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -145,8 +153,28 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
     return () => { live = false; };
   }, [venueRef, country, locality, haveOwn, havePhotos?.length]);
 
+  /**
+   * Where the trip is going, as a point.
+   *
+   * A trip begun in the app carries one; a link somebody was sent carries only
+   * a name ("/trips/new?place=Rome"), and without a point two things quietly
+   * stopped working — the drive from home, and the bias on the hotel search,
+   * which is why "Hilton" for Rome answered with Venice (owner, 7 Sep 2026).
+   * So a name is resolved once, in area mode, and both use the answer.
+   */
+  const [resolved, setResolved] = useState<Place | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (seed?.place?.lat != null || !seed?.placeText) { setResolved(null); return () => { live = false; }; }
+    api.geocode(seed.placeText, 1, { country: seed.countryCode ?? null, kind: 'area' })
+      .then((r) => { if (live) setResolved(r.results[0] ?? null); })
+      .catch(() => { if (live) setResolved(null); });
+    return () => { live = false; };
+  }, [seed?.place?.lat, seed?.placeText, seed?.countryCode]);
+  const where = seed?.place?.lat != null ? seed.place : resolved;
+
   /** The drive from home to where the trip is going. One read, no provider. */
-  const point = seed?.venue?.lat != null ? { lat: seed.venue.lat, lng: seed.venue.lng ?? 0 } : seed?.place?.lat != null ? { lat: seed.place.lat, lng: seed.place.lng } : null;
+  const point = seed?.venue?.lat != null ? { lat: seed.venue.lat, lng: seed.venue.lng ?? 0 } : where?.lat != null ? { lat: where.lat, lng: where.lng } : null;
   const [drive, setDrive] = useState<number | null>(null);
   useEffect(() => {
     let live = true;
@@ -195,7 +223,10 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
             } as any,
           }
           : seed?.place && !holiday ? { destination: seed.place as any } : {}),
-        ...(holiday && stayText.trim() ? { baseText: stayText.trim(), baseKind: 'hotel' } : {}),
+        // A picked hotel travels with its coordinates; a name nobody picked is
+        // still sent, and the API geocodes it in lodging mode as it always has.
+        ...(holiday && stay ? { base: stay, baseKind: 'hotel' } : {}),
+        ...(holiday && !stay && stayText.trim() ? { baseText: stayText.trim(), baseKind: 'hotel' } : {}),
         attendingMemberIds: [...attending],
       });
       if (then === 'travel' && onGettingThere) onGettingThere(created.trip.id);
@@ -329,20 +360,23 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
               <FormRow
                 icon="hotel"
                 title="Where you're staying"
-                sub={stayText.trim() || 'Add a hotel or address · optional'}
-                action={stayText.trim() ? 'Change' : 'Add'}
+                sub={stay?.label ?? (stayText.trim() || 'Add a hotel or address · optional')}
+                action={stay || stayText.trim() ? 'Change' : 'Add'}
                 onPress={() => setStayOpen((o) => !o)}
               />
               {stayOpen ? (
-                <TextInput
-                  value={stayText}
-                  onChangeText={setStayText}
-                  placeholder="Hotel name or an address"
-                  placeholderTextColor={colors.inkMuted}
-                  style={styles.input}
-                  autoFocus
-                  accessibilityLabel="Where you're staying"
-                />
+                <View style={styles.stayPicker}>
+                  <PlacePicker
+                    value={stay}
+                    onPick={(p) => { setStay(p); if (p) setStayOpen(false); }}
+                    onText={setStayText}
+                    placeholder="Hotel name or an address"
+                    kind="lodging"
+                    near={where}
+                    countryCode={country}
+                    autoFocus
+                  />
+                </View>
               ) : null}
               <FormRow
                 icon="transit"
@@ -523,11 +557,7 @@ const styles = StyleSheet.create({
   tickOn: { backgroundColor: colors.selected, borderColor: colors.ink },
   tickText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
 
-  input: {
-    height: 48, paddingHorizontal: 14, marginTop: 12, marginBottom: 4,
-    borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface,
-    fontFamily: fonts.body, fontSize: 15, color: colors.ink,
-  },
+  stayPicker: { paddingTop: 12, paddingBottom: 4 },
 
   foot: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: colors.lineSoft },
   primary: {

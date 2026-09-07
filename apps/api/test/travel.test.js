@@ -81,3 +81,28 @@ test('a fare is said in the currency of where they landed', () => {
   assert.equal(money(5500, 'GBP'), '£55');
   assert.equal(money(12000, 'USD'), '$120');
 });
+
+/**
+ * Which ways of getting there are worth a tab (owner, 7 Sep 2026: "drive only
+ * when applicable", and no ferry at all).
+ */
+test('a mode nobody would take is not offered', async () => {
+  const { modesFor } = await import('../src/routes/tripTravel.js');
+  const home = { lat: 51.52, lng: -0.13 };            // London
+  const windsor = { lat: 51.48, lng: -0.61 };         // 35 km
+  const edinburgh = { lat: 55.95, lng: -3.19 };       // 530 km
+  const rome = { lat: 41.90, lng: 12.50 };            // 1,430 km, abroad
+
+  // Down the road: a train and a car, and nobody flies to Windsor.
+  assert.deepEqual(modesFor({ home, destination: windsor, sameCountry: true }), ['train', 'drive']);
+  // The length of the country: all three are real answers.
+  assert.deepEqual(modesFor({ home, destination: edinburgh, sameCountry: true }), ['fly', 'train', 'drive']);
+  // Abroad and far: only the plane.
+  assert.deepEqual(modesFor({ home, destination: rome, sameCountry: false }), ['fly']);
+  // Ferry is gone from the vocabulary entirely.
+  for (const dest of [windsor, edinburgh, rome]) {
+    assert.ok(!modesFor({ home, destination: dest, sameCountry: true }).includes('ferry'));
+  }
+  // Nothing known yet is not "no way of getting there".
+  assert.deepEqual(modesFor({ home: null, destination: null }), ['fly', 'train', 'drive']);
+});

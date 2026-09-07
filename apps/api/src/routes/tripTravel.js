@@ -22,6 +22,9 @@ import {
   terminalByName, transferEstimates, parseFlightNumber, airlineName, TRANSFER_LIMIT_KM,
 } from '../sources/flights.js';
 import { nightsOf } from './trips.js';
+import { directions, routingEnabled } from '../sources/routing.js';
+import { kmBetween } from '../domain/travel.js';
+import { wallToUtc, DEFAULT_TZ } from '../domain/time.js';
 
 const router = Router();
 
@@ -115,6 +118,16 @@ export async function travelPayload(trip, household) {
     })),
     party: party.length || 1,
     from: home?.label ?? null,
+    /** Which tabs the strip draws. Ferry is gone (owner, 7 Sep 2026). */
+    modes: modesFor({
+      home,
+      destination: trip.base_lat != null ? { lat: trip.base_lat, lng: trip.base_lng }
+        : trip.destination_lat != null ? { lat: trip.destination_lat, lng: trip.destination_lng } : null,
+      sameCountry: Boolean(household.home_country_code && trip.country_code
+        && String(household.home_country_code).toUpperCase() === String(trip.country_code).toUpperCase()),
+    }),
+    /** Whether Epic can look a journey up at all, so the screen says which it is. */
+    canRoute: routingEnabled(),
     /**
      * Why there are no cells, when there are none. An airport 1,800 km from the
      * bed is not a transfer, and three empty boxes explain nothing — this is the
@@ -292,6 +305,100 @@ router.get('/:id/travel/terminals', async (req, res, next) => {
       if (found) return res.json({ terminals: [publicTerminal(found)] });
     }
     res.json({ terminals: [] });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// the journey Epic can work out for itself
+// ---------------------------------------------------------------------------
+
+/**
+ * Which ways of getting there are worth offering at all.
+ *
+ * The owner, 7 Sep 2026: "obviously, for the ferry, only when applicable, and
+ * drive only when applicable" — and, on the ferry, "I think you can remove
+ * ferry, to be honest. That's a bit of a nonsense." So there is no ferry, and
+ * the other three are offered only where they mean something:
+ *
+ *   fly    far enough that nobody drives it, or across a border
+ *   train  anywhere the open transit graph will route between
+ *   drive  anywhere on the same landmass, which for a household in Britain
+ *          means the same country unless they are getting on a boat
+ *
+ * A mode nobody would take is not a tab; it is a tab somebody has to read and
+ * dismiss.
+ */
+export function modesFor({ home, destination, sameCountry }) {
+  if (!home?.lat || !destination?.lat) return ['fly', 'train', 'drive'];
+  const km = kmBetween(home, destination);
+  const out = [];
+  if (!sameCountry || km > 350) out.push('fly');
+  if (km < 900) out.push('train');
+  if (sameCountry && km < 900) out.push('drive');
+  // Never nothing: an island in the Atlantic still has to be flown to.
+  return out.length ? out : ['fly'];
+}
+
+/**
+ * GET /api/trips/:id/travel/suggest?mode=train — the journey, worked out.
+ *
+ * The owner, 7 Sep 2026: "if we know where they're going from (home) and we
+ * know where they're going to (the destination), then surely it should just
+ * show the train, not plan out the trip." He is right, and it needs no new
+ * provider: Google Routes is already wired for the trip's directions drawer,
+ * and its TRANSIT mode answers with the line, the stations and the times.
+ *
+ * What comes back is a *proposal*, not a saved leg — the household taps it onto
+ * the trip, or types their own booking over it.
+ */
+router.get('/:id/travel/suggest', async (req, res, next) => {
+  try {
+    const { trip, household } = await ownTrip(req);
+    const mode = req.params.mode ?? req.query.mode;
+    if (!['train', 'drive'].includes(mode)) return bad(res, 'invalid_mode', 'Epic can work out a train or a drive.');
+    const home = homeOf(household);
+    const to = trip.base_lat != null ? { lat: trip.base_lat, lng: trip.base_lng, label: trip.base_label }
+      : trip.destination_lat != null ? { lat: trip.destination_lat, lng: trip.destination_lng, label: trip.destination_label } : null;
+    if (!home || !to) {
+      return res.json({ ok: false, message: 'Set a home address and say where you are going, and Epic will work the journey out.' });
+    }
+    if (!routingEnabled()) {
+      return res.json({ ok: false, message: 'Epic cannot look up live times just now. Type what you have booked and it will do the rest.' });
+    }
+
+    // Leave at the trip's own start, in the household's own zone.
+    const date = String(trip.start_date ?? '').slice(0, 10);
+    const departAt = date ? wallToUtc(date, '08:00', trip.timezone || DEFAULT_TZ) : null;
+    const found = await directions({ from: home, to, mode: mode === 'train' ? 'transit' : 'driving', departAt });
+    if (!found) {
+      return res.json({ ok: false, message: mode === 'train' ? 'No train Epic can find between those two. Type what you have booked.' : 'No road route Epic can find. Type what you have booked.' });
+    }
+
+    const rides = (found.steps ?? []).filter((s) => s.transit);
+    const first = rides[0]?.transit ?? null;
+    const last = rides[rides.length - 1]?.transit ?? null;
+    res.json({
+      ok: true,
+      mode,
+      minutes: found.minutes,
+      /** Every leg, in the words a person would use, so the screen can list them. */
+      legs: (found.steps ?? []).filter((s) => s.transit || s.minutes >= 3).map((s) => ({
+        mode: s.travelMode, minutes: s.minutes, text: s.text,
+        transit: s.transit ?? null,
+      })),
+      changes: Math.max(0, rides.length - 1),
+      from: first?.from ?? home.label,
+      to: last?.to ?? to.label,
+      departAt: first?.departs ?? null,
+      arriveAt: last?.arrives ?? null,
+      carrier: first?.agency ?? null,
+      serviceNo: first?.line ?? null,
+      /** Google's answer, so it is marked as a live look-up rather than our arithmetic. */
+      estimated: false,
+      says: mode === 'train'
+        ? `${rides.length ? `${rides.length} train${rides.length === 1 ? '' : 's'}` : 'A journey'}${rides.length > 1 ? `, ${rides.length - 1} change${rides.length === 2 ? '' : 's'}` : ''} · about ${found.minutes} min door to door`
+        : `About ${found.minutes} min at the wheel`,
+    });
   } catch (err) { next(err); }
 });
 

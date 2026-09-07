@@ -10,11 +10,17 @@
  * like it. So the polish is bought here, in a style file we own, rather than
  * bought from a provider by the map load.
  *
- * The colours are the palette's, not invented: the map's ground is the reading
- * ground, cream, and its parks are the lime tint — which is the one place on a
- * map where lime is the honest colour for the thing itself. Roads and buildings
- * are warm neutrals cut from the cream, so the map is a part of the
- * app rather than a rectangle of somebody else's software embedded in it.
+ * The colours are the trip rebuild's own (7 Sep 2026, `trip-map-drawer.html`),
+ * and they are the other way round from the app: **the ground is a warm grey
+ * and the roads are cream**, not the reverse.
+ *
+ * That was wrong here for a day and it showed. A cream map is the same colour
+ * as everything the app puts on top of it, so a chip floating over it had to be
+ * given a 2px ink outline to be seen at all — and the owner is right that it
+ * made them look "very, very buttony" (7 Sep 2026: "I don't know whether
+ * there's an option to put some more shading on the map so it's not cream").
+ * With the ground shaded, a plain cream chip reads on its own and the outlines
+ * come off. The map got quieter and the controls got lighter, from one change.
  *
  * **The tiles.** Vector tiles from OpenFreeMap, which is free, needs no key and
  * asks for no attribution beyond OpenStreetMap's. That matters twice over: no
@@ -36,20 +42,25 @@ const TILES = 'https://tiles.openfreemap.org/planet';
 
 const INK = '#201E1D';
 const MUTED = '#605D5D';
-const GROUND = '#FFFDF9';   // cream
-const ROAD = '#EFEBE3';
-const WATER = '#D6E6EE';
-const GREEN = '#EAFECB';    // lime tint: parks and open ground
-const BUILDING = '#F4F0E8';
-const LINE = '#E4DFD6';
+// Straight off the handoff's own drawing of the trip map.
+const GROUND = '#E6E3DD';   // the warm grey the map sits on
+const ROAD = '#FFFDF9';     // cream: the roads are the light thing now
+const ROAD_MINOR = '#F2EFE9';
+const WATER = '#D5DDE3';
+const GREEN = '#DFE6D3';    // parks and open ground
+const BUILDING = '#DEDAD3';
+const LINE = '#D7D3CB';
 
 /** The style, in Epic's palette. `dark` inverts the ground so the pins still read at night. */
 export function epicMapStyle(dark = false): any {
-  const ground = dark ? '#201E1D' : GROUND;
-  const road = dark ? '#332F2D' : ROAD;
-  const water = dark ? '#1E2B31' : WATER;
-  const green = dark ? '#2B3320' : GREEN;
-  const building = dark ? '#2A2725' : BUILDING;
+  // Dark is the handoff's table: ground #1C1A19, roads #33302E/#403C3A,
+  // park #20241C, water #1A2024.
+  const ground = dark ? '#1C1A19' : GROUND;
+  const road = dark ? '#403C3A' : ROAD;
+  const roadMinor = dark ? '#33302E' : ROAD_MINOR;
+  const water = dark ? '#1A2024' : WATER;
+  const green = dark ? '#20241C' : GREEN;
+  const building = dark ? '#26231F' : BUILDING;
   const label = dark ? '#A8A29C' : MUTED;
   const halo = dark ? '#201E1D' : GROUND;
   const placeLabel = dark ? '#FFFDF9' : INK;
@@ -87,7 +98,7 @@ export function epicMapStyle(dark = false): any {
         id: 'road-minor', type: 'line', source: 'openmaptiles', 'source-layer': 'transportation',
         filter: ['in', 'class', 'minor', 'service', 'track', 'path'],
         minzoom: 12,
-        paint: { 'line-color': road, 'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 12, 0.4, 18, 6] },
+        paint: { 'line-color': roadMinor, 'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 12, 0.4, 18, 6] },
       },
       {
         id: 'road-secondary', type: 'line', source: 'openmaptiles', 'source-layer': 'transportation',

@@ -202,7 +202,15 @@ export type Member = {
 
 export type Place = {
   /** The source's own identifier for it, when the map had one: lets an idea open a drawer. */
-  ref?: string; label: string; lat: number; lng: number; country?: string | null; countryCode?: string | null; locality?: string | null; displayName?: string; formatted?: string; address?: { line1: string | null; area: string | null; town: string | null; region: string | null; postcode: string | null; country: string | null }; matchedBy?: string; approximate?: boolean;
+  ref?: string; label: string;
+  /**
+   * What the map calls the thing itself — "Hilton Rome Eur La Lama" — where it
+   * is a named place rather than an address. A hotel row leads with this;
+   * `formatted` is the street, which is the right answer for a home address and
+   * the wrong one for a hotel.
+   */
+  name?: string | null;
+  lat: number; lng: number; country?: string | null; countryCode?: string | null; locality?: string | null; displayName?: string; formatted?: string; address?: { line1: string | null; area: string | null; town: string | null; region: string | null; postcode: string | null; country: string | null }; matchedBy?: string; approximate?: boolean;
   /** Areas only: which one this is ("Somerset · England · United Kingdom") and what kind ("city"). */
   where?: string; kindWord?: string | null };
 
@@ -713,7 +721,8 @@ export type TripSearchAnswer = {
   rule: string;
 };
 
-export type TravelMode2 = 'fly' | 'train' | 'drive' | 'ferry';
+/** Ferry was removed on 7 Sep 2026. */
+export type TravelMode2 = 'fly' | 'train' | 'drive';
 export type TransferMode = 'train' | 'taxi' | 'hire';
 
 /** One leg of getting there, with the lines that are worked out rather than typed. */
@@ -744,6 +753,10 @@ export type TripTravel = {
   legs: TravelLeg[]; transfers: TripTransfer[]; party: number; from: string | null;
   /** Why there are no transfer cells, when there are none. */
   transferNote?: string | null;
+  /** Which tabs the mode strip should draw — only the ones that mean something here. */
+  modes?: TravelMode2[];
+  /** Whether Epic can look a journey up at all. */
+  canRoute?: boolean;
   /** What Epic can fill in and what it cannot, in the words the screen says. */
   lookup: { schedules: boolean; says: string };
 };
@@ -1545,6 +1558,14 @@ export const api = {
   searchTerminals: (id: string, q: string, kind: 'airport' | 'station' | 'port' = 'airport') =>
     request<{ terminals: Terminal[] }>(`/api/trips/${id}/travel/terminals${qs({ q, kind })}`),
   refreshTransfers: (id: string) => post<TripTravel>(`/api/trips/${id}/travel/transfers/refresh`, {}),
+  /** The journey Epic can work out for itself: home → where you are going, by train or by road. */
+  suggestJourney: (id: string, mode: 'train' | 'drive') =>
+    request<{
+      ok: boolean; message?: string; mode?: 'train' | 'drive'; minutes?: number;
+      legs?: { mode: string; minutes: number; text: string; transit: { line: string | null; agency: string | null; vehicle: string | null; from: string | null; to: string | null; departs: string | null; arrives: string | null; headsign: string | null; stopCount: number | null } | null }[];
+      changes?: number; from?: string | null; to?: string | null; departAt?: string | null; arriveAt?: string | null;
+      carrier?: string | null; serviceNo?: string | null; says?: string;
+    }>(`/api/trips/${id}/travel/suggest${qs({ mode })}`),
   /** Pick one, or tap the chosen one again to take it back off the plan. */
   chooseTransfer: (id: string, mode: TransferMode | null) => post<TripTravel>(`/api/trips/${id}/travel/transfer`, { mode }),
 

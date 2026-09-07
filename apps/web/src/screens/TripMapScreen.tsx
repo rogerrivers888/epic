@@ -62,7 +62,7 @@ type Pill = 'activities' | 'food' | 'stay' | 'shortlist';
 const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string; icon: IconName }[] => [
   { key: 'activities', label: 'Activities', icon: 'inspire' },
   { key: 'food', label: withStay ? 'Food' : 'Food & drink', icon: 'restaurant' },
-  ...(withStay ? [{ key: 'stay' as Pill, label: 'Stay', icon: 'hotel' as IconName }] : []),
+  ...(withStay ? [{ key: 'stay' as Pill, label: 'Stays', icon: 'hotel' as IconName }] : []),
   // The count is the point of a shortlist: it is the one pill whose job is to
   // fill up, and without a number nothing on the map says it is (owner,
   // 6 Sep 2026: "I need a bracketed number of items that are in the shortlist,
@@ -871,8 +871,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
           >
-            <Icon name={p.icon} size={15} color={on ? colors.primaryFg : colors.ink} />
-            <Text style={[styles.pillText, on && { color: colors.primaryFg }]}>{p.label}</Text>
+            <Icon name={p.icon} size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+            <Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{p.label}</Text>
           </Pressable>
         );
       })}
@@ -2836,12 +2836,20 @@ const styles = StyleSheet.create({
   pills: { flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
   pillsFour: { gap: 6, paddingHorizontal: 14 },
   pillFour: { paddingHorizontal: 9 },
+  /**
+   * The chips along the bottom of the map (5c). No outline and no radius: the
+   * handoff draws them as plain cream rectangles, and the ink border I gave
+   * them was compensating for a cream basemap they could not be seen against
+   * (owner, 7 Sep 2026: "you shouldn't. I don't want black circles or a black
+   * border around them… it just makes it very, very buttony"). The basemap is
+   * shaded now (mapStyle.ts), so the fill is enough.
+   */
   pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 38, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34,
+    backgroundColor: colors.surface,
   },
-  pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  pillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  pillOn: { backgroundColor: colors.selected },
+  pillText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.ink },
   nudge: {
     alignSelf: 'flex-start', marginLeft: 20, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: radius.pill, backgroundColor: colors.primary, color: colors.primaryFg, overflow: 'hidden',

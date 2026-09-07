@@ -200,9 +200,19 @@ export function PlacePicker({
               ) : null}
               <Pressable onPress={() => choose(p)} style={[styles.result, areas && styles.suggestion]} accessibilityRole="button">
                 <View style={{ flex: 1 }}>
-                  <Row2 name={p.formatted ?? p.label} word={areas ? p.kindWord ?? null : null} />
+                  {/*
+                    A hotel is known by its name, not by its front door. In
+                    lodging mode the row leads with "Hilton Rome Eur La Lama"
+                    and keeps the street underneath; everywhere else `formatted`
+                    is right, because an address *is* the answer there (owner,
+                    7 Sep 2026 — searching for the Hilton "brings up nothing"
+                    useful).
+                  */}
+                  <Row2 name={(kind === 'lodging' ? p.name : null) ?? p.formatted ?? p.label} word={areas ? p.kindWord ?? null : null} />
                   <Text style={type.tiny} numberOfLines={2}>
-                    {areas ? p.where : p.approximate ? p.displayName : [p.address?.town, p.address?.postcode, p.country].filter(Boolean).join(' · ')}
+                    {areas ? p.where
+                      : kind === 'lodging' ? [p.address?.line1, p.address?.town ?? p.locality, p.country].filter(Boolean).join(' · ')
+                        : p.approximate ? p.displayName : [p.address?.town, p.address?.postcode, p.country].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
                 {areas ? null : <View style={styles.use}><Text style={styles.useText}>Use this</Text></View>}

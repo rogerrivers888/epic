@@ -13,7 +13,12 @@ import { query } from '../db.js';
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
 export const DIRECTIONS = ['outbound', 'return'];
-export const MODES = ['fly', 'train', 'drive', 'ferry'];
+/**
+ * Ferry is gone (owner, 7 Sep 2026: "I think you can remove ferry, to be
+ * honest. That's a bit of a nonsense"). Rows already written with it are still
+ * readable; nothing new can be one.
+ */
+export const MODES = ['fly', 'train', 'drive'];
 export const TRANSFER_MODES = ['train', 'taxi', 'hire'];
 
 export async function legsOf(tripId) {

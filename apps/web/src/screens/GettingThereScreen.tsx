@@ -23,11 +23,17 @@ import { tripName } from './tripName';
  * line under the field, and it is never a provider's error message.
  */
 
+/**
+ * Three ways, and only the ones that mean something here.
+ *
+ * Ferry is gone (owner, 7 Sep 2026: "a bit of a nonsense"), and which of the
+ * other three are drawn is the API's answer, not this screen's guess — it needs
+ * the household's home to work out (routes/tripTravel.js `modesFor`).
+ */
 const MODES: { key: TravelMode2; label: string; icon: IconName }[] = [
   { key: 'fly', label: 'Fly', icon: 'ticket' },
   { key: 'train', label: 'Train', icon: 'transit' },
   { key: 'drive', label: 'Drive', icon: 'driving' },
-  { key: 'ferry', label: 'Ferry', icon: 'boat' },
 ];
 
 const TRANSFER_ICON: Record<TransferMode, IconName> = { train: 'transit', taxi: 'taxi', hire: 'driving' };
@@ -57,15 +63,42 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
-  // The mode strip opens on whatever is already booked, so a household that
-  // came back to change the return does not land on an empty Fly tab.
-  useEffect(() => {
-    const first = data?.legs[0];
-    if (first) setMode(first.mode);
-  }, [data?.legs.length]);
-
   const legFor = (direction: 'outbound' | 'return') =>
     data?.legs.find((l) => l.direction === direction && l.mode === mode) ?? null;
+
+  /**
+   * The strip opens on whatever is already booked, so a household that came
+   * back to change the return does not land on an empty Fly tab — and, failing
+   * that, on the first way that actually applies.
+   */
+  useEffect(() => {
+    const first = data?.legs[0];
+    if (first) { setMode(first.mode); return; }
+    const offered = data?.modes;
+    if (offered?.length && !offered.includes(mode)) setMode(offered[0]);
+  }, [data?.legs.length, data?.modes?.join(',')]);
+
+  const shown = MODES.filter((m) => !data?.modes || data.modes.includes(m.key));
+
+  /**
+   * The journey Epic can work out for itself. Asked for only on Train and
+   * Drive, and only while nothing is booked on that tab: once the household has
+   * typed their own, theirs is the answer.
+   */
+  const [suggested, setSuggested] = useState<Awaited<ReturnType<typeof api.suggestJourney>> | null>(null);
+  const [looking, setLooking] = useState(false);
+  const booked = Boolean(legFor('outbound'));
+  useEffect(() => {
+    let live = true;
+    setSuggested(null);
+    if (mode === 'fly' || booked) return () => { live = false; };
+    setLooking(true);
+    api.suggestJourney(id, mode)
+      .then((r) => { if (live) setSuggested(r); })
+      .catch(() => { if (live) setSuggested(null); })
+      .finally(() => { if (live) setLooking(false); });
+    return () => { live = false; };
+  }, [id, mode, booked]);
 
   const dates = trip.trip.startDate && trip.trip.endDate && trip.trip.startDate !== trip.trip.endDate
     ? `${fmtDay(trip.trip.startDate)} – ${fmtDay(trip.trip.endDate)}`
@@ -96,7 +129,7 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
           <Text style={styles.meta}>{[dates, data?.from ? `from ${data.from}` : null].filter(Boolean).join(' · ')}</Text>
         </View>
         <View style={styles.strip}>
-          {MODES.map((m) => {
+          {shown.map((m) => {
             const on = m.key === mode;
             return (
               <Pressable key={m.key} onPress={() => setMode(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
@@ -111,6 +144,45 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
+
+        {/* What Epic worked out, before anybody types anything (owner, 7 Sep
+            2026: "surely it should just show the train"). One tap puts it on
+            the trip; typing over it is still there underneath. */}
+        {mode !== 'fly' && !booked ? (
+          <View style={styles.suggest}>
+            {looking ? <Text style={styles.hint}>Looking up the journey…</Text> : null}
+            {!looking && suggested?.ok ? (
+              <>
+                <View style={styles.legTop}>
+                  <Text style={styles.legEnd}>{[suggested.from, suggested.departAt].filter(Boolean).join(' ')}</Text>
+                  <Icon name="forward" size={16} color={colors.inkMuted} strokeWidth={2.2} />
+                  <Text style={styles.legEnd}>{[suggested.to, suggested.arriveAt].filter(Boolean).join(' ')}</Text>
+                </View>
+                <Text style={styles.legSub}>{suggested.says}</Text>
+                {(suggested.legs ?? []).filter((l) => l.transit).map((l, i) => (
+                  <Text key={i} style={styles.legStep} numberOfLines={2}>
+                    {[l.transit?.vehicle ?? 'Train', l.transit?.line, l.transit?.from && l.transit?.to ? `${l.transit.from} → ${l.transit.to}` : null,
+                      l.transit?.departs && l.transit?.arrives ? `${l.transit.departs}–${l.transit.arrives}` : null].filter(Boolean).join(' · ')}
+                  </Text>
+                ))}
+                <Pressable
+                  onPress={() => save('outbound', {
+                    mode, onDate: trip.trip.startDate ?? null,
+                    fromLabel: suggested.from ?? null, toLabel: suggested.to ?? null,
+                    carrier: suggested.carrier ?? null, serviceNo: suggested.serviceNo ?? null,
+                    note: suggested.says ?? null,
+                  })}
+                  style={styles.take}
+                  accessibilityRole="button"
+                >
+                  <Icon name="add" size={15} color={colors.primaryFg} strokeWidth={2.4} />
+                  <Text style={styles.takeText}>{mode === 'train' ? 'Put this train on the trip' : 'Put this drive on the trip'}</Text>
+                </Pressable>
+              </>
+            ) : null}
+            {!looking && suggested && !suggested.ok ? <Text style={styles.hint}>{suggested.message}</Text> : null}
+          </View>
+        ) : null}
 
         <Leg
           tripId={id}
@@ -223,7 +295,7 @@ function Leg({ tripId, direction, mode, leg, date, says, busy, onSave, backFrom 
 
   const kicker = `${direction === 'outbound' ? 'Outbound' : 'Return'}${date ? ` · ${fmtDay(date)}` : ''}`;
   const flying = mode === 'fly';
-  const numberLabel = flying ? 'Flight number, e.g. BA 549' : mode === 'train' ? 'Train or booking reference' : mode === 'ferry' ? 'Crossing, e.g. Dover → Calais' : 'What you are driving';
+  const numberLabel = flying ? 'Flight number, e.g. BA 549' : mode === 'train' ? 'Train or booking reference' : 'What you are driving';
 
   const resolve = async (value: string) => {
     if (!flying || value.trim().length < 3) { setLookup(null); return; }
@@ -296,7 +368,7 @@ function Leg({ tripId, direction, mode, leg, date, says, busy, onSave, backFrom 
     <View>
       <Text style={styles.kicker}>{kicker.toUpperCase()}</Text>
       <View style={styles.field}>
-        <Icon name={flying ? 'ticket' : mode === 'ferry' ? 'boat' : mode === 'train' ? 'transit' : 'driving'} size={18} color={colors.ink} strokeWidth={2.2} />
+        <Icon name={flying ? 'ticket' : mode === 'train' ? 'transit' : 'driving'} size={18} color={colors.ink} strokeWidth={2.2} />
         <TextInput
           value={service}
           onChangeText={(v) => { setService(v); resolve(v); }}
@@ -403,6 +475,13 @@ const styles = StyleSheet.create({
   legTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   legEnd: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },
   legSub: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  legStep: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, paddingTop: 2 },
+  suggest: { gap: 4, paddingTop: 10, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  take: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12,
+    backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: 16, alignSelf: 'flex-start',
+  },
+  takeText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.primaryFg },
   legLeave: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent },
   edit: { minHeight: TARGET, justifyContent: 'center', paddingLeft: 8 },
   editText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
