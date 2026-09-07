@@ -110,6 +110,14 @@ const LIGHT = {
   scrim: 'rgba(32,30,29,0.45)',
   // The heart of a place you love. Ink, not red — the pack retires brand red.
   loved: INK,
+  /**
+   * What somebody else said, in a thread (trip rebuild, 7 Sep 2026, 5e).
+   *
+   * A neutral grey, and not `surfaceMuted`: the lime tint is *selection*, and a
+   * received bubble drawn in it makes both sides of a conversation green, which
+   * is the one thing a chat cannot afford. The handoff names both values.
+   */
+  bubble: '#EAE7E7',
   // Time bar
   travel: '#D8D3CB',
   dwell: LIME,
@@ -164,6 +172,7 @@ const DARK: typeof LIGHT = {
   hover: D.limeTint,
   scrim: 'rgba(0,0,0,0.62)',
   loved: D.ink,
+  bubble: '#2A2726',
   travel: D.ruleSoft,
   dwell: LIME,
   slack: D.sheet,

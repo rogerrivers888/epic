@@ -102,6 +102,15 @@ export async function membersWithConstraints(householdId) {
   return rows;
 }
 
+/** Just the people, in the order every screen lists them: adults first, then by when they joined. */
+export async function membersOf(householdId) {
+  const { rows } = await query(
+    'select * from members where household_id = $1 order by is_minor, created_at',
+    [householdId],
+  );
+  return rows;
+}
+
 export async function insertMember(householdId, m) {
   const { rows } = await query(
     `insert into members (household_id, name, is_minor, relationship, birth_year, birth_date, avatar_url, typical_visit_minutes, max_travel_minutes, email, mobile)

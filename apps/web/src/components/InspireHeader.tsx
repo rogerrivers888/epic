@@ -20,6 +20,21 @@ import { Wordmark } from './Wordmark';
 const HEADER_TOP = 60;
 const GUTTER = 20;
 
+/**
+ * Just clear of the status bar, and no further.
+ *
+ * The handoff's 60 is measured on a drawing whose status bar is part of the
+ * picture; taken as padding *under* a real one it left the better part of a
+ * centimetre of nothing above the wordmark (owner, 7 Sep 2026). The clock needs
+ * clearing and nothing else does, so this is the inset plus a gap, with a floor
+ * for a phone that reports no inset at all.
+ *
+ * Exported because every screen that draws its own head has to take the status
+ * bar into its own first row (`ownsHeader`, routes.ts) — the Trips list, the
+ * new-trip search, the create screen, Getting there and a stop's Ask all do.
+ */
+export const TOP_INSET = (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any;
+
 /** Row 1: the mark, and where we are looking. */
 export function InspireTop({ where, onWhere }: { where: string; onWhere: () => void }) {
   return (
@@ -40,18 +55,58 @@ export function InspireTop({ where, onWhere }: { where: string; onWhere: () => v
 }
 
 /**
- * Activities | Food. No gap between them and no radius: they are two halves of
- * one control, and the lime fill is what says which half you are in.
+ * The head's right-hand control, whichever tab it is on.
+ *
+ * "Header wordmark and right-hand control sit in the same place on every tab;
+ * only the control changes" (trip rebuild, behaviour summary) — Inspire's is
+ * where you are looking, Trips' is "+ New trip". Both are a 40px box with a 2px
+ * ink rule, so they are one component with a different label in it.
  */
-export function ModeSwitch({ mode, onMode }: { mode: 'activities' | 'food'; onMode: (m: 'activities' | 'food') => void }) {
+export function TopControl({ label, icon, trailing, onPress, accessibilityLabel }: {
+  label: string;
+  /** Drawn before the label — the plus on "+ New trip", the pin on a location. */
+  icon?: IconName;
+  /** Drawn after it — the magnifier on Inspire's where-box. */
+  trailing?: IconName;
+  onPress: () => void;
+  accessibilityLabel?: string;
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.where} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label}>
+      {icon ? <Icon name={icon} size={16} color={colors.ink} strokeWidth={2.6} /> : null}
+      <Text numberOfLines={1} style={styles.whereText}>{label}</Text>
+      {trailing ? <Icon name={trailing} size={16} color={colors.inkMuted} /> : null}
+    </Pressable>
+  );
+}
+
+/** The mark on the left, one control on the right. Every tab's first row. */
+export function ScreenTop({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={styles.top}>
+      <Wordmark height={30} ground={colors.bg} />
+      {children}
+    </View>
+  );
+}
+
+/**
+ * Two words, joined, in Archivo 800 at 26px: Activities | Food on Inspire, Day
+ * trips | Holidays on Trips, Been | Liked on Places. No gap between them and no
+ * radius — they are two halves of one control, and the lime fill is what says
+ * which half you are in.
+ */
+export function PairSwitch<T extends string>({ value, options, onPick }: {
+  value: T; options: { value: T; label: string }[]; onPick: (v: T) => void;
+}) {
   return (
     <View style={styles.switchRow}>
-      {(['activities', 'food'] as const).map((m) => {
-        const on = m === mode;
+      {options.map((o) => {
+        const on = o.value === value;
         return (
           <Pressable
-            key={m}
-            onPress={() => onMode(m)}
+            key={o.value}
+            onPress={() => onPick(o.value)}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             style={[styles.switchCell, on ? styles.switchOn : styles.switchOff]}
@@ -60,13 +115,22 @@ export function ModeSwitch({ mode, onMode }: { mode: 'activities' | 'food'; onMo
                 and turns cream in the dark, which is white-on-lime at 1.25:1
                 (owner, 7 Sep 2026: "the text and icons inside the green squares
                 are white, not black"). */}
-            <Text style={[styles.switchText, { color: on ? colors.selectedFg : colors.inkMuted }]}>
-              {m === 'activities' ? 'Activities' : 'Food'}
-            </Text>
+            <Text numberOfLines={1} style={[styles.switchText, { color: on ? colors.selectedFg : colors.inkMuted }]}>{o.label}</Text>
           </Pressable>
         );
       })}
     </View>
+  );
+}
+
+/** Activities | Food, as the one pair Inspire draws. */
+export function ModeSwitch({ mode, onMode }: { mode: 'activities' | 'food'; onMode: (m: 'activities' | 'food') => void }) {
+  return (
+    <PairSwitch
+      value={mode}
+      options={[{ value: 'activities' as const, label: 'Activities' }, { value: 'food' as const, label: 'Food' }]}
+      onPick={onMode}
+    />
   );
 }
 
@@ -172,16 +236,7 @@ export const styles = StyleSheet.create({
   top: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     gap: spacing.md, paddingHorizontal: GUTTER,
-    /**
-     * Just clear of the status bar, and no further.
-     *
-     * The handoff's 60 is measured on a drawing whose status bar is part of the
-     * picture; taken as padding *under* a real one it left the better part of a
-     * centimetre of nothing above the wordmark (owner, 7 Sep 2026). The clock
-     * needs clearing and nothing else does, so this is the inset plus a gap,
-     * with a floor for a phone that reports no inset at all.
-     */
-    paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any,
+    paddingTop: TOP_INSET,
   },
   where: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingHorizontal: 12,
