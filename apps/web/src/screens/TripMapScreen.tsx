@@ -61,7 +61,7 @@ type Pill = 'activities' | 'food' | 'stay' | 'shortlist';
  */
 const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string; icon: IconName }[] => [
   { key: 'activities', label: 'Activities', icon: 'inspire' },
-  { key: 'food', label: withStay ? 'Food' : 'Food & drink', icon: 'restaurant' },
+  { key: 'food', label: 'Food', icon: 'restaurant' },
   ...(withStay ? [{ key: 'stay' as Pill, label: 'Stays', icon: 'hotel' as IconName }] : []),
   // The count is the point of a shortlist: it is the one pill whose job is to
   // fill up, and without a number nothing on the map says it is (owner,
@@ -1158,6 +1158,20 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
     return (day?.slots ?? []).find((sl) => sl.slot === 'morning')?.stops.length ?? 0;
   })();
 
+  /**
+   * When the day opens up: the end of the last stop, which is the moment
+   * something could be added without moving anything. Null while the day is
+   * empty — there is nothing to be "free from" yet.
+   */
+  const freeFrom = (() => {
+    const last = [...stops].reverse().find((x) => x.startTime);
+    if (!last?.startTime) return null;
+    const [h, m] = last.startTime.split(':').map(Number);
+    if (!Number.isFinite(h)) return null;
+    const at = h * 60 + m + (last.dwellMinutes ?? 0);
+    return `${String(Math.floor((at % 1440) / 60)).padStart(2, '0')}:${String(at % 60).padStart(2, '0')}`;
+  })();
+
   return (
     <View style={{ paddingHorizontal: 16 }}>
       {/* The booking card is gone (owner, 6 Sep 2026). It repeated the title
@@ -1200,12 +1214,28 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
           On a holiday whose base *is* the place, that row is the same word
           again, so it is not drawn. */}
       {anchorAt >= stops.length ? <Beat time={null} icon="pinned" title={tripName(trip)} detail={isTrip ? null : 'All day'} /> : null}
-      <Beat time={back} icon="home" title="Head home" detail={null} last />
 
-      <Pressable onPress={onAdd} style={styles.cta} accessibilityRole="button">
-        <Icon name="add" size={17} color={colors.ink} />
-        <Text style={styles.ctaText}>Add something along the way</Text>
-      </Pressable>
+      {/*
+        Adding something is a gap in the day, not a button under it (5c, and
+        owner 7 Sep 2026: "adjust the UI to show that you can add a stop or a
+        lunch or a stop nearby with a plus sign"). It sits where the free time
+        actually is — after the last stop, before going home — and says when
+        that is, so it reads as an opening rather than an instruction.
+      */}
+      {/* Hidden once the day has two or more stops (5c): a day with things in
+          it does not need to be told it could have more. */}
+      {stops.length < 2 ? (
+        <Beat
+          time={null}
+          icon="add"
+          title="Add lunch or a stop nearby"
+          detail={freeFrom ? `Free from ${freeFrom}` : null}
+          dashed
+          onPress={onAdd}
+        />
+      ) : null}
+
+      <Beat time={back} icon="home" title="Head home" detail={null} last />
     </View>
   );
 }
@@ -1215,22 +1245,25 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
  * where leaving home and heading home are outlined; `onPress` opens that stop's
  * own page and its Ask thread (3d).
  */
-function Beat({ time, icon, title, detail, last, on, onPress }: {
+function Beat({ time, icon, title, detail, last, on, dashed, onPress }: {
   time: string | null; icon: IconName; title: string; detail: string | null;
-  last?: boolean; on?: boolean; onPress?: () => void;
+  last?: boolean; on?: boolean;
+  /** The opening in the day: a dashed node and quieter type, not a filled beat. */
+  dashed?: boolean;
+  onPress?: () => void;
 }) {
   const body = (
     <View style={styles.beat}>
       <Text style={styles.beatTime}>{time ?? ''}</Text>
       <View style={{ alignItems: 'center' }}>
-        <View style={[styles.beatDot, on && styles.beatDotOn]}>
-          <Icon name={icon} size={15} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+        <View style={[styles.beatDot, on && styles.beatDotOn, dashed && styles.beatDotAdd]}>
+          <Icon name={icon} size={15} color={on ? colors.selectedFg : dashed ? colors.inkMuted : colors.ink} strokeWidth={2.2} />
         </View>
         {!last ? <View style={styles.beatLine} /> : null}
       </View>
       <View style={{ flex: 1, minWidth: 0, paddingTop: 5, paddingBottom: last ? 0 : 16, gap: 2 }}>
-        <Text style={styles.beatTitle} numberOfLines={2}>{title}</Text>
-        {detail ? <Text style={type.small} numberOfLines={1}>{detail}</Text> : null}
+        <Text style={[styles.beatTitle, dashed && styles.beatTitleAdd]} numberOfLines={2}>{title}</Text>
+        {detail ? <Text style={[type.small, dashed && styles.beatDetailAdd]} numberOfLines={1}>{detail}</Text> : null}
       </View>
     </View>
   );
@@ -2845,7 +2878,7 @@ const styles = StyleSheet.create({
    * shaded now (mapStyle.ts), so the fill is enough.
    */
   pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34,
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 8,
     backgroundColor: colors.surface,
   },
   pillOn: { backgroundColor: colors.selected },
@@ -2885,11 +2918,13 @@ const styles = StyleSheet.create({
   beatDot: { width: 30, height: 30, borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   /** The stop itself is lime-filled; the beats either side of it are outlined. */
   beatDotOn: { backgroundColor: colors.selected, borderColor: colors.selected },
+  /** The opening in the day: dashed, so it reads as a space rather than a thing. */
+  beatDotAdd: { borderStyle: 'dashed', borderColor: colors.inkMuted, backgroundColor: 'transparent' },
   beatLine: { flex: 1, width: 2, minHeight: 22, backgroundColor: colors.lineSoft },
   beatTitle: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink, lineHeight: 20 },
+  beatTitleAdd: { fontSize: 15, color: colors.inkMuted, fontWeight: '400' },
+  beatDetailAdd: { fontSize: 12 },
 
-  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, marginTop: 18, borderWidth: BORDER, borderColor: colors.ink, borderRadius: 10 },
-  ctaText: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '700', color: colors.ink },
 
   chips: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12, flexWrap: 'wrap' },
   chipQuiet: { borderColor: colors.ink },

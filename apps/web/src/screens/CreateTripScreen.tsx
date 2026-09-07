@@ -6,11 +6,10 @@ import { Icon } from '../components/Icon';
 import { MonthCalendar, DatesCaption, nightsBetween, ymd } from '../components/MonthCalendar';
 import { StatusLine } from '../components/ui';
 import { VenueThumb } from '../components/VenueThumb';
-import { Wheel, slots, timeLabel } from '../components/TimePicker';
 import { useViewport } from '../hooks/useViewport';
 import { TOP_INSET } from '../components/InspireHeader';
 import { firstName } from '../components/Faces';
-import { PlacePicker } from '../components/PlacePicker';
+import { WhereYouAreStayingScreen, StayChoice } from './WhereYouAreStayingScreen';
 
 /**
  * Making a trip (trip rebuild, 7 Sep 2026, screens 5a and 5b).
@@ -52,6 +51,8 @@ export type CreateSeed = {
 
 /** The photograph at the top, at the handoff's height. */
 const PHOTO = 150;
+/** One row of the drop-down, so the list can be opened on the value that is set. */
+const DROP_ROW = 38;
 
 const clampClock = (mins: number) => ((mins % 1440) + 1440) % 1440;
 const toClock = (mins: number) => `${String(Math.floor(clampClock(mins) / 60)).padStart(2, '0')}:${String(clampClock(mins) % 60).padStart(2, '0')}`;
@@ -61,17 +62,23 @@ const fromClock = (hhmm: string) => {
 };
 const hoursWords = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`);
 
-/**
- * How long to allow, as a wheel rather than a pair of arrows.
- *
- * Quarter hours up to two and a half, where the difference is worth having,
- * then half hours: nobody allows 4h15 at a theme park, and a wheel of
- * ninety-six near-identical rows is not one anybody can land on.
- */
-const ALLOW_OPTIONS = [
-  ...Array.from({ length: 9 }, (_, i) => String(30 + i * 15)),
-  ...Array.from({ length: 20 }, (_, i) => String(180 + i * 30)),
-];
+/** Half-hour steps, which is what the handoff draws and how anybody says a time. */
+const ARRIVE_OPTIONS = Array.from({ length: 37 }, (_, i) => {
+  const t = 5 * 60 + i * 30;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+});
+
+/** How long to stay, in the same half hours, from half an hour to a whole day. */
+const ALLOW_OPTIONS = Array.from({ length: 23 }, (_, i) => String(30 + i * 30));
+
+/** "4 hours", "90 minutes", "1 hour" — how somebody says a length, not how a clock does. */
+const stayWords = (m: number) => {
+  if (m < 60) return `${m} minutes`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  const hours = `${h} hour${h === 1 ? '' : 's'}`;
+  return rest ? `${hours} ${rest}m` : hours;
+};
 
 export function CreateTripScreen({ household, seed, onClose, onCreated, onGettingThere }: {
   household: HouseholdResponse;
@@ -93,40 +100,32 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
   const [title, setTitle] = useState(suggested);
   const [renaming, setRenaming] = useState(false);
 
-  const [start, setStart] = useState<string | null>(ymd(new Date()));
   /**
-   * A second date is what makes it a holiday, and the search screen has already
-   * said which it thinks this is (3a). So a row labelled *Holiday · 2h 30m
-   * flight* opens on a range rather than on one day — the dates still decide,
-   * and either can be changed with a tap.
+   * Nothing is chosen until somebody chooses it (owner, 7 Sep 2026: "there
+   * should be no date selected"). Opening on today made today the start of
+   * every trip and put a range nobody asked for on the calendar the moment a
+   * second date was tapped.
    */
-  const [end, setEnd] = useState<string | null>(
-    seed?.kind === 'holiday' ? ymd(new Date(Date.now() + 3 * 86_400_000)) : null,
-  );
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
 
   const [arrive, setArrive] = useState(fromClock('10:00'));
   const [allow, setAllow] = useState(seed?.venue?.dwellMinutes ?? 240);
   /** Which of the two wheels is open, if either. Only ever one at a time. */
   const [open, setOpen] = useState<'arrive' | 'allow' | null>(null);
-  /**
-   * A wheel that opens below the fold is a wheel nobody can reach: "Save trip"
-   * is pinned to the bottom and was cutting it in half. The panel says where it
-   * is, and the page scrolls it up to meet you.
-   */
-  const scroller = useRef<ScrollView>(null);
-  const panelY = useRef(0);
 
   const [attending, setAttending] = useState<Set<string>>(new Set(members.map((m) => m.id)));
   const [whoOpen, setWhoOpen] = useState(false);
   /**
-   * Where they are staying (5b). A typed name was not a search — "Hilton"
-   * matched nothing, because nothing was looking (owner, 7 Sep 2026). This is
-   * the picker Epic already has, in lodging mode and biased to where the trip
-   * is going, so "Hilton" for Rome is Rome's Hiltons and not London's.
+   * Where they are staying (5f). Its own pushed screen now, not a box on this
+   * one — a hotel search needs room for matches, for "use what I typed", and
+   * for the answer most people actually have at this point, which is that they
+   * have not booked anything yet.
    */
   const [stay, setStay] = useState<Place | null>(null);
   const [stayText, setStayText] = useState('');
   const [stayOpen, setStayOpen] = useState(false);
+  const stayWhere = stay?.name ?? stay?.label ?? (stayText.trim() || null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -189,6 +188,10 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
   const holiday = nights > 0;
 
   const leaveHome = drive != null ? toClock(arrive - drive) : null;
+  /** Back through the front door: the arrival, plus the stay, plus the way home. */
+  const homeBy = toClock(arrive + allow + (drive ?? 0));
+  const travelIcon: 'driving' | 'transit' | 'walking' = 'driving';
+  const travelWord = 'Drive';
 
   const chosen = members.filter((m) => attending.has(m.id));
   const whoWords = !chosen.length ? 'Nobody yet'
@@ -242,7 +245,7 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
 
   return (
     <View style={[styles.page, wide && styles.wide]}>
-      <ScrollView ref={scroller} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.head}>
           <View style={styles.titleRow}>
             {renaming ? (
@@ -294,90 +297,66 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
             trip" was an instruction nobody needed twice (owner, 7 Sep 2026),
             and the gap it left stays, so nothing below it moves up.
           */}
-          <View style={styles.captionRow}>{holiday ? <DatesCaption start={start} end={end} /> : null}</View>
+          <View style={styles.captionRow}>{holiday || !start ? <DatesCaption start={start} end={end} /> : null}</View>
 
-          {!holiday ? (
+          {!start ? null : !holiday ? (
             /*
-              Arrive and Allow (5a). The label sits *above* its number, because
-              the two are one thing (owner, 7 Sep 2026: "Arrive and Allow need
-              to be above the numbers, since they directly relate to the
-              numbers"), and the number is tapped rather than nudged: "I don't
-              want to hit arrows to move it in increments of 15 minutes." So the
-              arrows are gone and the wheel Epic already uses for a time opens
-              underneath — the same control as the day window and a booking.
+              Arrive and Stay for (5a, round 5).
+              
+              Two columns flush on the gutter: a small grey kicker over the
+              value in Archivo 800, with a chevron. No box, no underline, no
+              steppers — the owner asked for the arrows to go, and the handoff
+              draws a plain list dropping straight under the value instead.
             */
             <>
               <View style={styles.pair}>
                 <Field
                   label="Arrive"
-                  value={timeLabel(toClock(arrive))}
-                  hint={leaveHome ? `Leave home ${timeLabel(leaveHome)} · a ${hoursWords(drive!)} drive` : 'When you want to be there'}
-                  hintOn={Boolean(leaveHome)}
+                  value={toClock(arrive)}
                   open={open === 'arrive'}
                   onPress={() => setOpen(open === 'arrive' ? null : 'arrive')}
-                  divider
+                  options={ARRIVE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                  onPick={(v) => { setArrive(fromClock(v)); setOpen(null); }}
                 />
                 <Field
-                  label="Allow"
-                  value={hoursWords(allow)}
-                  hint={`Usually about ${hoursWords(seed?.venue?.dwellMinutes ?? 240)}`}
+                  label="Stay for"
+                  value={stayWords(allow)}
                   open={open === 'allow'}
                   onPress={() => setOpen(open === 'allow' ? null : 'allow')}
+                  options={ALLOW_OPTIONS.map((v) => ({ value: v, label: stayWords(Number(v)) }))}
+                  onPick={(v) => { setAllow(Number(v)); setOpen(null); }}
                 />
               </View>
-              {open ? (
-                <View
-                  style={styles.wheelPanel}
-                  onLayout={(e) => {
-                    panelY.current = e.nativeEvent.layout.y;
-                    scroller.current?.scrollTo({ y: Math.max(0, panelY.current - 90), animated: true });
-                  }}
-                >
-                  {open === 'arrive' ? (
-                    <Wheel
-                      label="Arrive"
-                      value={toClock(arrive)}
-                      options={slots(15, '05:00', '23:00')}
-                      onChange={(v) => setArrive(fromClock(v))}
-                    />
-                  ) : (
-                    <Wheel
-                      label="Allow"
-                      value={String(allow)}
-                      options={ALLOW_OPTIONS}
-                      format={(v) => hoursWords(Number(v))}
-                      onChange={(v) => setAllow(Number(v))}
-                    />
-                  )}
-                  <Pressable onPress={() => setOpen(null)} style={styles.done} accessibilityRole="button">
-                    <Text style={styles.doneText}>Done</Text>
-                  </Pressable>
-                </View>
-              ) : null}
+
+              {/*
+                The line that ties the two together: how you are getting there,
+                when to walk out of the door, and when you are back. All three
+                are derived, so any change to either column moves them.
+              */}
+              <View style={styles.travelLine}>
+                <Icon name={travelIcon} size={16} color={colors.ink} strokeWidth={2.2} />
+                <Text style={styles.travelText}>
+                  {drive != null ? `${travelWord} ${hoursWords(drive)}` : travelWord}
+                </Text>
+                {leaveHome ? (
+                  <>
+                    <Text style={styles.travelDot}>·</Text>
+                    <Text style={styles.travelText}>Leave home <Text style={styles.travelStrong}>{leaveHome}</Text></Text>
+                  </>
+                ) : null}
+                <Text style={styles.travelDot}>·</Text>
+                <Text style={styles.travelText}>Home by <Text style={styles.travelStrong}>{homeBy}</Text></Text>
+              </View>
             </>
           ) : (
             <>
               <FormRow
                 icon="hotel"
                 title="Where you're staying"
-                sub={stay?.label ?? (stayText.trim() || 'Add a hotel or address · optional')}
-                action={stay || stayText.trim() ? 'Change' : 'Add'}
-                onPress={() => setStayOpen((o) => !o)}
+                sub={stayWhere ?? 'Add a hotel or address · optional'}
+                action={stayWhere ? 'Change' : 'Add'}
+                onPress={() => setStayOpen(true)}
               />
-              {stayOpen ? (
-                <View style={styles.stayPicker}>
-                  <PlacePicker
-                    value={stay}
-                    onPick={(p) => { setStay(p); if (p) setStayOpen(false); }}
-                    onText={setStayText}
-                    placeholder="Hotel name or an address"
-                    kind="lodging"
-                    near={where}
-                    countryCode={country}
-                    autoFocus
-                  />
-                </View>
-              ) : null}
               <FormRow
                 icon="transit"
                 title="Getting there"
@@ -431,6 +410,33 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
         </View>
       </ScrollView>
 
+      {/*
+        Pushed *over* the form rather than navigated to, so everything already
+        filled in is still here when it closes. It has an address of its own all
+        the same (`/trips/new?stay=1`), which is the rule for a layer opened on
+        top of a page.
+      */}
+      {stayOpen ? (
+        <View style={styles.layer}>
+          <WhereYouAreStayingScreen
+            where={where}
+            meta={[
+              start && end ? `${new Date(`${start}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric' })} – ${new Date(`${end}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}` : null,
+              nights ? `${nights} night${nights === 1 ? '' : 's'}` : null,
+              chosen.length ? `${chosen.length} ${chosen.length === 1 ? 'person' : 'people'}` : null,
+            ].filter(Boolean).join(' · ')}
+            initial={stayText}
+            onClose={() => setStayOpen(false)}
+            onDone={(choice: StayChoice) => {
+              if (choice.kind === 'place') { setStay(choice.place); setStayText(''); }
+              if (choice.kind === 'typed') { setStay(null); setStayText(choice.text); }
+              if (choice.kind === 'later') { setStay(null); setStayText(''); }
+              setStayOpen(false);
+            }}
+          />
+        </View>
+      ) : null}
+
       <View style={styles.foot}>
         <Pressable onPress={() => save('trip')} style={styles.primary} accessibilityRole="button" disabled={busy || !start}>
           <Text style={styles.primaryText}>{busy ? 'Saving…' : 'Save trip'}</Text>
@@ -442,32 +448,63 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
 }
 
 /**
- * One of the pair: the word above, the number under it, and the line that says
- * what the number means. The whole cell is the target — there is nothing small
- * to hit, and nothing to hit repeatedly.
+ * One of the pair: a small grey kicker over the value, and a plain list that
+ * drops straight beneath it when the value is tapped (5a/5g).
+ *
+ * No box, no underline, no steppers — the owner, 7 Sep 2026: "I don't want to
+ * hit arrows to move it in increments of 15 minutes." The list is positioned
+ * absolutely so it opens *over* what is below rather than pushing the screen
+ * around, which is what the handoff draws.
  */
-function Field({ label, value, hint, hintOn, open, onPress, divider }: {
-  label: string; value: string; hint: string; hintOn?: boolean;
-  open: boolean; onPress: () => void; divider?: boolean;
+function Field({ label, value, open, onPress, options, onPick }: {
+  label: string;
+  value: string;
+  open: boolean;
+  onPress: () => void;
+  options: { value: string; label: string }[];
+  onPick: (value: string) => void;
 }) {
+  const list = useRef<ScrollView>(null);
+  const at = Math.max(0, options.findIndex((o) => o.value === value || o.label === value));
+  // Open on what is set, two rows up so there is something above it to scroll
+  // back to — a list that opens at five in the morning is a list to be scrolled.
+  useEffect(() => {
+    if (open) requestAnimationFrame(() => list.current?.scrollTo({ y: Math.max(0, (at - 2) * DROP_ROW), animated: false }));
+  }, [open, at]);
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.cell, divider && styles.cellDivider]}
-      accessibilityRole="button"
-      accessibilityState={{ expanded: open }}
-      accessibilityLabel={`${label}: ${value}. ${hint}`}
-    >
+    <View style={styles.cell}>
       <Text style={styles.cellLabel}>{label}</Text>
-      {/* Open is a lime fill, and a lime fill carries ink type in both
-          palettes — `colors.ink` is the *type* colour and turns cream in the
-          dark, which is 1.25:1 on lime and forbidden by the pack. */}
-      <View style={[styles.cellValue, open && styles.cellValueOn]}>
-        <Text style={[styles.cellValueText, open && styles.onLime]}>{value}</Text>
-        <Icon name={open ? 'collapse' : 'expand'} size={14} color={open ? ON_LIME : colors.ink} />
-      </View>
-      <Text style={[styles.cellHint, hintOn && styles.cellHintOn]}>{hint}</Text>
-    </Pressable>
+      <Pressable
+        onPress={onPress}
+        style={styles.cellValue}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}: ${value}`}
+      >
+        <Text style={styles.cellValueText}>{value}</Text>
+        <Icon name={open ? 'collapse' : 'expand'} size={14} color={colors.ink} strokeWidth={2.6} />
+      </Pressable>
+      {open ? (
+        <View style={styles.drop}>
+          <ScrollView ref={list} style={{ maxHeight: DROP_ROW * 5 }} showsVerticalScrollIndicator={false}>
+            {options.map((o) => {
+              const on = o.value === value || o.label === value;
+              return (
+                <Pressable
+                  key={o.value}
+                  onPress={() => onPick(o.value)}
+                  style={[styles.dropRow, on && styles.dropRowOn]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                >
+                  <Text style={[styles.dropText, on && styles.dropTextOn]}>{o.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -509,29 +546,45 @@ const styles = StyleSheet.create({
    */
   captionRow: { minHeight: 34, justifyContent: 'center' },
 
-  pair: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.lineSoft },
-  // Taller, and stacked: the word, the number, then what the number means.
-  cell: { flex: 1, minWidth: 0, gap: 8, paddingVertical: 16, paddingRight: 12 },
-  cellDivider: { borderRightWidth: 1, borderRightColor: colors.lineSoft, paddingRight: 16, marginRight: 4 },
-  cellLabel: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
-  cellValue: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-    alignSelf: 'flex-start', minWidth: 96, minHeight: 40, paddingHorizontal: 12,
-    backgroundColor: colors.surfaceMuted, borderBottomWidth: BORDER, borderBottomColor: colors.ink,
+  // Two columns flush on the gutter, under a light rule (5a).
+  /**
+   * `zIndex` matters here: the list drops out of this row and over the travel
+   * line and Who's coming, which come *after* it in the tree and would
+   * otherwise paint on top of it — which they did, and the list was see-through.
+   */
+  pair: {
+    flexDirection: 'row', gap: 12, paddingTop: 24, paddingBottom: 4, marginTop: 12,
+    borderTopWidth: 1, borderTopColor: colors.lineSoft, zIndex: 20,
   },
-  cellValueOn: { backgroundColor: colors.selected },
-  cellValueText: { fontFamily: fonts.body, fontSize: 17, fontWeight: '700', color: colors.ink },
-  onLime: { color: ON_LIME },
-  // Two lines, so "Leave home 08:55 · a 5 min drive" is said rather than cut.
-  cellHint: { fontFamily: fonts.body, fontSize: 12, lineHeight: 16, color: colors.inkMuted },
-  cellHintOn: { color: colors.accent, fontWeight: '600' },
+  cell: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
+  cellLabel: {
+    fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88,
+    textTransform: 'uppercase', color: colors.inkMuted,
+  },
+  // The value is the loud thing: Archivo 800 at 22, with a chevron and no box.
+  cellValue: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34 },
+  cellValueText: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.66, color: colors.ink },
 
-  wheelPanel: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 12,
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+  /**
+   * The list, dropped straight under the value it belongs to. Absolute, so it
+   * covers what is below rather than shoving the screen down; a 1px soft rule
+   * rather than the handoff's shadow, because the pack retires shadows and a
+   * rule does the same job on a cream ground.
+   */
+  drop: {
+    position: 'absolute', left: 0, top: '100%', marginTop: 8, minWidth: 132, zIndex: 30,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.lineSoft,
   },
-  done: { paddingHorizontal: 16, minHeight: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
-  doneText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.primaryFg },
+  dropRow: { height: DROP_ROW, justifyContent: 'center', paddingHorizontal: 12 },
+  dropRowOn: { backgroundColor: colors.accentSoft },
+  dropText: { fontFamily: fonts.body, fontSize: 16, color: colors.inkMuted },
+  dropTextOn: { color: colors.ink, fontWeight: '600' },
+
+  // How you get there, when you leave and when you are back — one grey line.
+  travelLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 10, paddingBottom: 14, zIndex: 0 },
+  travelText: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  travelStrong: { fontWeight: '600', color: colors.ink },
+  travelDot: { fontFamily: fonts.body, fontSize: 13, color: colors.lineSoft },
 
   formRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 18,
@@ -557,7 +610,8 @@ const styles = StyleSheet.create({
   tickOn: { backgroundColor: colors.selected, borderColor: colors.ink },
   tickText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
 
-  stayPicker: { paddingTop: 12, paddingBottom: 4 },
+  /** A screen pushed over this one, so the half-filled form underneath survives. */
+  layer: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: colors.bg, zIndex: 10 },
 
   foot: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: colors.lineSoft },
   primary: {

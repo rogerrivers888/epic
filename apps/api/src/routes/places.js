@@ -15,7 +15,7 @@ import * as menusRepo from '../repositories/menus.js';
 import { enabledSources, recallVenue, optInFrom } from '../sources/index.js';
 import { searchCached } from '../sources/cache.js';
 import { geocode, reverseGeocode, providerCalls as geocodeCalls } from '../sources/geocode.js';
-import { searchAreas, AREA_ATTRIBUTION, providerCalls as areaCalls } from '../sources/areas.js';
+import { searchAreas, searchLodging, AREA_ATTRIBUTION, providerCalls as areaCalls } from '../sources/areas.js';
 import { findMenuUrl } from '../sources/menuLink.js';
 import { whySourceFailed } from '../sources/why.js';
 import { resolveConcept, conceptByKey } from '../domain/concepts.js';
@@ -247,10 +247,24 @@ places.get('/geocode', async (req, res, next) => {
     // Both sources answer from a short memory of what they have just been asked,
     // so a row is only written when a request actually went out.
     const before = { osm: geocodeCalls(), photon: areaCalls() };
+    /**
+     * A hotel is a typeahead, so it goes to Photon first (sources/areas.js).
+     *
+     * Nominatim matches whole words: "Hotel Hass" found nothing while
+     * "Hassler" found the Hassler, which is the fault the owner hit (7 Sep
+     * 2026). Photon prefix-matches, which is what a box somebody is still
+     * typing into needs — and where it has nothing to say, Nominatim still
+     * answers, so an address typed in full keeps working.
+     */
+    const lodgingTypeahead = kind === 'lodging'
+      ? await searchLodging(String(req.query.q || ''), { limit, near, countryCode })
+      : [];
     const [results, home] = await Promise.all([
       kind === 'area'
         ? searchAreas(String(req.query.q || ''), { limit, near, countryCode })
-        : geocode(String(req.query.q || ''), { limit, near, countryCode, within: Boolean(m), kind }),
+        : lodgingTypeahead.length
+          ? lodgingTypeahead
+          : geocode(String(req.query.q || ''), { limit, near, countryCode, within: Boolean(m), kind }),
       kind === 'area' ? homeCountryOf(household) : null,
     ]);
     const made = [

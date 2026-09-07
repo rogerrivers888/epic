@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts } from '../theme';
 import { Icon } from './Icon';
+import { nextRange, nightsBetween } from './dateRange';
 
 /**
  * The month, on the create-trip screen (trip rebuild, 7 Sep 2026, 5a/5b).
@@ -31,16 +32,17 @@ export function monthTitle(year: number, month: number): string {
   return new Date(year, month, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
 }
 
-/** The nights between two dates. Same day is 0 — a day out, whatever it is called. */
-export const nightsBetween = (a: string, b: string) =>
-  Math.max(0, Math.round((+parse(b) - +parse(a)) / 86_400_000));
+// The decision a tap makes, and the nights it comes to, both live next door so
+// they can be tested without a React tree (`test/dates.test.ts`).
+export { nightsBetween } from './dateRange';
 
 export function MonthCalendar({ start, end, onChange, minMonth }: {
   /** The first date, or null for a calendar nobody has touched. */
   start: string | null;
   /** The last, when the household has tapped a second date. Null is one day. */
   end: string | null;
-  onChange: (next: { start: string; end: string | null }) => void;
+  /** `start` comes back null when the one chosen date is tapped again. */
+  onChange: (next: { start: string | null; end: string | null }) => void;
   /** The earliest month worth showing; the arrows stop here. Defaults to this one. */
   minMonth?: { year: number; month: number };
 }) {
@@ -91,15 +93,7 @@ export function MonthCalendar({ start, end, onChange, minMonth }: {
     return weeks.flat();
   }, [year, month, now]);
 
-  const pick = (date: string) => {
-    if (!start) return onChange({ start: date, end: null });
-    // Tapping the one date again clears the range back to a single day; tapping
-    // a later one opens it; tapping an earlier one starts again from there.
-    if (date === start) return onChange({ start: date, end: null });
-    if (end && date === end) return onChange({ start, end: null });
-    if (date < start) return onChange({ start: date, end: null });
-    return onChange({ start, end: date });
-  };
+  const pick = (date: string) => onChange(nextRange({ start, end }, date));
 
   return (
     <View>
@@ -159,7 +153,7 @@ export function MonthCalendar({ start, end, onChange, minMonth }: {
 
 /** "Saturday 12 September · tap another date for a longer trip", or the range in Moss. */
 export function DatesCaption({ start, end }: { start: string | null; end: string | null }) {
-  if (!start) return <Text style={styles.caption}>Tap a date to say when.</Text>;
+  if (!start) return <Text style={styles.caption}>Tap a date · tap a second one for a longer trip</Text>;
   if (!end) {
     return (
       <Text style={styles.caption}>

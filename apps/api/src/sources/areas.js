@@ -158,3 +158,88 @@ export async function searchAreas(text, { limit = 6, near = null, countryCode = 
   });
   return kept.sort((a, b) => a.rank - b.rank).slice(0, limit).map((k) => k.place);
 }
+
+
+// ---------------------------------------------------------------------------
+// somewhere to sleep, as somebody types
+// ---------------------------------------------------------------------------
+
+/**
+ * The same argument as areas, one field along.
+ *
+ * "Where you're staying" (trip redesign, 5f) is a typeahead: it highlights the
+ * letters typed so far inside the name it matched. Nominatim cannot do that —
+ * it matches whole words, so "Hotel Hass" finds nothing while "Hassler" finds
+ * the Hassler, which is exactly what the owner hit (7 Sep 2026: "searching for
+ * the Hilton, for example, brings up nothing"). Photon prefix-matches, which is
+ * what a box somebody is still typing into needs.
+ *
+ * Kept separate from `searchAreas` because the filter is the whole of it: the
+ * same index answers with roads and cafés, and a field asking where you are
+ * sleeping must not offer either.
+ */
+const SLEEPS = new Set([
+  ...['hotel', 'hostel', 'guest_house', 'motel', 'apartment', 'chalet', 'alpine_hut', 'aparthotel'].map((v) => `tourism:${v}`),
+  'building:hotel', 'leisure:resort', 'amenity:hotel',
+]);
+
+/** How near counts as near: a hotel for a trip to Rome is in Rome, not in Milan. */
+const STAY_NEAR_KM = 60;
+
+export async function searchLodging(text, { limit = 6, near = null, countryCode = null } = {}) {
+  const q = String(text || '').trim();
+  if (q.length < 2) return [];
+  const params = new URLSearchParams({ q, limit: '40', lang: 'en' });
+  if (near?.lat != null) { params.set('lat', String(near.lat)); params.set('lon', String(near.lng)); }
+  let features;
+  try {
+    features = (await ask(`${BASE}/api/?${params}`))?.features ?? [];
+  } catch {
+    // Photon down: Nominatim still answers, without the prefix matching.
+    return [];
+  }
+
+  const seen = new Set();
+  const kept = [];
+  features.forEach((f, rank) => {
+    const p = f.properties || {};
+    if (!SLEEPS.has(`${p.osm_key}:${p.osm_value}`)) return;
+    if (!p.name || !f.geometry?.coordinates) return;
+    if (countryCode && String(p.countrycode || '').toUpperCase() !== String(countryCode).toUpperCase()) return;
+    const [lng, lat] = f.geometry.coordinates;
+    // A hotel a hundred miles from the trip is not a match, however well the
+    // letters line up.
+    const km = near?.lat != null ? kmBetween({ lat: near.lat, lng: near.lng }, { lat, lng }) : 0;
+    if (near?.lat != null && km > STAY_NEAR_KM) return;
+    const key = `${String(p.name).toLowerCase()}|${lat.toFixed(4)},${lng.toFixed(4)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const street = [p.housenumber, p.street].filter(Boolean).join(' ') || p.district || p.city || null;
+    kept.push({
+      place: {
+        label: p.name,
+        name: p.name,
+        formatted: p.name,
+        displayName: [p.name, street, p.city, p.country].filter(Boolean).join(', '),
+        address: {
+          line1: street, area: p.district || null, town: p.city || null,
+          region: p.state || null, postcode: p.postcode || null, country: p.country || null,
+        },
+        lat: Number(lat),
+        lng: Number(lng),
+        country: p.country || null,
+        countryCode: p.countrycode ? String(p.countrycode).toUpperCase() : null,
+        locality: p.city || p.district || null,
+        kind: p.osm_value || null,
+        kindWord: p.osm_value === 'guest_house' ? 'guest house' : (p.osm_value || null),
+        source: 'osm',
+        sourcePlaceId: p.osm_id ? `${OSM_TYPE[p.osm_type] || p.osm_type}/${p.osm_id}` : null,
+        attribution: AREA_ATTRIBUTION,
+        matchedBy: 'lodging',
+      },
+      // Photon's own order, nudged by how close it is to where the trip is.
+      rank: rank + Math.round(km / 10),
+    });
+  });
+  return kept.sort((a, b) => a.rank - b.rank).slice(0, limit).map((k) => k.place);
+}
