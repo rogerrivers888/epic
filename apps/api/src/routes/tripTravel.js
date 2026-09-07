@@ -176,6 +176,30 @@ function farApart(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s))) > TRANSFER_LIMIT_KM;
 }
 
+/**
+ * What the journey is, in the words somebody would use.
+ *
+ * Counting every leg as a train was wrong the first time it ran: the second
+ * half of Sunningdale → Reading town centre is a bus, and calling it "2 trains"
+ * is the kind of small lie that makes everything else on the screen suspect.
+ * So the vehicles are counted by what they actually are.
+ */
+function transitWords(rides, minutes) {
+  if (!rides.length) return `About ${minutes} min door to door`;
+  const counts = new Map();
+  for (const r of rides) {
+    const what = (r.transit?.vehicle || 'train').toLowerCase();
+    counts.set(what, (counts.get(what) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()].map(([what, n]) => `${n} ${what}${n === 1 ? '' : 's'}`);
+  const changes = rides.length - 1;
+  return [
+    parts.join(' and '),
+    changes ? `${changes} change${changes === 1 ? '' : 's'}` : null,
+    `about ${minutes} min door to door`,
+  ].filter(Boolean).join(' · ');
+}
+
 /** Two hours at an airport, forty minutes at a station, an hour at a port. */
 const atTerminal = (mode) => (mode === 'fly' ? 120 : mode === 'ferry' ? 60 : 30);
 
@@ -395,9 +419,7 @@ router.get('/:id/travel/suggest', async (req, res, next) => {
       serviceNo: first?.line ?? null,
       /** Google's answer, so it is marked as a live look-up rather than our arithmetic. */
       estimated: false,
-      says: mode === 'train'
-        ? `${rides.length ? `${rides.length} train${rides.length === 1 ? '' : 's'}` : 'A journey'}${rides.length > 1 ? `, ${rides.length - 1} change${rides.length === 2 ? '' : 's'}` : ''} · about ${found.minutes} min door to door`
-        : `About ${found.minutes} min at the wheel`,
+      says: mode === 'train' ? transitWords(rides, found.minutes) : `About ${found.minutes} min at the wheel`,
     });
   } catch (err) { next(err); }
 });
