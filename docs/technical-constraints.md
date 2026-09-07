@@ -612,6 +612,26 @@ This works in production because the web service is `serve dist -s`, which answe
 
 Files: `web/src/router.tsx`, `web/src/routes.ts`, `web/test/routes.test.ts`, and every screen.
 
+### 13.15 The table, not the household — **built** (owner, 7 Sep 2026)
+
+> "When I'm out for a meal, there could be other guests with me… I'd like to be able to say, when I go into the menu, 'Add other guests.' In that case, I'll be asked for their names, or just their first names."
+
+> "If 2 people are having the same menu item, they each might have different special instructions that they want to provide to the waiter… Maybe I could see it going into a basket or something, so I know it's actually worked."
+
+> "Maybe there could be a QR code that the waiter could scan to then see what I've ordered, because standing there holding the phone while they take a note of what I want to order was quite awkward."
+
+**A guest belongs to the sitting, not to the family.** Ordering was built on members, and a member is a permanent thing: they are in Who's coming, their allergens exclude places, their stars teach the planner. Somebody who came to dinner once is none of that. So guests are rows on the order (`order_guests`, migration 060), keyed by a `ref` the phone generates — the order is rewritten whole on every save, so without a stable id from the device each save would seat a second Gina and orphan her dinner. Taking a guest off the table takes their dishes with it rather than leaving them as plates for everyone. Their plates appear in the meal afterwards and carry no stars: what a one-night guest thought of a dish is not a fact about this household's taste.
+
+**The note moved off the dish and onto the plate.** It used to hang off the menu item, which meant two people ordering the linguine shared one instruction. Picks are now keyed by dish *and* person, and an `order_items` row is one person and one dish — which is what Epic 6 C6 always meant and what a kitchen actually needs. The menu row draws one box per person having it.
+
+**The basket is the receipt for a tap.** The bar under the menu names the line that just went in ("Added · Gina · Spaghettoni al Ragù") and opens to show every line with the person it belongs to and its own ✕. A count that quietly ticks up in the corner is not evidence that anything worked.
+
+**The code is minted with the order, not asked for.** `orders.share_token` is written by `insertOrder`, so the QR draws from what the phone is already holding — a restaurant basement is exactly where a token fetched on demand cannot be fetched. `GET /api/order/:token` is public, in the same short list as the group invite link (`auth.js`): the waiter has no account, is standing in front of the household, and the unguessable token is the whole credential. What it opens is one sitting — the dishes, the words for the waiter, first names, and the allergens of the people eating — and nothing else: no household, no history, no roster. It is its own page (`/order/<token>`, §13.14), drawn with no chrome and no tab bar, and it re-reads itself every twenty seconds because the table goes on choosing after the code has been scanned.
+
+**Whose allergens go to the kitchen.** Only the people with a plate on the order — a household of five at a table of two must not put three absent people's allergens in front of a chef, because a warning that is usually irrelevant stops being read. The exception is a plate for the table: everybody there eats off that one, so it puts the whole household's lines back on. Roam still never clears a dish of an allergen a menu does not have to declare; the page says to ask.
+
+Files: `api/migrations/060_order_guests_and_share.sql`, `api/src/repositories/menus.js`, `api/src/routes/menus.js`, `api/src/auth.js`, `web/src/components/MenuOrder.tsx`, `web/src/screens/OrderTicketScreen.tsx`, `web/src/routes.ts`.
+
 ### 13.5 Closed-vocabulary matching for voice
 
 Used twice, for the same reason: rating capture interprets against known attendees and known ordered items; trip assembly interprets against the stops on screen. Constraining to a small known set matters more than ASR vendor choice.
