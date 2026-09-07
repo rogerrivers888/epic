@@ -124,6 +124,12 @@ const ATLAS_LIMIT = 250;
 // Food is a list rather than a wall of pictures, so it can afford more of them
 // than the atlas half — but not so many that the answer stops being one page.
 const FOOD_LIMIT = 150;
+/**
+ * The kinds of place the Food half is made of — the same set the sweep filters
+ * its candidates on (`sources/scoutArea.js`), so the two cannot drift apart.
+ * Anything else the open map calls a place to eat arrives as a restaurant.
+ */
+const FOOD_CATEGORIES = new Set(['restaurant', 'cafe', 'pub', 'bar', 'bakery']);
 
 /**
  * The credit a picture and a rating travel with. Sources hand this over as a
@@ -287,7 +293,17 @@ inspire.get('/near', async (req, res, next) => {
         venueRef: f.venue_ref,
         source: 'scout',
         name: f.name,
-        category: 'restaurant',
+        /**
+         * What kind of place, so the Food strip can offer more than one word.
+         *
+         * This was hard-coded 'restaurant' and the strip read back exactly one
+         * category (owner, 8 Sep 2026). The sweep has always known — it filters
+         * its candidates on this very set — it simply had nowhere to write it
+         * until migration 070. Falls back to a restaurant because that is what
+         * the sweep goes looking for, so an unresearched place is not stranded
+         * outside every category on the strip.
+         */
+        category: FOOD_CATEGORIES.has(f.category) ? f.category : 'restaurant',
         moods: ['food'],
         subcategory: f.cuisine_group ?? null,
         atlasCategory: null,

@@ -515,7 +515,16 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    * is allowed to answer with it. It is written against the shape rather than
    * against today's emptiness.
    */
-  const FOOD_KINDS: Record<string, string> = { restaurant: 'restaurants', cafe: 'cafes', pub: 'pubs', bar: 'pubs', takeaway: 'takeaway' };
+  /**
+   * The kind of place the API found, in the word the strip uses.
+   *
+   * A bar was folded into pubs and a bakery was not here at all, so the strip
+   * could only ever read "Restaurants" (owner, 8 Sep 2026). They are their own
+   * words now: a bar is not a pub and a bakery is not a café.
+   */
+  const FOOD_KINDS: Record<string, string> = {
+    restaurant: 'restaurants', cafe: 'cafes', pub: 'pubs', bar: 'bars', bakery: 'bakeries', takeaway: 'takeaway',
+  };
   /**
    * Somewhere to eat is a *kind of place*, not a place that happens to serve
    * food. Asking whether the taxonomy had taught it the word "food" put
@@ -580,7 +589,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    * pool still carries and the address still accepts, so a link to one works —
    * they simply have no entry point here until the design gives them one.
    */
-  const FOOD_LABELS: Record<string, string> = { restaurants: 'Restaurants', pubs: 'Pubs', cafes: 'Cafés', takeaway: 'Takeaway' };
+  const FOOD_LABELS: Record<string, string> = {
+    restaurants: 'Restaurants', pubs: 'Pubs', bars: 'Bars', cafes: 'Cafés', bakeries: 'Bakeries', takeaway: 'Takeaway',
+  };
   const stripItems = useMemo(() => {
     const all = { key: 'all', label: 'All' };
     // Only what is actually here. The handoff's lists are illustrative — the
@@ -740,13 +751,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               onPress={() => setPanel(panel === 'travel' ? null : 'travel')}
             />
             <FilterButton
-              icon="wallet"
+              icon="money"
               narrowed={budget !== 'all'}
               open={panel === 'budget'}
               label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'}
               onPress={() => setPanel(panel === 'budget' ? null : 'budget')}
             />
-            {mode === 'food' ? <FilterButton toggle on={openNow} label="Open now" onPress={() => setOpenNow(!openNow)} /> : null}
           </FilterRow>
         </View>
 
@@ -890,6 +900,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
             atHome={!chosen && !!home}
             onMode={setTravelBy}
             onMinutes={(m) => setCap(m)}
+            // Open now is a third filter chip no longer: it belongs with how
+            // far you will go, because both are questions about whether you
+            // could actually get there and be let in (owner, 8 Sep 2026).
+            // Food only — the atlas holds no opening hours for a hillside.
+            openNow={mode === 'food' ? openNow : null}
+            onOpenNow={setOpenNow}
             onDone={() => setPanel(null)}
           />
         </FilterPanel>

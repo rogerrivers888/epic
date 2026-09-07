@@ -129,12 +129,19 @@ export function PairSwitch<T extends string>({ value, options, onPick }: {
   );
 }
 
-/** Activities | Food, as the one pair Inspire draws. */
+/**
+ * Activities | Food & Drink, as the one pair Inspire draws.
+ *
+ * "Food" until 8 Sep 2026, when the strip beneath it gained bars — and a half
+ * of the app called Food with Bars in it is telling you the wrong thing. The
+ * full-width cell the v2 bar gave us is what made the longer word fit (owner:
+ * "maybe we've got room for Drink now as well").
+ */
 export function ModeSwitch({ mode, onMode }: { mode: 'activities' | 'food'; onMode: (m: 'activities' | 'food') => void }) {
   return (
     <PairSwitch
       value={mode}
-      options={[{ value: 'activities' as const, label: 'Activities' }, { value: 'food' as const, label: 'Food' }]}
+      options={[{ value: 'activities' as const, label: 'Activities' }, { value: 'food' as const, label: 'Food & Drink' }]}
       onPick={onMode}
     />
   );

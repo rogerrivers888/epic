@@ -48,7 +48,7 @@ import { firstHousehold } from '../repositories/households.js';
 const QUERIES = ['restaurants', 'best restaurants', 'italian restaurant', 'indian restaurant', 'asian restaurant', 'pub food', 'fine dining', 'brunch'];
 /** A sweep comes round twice a year; a rating that has moved is rare and slow. */
 const RESWEEP_DAYS = Number(process.env.EPIC_RESWEEP_DAYS || 180);
-const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar']);
+const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar', 'bakery']);
 /** Backoff for a menu that would not open, in hours. */
 const MENU_BACKOFF_H = [24, 168, 720, 2160];
 

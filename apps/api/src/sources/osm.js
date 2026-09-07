@@ -18,6 +18,12 @@ const AMENITY_TO_CATEGORY = {
   bar: 'bar', nightclub: 'bar',
   cinema: 'attraction', theatre: 'attraction', arts_centre: 'attraction',
 };
+/**
+ * A bakery is a shop in the open map, not an amenity, so it never reached the
+ * category above and every one of them came back an attraction. Read after the
+ * amenity, because a café that also sells bread is a café.
+ */
+const SHOP_TO_CATEGORY = { bakery: 'bakery', pastry: 'bakery', confectionery: 'bakery', deli: 'bakery' };
 const AMENITY_EXPERIENCE = { cinema: 'cinema', theatre: 'theatre', arts_centre: 'art-gallery' };
 const NOT_FOR_CHILDREN = /comedy|nightclub|casino|strip|adult/i;
 const TOURISM_EXPERIENCE = {
@@ -113,6 +119,7 @@ export function venueFromOsmElement(el) {
 
   let category = 'attraction';
   const experiences = [];
+  if (t.shop && SHOP_TO_CATEGORY[t.shop]) category = SHOP_TO_CATEGORY[t.shop];
   if (t.amenity && AMENITY_TO_CATEGORY[t.amenity]) {
     category = AMENITY_TO_CATEGORY[t.amenity];
     if (AMENITY_EXPERIENCE[t.amenity]) experiences.push(AMENITY_EXPERIENCE[t.amenity]);
@@ -296,7 +303,7 @@ export const osmSource = {
     // are nearly all cafés and restaurants, and the museums never made the cut
     // — which read as "Epic has no ideas for things to do".
     const sorted = [...seen.values()].sort((a, b) => d2(a) - d2(b));
-    const isFoodCat = (v) => ['restaurant', 'cafe', 'pub', 'bar'].includes(v.category);
+    const isFoodCat = (v) => ['restaurant', 'cafe', 'pub', 'bar', 'bakery'].includes(v.category);
     return [...sorted.filter(isFoodCat).slice(0, 200), ...sorted.filter((v) => !isFoodCat(v)).slice(0, 200)];
   },
 };

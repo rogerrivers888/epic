@@ -47,12 +47,13 @@ const OPTIONS: { minutes: TravelMinutes; label: string }[] = [
  * in the opposite corner of the screen from the hour it belonged to.
  */
 export function travelChipLabel(mode: TravelMode, minutes: TravelMinutes, from: string | null): string {
-  const time = minutes == null ? 'Anywhere' : `Up to ${minutes >= 60 ? `${minutes / 60} hr` : `${minutes} min`}`;
-  const how = mode === 'transit' ? ' by transport' : mode === 'walk' ? ' on foot' : minutes == null ? '' : ' drive';
-  // "Anywhere from Sunningdale" says nothing; without a ceiling the origin has
-  // stopped mattering, so the chip stops claiming it does.
-  if (!from || minutes == null) return `${time}${how}`;
-  return `${time}${mode === 'drive' ? '' : how} from ${from}`;
+  // "Within an hour of Sunningdale" rather than "Up to 1 hr from near
+  // Sunningdale" (owner, 8 Sep 2026: "it\'s a bit shorter"). The way of
+  // travelling is the icon in front of it, not a third clause.
+  if (minutes == null) return from ? `Anywhere near ${from}` : 'Anywhere';
+  const time = minutes >= 60 ? `${minutes / 60} hour${minutes >= 120 ? 's' : ''}` : `${minutes} min`;
+  const how = mode === 'transit' ? ' by transport' : mode === 'walk' ? ' on foot' : '';
+  return from ? `Within ${time} of ${from}${how}` : `Within ${time}${how}`;
 }
 
 /** How this filter reads where there is no room for the town: "Up to 1 hr drive". */
@@ -77,7 +78,7 @@ export function travelLabel(mode: TravelMode, minutes: TravelMinutes): string {
  */
 export function TravelPanel({
   from, mode, minutes, counts, total,
-  onEditFrom, onHere, onHome, homeLabel, atHome, onMode, onMinutes, onDone,
+  onEditFrom, onHere, onHome, homeLabel, atHome, onMode, onMinutes, openNow, onOpenNow, onDone,
 }: {
   /** Where the times are measured from, named. */
   from: string;
@@ -95,6 +96,9 @@ export function TravelPanel({
   atHome: boolean;
   onMode: (m: TravelMode) => void;
   onMinutes: (m: TravelMinutes) => void;
+  /** Whether only open places count. `null` where the question does not apply. */
+  openNow?: boolean | null;
+  onOpenNow?: (v: boolean) => void;
   onDone: () => void;
 }) {
   return (
@@ -161,6 +165,21 @@ export function TravelPanel({
           );
         })}
       </View>
+
+      {/* Whether they would actually be open when you got there — the same
+          question as how far, which is why it is here and not a chip of its
+          own (owner, 8 Sep 2026). A check, not a chevron: it settles here. */}
+      {openNow == null ? null : (
+        <Pressable
+          onPress={() => onOpenNow?.(!openNow)}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: openNow }}
+          style={[panel.row, panel.openRow, openNow && panel.rowOn]}
+        >
+          <Text style={[panel.rowText, openNow && panel.rowTextOn]}>Open now</Text>
+          <Icon name={openNow ? 'check' : 'hours'} size={18} color={openNow ? colors.ink : colors.inkMuted} />
+        </Pressable>
+      )}
 
       <Pressable onPress={onDone} style={panel.show} accessibilityRole="button">
         <Text style={panel.showText}>{total == null ? 'Show places' : `Show ${total.toLocaleString()} place${total === 1 ? '' : 's'}`}</Text>
@@ -240,6 +259,9 @@ const panel = StyleSheet.create({
 
   rows: { marginHorizontal: 6 },
   rowsTop: { marginTop: 14 },
+  // Sits under the ceilings but is not one of them, so it takes a rule rather
+  // than joining the list it is not a member of.
+  openRow: { marginHorizontal: 6, marginTop: 6, borderTopWidth: 1, borderTopColor: colors.lineSoft },
   row: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md,
     paddingVertical: 12, paddingHorizontal: 14, minHeight: TARGET,

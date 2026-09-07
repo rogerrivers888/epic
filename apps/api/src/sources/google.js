@@ -41,7 +41,7 @@ const THING_TYPES = [
 ];
 
 const TYPE_TO_CATEGORY = {
-  restaurant: 'restaurant', meal_takeaway: 'restaurant', meal_delivery: 'restaurant', bakery: 'cafe', cafe: 'cafe', coffee_shop: 'cafe', ice_cream_shop: 'cafe',
+  restaurant: 'restaurant', meal_takeaway: 'restaurant', meal_delivery: 'restaurant', bakery: 'bakery', cafe: 'cafe', coffee_shop: 'cafe', ice_cream_shop: 'cafe',
   bar: 'bar', wine_bar: 'bar', night_club: 'bar', pub: 'pub',
 };
 const TYPE_TO_EXPERIENCE = {

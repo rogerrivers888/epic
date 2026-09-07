@@ -69,8 +69,8 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
 export async function putPlace(areaCode, p) {
   await query(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
-                               accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, last_seen, scored_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now(), now())
+                               accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, last_seen, scored_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), now())
      on conflict (area_code, venue_ref) do update set
        name = coalesce(excluded.name, scout_places.name), rank = excluded.rank,
        epic_score = excluded.epic_score, owned_score = excluded.owned_score,
@@ -79,10 +79,14 @@ export async function putPlace(areaCode, p) {
        website = coalesce(excluded.website, scout_places.website),
        lat = coalesce(excluded.lat, scout_places.lat), lng = coalesce(excluded.lng, scout_places.lng),
        chain_scale = excluded.chain_scale, sites = excluded.sites, cuisine_group = excluded.cuisine_group,
+       -- Kept if this sweep could not tell: a place we already know is a pub
+       -- does not become an unknown because one pass read it thinly.
+       category = coalesce(excluded.category, scout_places.category),
        last_seen = now(), scored_at = now()`,
     [areaCode, p.venueRef, p.name ?? null, p.rank, p.epicScore, p.ownedScore, p.crowdBand, p.countBand,
       JSON.stringify(p.accolades ?? []), JSON.stringify(p.cuisines ?? []), p.chain === true,
-      p.website ?? null, p.lat ?? null, p.lng ?? null, p.chainScale ?? 'independent', p.sites ?? 1, p.cuisineGroup ?? null],
+      p.website ?? null, p.lat ?? null, p.lng ?? null, p.chainScale ?? 'independent', p.sites ?? 1, p.cuisineGroup ?? null,
+      p.category ?? null],
   );
   await query(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score, crowd_band, count_band, rank)
@@ -481,11 +485,17 @@ export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
     `select distinct on (p.venue_ref)
             p.venue_ref, p.name, p.lat, p.lng, p.website, p.cuisines, p.cuisine_group,
             p.accolades, p.crowd_band, p.count_band, p.chain, p.chain_scale, p.epic_score,
+            -- What kind of place, from the sweep first and the open map second.
+            -- The research lands after the sweep does, so a place matched to
+            -- OpenStreetMap last night is a café this morning rather than in
+            -- six months' time.
+            coalesce(p.category, r.category) as category,
             l.name as locality_name,
             sqrt(power((p.lat - $1) * 111.0, 2)
                + power((p.lng - $2) * 111.0 * cos(radians($1)), 2)) as km
        from scout_places p
        left join localities l on l.slug = p.locality_slug
+       left join place_records r on r.venue_ref = p.venue_ref
       where p.lat between $3 and $4 and p.lng between $5 and $6
       order by p.venue_ref, p.epic_score desc nulls last`,
     [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng]);

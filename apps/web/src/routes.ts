@@ -125,7 +125,16 @@ export type InspireMode = 'activities' | 'food';
  * and which of them are offered is decided by what is near you.
  */
 export const ACTIVITY_CATEGORIES: MoodKey[] = MOODS.filter((m) => m !== 'food');
-export const FOOD_CATEGORIES = ['restaurants', 'pubs', 'cafes', 'takeaway'] as const;
+/**
+ * The kinds of place the Food & Drink half offers, in the order the strip draws
+ * them (owner, 8 Sep 2026: "Restaurants, Bars, Bakeries, whatever different
+ * places we have"). Bars are their own word now rather than folded into pubs,
+ * and a bakery is not a café.
+ *
+ * The strip only ever offers what is actually near, so a category with nothing
+ * behind it is not drawn — this is the vocabulary, not the menu.
+ */
+export const FOOD_CATEGORIES = ['restaurants', 'pubs', 'bars', 'cafes', 'bakeries', 'takeaway'] as const;
 
 /**
  * A trip's tabs. The first three are the ones on the segmented control
