@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
-import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue } from '../api';
+import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
 import { colors, radius, spacing, TARGET, type } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
 import { MenuPanel, OrderPanel, PastMeals, StaffSheet, useMenuOrder } from './MenuOrder';
+import { FamilyVerdict } from './FamilyVerdict';
 import { OwnedFacts } from './OwnedFacts';
 import { useOffline } from '../hooks/useOffline';
 import { savedRecord } from '../offline/cache';
@@ -235,6 +236,14 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const [saved, setSaved] = useState(false);
   // Roam's own record: what survives when the provider cannot be reached.
   const [ownRecord, setOwnRecord] = useState<OwnedRecord | null | undefined>(undefined);
+  /**
+   * Every visit this household has made here, with every star given on it —
+   * the place itself and each plate on the table (routes/places.js
+   * `visitPayload`). It is what the family's own rating is worked out from
+   * (owner, 7 Sep 2026), and `undefined` until it has been asked for, so a
+   * place they have been to does not flash "have you been?" first.
+   */
+  const [visits, setVisits] = useState<Visit[] | undefined>(undefined);
   const { online, serving } = useOffline();
   // The same test the shell uses: not what the browser claims, but whether the
   // answers on screen actually came off the device.
@@ -272,7 +281,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
 
   useEffect(() => {
-    setTab('overview'); setVenue(undefined); setMenu(undefined); setError(null); setSaved(false); setOwnRecord(undefined); setInside(null);
+    setTab('overview'); setVenue(undefined); setMenu(undefined); setError(null); setSaved(false); setOwnRecord(undefined); setInside(null); setVisits(undefined);
     if (!item) return;
     let live = true;
     // A place the household has never opened has no saved answer of its own, but
@@ -319,7 +328,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     api.place(item.venueRef)
       .then((d) => {
         if (!live) return;
-        setVenue(d.venue); setMenu(d.menu ?? null);
+        setVenue(d.venue); setMenu(d.menu ?? null); setVisits(d.visits ?? []);
         if (d.venue) onVenue?.(d.venue);
         if (d.sourceError) setError(d.sourceError);
         if (d.ours) setOwnRecord(d.ours);
@@ -328,7 +337,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
       })
       .catch((e) => {
         if (!live) return;
-        setVenue(null); setMenu(null);
+        setVenue(null); setMenu(null); setVisits([]);
         setError(e?.code === 'offline' ? null : e.message);
         void fromDevice();
       });
@@ -360,6 +369,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const source = item.source ?? item.venueRef.split(':')[0];
   /** Ours outright: the atlas researched it, and there is no provider behind it. */
   const ours0wn = source === 'atlas' || item.venueRef.startsWith('wikidata:');
+  // Somewhere this household has actually eaten or been: what the drawer opens
+  // with, and where "Been again" belongs, both turn on it.
+  const been = (visits?.length ?? 0) > 0;
   const sourceName = SOURCE_LABEL[source] ?? source;
   const photoUri = (p: { ref?: string; url?: string }, w: number) => p.url ?? (p.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(p.ref)}&w=${w}` : null);
 
@@ -442,7 +454,16 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
               {shown === 'overview' ? (
                 <View style={{ gap: spacing.sm }}>
-                  {capture}
+                  {/*
+                    What this family made of the place, and only that (owner,
+                    7 Sep 2026): "it's asking me to rate again on the overview…
+                    I'm not sure why I need that… maybe the Been again goes in
+                    the reviews section". So somewhere they have been opens with
+                    their own stars, collapsed, and the ways of saying they have
+                    been again live under Reviews with the rest of the record.
+                    Somewhere they have not been keeps the invitation to say so.
+                  */}
+                  {been ? <FamilyVerdict visits={visits ?? []} members={ctl.members} /> : visits === undefined ? null : capture}
                   {v?.summary ?? item.summary ? <Text style={type.body}>{v?.summary ?? item.summary}</Text> : null}
                   {item.reasons.length ? <Wrap>{item.reasons.filter((r) => r.kind !== 'chain').map((r, i) => <Chip key={i} label={r.text} tone={r.kind === 'dislike' || r.kind === 'diet' ? 'dislike' : r.kind === 'note' ? 'neutral' : 'like'} />)}</Wrap> : null}
                   {v?.address ?? item.address ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}
@@ -539,7 +560,14 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               {shown === 'reviews' ? (
                 <View style={{ gap: spacing.sm }}>
                   {/* Ours first: what we ate and what we made of it, then the
-                      strangers' (owner, 4 Sep 2026). */}
+                      strangers' (owner, 4 Sep 2026). Saying you have been again
+                      is part of the record rather than something the overview
+                      asks you for every time you open the place (owner, 7 Sep
+                      2026). */}
+                  {/* The verdict is the Overview's line and is not repeated
+                      here: this tab is the detail behind it, and one screen
+                      with two ways to open the same thing is one too many. */}
+                  {been ? capture : null}
                   {eating ? <PastMeals ctl={ctl} /> : null}
                   {ours}
                   {reviews.length ? <Text style={type.h3}>What other people say</Text> : null}
