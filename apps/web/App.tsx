@@ -559,10 +559,11 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
           <View style={[styles.tabs, fullBleed && styles.tabsOver]} accessibilityRole="tablist">
             {tabs.map((t) => (
               <Pressable key={t.key} onPress={() => navigate(t.href)} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === t.key }}>
-                {/* The tab you are on is ink with a lime-filled glyph (Inspire
-                    rework, tab bar): the fill is the brand moment, and the ink
-                    outline around it is what keeps it legible on cream. */}
-                <Icon name={t.icon} size={22} color={tab === t.key ? colors.ink : colors.inkMuted} fill={tab === t.key} fillColor={tab === t.key ? colors.selected : undefined} />
+                {/* "Active (Inspire) ink text with lime-filled icon; inactive
+                    grey-700 for both label and icon" — so the glyph itself is
+                    lime, and the label is the type colour. Grey 500 is never
+                    used here: it fails contrast at 11px. */}
+                <Icon name={t.icon} size={22} color={tab === t.key ? colors.selected : colors.inkMuted} fill={tab === t.key} />
                 <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
               </Pressable>
             ))}
@@ -656,7 +657,10 @@ const styles = StyleSheet.create({
   modeInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   modeText: { fontSize: 12, fontWeight: '600', color: colors.inkMuted },
   modeTextActive: { color: colors.selectedFg },
-  stage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceMuted, padding: spacing.xl },
+  // The ground the phone frame sits on, in the owner's review view. A neutral
+  // one: `surfaceMuted` is the lime tint, which in dark is a deep olive and
+  // turned the whole desk green.
+  stage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, padding: spacing.xl },
   bezel: {
     padding: BEZEL, borderRadius: 36, backgroundColor: INK,
     boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
@@ -705,6 +709,6 @@ const styles = StyleSheet.create({
   // A 44pt target with no slack around it: the icon and its label are 37 of
   // those 44, and the ten extra were another few millimetres of nothing.
   tab: { flex: 1, minHeight: TARGET, alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: 4 },
-  tabText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },
+  tabText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },  // grey 700, both modes
   tabTextActive: { color: colors.ink },
 });

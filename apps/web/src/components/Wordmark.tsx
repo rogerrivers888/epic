@@ -63,7 +63,7 @@ export function Wordmark({ height = 40, ink = colors.ink, ground = colors.header
         {/* U+0131, the dotless i: the pin is the dot. */}
         <Text style={letter}>{'ı'}</Text>
         <View style={{ position: 'absolute', left: '50%', top, transform: [{ translateX: -pinW / 2 + fs * 0.03 }] }}>
-          <Pin size={pin} ink={ink} ground={ground} />
+          <Pin size={pin} ink={ink} ground={ground} hole />
         </View>
       </View>
       <Text style={letter}>c</Text>
@@ -88,11 +88,22 @@ export function Wordmark({ height = 40, ink = colors.ink, ground = colors.header
  */
 export const PIN_ASPECT = 38 / 52;
 
-export function Pin({ size = 24, ink = INK, ground = CREAM }: { size?: number; ink?: string; ground?: string }) {
+export function Pin({ size = 24, ink = INK, ground = CREAM, hole = size >= 24 }: {
+  size?: number; ink?: string; ground?: string;
+  /**
+   * Whether to cut the hole. The pack drops it below 24px, where it closes into
+   * a smudge — but that rule is about the pin standing alone as an icon. As the
+   * dot of the i it is around 9px at the header's 30px wordmark and the hole is
+   * still what makes it a pin rather than a full stop, so the wordmark asks for
+   * it regardless (owner, 7 Sep 2026: "the location thing above the eye doesn't
+   * have a black bit in the middle").
+   */
+  hole?: boolean;
+}) {
   return (
     <Svg width={Math.round(size * PIN_ASPECT)} height={size} viewBox="5 2 38 52">
       <Path d="M24 2C13 2 5 10.5 5 21c0 13 19 33 19 33s19-20 19-33C43 10.5 35 2 24 2z" fill={ink} />
-      {size >= 24 ? <Circle cx={24} cy={21} r={7} fill={ground} /> : null}
+      {hole ? <Circle cx={24} cy={21} r={7} fill={ground} /> : null}
     </Svg>
   );
 }

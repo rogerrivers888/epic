@@ -32,11 +32,42 @@ export type ThemePref = ThemeName | 'system';
 // The three, straight from the pack. Held here as well as in the palettes
 // because the wordmark and the app icons need the brand colour itself, not
 // whichever palette happens to be on.
-export const LIME = '#C8F542';       // oklch(0.90 0.20 125)
+export const LIME = '#C8F542';       // the pack's own hex, and what the pin assets are drawn in
 export const INK = '#201E1D';
 export const CREAM = '#FFFDF9';
 export const LIME_TINT = '#EAFECB';  // oklch(0.97 0.07 125) — UI only
 export const MOSS = '#446B00';       // oklch(0.48 0.13 130) — UI only
+
+/**
+ * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a
+ * deeper ground, a warmer off-white for type, and — the two that matter — a
+ * lime tint that is a dark olive rather than a pale wash, and a *lifted* green
+ * in place of moss, because moss on this ground fails contrast.
+ *
+ * Every one of these is the browser's own rendering of the handoff's `oklch`,
+ * read back off a screenshot rather than converted by hand.
+ */
+const D = {
+  ground: '#151413',
+  sheet: '#242220',
+  ink: '#F3F1EC',
+  grey700: '#A8A4A2',
+  grey500: '#807B78',   // decorative only — never text
+  ruleSoft: '#3A3634',
+  limeTint: '#2B390B',  // oklch(0.32 0.07 125)
+  moss: '#A6D75E',      // oklch(0.82 0.16 128)
+};
+
+/**
+ * Ink, always, on any lime fill — in both modes.
+ *
+ * The handoff states it as a rule of its own ("Every lime fill carries ink
+ * #201E1D text"), and it is the one thing that cannot be expressed by flipping
+ * a palette: `ink` is the *type* colour and becomes cream in the dark, so a
+ * control that fills with lime and asks for `colors.ink` gets white-on-lime and
+ * fails at 1.25:1. Anything sitting on lime asks for this instead.
+ */
+export const ON_LIME = INK;
 
 const LIGHT = {
   // Ground and surfaces
@@ -51,8 +82,14 @@ const LIGHT = {
   lime: LIME,
   // Type
   ink: INK,
-  inkMuted: '#605D5D',     // labels, placeholders, inactive tabs — 6.4:1 on cream
-  inkFaint: '#7A7674',
+  inkMuted: '#605D5D',     // grey 700: labels, placeholders, inactive tabs — 6.4:1 on cream
+  /**
+   * Grey 500 is the handoff's decorative grey and is explicitly never text — it
+   * fails AA below 18.66px, which is every size we set it at. So the faintest
+   * text is still grey 700, and `decor` is what a hairline or an empty tile uses.
+   */
+  inkFaint: '#605D5D',
+  decor: '#7D7979',
   // Rules are ink (pack §07: "Ink rules, cream fill, no shadow, no radius").
   line: INK,
   // The one exception: a track or a groove is a shape, not a rule, and an ink
@@ -67,8 +104,10 @@ const LIGHT = {
   primaryFg: CREAM,
   // Selection is the brand moment: a lime fill with ink type. Hover is the tint.
   selected: LIME,
-  selectedFg: INK,
+  selectedFg: ON_LIME,
   hover: LIME_TINT,
+  /** What a sheet is lifted off. Deeper in the dark, where a 45% veil is barely there. */
+  scrim: 'rgba(32,30,29,0.45)',
   // The heart of a place you love. Ink, not red — the pack retires brand red.
   loved: INK,
   // Time bar
@@ -95,43 +134,50 @@ const LIGHT = {
 // the ground, cream is every letter, and lime carries the things light mode
 // gives to ink — links, selection, the primary button.
 const DARK: typeof LIGHT = {
-  bg: INK,
-  surface: '#2A2725',      // raised
-  surfaceMuted: '#333030',
-  panel: '#2A2725',
-  well: '#333030',
-  tabbar: '#1A1817',
-  headerBg: INK,           // on ink the wordmark goes lime (pack §01, reverse)
-  headerSub: '#B8B3AE',
+  bg: D.ground,
+  surface: D.sheet,        // a sheet, a card, anything lifted off the ground
+  surfaceMuted: D.limeTint,
+  panel: D.sheet,
+  well: D.limeTint,
+  tabbar: D.ground,        // the bar is the ground with a rule on it, not a shelf
+  headerBg: D.ground,
+  headerSub: D.grey700,
   lime: LIME,
-  ink: CREAM,              // "ink" is the type colour, whatever the ground
-  inkMuted: '#A8A29C',
-  inkFaint: '#807A75',
-  line: '#6E6864',
-  lineSoft: '#3A3634',
-  accent: LIME,            // lime carries links and focus on ink
-  accentSoft: '#333030',
-  icon: CREAM,
+  ink: D.ink,              // "ink" is the type colour, whatever the ground
+  inkMuted: D.grey700,
+  inkFaint: D.grey700,     // grey 500 is never text, in either mode
+  decor: D.grey500,
+  // The strong rule is the type colour, as the table says. It only reads as
+  // loud on a ground that is not dark enough — which the old one was not.
+  line: D.ink,
+  lineSoft: D.ruleSoft,
+  // The lifted green. Moss itself fails on this ground, so the selected
+  // category, the sub-strip and "Open until" all use this instead.
+  accent: D.moss,
+  accentSoft: D.limeTint,
+  icon: D.ink,
+  // Primary inverts: ink-fill/cream-text becomes lime-fill/ink-text.
   primary: LIME,
-  primaryFg: INK,
+  primaryFg: ON_LIME,
   selected: LIME,
-  selectedFg: INK,
-  hover: '#333030',
-  loved: CREAM,
-  travel: '#3A3634',
+  selectedFg: ON_LIME,
+  hover: D.limeTint,
+  scrim: 'rgba(0,0,0,0.62)',
+  loved: D.ink,
+  travel: D.ruleSoft,
   dwell: LIME,
-  slack: '#2A2725',
+  slack: D.sheet,
   overrun: '#E8776B',
   overrunSoft: '#3E1F1B',
   allergen: '#EA7A70',
   allergenSoft: '#3D1E1B',
-  like: LIME,
-  likeSoft: '#333030',
-  dislike: '#A8A29C',
-  dislikeSoft: '#333030',
-  want: LIME,
-  wantSoft: '#333030',
-  rating: CREAM,
+  like: D.moss,
+  likeSoft: D.limeTint,
+  dislike: D.grey700,
+  dislikeSoft: D.sheet,
+  want: D.moss,
+  wantSoft: D.limeTint,
+  rating: D.moss,
 };
 
 export const PALETTES: Record<ThemeName, typeof LIGHT> = { light: LIGHT, dark: DARK };

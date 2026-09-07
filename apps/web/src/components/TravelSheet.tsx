@@ -91,8 +91,8 @@ export function TravelSheet({ from, mode, minutes, counts, total, onMode, onMinu
                   accessibilityState={{ selected: on }}
                   style={[styles.mode, i > 0 && styles.modeDivider, on && styles.modeOn]}
                 >
-                  <Icon name={m.icon} size={22} color={colors.ink} />
-                  <Text style={styles.modeText}>{m.label}</Text>
+                  <Icon name={m.icon} size={22} color={on ? colors.selectedFg : colors.ink} />
+                  <Text style={[styles.modeText, on && { color: colors.selectedFg }]}>{m.label}</Text>
                 </Pressable>
               );
             })}
@@ -131,16 +131,18 @@ export function TravelSheet({ from, mode, minutes, counts, total, onMode, onMinu
 
 const styles = StyleSheet.create({
   fill: { flex: 1, justifyContent: 'flex-end' },
-  scrim: { ...(StyleSheet.absoluteFill as object), backgroundColor: 'rgba(32,30,29,0.45)' },
+  // The handoff gives the scrim two values; `var()` resolves whichever mode is
+  // on, the same way every other colour here does.
+  scrim: { ...(StyleSheet.absoluteFill as object), backgroundColor: colors.scrim },
   // No top border: the design is explicit, and the scrim is what separates it.
-  sheet: { backgroundColor: colors.bg, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 44, gap: 18, maxHeight: '88%' },
+  sheet: { backgroundColor: colors.surface, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 44, gap: 18, maxHeight: '88%' },
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
   title: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink },
   sub: { fontFamily: fonts.body, fontSize: 14, color: colors.inkMuted, marginTop: 4 },
   close: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
   modes: { flexDirection: 'row', borderWidth: 1, borderColor: colors.lineSoft },
-  mode: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 12, paddingHorizontal: 8 },
+  mode: { flex: 1, alignItems: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 8, minHeight: 72 },
   modeDivider: { borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
   modeOn: { backgroundColor: colors.selected },
   modeText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, textAlign: 'center' },
