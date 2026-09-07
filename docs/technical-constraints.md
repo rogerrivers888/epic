@@ -632,6 +632,30 @@ Files: `web/src/router.tsx`, `web/src/routes.ts`, `web/test/routes.test.ts`, and
 
 Files: `api/migrations/060_order_guests_and_share.sql`, `api/src/repositories/menus.js`, `api/src/routes/menus.js`, `api/src/auth.js`, `web/src/components/MenuOrder.tsx`, `web/src/screens/OrderTicketScreen.tsx`, `web/src/routes.ts`.
 
+### 13.16 What a star is for — **built** (owner, 7 Sep 2026)
+
+> "I ate at Sebastian's last night. I added everything in my order. There is no option to rate this, and I think what I'd like is an actual call to action, like 'Rate the meal', that I can give to Phoenix. It can show Phoenix his meal, and then I can give it to Gina, and it can show Gina her meal. That's it, so everyone can rate it, and we're building up those ratings. I'd like to see how I can then find those ratings and how you're going to be using them."
+
+**The call to action is unconditional.** Rating used to hang off "We ate it", which appeared only on an order that was already on the server when the drawer opened — the assumption being that a meal is ordered on one screen and eaten later on another. It is not: the table writes the order *and* eats it in one sitting, and that order could never be rated. The Order tab now opens with **Rate the meal** whatever kind of order it is.
+
+**It is a board, not a form.** One turn per person: hand the phone over and they see their own plates and nothing else of the household's, star what they would have again, and hand it back. Each turn is written when it ends (`POST /api/orders/:id/ratings` carries only that person's rows, and `replaceDishRating` is scoped to the pair), so a phone put down halfway round the table keeps what it has already been given. Marks are keyed `<orderItemId>:<memberId>` for the same reason.
+
+**A plate for the table is offered to everybody.** It is the first time a shared plate could be rated at all — the API always accepted a `memberId` on an item with none of its own, but the screen never sent one, so every shared plate was silently skipped.
+
+**The visit is dated from the order, not from now.** A meal rated over breakfast the next morning is still recorded as having been eaten the night before, and only the people with a plate are its attendees.
+
+**Guests are not rated.** There is nowhere to put a guest's stars (§13.15) and Roam only learns the household's own palate; the board says so rather than leaving a name off with no explanation.
+
+**Where a star goes, in three layers.** This is the part that had never been said on a screen:
+
+1. *The plate.* A `ratings` row against the order item and the visit — what "What we had here" in the drawer shows, per person, per meal.
+2. *The dish.* If the plate matches a dish concept, the rating carries `concept_key`, and `loadLearnedPreferences` weights it by recency and counts it toward `ROAM_LEARN_THRESHOLD` (three). Household → the person → Food → "Learned from visits" is that count, and the summary after rating now says the same thing at the moment it changes: "Ada · Arrabbiata — 1 of 3".
+3. *The planning.* Confirmed, it becomes a `learned-like` reason on every card the ranker touches, and — new — a food the family loves, so it earns a table of its own on the home screen (`withStarredFoods`, `domain/tastes.js`) beside the foods somebody typed in by hand. It is added, never substituted: a like written by a person always wins, and an unconfirmed one stays out.
+
+**Burrata is not a burrito.** The chip that files a plate under a dish used to be offered on string similarity alone, which is how a seven-letter cheese matched a seven-letter wrap. A near match is now only offered when the menu's own words share a meaningful word with the concept's (`suggestConcept`): "Spaghettoni al Ragù" and "tagliatelle al ragù" share *ragù* and are the same dish; burrata and burrito share only their spelling. A dish Roam cannot name says so on the summary — "not a dish Roam has a name for yet, so that star stays with this plate and this place" — rather than counting for nothing in silence.
+
+Files: `web/src/components/MenuOrder.tsx`, `api/src/domain/concepts.js`, `api/src/domain/tastes.js`, `api/src/routes/tastes.js`, `api/src/routes/menus.js`, `api/test/dishSuggestion.test.js`, `api/test/starredFoods.test.js`.
+
 ### 13.5 Closed-vocabulary matching for voice
 
 Used twice, for the same reason: rating capture interprets against known attendees and known ordered items; trip assembly interprets against the stops on screen. Constraining to a small known set matters more than ASR vendor choice.
