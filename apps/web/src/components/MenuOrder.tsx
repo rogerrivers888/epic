@@ -170,6 +170,9 @@ function Face({ label, on, onPress, size = 30, guest = false }: { label: string;
 }
 
 const money = (n: number) => `£${n.toFixed(2).replace(/\.00$/, '')}`;
+/** "2026-09-06" is a date nobody says out loud. */
+const day = (iso?: string | null) =>
+  (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) : '');
 /** Whose plate this was, in one word: a first name, a guest's name, or the table. */
 const whoHad = (i: OrderItem) => i.member?.split(' ')[0] ?? i.guest ?? 'the table';
 
@@ -555,6 +558,26 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
+  /**
+   * A meal that is already in the history, opened to be rated.
+   *
+   * The order at a place stops being "the order" the moment it becomes a
+   * visit, which left a meal that was eaten before anybody starred it with no
+   * way back to the stars at all — you could only ever rate in the one sitting
+   * where you said you had eaten it. This is that way back, and it is also how
+   * somebody who was not at the table when the phone went round gets their go.
+   */
+  function rateThatMeal(meal: Order) {
+    setOrder(meal);
+    setGuests(meal.guests.map((g) => ({ ref: g.ref, name: g.name })));
+    setMarks(marksOf(meal));
+    setTookATurn(Object.fromEntries(meal.items.flatMap((i) => i.ratings ?? []).map((r) => [r.memberId, true])));
+    setPhase('rate');
+    setTurn(null);
+    setError(null);
+    api.learned().then((l) => setLearned(l.learned)).catch(() => {});
+  }
+
   /** Everybody has had a go. */
   function finishRating() {
     setPhase('saved');
@@ -624,7 +647,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     picks, pickOf, setPick, togglePick, onThis, diners, guests, seating, setSeating, addGuest, removeGuest,
     peek, setPeek, added, chosen, total, dropLine, order, resumed, marks, setMarks, markOf, setMark, busy, staff, setStaff, phase, setPhase,
     noting, setNoting, asked, groups, allergenLines, dietLines, history, again, setAgain,
-    turn, setTurn, tookATurn, raters, platesFor, learned, handTo, finishTurn, finishRating, rateTheMeal,
+    turn, setTurn, tookATurn, raters, platesFor, learned, handTo, finishTurn, finishRating, rateTheMeal, rateThatMeal,
     readTheMenu, toTheOrder, removeFromOrder, noteOnOrder, startAgain, whatIsThis, orderAgain,
   };
 }
@@ -1113,6 +1136,13 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
   // The drawer sits inside the app's own router, so "go and look at it" can be
   // an actual button rather than a sentence naming a screen (§13.14).
   const { navigate } = useRouter();
+  /**
+   * A meal that has become a visit is the household's history, and history is
+   * not edited from the order screen: the stars are the only thing about it
+   * that can still change (Requirements §5, and the rule this file has always
+   * had about a visit being the boundary).
+   */
+  const eaten = Boolean(order?.visitId);
 
   if (!order || !order.items.length) {
     const last = ctl.history[0];
@@ -1121,9 +1151,34 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
       <ScrollView contentContainerStyle={styles.body}>
         {last ? (
           <>
+            {/*
+              The stars for a meal that is already history.
+              An order stops being "the order" the moment it becomes a visit,
+              which used to mean the only chance to rate a meal was the sitting
+              in which you said you had eaten it — close the drawer and the
+              plates were unrateable for good. This is the way back, and it is
+              how anybody who missed their turn gets one (owner, 7 Sep 2026).
+            */}
+            {(() => {
+              const stars = last.items.flatMap((i) => i.ratings ?? []).filter((r) => r.score).length;
+              return (
+                <Card>
+                  <Row style={{ alignItems: 'center' }}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={type.h3}>{stars ? 'What everyone thought' : 'Nobody has rated this meal'}</Text>
+                      <Text style={type.tiny}>
+                        {last.visitedOn ? `You ate here on ${day(last.visitedOn)}` : 'Your last meal here'}
+                        {stars ? ` · ${stars} starred so far` : ' · hand the phone round and each of you stars your own plates'}
+                      </Text>
+                    </View>
+                    <Button label={stars ? 'Rate more' : 'Rate the meal'} icon="favourite" onPress={() => ctl.rateThatMeal(last)} disabled={busy} />
+                  </Row>
+                </Card>
+              );
+            })()}
             <Text style={type.h3}>The same again?</Text>
             <Text style={type.small}>
-              What you had here{last.visitedOn ? ` on ${last.visitedOn}` : ' last time'}. Untick anything nobody wants twice, order the rest,
+              What you had here{last.visitedOn ? ` on ${day(last.visitedOn)}` : ' last time'}. Untick anything nobody wants twice, order the rest,
               and add to it from the menu.
             </Text>
             {[{ key: 'table', name: 'For the table', kind: 'table' as const },
@@ -1347,10 +1402,10 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
           <Card>
             <Row style={{ alignItems: 'center' }}>
               <View style={{ flex: 1, gap: 2 }}>
-                <Text style={type.h3}>{order.visitId ? 'What did everyone think?' : 'Eaten it?'}</Text>
+                <Text style={type.h3}>{eaten ? 'What did everyone think?' : 'Eaten it?'}</Text>
                 <Text style={type.tiny}>
-                  {order.visitId
-                    ? 'Hand the phone round — anybody who has not had a go still can.'
+                  {eaten
+                    ? 'This meal is in your history now — anybody who has not had a go still can.'
                     : 'Hand the phone round the table and each of you stars your own plates.'}
                 </Text>
               </View>
@@ -1371,23 +1426,27 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                 <Row style={{ alignItems: 'center' }}>
                   <Text style={[type.body, { flex: 1 }]}>{i.name}</Text>
                   <Text style={type.small}>{i.priceText ?? ''}</Text>
-                  <Pressable
-                    onPress={() => setNoting((n) => ({ ...n, [i.id]: !n[i.id] }))}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${i.note ? 'Change the' : 'Add a'} word for the waiter about ${i.name}`}
-                    style={styles.rowBtn}
-                  >
-                    <Icon name="edit" size={14} color={i.note ? colors.icon : colors.inkMuted} />
-                  </Pressable>
-                  <Pressable
-                    onPress={() => ctl.removeFromOrder(i)}
-                    disabled={busy}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Take ${i.name} off the order`}
-                    style={styles.rowBtn}
-                  >
-                    <Icon name="close" size={15} color={colors.inkMuted} />
-                  </Pressable>
+                  {eaten ? null : (
+                    <>
+                      <Pressable
+                        onPress={() => setNoting((n) => ({ ...n, [i.id]: !n[i.id] }))}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${i.note ? 'Change the' : 'Add a'} word for the waiter about ${i.name}`}
+                        style={styles.rowBtn}
+                      >
+                        <Icon name="edit" size={14} color={i.note ? colors.icon : colors.inkMuted} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => ctl.removeFromOrder(i)}
+                        disabled={busy}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Take ${i.name} off the order`}
+                        style={styles.rowBtn}
+                      >
+                        <Icon name="close" size={15} color={colors.inkMuted} />
+                      </Pressable>
+                    </>
+                  )}
                 </Row>
                 {i.note && !noting[i.id] ? <Text style={type.tiny}>{i.note}</Text> : null}
                 {noting[i.id] ? (
@@ -1425,11 +1484,21 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
         {footer}
       </ScrollView>
       <View style={styles.bar}>
-        <Button label="Restart" icon="refresh" kind="ghost" style={styles.barBtn} onPress={ctl.startAgain} disabled={busy} />
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Button label="Add/Change" icon="edit" kind="secondary" style={styles.barBtn} onPress={onMenu} disabled={busy} />
-        </View>
-        <Button label="Show staff" icon="list" style={styles.barBtn} onPress={() => ctl.setStaff(true)} disabled={!order.items.length} />
+        {eaten ? (
+          <>
+            <Button label="The menu" icon="restaurant" kind="ghost" style={styles.barBtn} onPress={onMenu} />
+            <View style={{ flex: 1, alignItems: 'center' }}><Text style={type.tiny}>Eaten — the stars are all that can change</Text></View>
+            <Button label="Rate the meal" icon="favourite" style={styles.barBtn} onPress={ctl.rateTheMeal} disabled={busy} />
+          </>
+        ) : (
+          <>
+            <Button label="Restart" icon="refresh" kind="ghost" style={styles.barBtn} onPress={ctl.startAgain} disabled={busy} />
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Button label="Add/Change" icon="edit" kind="secondary" style={styles.barBtn} onPress={onMenu} disabled={busy} />
+            </View>
+            <Button label="Show staff" icon="list" style={styles.barBtn} onPress={() => ctl.setStaff(true)} disabled={!order.items.length} />
+          </>
+        )}
       </View>
     </>
   );
