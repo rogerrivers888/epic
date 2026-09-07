@@ -80,6 +80,7 @@ const publicItem = (i) => ({
   startsOn: ymd(i.starts_on), startsAt: i.starts_at?.slice(0, 5) ?? null, endsAt: i.ends_at?.slice(0, 5) ?? null,
   bookWhere: i.book_where, externalUrl: i.external_url, guestNote: i.guest_note,
   paymentMode: i.payment_mode,
+  meet: i.meet_label ? { label: i.meet_label, lat: i.meet_lat, lng: i.meet_lng } : null,
 });
 
 /**
@@ -342,11 +343,46 @@ router.get('/groups', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * The group's list is the trip's list.
+ *
+ * A group is made from the trip as it stood that minute, and the trip keeps
+ * moving — the organiser adds two activities the next day and expects to find
+ * them on the group (owner, 7 Sep 2026: "I have now added 2 activities to the
+ * Thorpe Park trip… but when I get to what's on the trip, there are no
+ * activities listed, so I can't set them to be mandatory or not"). So the list
+ * is topped up whenever the organiser opens it. Anything they took off it
+ * stays off: `dropped_refs` is the difference between "not added yet" and "no,
+ * not that one".
+ */
+async function syncFromTrip(group) {
+  const [shortlist, existing] = await Promise.all([
+    groupsRepo.shortlistForChecklist(group.trip_id),
+    groupsRepo.itemRefs(group.id),
+  ]);
+  const known = new Set(existing.map((i) => i.venue_ref).filter(Boolean));
+  const labels = new Set(existing.map((i) => (i.label ?? '').trim().toLowerCase()));
+  const dropped = new Set(Array.isArray(group.dropped_refs) ? group.dropped_refs : []);
+  let position = await groupsRepo.nextItemPosition(group.id);
+  for (const s of shortlist) {
+    if (!s.venue_ref || known.has(s.venue_ref) || dropped.has(s.venue_ref)) continue;
+    if (labels.has((s.venue_label ?? '').trim().toLowerCase())) continue;
+    // A meal is asked about rather than required: what the organiser needs from
+    // it is a number for the table.
+    await groupsRepo.insertItem(group.id, {
+      kind: 'activity', required: s.kind !== 'food', label: s.venue_label,
+      detail: s.kind === 'food' ? 'Are you coming to this?' : null,
+      venueRef: s.venue_ref, position: position++,
+    });
+  }
+}
+
 /** GET /api/trips/:id/group — null when the trip is still a household trip. */
 router.get('/trips/:id/group', async (req, res, next) => {
   try {
     const groupId = await groupsRepo.groupIdForTrip(req.params.id);
     if (!groupId) return res.json({ group: null });
+    await syncFromTrip(await loadGroup(groupId));
     res.json(await groupPayload(groupId));
   } catch (err) { next(err); }
 });
@@ -511,6 +547,7 @@ router.post('/groups/:id/items', async (req, res, next) => {
       externalUrl: b.externalUrl?.trim() || null, guestNote: b.guestNote?.trim() || null,
       // Who takes the money for this one; null follows the group's setting.
       paymentMode: ['roam', 'direct'].includes(b.paymentMode) ? b.paymentMode : null,
+      meetLabel: b.meet?.label?.trim() || null, meetLat: b.meet?.lat ?? null, meetLng: b.meet?.lng ?? null,
     });
     res.status(201).json(await groupPayload(group.id));
   } catch (err) { next(err); }
@@ -544,6 +581,11 @@ router.patch('/groups/:id/items/:itemId', async (req, res, next) => {
     if (b.externalUrl !== undefined) put('external_url', b.externalUrl?.trim() || null);
     if (b.guestNote !== undefined) put('guest_note', b.guestNote?.trim() || null);
     if (b.paymentMode !== undefined) put('payment_mode', ['roam', 'direct'].includes(b.paymentMode) ? b.paymentMode : null);
+    if (b.meet !== undefined) {
+      put('meet_label', b.meet?.label?.trim() || null);
+      put('meet_lat', b.meet?.lat ?? null);
+      put('meet_lng', b.meet?.lng ?? null);
+    }
     if (b.state !== undefined && ['open', 'closed', 'cancelled'].includes(b.state)) put('state', b.state);
     if (!sets.length) return res.json(await groupPayload(group.id));
     const before = await groupsRepo.itemOfGroup(req.params.itemId, group.id);
@@ -579,6 +621,15 @@ router.delete('/groups/:id/items/:itemId', async (req, res, next) => {
     const group = await loadGroup(req.params.id);
     const acted = await groupsRepo.actedOnCount(req.params.itemId, group.id);
     if (acted > 0) return res.status(409).json({ error: 'item_in_use', message: `${acted} ${acted === 1 ? 'person has' : 'people have'} already done this one. Change what it says instead of removing it.` });
+    // Taking a place off the group's list is a decision about that place, and
+    // it has to survive the list being topped up from the trip again.
+    const item = await groupsRepo.itemOfGroup(req.params.itemId, group.id);
+    if (item?.venue_ref) {
+      const dropped = Array.isArray(group.dropped_refs) ? group.dropped_refs : [];
+      if (!dropped.includes(item.venue_ref)) {
+        await groupsRepo.updateGroup(group.id, ['dropped_refs = $2'], [group.id, JSON.stringify([...dropped, item.venue_ref])]);
+      }
+    }
     await groupsRepo.deleteItem(req.params.itemId, group.id);
     res.json(await groupPayload(group.id));
   } catch (err) { next(err); }

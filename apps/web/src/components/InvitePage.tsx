@@ -22,6 +22,11 @@ import { Wordmark } from './Wordmark';
  */
 
 const ROAM_GALLERY = ['/covers/1.jpg', '/covers/2.jpg', '/covers/3.jpg', '/covers/4.jpg', '/covers/5.jpg', '/covers/6.jpg'];
+const SOURCES: { key: string; label: string; icon: IconName }[] = [
+  { key: 'gallery', label: 'Roam gallery', icon: 'climbing' },
+  { key: 'trip', label: 'From the trip', icon: 'picture' },
+  { key: 'upload', label: 'Upload one of yours', icon: 'upload' },
+];
 export const TITLE_MAX = 40;
 export const SUMMARY_MAX = 160;
 export const POINT_MAX = 90;
@@ -279,20 +284,28 @@ export type InviteEdit = {
  * shown but not editable here, because it is the trip's and changing it is what
  * step 2 is for.
  */
-export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPreview }: {
+export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose, onPreview }: {
   data: InvitePageData; tripPhotos?: string[]; saving?: boolean;
+  /** What was being written when the organiser went off to preview it. */
+  draft?: InviteEdit | null;
   onSave: (body: InviteEdit) => void; onClose: () => void; onPreview: (draft: InviteEdit) => void;
 }) {
-  const [coverKind, setCoverKind] = useState<'banner' | 'full'>(data.invite.coverKind ?? 'banner');
-  const [coverUrl, setCoverUrl] = useState<string | null>(data.invite.coverUrl);
-  const [source, setSource] = useState<string>(data.invite.coverUrl?.startsWith('photo:') ? 'trip' : data.invite.coverUrl?.startsWith('data:') ? 'upload' : 'gallery');
-  const [title, setTitle] = useState(data.invite.title ?? '');
-  const [summary, setSummary] = useState(data.invite.summary ?? '');
-  const [points, setPoints] = useState<string[]>(data.invite.howItWorks.length ? data.invite.howItWorks : ['']);
+  // A preview must not cost you the picture you just chose (owner, 7 Sep 2026:
+  // "it loses the image as soon as I click preview"), so the unsaved draft comes
+  // back in with you.
+  const from = draft ?? null;
+  const [coverKind, setCoverKind] = useState<'banner' | 'full'>(from?.coverKind ?? data.invite.coverKind ?? 'banner');
+  const [coverUrl, setCoverUrl] = useState<string | null>(from ? from.coverUrl : data.invite.coverUrl);
+  const startUrl = from ? from.coverUrl : data.invite.coverUrl;
+  const [source, setSource] = useState<string>(startUrl?.startsWith('photo:') ? 'trip' : startUrl?.startsWith('data:') ? 'upload' : 'gallery');
+  const [title, setTitle] = useState(from?.inviteTitle ?? data.invite.title ?? '');
+  const [summary, setSummary] = useState(from?.inviteSummary ?? data.invite.summary ?? '');
+  const [points, setPoints] = useState<string[]>((from?.howItWorks ?? data.invite.howItWorks).length ? (from?.howItWorks ?? data.invite.howItWorks) : ['']);
   // The point just added, so the cursor lands in it rather than nowhere (owner,
   // 7 Sep 2026: "when I click Add Point… it doesn't have the cursor in point 2").
   const [fresh, setFresh] = useState<number | null>(null);
-  const draft = (): InviteEdit => ({
+  const [picking, setPicking] = useState(false);
+  const edit = (): InviteEdit => ({
     coverKind, coverUrl, coverSource: source,
     inviteTitle: title.trim(), inviteSummary: summary.trim(),
     howItWorks: points.map((p) => p.trim()).filter(Boolean),
@@ -328,33 +341,45 @@ export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPrev
       <Row style={{ justifyContent: 'space-between' }}>
         <Pressable onPress={onClose} accessibilityRole="button" style={{ padding: 4 }}><Icon name="back" size={20} /></Pressable>
         <Text style={type.h2}>Edit the invite page</Text>
-        <Pressable onPress={() => onPreview(draft())} accessibilityRole="button">
-          <Row><Icon name="preview" size={16} color={colors.accent} /><Text style={[type.h3, { color: colors.accent }]}>Preview</Text></Row>
-        </Pressable>
+        <View style={{ width: 18 }} />
       </Row>
 
       <View style={{ gap: spacing.sm }}>
-        <Row style={{ justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <Text style={type.label}>COVER PHOTO</Text>
-          <View style={{ width: 176 }}>
-            <Segmented value={coverKind} onChange={setCoverKind} options={[{ value: 'banner', label: 'Banner' }, { value: 'full', label: 'Full' }]} />
-          </View>
-        </Row>
-        <Row style={{ alignItems: 'flex-start' }}>
+        <Text style={styles.section}>Cover photo</Text>
+        <Row style={{ alignItems: 'center' }}>
           <View style={styles.coverNow}>
             {coverUri(coverUrl, 480) ? <Image source={{ uri: coverUri(coverUrl, 480)! }} style={styles.coverNowImg} accessibilityIgnoresInvertColors /> : <Icon name="picture" size={20} color={colors.inkFaint} />}
           </View>
+          {/* Where the picture comes from is one question with three answers, so
+              it is one control (owner, 7 Sep 2026: "these 3 buttons… look really
+              bad… it should be a dropdown"). */}
           <View style={{ flex: 1, gap: 6 }}>
-            <Wrap>
-              <Pill label="Upload" icon="upload" on={source === 'upload'} onPress={upload} />
-              <Pill label="From the trip" icon="picture" on={source === 'trip'} onPress={() => setSource('trip')} />
-              <Pill label="Roam gallery" icon="climbing" on={source === 'gallery'} onPress={() => setSource('gallery')} />
-            </Wrap>
-            {source === 'trip' && !(tripPhotos ?? []).length
-              ? <Text style={type.small}>This trip has no picture of its own yet. Pick one from the gallery, or upload yours.</Text>
-              : null}
+            <Pressable onPress={() => setPicking(!picking)} accessibilityRole="button" style={styles.dropdown}>
+              <Icon name={source === 'upload' ? 'upload' : source === 'trip' ? 'picture' : 'climbing'} size={15} color={colors.ink} />
+              <Text style={[type.body, { flex: 1 }]}>{SOURCES.find((x) => x.key === source)?.label}</Text>
+              <Icon name={picking ? 'collapse' : 'expand'} size={15} color={colors.inkMuted} />
+            </Pressable>
+            {picking ? (
+              <View style={styles.dropdownList}>
+                {SOURCES.map((x) => (
+                  <Pressable
+                    key={x.key}
+                    onPress={() => { setPicking(false); if (x.key === 'upload') upload(); else setSource(x.key); }}
+                    accessibilityRole="button"
+                    style={styles.dropdownRow}
+                  >
+                    <Icon name={x.icon} size={15} color={colors.ink} />
+                    <Text style={[type.body, { flex: 1 }]}>{x.label}</Text>
+                    {source === x.key ? <Icon name="check" size={15} color={colors.accent} /> : null}
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
           </View>
         </Row>
+        {source === 'trip' && !(tripPhotos ?? []).length
+          ? <Text style={type.small}>This trip has no picture of its own yet. Pick one from the gallery, or upload yours.</Text>
+          : null}
         {source !== 'upload' ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
             {gallery.map((g) => (
@@ -364,6 +389,15 @@ export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPrev
             ))}
           </ScrollView>
         ) : null}
+
+        {/* Banner and Full mean nothing on their own. */}
+        <Text style={[styles.fieldLabel, { marginTop: 4 }]}>How big it sits on the page</Text>
+        <Segmented value={coverKind} onChange={setCoverKind} options={[{ value: 'banner', label: 'A strip on top' }, { value: 'full', label: 'Fills the top' }]} />
+        <Text style={type.small}>
+          {coverKind === 'full'
+            ? 'The photo fills the top of the page with the title over it.'
+            : 'A band of photo above the title, with the words underneath it.'}
+        </Text>
       </View>
 
       <View>
@@ -413,12 +447,9 @@ export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPrev
         ) : null}
       </View>
 
-      <Row style={{ justifyContent: 'space-between' }}>
-        <Text style={type.label}>WHAT YOU GET · {data.items.length} ITEMS</Text>
-        <Text style={type.small}>From the trip · shown in date order</Text>
-      </Row>
-
-      <Button label="Save" icon="forward" loading={saving} onPress={() => onSave(draft())} />
+      {/* Preview and Save belong at the end of the writing, not above it. */}
+      <Button label="Save" icon="check" loading={saving} onPress={() => onSave(edit())} />
+      <Button label="Preview what they'll see" kind="secondary" icon="preview" onPress={() => onPreview(edit())} />
     </View>
   );
 }
@@ -433,6 +464,15 @@ function Pill({ label, icon, on, onPress }: { label: string; icon: IconName; on:
 }
 
 const styles = StyleSheet.create({
+  // The same headers the group panel uses: said, not shouted.
+  section: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, marginBottom: 4 },
+  dropdown: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET,
+    paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+  },
+  dropdownList: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, overflow: 'hidden' },
+  dropdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET, paddingHorizontal: spacing.md },
   hero: { borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.mint },
   heroImg: { width: '100%' },
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(32,30,29,0.42)' },

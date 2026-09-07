@@ -67,9 +67,11 @@ export function JoinScreen({ token, preview, onExit }: {
   const [v, setV] = useState<JoinView | null>(null);
   const [account, setAccount] = useState<GuestAccount | null>(null);
   const [booking, setBooking] = useState<GroupBooking | null>(null);
-  // A preview begins where the organiser left off: they have just read the
-  // landing page, and the thing they asked to see is what happens next.
-  const [stage, setStage] = useState<Stage>(preview ? 'account' : 'landing');
+  // A preview goes straight to the itinerary. The organiser is not shopping for
+  // an account; they want to see what their guests are asked to book and pay
+  // (owner, 7 Sep 2026: "I don't think we need to show them the sign-up journey
+  // that the user goes through… just show them the itinerary page").
+  const [stage, setStage] = useState<Stage>(preview ? 'book' : 'landing');
   // In preview nobody has joined, so how many are coming is whatever the
   // organiser typed on the household screen a moment ago.
   const [heads, setHeads] = useState(1);
@@ -142,10 +144,10 @@ export function JoinScreen({ token, preview, onExit }: {
       />
     ) : stage === 'book' ? (
       <BookStep
-        v={v} busy={busy} heads={heads}
-        onBack={() => go(v.you?.joinedAt ? 'landing' : 'household')}
+        v={v} busy={busy} heads={heads} preview={preview}
+        onBack={() => (preview ? onExit?.() : go(v.you?.joinedAt ? 'landing' : 'household'))}
         onConfirm={async (picks) => {
-          if (preview) { go('trial'); return; }
+          if (preview) { onExit?.(); return; }
           setBusy(true);
           try {
             const r = await api.joinBook(token, { participantToken: me!, picks });
@@ -208,6 +210,7 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
   const [matchId, setMatchId] = useState<string | null>(null);
+  const [kind, setKind] = useState<'mobile' | 'email'>('mobile');
   const [known, setKnown] = useState(false);
   const them = v.group.organiser ?? 'The organiser';
   const named = v.expecting.length > 0;
@@ -224,6 +227,7 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
       setKnown(true);
       setName((n) => n || acc.name || '');
       setContact((c) => c || acc.email || acc.mobile || '');
+      if (acc.email) setKind('email');
     }).catch(() => {});
     return () => { live = false; };
   }, []);
@@ -276,10 +280,25 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
       ) : null}
 
       <View>
-        <Text style={type.label}>MOBILE OR EMAIL</Text>
+        {/* Which of the two it is decides the keyboard, and a keyboard of letters
+            for a phone number is the wrong one (owner, 7 Sep 2026). */}
+        <Row style={{ justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <Text style={type.label}>HOW TO REACH YOU</Text>
+          <View style={{ width: 176 }}>
+            <Segmented
+              value={kind}
+              options={[{ value: 'mobile' as const, label: 'Mobile' }, { value: 'email' as const, label: 'Email' }]}
+              onChange={setKind}
+            />
+          </View>
+        </Row>
         <TextInput
           value={contact} onChangeText={setContact} autoCapitalize="none"
-          placeholder={`So ${them} can remind you — and it's how you sign in`} placeholderTextColor={colors.inkFaint}
+          keyboardType={kind === 'mobile' ? 'phone-pad' : 'email-address'}
+          inputMode={kind === 'mobile' ? 'tel' : 'email'}
+          textContentType={kind === 'mobile' ? 'telephoneNumber' : 'emailAddress'}
+          placeholder={kind === 'mobile' ? `So ${them} can remind you — 07…` : `So ${them} can remind you — you@…`}
+          placeholderTextColor={colors.inkFaint}
           style={styles.input}
         />
         {/* Roam has no message channel until one is configured, so this says
@@ -487,8 +506,9 @@ const host = (url?: string | null) => {
  * are re-worked by the API on Confirm: a price is the group's fact, not the
  * browser's.
  */
-function BookStep({ v, busy, heads: pretendHeads, onBack, onConfirm }: {
-  v: JoinView; busy: boolean; heads?: number; onBack: () => void; onConfirm: (picks: Record<string, Pick>) => void;
+function BookStep({ v, busy, heads: pretendHeads, preview, onBack, onConfirm }: {
+  v: JoinView; busy: boolean; heads?: number; preview?: boolean;
+  onBack: () => void; onConfirm: (picks: Record<string, Pick>) => void;
 }) {
   const [picks, setPicks] = useState<Record<string, Pick>>(() => seed(v));
   const them = v.group.organiser ?? 'the organiser';
@@ -527,8 +547,11 @@ function BookStep({ v, busy, heads: pretendHeads, onBack, onConfirm }: {
 
   return (
     <View style={{ gap: spacing.md }}>
+      {/* In a preview the bar above already carries the way back. */}
       <Row style={{ justifyContent: 'space-between' }}>
-        <Pressable onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back</Text></Row></Pressable>
+        {preview ? <View /> : (
+          <Pressable onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back</Text></Row></Pressable>
+        )}
         <Wordmark height={26} />
       </Row>
 
@@ -642,6 +665,7 @@ function BookRow({ item: i, pick, organiser, roam, heads, onPick }: {
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={type.h3}>{i.label}</Text>
         {meta ? <Text style={type.small}>{meta}</Text> : null}
+        {i.meet ? <Row><Icon name="address" size={13} color={colors.inkMuted} /><Text style={[type.small, { flex: 1 }]}>{i.meet.label}</Text></Row> : null}
         <Text style={[type.small, { color: colors.accent }]}>{paymentLine}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>{control}</View>

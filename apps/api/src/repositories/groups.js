@@ -159,6 +159,8 @@ const ITEM_COLUMNS = {
   bookWhere: 'book_where', externalUrl: 'external_url', guestNote: 'guest_note',
   // Who takes the money for this one. Null follows the group's own setting.
   paymentMode: 'payment_mode',
+  // Where everybody meets, as an address rather than a sentence in the note.
+  meetLabel: 'meet_label', meetLat: 'meet_lat', meetLng: 'meet_lng',
 };
 
 export async function insertItem(groupId, i, client) {
@@ -211,6 +213,12 @@ export async function deleteItem(itemId, groupId) {
 /** The trip's shortlist, to make the first checklist out of. */
 export async function shortlistForChecklist(tripId, client) {
   const { rows } = await on(client)('select * from trip_shortlist where trip_id = $1 order by position nulls last, added_at', [tripId]);
+  return rows;
+}
+
+/** What the group has already been told about, so the trip's new places can be spotted. */
+export async function itemRefs(groupId) {
+  const { rows } = await query('select venue_ref, stop_id, label from group_items where group_id = $1', [groupId]);
   return rows;
 }
 
