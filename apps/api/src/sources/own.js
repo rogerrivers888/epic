@@ -796,16 +796,19 @@ export async function sweepExpired() {
  * else's server being generous.
  */
 export async function identifyKinds({ limit = 25, householdId = null } = {}) {
-  const refs = await owned.needingKind(limit);
+  const rows = await owned.needingKind(limit);
   let found = 0;
   const kinds = {};
-  for (const ref of refs) {
+  for (const { ref, ...seed } of rows) {
+    // Seeded from the sweep. These records are empty — no name, no point —
+    // which is exactly why the open map was never asked about them: `enrich`
+    // gives up before Overpass without something to search for.
     // Never throws; a place the open map has never heard of is left as it was.
-    await enrich(ref, { householdId, force: true, replace: false, paid: false }).catch(() => null);
+    await enrich(ref, { householdId, force: true, replace: false, paid: false, seed }).catch(() => null);
     const rec = await ownedRecord(ref).catch(() => null);
     if (rec?.category) { found += 1; kinds[rec.category] = (kinds[rec.category] ?? 0) + 1; }
   }
-  return { asked: refs.length, identified: found, kinds };
+  return { asked: rows.length, identified: found, kinds };
 }
 
 /** Places claimed but never researched, or due to be tried again. */

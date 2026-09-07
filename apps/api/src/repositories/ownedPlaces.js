@@ -186,17 +186,21 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
  */
 export async function needingKind(limit = 25) {
   const { rows } = await query(
-    `select distinct on (r.venue_ref) r.venue_ref
+    `select distinct on (r.venue_ref) r.venue_ref, p.name, p.lat, p.lng, p.website
        from place_records r
        join scout_places p on p.venue_ref = r.venue_ref
       where r.category is null
         and r.osm_ref is null
         and r.enrich_attempts < 4
+        and p.name is not null and p.lat is not null and p.lng is not null
       order by r.venue_ref, p.epic_score desc nulls last
       limit $1`,
     [limit],
   );
-  return rows.map((r) => r.venue_ref);
+  // The sweep's own row, not the record's: the record is empty — that is the
+  // whole reason these are on this list — and the open map cannot be asked
+  // about a place with no name and no point.
+  return rows.map((r) => ({ ref: r.venue_ref, name: r.name, lat: r.lat, lng: r.lng, website: r.website }));
 }
 
 /** How much of the household's research is owned, for Settings and the offline card. */
