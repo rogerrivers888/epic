@@ -55,6 +55,48 @@ change, and nothing depends on it), both connected to this repo's `main` branch 
 
 Postgres is a Railway Postgres service in the same project; the `api` needs its `DATABASE_URL`.
 
+### The address
+
+Epic is at **https://epic.day**, behind Cloudflare (proxied, SSL Full), which
+hands on to Railway. One variable says so — `EPIC_APP_URL` — and everything
+that has to name the site reads it from `apps/api/src/origins.js`: sign-in
+links, the address the crawler publishes in its user agent, the origins a
+browser may carry a session from, and where a request on the wrong hostname is
+sent. Unset, it falls back to `https://epic.day` rather than to a Railway
+hostname: an unset variable should degrade to the right answer, not the old one.
+`APP_URL` is read as an alias, but `EPIC_APP_URL` is the documented name because
+every other variable here is `EPIC_*`.
+
+**Everything answers on one address.** `www.epic.day`, any `*.up.railway.app`
+hostname somebody bookmarked, and plain HTTP all 301 to `https://epic.day`.
+Cloudflare cannot do this part for the Railway hostnames, because it never sees
+them — they are the origin, not the edge — so both services do it themselves
+(`apps/web/server.mjs`, and the middleware in `apps/api/src/server.js`).
+
+Three things are deliberately *never* redirected, and each would be an outage if
+they were: `/api`, because a client that followed a 301 would arrive somewhere
+that may not answer; `/health`, because that is how Railway decides a deployment
+is alive and it is asked over plain HTTP on an internal hostname; and anything
+on `*.railway.internal` or `localhost`, for the same reason.
+
+**The web service no longer uses `serve`.** It could not do a redirect that
+depends on the host, so `apps/web/server.mjs` replaces it — the same static
+serving, SPA fallback and `sw.js` cache rules, plus the canonicalisation. A
+missing hashed asset 404s rather than falling through to `index.html`, so a
+half-deployed bundle says so where it happens.
+
+**Two proxies, not one.** Cloudflare terminates TLS and Railway terminates
+again, so `trust proxy` is `2` (`EPIC_TRUSTED_PROXIES` if that ever changes) and
+rate limiting counts per caller using Cloudflare's `CF-Connecting-IP`, which is
+the one address in the chain a caller cannot forge.
+
+There is no OAuth in Epic — sign-in is a passcode and a magic link — so there
+are no callback URLs to move. There was no sitemap or canonical tag before this;
+`apps/web/public/sitemap.xml`, `robots.txt` and the `<link rel="canonical">` in
+`index.html` are new. The sitemap has one entry because every page is behind a
+passcode; `robots.txt` excludes `/join/` and `/order/`, which are unguessable
+links people are sent and must never be indexed.
+
 ### The rebrand: what is still called Roam
 
 Roam became Epic on 7 September 2026 (`Supporting docs/Rebrand - EPIC`). The code,
@@ -202,9 +244,11 @@ spends it.
 | `TWILIO_AUTH_TOKEN` | with the above | The secret to sign with: the account's Auth Token, or an API key's secret when `TWILIO_API_KEY_SID` is set. Doppler only. |
 | `TWILIO_FROM` | with the above | The number texts come from, or a messaging service SID (`MG…`), which is what Twilio wants for UK traffic. Non-secret, but no text sender exists until all three are set. |
 | `TWILIO_API_KEY_SID` | optional | An API key (`SK…`) to sign as, instead of the account itself — revocable without changing the account's token. The account SID above is still required: a key signs a request, it does not address one. |
-| `EPIC_WEB_URL` | recommended | Where the web app is served, e.g. `https://epic-web.up.railway.app`. Non-secret. Sign-in links are built against it; unset, they fall back to the request's own origin. |
+| `EPIC_APP_URL` | **yes** | `https://epic.day` — the one address Epic answers on. Non-secret. Sign-in links, the crawler's user agent, the CORS allowlist and every redirect are built from it. Unset, it defaults to `https://epic.day`; set it anyway, so moving the domain is one variable rather than a deploy. `APP_URL` is accepted as an alias. |
+| `EPIC_WEB_URL` | optional | Overrides `EPIC_APP_URL` for sign-in links only. Now that the app and the site are the same address there is no reason to set it; it exists for the case where they are not. |
+| `EPIC_TRUSTED_PROXIES` | optional | How many proxies sit in front of this process, for `req.ip` and rate limiting. Default 2 (Cloudflare, then Railway). Only change it if the chain in front changes. |
 | `EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND` | optional | Provider calls a household may make in a calendar month before Epic stops searching for it (default 3000). Per-account ceilings on the Accounts screen override it; a new account starts at a quarter of it. |
-| `EPIC_WEB_ORIGIN` | recommended | Comma-separated list of origins the web app is served from, e.g. `https://epic-web.up.railway.app`. Non-secret. Restricts which sites may open a session-carrying request; unset, any origin is answered and the passcode is the only guard. |
+| `EPIC_WEB_ORIGIN` | recommended | Comma-separated list of origins the web app is served from, e.g. `https://epic.day, https://www.epic.day`. Non-secret. Restricts which sites may open a session-carrying request; unset, any origin is answered and the passcode is the only guard. `EPIC_APP_URL` and its `www.` are **always** allowed whatever this says — an allowlist that can be emptied by forgetting a variable is a way to take the app down with a config change. |
 | `ANTHROPIC_API_KEY` | yes | conversational planner (Doppler) |
 | `ANTHROPIC_WORKSPACE_ID` | if the key is identity-linked | The Anthropic workspace the key acts in (`wrkspc_…`). Console-issued keys that are linked to a person require it; a legacy workspace key does not. |
 | `RAILPACK_START_CMD` | yes | see table above (non-secret) |
@@ -237,6 +281,7 @@ spends it.
 |---|---|---|
 | `PORT` | set by the platform | |
 | `RAILPACK_BUILD_CMD`, `RAILPACK_START_CMD` | yes | see table above (non-secret) |
-| `EXPO_PUBLIC_API_URL` | yes, **at build time** | Public URL of the `api` service. `EXPO_PUBLIC_*` values are inlined into the bundle by `expo export`; setting it only at runtime has no effect, and it must never hold a secret. |
+| `EXPO_PUBLIC_API_URL` | yes, **at build time** | Public URL of the `api` service. `EXPO_PUBLIC_*` values are inlined into the bundle by `expo export`; setting it only at runtime has no effect, and it must never hold a secret. **This is the one address that does not become `https://epic.day` automatically** — it depends on where the API is actually reachable. If Cloudflare routes `epic.day/api` to the `api` service, set it to `https://epic.day`; if the API has its own subdomain, set that; if it is still on its Railway hostname, leave it, because the redirect middleware deliberately lets `/api` through untouched so it keeps answering either way. |
+| `EPIC_APP_URL` | yes | The same value as on `api`: `https://epic.day`. `apps/web/server.mjs` reads it to decide which host is the canonical one. |
 
 Provider keys for place, routing, event and speech sources are added to `api` (via Doppler) as each source is enabled (Technical Constraints §11), never to `web`.

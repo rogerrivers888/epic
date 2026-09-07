@@ -1,3 +1,5 @@
+import { APP_URL, configuredAppUrl } from '../origins.js';
+import { deployed } from '../auth.js';
 /**
  * Sending an e-mail, when there is anything to send it with.
  *
@@ -50,9 +52,18 @@ export function mailStatus() {
 export function webUrl(req) {
   const set = String(process.env.EPIC_WEB_URL || '').trim().replace(/\/$/, '');
   if (set) return set;
+  // Then the site, when it has actually been configured — a link e-mailed to
+  // somebody outlives the request that made it, and should not carry whichever
+  // hostname the back office happened to be open on. Only when it is *set*,
+  // though: falling back to the default here would hand a developer running
+  // locally a link into production.
+  const app = configuredAppUrl();
+  if (app) return app;
   const origin = req?.headers?.origin;
   if (origin) return String(origin).replace(/\/$/, '');
-  return 'http://localhost:8081';
+  // Deployed with nothing set at all, the live site beats a localhost link
+  // that could never work; on a laptop, localhost is the right answer.
+  return deployed() ? APP_URL : 'http://localhost:8081';
 }
 
 /**

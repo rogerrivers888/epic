@@ -17,10 +17,11 @@
 // the thing to do if that text is ever wanted without the credit line.
 
 import { FOOD_CATEGORIES as EATING } from '../constants.js';
+import { userAgent } from '../origins.js';
 
 const WIKI = 'https://en.wikipedia.org/w/api.php';
 const WIKIDATA = 'https://www.wikidata.org/w/api.php';
-const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; place research)';
+const UA = userAgent('place research');
 const TIMEOUT = 8000;
 
 // An article about a building that happens to be near is not an article about

@@ -35,6 +35,7 @@
 // to each, so the band cannot be read backwards into the figure behind it.
 
 import { sweepArea } from './google.js';
+import { userAgent } from '../origins.js';
 import { mirrorsInOrder, mirrorAnswered, mirrorFailed } from './overpass.js';
 import { normalise, metresBetween } from './openMatch.js';
 import * as lib from '../repositories/library.js';
@@ -132,7 +133,7 @@ async function osmNear({ lat, lng, spanKm }) {
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'EpicBot/1.0 (epic activity sweep)' },
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': userAgent('activity sweep') },
         body: new URLSearchParams({ data: q }),
         signal: AbortSignal.timeout(180_000),
       });

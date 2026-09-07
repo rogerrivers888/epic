@@ -1,0 +1,12 @@
+# Epic is behind a passcode: there is nothing here to index that does not need
+# a session first. The two exceptions are the links people are sent — a group
+# invitation and a table's order page — and those are unguessable by design and
+# must not end up in an index.
+User-agent: *
+Disallow: /join/
+Disallow: /order/
+Disallow: /admin
+Disallow: /mockups/
+Allow: /
+
+Sitemap: https://epic.day/sitemap.xml

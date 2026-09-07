@@ -32,11 +32,12 @@
  */
 
 import { query } from '../db.js';
+import { userAgent } from '../origins.js';
 import { reverseGeocode } from './geocode.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
 const POSTCODES_API = 'https://api.postcodes.io';
-const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; locality lookup)';
+const UA = userAgent('locality lookup');
 
 /**
  * The zoom at which Nominatim reliably answers with a full address.

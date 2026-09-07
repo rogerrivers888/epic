@@ -20,10 +20,11 @@
 // There is no image processing in the API — no sharp, no canvas — and this file
 // deliberately does not add one. What a source gives us is what we store.
 
+import { userAgent } from '../origins.js';
 const TIMEOUT_MS = 8000;
 const MAX_BYTES = 3_000_000;
 
-export const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; place picture; rogerrivers@gmail.com)';
+export const UA = userAgent('place picture; rogerrivers@gmail.com');
 
 /**
  * What this file actually is, from its first bytes rather than from what the

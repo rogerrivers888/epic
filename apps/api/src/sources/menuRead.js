@@ -36,10 +36,11 @@
 //     screen can mark them indicative once they are old (Epic 6 C8).
 
 import { parseStructured } from '../claude.js';
+import { userAgent } from '../origins.js';
 import { searchWeb } from '../claude.js';
 import { z } from 'zod/v4';
 
-const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; household menu read)';
+const UA = userAgent('household menu read');
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_BYTES = 12_000_000;
 const RENDER_TIMEOUT_MS = Number(process.env.EPIC_RENDER_TIMEOUT_MS || 25_000);

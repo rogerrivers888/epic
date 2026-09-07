@@ -31,6 +31,7 @@
 //     400 Bad Request); the API tells us the URL of the nearest bucket it will
 //     serve, and that is the URL we fetch.
 
+import { userAgent } from '../origins.js';
 const SPARQL = 'https://query.wikidata.org/sparql';
 const COMMONS = 'https://commons.wikimedia.org/w/api.php';
 const WIKIPEDIA = 'https://en.wikipedia.org/w/api.php';
@@ -40,7 +41,7 @@ const PAGEVIEWS = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-artic
  * Who we are. The Wikimedia policy asks for a real contact, and a bot that does
  * not give one gets blocked without warning — so this is not cosmetic.
  */
-export const UA = 'EpicBot/1.0 (https://web-production-afce9.up.railway.app; epic atlas harvest; rogerrivers@gmail.com)';
+export const UA = userAgent('epic atlas harvest; rogerrivers@gmail.com');
 
 const SPARQL_TIMEOUT = 60_000;   // WDQS's own ceiling is 60s; a county takes ~2s
 const API_TIMEOUT = 20_000;

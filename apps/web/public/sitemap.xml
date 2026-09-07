@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One entry, and that is not an oversight: every page in Epic is behind a
+  passcode, so there is nothing else a crawler could reach. The invitation and
+  order links are unguessable by design and are excluded in robots.txt. When
+  there are public pages — a marketing page, a help page — they belong here.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://epic.day/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
