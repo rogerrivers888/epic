@@ -77,7 +77,7 @@ function statusWords(t: TripSummary): { text: string; strong: boolean } {
   return { text: `In ${days} days`, strong: true };
 }
 
-export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, onOpen, onNew, wide }: {
+export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, onOpen, onHold, onNew, wide }: {
   trips: TripSummary[] | null;
   loading: boolean;
   error: string | null;
@@ -86,6 +86,8 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
   onSpan: (s: 'day' | 'holiday') => void;
   onWhen: (w: TripsWhen) => void;
   onOpen: (t: TripSummary) => void;
+  /** Hold a row for rename, share and delete — where the ⋯ went (5h). */
+  onHold: (t: TripSummary) => void;
   onNew: () => void;
   wide: boolean;
 }) {
@@ -149,13 +151,13 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
                 : `Nothing coming up. Tap New trip and say where you're going.`}
           </Text>
         ) : null}
-        {shown.map((t) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} />)}
+        {shown.map((t) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />)}
       </ScrollView>
     </View>
   );
 }
 
-function TripRow({ trip, onPress }: { trip: TripSummary; onPress: () => void }) {
+function TripRow({ trip, onPress, onHold }: { trip: TripSummary; onPress: () => void; onHold: () => void }) {
   const status = statusWords(trip);
   const meta = [
     whenWords(trip),
@@ -164,8 +166,18 @@ function TripRow({ trip, onPress }: { trip: TripSummary; onPress: () => void }) 
   ].filter(Boolean).join(' · ');
 
   return (
-    <Pressable onPress={onPress} style={styles.row} accessibilityRole="button" accessibilityLabel={tripTitle(trip)}>
-      <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} width={84} height={84} rounded={0} credit={false} />
+    <Pressable
+      onPress={onPress}
+      onLongPress={onHold}
+      delayLongPress={400}
+      style={styles.row}
+      accessibilityRole="button"
+      accessibilityLabel={`${tripTitle(trip)}. Hold for rename, share and delete`}
+    >
+      {/* 84 at 1.6 (owner, 8 Sep 2026: "increase image size 60%", on Trips as
+          on Inspire) — a trip is remembered by where it went, and the picture
+          is the fastest way to say it. */}
+      <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} width={134} height={134} rounded={0} credit={false} />
       <View style={styles.rowBody}>
         <Text style={styles.name} numberOfLines={2}>{tripTitle(trip)}</Text>
         <Text style={styles.meta} numberOfLines={1}>{meta}</Text>

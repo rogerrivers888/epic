@@ -30,7 +30,7 @@ import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } fr
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
-import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, fonts, radius, spacing, ON_LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
 import { Icon, IconName, Stars } from '../components/Icon';
@@ -666,81 +666,65 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const party = attendees.length;
   const header = groupPage ? <View style={{ height: spacing.sm }} /> : (
     <View style={styles.header}>
+      {/*
+        No boxes in the drawer (5h). The back arrow is a plain 20px glyph in a
+        32px hit area — outlined, the header read as three buttons competing
+        with the title, which is the thing you are meant to read.
+      */}
       <Pressable
         onPress={() => (pill ? setPill(null) : section === 'group' ? onSection('itinerary') : onBack())}
-        style={styles.round}
+        style={styles.backBare}
         accessibilityRole="button"
         accessibilityLabel={pill || section === 'group' ? 'Back to the trip' : 'Trips'}
       >
-        <Icon name="back" size={18} color={colors.ink} />
+        <Icon name={pill ? 'trips' : 'back'} size={20} color={colors.ink} strokeWidth={2} />
       </Pressable>
-      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <View style={styles.titleRow}>
+
+      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+        {/*
+          The ⋯ is gone (5h) and its list moved onto a long press — here on the
+          title, and on the row in the Trips list. Rename, share and delete are
+          things you do to a trip occasionally; they did not need a permanent
+          button beside the two you use every time.
+        */}
+        <Pressable
+          onLongPress={onMenu}
+          delayLongPress={400}
+          accessibilityRole="button"
+          accessibilityLabel={`${tripName(trip)}. Hold for rename, share and delete`}
+        >
           <Text style={styles.title} numberOfLines={1}>{tripName(trip)}</Text>
-        </View>
-        {/* The dates of the whole trip, not one day of it: the day strip below
-            says which day, and saying it twice made the header disagree with
-            the picker (owner, 6 Sep 2026). */}
+        </Pressable>
         <Text style={type.small} numberOfLines={1}>
           {(() => {
             const range = isTrip && trip.startDate && trip.endDate && trip.startDate !== trip.endDate;
             return [
-              range ? `${fmtDate(trip.startDate!)} – ${fmtDate(trip.endDate!)}` : fmtDate(trip.startDate ?? trip.departAt),
-              base ? base.label.split(',')[0] : isTrip ? null : 'from home',
-              // Screen 15/19: a trip with nights and no bed says so on the line
-              // people read first, and while the stay list is up it says what
-              // they are doing rather than repeating the dates.
-              pill === 'stay' ? 'choosing a stay' : wantsStay && !stayChosen ? 'no stay yet' : null,
-              // The drive each way is on the chip on the map; on a trip away the
-              // dates have the room instead, and the line was truncating.
-              !range && !pill && dest && start ? `${mins(Math.max(1, Math.round(estimateMinutes(start, dest))))} each way` : null,
+              range
+                ? `${fmtDate(trip.startDate!).replace(/ \w+$/, '')} – ${fmtDate(trip.endDate!)}`
+                : fmtDate(trip.startDate ?? trip.departAt),
+              range ? `${nights + 1} days` : base ? `from ${base.label.split(',')[0]}` : 'from home',
+              pill === 'stay' ? 'choosing a stay' : null,
             ].filter(Boolean).join(' · ');
           })()}
         </Text>
       </View>
-      {/*
-        The ⋯ is gone (owner, 6 Sep 2026): "I don't really understand why we
-        have an ellipsis when the options of the ellipsis are: Find things to do
-        (which is the activities that are on the map), Shortlist (also on the
-        map), Plan the day (which is the screen that you're already on)."
 
-        He is right — every one of them was already a pill or the sheet itself.
-        Stay went the same way when the banner and the Stay pill arrived. The
-        one thing left behind it was Data, which is an admin diagnostic and
-        keeps its address (`/trips/<id>/data`) without needing a button on a
-        household's screen.
-      */}
-      {pill ? (
-        <Pressable onPress={() => setPill(null)} style={styles.round} accessibilityRole="button" accessibilityLabel="Back to the trip">
-          <Icon name="trips" size={18} color={colors.ink} />
-        </Pressable>
-      ) : (
-        /**
-         * The header's right-hand side (5c): who is coming, in an outlined box,
-         * and a solid chat button — ink in light, lime in the dark, which is
-         * what `colors.primary` already is in each palette. Plus the ⋯, which
-         * is back with a list nothing else on the screen carries: rename,
-         * change date, move, share, delete (1c).
-         */
-        <View style={styles.headEnd}>
-          {onPeople ? (
-            <Pressable onPress={onPeople} style={styles.people} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
-              <Icon name="household" size={16} color={colors.ink} strokeWidth={2.2} />
-              <Text style={styles.peopleText}>{party || 1}</Text>
-            </Pressable>
-          ) : null}
-          {onChat ? (
-            <Pressable onPress={onChat} style={styles.chatBtn} accessibilityRole="button" accessibilityLabel={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'}>
-              <Icon name="message" size={22} color={colors.primaryFg} strokeWidth={2.2} />
-            </Pressable>
-          ) : null}
-          {onMenu ? (
-            <Pressable onPress={onMenu} style={styles.round} accessibilityRole="button" accessibilityLabel="More">
-              <Icon name="menu" size={18} color={colors.ink} />
-            </Pressable>
-          ) : null}
-        </View>
-      )}
+      {/* Bare icons: the people who are coming, and the conversation. */}
+      <View style={styles.headEnd}>
+        {onPeople ? (
+          <Pressable onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
+            <Icon name="household" size={20} color={colors.ink} strokeWidth={2} />
+            <Text style={styles.peopleCount}>{party || 1}</Text>
+          </Pressable>
+        ) : null}
+        {onChat ? (
+          <Pressable onPress={onChat} style={styles.chatBare} accessibilityRole="button" accessibilityLabel={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'}>
+            {/* Unread turns the icon Moss. No dot — a badge on a bare icon is a
+                box by another name (5h). */}
+            <Icon name="message" size={20} color={chatUnread ? colors.accent : colors.ink} strokeWidth={2} />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 
@@ -825,32 +809,28 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         <GroupPanel d={d} onChanged={onChanged} onPage={setGroupPage} />
       </View>
     ) : (
-    <SheetTabs section={section} counts={places?.counts.all ?? 0} onSection={onSection}>
-      {section === 'places' ? <TripPlacesList data={places} onSelect={(ref) => { setSelected(ref); setDetent('half'); }} onDelete={onDelete} />
-        : (
-            <>
-              {/* The day strip, on a holiday only — a day out has one day and a
-                  row of one chip is furniture (§13/14), and past a week it
-                  gains the tabs above it (§21). */}
-              {days.length > 1 ? (
-                <Days days={days} chosen={day?.id ?? null} onPick={(id) => setDayId(id)} />
-              ) : null}
-              {/* The signpost (§15): a trip with nights and nowhere to sleep
-                  says so, once, above the day — one ink banner, and the whole
-                  of it opens the wizard. It counts days, where the wizard
-                  counts places: "3 of 8 days planned". */}
-              {wantsStay && !stayChosen ? (
-                <StaySignpost
-                  planned={plannedDays}
-                  days={days.length}
-                  weekNote={days.length > 8 ? 'week 1 so far' : null}
-                  onFind={() => { setCriteriaStep(1); setCriteria(true); }}
-                />
-              ) : null}
-              <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} />
-            </>
-          )}
-    </SheetTabs>
+    section === 'places' ? (
+      <TripPlacesList data={places} onSelect={(ref) => { setSelected(ref); setDetent('half'); }} onDelete={onDelete} />
+    ) : (
+      <>
+        <SheetHead
+          days={days}
+          dayId={day?.id ?? null}
+          stops={(day?.slots ?? []).reduce((n, sl) => n + sl.stops.length, 0)}
+          places={places?.counts.all ?? 0}
+          multi={days.length > 1}
+          onDay={(id) => setDayId(id)}
+          onPlaces={() => onSection('places')}
+          onMap={() => setDetent('peek')}
+        />
+        {/* Somewhere to sleep, while there is nowhere (5h). A shelf where an
+            ink banner used to be: a thing to do, not an advertisement. */}
+        {wantsStay && !stayChosen ? (
+          <FindYourStay onPress={() => { setCriteriaStep(1); setCriteria(true); }} />
+        ) : null}
+        <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} />
+      </>
+    )
     )
   );
 
@@ -1086,41 +1066,79 @@ function estimateMinutes(a: { lat: number; lng: number }, b: { lat: number; lng:
 // Trip home: the day
 // ---------------------------------------------------------------------------
 
-/** Day · Places · Group, inside the sheet — so the map stays the screen. */
-function SheetTabs({ section, counts, onSection, children }: {
-  section: TripSection; counts: number; onSection: (s: TripSection) => void; children: React.ReactNode;
+/**
+ * What sits between the header and the timeline.
+ *
+ * A day out gets a kicker and "Map ›", which drops the drawer to show the map
+ * rather than going anywhere (5c). A trip with days in it gets the day strip
+ * instead — a full-bleed lime-tint band you swipe — and the door into its
+ * places (5h). The joined **The day / Places** pair is gone from both: on a day
+ * out the two lists were the same list, and on a holiday the days are what you
+ * are choosing between.
+ */
+function SheetHead({ days, dayId, stops, places, multi, onDay, onPlaces, onMap }: {
+  days: TripDay[]; dayId: string | null; stops: number; places: number; multi: boolean;
+  onDay: (id: string) => void; onPlaces: () => void; onMap: () => void;
 }) {
-  /**
-   * Two tabs, not three. Group was put here on 5 Sep at the owner's request —
-   * "We've lost the group tab. When I go into a trip, can you please add group
-   * into the boxes at the top?" — and he corrected that on 6 Sep against the
-   * screens: "you can actually select a group, and therefore we didn't have a
-   * group tab. We just select the group when we select the number of people."
-   * So it moved to Who's coming (§12), where the handoff draws it. The page
-   * keeps its address; only the tab is gone.
-   */
-  const tabs: { value: TripSection; label: string }[] = [
-    { value: 'itinerary', label: 'The day' },
-    { value: 'places', label: `Places${counts ? ` · ${counts}` : ''}` },
-  ];
-  const on = tabs.some((t) => t.value === section) ? section : 'itinerary';
+  if (!multi) {
+    return (
+      <View style={styles.kickerRow}>
+        <Text style={styles.kicker}>{stops ? `The day · ${stops} stop${stops === 1 ? '' : 's'}` : 'The day'}</Text>
+        <Pressable onPress={onMap} accessibilityRole="button" accessibilityLabel="See the map">
+          <Text style={styles.mossLink}>Map ›</Text>
+        </Pressable>
+      </View>
+    );
+  }
   return (
     <>
-      <View style={styles.tabs}>
-        {tabs.map((t) => (
-          <Pressable
-            key={t.value}
-            onPress={() => onSection(t.value)}
-            style={[styles.tab, on === t.value && styles.tabOn]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: on === t.value }}
-          >
-            <Text numberOfLines={1} style={[styles.tabText, on === t.value && { color: colors.primaryFg }]}>{t.label}</Text>
-          </Pressable>
-        ))}
+      <View style={styles.dayStripRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayStrip} contentContainerStyle={{ gap: 6 }}>
+          {days.map((dd) => {
+            const on = dd.id === dayId;
+            const when = new Date(`${String(dd.date).slice(0, 10)}T12:00:00`);
+            return (
+              <Pressable
+                key={dd.id}
+                onPress={() => onDay(dd.id)}
+                style={[styles.dayCell, on && styles.dayCellOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={when.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}
+              >
+                <Text style={[styles.dayWord, on && styles.dayWordOn]}>{when.toLocaleDateString([], { weekday: 'short' })}</Text>
+                <Text style={styles.dayNum}>{when.getDate()}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <View style={styles.dayMore}><Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} /></View>
       </View>
-      {children}
+      <View style={styles.placesLine}>
+        <Pressable onPress={onPlaces} accessibilityRole="button" accessibilityLabel={`${places} places on this trip`}>
+          <Text style={styles.mossLink}>{`${places} place${places === 1 ? '' : 's'} ›`}</Text>
+        </Pressable>
+      </View>
     </>
+  );
+}
+
+/**
+ * Somewhere to sleep, when there is nowhere yet (5h).
+ *
+ * A warm shelf rather than a card: it is a thing to do, not a thing to read,
+ * and it exists only while the answer is missing.
+ */
+function FindYourStay({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={styles.stayRow} accessibilityRole="button">
+      <Icon name="hotel" size={20} color={colors.ink} strokeWidth={2} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.stayTitle}>Find your stay</Text>
+        <Text style={styles.staySub} numberOfLines={1}>Nothing booked · we'll suggest stays near your plans</Text>
+      </View>
+      <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+    </Pressable>
   );
 }
 
@@ -1150,6 +1168,9 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
    * day has not got it, and it is drawn where it belongs: after whatever
    * happens on the way there, before whatever happens on the way home.
    */
+  /** Somewhere they are actually sleeping — not the middle of the city Epic searches from. */
+  const sleepingAt = isTrip && trip.base && trip.base.kind !== 'centre' && trip.base.kind !== 'home' ? trip.base.label : null;
+
   const anchorAt = (() => {
     if (!dest || tripName(trip) === fromName(trip)) return -1;
     const near = (a: { lat: number | null; lng: number | null }) => a.lat != null && dest.lat != null
@@ -1190,7 +1211,9 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
       <Beat
         time={isTrip ? trip.dayStart ?? null : clock(trip.departAt)}
         icon="driving"
-        title={isTrip && !trip.destination ? 'Start the day' : 'Leave home'}
+        /* "Start day 3" on a trip with days in it, so the timeline says which
+           one you are looking at without a kicker repeating the strip (5h). */
+        title={days.length > 1 && dayIndex >= 0 ? `Start day ${dayIndex + 1}` : 'Start the day'}
         detail={(() => {
           const from = fromName(trip);
           const to = dest ? tripName(trip) : null;
@@ -1235,7 +1258,15 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
         />
       ) : null}
 
-      <Beat time={back} icon="home" title="Head home" detail={null} last />
+      {/* Where the day ends: home on a day out, and the bed on a trip that has
+          one — "Head home" is wrong when home is four hundred miles away. */}
+      <Beat
+        time={back}
+        icon={sleepingAt ? 'hotel' : 'home'}
+        title={sleepingAt ? 'Back to the stay' : 'Head home'}
+        detail={sleepingAt ? sleepingAt.split(',')[0] : null}
+        last
+      />
     </View>
   );
 }
@@ -2002,72 +2033,6 @@ function SearchAlong({ hasRoute, value, onClose, onSearch }: {
 }
 
 /**
- * The day strip on a holiday (handoff §13/14). Selecting a day re-scopes the
- * timeline; a green dot marks the days that have something on them, so the
- * empty ones are visible without opening each.
- */
-/**
- * The day strip, and the week tabs above it once a holiday runs past a week
- * (Hotels 2 §21). The owner asked what a fortnight would do: sixteen 44px chips
- * scroll off the edge and nothing tells you where you are in the trip, so over
- * eight days the strip is cut into weeks, a segmented control picks the week,
- * and the chips shrink to 38px so a week fits without scrolling. The green dot
- * under a day means something is planned on it, and it survives the split.
- */
-function Days({ days, chosen, onPick }: { days: TripDay[]; chosen: string | null; onPick: (id: string) => void }) {
-  const weeks = useMemo(() => weeksOf(days), [days]);
-  const chosenWeek = Math.max(0, weeks.findIndex((w) => w.days.some((d) => d.id === chosen)));
-  const [week, setWeek] = useState(chosenWeek);
-  useEffect(() => { setWeek(chosenWeek); }, [chosenWeek]);
-  const shown = weeks.length > 1 ? (weeks[week] ?? weeks[0]).days : days;
-  return (
-    <>
-      {weeks.length > 1 ? (
-        <ScrollView horizontal={weeks.length > 3} showsHorizontalScrollIndicator={false}>
-          <View style={[styles.weeks, weeks.length > 3 && { minWidth: 340 }]}>
-            {weeks.map((w, i) => {
-              const on = i === week;
-              return (
-                <Pressable
-                  key={w.label}
-                  onPress={() => { setWeek(i); const first = w.days[0]; if (first) onPick(first.id); }}
-                  style={[styles.week, on && styles.weekOn, w.days.length < 4 && { flex: 0.8 }]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <Text style={[styles.weekName, on && { color: colors.primaryFg }]} numberOfLines={1}>{w.label}</Text>
-                  <Text style={[styles.weekWhen, on && { color: '#C9C5C2' }]} numberOfLines={1}>{w.when}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </ScrollView>
-      ) : null}
-      <DayStrip days={shown} chosen={chosen} onPick={onPick} narrow={weeks.length > 1} />
-    </>
-  );
-}
-
-function DayStrip({ days, chosen, onPick, narrow }: { days: TripDay[]; chosen: string | null; onPick: (id: string) => void; narrow?: boolean }) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
-      {days.map((dd) => {
-        const on = dd.id === chosen;
-        const planned = dd.slots.some((sl) => sl.stops.length);
-        const d = new Date(`${dd.date}T12:00:00`);
-        return (
-          <Pressable key={dd.id} onPress={() => onPick(dd.id)} style={[styles.dayChip, narrow && { width: 38 }, on && styles.dayChipOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
-            <Text style={[styles.dayChipDow, on && { color: colors.primaryFg }]}>{d.toLocaleDateString([], { weekday: 'short' })}</Text>
-            <Text style={[styles.dayChipNum, narrow && { fontSize: 14 }, on && { color: colors.primaryFg }]}>{d.getDate()}</Text>
-            {planned ? <View style={[styles.dayDot, on && { backgroundColor: colors.primaryFg }]} /> : <View style={styles.dayDotGap} />}
-          </Pressable>
-        );
-      })}
-    </ScrollView>
-  );
-}
-
-/**
  * Who's coming (handoff §12), from the +3 pill on any screen. It is not a
  * settings page: tickets, table sizes and the car all follow this, which is why
  * the note says so and why it is one tap from everywhere.
@@ -2162,35 +2127,6 @@ function WhosComing({ household, attending, hasCar, onClose, onSave, onInvite, o
 // ---------------------------------------------------------------------------
 // Stay
 // ---------------------------------------------------------------------------
-
-/**
- * The signpost (Hotels 2, screen 15). A trip made with "find us somewhere" has
- * nowhere to sleep, and the day is not the place to discover that.
- *
- * One ink banner, exactly as drawn, and the whole of it is the tap: the two
- * stacked buttons that stood here were an earlier reading, and the handoff
- * replaces them with a single row that says how much of the trip is planned —
- * because that is what makes the answer better. "Near my plans" improves as the
- * plans fill in, so the count is the argument for tapping it.
- */
-function StaySignpost({ planned, days, weekNote, onFind }: {
-  planned: number; days: number; weekNote?: string | null; onFind: () => void;
-}) {
-  return (
-    <Pressable onPress={onFind} style={styles.signpost} accessibilityRole="button" accessibilityLabel="Find your stay">
-      <View style={styles.signIcon}><Icon name="hotel" size={19} color={colors.ink} /></View>
-      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text style={styles.signTitle}>Find your stay</Text>
-        <Text style={styles.signSub} numberOfLines={1}>
-          {planned
-            ? `${planned} of ${days} day${days === 1 ? '' : 's'} planned · ${weekNote ?? "we'll place you near them"}`
-            : `Nothing planned yet · we'll place you near the middle`}
-        </Text>
-      </View>
-      <Icon name="more" size={18} color={colors.primaryFg} />
-    </Pressable>
-  );
-}
 
 const PLACEMENTS: { key: StayPlacement; icon: IconName; title: string; blurb: string }[] = [
   { key: 'plans', icon: 'place', title: 'Near my plans', blurb: 'Best placed for the {n} places you’ve planned' },
@@ -2838,30 +2774,48 @@ function AddSheet({ place, trip, party, onCancel, onSave }: {
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  title: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, flexShrink: 1 },
-  party: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
-  partyText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.ink },
+  title: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink, flexShrink: 1 },
   // The header's right-hand cluster (5c): an outlined people count, a solid
   // chat button, and the ⋯. Three 40px targets, which is what fits beside a
   // 26px title on a 390px phone.
-  headEnd: { flexDirection: 'row', gap: 6, flexShrink: 0 },
-  people: {
-    height: 40, paddingHorizontal: 10, borderWidth: BORDER, borderColor: colors.ink,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-  },
-  peopleText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  headEnd: { flexDirection: 'row', gap: 2, flexShrink: 0, marginRight: -8 },
   // Ink in light, lime in the dark — which is what `primary` already is in each
   // palette, with `primaryFg` the glyph that reads on it.
-  chatBtn: { width: 40, height: 40, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  round: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
 
   // The switch inside the drawer (5c): "joined pair, Archivo 800 18px, full
   // width". A lime fill says which half you are in and the tint is the other,
   // which is the same pair the Trips list and Inspire both draw.
-  tabs: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, marginBottom: 6 },
-  tab: { flex: 1, minWidth: 0, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentSoft },
-  tabOn: { backgroundColor: colors.selected },
-  tabText: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.inkMuted },
+  // The kicker row: what this is on the left, the way to the map on the right.
+  kickerRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, paddingHorizontal: 20 },
+  mossLink: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent },
+
+  /**
+   * The day strip (5h): a full-bleed lime-tint band, one 44px cell per day, the
+   * chosen one filled lime. It replaces the joined pair and the week tabs — on
+   * a trip with days in it, the days *are* the choice.
+   */
+  dayStripRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 20 },
+  dayStrip: { flex: 1, backgroundColor: colors.accentSoft },
+  dayCell: { width: 44, flexShrink: 0, alignItems: 'center', gap: 1, paddingVertical: 6 },
+  dayCellOn: { backgroundColor: colors.selected },
+  dayWord: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.inkMuted },
+  dayWordOn: { color: ON_LIME },
+  dayNum: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', letterSpacing: -0.34, color: colors.ink },
+  dayMore: { width: 28, height: 44, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  placesLine: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, marginTop: -10 },
+
+  // Somewhere to sleep, while there is nowhere: a warm shelf, not a card.
+  stayRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.panelWarm,
+    paddingVertical: 12, paddingHorizontal: 14, marginHorizontal: 20, marginBottom: 16, marginTop: 10,
+  },
+  stayTitle: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
+  staySub: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted, marginTop: 1 },
+
+  backBare: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: -8 },
+  peopleBare: { height: 32, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  peopleCount: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  chatBare: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 
   // The three pills over the map.
   // Four pills (§15: padding 9px 9px, gap 6px, label "Food") have to fit 390px
@@ -2913,14 +2867,17 @@ const styles = StyleSheet.create({
   // The timeline (5c): a 48px time column, 30px square nodes with a 2px ink
   // rule, joined by a 2px soft one. Square, like everything else — a round dot
   // was the last radius left on this screen.
+  // 44px column, 28px nodes, and a 1px soft border rather than a 2px ink one:
+  // the drawer has no boxes in it now, and the spine should read as a thread
+  // rather than a row of buttons (5h).
   beat: { flexDirection: 'row', gap: 14 },
-  beatTime: { width: 48, paddingTop: 6, fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
-  beatDot: { width: 30, height: 30, borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  beatTime: { width: 44, paddingTop: 5, fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  beatDot: { width: 28, height: 28, borderWidth: 1, borderColor: colors.lineSoft, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   /** The stop itself is lime-filled; the beats either side of it are outlined. */
   beatDotOn: { backgroundColor: colors.selected, borderColor: colors.selected },
   /** The opening in the day: dashed, so it reads as a space rather than a thing. */
-  beatDotAdd: { borderStyle: 'dashed', borderColor: colors.inkMuted, backgroundColor: 'transparent' },
-  beatLine: { flex: 1, width: 2, minHeight: 22, backgroundColor: colors.lineSoft },
+  beatDotAdd: { borderStyle: 'dashed', borderColor: colors.decor, backgroundColor: 'transparent' },
+  beatLine: { flex: 1, width: 1, minHeight: 22, backgroundColor: colors.lineSoft },
   beatTitle: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink, lineHeight: 20 },
   beatTitleAdd: { fontSize: 15, color: colors.inkMuted, fontWeight: '400' },
   beatDetailAdd: { fontSize: 12 },

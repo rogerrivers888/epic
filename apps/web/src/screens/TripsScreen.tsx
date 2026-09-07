@@ -221,6 +221,9 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
       onSpan={setSpan}
       onWhen={setWhen}
       onOpen={(t) => navigate(paths.trip(t.id))}
+      /* Holding a row opens the trip with its menu up — the ⋯ is gone from the
+         header (5h), and this is where its list went. */
+      onHold={(t) => navigate(`${paths.trip(t.id)}?menu=1`)}
       onNew={() => { onSeedUsed?.(); setPicked(null); navigate(paths.tripsSearch()); }}
       wide={wide}
     />
@@ -283,7 +286,10 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onB
    * makes: Share has an address of its own, because a sheet somebody is meant
    * to be able to link to is a page.
    */
-  const [sheet, setSheet] = useState<TripMenuAction | null>(null);
+  const [sheet, setSheet] = useState<TripMenuAction | null>(
+    // Arrived by holding a row on the Trips list: the menu is what was asked for.
+    query.get('menu') ? ('menu' as TripMenuAction) : null,
+  );
   const setDayId = (next: string) => navigate(paths.trip(id, 'day', next));
   useEffect(() => { if (asked) rememberScreen<TripPageMemory>(sectionKey, { section: asked }); }, [sectionKey, asked]);
   const [menu, setMenu] = useState(false);
@@ -772,7 +778,8 @@ function TripPlaceRow({ place: p, first, isPast, onPress }: { place: TripPlace; 
   const said = p.scores.length ? p.scores.map((s) => `${s.member.split(' ')[0]} ${s.score}`).join(' · ') : null;
   return (
     <Pressable onPress={onPress} style={[styles.prow, !first && styles.rowLine]} accessibilityRole="button">
-      <VenueThumb name={p.name} image={p.image} category={p.category} width={56} height={56} rounded={radius.md} credit={false} />
+      {/* The same 60% the Trips list took (owner, 8 Sep 2026): 56 becomes 90. */}
+      <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={radius.md} credit={false} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <Text style={type.h3} numberOfLines={1}>{p.name ?? 'A place'}</Text>
         {meta ? <Text style={type.small} numberOfLines={1}>{meta}</Text> : null}
@@ -1199,7 +1206,7 @@ function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
                         credit; with no picture it falls back to the bed icon on
                         the one lime ground rather than inventing something. */}
                     <Row style={{ gap: spacing.md, alignItems: 'flex-start' }}>
-                      <VenueThumb name={s.name} photos={s.photos} category="hotel" width={92} height={70} credit={false} rounded={radius.sm} />
+                      <VenueThumb name={s.name} photos={s.photos} category="hotel" width={147} height={112} credit={false} rounded={radius.sm} />
                       <View style={{ flex: 1, gap: 3 }}>
                         <Text style={type.h3} numberOfLines={2}>{s.name}</Text>
                         {/* What it is graded at, then where it is. */}

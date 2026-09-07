@@ -56,7 +56,8 @@ const D = {
   ruleSoft: '#3A3634',
   limeTint: '#2B390B',  // oklch(0.32 0.07 125)
   moss: '#A6D75E',      // oklch(0.82 0.16 128)
-  bubble: '#2A2726',    // a warm neutral lift off the ground
+  bubble: '#2A2726',
+  panelWarm: '#2A2726',    // a warm neutral lift off the ground
 };
 
 /**
@@ -138,6 +139,13 @@ const LIGHT = {
    * is the one thing a chat cannot afford. The handoff names both values.
    */
   bubble: '#EAE7E7',
+  /**
+   * A warm grey panel — the "Find your stay" row on a multi-day trip (5h).
+   *
+   * Not the lime tint, which is selection, and not a bubble, which is somebody
+   * speaking: this is a shelf, and the handoff names both its values.
+   */
+  panelWarm: '#F3F1EC',
   // Time bar
   travel: '#D8D3CB',
   dwell: LIME,
@@ -197,6 +205,7 @@ const DARK: typeof LIGHT = {
   scrimSoft: 'rgba(0,0,0,0.55)',
   loved: D.ink,
   bubble: D.bubble,
+  panelWarm: D.panelWarm,
   travel: D.ruleSoft,
   dwell: LIME,
   slack: D.sheet,

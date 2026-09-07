@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, TripChat, TripDetail } from '../api';
-import { colors, fonts, BORDER } from '../theme';
+import { colors, fonts, BORDER, ON_LIME } from '../theme';
 import { Icon } from '../components/Icon';
 import { MapGL, MapMarker, MapRoute } from '../components/MapGL';
 import { Thread, Composer } from '../components/Thread';
@@ -88,19 +88,21 @@ export function TripChatScreen({ trip, onBack, onOpenStop, onPeople }: {
 
         <View style={styles.head}>
           <View style={styles.headRow}>
-            <Pressable onPress={onBack} style={styles.round} accessibilityRole="button" accessibilityLabel="Back to the trip">
-              <Icon name="back" size={18} color={colors.ink} strokeWidth={2.2} />
+            {/* Bare, like the drawer's (5h): no boxes in here. */}
+            <Pressable onPress={onBack} style={styles.backBare} accessibilityRole="button" accessibilityLabel="Back to the trip">
+              <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
             </Pressable>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.title} numberOfLines={1}>{tripName(trip.trip)}</Text>
             </View>
-            <Pressable onPress={onPeople} style={styles.people} accessibilityRole="button" accessibilityLabel="Who's coming">
-              <Icon name="household" size={16} color={colors.ink} strokeWidth={2.2} />
+            <Pressable onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming">
+              <Icon name="household" size={20} color={colors.ink} strokeWidth={2} />
               <Text style={styles.peopleText}>{people?.count ?? trip.attendees.length}</Text>
             </Pressable>
-            {/* The chat button, shown active: lime with a 2px ink rule (5e). */}
+            {/* Open: the icon sits on a small lime tile, which is the only fill
+                in the header and says which of the two you are looking at. */}
             <View style={styles.chatOn}>
-              <Icon name="message" size={24} color={colors.selectedFg} strokeWidth={2.2} />
+              <Icon name="message" size={20} color={ON_LIME} strokeWidth={2} />
             </View>
           </View>
           <View style={styles.chatBar}>
@@ -126,25 +128,23 @@ export function TripChatScreen({ trip, onBack, onOpenStop, onPeople }: {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
-  drawer: { flex: 1, minHeight: 0, backgroundColor: colors.bg, borderTopWidth: BORDER, borderTopColor: colors.line },
+  // No top rule (5h): the grab handle is what says the drawer starts here.
+  drawer: { flex: 1, minHeight: 0, backgroundColor: colors.bg },
   drawerWide: { maxWidth: 720, alignSelf: 'center', width: '100%' },
   grabWrap: { alignItems: 'center', paddingTop: 8 },
   grab: { width: 40, height: 4, backgroundColor: colors.lineSoft },
 
   head: { paddingHorizontal: 20, paddingTop: 10, gap: 14 },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  round: { width: 40, height: 40, borderWidth: BORDER, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  backBare: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: -8 },
   title: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink },
-  people: {
-    height: 40, paddingHorizontal: 10, borderWidth: BORDER, borderColor: colors.ink,
-    flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0,
-  },
+  peopleBare: { height: 32, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
   peopleText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
-  chatOn: { width: 40, height: 40, backgroundColor: colors.selected, borderWidth: BORDER, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  chatOn: { width: 32, height: 32, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
 
   chatBar: {
     flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10,
-    paddingBottom: 8, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
   },
   chatTitle: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.ink },
   chatWho: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted, flexShrink: 1 },

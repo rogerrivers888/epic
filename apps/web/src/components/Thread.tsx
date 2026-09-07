@@ -142,8 +142,10 @@ export function Composer({ placeholder, onSend, busy, insetBottom = 0 }: {
         style={styles.field}
         accessibilityLabel={placeholder}
       />
+      {/* An arrow, not a filled block (5h): the composer is a line you type on,
+          and a solid square beside it was the heaviest thing on the screen. */}
       <Pressable onPress={send} style={styles.send} accessibilityRole="button" accessibilityLabel="Send" disabled={busy}>
-        <Icon name="send" size={18} color={colors.primaryFg} strokeWidth={2.4} />
+        <Icon name="send" size={20} color={colors.accent} strokeWidth={2.2} />
       </Pressable>
     </View>
   );
@@ -176,8 +178,8 @@ const styles = StyleSheet.create({
 
   composer: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 12 },
   field: {
-    flex: 1, height: 48, paddingHorizontal: 14, borderWidth: BORDER, borderColor: colors.ink,
+    flex: 1, height: 48, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.lineSoft,
     backgroundColor: colors.surface, fontFamily: fonts.body, fontSize: 15, color: colors.ink,
   },
-  send: { width: 48, height: 48, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  send: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
 });
