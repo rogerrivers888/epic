@@ -654,6 +654,16 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   const [sort, setSort] = useQueryState<Sort>('sort', 'name', asOneOf(['name', 'mine', 'recent'] as const, 'name'));
   const [view, setView] = useQueryState<'list' | 'map'>('view', 'list', asOneOf(['list', 'map'] as const, 'list'));
   const [sheet, setSheet] = useState<'status' | 'type' | 'mood' | 'trip' | 'year' | 'sort' | null>(null);
+  /**
+   * Whether the household has picked a status themselves on this screen.
+   *
+   * The address cannot answer that on its own: Loved is the default and a
+   * default is never written down, so tapping "Loved" leaves the query exactly
+   * as it was. Without this, tapping Loved on a tab with nothing loved would
+   * step straight back down to Been, and the chip flipping to a word nobody
+   * chose reads as a bug rather than as an empty list.
+   */
+  const [chose, setChose] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selPin, setSelPin] = useState<string | null>(null);
 
@@ -667,7 +677,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   // the row is marked so the eye finds it.
   useEffect(() => {
     if (!landed) return;
-    setAdding(false); setKind(landed.kind); setStatus('any'); setTypeF(null); setMoodF(null); setTripF(null); setYearF(null); setView('list');
+    setAdding(false); setKind(landed.kind); setStatus('any'); setChose(true); setTypeF(null); setMoodF(null); setTripF(null); setYearF(null); setView('list');
   }, [landed?.venueRef]);
 
   const counts = useMemo(() => ({
@@ -717,7 +727,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
    * the address says a status, the address wins and nothing steps down, which
    * is what keeps `?status=loved` a page somebody can be sent.
    */
-  const asked = query.get('status') != null;
+  const asked = chose || query.get('status') != null;
   const showing: Status = asked ? status
     : inKindAndType.some((p) => p.special) ? 'loved'
       : inKindAndType.some((p) => p.visits > 0) ? 'been'
@@ -847,7 +857,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
         {/* The answer opens under the question (owner, 5 Sep 2026), and a
             filter with nothing to offer says why rather than opening empty. */}
         <PickPanel open={sheet === 'status'} title="What are we looking at?" options={statusOptions} value={showing}
-          onPick={(v) => { setStatus(v as Status); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
+          onPick={(v) => { setStatus(v as Status); setChose(true); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
         <PickPanel open={sheet === 'type'} title={shown === 'eat' ? 'Cuisine' : shown === 'stay' ? 'Kind of stay' : 'Kind of thing'}
           options={typeOptions} value={typeF ?? ''}
           empty={nothingOnTab ? 'Nothing on this tab yet, so there is nothing to narrow.' : shown === 'eat' ? 'Nothing here has said what food it serves yet.' : 'Nothing here has said what kind of thing it is yet.'}
@@ -1148,7 +1158,9 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
       {place.onTrips?.length ? (
         <Text style={type.small}>
           {place.visits ? 'Been here on ' : 'Kept for '}
-          {place.onTrips.map((t) => [t.title?.split(/\s+[·,]\s+|,\s+then\s+/)[0].trim(), t.on].filter(Boolean).join(', ')).join(' · ')}
+          {/* Deduplicated, because three plans for the same weekend all begin
+              "London" and would otherwise read as three separate trips. */}
+          {[...new Set(place.onTrips.map((t) => tripWhen({ id: t.id, label: t.title, startsOn: null, endsOn: null, on: t.on })))].join(' · ')}
         </Text>
       ) : null}
       {/* What each of us thought is the meal's record now, not a form on the
