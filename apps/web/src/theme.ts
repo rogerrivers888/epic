@@ -56,6 +56,7 @@ const D = {
   ruleSoft: '#3A3634',
   limeTint: '#2B390B',  // oklch(0.32 0.07 125)
   moss: '#A6D75E',      // oklch(0.82 0.16 128)
+  bubble: '#2A2726',    // a warm neutral lift off the ground
 };
 
 /**
@@ -106,8 +107,27 @@ const LIGHT = {
   selected: LIME,
   selectedFg: ON_LIME,
   hover: LIME_TINT,
+  /**
+   * The three grounds of the v2 menu bar (handoff "Shared header - v2").
+   *
+   * `switchOff` is the half of the pair you are not in: a warm neutral grey
+   * rather than the lime tint, because the tint is *selection* and two green
+   * cells would say you were in both. `onLimeMuted` is an unselected word
+   * sitting on the lime band - moss on light, a deeper green on dark, since the
+   * band stays lime in both modes and the light-mode moss goes muddy there.
+   * `bandSub` is the drawer row that opens under a chosen category.
+   */
+  switchOff: '#F3F1EC',
+  onLimeMuted: MOSS,
+  bandSub: LIME_TINT,
   /** What a sheet is lifted off. Deeper in the dark, where a 45% veil is barely there. */
   scrim: 'rgba(32,30,29,0.45)',
+  /**
+   * The lighter veil under a filter dropdown. A panel hanging off the bar is
+   * still part of the screen behind it - you are meant to see the list you are
+   * about to change - so it dims less than a sheet that has replaced it.
+   */
+  scrimSoft: 'rgba(32,30,29,0.35)',
   // The heart of a place you love. Ink, not red — the pack retires brand red.
   loved: INK,
   /**
@@ -170,9 +190,13 @@ const DARK: typeof LIGHT = {
   selected: LIME,
   selectedFg: ON_LIME,
   hover: D.limeTint,
+  switchOff: D.bubble,
+  onLimeMuted: '#335200',  // oklch(0.40 0.11 130) - on the band, which stays lime in the dark
+  bandSub: '#34440D',      // oklch(0.36 0.08 125)
   scrim: 'rgba(0,0,0,0.62)',
+  scrimSoft: 'rgba(0,0,0,0.55)',
   loved: D.ink,
-  bubble: '#2A2726',
+  bubble: D.bubble,
   travel: D.ruleSoft,
   dwell: LIME,
   slack: D.sheet,

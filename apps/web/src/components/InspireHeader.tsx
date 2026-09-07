@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts, spacing, BORDER, TARGET } from '../theme';
 import { Icon, IconName } from './Icon';
 import { Wordmark } from './Wordmark';
@@ -13,8 +13,12 @@ import { Wordmark } from './Wordmark';
  * and 8e draw the same head over a different body, and two copies of a header
  * is how the two stop matching.
  *
- * The centred switch and its strip are the one exception to the pack's
- * flush-left rule, and the handoff says so explicitly.
+ * The middle two are the v2 menu bar ("Trips home page redesign menu bar",
+ * 7 Sep 2026), which supersedes the centred switch and underlined strip the
+ * pack shipped with: one bar that bleeds to both edges, in three flat fields -
+ * the pair, the lime category band, and the paler drawer row that opens under
+ * a chosen category. Nothing in it is centred by exception any more; the bar
+ * is centred type on a full-width field, which is a different thing.
  */
 
 const HEADER_TOP = 60;
@@ -35,21 +39,19 @@ const GUTTER = 20;
  */
 export const TOP_INSET = (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any;
 
-/** Row 1: the mark, and where we are looking. */
-export function InspireTop({ where, onWhere }: { where: string; onWhere: () => void }) {
+/**
+ * Row 1 on Inspire: the mark, and nothing else.
+ *
+ * The where-box that used to sit here has moved into the filter line (handoff
+ * v2, "Filter line v2"), where it reads as one answer with the range it is
+ * measured over - "Up to 1 hr from Sunningdale" - instead of a town in one
+ * corner and an hour in another with nothing joining them. The row keeps its
+ * 40px height so the bar below does not ride up when the field goes.
+ */
+export function InspireTop() {
   return (
-    <View style={styles.top}>
+    <View style={[styles.top, styles.topAlone]}>
       <Wordmark height={30} ground={colors.bg} />
-      <Pressable
-        onPress={onWhere}
-        style={styles.where}
-        accessibilityRole="button"
-        accessibilityLabel={`Near ${where}. Change where you are looking, or search for a place`}
-      >
-        <Icon name="address" size={14} color={colors.ink} />
-        <Text numberOfLines={1} style={styles.whereText}>{where}</Text>
-        <Icon name="search" size={16} color={colors.inkMuted} />
-      </Pressable>
     </View>
   );
 }
@@ -91,10 +93,14 @@ export function ScreenTop({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Two words, joined, in Archivo 800 at 26px: Activities | Food on Inspire, Day
- * trips | Holidays on Trips, Been | Liked on Places. No gap between them and no
- * radius — they are two halves of one control, and the lime fill is what says
- * which half you are in.
+ * Two words, joined, edge to edge: Activities | Food on Inspire, Day trips |
+ * Holidays on Trips.
+ *
+ * The v2 menu bar (handoff "Shared header - v2", 7 Sep 2026) replaces the
+ * centred pair the pack shipped with. Two equal cells that bleed to both edges,
+ * no gap, no radius and no rule under them - the lime fill is the whole of the
+ * signal, and the half you are not in takes a warm grey rather than the lime
+ * tint, because the tint means *selected* everywhere else in the app.
  */
 export function PairSwitch<T extends string>({ value, options, onPick }: {
   value: T; options: { value: T; label: string }[]; onPick: (v: T) => void;
@@ -137,11 +143,14 @@ export function ModeSwitch({ mode, onMode }: { mode: 'activities' | 'food'; onMo
 export type StripItem = { key: string; label: string };
 
 /**
- * The category strip, sitting on the 2px ink rule that closes the switch block.
+ * The category band: a lime field directly under the switch, with the
+ * categories centred on it.
  *
- * The selected item is moss with a moss underline that lands *on* that rule
- * rather than above it, which is what makes the strip read as part of the block
- * instead of a row floating under it.
+ * v2 drops the moss underline the pack shipped with. On a lime ground an
+ * underline is a third green line under two green blocks, and it was the thing
+ * that made the head read as a stack of rows rather than one bar; weight alone
+ * does the work now - the chosen word is ink at 800, the rest sit back in a
+ * green that is a shade of the band itself.
  */
 export function CategoryStrip({ items, value, onPick }: {
   items: StripItem[]; value: string; onPick: (key: string) => void;
@@ -150,14 +159,18 @@ export function CategoryStrip({ items, value, onPick }: {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={styles.band}
       contentContainerStyle={styles.strip}
     >
       {items.map((it) => {
         const on = it.key === value;
         return (
           <Pressable key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
-            <View style={[styles.stripItem, on && styles.stripItemOn]}>
-              <Text numberOfLines={1} style={[styles.stripText, { color: on ? colors.accent : colors.inkMuted }]}>{it.label}</Text>
+            <View style={styles.stripItem}>
+              <Text
+                numberOfLines={1}
+                style={[styles.stripText, on ? styles.stripTextOn : styles.stripTextOff]}
+              >{it.label}</Text>
             </View>
           </Pressable>
         );
@@ -167,28 +180,67 @@ export function CategoryStrip({ items, value, onPick }: {
 }
 
 /**
- * The drawers inside the open category (8b). The whole row is moss — it belongs
- * to the category above it, and colouring only the selected item would make it
- * read as a second strip of equals.
+ * The drawers inside the open category (8b), on a band of their own.
+ *
+ * A paler shade of the same green says "inside the thing above" without
+ * repeating its colour, and it only exists while a category is open - so it
+ * slides down out of the band rather than appearing, which is the difference
+ * between the head growing and the head jumping.
  */
 export function SubStrip({ items, value, onPick, allLabel }: {
   items: StripItem[]; value: string; onPick: (key: string) => void; allLabel: string;
 }) {
   const all: StripItem[] = [{ key: 'all', label: allLabel }, ...items];
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subStrip}>
-      {all.map((it) => {
-        const on = it.key === value;
-        return (
-          <Pressable key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
-            <View style={[styles.subItem, on && styles.subItemOn]}>
-              <Text numberOfLines={1} style={[styles.subText, on ? styles.subTextOn : styles.subTextOff]}>{it.label}</Text>
-            </View>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+    <Reveal>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.subBand} contentContainerStyle={styles.subStrip}>
+        {all.map((it) => {
+          const on = it.key === value;
+          return (
+            <Pressable key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+              <View style={styles.subItem}>
+                <Text numberOfLines={1} style={[styles.subText, on ? styles.subTextOn : styles.subTextOff]}>{it.label}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </Reveal>
   );
+}
+
+/**
+ * 150ms, ease-out, and nothing else moves.
+ *
+ * The handoff asks the sub-row to slide in. It is a band under a band, so the
+ * honest version of that is the row sliding out from behind the one above it -
+ * hence the clip, and hence the translate rather than a height animation, which
+ * would need the row measured before it could be drawn.
+ */
+function Reveal({ children }: { children: React.ReactNode }) {
+  const anim = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 150, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [anim]);
+  return (
+    <View style={styles.reveal}>
+      <Animated.View style={{ opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }] }}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * The whole menu bar: the pair, the band, and the drawers when one is open.
+ *
+ * It bleeds to both edges, so it is the one part of the head that takes no
+ * gutter. Screens hand it their strip rather than drawing three components in
+ * the right order themselves - that order *is* the design, and it is the thing
+ * that would drift between Inspire and Trips first.
+ */
+export function MenuBar({ children }: { children: React.ReactNode }) {
+  return <View style={styles.bar}>{children}</View>;
 }
 
 /**
@@ -204,11 +256,46 @@ export function FilterRow({ children, count }: { children: React.ReactNode; coun
   );
 }
 
-export function FilterButton({ label, icon, strong, on, narrowed, onPress, toggle }: {
+/**
+ * What a filter chip opens: a panel hanging off the bottom of the bar.
+ *
+ * v2 moves the filters out of a bottom sheet and under the line that owns them
+ * (handoff, "Filter line v2"). The difference is not decoration - a sheet
+ * covers the list you are filtering, and this does not: it drops over the top
+ * of it behind a light veil, so the thing you are about to change is still
+ * there while you change it.
+ *
+ * `top` is where the head ends, measured rather than assumed, because the head
+ * is a different height with a sub-band open than without one.
+ */
+export function FilterPanel({ top, onClose, children }: {
+  top: number; onClose: () => void; children: React.ReactNode;
+}) {
+  return (
+    <>
+      <Pressable
+        style={[StyleSheet.absoluteFill, styles.panelScrim]}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
+      <View style={[styles.panel, { top }]}>
+        {/* On a wide window the rows line up with the list they are filtering
+            rather than running the full width of the pane. */}
+        <View style={styles.panelInner}>{children}</View>
+      </View>
+    </>
+  );
+}
+
+/** The small caps that name a group inside a panel: FROM, HOW FAR. */
+export function PanelKicker({ children }: { children: React.ReactNode }) {
+  return <Text style={styles.kicker}>{children}</Text>;
+}
+
+export function FilterButton({ label, icon, on, narrowed, open, onPress, toggle }: {
   label: string;
   icon?: IconName;
-  /** The travel filter, which always has a value and so is always ink. */
-  strong?: boolean;
   /** A toggle that is currently on (Open now). */
   on?: boolean;
   /**
@@ -218,16 +305,28 @@ export function FilterButton({ label, icon, strong, on, narrowed, onPress, toggl
    * the only explanation.
    */
   narrowed?: boolean;
+  /** Its panel is hanging open below the line. Lime, and the chevron turns over. */
+  open?: boolean;
   onPress: () => void;
   /** A toggle has no chevron: there is no sheet behind it. */
   toggle?: boolean;
 }) {
-  const colour = strong || on || narrowed ? colors.ink : colors.inkMuted;
+  /**
+   * Ink, whatever it is set to (v2). The line used to grey out anything left at
+   * its default, which made "Any budget" look disabled rather than open; the
+   * icon in front of each one is what tells them apart now.
+   */
+  const colour = open ? colors.selectedFg : colors.ink;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={toggle ? { checked: !!on } : undefined} style={[styles.filterBtn, narrowed && styles.filterOn]}>
-      {icon ? <Icon name={icon} size={18} color={colour} /> : null}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={toggle ? { checked: !!on } : { expanded: !!open }}
+      style={[styles.filterBtn, narrowed && !open && styles.filterNarrowed, open && styles.filterOpen]}
+    >
+      {icon ? <Icon name={icon} size={16} color={colour} strokeWidth={2.2} /> : null}
       <Text style={[styles.filterText, { color: colour, fontWeight: on ? '700' : '600' }]}>{label}</Text>
-      {toggle ? null : <Icon name="expand" size={12} color={colour} />}
+      {toggle ? null : <Icon name={open ? 'collapse' : 'expand'} size={12} color={colour} strokeWidth={2.6} />}
     </Pressable>
   );
 }
@@ -238,39 +337,48 @@ export const styles = StyleSheet.create({
     gap: spacing.md, paddingHorizontal: GUTTER,
     paddingTop: TOP_INSET,
   },
+  // The wordmark on its own still stands the row up to the height the box used
+  // to give it, so the bar sits where it does on every other tab.
+  topAlone: { minHeight: 40 },
   where: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingHorizontal: 12,
     borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface, flexShrink: 1,
   },
   whereText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink, flexShrink: 1 },
 
-  // The switch block: the pair, the strip, and the one ink rule under both.
-  switchRow: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing.xl },
-  switchCell: { paddingHorizontal: 14, paddingVertical: 6 },
-  switchOn: { backgroundColor: colors.selected },
-  switchOff: { backgroundColor: colors.accentSoft },
-  switchText: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.78 },
-
-  strip: { flexGrow: 1, justifyContent: 'center', gap: 18, paddingTop: 6, paddingHorizontal: GUTTER },
   /**
-   * The selected item's marker sits inside its own box rather than being pulled
-   * down onto the block's rule with a negative margin: the strip is a scroller,
-   * a scroller clips what hangs outside it, and the marker was being clipped
-   * away entirely — so nothing on the row looked chosen (owner, 7 Sep 2026:
-   * "you've got no active 1").
+   * The menu bar (v2). Edge to edge, which on a phone means no gutter at all -
+   * every screen that draws it puts its own padding on the rows above and
+   * below instead, so the bar is the only thing touching both sides.
    */
-  stripItem: { paddingTop: 6, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
-  stripItemOn: { borderBottomColor: colors.accent },
-  stripText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600' },
+  bar: { marginTop: 20 },
 
-  subStrip: { flexGrow: 1, gap: 18, paddingTop: 8, paddingBottom: 6, paddingHorizontal: GUTTER },
-  subItem: { paddingBottom: 4, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
-  subItemOn: { borderBottomColor: colors.accent },
-  // One size up: at 13 the drawers under an open category were the smallest
-  // thing on the screen and the hardest to hit (owner, 7 Sep 2026).
-  subText: { fontFamily: fonts.body, fontSize: 15, color: colors.accent },
-  subTextOn: { fontWeight: '600' },
-  subTextOff: { fontWeight: '400', opacity: 0.75 },
+  switchRow: { flexDirection: 'row' },
+  switchCell: { flex: 1, alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12 },
+  switchOn: { backgroundColor: colors.selected },
+  switchOff: { backgroundColor: colors.switchOff },
+  switchText: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6, lineHeight: 24, textAlign: 'center' },
+
+  // The band, and the row of words centred on it. `flexGrow` is what centres a
+  // short list and still lets a long one scroll from the left edge.
+  band: { backgroundColor: colors.lime },
+  strip: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 18, paddingHorizontal: 12 },
+  stripItem: { paddingTop: 9, paddingBottom: 7 },
+  stripText: { fontFamily: fonts.body, fontSize: 14, lineHeight: 18 },
+  stripTextOn: { fontWeight: '800', color: colors.selectedFg },
+  stripTextOff: { fontWeight: '500', color: colors.onLimeMuted },
+
+  subBand: { backgroundColor: colors.bandSub },
+  subStrip: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 16, paddingHorizontal: 12 },
+  subItem: { paddingTop: 8, paddingBottom: 6 },
+  subText: { fontFamily: fonts.body, fontSize: 13, lineHeight: 17 },
+  subTextOn: { fontWeight: '800', color: colors.ink },
+  subTextOff: { fontWeight: '500', color: colors.inkMuted },
+  // The band above is what the drawers slide out from, so what leaves the top
+  // of this box has to be cut off rather than drawn over it - and the box
+  // itself takes the band's colour, or the twelve pixels the row has not
+  // reached yet flash cream.
+  reveal: { overflow: 'hidden', backgroundColor: colors.bandSub },
 
   filters: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -279,21 +387,32 @@ export const styles = StyleSheet.create({
   // The filters wrap rather than run under the count: three of them plus
   // "14 places" does not fit 390px on one line, and the count is the thing you
   // read to decide whether to change them.
-  filterItems: { flexDirection: 'row', alignItems: 'center', gap: 16, flexShrink: 1, flexWrap: 'wrap' },
-  filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
-  filterOn: { backgroundColor: colors.accentSoft, paddingHorizontal: 8, marginHorizontal: -2 },
+  filterItems: { flexDirection: 'row', alignItems: 'center', gap: 16, rowGap: 8, flexShrink: 1, flexWrap: 'wrap' },
+  /**
+   * The chip's fill bleeds back out of its own padding (the handoff's
+   * `padding:6px 8px; margin:-6px -8px`), so an open chip grows a lime block
+   * around the words without the line above it moving.
+   */
+  filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 8, marginVertical: -6, marginHorizontal: -8 },
+  filterOpen: { backgroundColor: colors.selected },
+  // Narrowed but not open: the tint, so a filter cutting the list down still
+  // says so without claiming to be the thing you have just tapped.
+  filterNarrowed: { backgroundColor: colors.accentSoft },
   filterText: { fontFamily: fonts.body, fontSize: 13 },
+
+  // The panel a chip opens. Two ink rules and the ground: it is a drawer pulled
+  // out of the bar, not a card, so it takes the full width and has no shadow.
+  panelScrim: { backgroundColor: colors.scrimSoft },
+  panel: {
+    position: 'absolute', left: 0, right: 0, backgroundColor: colors.bg, paddingBottom: 14,
+    borderTopWidth: BORDER, borderBottomWidth: BORDER, borderColor: colors.line,
+  },
+  panelInner: { width: '100%', maxWidth: 1120, alignSelf: 'center' },
+  kicker: {
+    fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88,
+    textTransform: 'uppercase', color: colors.inkMuted,
+  },
   count: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, flexShrink: 0 },
 });
 
 export const HEADER = { top: HEADER_TOP, gutter: GUTTER };
-
-/**
- * The 2px rule the switch block closes with.
- *
- * `line`, not `ink`: in dark mode `ink` is the *type* colour, cream, and a
- * full-width cream band was the brightest thing on the screen (owner, 7 Sep
- * 2026: "the menu item line looks too bright"). `line` is ink on cream and a
- * warm mid-grey on ink, so the rule reads as a rule in both.
- */
-export const blockRule = { borderBottomWidth: BORDER, borderBottomColor: colors.line } as const;

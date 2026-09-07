@@ -6,7 +6,7 @@ import {
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
   Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode,
-  Eye, Upload, Image as ImageIcon, Gift, CreditCard,
+  Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
 } from 'lucide-react-native';
@@ -57,6 +57,9 @@ const ICONS = {
   booked: CircleCheck, full: Ban, locked: Lock, money: PoundSterling, grip: GripVertical, list: List, map: Map, info: Info, search: Search, edit: Pencil,
   // the invite page: what it looks like, and where its picture comes from
   preview: Eye, upload: Upload, picture: ImageIcon, gift: Gift, card: CreditCard,
+  // What a thing costs, on the filter line. `money` is the pound sign, which is
+  // a currency; this is the budget you are spending in it.
+  wallet: Wallet,
   // categories
   restaurant: Utensils, cafe: Coffee, pub: Beer, bar: Wine, attraction: Landmark, event: Ticket, hotel: BedDouble, place: MapPin,
   // What a place actually is, over the closed experience vocabulary

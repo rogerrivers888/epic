@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { TripSummary } from '../api';
 import { colors, fonts, type } from '../theme';
-import { CategoryStrip, ScreenTop, PairSwitch, TopControl, blockRule } from '../components/InspireHeader';
+import { CategoryStrip, MenuBar, ScreenTop, PairSwitch, TopControl } from '../components/InspireHeader';
 import { VenueThumb } from '../components/VenueThumb';
 import { StatusLine } from '../components/ui';
 // The name the household wrote is what a row says (1a: "Windsor Saturday",
@@ -15,9 +15,10 @@ import { tripTitle } from './tripName';
  * The Trips tab (trip rebuild, 7 Sep 2026, screen 1a).
  *
  * The head is the one every tab has now — the wordmark, and one control on the
- * right, which here is "+ New trip". Under it the switch block: **Day trips /
- * Holidays** in Archivo 800, the strip **Upcoming · Past · Ideas** sitting on
- * the block's 2px ink rule, and a count.
+ * right, which here is "+ New trip". Under it the menu bar Inspire draws
+ * (`MenuBar`, v2, 7 Sep 2026), edge to edge: **Day trips / Holidays** as two
+ * equal cells in Archivo 800, and **Upcoming · Past · Ideas** centred on the
+ * lime band beneath. Then a count.
  *
  * Then rows. No cards, no boxes: an 84px picture, three lines, and a 1px rule
  * on the 20px gutter — which is the pack's list everywhere else in the app.
@@ -122,10 +123,12 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
           <TopControl label="New trip" icon="add" onPress={onNew} accessibilityLabel="Start a new trip" />
         </ScreenTop>
 
-        <View style={[styles.block, blockRule]}>
+        {/* The same menu bar as Inspire, with this tab's two words in it: the
+            head is shared so that the tabs cannot drift apart. */}
+        <MenuBar>
           <PairSwitch value={span} options={SPANS} onPick={onSpan} />
           <CategoryStrip items={WHENS.map((w) => ({ key: w.key, label: w.label }))} value={when} onPick={(k) => onWhen(k as TripsWhen)} />
-        </View>
+        </MenuBar>
 
         <Text style={styles.count}>
           {count === 0
@@ -175,9 +178,6 @@ function TripRow({ trip, onPress }: { trip: TripSummary; onPress: () => void }) 
 const styles = StyleSheet.create({
   wide: { maxWidth: 860, alignSelf: 'center', width: '100%' },
   wideBody: { maxWidth: 860, alignSelf: 'center', width: '100%' },
-  // The switch and the strip are one block, closed by one 2px ink rule; the
-  // strip's selected marker lands on that rule (InspireHeader).
-  block: { marginTop: 20 },
   count: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, paddingHorizontal: 20, paddingTop: 14 },
 
   body: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },

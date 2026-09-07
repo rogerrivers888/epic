@@ -11,9 +11,9 @@ import { useViewport } from '../hooks/useViewport';
 import { firstName } from '../components/Faces';
 import { asFlag, asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
 import { paths, withQuery, MOODS, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
-import { CategoryStrip, FilterButton, FilterRow, InspireTop, ModeSwitch, SubStrip, blockRule } from '../components/InspireHeader';
+import { CategoryStrip, FilterButton, FilterPanel, FilterRow, InspireTop, MenuBar, ModeSwitch, SubStrip } from '../components/InspireHeader';
 import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow } from '../components/InspireBody';
-import { ChoiceSheet, TravelSheet, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
+import { ChoicePanel, TravelPanel, travelChipLabel, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
 import type { OpenTripOptions } from './PlanScreen';
 
 /**
@@ -276,6 +276,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   const attending = who.length ? new Set(who) : null;
   const setAttending = (next: Set<string> | null) => setWho(next && next.size !== members.length ? [...next] : []);
   const [panel, setPanel] = useState<Panel>(null);
+  /**
+   * How tall the head is, so a filter panel can hang off the bottom of it.
+   *
+   * Measured rather than worked out: the head is one band taller when a
+   * category is open, and a panel pinned to a guessed number would float over
+   * the sub-strip or leave a stripe of the list showing above it.
+   */
+  const [headH, setHeadH] = useState(0);
   const [travelBy, setTravelBy] = useQueryState<TravelMode>('by', 'drive', asOneOf(['drive', 'transit', 'walk'], 'drive'));
   // Food starts closer to home than a day out does: twenty minutes, not an hour.
   const [openNow, setOpenNow] = useQueryState<boolean>('open', false, asFlag);
@@ -387,6 +395,15 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   useEffect(() => { void load(); }, [load]);
 
   const placeName = shortPlace(pool?.place.locality ?? centre?.locality ?? centre?.label);
+  /**
+   * What the first chip and the panel's field call where we are looking.
+   *
+   * `fromHere` is the browser's fix rather than a town somebody typed, so it
+   * says so: "Up to 1 hr from near Egham" is honest about a location that is
+   * accurate to a few streets. Empty when nowhere is set at all, and the chip
+   * then falls back to "Up to 1 hr drive" with no origin claimed.
+   */
+  const whereName = centre ? `${fromHere ? 'near ' : ''}${placeName}` : '';
 
   // Everything the sources called a kind of place here, for the kinds panel:
   // the list is what is actually in this pool, so it is never a menu of
@@ -688,40 +705,47 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
         {/* The head of the screen (8a/8b/8d): who and where, which half, which
             category, and how far. Sticky, because the strip is how you move
             around this tab and it should not scroll away from you. */}
-        <View style={styles.header}>
-          <InspireTop
-            where={chosen ? `${fromHere ? 'Near ' : ''}${shortPlace(chosen.locality ?? chosen.label)}` : placeName || 'Where should we go?'}
-            onWhere={() => navigate(paths.inspireSearch() + hereQuery())}
-          />
-          <View style={styles.block}>
+        <View style={styles.header} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
+          <InspireTop />
+          <MenuBar>
             <ModeSwitch mode={mode} onMode={(m) => goTo(m, null)} />
             <CategoryStrip
               items={stripItems}
               value={pick ?? 'all'}
               onPick={(k) => goTo(mode, k === 'all' ? null : k)}
             />
-          </View>
-          {/* The drawers inside an open Activities category (8b). Food has no
-              sub-strip: a cuisine is already the narrowest thing here. */}
-          {mode === 'activities' && pick && (drawersFor(pick).length > 0) ? (
-            <SubStrip
-              items={drawersFor(pick)}
-              value={within}
-              onPick={setWithin}
-              allLabel={`All ${label(pick).toLowerCase()}`}
-            />
-          ) : null}
+            {/* The drawers inside an open Activities category (8b), inside the
+                bar rather than under it: the paler band is the third field of
+                the same block. Food has no sub-strip - a cuisine is already the
+                narrowest thing here. */}
+            {mode === 'activities' && pick && (drawersFor(pick).length > 0) ? (
+              <SubStrip
+                key={pick}
+                items={drawersFor(pick)}
+                value={within}
+                onPick={setWithin}
+                allLabel={`All ${label(pick).toLowerCase()}`}
+              />
+            ) : null}
+          </MenuBar>
           <FilterRow count={pick ? `${listed.length} place${listed.length === 1 ? '' : 's'}` : null}>
-            {/* Lit when it is doing something out of the ordinary, so the
-                reason a list is short is visible before the list is empty. */}
+            {/* The first chip carries both the town and the range (v2): the
+                where-box has left the top row, and "20 minutes" is not a fact
+                until it says twenty minutes from what. */}
             <FilterButton
               icon={travelBy === 'walk' ? 'walking' : travelBy === 'transit' ? 'transit' : 'driving'}
-              strong
               narrowed={travelBy !== 'drive'}
-              label={travelLabel(travelBy, cap as TravelMinutes)}
+              open={panel === 'travel'}
+              label={travelChipLabel(travelBy, cap as TravelMinutes, whereName)}
               onPress={() => setPanel(panel === 'travel' ? null : 'travel')}
             />
-            <FilterButton narrowed={budget !== 'all'} label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'} onPress={() => setPanel(panel === 'budget' ? null : 'budget')} />
+            <FilterButton
+              icon="wallet"
+              narrowed={budget !== 'all'}
+              open={panel === 'budget'}
+              label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'}
+              onPress={() => setPanel(panel === 'budget' ? null : 'budget')}
+            />
             {mode === 'food' ? <FilterButton toggle on={openNow} label="Open now" onPress={() => setOpenNow(!openNow)} /> : null}
           </FilterRow>
         </View>
@@ -844,39 +868,50 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
           ) : null}
         </View>
       </ScrollView>
-      {/* 8c: how far, as a sheet over the screen rather than a panel inside it.
-          The counts are what make it a decision instead of a guess. */}
-      {/* Budget, on the same pattern as the travel sheet (8c). It was a button
-          that opened nothing at all. The counts matter more here than they do
+      {/* v2: the filters open *under* the line that owns them rather than up
+          from the bottom of the screen, so the list being filtered stays in
+          view behind a light veil while it is being changed. */}
+      {panel === 'travel' ? (
+        <FilterPanel top={headH} onClose={() => setPanel(null)}>
+          <TravelPanel
+            from={whereName || 'Where should we go?'}
+            mode={travelBy}
+            minutes={cap as TravelMinutes}
+            counts={countAt}
+            total={countAt(cap as TravelMinutes)}
+            onEditFrom={() => { setPanel(null); navigate(paths.inspireSearch() + hereQuery()); }}
+            // Only offered where the browser will answer; a dead link to a
+            // permission that was refused is worse than no link.
+            onHere={me.supported ? () => { setPanel(null); void useHereNow(); } : null}
+            // Clearing the town falls back to the household's home, which is
+            // what `centre` does when nobody has said anywhere else.
+            onHome={home ? () => setWhere(null, null) : null}
+            homeLabel="Home"
+            atHome={!chosen && !!home}
+            onMode={setTravelBy}
+            onMinutes={(m) => setCap(m)}
+            onDone={() => setPanel(null)}
+          />
+        </FilterPanel>
+      ) : null}
+      {/* Budget on the same pattern. The counts matter more here than they do
           for travel: almost nothing in the atlas carries a price, so a band
           without them would empty the screen with no explanation. */}
       {panel === 'budget' ? (
-        <ChoiceSheet
-          title="What are we spending?"
-          sub={pricesKnown ? `Where a price is known near ${placeName}.` : `Nothing around ${placeName} has been priced yet, so only Any has anything in it.`}
-          options={BUDGETS.map((b) => ({
-            key: b.key,
-            label: b.label,
-            count: b.max == null
-              ? inMode.length
-              : inMode.filter((i) => i.priceLevel != null && i.priceLevel <= (b.max as number)).length,
-          }))}
-          value={budget}
-          onPick={(k) => { setBudget(k); setPanel(null); }}
-          onClose={() => setPanel(null)}
-        />
-      ) : null}
-      {panel === 'travel' ? (
-        <TravelSheet
-          from={placeName}
-          mode={travelBy}
-          minutes={cap as TravelMinutes}
-          counts={countAt}
-          total={countAt(cap as TravelMinutes)}
-          onMode={setTravelBy}
-          onMinutes={(m) => setCap(m)}
-          onClose={() => setPanel(null)}
-        />
+        <FilterPanel top={headH} onClose={() => setPanel(null)}>
+          <ChoicePanel
+            sub={pricesKnown ? `Where a price is known near ${placeName}.` : `Nothing around ${placeName} has been priced yet, so only Any has anything in it.`}
+            options={BUDGETS.map((b) => ({
+              key: b.key,
+              label: b.label,
+              count: b.max == null
+                ? inMode.length
+                : inMode.filter((i) => i.priceLevel != null && i.priceLevel <= (b.max as number)).length,
+            }))}
+            value={budget}
+            onPick={(k) => { setBudget(k); setPanel(null); }}
+          />
+        </FilterPanel>
       ) : null}
       <VenueDrawer
         item={drawer}
@@ -1108,7 +1143,6 @@ const styles = StyleSheet.create({
   scroll: { paddingBottom: spacing.xxl },
   // The head of the tab: cream, and carrying the block rule that closes it.
   header: { backgroundColor: colors.bg },
-  block: { ...blockRule },
   top: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, backgroundColor: colors.bg },
   topWide: { maxWidth: 1120, width: '100%', alignSelf: 'center' },
   column: { gap: spacing.md },
