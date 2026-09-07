@@ -79,14 +79,25 @@ export default function App() {
  * iPhone"). What must stay clear of them is the sheet and the tab bar, and each
  * of those keeps itself clear.
  */
-function Edges({ children, style, bleed }: { children: React.ReactNode; style?: any; bleed?: boolean }) {
+function Edges({ children, style, bleed, ownFooter }: { children: React.ReactNode; style?: any; bleed?: boolean; ownFooter?: boolean }) {
   const Box: any = bleed ? View : SafeAreaView;
   // The app draws under the status bar (index.html), so a screen that is not
   // full-bleed puts the inset back on rather than letting the wordmark sit
   // under the clock. `env()` is nought in a browser tab and only bites in the
   // installed app, which is the only place the status bar is ours to use.
+  //
+  // The *bottom* inset is different, and getting it wrong here is what left a
+  // band of empty screen under the tab bar (owner, 7 Sep 2026: "the Inspire,
+  // Places and Trips are about 1.5 cm from the bottom of the screen"). Padding
+  // the whole app stops everything short of the home indicator, background and
+  // all. When a screen carries its own bottom chrome the bar absorbs the inset
+  // instead, so its fill and its rule run to the physical edge and only the
+  // labels sit clear of the indicator.
   const inset = !bleed && Platform.OS === 'web'
-    ? { paddingTop: 'env(safe-area-inset-top)' as any, paddingBottom: 'env(safe-area-inset-bottom)' as any }
+    ? {
+      paddingTop: 'env(safe-area-inset-top)' as any,
+      ...(ownFooter ? null : { paddingBottom: 'env(safe-area-inset-bottom)' as any }),
+    }
     : null;
   return <Box style={[style, inset]}>{children}</Box>;
 }
@@ -290,6 +301,8 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
    * over it rather than under it. A trip is one, because the trip is a map now.
    */
   const fullBleed = !desktop && isFullBleed(route);
+  /** Whether the tab bar is on screen, and therefore what carries the bottom inset. */
+  const hasTabs = !desktop && !isImmersive(route);
   // A screen that is all form takes the tab bar's strip too.
   const immersive = !desktop && isImmersive(route);
   /**
@@ -493,7 +506,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
   // between desktop and phone (window resize or the Web/Mobile toggle) keeps
   // whatever is open on the screen — the trip you were looking at, a search.
   return (
-    <Edges style={styles.root} bleed={fullBleed}>
+    <Edges style={styles.root} bleed={fullBleed} ownFooter={hasTabs}>
       <StatusBar style="dark" />
       <View style={desktop ? styles.desktop : styles.fill}>
         {desktop ? (
@@ -535,7 +548,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
               address). Owner, 7 Sep 2026: "I get a blank page". */}
           <ErrorBoundary resetKey={here}>{screen}</ErrorBoundary>
         </View>
-        {!desktop && !immersive ? (
+        {hasTabs ? (
           // On a full-bleed screen the tab bar floats over the map instead of
           // taking a strip off the bottom of it, so the map really does reach
           // every edge (owner, 6 Sep 2026).
@@ -665,7 +678,13 @@ const styles = StyleSheet.create({
   banner: { padding: spacing.sm, backgroundColor: colors.accentSoft, alignItems: 'center' },
   bannerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   bannerDown: { backgroundColor: colors.overrunSoft },
-  tabs: { flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar, paddingBottom: 4 },
+  // The design's own 28px, or the home indicator plus a little, whichever is
+  // the larger — so the bar looks the same in a browser tab as it does in the
+  // installed app, and never has the indicator sitting on its labels.
+  tabs: {
+    flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar,
+    paddingBottom: (Platform.OS === 'web' ? 'max(28px, calc(env(safe-area-inset-bottom) + 8px))' : 28) as any,
+  },
   // Floating over the map, and clear of the home indicator on a phone that has
   // one — the map runs under the indicator, the labels must not.
   tabsOver: {

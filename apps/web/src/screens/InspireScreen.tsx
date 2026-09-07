@@ -132,7 +132,10 @@ type Panel = null | 'travel' | 'kind' | 'who' | 'outing' | 'budget';
  * which page it is — and only what differs from the default is written down, so
  * a screen nobody has touched stays at `/inspire`.
  */
-const KEYS = ['at', 'where', 'locality', 'from', 'mood', 'travel', 'outing', 'budget', 'kinds', 'who'];
+// What this tab remembers between visits when the address itself is silent.
+// `place` and `within` are deliberately absent: a drawer and a sub-category are
+// not a way of being set, they are something open on one page.
+const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'by', 'outing', 'budget', 'open', 'kinds', 'who'];
 
 /** "51.48160,-0.61130" — enough to look around the same town, and no more. */
 const placeFromQuery = (q: URLSearchParams): Place | null => {
@@ -269,7 +272,28 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
     write: (v: string) => (v && v !== 'all' ? v : null),
   });
   const goTo = (m: 'activities' | 'food', p: string | null) => navigate(paths.inspireMode(m, p) + hereQuery());
-  const hereQuery = () => { const q = query.toString(); return q ? `?${q}` : ''; };
+  /**
+   * What travels with you when you move around this tab, and what does not.
+   *
+   * Where you are looking and how you are filtering it describe *you*, so they
+   * follow: the town, the travel ceiling, the budget, Open now. Two things
+   * belong to the page you are leaving and must be dropped, or they arrive
+   * somewhere they mean nothing (owner, 7 Sep 2026):
+   *
+   *   · `place` is the drawer open *over* a page. Carried across, switching to
+   *     Food kept Cumberland Lodge open above the restaurants, and tapping a
+   *     cuisine looked like tapping a place — it re-opened the same drawer, menu
+   *     tabs and all, over the new list.
+   *   · `within` is a drawer inside one category. Museums means nothing in
+   *     Sport, and a stale one filters the new list down to nothing.
+   */
+  const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'budget', 'open'];
+  const hereQuery = () => {
+    const kept = new URLSearchParams();
+    for (const k of CARRIED) { const v = query.get(k); if (v != null) kept.set(k, v); }
+    const q = kept.toString();
+    return q ? `?${q}` : '';
+  };
   /** One address out of a path and a change to the query, for the taps that do both at once. */
   const here = (base: string, patch: Record<string, string | null>) => withQuery(href, patch, base);
 
