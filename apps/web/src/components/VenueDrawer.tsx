@@ -568,7 +568,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                       here: this tab is the detail behind it, and one screen
                       with two ways to open the same thing is one too many. */}
                   {been ? capture : null}
-                  {eating ? <PastMeals ctl={ctl} /> : null}
+                  {eating ? <PastMeals ctl={ctl} onRate={() => setTab('order')} /> : null}
                   {ours}
                   {reviews.length ? <Text style={type.h3}>What other people say</Text> : null}
                   {reviews.map((r, i) => (

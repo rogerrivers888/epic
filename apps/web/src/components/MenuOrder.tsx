@@ -207,6 +207,8 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   const [seating, setSeating] = useState(false);
   // Dishes on the order that the held menu does not list (see `Carried`).
   const [carried, setCarried] = useState<Carried>({});
+  // Tonight's order, held aside while an older meal is being rated.
+  const [tonight, setTonight] = useState<Order | null>(null);
   // The basket, so a tap is visibly a thing that happened (owner, 7 Sep 2026:
   // "maybe I could see it going into a basket or something, so I know it's
   // actually worked"). `added` is the line just put in, said once and faded.
@@ -627,6 +629,9 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
    * somebody who was not at the table when the phone went round gets their go.
    */
   function rateThatMeal(meal: Order) {
+    // Whatever was being written for tonight, so that going back to rating an
+    // old meal is not a way to lose it.
+    setTonight(order?.visitId ? null : order);
     setOrder(meal);
     setGuests(meal.guests.map((g) => ({ ref: g.ref, name: g.name })));
     setMarks(marksOf(meal));
@@ -641,6 +646,19 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   function finishRating() {
     setPhase('saved');
     api.orderHistory(venueRef).then((h) => setHistory(h.orders)).catch(() => {});
+  }
+
+  /** Back to what was being ordered before an old meal was opened to rate it. */
+  function backToTonight() {
+    if (!tonight) return;
+    setOrder(tonight);
+    const read = picksOf(tonight);
+    setPicks(read.picks);
+    setCarried(read.carried);
+    setGuests(tonight.guests.map((g) => ({ ref: g.ref, name: g.name })));
+    setTonight(null);
+    setPhase('order');
+    setTurn(null);
   }
 
   /**
@@ -712,7 +730,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     peek, setPeek, added, chosen, total, dropLine, order, resumed, marks, setMarks, markOf, setMark, busy, staff, setStaff, phase, setPhase,
     noting, setNoting, asked, groups, allergenLines, dietLines, history, again, setAgain,
     turn, setTurn, tookATurn, raters, platesFor, learned, handTo, finishTurn, finishRating, rateTheMeal, rateThatMeal,
-    dining, setDining,
+    dining, setDining, tonight, backToTonight,
     readTheMenu, toTheOrder, removeFromOrder, noteOnOrder, startAgain, whatIsThis, orderAgain,
   };
 }
@@ -879,7 +897,14 @@ function RatingBoard({ ctl, footer }: { ctl: MenuOrderCtl; footer?: React.ReactN
         {footer}
       </ScrollView>
       <View style={styles.bar}>
-        <Button label="The order" icon="back" kind="ghost" style={styles.barBtn} onPress={() => ctl.setPhase('order')} disabled={busy} />
+        <Button
+          label={ctl.tonight ? "Tonight's order" : 'The order'}
+          icon="back"
+          kind="ghost"
+          style={styles.barBtn}
+          onPress={() => (ctl.tonight ? ctl.backToTonight() : ctl.setPhase('order'))}
+          disabled={busy}
+        />
         <View style={{ flex: 1, alignItems: 'center' }}>
           {left ? <Text style={type.tiny}>{left} still to go</Text> : null}
         </View>
@@ -1553,6 +1578,9 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
             kind={yetToGo.length ? 'primary' : 'secondary'}
             onPress={() => { ctl.setTurn(null); ctl.setPhase('rate'); }}
           />
+          {/* An old meal was opened to be rated while tonight's was being
+              written: this is the way back to it. */}
+          {ctl.tonight ? <Button label="Back to tonight's order" icon="back" kind="secondary" onPress={ctl.backToTonight} /> : null}
         </Wrap>
         {footer}
       </ScrollView>
@@ -1683,7 +1711,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
  * really want to see what they ordered… what each person loved"). It is a
  * record, not a form: the stars are given once, on the order, after the meal.
  */
-export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
+export function PastMeals({ ctl, onRate }: { ctl: MenuOrderCtl; onRate?: () => void }) {
   if (!ctl.history.length) return null;
   return (
     <View style={{ gap: spacing.sm }}>
@@ -1694,7 +1722,18 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
         const stars = meal.items.flatMap((i) => i.ratings ?? []).filter((r) => r.score).length;
         return (
           <View key={meal.id} style={{ gap: 4 }}>
-            <Text style={styles.mealWhen}>{meal.visitedOn ? day(meal.visitedOn) : 'A visit'}{stars ? ` · ${stars} starred` : ''}</Text>
+            <Row style={{ alignItems: 'center' }}>
+              <Text style={[styles.mealWhen, { flex: 1 }]}>{meal.visitedOn ? day(meal.visitedOn) : 'A visit'}{stars ? ` · ${stars} starred` : ''}</Text>
+              {/* Every meal here can still be starred, by whoever has not yet
+                  (owner, 7 Sep 2026) — including one from months ago. */}
+              {onRate ? (
+                <Chip
+                  label={stars ? 'Rate more' : 'Rate the meal'}
+                  icon="favourite"
+                  onPress={() => { ctl.rateThatMeal(meal); onRate(); }}
+                />
+              ) : null}
+            </Row>
             {meal.items.map((i) => {
               const rs = (i.ratings ?? []).filter((r) => r.score || r.take === 'not_for_me');
               const who = whoHad(i);
