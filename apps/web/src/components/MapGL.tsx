@@ -57,6 +57,28 @@ export type MapMarker = {
 /** The route drawn under the markers: home → destination, and back. */
 export type MapRoute = { id: string; points: Point[]; dashed?: boolean };
 
+/**
+ * The ground a search covers, shaded on the map under the pins — and, while the
+ * sources are answering, the lens going over it (owner, 7 Sep 2026: "a shaded
+ * area on the real map. A magnifying glass goes over the shaded area and
+ * illuminates the bit that it's going over, so you can see that it's searching
+ * along the route").
+ *
+ * The shape comes from `searchGround.ts`, which is the same arithmetic the
+ * endpoint filters with, so what is shaded is the ground that is actually
+ * searched and widening the detour visibly widens it.
+ */
+export type MapShade = {
+  /** The outline of the ground, closed, in lng/lat. */
+  ring: Point[];
+  /** The line the lens travels: the road, or one point to circle around. */
+  spine: Point[];
+  /** How far off that line the search reaches, in km — the lens's size and its wander. */
+  halfWidthKm: number;
+  /** True while the search is running: the lens sweeps, and the shade opens under it. */
+  searching: boolean;
+};
+
 export type MapGLProps = {
   markers: MapMarker[];
   routes?: MapRoute[];
@@ -76,6 +98,12 @@ export type MapGLProps = {
   fitToMarkers?: boolean;
   /** Centre on one marker without refitting everything. */
   focusId?: string | null;
+  /**
+   * The ground the current search covers. Drawn under the route and the pins,
+   * so the band is scenery the day is read against rather than something on top
+   * of it. Null on the trip itself, where nothing is being searched.
+   */
+  shade?: MapShade | null;
   onMapPress?: () => void;
   dark?: boolean;
 };

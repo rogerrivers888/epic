@@ -28,7 +28,7 @@
 
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { api, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
+import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
 import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
@@ -38,6 +38,7 @@ import { VenueThumb } from '../components/VenueThumb';
 import { Avatar } from '../components/Faces';
 import { BottomSheet, Detent, detentHeights } from '../components/BottomSheet';
 import { MapGL, MapMarker, MapRoute } from '../components/MapGL';
+import { searchGround } from '../components/searchGround';
 import { GroupPanel } from '../components/GroupPanel';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { asOneOf, asText, useQueryState, useRouter } from '../router';
@@ -71,15 +72,16 @@ const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string;
 /** The height of the tab bar the shell draws under this screen. */
 const TABBAR = 70;
 
-export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu, onSection }: {
+export function TripMapScreen({ d, section, household, onBack, onChanged, onSection, onDelete }: {
   d: TripDetail;
   /** Which view the sheet is showing: the day, the trip's places, or the group. */
   section: TripSection;
   household: HouseholdResponse | null;
   onBack: () => void;
   onChanged: () => Promise<void>;
-  onMenu: () => void;
   onSection: (s: TripSection) => void;
+  /** The delete control, passed in so the sheet does not own the confirming. */
+  onDelete: React.ReactNode;
 }) {
   const { width, height } = useViewport();
   const wide = width >= 900;
@@ -87,6 +89,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
   const { trip, days, shortlist, attendees } = d;
 
   const [pill, setPill] = useQueryState<Pill | null>('pill', null, asOneOf(['activities', 'food', 'stay', 'shortlist'] as const, null));
+  /**
+   * The household's standing answer to "what are you looking for" (owner,
+   * 6 Sep 2026: "I never search for pubs or bakeries. I just want to find
+   * restaurants"). It is what the browse *opens* on; the address always wins,
+   * so a shared link shows what it says and not somebody else's habit.
+   */
+  const browseDefaults = household?.household?.browse ?? null;
   // How you want to stay, and how far you will go. All of it in the address, so
   // "the beds by a station under a ten-minute walk" is a page somebody can send.
   const [placement, setPlacement] = useQueryState<StayPlacement>('where', 'plans', asOneOf(['plans', 'town', 'station'] as const, 'plans'));
@@ -131,6 +140,11 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
   /** What was typed into "search along the route", and which category was picked. */
   const [q, setQ] = useQueryState<string | null>('q', null, asText);
   const [kindOf, setKindOf] = useQueryState<string | null>('type', null, asText);
+  /**
+   * The kitchen, which is a different question from the kind of place — "an
+   * Italian restaurant" is two answers, and one control could only take one.
+   */
+  const [cuisine, setCuisine] = useQueryState<string | null>('cuisine', null, asText);
   const [searching, setSearching] = useState(false);
   const maxDetourMin = Number(detour) || 15;
 
@@ -151,8 +165,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
   useEffect(() => { api.tripPlaces(trip.id).then(setPlaces).catch(() => null); }, [trip.id, shortlist.length, days.length]);
 
   // Browse: what is along the way. One fetch per (pill, scope, detour).
-  const [along, setAlong] = useState<{ loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number }>(
-    { loading: false, places: [], counts: { route: 0 }, error: null, degraded: [], hasRoute: false, beyond: 0 },
+  const [along, setAlong] = useState<{ loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number; corridorKm: number | null }>(
+    { loading: false, places: [], counts: { route: 0 }, error: null, degraded: [], hasRoute: false, beyond: 0, corridorKm: null },
   );
   /**
    * One search per pill, scope and distance — and **not** per type.
@@ -176,10 +190,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
     // The list that is on screen is the answer to the last question, so it
     // goes when the question changes: Activities showed the food it had just
     // been showing, for as long as the search took (owner, 6 Sep 2026).
-    setAlong((a) => ({ ...a, places: [], beyond: 0, loading: true, error: null }));
+    // The band on the map goes with it: it is drawn from this screen's reading
+    // of the corridor until the answer says how wide it really was.
+    setAlong((a) => ({ ...a, places: [], beyond: 0, corridorKm: null, hasRoute: trip.destination?.lat != null, loading: true, error: null }));
     api.tripAlong(trip.id, { kind: pill === 'food' ? 'food' : 'things', maxDetourMin, around: around ?? undefined, aroundName: aroundName ?? undefined, q: q || undefined })
-      .then((r) => setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0 }))
-      .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0 }));
+      .then((r) => setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null }))
+      .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null }));
   }, [alongKey, trip.id, pill, around, aroundName, maxDetourMin, q]);
 
   /**
@@ -187,9 +203,24 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
    * pool, so filtering in the list alone would leave twenty-five pins over a
    * list of five.
    */
+  /**
+   * The filter that is actually in force.
+   *
+   * Nothing in the address means "whatever this household always wants"; the
+   * word `any` means "they have said, and what they said was everything". The
+   * two have to be different, or clearing a filter would be undone by the
+   * default the moment the screen re-read it — and a link somebody sends would
+   * arrive wearing the recipient's habits instead of the sender's search.
+   */
+  const forKind = pill === 'food' ? 'food' : 'things';
+  const kind = kindOf ?? browseDefaults?.[forKind]?.type ?? null;
+  const kitchenOf = cuisine ?? (forKind === 'food' ? browseDefaults?.food?.cuisine ?? null : null);
+  const kindNow = kind === 'any' ? null : kind;
+  const cuisineNow = kitchenOf === 'any' ? null : kitchenOf;
+
   const shownAlong = useMemo(
-    () => (kindOf ? along.places.filter((p) => isKind(p, kindOf)) : along.places),
-    [along.places, kindOf],
+    () => along.places.filter((p) => (!kindNow || isKind(p, kindNow)) && (!cuisineNow || isKind(p, cuisineNow))),
+    [along.places, kindNow, cuisineNow],
   );
 
   // Somewhere to sleep, ranked the way the criteria asked. Only fetched when
@@ -379,6 +410,42 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
   }, [start?.lat, start?.lng, dest?.lat, dest?.lng]);
 
   /**
+   * The ground a browse covers, shaded on the map (owner, 7 Sep 2026: "I'd like
+   * to see a shaded area on the real map… the area that you've said you're
+   * prepared to travel 15 minutes off route").
+   *
+   * It is on screen the moment a pill is lit and stays there while the list is,
+   * because the detour toggle is *in* that list and moving it from 15 to 30 has
+   * to be something you can see happen. While the sources are answering the map
+   * sweeps it with a glass; when they have answered the band is what the pins
+   * are standing in.
+   *
+   * The two ends are the endpoint's, not the map's: `GET /:id/along` starts
+   * from the base if there is one and only treats an actual destination as a
+   * destination, where the pins use the base as the far end of a holiday. A
+   * band drawn from the map's pair would be shading ground the search never
+   * looked at.
+   */
+  const ground = useMemo(() => {
+    if (pill !== 'food' && pill !== 'activities') return null;
+    const from = trip.base?.lat != null ? trip.base : trip.origin;
+    if (from?.lat == null) return null;
+    const to = trip.destination?.lat != null ? trip.destination : null;
+    const at = (() => {
+      const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(around ?? '');
+      return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
+    })();
+    return searchGround({
+      origin: { lat: from.lat as number, lng: from.lng as number },
+      destination: to ? { lat: to.lat as number, lng: to.lng as number } : null,
+      around: at,
+      mode: trip.travelMode,
+      maxDetourMin,
+      corridorKm: along.corridorKm,
+    });
+  }, [pill, trip.base?.lat, trip.base?.lng, trip.origin?.lat, trip.origin?.lng, trip.destination?.lat, trip.destination?.lng, trip.travelMode, around, maxDetourMin, along.corridorKm]);
+
+  /**
    * What the chip on the map says. Browsing, it is what came back; on the trip
    * itself it is the drive there and what the stops have added to it.
    */
@@ -520,15 +587,23 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
           })()}
         </Text>
       </View>
+      {/*
+        The ⋯ is gone (owner, 6 Sep 2026): "I don't really understand why we
+        have an ellipsis when the options of the ellipsis are: Find things to do
+        (which is the activities that are on the map), Shortlist (also on the
+        map), Plan the day (which is the screen that you're already on)."
+
+        He is right — every one of them was already a pill or the sheet itself.
+        Stay went the same way when the banner and the Stay pill arrived. The
+        one thing left behind it was Data, which is an admin diagnostic and
+        keeps its address (`/trips/<id>/data`) without needing a button on a
+        household's screen.
+      */}
       {pill ? (
         <Pressable onPress={() => setPill(null)} style={styles.round} accessibilityRole="button" accessibilityLabel="Back to the trip">
           <Icon name="trips" size={18} color={colors.ink} />
         </Pressable>
-      ) : (
-        <Pressable onPress={onMenu} style={styles.round} accessibilityRole="button" accessibilityLabel="More">
-          <Icon name="menu" size={18} color={colors.ink} />
-        </Pressable>
-      )}
+      ) : null}
     </View>
   );
 
@@ -575,8 +650,20 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
       selected={selected}
       onSelect={(ref) => setSelected(ref)}
       onOpen={openPlace}
-      kindOf={kindOf}
-      onKind={setKindOf}
+      kindOf={kindNow}
+      onKind={(k) => setKindOf(k ?? 'any')}
+      cuisine={cuisineNow}
+      onCuisine={(c) => setCuisine(c ?? 'any')}
+      onAlways={async (next) => {
+        try {
+          await api.updateHousehold({ browse: next });
+          await onChanged();
+        } catch (e: any) { setError(e.message); }
+      }}
+      isDefault={
+        (browseDefaults?.[forKind]?.type ?? null) === kindNow
+        && (forKind !== 'food' || (browseDefaults?.food?.cuisine ?? null) === cuisineNow)
+      }
       onAdd={setAdding}
       onShortlist={shortlistIt}
     />
@@ -593,7 +680,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
       </View>
     ) : (
     <SheetTabs section={section} counts={places?.counts.all ?? 0} onSection={onSection}>
-      {section === 'places' ? <TripPlacesList data={places} onSelect={(ref) => { setSelected(ref); setDetent('half'); }} />
+      {section === 'places' ? <TripPlacesList data={places} onSelect={(ref) => { setSelected(ref); setDetent('half'); }} onDelete={onDelete} />
         : (
             <>
               {/* The day strip, on a holiday only — a day out has one day and a
@@ -655,6 +742,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onMenu
         fitKey={`${pill ?? 'home'}:${markers.length}`}
         fitToMarkers={pill != null}
         focusId={selected}
+        shade={ground ? { ...ground, searching: along.loading } : null}
         // A tap on the map clears the chosen pin and nothing else. It used to
         // shrink the sheet too, which read well and was in fact the bug that
         // stopped the sheet opening at all: a drag that ends over the map makes
@@ -943,9 +1031,20 @@ function Beat({ time, icon, title, detail, last }: { time: string | null; icon: 
   );
 }
 
-function TripPlacesList({ data, onSelect }: { data: { places: TripPlace[] } | null; onSelect: (ref: string) => void }) {
+function TripPlacesList({ data, onSelect, onDelete }: {
+  data: { places: TripPlace[] } | null; onSelect: (ref: string) => void;
+  /** Getting rid of the whole trip — see the note where it is drawn. */
+  onDelete: React.ReactNode;
+}) {
   if (!data) return <Text style={[type.small, { padding: spacing.lg }]}>Loading…</Text>;
-  if (!data.places.length) return <View style={{ padding: spacing.lg }}><Card><Text style={type.small}>Nothing on this trip yet. Pick a pill above and search along the route.</Text></Card></View>;
+  if (!data.places.length) {
+    return (
+      <View style={{ padding: spacing.lg, gap: 20 }}>
+        <Card><Text style={type.small}>Nothing on this trip yet. Pick a pill above and search along the route.</Text></Card>
+        <View style={styles.dangerFoot}>{onDelete}</View>
+      </View>
+    );
+  }
   return (
     <View style={{ paddingHorizontal: 16 }}>
       {data.places.map((p) => (
@@ -960,6 +1059,15 @@ function TripPlacesList({ data, onSelect }: { data: { places: TripPlace[] } | nu
           <Icon name={p.scheduled ? 'booked' : 'shortlisted'} size={17} color={p.scheduled ? colors.accent : colors.inkMuted} />
         </Pressable>
       ))}
+      {/*
+        Getting rid of the trip, at the foot of the page that lists everything
+        in it. It was behind the ⋯ the owner asked to remove (6 Sep 2026), and
+        everything else behind that menu was already a pill on the map — this
+        was the one thing that would have been left with no way to it. The foot
+        of a list is where a destructive thing belongs: you have to have
+        scrolled past the trip to reach it.
+      */}
+      <View style={styles.dangerFoot}>{onDelete}</View>
     </View>
   );
 }
@@ -970,7 +1078,7 @@ function TripPlacesList({ data, onSelect }: { data: { places: TripPlace[] } | nu
 
 const DETOURS = [5, 10, 15, 30];
 
-function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
+function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
   pill: Pill;
   along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number };
   shortlisted: TripPlace[];
@@ -992,6 +1100,12 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
   onShortlist: (p: TripAlongPlace) => Promise<void>;
   kindOf: string | null;
   onKind: (k: string | null) => void;
+  /** The kitchen, a second and independent narrowing of a food search. */
+  cuisine: string | null;
+  onCuisine: (c: string | null) => void;
+  /** Make what is on screen the standing answer, or take it back. */
+  onAlways: (next: BrowseDefaultsPatch) => Promise<void>;
+  isDefault: boolean;
   /** The pool with the type applied — the same list the map is pinning. */
   shown: TripAlongPlace[];
 }) {
@@ -1011,6 +1125,21 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
       .filter((x) => x.count)
       .sort((a, b) => b.count - a.count);
   }, [along.places, pill]);
+
+  /**
+   * Which kitchens are along here — counted *inside* the kind of place already
+   * chosen, so "Restaurant · Italian" says how many Italian restaurants there
+   * are rather than how many Italian anythings. A bakery has no kitchen to
+   * offer, which is why the list is empty for one and the section folds away.
+   */
+  const cuisines = useMemo(() => {
+    if (pill !== 'food') return [];
+    const pool = kindOf ? along.places.filter((p) => isKind(p, kindOf)) : along.places;
+    return CUISINES
+      .map((c) => ({ kind: c, count: pool.filter((p) => isKind(p, c)).length }))
+      .filter((x) => x.count)
+      .sort((a, b) => b.count - a.count);
+  }, [along.places, kindOf, pill]);
 
   if (pill === 'shortlist') {
     return (
@@ -1083,13 +1212,20 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
           show the minutes they had chosen. */}
       <View style={styles.chips}>
         <Chip
-          label={anchorLabel ? `Within ${maxDetourMin} min` : `${along.hasRoute ? 'Along the route' : 'Within'} · ${maxDetourMin} min`}
+          label={`Max detour · ${maxDetourMin} min`}
           on
           chevron
           onPress={() => setOpenDetour((v) => !v)}
         />
         {anchorLabel ? <Chip label={`Around ${anchorLabel}`} on onClear={onClearAnchor} /> : null}
-        <Chip label={kindOf ? `${cap(kindOf)} · ${shown.length}` : 'Type'} on={!!kindOf} chevron onPress={() => setOpenKind((v) => !v)} />
+        <Chip
+          label={kindOf || cuisine
+            ? `${[cuisine && cap(cuisine), kindOf && cap(kindOf)].filter(Boolean).join(' ')} · ${shown.length}`
+            : 'Type'}
+          on={!!(kindOf || cuisine)}
+          chevron
+          onPress={() => setOpenKind((v) => !v)}
+        />
       </View>
 
       {openKind ? (
@@ -1101,13 +1237,13 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
         */
         <View style={styles.dropdown}>
           <Text style={styles.kicker}>{pill === 'food' ? 'Food & drink' : 'Things to do'}{along.hasRoute ? ' · along the route' : ' · nearby'}</Text>
-          <Pressable onPress={() => { onKind(null); setOpenKind(false); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf }}>
+          <Pressable onPress={() => { onKind(null); onCuisine(null); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf && !cuisine }}>
             <Text style={[type.body, { flex: 1 }]}>Everything</Text>
             <Text style={[type.small, { marginRight: 8 }]}>{along.places.length}</Text>
-            {!kindOf ? <Icon name="check" size={16} color={colors.accent} /> : null}
+            {!kindOf && !cuisine ? <Icon name="check" size={16} color={colors.accent} /> : null}
           </Pressable>
           {kinds.length ? kinds.map(({ kind, count }) => (
-            <Pressable key={kind} onPress={() => { onKind(kind); setOpenKind(false); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: kindOf === kind }}>
+            <Pressable key={kind} onPress={() => onKind(kindOf === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: kindOf === kind }}>
               <Text style={[type.body, { flex: 1 }]}>{cap(kind)}</Text>
               <Text style={[type.small, { marginRight: 8 }]}>{count}</Text>
               {kindOf === kind ? <Icon name="check" size={16} color={colors.accent} /> : null}
@@ -1117,12 +1253,69 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
               Nothing along here says what kind of place it is yet.
             </Text>
           )}
+
+          {/*
+            The kitchen, under the kind of place and counted inside it. This is
+            the drill-down the owner asked for: "maybe once I select restaurant
+            as a type, you can give me an additional pick list for the type of
+            restaurant" (6 Sep 2026). It is offered without waiting for a kind
+            to be picked, because "Italian, wherever it is" is a fair thing to
+            want too — but the counts follow the kind once there is one.
+          */}
+          {cuisines.length ? (
+            <>
+              <Text style={[styles.kicker, { marginTop: 12 }]}>
+                {kindOf ? `Kitchen · ${cap(kindOf)}` : 'Kitchen'}
+              </Text>
+              {cuisines.map(({ kind, count }) => (
+                <Pressable key={kind} onPress={() => onCuisine(cuisine === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: cuisine === kind }}>
+                  <Text style={[type.body, { flex: 1 }]}>{cap(kind)}</Text>
+                  <Text style={[type.small, { marginRight: 8 }]}>{count}</Text>
+                  {cuisine === kind ? <Icon name="check" size={16} color={colors.accent} /> : null}
+                </Pressable>
+              ))}
+            </>
+          ) : null}
+
+          {/*
+            A filter is an answer for this afternoon; a default is a standing
+            one. They are separate acts, so changing the filter never quietly
+            rewrites what every trip opens on.
+          */}
+          <Pressable
+            onPress={() => onAlways(pill === 'food'
+              ? { food: { type: kindOf, cuisine } }
+              : { things: { type: kindOf } })}
+            style={[styles.optRow, { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 6 }]}
+            accessibilityRole="button"
+          >
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[type.body, { fontWeight: '700', color: isDefault ? colors.inkMuted : colors.accent }]}>
+                {isDefault ? 'This is what you always start with' : 'Always start with this'}
+              </Text>
+              <Text style={type.tiny} numberOfLines={1}>
+                {isDefault
+                  ? 'Tap a different one above, then set it'
+                  : kindOf || cuisine
+                    ? `Every trip opens on ${[cuisine && cap(cuisine), kindOf ? cap(kindOf) : 'everything'].filter(Boolean).join(' ')}`
+                    : 'Every trip opens on everything'}
+              </Text>
+            </View>
+            {isDefault ? <Icon name="check" size={16} color={colors.accent} /> : <Icon name="keep" size={16} color={colors.accent} />}
+          </Pressable>
         </View>
       ) : null}
 
       {openDetour ? (
         <View style={styles.dropdown}>
-          <Text style={styles.kicker}>{anchorLabel ? `How far from ${anchorLabel}` : along.hasRoute ? 'How far off the route' : 'How far away'}</Text>
+          {/* His words, 6 Sep 2026: "something shorter and punchier, like 'Max
+              detour', and then, when I expand, it can say, 'How far off the
+              route are you prepared to travel?'" */}
+          <Text style={styles.kicker}>
+            {anchorLabel
+              ? `How far from ${anchorLabel} are you prepared to travel?`
+              : along.hasRoute ? 'How far off the route are you prepared to travel?' : 'How far are you prepared to travel?'}
+          </Text>
           {DETOURS.map((n) => (
             <Pressable key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
               <Text style={[type.body, { flex: 1 }]}>Up to {n} minutes</Text>
@@ -1132,7 +1325,17 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
         </View>
       ) : null}
 
-      {along.loading ? <Text style={[type.small, { padding: spacing.lg }]}>Looking along the route…</Text> : null}
+      {/* Named against the band on the map behind the sheet, so the words and
+          the shading are plainly the same thing. */}
+      {along.loading ? (
+        <Text style={[type.small, { padding: spacing.lg }]}>
+          {anchorLabel
+            ? `Looking over the shaded ground — within ${maxDetourMin} minutes of ${anchorLabel}…`
+            : along.hasRoute
+              ? `Looking over the shaded band — up to ${maxDetourMin} minutes off the route…`
+              : `Looking over the shaded ground — up to ${maxDetourMin} minutes away…`}
+        </Text>
+      ) : null}
       {!along.loading && along.degraded.length && along.places.length ? (
         <Text style={[type.tiny, { paddingHorizontal: 16, paddingTop: 8 }]}>
           {along.degraded.map((x) => x.source).join(' and ')} did not answer, so some of these have no reviews.
@@ -1143,9 +1346,9 @@ function BrowseList({ pill, along, shown, shortlisted, onUnshortlist, onOpenSave
         <View style={{ padding: spacing.lg }}>
           <Card>
             <Text style={type.small}>
-              {`Nothing along here is a ${cap(kindOf ?? '')} — ${along.places.length} other place${along.places.length === 1 ? '' : 's'} are.`}
+              {`Nothing along here is ${[cuisine && cap(cuisine), kindOf ? cap(kindOf) : 'that'].filter(Boolean).join(' ')} — ${along.places.length} other place${along.places.length === 1 ? '' : 's'} are.`}
             </Text>
-            <Pressable onPress={() => onKind(null)} accessibilityRole="button">
+            <Pressable onPress={() => { onKind(null); onCuisine(null); }} accessibilityRole="button">
               <Text style={[type.small, { color: colors.accent, fontWeight: '700', marginTop: 6 }]}>Show everything →</Text>
             </Pressable>
           </Card>
@@ -1350,7 +1553,29 @@ function Chip({ label, on, chevron, onPress, onClear }: { label: string; on?: bo
 }
 
 /** The kinds a browse list can be narrowed to (handoff §06). Words, not tags. */
-const FOOD_KINDS = ['pub', 'cafe', 'restaurant', 'bakery', 'bar', 'ice cream'];
+/**
+ * What kind of place it is, and — for a restaurant — what kitchen it runs.
+ *
+ * Two different questions, and the owner wanted both (6 Sep 2026: "if I'm
+ * selecting food and drink, what I'm interested in is not the type. I want to
+ * see Italian, and in addition to whether it's a restaurant, a cafe, a pub, or
+ * a bakery, I also want to see the type of restaurant").
+ *
+ * They are kept apart rather than thrown in one list, because they combine:
+ * "an Italian restaurant" is two answers, and a single list could only ever
+ * take one of them.
+ */
+const FOOD_KINDS = ['restaurant', 'pub', 'cafe', 'bar', 'bakery', 'ice cream'];
+/**
+ * The kitchens worth offering. Not every word a source has ever tagged — a
+ * menu of ninety cuisines is a wall, and the ones nobody near you serves are
+ * filtered out anyway (only what is in the pool is listed).
+ */
+const CUISINES = [
+  'italian', 'indian', 'chinese', 'thai', 'japanese', 'french', 'spanish', 'greek',
+  'turkish', 'mexican', 'vietnamese', 'korean', 'lebanese', 'american', 'british',
+  'seafood', 'steak house', 'pizza', 'burger', 'sushi', 'tapas', 'vegetarian', 'vegan',
+];
 const THING_KINDS = ['walk', 'park', 'castle', 'museum', 'beach', 'viewpoint', 'playground', 'farm', 'gallery'];
 
 /**
@@ -2386,6 +2611,7 @@ const styles = StyleSheet.create({
   linkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line, minHeight: TARGET },
   linkText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink, flexShrink: 1 },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: TARGET },
+  dangerFoot: { paddingTop: 20, paddingBottom: 8, alignItems: 'flex-start' },
   caution: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
   check: { width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   checkOn: { backgroundColor: colors.primary, borderColor: colors.primary },

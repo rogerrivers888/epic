@@ -24,7 +24,8 @@ import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { MapGLProps, MapMarker } from './MapGL';
+import type { MapGLProps, MapMarker, MapShade, Point } from './MapGL';
+import { circleRing } from './searchGround';
 import { roamMapStyle } from './mapStyle';
 import { colors } from '../theme';
 
@@ -42,6 +43,92 @@ const GLYPH: Record<string, string> = {
   ticket: '<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1 0 4H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"/>',
   place: '<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
 };
+
+/**
+ * The shaded ground, and the glass going over it.
+ *
+ * The band is leaf over the map's mint, faint enough that the roads and the
+ * water still read through it — it is the ground being searched, not a curtain
+ * drawn over it. The lens is a hole in that band with an ink rim: what it is
+ * over is the map at full strength, which is what makes it look like it is
+ * lighting the ground up rather than sliding a disc across it.
+ */
+const SHADE = {
+  light: { fill: '#2E8A63', fillOpacity: 0.13, line: '#201E1D', glow: '#FFFFFF', rim: '#201E1D', casing: '#FFFFFF' },
+  dark: { fill: '#B6E3CF', fillOpacity: 0.12, line: '#F3F2F2', glow: '#B6E3CF', rim: '#F3F2F2', casing: '#1E1E23' },
+};
+
+/**
+ * How the glass is sized and how far it swings.
+ *
+ * A wash of white inside it and nothing more: the hole in the band is what
+ * lights the ground up, and a glow heavy enough to be noticed on its own turns
+ * the glass into a white disc with a map missing from under it — which is the
+ * opposite of what it is for.
+ */
+const GLASS = { glow: 0.07, ofBand: 0.42, ofRoad: 0.12, swing: 0.4 };
+
+/** One pass of the glass along the road, in seconds. */
+const SWEEP_SECONDS = 4.6;
+
+const KM_PER_DEG = 111.32;
+const kmApart = (a: Point, b: Point) => {
+  const kx = Math.cos((a.lat * Math.PI) / 180);
+  return Math.hypot((b.lng - a.lng) * kx * KM_PER_DEG, (b.lat - a.lat) * KM_PER_DEG);
+};
+
+/**
+ * Where the glass is on its way down the road.
+ *
+ * Along the spine at `f`, and swung from one side of the band to the other as
+ * it goes, because a search that only ever walked the centre line would be
+ * saying it looks at the road rather than at the band beside it. With no road
+ * to walk — a circle around somewhere tapped — it goes round instead.
+ */
+function lensAt(shade: MapShade, f: number): Point {
+  const swing = Math.sin(f * Math.PI * 2 * 2.4) * shade.halfWidthKm * GLASS.swing;
+  const pts = shade.spine;
+  if (pts.length < 2) {
+    const c = pts[0];
+    const kx = Math.max(1e-6, Math.cos((c.lat * Math.PI) / 180));
+    const th = f * Math.PI * 2;
+    const r = shade.halfWidthKm * GLASS.swing;
+    return { lat: c.lat + (r * Math.sin(th)) / KM_PER_DEG, lng: c.lng + (r * Math.cos(th)) / (KM_PER_DEG * kx) };
+  }
+  const legs = pts.slice(1).map((p, i) => kmApart(pts[i], p));
+  const total = legs.reduce((n, x) => n + x, 0) || 1;
+  let want = f * total;
+  let i = 0;
+  while (i < legs.length - 1 && want > legs[i]) { want -= legs[i]; i += 1; }
+  const a = pts[i];
+  const b = pts[i + 1];
+  const k = legs[i] ? Math.min(1, want / legs[i]) : 0;
+  const on = { lat: a.lat + (b.lat - a.lat) * k, lng: a.lng + (b.lng - a.lng) * k };
+  // Off to one side of the road, measured square to it.
+  const kx = Math.max(1e-6, Math.cos((a.lat * Math.PI) / 180));
+  const dx = (b.lng - a.lng) * kx * KM_PER_DEG;
+  const dy = (b.lat - a.lat) * KM_PER_DEG;
+  const len = Math.hypot(dx, dy) || 1;
+  return {
+    lat: on.lat + (swing * (dx / len)) / KM_PER_DEG,
+    lng: on.lng - (swing * (dy / len)) / (KM_PER_DEG * kx),
+  };
+}
+
+const ringToCoords = (ring: Point[]) => ring.map((p) => [p.lng, p.lat]);
+
+/** The glass itself: the rim it is seen through, and the handle it is held by. */
+function lensFeatures(centre: Point, km: number) {
+  const kx = Math.max(1e-6, Math.cos((centre.lat * Math.PI) / 180));
+  const rim = circleRing(centre, km, 64);
+  // Down and to the right, which is the way a magnifying glass is held.
+  const from = { lat: centre.lat - (km * 0.72) / KM_PER_DEG, lng: centre.lng + (km * 0.72) / (KM_PER_DEG * kx) };
+  const to = { lat: centre.lat - (km * 1.5) / KM_PER_DEG, lng: centre.lng + (km * 1.5) / (KM_PER_DEG * kx) };
+  return {
+    ring: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ringToCoords(rim)] } },
+    handle: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: ringToCoords([from, to]) } },
+  } as any;
+}
 
 /** Each kind's shape, from the handoff's design tokens. */
 const KIND: Record<MapMarker['kind'], { size: number; bg: string; border: string; borderWidth: number; dashed?: boolean; fg: string; halo?: boolean }> = {
@@ -162,7 +249,7 @@ function markerEl(m: MapMarker): HTMLElement {
   return wrap;
 }
 
-export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, focusId, onMapPress, dark }: MapGLProps) {
+export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, focusId, shade = null, onMapPress, dark }: MapGLProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const drawn = useRef(new Map<string, maplibregl.Marker>());
@@ -277,6 +364,156 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     };
     if (ready.current) apply(); else m.once('load', apply);
   }, [JSON.stringify(routes.map((r) => [r.id, r.points.length, r.dashed]))]);
+
+  /**
+   * The ground the search covers, and the glass going over it.
+   *
+   * One source for the band and one for the glass, both written to directly
+   * rather than through React: the sweep is a frame loop, and re-rendering the
+   * trip screen sixty times a second to move a circle would cost more than
+   * everything else on the map put together.
+   *
+   * The glass is a **hole in the band**, not a disc on top of it. A polygon's
+   * second ring is a hole, so the band is drawn with the lens cut out of it and
+   * what the lens is over is the map at full strength — which is what "it
+   * illuminates the bit that it's going over" actually means. Underneath the
+   * route and the pins, so the day is still legible through the search.
+   */
+  const shadeRef = useRef<MapShade | null>(shade);
+  shadeRef.current = shade;
+  const sweep = useRef(0);
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return undefined;
+    const tone = SHADE[dark ? 'dark' : 'light'];
+    /** Somebody who has asked not to be moved gets the band, and the glass parked on it. */
+    const still = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false;
+
+    const teardown = () => {
+      for (const id of ['roam-lens-handle', 'roam-lens-rim', 'roam-lens-casing', 'roam-lens-glow', 'roam-shade-line', 'roam-shade-fill']) {
+        if (m.getLayer(id)) m.removeLayer(id);
+      }
+      for (const id of ['roam-lens', 'roam-shade']) if (m.getSource(id)) m.removeSource(id);
+    };
+
+    /** The band, with the glass cut out of it when there is a glass. */
+    const bandData = (lens: { at: Point; km: number } | null) => ({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: lens
+            ? [ringToCoords(shadeRef.current!.ring), ringToCoords(circleRing(lens.at, lens.km, 64))]
+            : [ringToCoords(shadeRef.current!.ring)],
+        },
+      }],
+    } as any);
+
+    const paint = (lens: { at: Point; km: number } | null, glassOpacity: number) => {
+      const band = m.getSource('roam-shade') as maplibregl.GeoJSONSource | undefined;
+      const glass = m.getSource('roam-lens') as maplibregl.GeoJSONSource | undefined;
+      if (!band || !glass) return;
+      band.setData(bandData(lens));
+      const f = lens ? lensFeatures(lens.at, lens.km) : null;
+      glass.setData({ type: 'FeatureCollection', features: f ? [f.ring, f.handle] : [] } as any);
+      for (const [id, base] of [['roam-lens-glow', GLASS.glow], ['roam-lens-casing', 0.85], ['roam-lens-rim', 1], ['roam-lens-handle', 1]] as const) {
+        if (!m.getLayer(id)) continue;
+        const prop = id === 'roam-lens-glow' ? 'fill-opacity' : 'line-opacity';
+        m.setPaintProperty(id, prop as any, base * glassOpacity);
+      }
+    };
+
+    const build = () => {
+      if (!shadeRef.current || m.getLayer('roam-shade-fill')) return;
+      // Under the route when there is one, so the road still reads through the band.
+      const under = m.getLayer('roam-route-casing') ? 'roam-route-casing' : undefined;
+      m.addSource('roam-shade', { type: 'geojson', data: bandData(null) });
+      m.addSource('roam-lens', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } as any });
+      m.addLayer({
+        id: 'roam-shade-fill', type: 'fill', source: 'roam-shade',
+        paint: { 'fill-color': tone.fill, 'fill-opacity': tone.fillOpacity },
+      }, under);
+      m.addLayer({
+        id: 'roam-shade-line', type: 'line', source: 'roam-shade',
+        layout: { 'line-join': 'round' },
+        paint: { 'line-color': tone.line, 'line-width': 1.4, 'line-opacity': 0.4, 'line-dasharray': [4, 3] },
+      }, under);
+      m.addLayer({
+        id: 'roam-lens-glow', type: 'fill', source: 'roam-lens',
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'fill-color': tone.glow, 'fill-opacity': 0 },
+      }, under);
+      // A white casing under the rim, the same trick the route uses, so the
+      // glass reads over water and green alike.
+      m.addLayer({
+        id: 'roam-lens-casing', type: 'line', source: 'roam-lens',
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': tone.casing, 'line-width': 7, 'line-opacity': 0 },
+      }, under);
+      m.addLayer({
+        id: 'roam-lens-rim', type: 'line', source: 'roam-lens',
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'line-color': tone.rim, 'line-width': 2.6, 'line-opacity': 0 },
+      }, under);
+      m.addLayer({
+        id: 'roam-lens-handle', type: 'line', source: 'roam-lens',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': tone.rim, 'line-width': 4.5, 'line-opacity': 0 },
+      }, under);
+    };
+
+    let raf = 0;
+    const apply = () => {
+      if (!shadeRef.current) { teardown(); return; }
+      build();
+      const sh = shadeRef.current;
+      /**
+       * How big the glass is. A share of the band, so a wider detour is looked
+       * at through a wider glass — and, where there is a road, no more than a
+       * share of the road itself, or a fifteen-mile band across a two-hundred
+       * mile drive would be searched by something the size of the county.
+       */
+      const road = sh.spine.slice(1).reduce((n, p, i) => n + kmApart(sh.spine[i], p), 0);
+      const lensKm = Math.max(0.15, road
+        ? Math.min(sh.halfWidthKm * GLASS.ofBand, road * GLASS.ofRoad)
+        : sh.halfWidthKm * GLASS.ofBand);
+      if (!sh.searching) { paint(null, 0); return; }
+      if (still) { paint({ at: lensAt(sh, 0.5), km: lensKm }, 1); return; }
+      const started = performance.now() - sweep.current * SWEEP_SECONDS * 1000;
+      const loop = () => {
+        const f = (((performance.now() - started) / 1000) % SWEEP_SECONDS) / SWEEP_SECONDS;
+        sweep.current = f;
+        // Faded in at the start of a pass and out at the end, so the jump back
+        // to the beginning of the road reads as another pass rather than a skip.
+        const edge = Math.min(1, f / 0.1, (1 - f) / 0.1);
+        paint({ at: lensAt(sh, f), km: lensKm }, edge);
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+    };
+
+    if (ready.current) apply(); else m.once('load', apply);
+    /**
+     * A change of palette rebuilds the style from scratch and takes every
+     * source with it. Only ever acts when the band has actually gone, which is
+     * what stops it being the write-on-every-event loop that wedged this screen
+     * once already.
+     */
+    const rebuild = () => { if (shadeRef.current && !m.getLayer('roam-shade-fill') && ready.current) apply(); };
+    m.on('styledata', rebuild);
+    return () => {
+      cancelAnimationFrame(raf);
+      m.off('styledata', rebuild);
+      if (map.current === m && m.getStyle()) teardown();
+    };
+    // The ring is the whole shape, so its ends and its width are enough to know
+    // it has changed — a wider detour moves both.
+  }, [shade ? `${shade.ring.length}:${shade.halfWidthKm}:${shade.ring[0]?.lat},${shade.ring[0]?.lng}:${shade.searching}` : null, dark]);
 
   /**
    * Labels that would sit on top of each other, thinned out.
