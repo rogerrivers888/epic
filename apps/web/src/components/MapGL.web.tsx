@@ -155,9 +155,19 @@ function markerEl(m: MapMarker): HTMLElement {
    * label hangs off.
    */
   const wrap = document.createElement('div');
-  wrap.style.cssText = `cursor:pointer${m.dim ? ';opacity:0.32' : ''}`;
+  wrap.style.cssText = 'cursor:pointer';
   const inner = document.createElement('div');
-  inner.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center';
+  /*
+    The fading goes on the inner element, not the outer one.
+
+    MapLibre owns `opacity` on the element it was handed — it writes it on every
+    frame for terrain occlusion — so an inline opacity there is overwritten
+    within a frame and nothing ever looks faded (measured on the deployed map,
+    7 Sep 2026: forty-five markers, every one of them at opacity 1). The same
+    reasoning as `position` above: the outer element is the library's, the inner
+    one is ours.
+  */
+  inner.style.cssText = `position:relative;display:flex;align-items:center;justify-content:center${m.dim ? ';opacity:0.3' : ''}`;
   wrap.appendChild(inner);
   const size = m.selected ? k.size + 4 : k.size;
   const glyph = GLYPH[m.icon ?? ''] ?? GLYPH.place;
