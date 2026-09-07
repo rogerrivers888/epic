@@ -873,7 +873,9 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
 }) {
   const [page, setPage] = useState<0 | 1>(0);
   const [label, setLabel] = useState(item?.label ?? '');
-  const [on, setOn] = useState(item?.startsOn ?? g.trip.startDate ?? '');
+  // A new event starts on the day the trip does; one that has never had a date
+  // is not given one behind the organiser's back.
+  const [on, setOn] = useState(item ? (item.startsOn ?? '') : (g.trip.startDate ?? ''));
   const [at, setAt] = useState(item?.startsAt ?? '');
   const [must, setMust] = useState(item?.required ?? false);
   const [meet, setMeet] = useState<Place | null>(item?.meet?.label ? { label: item.meet.label, lat: item.meet.lat ?? 0, lng: item.meet.lng ?? 0 } : null);
