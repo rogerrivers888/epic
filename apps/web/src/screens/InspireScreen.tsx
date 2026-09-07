@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, Place, API_URL } from '../api';
 import { useHere } from '../hooks/useHere';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName, iconFor } from '../components/Icon';
 import { Chip, minutes } from '../components/ui';
 import { VenueDrawer } from '../components/VenueDrawer';
@@ -484,6 +484,30 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
     return within === 'all' ? inCategory : inCategory.filter((i) => i.subcategory === within);
   }, [inMode, mode, pick, within]);
 
+  /**
+   * Has a setting emptied the screen, and what is the shortest way out?
+   *
+   * The pool is answered for one travel mode, so widening the ceiling can be
+   * worked out from what is already in hand; changing the mode cannot, and is
+   * offered as the thing to try rather than as a number. Driving first, because
+   * it is the widest and the default the design assumes.
+   */
+  const emptied = Boolean(pool) && !loading && inMode.length > 0 && (pick ? listed.length === 0 : shown.length === 0);
+  const wider = useMemo(() => {
+    const all = (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i)));
+    if (travelBy !== 'drive') {
+      return { count: all.length, how: `are within reach if you drive`, label: 'Show driving times', apply: () => setTravelBy('drive') };
+    }
+    const next = ([30, 60, 120, null] as TravelMinutes[]).find((m) => m !== cap && (m == null || (cap != null && m > cap)) && all.some((i) => m == null || i.travelMinutes <= m));
+    const n = all.filter((i) => next == null || i.travelMinutes <= next).length;
+    return {
+      count: n,
+      how: next == null ? 'are further out' : `are within ${next >= 60 ? `${next / 60} hr` : `${next} min`}`,
+      label: next == null ? 'Look anywhere' : `Go up to ${next >= 60 ? `${next / 60} hr` : `${next} min`}`,
+      apply: () => setCap(next ?? null),
+    };
+  }, [pool, mode, isFood, travelBy, cap]);
+
   /** How many places each travel ceiling would give, for the sheet's counts. */
   const countAt = useCallback((m: TravelMinutes) => (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i)) && (m == null || i.travelMinutes <= m)).length, [pool, mode, isFood]);
 
@@ -699,12 +723,37 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               ) : null}
 
               {/* 8b and 8e: one category or one cuisine, as a list. */}
+              {/*
+                Why the screen is empty, and one tap out of it.
+
+                Choosing Walk and leaving it on is enough to lose everything:
+                an hour's walk holds four places where an hour's drive holds a
+                hundred and seventy-two, and the only sign of it is three small
+                words in the filter row. A screen that has been emptied by a
+                setting has to say so, and say which (owner, 7 Sep 2026: "you
+                seem to have lost lots of activities").
+              */}
+              {emptied ? (
+                <View style={[styles.gutter, { gap: spacing.sm, paddingVertical: spacing.lg }]}>
+                  <Text style={type.h3}>Nothing within {travelLabel(travelBy, cap as TravelMinutes).toLowerCase()} of {placeName}</Text>
+                  <Text style={type.small}>
+                    {wider.count} place{wider.count === 1 ? '' : 's'} {wider.how}.
+                  </Text>
+                  <Pressable onPress={wider.apply} accessibilityRole="button" style={styles.widen}>
+                    <Text style={styles.widenText}>{wider.label}</Text>
+                    <Icon name="forward" size={16} color={colors.selectedFg} />
+                  </Pressable>
+                </View>
+              ) : null}
+
               {pick ? (
                 listed.length ? listed.map((i) => (
                   mode === 'food'
                     ? <FoodRow key={i.venueRef} item={i} kind={cap1(i.cuisines[0] ?? '')} where={i.region ? shortPlace(i.region) : null} standing={(i as any).standing ?? null} onOpen={() => open(i)} />
                     : <PlaceRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} onOpen={() => open(i)} />
-                )) : (
+                )) : emptied ? null : (
+                  /* The one above already says which setting emptied it and
+                     offers the way out; two empty states is one too many. */
                   <Empty
                     title={`Nothing ${label(pick).toLowerCase()} within reach of ${placeName}`}
                     body="Widen how far you will go, or search another town."
@@ -723,12 +772,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   {pool.items.length} place{pool.items.length === 1 ? '' : 's'} within {pool.radiusKm} km of {placeName}
                   {pool.from.how === 'home' ? ' · times are from home' : ' · times are from where you are'}, estimated.
                 </Text>
-                {/* The credits are a condition of showing the pictures, so they
-                    appear when pictures do — not as forty lines under a screen
-                    that drew none. The place detail carries its own. */}
-                {pool.attribution.length && (shelves.some((sh) => sh.items.length) || listed.length) ? (
-                  <Text style={type.tiny} numberOfLines={4}>{pool.attribution.join(' · ')}</Text>
-                ) : null}
+                {/* No credits here. A licence is satisfied where the picture is
+                    actually looked at — which is the place, opened — and the
+                    handoff puts them there, one line at the end of the scroll
+                    (8f). Forty of them under the home screen was noise nobody
+                    reads and nobody asked for (owner, 7 Sep 2026: "all of these
+                    image contributions should not be on the Inspire page"). */}
                 <Pressable onPress={load} hitSlop={8} accessibilityRole="button">
                   <Text style={[type.small, { fontWeight: '700' }]}>Look again</Text>
                 </Pressable>
@@ -987,6 +1036,13 @@ function Empty({ title, body, onRetry }: { title: string; body: string; onRetry?
 }
 
 const styles = StyleSheet.create({
+  // The one tap out of a screen a filter has emptied.
+  widen: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
+    backgroundColor: colors.selected, paddingHorizontal: 16, minHeight: TARGET, justifyContent: 'center',
+  },
+  widenText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.selectedFg },
+
   fill: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingBottom: spacing.xxl },
   // The head of the tab: cream, and carrying the block rule that closes it.
