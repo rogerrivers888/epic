@@ -247,3 +247,45 @@ test('a place rule beats "somewhere to eat is Food"', () => {
   );
   assert.equal(category, 'culture');
 });
+
+/**
+ * The drawer a household's own place is filed in — what a row in Places says it
+ * is (owner, 7 Sep 2026: "it should say what type of attraction it is, like
+ * theme park or whatever… the subcategory, not just say attractions
+ * repeatedly").
+ *
+ * Migration 054 files the atlas by Wikidata type, which a place saved from a
+ * map search does not have. Migration 063 files those by experience instead,
+ * and the thing that could silently go wrong is not the naming — it is the
+ * re-shelving: a rule that names a drawer names the cabinet with it, so a
+ * careless seed would move every park onto whatever shelf its drawer sits in.
+ */
+test('an experience names the drawer without moving the place to another shelf', () => {
+  const PARK = { scope: 'experience', subject: 'park', subject_label: 'a park', weights: {}, subcategory: 'parks' };
+  const { shelves, subcategory } = shelvesForVenue(
+    { source: 'osm', sourcePlaceId: 'way/3', category: 'attraction', experiences: ['park'] },
+    rulesOf(PARK),
+    VOCAB,
+  );
+  // The row can say "Parks & commons" instead of "Attractions"…
+  assert.equal(subcategory, 'parks');
+  // …and the place is on the same shelf it was on before anybody seeded a drawer.
+  assert.deepEqual(shelves, ['outdoors']);
+  assert.deepEqual(
+    shelvesForVenue({ source: 'osm', sourcePlaceId: 'way/3', category: 'attraction', experiences: ['park'] }).shelves,
+    ['outdoors'],
+  );
+});
+
+test('a drawer is only named where something actually named it', () => {
+  // The National Gallery arrives with no tags at all and lands on Fun because a
+  // place has to be somewhere. There is no drawer for that, and inventing one
+  // would put a confident wrong word on the row.
+  const { subcategory, because } = shelvesForVenue(
+    { source: 'osm', sourcePlaceId: 'way/4', category: 'attraction', experiences: [] },
+    NO_RULES,
+    VOCAB,
+  );
+  assert.equal(subcategory, null);
+  assert.ok(because.every((r) => r.scope === 'default'));
+});

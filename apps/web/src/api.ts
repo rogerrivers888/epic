@@ -613,7 +613,13 @@ export type AtlasPlace = { venueRef: string; name: string; unnamed?: boolean; ki
   /** Where it is at a glance: postcode district and the nearest station with its lines; null until looked up. */ postcode: string | null; station: string | null; stationLines: string[]; stationKind: string | null; stationDistanceM: number | null; whereChecked: string | null;
   /** The picture Roam owns for this place, if the ladder found one. */ image?: OwnedImage | null;
   /** Rented: the provider's photographs, sent only where we own none, fetched at display and never stored. */ photos?: VenuePhotoRef[] | null;
-  /** What a day here is like, over the closed set of six (domain/moods.js) — the Mood filter's vocabulary. */ moods?: MoodKey[] };
+  /** What a day here is like, over the closed set of six (domain/moods.js) — the Mood filter's vocabulary. */ moods?: MoodKey[];
+  /** The drawer this place is filed in ("theme-parks") and its label ("Theme parks & rides") — what a row says it is, instead of repeating "Attraction". */
+  subcategory?: string | null; subcategoryLabel?: string | null;
+  /** The cabinet's label ("Outdoors", "Culture") — the fallback when nothing has named a drawer for this place yet. */
+  categoryLabel?: string | null;
+  /** Rented: what the crowd made of it, sent only where nobody here has scored it, fetched at display and never stored. */
+  rating?: number | null; ratingCount?: number | null };
 
 /**
  * One place you could stop along the way (the map-first Browse mode).

@@ -378,6 +378,24 @@ export const googleSource = {
   },
 
   /**
+   * Just what the crowd made of it: the rating and how many people gave one.
+   *
+   * The narrowest mask that reaches a number. Both fields are Enterprise and
+   * bill as such, which is exactly why this is its own call rather than a
+   * corner of the detail: a row in Places wants "4.6 (12,400)" and nothing
+   * else, and asking for the hours, the reviews and the price list to get it is
+   * paying for a page to draw a line.
+   *
+   * Nothing it returns is written down (sources/rentedRating.js).
+   */
+  async rating(id, { meter = null } = {}) {
+    if (!KEY()) return null;
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,rating,userRatingCount', meter });
+    if (!p) return null;
+    return { rating: p.rating ?? null, ratingCount: p.userRatingCount ?? null };
+  },
+
+  /**
    * Just enough to go looking with: the name, the point, and the address of
    * their own site.
    *

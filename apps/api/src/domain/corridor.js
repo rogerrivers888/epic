@@ -55,7 +55,7 @@ const mealAt = (date, tz, category) => {
  * Somewhere the household already loves clears any bar.
  */
 export function standoutReason(c, detourMinutes = 0, limitMinutes = 15) {
-  if (c.special) return 'One of yours — you marked it special';
+  if (c.special) return 'One of yours — you gave it the heart';
   if ((c.reasons || []).some((r) => r.kind === 'learned-like')) return (c.reasons.find((r) => r.kind === 'learned-like') || {}).text ?? 'Loved before';
   const r = c.rating;
   const n = c.ratingCount ?? 0;

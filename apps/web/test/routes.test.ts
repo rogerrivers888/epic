@@ -188,6 +188,22 @@ test('a change to the query keeps the rest of the address', () => {
 });
 
 /**
+ * Places opens on Loved now (owner, 7 Sep 2026), so Loved is the default and
+ * the default is the one thing never written into the address. Everything else
+ * is, including the year picker that stands in for the trip chip close to home.
+ */
+test('the status a Places list opens on is the one it does not write down', () => {
+  // Loved is the default and a default is never spelled out, so choosing
+  // another status writes it and clearing it takes it away again.
+  assert.equal(withQuery('/places/home?kind=eat', { status: 'been' }), '/places/home?kind=eat&status=been');
+  assert.equal(withQuery('/places/home?kind=eat', { status: 'saved' }), '/places/home?kind=eat&status=saved');
+  assert.equal(withQuery('/places/home?status=been', { status: null }), '/places/home');
+  // Close to home the trip chip is a year chip, and a year is part of the page.
+  assert.equal(withQuery('/places/home?kind=eat', { year: '2025' }), '/places/home?kind=eat&year=2025');
+  assert.equal(withQuery('/places/home?kind=eat&year=2025', { year: null }), '/places/home?kind=eat');
+});
+
+/**
  * The one that mattered: tapping Food & drink also clears the Type filter, and
  * those are two calls in the same handler. Each has to start from what the last
  * one wrote, or the second undoes the first and the tab looks dead (owner,

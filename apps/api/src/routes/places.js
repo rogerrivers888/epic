@@ -601,14 +601,17 @@ places.post('/save', async (req, res, next) => {
     const household = await currentHousehold();
     const { source, id } = splitRef(req.body?.ref);
     if (!source || !id) return res.status(400).json({ error: 'ref_required' });
-    const status = ['saved', 'dismissed', 'special'].includes(req.body?.status) ? req.body.status : 'saved';
+    // `loved` is the word the screens use now and `special` is the word in the
+    // ledger; both are accepted so nothing already written stops working.
+    const asked = req.body?.status === 'loved' ? 'special' : req.body?.status;
+    const status = ['saved', 'dismissed', 'special'].includes(asked) ? asked : 'saved';
     // Special is the household's own mark and comes from nowhere else — no
     // source has an opinion about it — and it is what you say after you have
     // been (owner, 4 Sep 2026). Somewhere you have not been can be saved to
     // try; it cannot be special yet.
     if (status === 'special') {
       if (!await visitsRepo.hasVisited(household.id, `${source}:${id}`)) {
-        return res.status(409).json({ error: 'not_been', message: 'Special comes after you have been. Record the visit first, then mark it special.' });
+        return res.status(409).json({ error: 'not_been', message: 'Loved comes after you have been. Record the visit first, then give it the heart.' });
       }
     }
     await visitsRepo.recordLedger(household.id, source, id, status);

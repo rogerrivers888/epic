@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
-import { CategoryIcon, Icon } from '../components/Icon';
+import { CategoryIcon, Icon, Rating } from '../components/Icon';
 import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, Place, TripBrief, TripSummary, Venue, Visit } from '../api';
 import { MapView, MapPin } from '../components/MapView';
 import { VenueDrawer } from '../components/VenueDrawer';
@@ -35,9 +35,9 @@ export type { VisitCreateBody } from '../components/Visits';
  * Everything / Things to do / Food & drink on top, Status and Type as
  * dropdowns, list or map, and no trips (trips live in Trips). A row shows one
  * number, your own score out of 5, and where the place is at a glance: the
- * postcode district and the nearest station with its line. Special is a red
- * heart on the row's icon (style guide: red is the heart). Everything else
- * about a place is in the drawer.
+ * postcode district and the nearest station with its line. Loved — the mark the
+ * ledger still calls `special` — is a red heart on the row's icon (style guide:
+ * red is the heart). Everything else about a place is in the drawer.
  */
 
 /**
@@ -46,15 +46,27 @@ export type { VisitCreateBody } from '../components/Visits';
  * redesign draws three segments and the Hotels one only where there is one.
  */
 type Kind = 'do' | 'eat' | 'stay';
-/** Been there, kept for later, or kept and loved. The "All ▾" dropdown. */
-type Status = 'any' | 'been' | 'saved' | 'special';
+/**
+ * Been there, kept for later, or been there and loved it. The status dropdown.
+ *
+ * "Loved" is the word now, and the heart is why (owner, 7 Sep 2026: "the
+ * Special can be renamed Loved because we're using a heart icon, so I think it
+ * makes sense"). It is the same mark underneath — `place_ledger.status =
+ * 'special'` — and it is still only sayable about somewhere you have been.
+ *
+ * `saved` is called Shortlisted on screen, because saving and shortlisting were
+ * being read as the same thing and they are not: shortlisting is somewhere you
+ * are thinking about, and the screen no longer opens on it.
+ */
+type Status = 'any' | 'been' | 'saved' | 'loved';
+/** What each answer is called, in the order the dropdown reads: the strongest thing you can say about a place first. */
+const STATUS_LABEL: Record<Status, string> = { loved: 'Loved', been: 'Been', saved: 'Shortlisted', any: 'All' };
 type Sort = 'name' | 'mine' | 'recent';
 /** The sort dropdown's three answers; the first is the default and is never written into the address. */
 const SORTS: { value: Sort; label: string }[] = [{ value: 'name', label: 'A–Z' }, { value: 'mine', label: 'My rating' }, { value: 'recent', label: 'Most recent' }];
 
 const uuid = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1).replace(/-/g, ' ');
-const fmtScore = (s: number) => s.toFixed(1).replace('.0', '');
 /** "Feb 2024" — as precise as a row has room to be. */
 const fmtMonth = (iso?: string | null) => (iso ? new Date(`${String(iso).slice(0, 10)}T12:00:00`).toLocaleDateString([], { month: 'short', year: 'numeric' }) : null);
 
@@ -109,8 +121,20 @@ function typeOf(p: AtlasPlace, kind: Kind): string {
   }
   if (c === 'pub' || c === 'bar') return 'Pubs & bars';
   if (c === 'event') return 'Events';
+  // What kind of thing it is, in the words the Shelves page keeps: the drawer
+  // it is filed in — "Theme parks & rides", "Parks & commons", "Castles" —
+  // which is the answer to the question a row is actually asking (owner, 7 Sep
+  // 2026: it "should say what type of attraction it is, like theme park or
+  // whatever… the subcategory, not just say attractions repeatedly").
+  //
+  // Below the drawer, whatever the map tagged it. Below that, the cabinet's own
+  // name: "Outdoors" is a smaller answer than "Woodland & forests" but it is
+  // still an answer, and "Attractions" is not one at all. Windsor Great Park is
+  // the case that made the point — a walk, filed under a word that says nothing.
+  if (p.subcategoryLabel) return p.subcategoryLabel;
   const experiences = experiencesOf(p);
   if (experiences.length) return cap(experiences[0]);
+  if (p.categoryLabel) return p.categoryLabel;
   return c === 'attraction' ? 'Attractions' : 'Other';
 }
 
@@ -129,9 +153,9 @@ function rowType(p: AtlasPlace, kind: Kind): string {
   return CATEGORY_PILL[c] ?? 'Restaurant';
 }
 
-const statusOf = (p: AtlasPlace): Exclude<Status, 'any'> => (p.visits > 0 ? 'been' : p.special ? 'special' : 'saved');
+const statusOf = (p: AtlasPlace): Exclude<Status, 'any'> => (p.special ? 'loved' : p.visits > 0 ? 'been' : 'saved');
 const matchesStatus = (p: AtlasPlace, s: Status) =>
-  s === 'any' || (s === 'special' ? p.special : s === 'been' ? p.visits > 0 : p.visits === 0);
+  s === 'any' || (s === 'loved' ? p.special : s === 'been' ? p.visits > 0 : p.visits === 0);
 /**
  * The mark on a row: one person's if somebody is chosen, and the household's
  * between them when nobody is ("Anyone ▾"). An average of one is that one.
@@ -143,25 +167,32 @@ const myScore = (p: AtlasPlace, viewer: string | null) => {
 };
 
 /**
- * The green line under a row: what the household did here, and on which trip.
+ * The mark under a row, and whose it is.
  *
- * Green is the status line everywhere in the redesign (handover §6); red is
- * kept for the heart and for a thing that still needs doing.
+ * The line here used to be "Saved · for Bath, Sep 2026" — where a place came
+ * from and which trip put it there. The owner, 7 Sep 2026: "I don't need to see
+ * that. I can just see if I click into it… we should only use the main view for
+ * stuff that's really relevant." So the trip and the date have moved to the
+ * drawer, and the row's third line answers the question the row is for: is this
+ * place any good.
+ *
+ * Ours first and always — the person the "Anyone ▾" chip has chosen, or the
+ * household between them — and only where nobody here has scored it does the
+ * crowd get a say. It is marked as theirs, by carrying its review count and no
+ * name, rather than being dressed up as one of our marks: "If I haven't rated
+ * it, then you should show the general rating."
  */
-function statusLine(p: AtlasPlace, kind: Kind, viewer: string | null): string {
-  const trip = p.onTrips?.[0] ?? null;
-  // A trip's name is often a whole sentence ("Kew Gardens with the Treetop
-  // Walkway, then Richmond riverside"); a row has room for the first thing in it.
-  const name = trip?.title ? trip.title.split(/\s+[·,]\s+|,\s+then\s+/)[0].trim() : null;
-  const when = fmtMonth(p.lastOn) ?? trip?.on ?? null;
+function rowRating(p: AtlasPlace, viewer: string | null, members: { id: string; name: string }[]):
+  { value: number; whose: string | null } | null {
   const mine = myScore(p, viewer);
-  if (p.visits > 0) {
-    const verb = kind === 'stay' ? 'Stayed' : 'Been';
-    const where = name ? `${name}${when ? `, ${when}` : ''}` : when;
-    return [verb, where, mine != null ? `you ${fmtScore(mine)}` : null].filter(Boolean).join(' · ');
+  if (mine != null) {
+    const who = viewer ? members.find((m) => m.id === viewer)?.name ?? null : p.scores.length > 1 ? 'us' : p.scores[0]?.member ?? null;
+    return { value: mine, whose: who };
   }
-  if (p.special) return name ? `Special · kept for ${name}` : 'Special · one of ours';
-  return name ? `Saved · for ${name}` : 'Saved';
+  // Rented, and only here at all because nobody in the household has been:
+  // never stored, never kept on a device (api/src/sources/rentedRating.js).
+  if (p.rating != null) return { value: p.rating, whose: p.ratingCount ? `(${p.ratingCount.toLocaleString()})` : null };
+  return null;
 }
 
 function atlasToVenue(p: AtlasPlace): Venue {
@@ -198,7 +229,7 @@ function atlasToBrowseItem(p: AtlasPlace): BrowseItem {
 }
 
 /** Inside a city: how the list is filtered and sorted, and whether it is a map. All of it is in the address. */
-const CITY_KEYS = ['kind', 'status', 'type', 'mood', 'trip', 'sort', 'view'];
+const CITY_KEYS = ['kind', 'status', 'type', 'mood', 'trip', 'year', 'sort', 'view'];
 
 // ---------------------------------------------------------------------------
 // The screen
@@ -416,7 +447,7 @@ function AtlasRoot({ data, error, household, members, viewer, wide, adding, onAd
             <View style={styles.list}>
               <AreaRow
                 title="Close to home"
-                meta={data.home.places ? `Within ${data.home.radiusMiles} miles · ${data.home.places} place${data.home.places === 1 ? '' : 's'}${data.home.special ? ` · ${data.home.special} saved` : ''}` : `Nothing within ${data.home.radiusMiles} miles yet`}
+                meta={data.home.places ? `Within ${data.home.radiusMiles} miles · ${data.home.places} place${data.home.places === 1 ? '' : 's'}${data.home.special ? ` · ${data.home.special} loved` : ''}` : `Nothing within ${data.home.radiusMiles} miles yet`}
                 status={data.home.been ? `${data.home.been} been · ${data.home.places - data.home.been} to try` : null}
                 image={data.home.image} category="place" first
                 onPress={() => navigate(paths.placesHome())}
@@ -605,14 +636,24 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
    */
   const memoryKey = `places.city.${home ? 'home' : `${country?.code ?? '?'}.${city?.name ?? '?'}`}`;
   useStickyQuery(memoryKey, CITY_KEYS);
+  const { query } = useRouter();
+  const members = household?.members ?? [];
   const [kind, setKind] = useQueryState<Kind>('kind', 'do', asOneOf(['do', 'eat', 'stay'] as const, 'do'));
-  const [status, setStatus] = useQueryState<Status>('status', 'any', asOneOf(['any', 'been', 'saved', 'special'] as const, 'any'));
+  /**
+   * Loved is where this screen opens now (owner, 7 Sep 2026: "it should just
+   * default to Been and only the ones that I've rated. Or maybe it could be
+   * Loved… and I think that should be the default"). It used to open on All,
+   * which meant the first thing a household saw was its shortlist — somewhere
+   * they are thinking about rather than somewhere they know is good.
+   */
+  const [status, setStatus] = useQueryState<Status>('status', 'loved', asOneOf(['any', 'been', 'saved', 'loved'] as const, 'loved'));
   const [typeF, setTypeF] = useQueryState<string | null>('type', null, asText);
   const [moodF, setMoodF] = useQueryState<string | null>('mood', null, asText);
   const [tripF, setTripF] = useQueryState<string | null>('trip', null, asText);
+  const [yearF, setYearF] = useQueryState<string | null>('year', null, asText);
   const [sort, setSort] = useQueryState<Sort>('sort', 'name', asOneOf(['name', 'mine', 'recent'] as const, 'name'));
   const [view, setView] = useQueryState<'list' | 'map'>('view', 'list', asOneOf(['list', 'map'] as const, 'list'));
-  const [sheet, setSheet] = useState<'status' | 'type' | 'mood' | 'trip' | 'sort' | null>(null);
+  const [sheet, setSheet] = useState<'status' | 'type' | 'mood' | 'trip' | 'year' | 'sort' | null>(null);
   const [adding, setAdding] = useState(false);
   const [selPin, setSelPin] = useState<string | null>(null);
 
@@ -626,7 +667,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   // the row is marked so the eye finds it.
   useEffect(() => {
     if (!landed) return;
-    setAdding(false); setKind(landed.kind); setStatus('any'); setTypeF(null); setMoodF(null); setTripF(null); setView('list');
+    setAdding(false); setKind(landed.kind); setStatus('any'); setTypeF(null); setMoodF(null); setTripF(null); setYearF(null); setView('list');
   }, [landed?.venueRef]);
 
   const counts = useMemo(() => ({
@@ -660,22 +701,53 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   const noneYet = `No ${thingsHere} saved in ${title} yet.`;
   const inKindAndType = places.filter((p) => inKind(p) && (!typeF || typeOf(p, shown) === typeF));
   const statusOptions = [
-    { value: 'any', label: 'All', count: inKindAndType.length },
-    { value: 'saved', label: 'Saved', count: inKindAndType.filter((p) => p.visits === 0).length },
-    { value: 'been', label: 'Been', count: inKindAndType.filter((p) => p.visits > 0).length },
-    { value: 'special', label: 'Special', count: inKindAndType.filter((p) => p.special).length },
+    { value: 'loved', label: STATUS_LABEL.loved, count: inKindAndType.filter((p) => p.special).length },
+    { value: 'been', label: STATUS_LABEL.been, count: inKindAndType.filter((p) => p.visits > 0).length },
+    { value: 'saved', label: STATUS_LABEL.saved, count: inKindAndType.filter((p) => p.visits === 0).length },
+    { value: 'any', label: STATUS_LABEL.any, count: inKindAndType.length },
   ];
-  const matchesMood = (p: AtlasPlace) => !moodF || (p.moods ?? []).includes(moodF as any);
-  const matchesTrip = (p: AtlasPlace) => !tripF || (p.onTrips ?? []).some((t) => t.id === tripF);
+  /**
+   * What the screen is actually showing.
+   *
+   * Loved is the default, and a default that opens on an empty list is not a
+   * default anybody wants: a household with nothing hearted on this tab yet
+   * would arrive at "nothing matches — clear a filter" on a screen they have
+   * not filtered. So an *unasked* status steps down — loved, then been, then
+   * everything — and stops at the first one with something in it. The moment
+   * the address says a status, the address wins and nothing steps down, which
+   * is what keeps `?status=loved` a page somebody can be sent.
+   */
+  const asked = query.get('status') != null;
+  const showing: Status = asked ? status
+    : inKindAndType.some((p) => p.special) ? 'loved'
+      : inKindAndType.some((p) => p.visits > 0) ? 'been'
+        : 'any';
+  // Mood is a question about a day out, and a day out is not a dinner (owner,
+  // 7 Sep 2026: "I don't need a mood in Food and Drink. That's for activities,
+  // not for food"). It is not drawn on the other two tabs, so it does not
+  // filter there either — a mood left behind on Activities must not quietly
+  // hide half of Food & drink.
+  const moodShown = shown === 'do';
+  const matchesMood = (p: AtlasPlace) => !moodShown || !moodF || (p.moods ?? []).includes(moodF as any);
+  // Which trip put it here is a question about somewhere you travelled to, and
+  // nobody travels to their own front door (owner, 7 Sep 2026: "I don't think I
+  // need a trip dropdown either… if I'm looking at something in Italy, then
+  // maybe I can filter by trip. That makes sense, but not when I'm looking at
+  // my home"). Close to home the same slot asks the question that does apply
+  // there — which year you went — and only once there is more than one answer.
+  const tripShown = !home;
+  const matchesTrip = (p: AtlasPlace) => !tripShown || !tripF || (p.onTrips ?? []).some((t) => t.id === tripF);
+  const yearOf = (p: AtlasPlace) => (p.lastOn ? String(p.lastOn).slice(0, 4) : null);
+  const matchesYear = (p: AtlasPlace) => !yearF || yearOf(p) === yearF;
 
   const typeCounts = new Map<string, number>();
-  places.filter((p) => inKind(p) && matchesStatus(p, status) && matchesMood(p) && matchesTrip(p)).forEach((p) => { const t = typeOf(p, shown); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); });
+  places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p)).forEach((p) => { const t = typeOf(p, shown); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); });
   const typeOptions = [{ value: '', label: shown === 'eat' ? 'Any cuisine' : shown === 'stay' ? 'Any kind of stay' : 'Any kind', count: [...typeCounts.values()].reduce((a, b) => a + b, 0) }, ...[...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ value: t, label: t, count: n }))];
 
   // Mood is the same closed set of six the home screen's shelves are (the API
   // works it out per place); only the ones that are actually here are offered.
   const moodCounts = new Map<string, number>();
-  places.filter((p) => inKind(p) && matchesStatus(p, status)).forEach((p) => (p.moods ?? []).forEach((m) => moodCounts.set(m, (moodCounts.get(m) ?? 0) + 1)));
+  places.filter((p) => inKind(p) && matchesStatus(p, showing)).forEach((p) => (p.moods ?? []).forEach((m) => moodCounts.set(m, (moodCounts.get(m) ?? 0) + 1)));
   const moodOptions = [{ value: '', label: 'Any mood', count: places.filter(inKind).length }, ...MOODS.filter((m) => moodCounts.has(m)).map((m) => ({ value: m, label: cap(m), count: moodCounts.get(m)! }))];
 
   // The trips this area's places were on: the redesign's fourth chip, "Rome ·
@@ -689,15 +761,30 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
     return [{ value: '', label: 'Any trip', count: places.length }, ...[...seen.values()].sort((a, b) => b.count - a.count)];
   }, [places]);
 
+  /**
+   * Close to home, the years the household actually went. It is the trip chip's
+   * place on this layer (owner, 7 Sep 2026: "maybe even then, I can have a year
+   * picker because there could be lots of different trips"), and it earns that
+   * place only when there is a choice to make: one year of visits is not a
+   * filter, it is a fact.
+   */
+  const yearOptions = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const p of inList) { const y = yearOf(p); if (y) seen.set(y, (seen.get(y) ?? 0) + 1); }
+    if (seen.size < 2) return [];
+    return [{ value: '', label: 'Any year', count: inList.length },
+      ...[...seen.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([y, n]) => ({ value: y, label: y, count: n }))];
+  }, [places, shown]);
+
   const rows = useMemo(() => {
-    const list = places.filter((p) => inKind(p) && matchesStatus(p, status) && matchesMood(p) && matchesTrip(p) && (!typeF || typeOf(p, shown) === typeF));
+    const list = places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p) && (!typeF || typeOf(p, shown) === typeF));
     const by: Record<Sort, (a: AtlasPlace, b: AtlasPlace) => number> = {
       name: (a, b) => a.name.localeCompare(b.name),
       mine: (a, b) => (myScore(b, viewer) ?? -1) - (myScore(a, viewer) ?? -1) || a.name.localeCompare(b.name),
       recent: (a, b) => (b.lastOn ?? '').localeCompare(a.lastOn ?? '') || a.name.localeCompare(b.name),
     };
     return [...list].sort(by[sort]);
-  }, [places, shown, status, typeF, moodF, tripF, sort, viewer]);
+  }, [places, shown, showing, typeF, moodF, tripF, yearF, home, sort, viewer]);
 
   const pins: MapPin[] = rows.filter((p) => p.lat != null && p.lng != null).map((p) => ({
     id: p.venueRef, lat: p.lat as number, lng: p.lng as number, label: p.name, number: '', heart: p.special,
@@ -735,16 +822,20 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
         </Row>
       </View>
       <View style={[styles.body, wide && styles.bodyCentred]}>
-        <Segmented value={shown} options={segments} onChange={(k) => { setKind(k); setTypeF(null); setSelPin(null); onLandedShown(); }} />
+        <Segmented value={shown} options={segments} onChange={(k) => { setKind(k); setTypeF(null); if (k !== 'do') setMoodF(null); setSelPin(null); onLandedShown(); }} />
         {adding ? (
           <AddPlace household={household} kind={shown} centre={centre} radiusKm={searchRadiusKm} ctx={ctx} wide={wide} onAdded={onChanged} onOpen={onOpenVenue} />
         ) : (
         <>
         <View style={styles.filters}>
-          <FilterChip label={statusOptions.find((o) => o.value === status)?.label ?? 'All'} on={status !== 'any'} open={sheet === 'status'} onPress={() => setSheet(sheet === 'status' ? null : 'status')} />
+          {/* The status chip always says which list you are looking at, default or
+              not — a screen that has quietly stepped down to Been must not read
+              as though it were showing everything. */}
+          <FilterChip label={STATUS_LABEL[showing]} on={showing !== 'any'} open={sheet === 'status'} onPress={() => setSheet(sheet === 'status' ? null : 'status')} />
           <FilterChip label={typeF ?? 'Type'} on={!!typeF} open={sheet === 'type'} onPress={() => setSheet(sheet === 'type' ? null : 'type')} />
-          <FilterChip label={moodF ? cap(moodF) : 'Mood'} on={!!moodF} open={sheet === 'mood'} onPress={() => setSheet(sheet === 'mood' ? null : 'mood')} />
-          {tripOptions.length > 1 ? <FilterChip label={tripF ? tripOptions.find((o) => o.value === tripF)?.label ?? 'Trip' : 'Trip'} on={!!tripF} open={sheet === 'trip'} onPress={() => setSheet(sheet === 'trip' ? null : 'trip')} /> : null}
+          {moodShown ? <FilterChip label={moodF ? cap(moodF) : 'Mood'} on={!!moodF} open={sheet === 'mood'} onPress={() => setSheet(sheet === 'mood' ? null : 'mood')} /> : null}
+          {tripShown && tripOptions.length > 1 ? <FilterChip label={tripF ? tripOptions.find((o) => o.value === tripF)?.label ?? 'Trip' : 'Trip'} on={!!tripF} open={sheet === 'trip'} onPress={() => setSheet(sheet === 'trip' ? null : 'trip')} /> : null}
+          {!tripShown && yearOptions.length ? <FilterChip label={yearF ?? 'Year'} on={!!yearF} open={sheet === 'year'} onPress={() => setSheet(sheet === 'year' ? null : 'year')} /> : null}
           <FilterChip label={sort === 'name' ? 'A–Z' : sort === 'mine' ? 'My rating' : 'Most recent'} on={sort !== 'name'} open={sheet === 'sort'} onPress={() => setSheet(sheet === 'sort' ? null : 'sort')} />
           <View style={{ flex: 1 }} />
           <View style={styles.viewToggle}>
@@ -755,17 +846,19 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
 
         {/* The answer opens under the question (owner, 5 Sep 2026), and a
             filter with nothing to offer says why rather than opening empty. */}
-        <PickPanel open={sheet === 'status'} title="Been here?" options={statusOptions} value={status}
+        <PickPanel open={sheet === 'status'} title="What are we looking at?" options={statusOptions} value={showing}
           onPick={(v) => { setStatus(v as Status); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
         <PickPanel open={sheet === 'type'} title={shown === 'eat' ? 'Cuisine' : shown === 'stay' ? 'Kind of stay' : 'Kind of thing'}
           options={typeOptions} value={typeF ?? ''}
           empty={nothingOnTab ? 'Nothing on this tab yet, so there is nothing to narrow.' : shown === 'eat' ? 'Nothing here has said what food it serves yet.' : 'Nothing here has said what kind of thing it is yet.'}
           onPick={(v) => { setTypeF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'mood'} title="What's the day for?" options={moodOptions} value={moodF ?? ''}
+        <PickPanel open={sheet === 'mood' && moodShown} title="What's the day for?" options={moodOptions} value={moodF ?? ''}
           empty={nothingOnTab ? 'Nothing on this tab yet, so there is no mood to pick.' : 'Nothing here has been given a mood yet.'}
           onPick={(v) => { setMoodF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'trip'} title="On which trip" options={tripOptions} value={tripF ?? ''}
+        <PickPanel open={sheet === 'trip' && tripShown} title="On which trip" options={tripOptions} value={tripF ?? ''}
           onPick={(v) => { setTripF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
+        <PickPanel open={sheet === 'year' && !tripShown} title="Which year you went" options={yearOptions} value={yearF ?? ''}
+          onPick={(v) => { setYearF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
         <PickPanel open={sheet === 'sort'} title="Sort by" options={SORTS} value={sort}
           onPick={(v) => { setSort(v as Sort); setSheet(null); }} onClose={() => setSheet(null)} />
 
@@ -774,7 +867,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
             <View style={[{ gap: spacing.sm }, wide && showMap && { width: 440 }]}>
               {rows.length ? (
                 <View style={styles.list}>
-                  {rows.map((p, i) => <PlaceRow key={p.venueRef} place={p} kind={shown} viewer={viewer} first={i === 0} selected={openRef === p.venueRef || landed?.venueRef === p.venueRef} onPress={() => { onLandedShown(); onOpen(p); }} />)}
+                  {rows.map((p, i) => <PlaceRow key={p.venueRef} place={p} kind={shown} viewer={viewer} members={members} first={i === 0} selected={openRef === p.venueRef || landed?.venueRef === p.venueRef} onPress={() => { onLandedShown(); onOpen(p); }} />)}
                 </View>
               ) : (
                 <Card>
@@ -799,7 +892,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
               <MapView pins={pins} height={mapHeight} focusId={selPin} />
               {selected ? (
                 <View style={styles.pinCard}>
-                  <PlaceRow place={selected} kind={shown} viewer={viewer} first selected={false} onPress={() => onOpen(selected)} />
+                  <PlaceRow place={selected} kind={shown} viewer={viewer} members={members} first selected={false} onPress={() => onOpen(selected)} />
                 </View>
               ) : <Text style={[type.tiny, styles.mapHint]}>{pins.length} pins · filled been · hollow saved · tap one</Text>}
             </View>
@@ -873,11 +966,12 @@ function GettingThere({ place }: { place: AtlasPlace }) {
  * (handover §6): a 56–64px picture, the name, a meta line, a green status line,
  * and a trailing tick or heart.
  *
- * Green tick = been. Red heart = saved. That is the whole trailing column —
- * red stays the heart (style guide) and the mark out of five rides on the green
- * line, where it reads as part of "what we thought" rather than as a badge.
+ * Green tick = been. Red heart = loved or shortlisted, filled when it is loved.
+ * That is the whole trailing column — red stays the heart (style guide) — and
+ * the third line is the mark: ours if anybody here has given one, the crowd's
+ * only if nobody has (owner, 7 Sep 2026).
  */
-function PlaceRow({ place, kind, viewer, first, selected, onPress }: { place: AtlasPlace; kind: Kind; viewer: string | null; first?: boolean; selected: boolean; onPress: () => void }) {
+function PlaceRow({ place, kind, viewer, members, first, selected, onPress }: { place: AtlasPlace; kind: Kind; viewer: string | null; members: { id: string; name: string }[]; first?: boolean; selected: boolean; onPress: () => void }) {
   const been = place.visits > 0;
   // Where it is, in as few words as possible: the station, not the district and
   // the lines (owner, 4 Sep 2026: "that's too much detail… just show the tube
@@ -920,12 +1014,16 @@ function PlaceRow({ place, kind, viewer, first, selected, onPress }: { place: At
           {pill ? <View style={styles.pill}><Text style={styles.pillText}>{pill}</Text></View> : null}
           {where ? <Text style={[type.small, { flexShrink: 1 }]} numberOfLines={1}>{where}</Text> : null}
         </View>
-        <Text style={styles.green} numberOfLines={1}>{statusLine(place, kind, viewer)}</Text>
+        {(() => {
+          const mark = rowRating(place, viewer, members);
+          if (!mark) return <Text style={type.tiny}>No rating yet</Text>;
+          return <Rating value={mark.value}>{mark.whose ? ` ${mark.whose}` : ''}</Rating>;
+        })()}
       </View>
       {been ? (
         <View style={styles.tick} accessibilityLabel="Been here"><Icon name="check" size={13} color={colors.headerSub} strokeWidth={3} /></View>
       ) : (
-        <View style={{ paddingHorizontal: 2 }} accessibilityLabel={place.special ? 'Special' : 'Saved'}>
+        <View style={{ paddingHorizontal: 2 }} accessibilityLabel={place.special ? 'Loved' : 'Shortlisted'}>
           <Icon name="keep" size={17} color={colors.red} fill={place.special} />
         </View>
       )}
@@ -1038,10 +1136,21 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
     <View style={styles.ours}>
       <Row style={{ flexWrap: 'wrap' }}>
         <Text style={type.h3}>Ours</Text>
-        {place.visits ? <Chip label={`Been ${place.visits}×${place.lastOn ? ` · last ${place.lastOn}` : ''}`} /> : <Chip label="To try" />}
-        {place.special ? <Chip label="Special" icon="keep" iconFill /> : null}
+        {place.visits ? <Chip label={`Been ${place.visits}×${place.lastOn ? ` · last ${fmtMonth(place.lastOn)}` : ''}`} /> : <Chip label="Shortlisted" />}
+        {place.special ? <Chip label="Loved" icon="keep" iconFill /> : null}
 
       </Row>
+      {/* Where this place came from. It used to be the row's third line —
+          "Saved · for Bath, Sep 2026" — and the owner, 7 Sep 2026: "I don't need
+          to see that. I can just see if I click into it, maybe I can see then
+          when I saved it or what trip it was part of." So it is here, where
+          there is room for all of it rather than the first trip and no more. */}
+      {place.onTrips?.length ? (
+        <Text style={type.small}>
+          {place.visits ? 'Been here on ' : 'Kept for '}
+          {place.onTrips.map((t) => [t.title?.split(/\s+[·,]\s+|,\s+then\s+/)[0].trim(), t.on].filter(Boolean).join(', ')).join(' · ')}
+        </Text>
+      ) : null}
       {/* What each of us thought is the meal's record now, not a form on the
           place (owner, 4 Sep 2026): the stars are given on the order, and
           "our history here" shows what was ordered and what was loved. */}
@@ -1050,11 +1159,11 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
             long way round, for another date, who came, a note or exact scores. */}
         <Button label={adding ? 'Close' : 'Record a past visit'} icon={adding ? 'close' : undefined} kind="ghost" onPress={() => { setEditing(null); setDetailed(true); setAdding((a) => !a); }} />
         {!place.visits && place.ledger !== 'saved' && !place.special ? <Button label="Save to try" kind="secondary" onPress={async () => { await api.savePlace(place.venueRef, 'saved', ctx); setMsg('Saved to try.'); await onChanged(); }} /> : null}
-        {place.visits > 0 && !place.special ? <Button label="Mark as special" icon="keep" kind="secondary" onPress={async () => { await api.savePlace(place.venueRef, 'special', ctx); setMsg('Marked special — the planner will go further for it.'); await onChanged(); }} /> : null}
+        {place.visits > 0 && !place.special ? <Button label="We loved it" icon="keep" kind="secondary" onPress={async () => { await api.savePlace(place.venueRef, 'special', ctx); setMsg('Loved — the planner will go further for it.'); await onChanged(); }} /> : null}
       </Wrap>
-      {/* Special is ours alone — no source has an opinion about it — and it is
+      {/* Loved is ours alone — no source has an opinion about it — and it is
           what you say after you have been (owner, 4 Sep 2026). */}
-      {!place.visits && !place.special ? <Text style={type.tiny}>Special comes after you've been. Record the visit and it appears here.</Text> : null}
+      {!place.visits && !place.special ? <Text style={type.tiny}>Loved comes after you've been. Record the visit and it appears here.</Text> : null}
       {msg ? <StatusLine tone="good">{msg}</StatusLine> : null}
       {adding && household ? (
         detailed ? (

@@ -22,6 +22,9 @@ import { countryOutline, sketchFor, SKETCH_ATTRIBUTION } from '../sources/sketch
 import { heroesForPlaces } from '../repositories/library.js';
 import { shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
+import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
+import { fillRatings, needsRating, ratingKept } from '../sources/rentedRating.js';
+import { recordsFor } from '../repositories/ownedPlaces.js';
 
 /**
  * A stored picture in the shape a card draws. `credit` travels with it because
@@ -216,7 +219,7 @@ atlas.get('/', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** GET /api/atlas/places?country=GB&city=London&kind=food&status=been|saved|special */
+/** GET /api/atlas/places?country=GB&city=London&kind=food&status=been|saved|loved */
 atlas.get('/places', async (req, res, next) => {
   try {
     const household = await currentHousehold();
@@ -246,6 +249,21 @@ atlas.get('/places', async (req, res, next) => {
       const kinds = taxonomyKept(p.venueRef);
       return kinds ? { ...p, venue: { ...(p.venue ?? {}), cuisines: kinds.cuisines, experiences: kinds.experiences } } : p;
     });
+    // What we own about these places, which for a row is the one thing that
+    // matters: what kind of thing it is. A place saved from a map search often
+    // arrives with no snapshot at all — "St James's Park" with an empty venue —
+    // and the research in sources/own.js has since read OpenStreetMap and the
+    // encyclopedias and written down what it is. That is ours to keep, so it is
+    // read from the database rather than rented back from anybody.
+    const owned = new Map((await recordsFor(places.map((p) => p.venueRef)).catch(() => [])).map((r) => [r.venue_ref, r]));
+    places = places.map((p) => {
+      const own = owned.get(p.venueRef);
+      if (!own) return p;
+      const v = p.venue ?? {};
+      const experiences = (v.experiences ?? []).length ? v.experiences : (own.experiences ?? []);
+      const cuisines = (v.cuisines ?? []).length ? v.cuisines : (own.cuisines ?? []);
+      return { ...p, category: p.category ?? own.category ?? null, venue: { ...v, experiences, cuisines } };
+    });
     // The picture we own for each of these, in one statement. A row without one
     // still draws its category icon; a row with one draws the mark or the
     // photograph the ladder found (sources/placePicture.js). Never a photograph
@@ -255,7 +273,7 @@ atlas.get('/places', async (req, res, next) => {
     // the area screen's Mood dropdown is the same vocabulary as the home
     // screen's shelves. Nothing here fetches: it reads the experiences and the
     // category a search already returned.
-    const rules = await shelfRules();
+    const [rules, tax] = await Promise.all([shelfRules(), shelfTaxonomy()]);
     places = places.map((p) => {
       const ours = ownedImage(ourPictures.get(p.venueRef) ?? null);
       return {
@@ -268,13 +286,40 @@ atlas.get('/places', async (req, res, next) => {
         // over `photos`, so a place the ladder later finds a mark for simply
         // stops drawing the provider's.
         photos: ours ? undefined : photosKept(p.venueRef) ?? undefined,
-        moods: shelvesForVenue({
-          source: p.venueRef.split(':')[0], sourcePlaceId: p.venueRef.split(':').slice(1).join(':'),
-          category: p.category ?? p.venue?.category ?? null, experiences: p.venue?.experiences ?? [],
-        }, rules).shelves,
+        // The vocabulary has to be passed, not left to default: without it the
+        // resolver has no parent for a drawer and can never name one, and the
+        // whole point here is the drawer's name (owner, 7 Sep 2026 — a row
+        // should "say what type of attraction it is, like theme park or
+        // whatever… the subcategory, not just say attractions repeatedly").
+        ...(() => {
+          const shelf = shelvesForVenue({
+            source: p.venueRef.split(':')[0], sourcePlaceId: p.venueRef.split(':').slice(1).join(':'),
+            category: p.category ?? p.venue?.category ?? null, experiences: p.venue?.experiences ?? [],
+          }, rules, tax.vocab);
+          // The cabinet's name is only worth putting on a row when something
+          // actually decided it. A place the map gave no tags for lands on Fun
+          // because a place has to be somewhere, and "Fun" on the National
+          // Gallery is a worse answer than saying nothing — so the label is
+          // sent only where a rule or a tag put it there.
+          const grounded = shelf.because.some((r) => r.scope !== 'default') || (p.venue?.experiences ?? []).length > 0;
+          return {
+            moods: shelf.shelves,
+            subcategory: shelf.subcategory,
+            subcategoryLabel: shelf.subcategory ? tax.subByKey.get(shelf.subcategory)?.label ?? null : null,
+            categoryLabel: grounded && shelf.category ? tax.byKey.get(shelf.category)?.label ?? null : null,
+          };
+        })(),
+        // What everybody else made of it, for a place nobody here has scored.
+        // Rented, held in memory, never written down (sources/rentedRating.js),
+        // and stripped again before a device may keep it.
+        ...(p.scores.length ? {} : ratingKept(p.venueRef) ?? {}),
       };
     });
-    if (status) places = places.filter((p) => (status === 'special' ? p.special : p.status === status));
+    // "Loved" is what the screen calls it now (owner, 7 Sep 2026: "the Special
+    // can be renamed Loved because we're using a heart icon"); `special` is
+    // still the word in the ledger, and still answered, so an address somebody
+    // shared last week does not break.
+    if (status) places = places.filter((p) => (status === 'special' || status === 'loved' ? p.special : p.status === status));
     // Where a place is, and what kind of place it is, are looked up lazily a few
     // rows per read, after the response has gone; the web asks again shortly
     // while any row is still waiting.
@@ -282,9 +327,13 @@ atlas.get('/places', async (req, res, next) => {
     // yet. Counted with the rest so the screen asks again and the tiles fill in,
     // rather than a household seeing mint squares until they navigate away.
     const wantPictures = places.filter((p) => needsPhoto(p.venueRef, Boolean(p.image)));
+    // A row with nobody's mark on it and no crowd rating held yet. Our own
+    // score always wins, so a place the household has scored never asks.
+    const wantRatings = places.filter((p) => needsRating(p.venueRef, p.scores.length > 0));
     const pending = rows.filter((r) => r.lat != null && r.lng != null && !r.where_checked).length
       + rows.filter(needsTaxonomy).length
-      + wantPictures.length;
+      + wantPictures.length
+      + wantRatings.length;
     res.json({ places, wherePending: pending });
     if (pending && !whereRunning.has(household.id)) {
       whereRunning.add(household.id);
@@ -295,6 +344,10 @@ atlas.get('/places', async (req, res, next) => {
         // provider is, and a provider bills. Anything that could have filled a
         // tile for free has already had its turn by now.
         .then(() => fillPhotos(household.id, wantPictures.map((p) => ({ venueRef: p.venueRef, hasOwn: Boolean(p.image) }))))
+        // Last of all, and for the same reason again: a rating and a review
+        // count are the provider's dearest fields, so everything that could
+        // have filled a row for nothing has already had its turn.
+        .then(() => fillRatings(household.id, wantRatings.map((p) => ({ venueRef: p.venueRef, ours: false }))))
         .catch(() => null)
         .finally(() => whereRunning.delete(household.id));
     }

@@ -44,8 +44,15 @@ const isJoin = (p: string) => /^\/api\/join\/[^/]+$/.test(p);
  * honest thing for it to draw — we do not have that picture, we were only
  * allowed to look at it.
  */
-function cleanPlaceRow<T extends { venueRef?: string; venue?: unknown; photos?: unknown }>(row: T): T {
+function cleanPlaceRow<T extends { venueRef?: string; venue?: unknown; photos?: unknown; rating?: unknown; ratingCount?: unknown }>(row: T): T {
   if (row.photos !== undefined) row = { ...row, photos: undefined };
+  // The crowd rating is rented too (api/src/sources/rentedRating.js): held in
+  // memory on the server for a week and never written down there either. A row
+  // that shows 4.6 on the network shows our own mark, or none, offline — which
+  // is correct, because what we rent we lose when the signal goes.
+  if (!isOpenSource(row.venueRef) && (row.rating !== undefined || row.ratingCount !== undefined)) {
+    row = { ...row, rating: undefined, ratingCount: undefined };
+  }
   // `image` deliberately survives this. It is not a provider's photograph: it is
   // an id into our own library, and every row in there is something we are
   // allowed to keep — a Commons photograph, a CC BY-SA street-level frame, or a
