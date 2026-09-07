@@ -75,6 +75,29 @@ export async function currentHousehold() {
  */
 export const householdOf = (householdId) => households.householdById(householdId);
 
+/**
+ * Which *person* this request is, not just which household.
+ *
+ * The chat needs it (trip rebuild, 7 Sep 2026): a message has an author, and a
+ * bubble on the right rather than the left is the whole of how a thread reads.
+ * `accounts.member_id` is the join (migration 056); the shared passcode has no
+ * account at all, and that is the owner, so it falls back to the first adult in
+ * the household — the same person the passcode has always been.
+ *
+ * Returns null only for a household with no adults in it, which is a household
+ * that has not been set up.
+ */
+export async function currentMember() {
+  const household = await currentHousehold();
+  const people = await households.membersOf(household.id);
+  const account = currentAccount();
+  if (account?.member_id) {
+    const mine = people.find((m) => m.id === account.member_id);
+    if (mine) return mine;
+  }
+  return people.find((m) => !m.is_minor) ?? people[0] ?? null;
+}
+
 const ageOf = (birthYear) => (birthYear ? new Date().getFullYear() - birthYear : null);
 /** Exact age from a birthday, else a rough one from the year. */
 function ageFrom(birthDate, birthYear) {

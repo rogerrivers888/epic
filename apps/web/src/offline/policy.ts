@@ -26,6 +26,9 @@ const path = (full: string) => full.split('?')[0];
 const isTripDetail = (p: string) => /^\/api\/trips\/[^/]+$/.test(p);
 const isTripPlaces = (p: string) => /^\/api\/trips\/[^/]+\/places$/.test(p);
 const isJourney = (p: string) => /^\/api\/trips\/[^/]+\/journey$/.test(p);
+const isTripChat = (p: string) => /^\/api\/trips\/[^/]+\/chat$/.test(p);
+const isTripAsks = (p: string) => /^\/api\/trips\/[^/]+\/asks\/.+$/.test(p);
+const isTripTravel = (p: string) => /^\/api\/trips\/[^/]+\/travel$/.test(p);
 const isDirections = (p: string) => /^\/api\/trips\/[^/]+\/directions$/.test(p);
 const isVisit = (p: string) => /^\/api\/visits\/[^/]+$/.test(p);
 const isJoin = (p: string) => /^\/api\/join\/[^/]+$/.test(p);
@@ -122,6 +125,37 @@ export function storable(fullPath: string, body: any): any | null {
   // to the device because a trip you are on is exactly the thing to be looking
   // at with no signal.
   if (isTripPlaces(p)) return body;
+
+  /**
+   * The trip's conversation, and one stop's Ask (trip rebuild, 7 Sep 2026).
+   *
+   * Every word in it was written by the household or by somebody they invited,
+   * so there is nothing rented here — and a conversation about the day you are
+   * on is exactly the thing to still have in a car park with no signal.
+   *
+   * One thing is taken out on the way: a guest's mobile number or email. It is
+   * how the organiser reaches them, not part of the conversation, and a phone in
+   * a pocket is somewhere we cannot reach to delete anything from. The names
+   * stay, because a thread without them is unreadable.
+   */
+  if (isTripChat(p) || isTripAsks(p)) {
+    return {
+      ...body,
+      people: body.people
+        ? { ...body.people, guests: (body.people.guests ?? []).map((g: any) => ({ ...g, contact: null })) }
+        : body.people,
+    };
+  }
+
+  /**
+   * Getting there. The legs are the household's own booking, and the airports
+   * on them come from OpenStreetMap — open data, ours to keep (sources/
+   * flights.js). "Leave home by 05:20" is Epic's own arithmetic over both.
+   *
+   * This is the answer somebody most needs with no signal: they are at the
+   * airport.
+   */
+  if (isTripTravel(p)) return body;
 
   // --- a group trip: the participant's own list, and never the roster ----
   // Someone in a group is often the person with the worst signal — a car park,

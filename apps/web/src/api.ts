@@ -658,6 +658,14 @@ export type Trip = {
   departAt: string; returnAt: string;
   travelMode: 'walking' | 'cycling' | 'driving' | 'transit'; intensity: 'relaxed' | 'balanced' | 'packed';
   country?: string | null; countryCode?: string | null; locality?: string | null;
+  /**
+   * Whether the dates mean anything yet (trip rebuild, 7 Sep 2026). False is an
+   * idea — the third strip on the Trips list — and the row says "Date not fixed"
+   * rather than a day nobody has agreed to.
+   */
+  datesFixed?: boolean;
+  /** Whether this trip has ever been shared. The link itself is fetched, never listed. */
+  shared?: boolean;
 };
 
 export type TripSummary = Trip & {
@@ -694,6 +702,97 @@ export type TripPlace = {
 export type TripStop = { id: string; position: number; venueRef: string; name: string; lat: number | null; lng: number | null; dwellMinutes: number; visit: Visit | null };
 
 export type TripDetail = { trip: Trip; attendees: { id: string; name: string; isMinor: boolean; avatarUrl?: string | null }[]; days: TripDay[]; shortlist: ShortlistItem[]; stops: TripStop[]; budget: Budget };
+
+// --- the trip rebuild (7 Sep 2026) -----------------------------------------
+
+/** "Where are you going?" — countries, then cities and towns, each pre-labelled. */
+export type TripSearchAnswer = {
+  home: string | null;
+  countries: { code: string; name: string; kind: 'holiday'; says: string }[];
+  places: (Place & { kind: 'day' | 'holiday'; says: string; minutes: number | null; by: 'driving' | 'flying' | null })[];
+  rule: string;
+};
+
+export type TravelMode2 = 'fly' | 'train' | 'drive' | 'ferry';
+export type TransferMode = 'train' | 'taxi' | 'hire';
+
+/** One leg of getting there, with the lines that are worked out rather than typed. */
+export type TravelLeg = {
+  id: string; direction: 'outbound' | 'return'; mode: TravelMode2; onDate: string | null;
+  from: { code: string | null; label: string | null; point: Terminal | null };
+  to: { code: string | null; label: string | null };
+  departAt: string | null; arriveAt: string | null;
+  carrier: string | null; serviceNo: string | null; terminal: string | null;
+  durationMinutes: number | null; bookingRef: string | null; note: string | null; source: string;
+  accessMinutes: number | null; accessEstimated: boolean;
+  /** "Leave home by 05:20 · 40 min drive" — departure minus two hours minus the drive. */
+  leaveHome: { time: string; dayBefore: boolean; minutes: number; estimated: boolean } | null;
+  resolved: boolean;
+};
+
+export type Terminal = {
+  code: string; kind: 'airport' | 'station' | 'port'; name: string; locality: string | null;
+  country: string | null; countryCode: string | null; lat: number | null; lng: number | null; attribution: string;
+};
+
+export type TripTransfer = {
+  id: string; mode: TransferMode; label: string | null; detail: string | null; minutes: number | null;
+  estCost: string | null; estCostPence: number | null; currency: string; chosen: boolean;
+};
+
+export type TripTravel = {
+  legs: TravelLeg[]; transfers: TripTransfer[]; party: number; from: string | null;
+  /** Why there are no transfer cells, when there are none. */
+  transferNote?: string | null;
+  /** What Epic can fill in and what it cannot, in the words the screen says. */
+  lookup: { schedules: boolean; says: string };
+};
+
+/** What a flight number resolved to, before anything is saved. */
+export type FlightLookup = {
+  ok: boolean; message: string;
+  serviceNo?: string; carrier?: string | null; carrierKnown?: boolean;
+  from?: Terminal | null; to?: Terminal | null; scheduled?: boolean; asks?: string[];
+};
+
+export type ChatMessage = {
+  id: string; body: string; at: string; mine: boolean;
+  author: { name: string; guest: boolean; initial: string; memberId: string | null; guestId: string | null };
+  /** Set where it was asked on a stop rather than in the chat — the "› Asked on …" pointer. */
+  onStop: { venueRef: string; label: string | null } | null;
+  seenBy: number;
+};
+
+export type TripPeople = {
+  members: { id: string; name: string; isMinor: boolean; avatarUrl: string | null }[];
+  guests: { id: string; name: string; contact: string | null; contactKind: string | null; status: string; joinedAt: string | null }[];
+  count: number;
+};
+
+export type TripChat = {
+  messages: ChatMessage[]; people: TripPeople; unread: number;
+  /** How many questions sit on each stop, by venue ref. */
+  askCounts: Record<string, number>;
+  organiser?: { id: string; name: string } | null;
+};
+
+export type TripShare = {
+  household: { id: string; name: string; isMinor: boolean; avatarUrl: string | null; going: boolean; organiser: boolean; status: string }[];
+  guests: { id: string; name: string; contact: string | null; contactKind: string | null; status: string; says: string; link: string | null }[];
+  link: string;
+  /** Whether an invite can actually be sent from here — neither sender is Epic's to switch on. */
+  canSend: { sms: boolean; email: boolean };
+};
+
+/** The trip as somebody with the link sees it: the plan, the people, and nothing else. */
+export type SharedTrip = {
+  trip: { id: string; title: string; where: string | null; startDate: string | null; endDate: string | null; datesFixed: boolean; nights: number; dates: string | null; from: string | null };
+  days: { id: string; date: string; label: string | null; stops: { id: string; venueRef: string; name: string; startTime: string | null; dwellMinutes: number }[] }[];
+  travel: { direction: string; mode: string; onDate: string | null; from: string | null; to: string | null; departAt: string | null; arriveAt: string | null; carrier: string | null; serviceNo: string | null }[];
+  people: { members: { name: string; initial: string }[]; guests: { name: string; initial: string }[] };
+  you: { id: string; name: string; joined: boolean } | null;
+  canSend?: { sms: boolean; email: boolean };
+};
 
 // --- group trips -----------------------------------------------------------
 // A group hangs off a trip: one organiser, a checklist of the things the trip
@@ -1395,6 +1494,81 @@ export const api = {
     post<TripDetail>('/api/trips', body),
   updateTrip: (id: string, body: Partial<Pick<Trip, 'title' | 'notes' | 'departAt' | 'returnAt' | 'travelMode' | 'intensity'>>) => patch<TripDetail>(`/api/trips/${id}`, body),
   deleteTrip: (id: string) => del<void>(`/api/trips/${id}`),
+
+  // --- the trip rebuild (7 Sep 2026) ----------------------------------------
+
+  /** "Where are you going?" — countries first, then cities and towns (3a). */
+  searchTrips: (q: string) => request<TripSearchAnswer>(`/api/trips/search${qs({ q })}`),
+
+  /** How long it takes to get there from home — Epic's own arithmetic, no route bought. */
+  fromHome: (p: { lat: number; lng: number; mode?: Trip['travelMode'] }) =>
+    request<{ minutes: number | null; estimated: boolean; home: string | null; mode?: string }>(`/api/trips/from-home${qs(p as any)}`),
+
+  /**
+   * The create screen's one call (5a/5b). It never says which kind of trip this
+   * is: one date is a day out, a range is a holiday, and the API infers it.
+   */
+  createTripV3: (body: {
+    kind: 'day' | 'holiday';
+    title?: string;
+    /** A day out: the date, when they want to arrive, and how long to allow. */
+    date?: string; arriveAt?: string; allowMinutes?: number;
+    /** A holiday: the range. */
+    startDate?: string; endDate?: string;
+    place?: Place; placeText?: string;
+    destination?: Place & { ref?: string }; destinationText?: string;
+    base?: Place; baseText?: string; baseKind?: string;
+    attendingMemberIds?: string[];
+    travelMode?: Trip['travelMode'];
+    /** False saves it as an idea: the dates are a placeholder, and the row says "Date not fixed". */
+    datesFixed?: boolean;
+  }) => post<TripDetail>('/api/trips', body),
+
+  /** The ⋯ menu's two: "Move to Holidays", and marking a trip an idea. */
+  setTripFlags: (id: string, body: { datesFixed?: boolean; kind?: 'day' | 'holiday' }) => patch<TripDetail>(`/api/trips/${id}`, body),
+
+  // getting there
+  tripTravel: (id: string) => request<TripTravel>(`/api/trips/${id}/travel`),
+  saveTravelLeg: (id: string, direction: 'outbound' | 'return', body: {
+    mode: TravelMode2; onDate?: string | null; fromCode?: string | null; fromLabel?: string | null;
+    toCode?: string | null; toLabel?: string | null; departAt?: string | null; arriveAt?: string | null;
+    carrier?: string | null; serviceNo?: string | null; terminal?: string | null; bookingRef?: string | null;
+    accessMinutes?: number | null; note?: string | null;
+  }) => put<TripTravel>(`/api/trips/${id}/travel/legs/${direction}`, body),
+  deleteTravelLeg: (id: string, legId: string) => del<TripTravel>(`/api/trips/${id}/travel/legs/${legId}`),
+  lookupFlight: (id: string, no: string, p: { from?: string; to?: string } = {}) =>
+    request<FlightLookup>(`/api/trips/${id}/travel/flight${qs({ no, ...p })}`),
+  searchTerminals: (id: string, q: string, kind: 'airport' | 'station' | 'port' = 'airport') =>
+    request<{ terminals: Terminal[] }>(`/api/trips/${id}/travel/terminals${qs({ q, kind })}`),
+  refreshTransfers: (id: string) => post<TripTravel>(`/api/trips/${id}/travel/transfers/refresh`, {}),
+  /** Pick one, or tap the chosen one again to take it back off the plan. */
+  chooseTransfer: (id: string, mode: TransferMode | null) => post<TripTravel>(`/api/trips/${id}/travel/transfer`, { mode }),
+
+  // the conversation
+  tripChat: (id: string) => request<TripChat>(`/api/trips/${id}/chat`),
+  tripAsks: (id: string, venueRef: string) => request<TripChat>(`/api/trips/${id}/asks/${encodeURIComponent(venueRef)}`),
+  sendTripMessage: (id: string, body: { body: string; venueRef?: string | null; venueLabel?: string | null }) =>
+    post<{ message: ChatMessage } & TripChat>(`/api/trips/${id}/chat`, body),
+  readTripChat: (id: string) => post<{ unread: number }>(`/api/trips/${id}/chat/read`, {}),
+
+  // sharing
+  tripShare: (id: string) => request<TripShare>(`/api/trips/${id}/share`),
+  setTripHousehold: (id: string, memberIds: string[]) => put<TripShare>(`/api/trips/${id}/share/household`, { memberIds }),
+  inviteGuest: (id: string, body: { name: string; contact: string }) => post<TripShare>(`/api/trips/${id}/share/guests`, body),
+  resendGuest: (id: string, guestId: string) => post<{ sent: string | null } & TripShare>(`/api/trips/${id}/share/guests/${guestId}/resend`, {}),
+  removeGuest: (id: string, guestId: string) => del<TripShare>(`/api/trips/${id}/share/guests/${guestId}`),
+
+  // --- the guest's door: public, and resolved from the link, never a session --
+  sharedTrip: (token: string, you?: string | null) => request<SharedTrip>(`/api/shared/${token}${qs({ you })}`),
+  /** `token` is the guest's own door, kept on their device; `you` in the payload is who they are. */
+  sharedEnter: (token: string, body: { name?: string; contact: string }) =>
+    post<{ guestId: string; sent: 'sms' | 'email' | null; message?: string; token?: string } & Partial<SharedTrip>>(`/api/shared/${token}/enter`, body),
+  sharedVerify: (token: string, body: { guestId: string; code: string }) =>
+    post<{ token: string } & SharedTrip>(`/api/shared/${token}/verify`, body),
+  sharedChat: (token: string, you: string, stop?: string | null) =>
+    request<{ messages: ChatMessage[] }>(`/api/shared/${token}/chat${qs({ you, stop })}`),
+  sharedSend: (token: string, body: { you: string; body: string; venueRef?: string | null; venueLabel?: string | null }) =>
+    post<{ messages: ChatMessage[] }>(`/api/shared/${token}/chat`, body),
   addStop: (tripId: string, body: { venueRef: string; name: string; lat?: number; lng?: number; dwellMinutes?: number }) => post<TripDetail>(`/api/trips/${tripId}/stops`, body),
   removeStop: (tripId: string, stopId: string) => del<TripDetail>(`/api/trips/${tripId}/stops/${stopId}`),
   reorderStops: (tripId: string, stopIds: string[]) => post<TripDetail>(`/api/trips/${tripId}/stops/reorder`, { stopIds }),

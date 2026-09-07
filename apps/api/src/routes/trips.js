@@ -3,11 +3,15 @@
 // shortlist of researched places; a base to come back to.
 
 import { Router } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { withTransaction } from '../db.js';
 import * as trips from '../repositories/trips.js';
 import { computeBudget, INTENSITY_TARGETS } from '../domain/budget.js';
 import { isTravelMode } from '../domain/travel.js';
 import { dayAsTrip, datesBetween, slotFor } from '../domain/days.js';
+import { DEFAULT_TZ, wallToUtc } from '../domain/time.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
 import { searchAreas } from '../sources/areas.js';
 import { optInFrom, enabledSources, pointsAlong, resolveVenues, SCREEN_DEADLINE_MS } from '../sources/index.js';
@@ -28,6 +32,16 @@ import { matchOsm } from '../sources/openMatch.js';
 import { mirrorHealth as overpassHealth } from '../sources/overpass.js';
 
 const router = Router();
+
+/**
+ * Every country there is, by code, for the Countries group on the new-trip
+ * search (3a). The same file the search sketch draws its coastlines from —
+ * Natural Earth, public domain — read for the names only.
+ */
+const COUNTRIES = JSON.parse(fs.readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/country-outlines.json'), 'utf8',
+));
+
 const SLOTS = ['morning', 'afternoon', 'evening'];
 const EATING = ['restaurant', 'cafe', 'pub', 'bar'];
 const SLEEPING = ['hotel', 'lodging'];
@@ -81,6 +95,14 @@ export function publicTrip(t) {
     countryCode: t.country_code,
     locality: t.locality,
     timezone: t.timezone ?? null,
+    /**
+     * Whether the dates mean anything yet (migration 068). False is an idea —
+     * the third strip on the Trips list — and every row says "Date not fixed"
+     * instead of a day nobody has agreed to.
+     */
+    datesFixed: t.dates_fixed !== false,
+    /** Whether this trip has ever been shared. The link itself is not sent here. */
+    shared: Boolean(t.share_token),
   };
 }
 
@@ -202,16 +224,130 @@ router.get('/', async (req, res, next) => {
 });
 
 /**
+ * GET /api/trips/search?q=Ita — where are you going? (trip rebuild, screen 3a)
+ *
+ * Two groups, and the second is the interesting one. **Countries** are back as
+ * an answer, because "Italy" is a thing somebody types when they have not
+ * decided which city yet, and the next step asks. **Cities and towns** are the
+ * ordinary area search Epic already does (Photon, prefix-matched), each row
+ * pre-labelled with what kind of trip it would be.
+ *
+ * The label is the handoff's rule of thumb, and it is worked out here rather
+ * than on the phone because it needs the household's home: within about three
+ * hours = a day trip; further, or across a border, = a holiday. It is a
+ * suggestion — the create screen infers the real answer from the dates — so it
+ * says how long it would take rather than pronouncing.
+ *
+ * No provider is called that costs anything: Photon is the open geocoder Epic
+ * already uses, and the times are its own straight-line arithmetic.
+ */
+router.get('/search', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const q = String(req.query.q ?? '').trim();
+    if (q.length < 2) return res.json({ countries: [], places: [], home: household.home_label ?? null });
+    const home = household.home_lat != null
+      ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng }
+      : null;
+    const homeCode = String(household.home_country_code ?? '').toUpperCase() || null;
+
+    const places = await searchAreas(q, { limit: 8, near: home });
+    const needle = q.toLowerCase();
+    const countries = Object.entries(COUNTRIES)
+      .filter(([, c]) => c.name.toLowerCase().startsWith(needle))
+      .slice(0, 3)
+      .map(([code, c]) => ({ code, name: c.name }));
+
+    res.json({
+      home: home?.label ?? null,
+      countries: countries.map((c) => ({
+        ...c,
+        /** A country is never a day trip: the next step asks which city. */
+        kind: 'holiday',
+        says: 'Holiday · pick a starting city next',
+      })),
+      places: places.map((p) => ({ ...p, ...tripShapeFor(p, home, homeCode) })),
+      /** Shown as helper text under the list, in the handoff's own words. */
+      rule: "Within about 3 hours of home it's a day trip; further, or across a border, it's a holiday. You can change this later.",
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/trips/from-home?lat=&lng=&mode=driving — how long it takes to get there.
+ *
+ * The create screen needs it for one line: "Leave home 08:55 · 5 min", which is
+ * the arrival minus the drive (5a). It is Epic's own straight-line arithmetic,
+ * not a routing call — no provider, no money, and marked as an estimate so
+ * nothing downstream mistakes it for a route.
+ */
+router.get('/from-home', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'point_required' });
+    if (household.home_lat == null) return res.json({ minutes: null, estimated: true, home: null });
+    const home = { lat: household.home_lat, lng: household.home_lng };
+    const mode = isTravelMode(req.query.mode) ? req.query.mode : 'driving';
+    res.json({
+      minutes: estimateTravelMinutes(home, { lat, lng }, mode),
+      estimated: true,
+      home: household.home_label ?? null,
+      mode,
+    });
+  } catch (err) { next(err); }
+});
+
+/** How far it is, and therefore which shape of trip the row suggests. */
+function tripShapeFor(place, home, homeCode) {
+  const abroad = Boolean(homeCode && place.countryCode && String(place.countryCode).toUpperCase() !== homeCode);
+  if (!home?.lat) {
+    return { kind: abroad ? 'holiday' : 'day', says: abroad ? 'Holiday' : 'Day trip', minutes: null, by: null };
+  }
+  const km = kmBetween(home, place);
+  if (abroad || km > 450) {
+    // Far enough that nobody drives it: an hour on the ground each end plus the
+    // air time, which is the number a person actually plans around.
+    const air = Math.round((km / 700) * 60) + 60;
+    return { kind: 'holiday', says: `Holiday · ${words(air)} flight`, minutes: air, by: 'flying' };
+  }
+  const drive = estimateTravelMinutes(home, place, 'driving');
+  const day = drive <= 180;
+  return {
+    kind: day ? 'day' : 'holiday',
+    says: `${day ? 'Day trip' : 'Holiday'} · ${words(drive)} drive`,
+    minutes: drive, by: 'driving',
+  };
+}
+
+const words = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`);
+
+/** Which third of the day a wall clock falls in. `slotFor` wants an instant; this wants "09:00". */
+function slotOfClock(hhmm) {
+  const h = Number(String(hhmm).slice(0, 2));
+  return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+}
+
+/**
  * POST /api/trips
- * Trip:   { kind:'trip', title, place|placeText, startDate, endDate, base|baseText, baseKind, hasCar, travelMode?, intensity?, dayStart?, dayEnd?, attendingMemberIds?, notes? }
- * Outing: { kind:'outing', origin|originText, destination|destinationText, departAt, returnAt, travelMode, intensity, attendingMemberIds }
+ * Day:     { kind:'day', date, arriveAt, allowMinutes, destination?, title?, attendingMemberIds? }
+ * Holiday: { kind:'holiday'|'trip', title, place|placeText, startDate, endDate, base|baseText, … }
+ * Outing:  { kind:'outing', origin|originText, destination|destinationText, departAt, returnAt, … }
  */
 router.post('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
     const b = req.body || {};
     const home = household.home_lat != null ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng } : null;
-    const kind = b.kind === 'trip' ? 'trip' : 'outing';
+    /**
+     * The create screen (5a/5b) never asks what kind of trip this is — it
+     * infers it from the dates, which is the handoff's rule: "one date = day
+     * trip; a range = multi-day". So it sends `day` or `holiday`, which are the
+     * two words a person would use, and they land on the two shapes the tables
+     * have always had.
+     */
+    const kind = b.kind === 'trip' || b.kind === 'holiday' ? 'trip' : 'outing';
     const travelMode = b.travelMode ?? (b.hasCar === false ? 'transit' : 'driving');
     const intensity = b.intensity ?? household.default_intensity;
     if (!isTravelMode(travelMode)) return res.status(400).json({ error: 'invalid_mode' });
@@ -256,6 +392,7 @@ router.post('/', async (req, res, next) => {
         }
         return created;
       });
+      if (b.datesFixed === false) await trips.setTripFlags(trip.id, { datesFixed: false });
       return res.status(201).json(await tripPayload(trip.id));
     }
 
@@ -266,15 +403,41 @@ router.post('/', async (req, res, next) => {
     if (!origin) return res.status(400).json({ error: 'origin_required', message: 'Give a starting point, or set a home address in Settings.' });
     let destination = b.destination?.lat != null ? b.destination : null;
     if (!destination && b.destinationText) [destination] = await geocode(b.destinationText, { limit: 1, near: home });
-    if (!b.departAt || !b.returnAt) return res.status(400).json({ error: 'window_required' });
-    if (new Date(b.returnAt) <= new Date(b.departAt)) return res.status(400).json({ error: 'invalid_window' });
+
+    /**
+     * The day out, as the create screen asks it (5a): a date, the time they
+     * want to *arrive*, and how long to allow there.
+     *
+     * The window is derived rather than typed, which is the whole point of that
+     * screen — "Leave home 08:55" is the arrival minus the drive, and "Head
+     * home" is the arrival plus the allowance plus the drive back. The
+     * household never has to do that arithmetic, and moving the arrival moves
+     * both ends with it.
+     */
+    let { departAt, returnAt } = b;
+    const allowMinutes = Number(b.allowMinutes) || null;
+    if (!departAt && b.date && b.arriveAt) {
+      // "09:00" is a wall clock in the household's own zone, not the server's —
+      // the API runs in UTC on Railway and reading it as local time would put a
+      // British summer morning an hour out.
+      const zone = household.timezone || DEFAULT_TZ;
+      const arrive = wallToUtc(String(b.date).slice(0, 10), String(b.arriveAt).slice(0, 5), zone);
+      if (!arrive || Number.isNaN(+arrive)) return res.status(400).json({ error: 'invalid_window', message: 'That is not a date and time we can read.' });
+      const drive = destination?.lat != null && origin?.lat != null
+        ? estimateTravelMinutes(origin, destination, travelMode) : 0;
+      const allow = allowMinutes ?? 240;
+      departAt = new Date(+arrive - drive * 60_000).toISOString();
+      returnAt = new Date(+arrive + (allow + drive) * 60_000).toISOString();
+    }
+    if (!departAt || !returnAt) return res.status(400).json({ error: 'window_required' });
+    if (new Date(returnAt) <= new Date(departAt)) return res.status(400).json({ error: 'invalid_window' });
 
     const trip = await withTransaction(async (client) => {
       const created = await trips.insertOuting(household.id, {
         title: b.title?.trim() || null, notes: b.notes?.trim() || null,
         originLabel: origin.label, originLat: origin.lat, originLng: origin.lng,
         destinationLabel: destination?.label ?? null, destinationLat: destination?.lat ?? null, destinationLng: destination?.lng ?? null,
-        departAt: b.departAt, returnAt: b.returnAt, travelMode, intensity,
+        departAt, returnAt, travelMode, intensity,
         hasCar: b.hasCar !== false, timezone: household.timezone || 'Europe/London',
       }, client);
       for (const memberId of await ids(client)) await trips.addAttendee(created.id, memberId, client);
@@ -303,15 +466,21 @@ router.post('/', async (req, res, next) => {
         const day = await trips.firstDayOf(created.id, client);
         if (day) {
           await trips.insertStop(created.id, day.id, {
-            slot: 'afternoon', startTime: null, position: 1,
+            // The arrival is the household's answer, so it goes on the stop:
+            // the timeline then reads 09:55 Leave home · 10:00 Wentworth Club,
+            // which is the sentence the create screen promised (5a).
+            slot: b.arriveAt ? slotOfClock(b.arriveAt) : 'afternoon',
+            startTime: b.arriveAt ? String(b.arriveAt).slice(0, 5) : null,
+            position: 1,
             venueRef: destination.ref, name: destination.label,
             lat: destination.lat, lng: destination.lng,
-            // The reason for the day gets the day: what is left of the window
-            // once the driving is paid for, so a stop added on the way is seen
-            // to come out of it rather than to be free.
-            dwellMinutes: Math.max(
+            // "Allow" is the answer where the household gave one. Otherwise the
+            // reason for the day gets the day: what is left of the window once
+            // the driving is paid for, so a stop added on the way is seen to
+            // come out of it rather than to be free.
+            dwellMinutes: allowMinutes ?? Math.max(
               60,
-              Math.round((new Date(b.returnAt) - new Date(b.departAt)) / 60_000)
+              Math.round((new Date(returnAt) - new Date(departAt)) / 60_000)
                 - 2 * estimateTravelMinutes(origin, destination, travelMode),
             ),
           }, client);
@@ -319,6 +488,12 @@ router.post('/', async (req, res, next) => {
       }
       return created;
     });
+    /**
+     * An idea (1a, the third strip): the dates in the columns are a placeholder
+     * so the day machinery keeps working, and every screen says "Date not
+     * fixed" instead of a day nobody has agreed to.
+     */
+    if (b.datesFixed === false) await trips.setTripFlags(trip.id, { datesFixed: false });
     res.status(201).json(await tripPayload(trip.id));
   } catch (err) {
     next(err);
@@ -414,6 +589,17 @@ router.patch('/:id', async (req, res, next) => {
       // Which place sources this trip's searches and plans may use; null means the default set.
       if ('sources' in b) {
         await trips.setTripSources(trip.id, Array.isArray(b.sources) ? b.sources.map(String).filter(Boolean) : null, client);
+      }
+      /**
+       * The two the ⋯ menu changes (trip rebuild, screen 1c): whether the dates
+       * are real — an idea has none, and its row says "Date not fixed" — and
+       * "Move to Holidays", which is the only thing that rewrites `kind`.
+       */
+      if ('datesFixed' in b || 'kind' in b) {
+        await trips.setTripFlags(trip.id, {
+          datesFixed: typeof b.datesFixed === 'boolean' ? b.datesFixed : null,
+          kind: b.kind === 'trip' || b.kind === 'holiday' ? 'trip' : b.kind === 'outing' || b.kind === 'day' ? 'outing' : null,
+        }, client);
       }
       await ensureDays(client, updated);
     });

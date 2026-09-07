@@ -1,37 +1,37 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
-import { api, BrowseItem, GroupSummary, HouseholdResponse, Place, PlanAction, PlanResponse, ShortlistItem, Stay, StayPricing, TripDay, TripDetail, TripPlace, TripSummary, Venue, DayStop } from '../api';
+import { api, HouseholdResponse, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, DayStop } from '../api';
 import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { Button, Card, Chip, FoldLine, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
+import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
 import { TimeBar } from '../components/TimeBar';
-import { Avatar, WhoLine } from '../components/Faces';
 import { PlacePicker } from '../components/PlacePicker';
-import { DateRangePicker, monthSpanLabel } from '../components/DateRangePicker';
-import { TimeRangePicker, timeLabel } from '../components/TimePicker';
 import { PricePointControl, ChainsControl } from '../components/PlanControls';
 import { MapView, MapPin } from '../components/MapView';
-import { VenueRow, VisitForm, VisitSummary } from './PlacesScreen';
+import { VisitForm, VisitSummary } from './PlacesScreen';
 import { VenueThumb } from '../components/VenueThumb';
-import { PickPanel } from '../components/PickPanel';
-import { WhereSearch } from '../components/WhereSearch';
-import { TripCard } from '../components/TripCard';
 import { TripMapScreen } from './TripMapScreen';
 import { speak as speakRaw, useSpeech } from '../hooks/useSpeech';
 import { Listening } from '../components/Listening';
 import { CategoryIcon, Icon, IconName, Rating, Stars } from '../components/Icon';
 import { ShortlistJourney, TripJourneyDay } from '../components/Journey';
-import { BrowseNear, FindCat, FindState, emptyFind } from '../components/BrowseNear';
+import { BrowseNear, FindState, emptyFind } from '../components/BrowseNear';
 import { getSpeakPref } from './SettingsScreen';
 import { SourceDataPanel } from '../components/SourceData';
 import { isAdmin } from '../admin';
 import { recallScreen, rememberScreen } from '../screenState';
-import { asOneOf, asText, useQueryState, useRouter } from '../router';
+import { asOneOf, useQueryState, useRouter } from '../router';
 import { paths, TRIP_TABS, type Route, type TripSection } from '../routes';
-import { accuracyWords, useHere } from '../hooks/useHere';
-import { shortPlaceName, tripName } from './tripName';
+import { tripName } from './tripName';
+import { TripsList, TripsWhen } from './TripsList';
+import { NewTripSearchScreen } from './NewTripSearchScreen';
+import { CreateTripScreen } from './CreateTripScreen';
+import { GettingThereScreen } from './GettingThereScreen';
+import { TripChatScreen } from './TripChatScreen';
+import { StopAskScreen } from './StopAskScreen';
+import { DeleteTripSheet, RenameTripSheet, ShareTripSheet, TripMenuSheet, TripMenuAction } from './TripSheets';
 
 const speak = (t: string) => { if (getSpeakPref()) speakRaw(t); };
 const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -73,34 +73,23 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
 }) {
   const { width } = useViewport();
   const wide = width >= 1000;
-  const { navigate, back, setQuery } = useRouter();
+  const { navigate, back, query } = useRouter();
   const [data, setData] = useState<Awaited<ReturnType<typeof api.trips>> | null>(null);
   const creating = route.creating;
   const openId = route.tripId;
   /**
-   * How the list is set (handover, 5 Sep 2026, screen 2a): "Day trips /
-   * Holidays segmented. Filters: area (All areas · UK · Abroad), when (defaults
-   * Upcoming), who." All of it is query, because it is how the page is set and
-   * not which page it is (CLAUDE.md).
+   * How the list is set (trip rebuild, 1a): which half of the switch, and which
+   * of the three strips. Both are query, because they are how the page is set
+   * and not which page it is (CLAUDE.md).
    *
-   * Where is drawn under Past only (owner, 5 Sep 2026) — see `byArea` below.
+   * The area and who filters that used to sit here are gone with the chips that
+   * carried them: the strips are the filter now, and Ideas is the one that is
+   * new. Nothing the owner asked for was removed — Where was already drawn under
+   * Past only, and a trip's people are on the trip.
    */
   const [span, setSpan] = useQueryState<'day' | 'holiday'>('span', 'day', asOneOf(['day', 'holiday'] as const, 'day'));
-  // Read here, written by `setWhen` below, which moves Where with it.
-  const [when] = useQueryState<'upcoming' | 'past'>('when', 'upcoming', asOneOf(['upcoming', 'past'] as const, 'upcoming'));
-  const [area, setArea] = useQueryState<string | null>('area', null, asText);
-  const [who, setWho] = useQueryState<string | null>('who', null, asText);
-  const [sheet, setSheet] = useState<'area' | 'when' | 'who' | null>(null);
-  const [myGroups, setMyGroups] = useState<GroupSummary[]>([]);
+  const [when, setWhen] = useQueryState<TripsWhen>('when', 'upcoming', asOneOf(['upcoming', 'past', 'ideas'] as const, 'upcoming'));
   const [error, setError] = useState<string | null>(null);
-  /**
-   * When and Where move together, in one address rather than two navigations
-   * racing each other: coming back to Upcoming takes the country with it,
-   * because the chip that set it is not drawn there and a filter nobody can
-   * see is a filter nobody can undo.
-   */
-  const setWhen = (next: 'upcoming' | 'past') =>
-    setQuery({ when: next === 'upcoming' ? null : next, ...(next === 'upcoming' ? { area: null } : {}) });
 
   // Which trip the address has open, for the loader — as a ref, so opening one
   // does not count as a reason to go and fetch the list again.
@@ -110,10 +99,6 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     try {
       const next = await api.trips();
       setData(next);
-      // The groups this household runs: the Who filter lists them beneath the
-      // people, because "who's coming" has the same two kinds of answer here as
-      // it does on the form that made the trip.
-      api.groups().then((r) => setMyGroups(r.groups)).catch(() => {});
       // A trip deleted since you last looked should not reopen as an error page.
       if (openNow.current && !next.trips.some((t) => t.id === openNow.current)) navigate(paths.trips(), { replace: true });
     } catch (e: any) { setError(e.message); }
@@ -132,10 +117,9 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   const [picked, setPicked] = useState<TripSeed | null>(null);
 
   /**
-   * "Where are you going?" — the same screen Inspire's search bar opens, on
-   * the tab where trips are made (owner, 7 Sep 2026: "when I go to trips, I
-   * should be able to just create a new trip from here, in the same way that I
-   * can when I click on the search box on the Inspire tab").
+   * "Where are you going?" — the new-trip search (3a), on the tab where trips
+   * are made (owner, 7 Sep 2026: "when I go to trips, I should be able to just
+   * create a new trip from here").
    *
    * Picking a town replaces this screen with the form rather than pushing on
    * top of it: Back from a half-filled form belongs on the trips, not on the
@@ -143,13 +127,12 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
    */
   if (route.searching) {
     return (
-      <WhereSearch
-        title="Where are you going?"
-        home={household?.household.home ?? null}
+      <NewTripSearchScreen
         onClose={() => back(paths.trips())}
-        onPick={(p) => {
+        onPick={(p, kind) => {
           const q = new URLSearchParams({ place: p.locality ?? p.label });
           if (p.countryCode) q.set('country', p.countryCode);
+          q.set('kind', kind);
           setPicked({ place: p, placeText: p.locality ?? p.label, countryCode: p.countryCode ?? undefined });
           navigate(`${paths.newTrip()}?${q}`, { replace: true });
         }}
@@ -164,6 +147,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
         id={openId}
         section={route.section}
         dayId={route.dayId}
+        stopRef={route.stopRef}
         household={household}
         onBack={async () => { back(paths.trips()); await load(); }}
         refreshHousehold={refreshHousehold}
@@ -172,661 +156,69 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     );
   }
 
-  const all = data?.trips ?? [];
-  const homeCode = data?.countries?.[0]?.code ?? null;
-  const startOf = (t: TripSummary) => new Date(t.startDate ? `${t.startDate}T12:00:00` : t.departAt);
-
-  /** A night away is a holiday; everything else is a day out, whatever it calls itself. */
-  const inSpan = (t: TripSummary) => (span === 'holiday' ? t.nights > 0 : t.nights === 0);
-  const inArea = (t: TripSummary) => {
-    if (!area) return true;
-    if (area === 'uk') return t.countryCode === homeCode;
-    if (area === 'abroad') return !!t.countryCode && t.countryCode !== homeCode;
-    return t.countryCode === area;
-  };
   /**
-   * Who, with two kinds of answer: a person in the household, or one of the
-   * household's groups. A group runs across more than one trip once it has been
-   * used again — the same school dads, a year later — and those are the same
-   * group to everybody except the database, so they are matched by name.
+   * The create screen (5a/5b). One screen, no tabs, and it never asks what kind
+   * of trip this is — the dates decide.
    */
-  const pickedGroup = who?.startsWith('group:') ? myGroups.find((g) => g.id === who.slice(6)) ?? null : null;
-  const groupTripIds = pickedGroup
-    ? new Set(myGroups.filter((g) => (g.name ?? '') === (pickedGroup.name ?? '')).map((g) => g.tripId))
-    : null;
-  const inWho = (t: TripSummary) =>
-    !who ? true : groupTripIds ? groupTripIds.has(t.id) : t.attendees.some((a) => a.id === who);
-  /**
-   * Where is a question about the past only (owner, 5 Sep 2026: "the country
-   * (UK or abroad) only needs to appear when you're looking in the past.
-   * Otherwise, you can just show all the upcoming trips").
-   *
-   * He is right about what the chip is for. Everything ahead of you is a short
-   * list you want to see whole — narrowing it by continent is filing, not
-   * finding — whereas "my trips to Italy" is a question about years of them.
-   * So the chip is drawn under Past and nowhere else, and it does not filter
-   * when it is not on screen: a filter you cannot see is one you cannot undo.
-   */
-  const byArea = when === 'past';
-  const shown = all.filter((t) => inSpan(t) && (!byArea || inArea(t)) && inWho(t) && (byArea ? t.isPast : !t.isPast));
-  const pastCount = all.filter((t) => inSpan(t) && inWho(t) && t.isPast).length;
-
-  /**
-   * Upcoming is grouped by month and past by year (handover 2a/2b): what is
-   * coming needs "which weekend"; what is gone needs "which year we did that".
-   */
-  const groups = (() => {
-    const now = new Date();
-    const key = (t: TripSummary) => {
-      const d = startOf(t);
-      if (when === 'past') return String(d.getFullYear());
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-        ? 'This month'
-        : d.toLocaleDateString([], { month: 'long', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
-    };
-    const asc = (a: TripSummary, b: TripSummary) => +startOf(a) - +startOf(b);
-    const sorted = [...shown].sort(when === 'past' ? (a, b) => asc(b, a) : asc);
-    const out: { label: string; trips: TripSummary[] }[] = [];
-    for (const t of sorted) {
-      const k = key(t);
-      const g = out.find((x) => x.label === k) ?? (out.push({ label: k, trips: [] }), out[out.length - 1]);
-      g.trips.push(t);
-    }
-    return out;
-  })();
-
-  const countries = data?.countries ?? [];
-  // Counted over the past, because that is the only place the chip is drawn.
-  const behind = all.filter((t) => inSpan(t) && t.isPast);
-  const areaOptions = [
-    { value: '', label: 'All areas', count: behind.length },
-    ...(homeCode ? [{ value: 'uk', label: countries.find((c) => c.code === homeCode)?.name ?? 'Home', count: behind.filter((t) => t.countryCode === homeCode).length }] : []),
-    { value: 'abroad', label: 'Abroad', count: behind.filter((t) => !!t.countryCode && t.countryCode !== homeCode).length },
-    ...countries.filter((c) => c.code !== homeCode && behind.some((t) => t.countryCode === c.code))
-      .map((c) => ({ value: c.code, label: c.name, count: behind.filter((t) => t.countryCode === c.code).length })),
-  ];
-  const whenOptions = [
-    { value: 'upcoming', label: 'Upcoming', count: all.filter((t) => inSpan(t) && !t.isPast).length },
-    { value: 'past', label: 'Past', count: all.filter((t) => inSpan(t) && t.isPast).length },
-  ];
-  const areaLabel = areaOptions.find((o) => o.value === (area ?? ''))?.label ?? 'All areas';
-  const whoLabel = pickedGroup ? (pickedGroup.name ?? 'A group') : (household?.members ?? []).find((m) => m.id === who)?.name ?? 'Anyone';
-
-  return (
-    <ScrollView contentContainerStyle={[styles.page, wide && { maxWidth: 860, alignSelf: 'center', width: '100%' }]} keyboardShouldPersistTaps="handled">
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={type.title}>{creating ? 'New trip' : 'Trips'}</Text>
-          {creating ? <Text style={type.small}>Where, when, and who — everything else can wait until it exists.</Text> : null}
-        </View>
-        <Pressable
-          onPress={() => { onSeedUsed?.(); setPicked(null); navigate(creating ? paths.trips() : paths.newTrip()); }}
-          style={[styles.roundBtn, !creating && styles.roundBtnInk]}
-          accessibilityRole="button"
-          accessibilityLabel={creating ? 'Close' : 'New trip'}
-        >
-          <Icon name={creating ? 'close' : 'add'} size={20} color={creating ? colors.ink : colors.primaryFg} strokeWidth={2.2} />
-        </Pressable>
-      </View>
-
-      {/* A new trip is its own page: the trips you already have are not part of
-          making one (owner, 4 Sep 2026). */}
-      {creating && household ? (
-        <>
-          <NewTripForm
-            household={household}
-            startFrom={seed ?? picked}
-            onCreated={async (t, group) => {
-              // A trip made from a place opens with that place already on it.
-              // Failing to seed is not a reason to lose the trip they just
-              // made, so it is tried and the trip opens either way.
-              //
-              // On a day out the API has already put it on the day, as the stop
-              // the day is built around, so shortlisting it as well would put
-              // the same place in two lists — which is what the owner found on
-              // the Wembley trip (6 Sep 2026). It goes on the shortlist only
-              // where it is not already on the trip: a trip away, where the
-              // place somebody tapped is one must-do in a city of them.
-              const must = seed?.seed;
-              const onTheDay = t.days.some((day) => day.slots.some((sl) => sl.stops.some((st) => st.venueRef === must?.venueRef)));
-              if (must && !onTheDay) {
-                try {
-                  await api.addToShortlist(t.trip.id, {
-                    venueRef: must.venueRef, venueLabel: must.name, category: must.category ?? null,
-                    lat: must.lat ?? null, lng: must.lng ?? null, mustDo: true,
-                    note: must.note ?? 'The reason for the trip',
-                  });
-                } catch { /* the trip is made; the shortlist can be added to by hand */ }
-              }
-              onSeedUsed?.();
-              setPicked(null);
-              // Who's coming was answered "a group": make it, then open the
-              // front door on it rather than the trip's own day.
-              if (group) {
-                try { await api.createTripGroup(t.trip.id, { copyFromGroupId: group.copyFromGroupId }); } catch { /* the trip is made; the group can be started from the tab */ }
-                await load(); navigate(paths.trip(t.trip.id, 'group'), { replace: true });
-                return;
-              }
-              await load(); navigate(paths.trip(t.trip.id), { replace: true });
-            }}
-          />
-          {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-        </>
-      ) : (
-        <>
-          {/* A trip starts with where, and this is the tab you open to start one
-              (owner, 7 Sep 2026). Deliberately the same control as Inspire's
-              search bar — same shape, same screen behind it — because it is the
-              same question, and the + beside the title is still there for
-              somebody who would rather fill the form in from the top. */}
-          <Pressable
-            onPress={() => navigate(paths.tripsSearch())}
-            style={[styles.where, wide && styles.whereWide]}
-            accessibilityRole="search"
-            accessibilityLabel="Where are you going?"
-          >
-            <Icon name="search" size={18} color={colors.ink} strokeWidth={2.2} />
-            <Text style={styles.whereText} numberOfLines={1}>Where are you going?</Text>
-          </Pressable>
-          <Segmented
-            value={span}
-            options={[{ value: 'day' as const, label: 'Day trips' }, { value: 'holiday' as const, label: 'Holidays' }]}
-            onChange={setSpan}
-          />
-          <View style={styles.filters}>
-            <FilterChip label={when === 'past' ? 'Past' : 'Upcoming'} on={when === 'past'} open={sheet === 'when'} onPress={() => setSheet(sheet === 'when' ? null : 'when')} />
-            {byArea ? <FilterChip label={areaLabel} on={!!area} open={sheet === 'area'} onPress={() => setSheet(sheet === 'area' ? null : 'area')} /> : null}
-            <FilterChip label={whoLabel} on={!!who} open={sheet === 'who'} onPress={() => setSheet(sheet === 'who' ? null : 'who')} />
-          </View>
-          {/* The answers open under the chips, not in a sheet at the foot of the window. */}
-          <PickPanel open={sheet === 'when'} title="When" options={whenOptions} value={when} onPick={(v) => { setWhen(v as any); setSheet(null); }} onClose={() => setSheet(null)} />
-          <PickPanel open={sheet === 'area'} title="Where" options={areaOptions} value={area ?? ''} onPick={(v) => { setArea(v || null); setSheet(null); }} onClose={() => setSheet(null)} />
-          <WhoPanel
-            open={sheet === 'who'}
-            members={household?.members ?? []}
-            groups={myGroups}
-            value={who ?? ''}
-            onPick={(v) => { setWho(v || null); setSheet(null); }}
-            onClose={() => setSheet(null)}
-          />
-          {pickedGroup ? (
-            <GroupSummaryRow
-              group={pickedGroup}
-              others={myGroups.filter((g) => (g.name ?? '') === (pickedGroup.name ?? ''))}
-              onManage={() => navigate(paths.trip(pickedGroup.tripId, 'group'))}
-            />
-          ) : null}
-
-          {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-          {!data ? <Text style={type.small}>Loading…</Text> : null}
-          {data && !all.length ? <Card><Text style={type.small}>No trips yet. Say where you're going above, or open an area in Places and tap "Plan a trip here".</Text></Card> : null}
-          {data && all.length && !shown.length ? (
-            <Card><Text style={type.small}>Nothing {when === 'past' ? 'behind you' : 'coming up'} that matches. Change a filter, or look at {span === 'day' ? 'Holidays' : 'Day trips'}.</Text></Card>
-          ) : null}
-
-          {groups.map((g) => (
-            <View key={g.label} style={{ gap: spacing.sm }}>
-              <Text style={type.label}>{g.label}</Text>
-              {g.trips.map((t) => <TripCard key={t.id} trip={t} members={household?.members ?? []} onPress={() => navigate(paths.trip(t.id))} />)}
-            </View>
-          ))}
-
-          {/* Past is a filter, not a fold: the link sets the When chip. */}
-          {when === 'upcoming' && pastCount ? (
-            <Pressable onPress={() => setWhen('past')} accessibilityRole="button" style={{ paddingVertical: spacing.sm }}>
-              <Row style={{ gap: 4 }}>
-                <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Past trips · {pastCount}</Text>
-                <Icon name="forward" size={14} color={colors.accent} />
-              </Row>
-            </Pressable>
-          ) : null}
-          {when === 'past' ? (
-            <Pressable onPress={() => setWhen('upcoming')} accessibilityRole="button" style={{ paddingVertical: spacing.sm }}>
-              <Row style={{ gap: 4 }}>
-                <Icon name="back" size={14} color={colors.accent} />
-                <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>What's coming up</Text>
-              </Row>
-            </Pressable>
-          ) : null}
-
-        </>
-      )}
-    </ScrollView>
-  );
-}
-
-
-/** A dropdown, as a chip that opens a panel under the row. Same control as Places. */
-function FilterChip({ label, on, open, onPress }: { label: string; on: boolean; open?: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.fchip, on && styles.fchipOn, open && !on && styles.fchipOpen]} accessibilityRole="button" accessibilityState={{ expanded: !!open }}>
-      <Text style={[styles.fchipText, on && { color: colors.primaryFg }]} numberOfLines={1}>{label}</Text>
-      <Icon name={open ? 'collapse' : 'expand'} size={13} color={on ? colors.primaryFg : colors.ink} />
-    </Pressable>
-  );
-}
-
-
-// ---------------------------------------------------------------------------
-// New trip
-// ---------------------------------------------------------------------------
-
-/** Trip away, day out from home, or out already. */
-type TripKind = 'trip' | 'outing' | 'now';
-
-/** The clock, down to the last five minutes: a window that starts "now" starts now. */
-const roundedNow = () => {
-  const d = new Date();
-  d.setMinutes(Math.floor(d.getMinutes() / 5) * 5, 0, 0);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
-/** Four hours later, on the half hour, and never past the end of the day. */
-const hoursAfter = (hhmm: string, hours: number) => {
-  const [h, m] = hhmm.split(':').map(Number);
-  const mins = Math.min(23 * 60 + 30, Math.ceil((h * 60 + m + hours * 60) / 30) * 30);
-  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
-};
-
-const KIND_HINT: Record<TripKind, string> = {
-  trip: 'Somewhere else, with dates and somewhere to stay.',
-  outing: 'A day out from home, planned by the hour.',
-  now: "You're out already — this starts where you're standing, from now.",
-};
-
-/**
- * Where you are, asked of the device only when the button is pressed (owner,
- * 4 Sep 2026). Typing it is always there underneath: a browser set to keep
- * location private, a phone that cannot see the sky, or simply a household that
- * would rather say it must all end up in the same place.
- */
-function StartHere({ value, onPick }: { value: Place | null; onPick: (p: Place | null) => void }) {
-  const me = useHere();
-  const fromDevice = Boolean(value && me.place && value.lat === me.place.lat && value.lng === me.place.lng);
-  return (
-    <View style={{ gap: spacing.sm }}>
-      {!value ? (
-        <>
-          {me.supported ? <Button label={me.busy ? 'Finding you…' : 'Use my location'} icon="here" onPress={async () => { const p = await me.ask(); if (p) onPick(p); }} loading={me.busy} /> : null}
-          <Text style={type.tiny}>{me.supported ? "Your device says where you are and the map gives it a name. It isn't stored — it's used to search around you." : 'This browser cannot tell us where you are. Type it instead.'}</Text>
-          {me.error ? <StatusLine tone="warn">{me.error}</StatusLine> : null}
-        </>
-      ) : null}
-      <PlacePicker value={value} onPick={onPick} placeholder={me.supported ? 'Or type where you are' : 'Where you are'} />
-      {fromDevice ? <Text style={type.tiny}>From your device{me.accuracyM != null ? `, ${accuracyWords(me.accuracyM)}` : ''} · © OpenStreetMap contributors</Text> : null}
-    </View>
-  );
-}
-
-function NewTripForm({ household, startFrom, onCreated }: {
-  household: HouseholdResponse; startFrom: TripSeed | null;
-  /** `group` is set when the answer to Who's coming was a group: the trip is made, then the group is. */
-  onCreated: (t: TripDetail, group?: { copyFromGroupId?: string } | null) => Promise<void>;
-}) {
-  // What the address says about the trip being made — the question, not the
-  // half-typed answer — so `/trips/new?place=Bath&kind=outing` opens the right
-  // form even for somebody who was sent the link.
-  const { query } = useRouter();
-  const prefill: TripSeed | null = useMemo(() => {
-    const kind = query.get('kind');
-    const asked: TripSeed = {
-      ...(startFrom ?? {}),
-      kind: kind === 'trip' || kind === 'outing' || kind === 'now' ? kind : startFrom?.kind,
-      placeText: startFrom?.placeText ?? query.get('place') ?? undefined,
-      countryCode: startFrom?.countryCode ?? query.get('country') ?? undefined,
-    };
-    return Object.values(asked).some((v) => v != null) ? asked : null;
-  }, [startFrom, query.get('kind'), query.get('place'), query.get('country')]);
-  const home = household.household.home;
-  // Three ways a trip begins (owner, 4 Sep 2026): somewhere else with dates, a
-  // day out from home, or — the one that was missing — standing in the street
-  // already ("in the real world, I'm out in London and I suddenly want to find
-  // somewhere to go"). "Right now" is a day out whose starting point is the
-  // device's own fix and whose window starts on the clock.
-  const [kind, setKind] = useState<TripKind>(prefill?.kind ?? 'trip');
-  const [title, setTitle] = useState('');
-  // The name is filled in from where you are going and keeps up with it until
-  // you type over it (owner, 4 Sep 2026: "It should just chuck in the location
-  // that I'm going to, and then I can just edit that name as I see fit").
-  const [named, setNamed] = useState(false);
-  const [place, setPlace] = useState<Place | null>(prefill?.place ?? null);
-  const [placeText, setPlaceText] = useState(prefill?.placeText ?? '');
-  const [start, setStart] = useState(new Date().toISOString().slice(0, 10));
-  const [end, setEnd] = useState(new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10));
-  const [base, setBase] = useState<Place | null>(null);
-  const [baseKind, setBaseKind] = useState<'hotel' | 'rental' | 'friends' | 'home' | 'other'>('hotel');
-  // Booked already, or wanting Epic to look. Looking is the default, because a
-  // trip being made is usually a trip not yet booked.
-  const [stayMode, setStayMode] = useState<'known' | 'find'>('find');
-  const [hasCar, setHasCar] = useState(true);
-  const [dayStart, setDayStart] = useState('09:30');
-  const [dayEnd, setDayEnd] = useState('21:00');
-  const [intensity, setIntensity] = useState(household.household.defaultIntensity);
-  const [attending, setAttending] = useState<Set<string>>(new Set(household.members.map((m) => m.id)));
-  const [seed, setSeed] = useState(true);
-  // outing
-  const [from, setFrom] = useState<Place | null>(home);
-  // A day out arriving from somewhere else already knows where it is going —
-  // it is the place they tapped "Create trip" on — so the destination is
-  // filled and only the times are left to answer.
-  const [to, setTo] = useState<Place | null>(prefill?.kind === 'outing' ? prefill?.place ?? null : null);
-  const [oStart, setOStart] = useState('10:00');
-  const [oEnd, setOEnd] = useState('16:00');
-  // Right now: where the device says they are, and the hours left in the day.
-  const [herePlace, setHerePlace] = useState<Place | null>(null);
-  const [nStart, setNStart] = useState(() => roundedNow());
-  const [nEnd, setNEnd] = useState(() => hoursAfter(roundedNow(), 4));
-  // A day out is a drive unless it is said not to be (owner, 4 Sep 2026:
-  // "the means of transport should be defaulted to drive… walking and cycling,
-  // it's just too much noise"). The other three are behind the line.
-  const [mode, setMode] = useState<'walking' | 'cycling' | 'driving' | 'transit'>('driving');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // "Bath" is not "Bath and North East Somerset", which is the council that
-  // collects its bins (owner, 6 Sep 2026). One rule, in tripName.ts — and it
-  // still reads an address by its town, because "Fairways" names nowhere.
-  const shortName = (p: Place | null) => (!p ? '' : home && p.lat === home.lat && p.lng === home.lng ? 'Home' : shortPlaceName(p));
-  // Where a day out starts: home (or wherever they said) for a planned one, the
-  // device's fix for one that has already started.
-  const startPoint = kind === 'now' ? herePlace : from;
-  // Half-typed letters are not a destination: the name fills in once somewhere
-  // has been picked, not while the box still says "bat".
-  const city = kind === 'trip' ? shortName(place) : shortName(to) || shortName(startPoint);
-  const defaultTitle = kind === 'trip'
-    ? (city ? `${city} · ${monthSpanLabel(start, end)}` : '')
-    : kind === 'now'
-      ? (herePlace ? `Around ${shortName(herePlace)}, ${fmtDate(start)}` : '')
-      : (to ? `${shortName(from) || 'Home'} → ${shortName(to)}` : from ? `Around ${shortName(from)}` : '');
-  // Where changes, so does the name — until it has been typed in.
-  useEffect(() => { if (!named) setTitle(defaultTitle); }, [defaultTitle, named]);
-  const savedTitle = title.trim() || defaultTitle || undefined;
-
-  const submit = async (group?: { copyFromGroupId?: string } | null) => {
-    setBusy(true); setError(null);
-    try {
-      if (kind === 'trip') {
-        if (!place && !placeText.trim()) { setError('Where is the trip? Pick a city or region.'); setBusy(false); return; }
-        const t = await api.createMultiDayTrip({
-          title: savedTitle ?? (placeText.trim() ? `${placeText.trim()} · ${monthSpanLabel(start, end)}` : undefined),
-          place: place ?? undefined, placeText: place ? undefined : placeText.trim(), startDate: start, endDate: end,
-          base: base ?? undefined, baseKind: base ? baseKind : 'other', hasCar, dayStart, dayEnd, intensity, attendingMemberIds: [...attending], seedFromAtlas: seed,
-        });
-        await onCreated(t, group);
-      } else if (kind === 'now') {
-        if (!herePlace) { setError('Tap "Use my location", or type where you are.'); setBusy(false); return; }
-        // Now is now: the window opens at this minute rather than at the top of
-        // the five it was rounded to, so nothing is already in the past.
-        const now = new Date();
-        const depart = new Date(`${now.toISOString().slice(0, 10)}T${nStart}:00`);
-        if (depart < now) depart.setTime(now.getTime());
-        const back = new Date(`${now.toISOString().slice(0, 10)}T${nEnd}:00`);
-        // Late enough in the evening and "back by" has already gone: give them
-        // the couple of hours they actually have rather than an error.
-        if (back <= depart) back.setTime(depart.getTime() + 2 * 3600_000);
-        const t = await api.createTrip({
-          title: savedTitle, origin: herePlace,
-          departAt: depart.toISOString(), returnAt: back.toISOString(),
-          travelMode: mode, intensity, attendingMemberIds: [...attending],
-        });
-        await onCreated(t, group);
-      } else {
-        if (!from) { setError('Where does it start?'); setBusy(false); return; }
-        const t = await api.createTrip({
-          title: savedTitle, origin: from, destination: to ?? undefined,
-          departAt: new Date(`${start}T${oStart}:00`).toISOString(), returnAt: new Date(`${start}T${oEnd}:00`).toISOString(),
-          travelMode: mode, intensity, attendingMemberIds: [...attending],
-        });
-        await onCreated(t, group);
-      }
-    } catch (e: any) { setError(e.message); } finally { setBusy(false); }
-  };
-
-  const nameField = (
-    <View style={{ gap: 4 }}>
-      <Text style={type.h3}>Name</Text>
-      <TextInput
-        value={title}
-        onChangeText={(t) => { setNamed(true); setTitle(t); }}
-        placeholder={city ? defaultTitle : 'Pick where first'}
-        placeholderTextColor={colors.inkFaint}
-        style={styles.input}
-      />
-    </View>
-  );
-
-  const toggleWho = (id: string) => setAttending((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  // A group is one of the answers to Who's coming (Group Trips v2, Epic 1), and
-  // one the household may have answered before: the same school dads, again.
-  const [groups, setGroups] = useState<GroupSummary[]>([]);
-  useEffect(() => { api.groups().then((r) => setGroups(r.groups.filter((g) => !g.cancelled))).catch(() => {}); }, []);
-  const whoLine = (
-    <WhoLine
-      members={household.members}
-      attending={attending}
-      onToggle={toggleWho}
-      onGroup={() => submit({})}
-      groups={groups.slice(0, 4).map((g) => ({ id: g.id, name: g.name, joined: g.joined }))}
-      onUseGroup={(id) => submit({ copyFromGroupId: id })}
-    />
-  );
-  const paceLine = (
-    <FoldLine label="Pace" value={{ relaxed: 'Relaxed', balanced: 'Balanced', packed: 'Packed' }[intensity]}>
-      <Segmented value={intensity} options={[{ value: 'relaxed', label: 'Relaxed' }, { value: 'balanced', label: 'Balanced' }, { value: 'packed', label: 'Packed' }]} onChange={setIntensity} />
-    </FoldLine>
-  );
-
-  return (
-    <Card style={{ borderColor: colors.accent }}>
-      <Segmented
-        value={kind}
-        options={[{ value: 'trip', label: 'Trip away' }, { value: 'outing', label: 'Day out' }, { value: 'now', label: 'Right now' }]}
-        onChange={(k) => {
-          // The clock has moved on since the form was opened: a window that
-          // says "now" has to mean now, not when the page loaded.
-          if (k === 'now') { const t = roundedNow(); setNStart(t); setNEnd(hoursAfter(t, 4)); }
-          setKind(k);
+  if (creating && household) {
+    /**
+     * What the address says the trip is for, and what the search screen just
+     * answered. The address carries the *question* — `/trips/new?place=Rome` —
+     * so a link opens the right form for somebody who was sent it; `picked`
+     * carries the answer's coordinates, which a town's name alone cannot.
+     */
+    const from = seed ?? picked;
+    const askedPlace = query.get('place');
+    const askedKind = query.get('kind');
+    return (
+      <CreateTripScreen
+        household={household}
+        seed={{
+          place: from?.place ?? null,
+          placeText: from?.placeText ?? askedPlace ?? undefined,
+          countryCode: from?.countryCode ?? query.get('country') ?? undefined,
+          venue: from?.seed
+            ? {
+              venueRef: from.seed.venueRef, name: from.seed.name,
+              lat: from.seed.lat ?? null, lng: from.seed.lng ?? null, category: from.seed.category ?? null,
+            }
+            : null,
+          kind: askedKind === 'holiday' || from?.kind === 'trip' ? 'holiday'
+            : askedKind === 'day' || from?.kind === 'outing' || from?.kind === 'now' ? 'day' : undefined,
+        }}
+        onClose={() => { onSeedUsed?.(); setPicked(null); back(paths.trips()); }}
+        onCreated={async (t) => {
+          onSeedUsed?.();
+          setPicked(null);
+          await load();
+          navigate(paths.trip(t.trip.id), { replace: true });
+        }}
+        onGettingThere={(tripId) => {
+          onSeedUsed?.();
+          setPicked(null);
+          navigate(paths.tripTravel(tripId), { replace: true });
         }}
       />
-      <Text style={type.tiny}>{KIND_HINT[kind]}</Text>
+    );
+  }
 
-      {kind === 'trip' ? (
-        <>
-          {/* One box, searched as the letters arrive. It asks for a city or a
-              region, so the box does not say so twice (owner, 4 Sep 2026). */}
-          <Text style={type.h3}>Where</Text>
-          <PlacePicker value={place} onPick={(p) => { setPlace(p); if (p) setPlaceText(''); }} onText={setPlaceText} kind="area" countryCode={prefill?.countryCode} placeholder="Lisbon · Bath · the Lake District" />
-          <Text style={type.h3}>Dates</Text>
-          <DateRangePicker start={start} end={end} onApply={(s, e) => { setStart(s); setEnd(e); }} />
-          {nameField}
-          {/* Two things it can be, and the second is the one worth building for
-              (owner, 4 Sep 2026: "there are only 2 options: I'm staying
-              somewhere, or I need to find somewhere to stay… you should also
-              have 'Find me a location'"). */}
-          <Text style={type.h3}>Where you'll stay</Text>
-          <Segmented
-            value={stayMode}
-            options={[{ value: 'known', label: "We've got somewhere" }, { value: 'find', label: 'Find us somewhere' }]}
-            onChange={(v) => { setStayMode(v as 'known' | 'find'); if (v === 'find') setBase(null); }}
-          />
-          {stayMode === 'known' ? (
-            <>
-              <PlacePicker value={base} onPick={setBase} near={place} countryCode={place?.countryCode} kind="lodging" placeholder={city ? `Hotel, rental or address in ${city}` : 'Hotel, rental or address'} />
-              {base ? <Wrap>{(['hotel', 'rental', 'friends', 'other'] as const).map((k) => <Chip key={k} label={k} selected={baseKind === k} onPress={() => setBaseKind(k)} />)}</Wrap> : null}
-            </>
-          ) : (
-            <Text style={type.tiny}>
-              We'll look as soon as the trip exists — and again once you've shortlisted a few things, so we can rank beds by how much of your week is on foot from the front door.
-            </Text>
-          )}
-          {whoLine}
-          {paceLine}
-          <FoldLine label="Days run" value={`${timeLabel(dayStart)} – ${timeLabel(dayEnd)}${hasCar ? ' · with a car' : ' · no car'}${seed ? '' : ' · not from our atlas'}`}>
-            <View style={{ gap: spacing.sm }}>
-              <TimeRangePicker start={dayStart} end={dayEnd} onChange={(a, b) => { setDayStart(a); setDayEnd(b); }} labels={['Days start', 'Days end']} />
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Text style={type.body}>We'll have a car</Text>
-                <Switch value={hasCar} onValueChange={setHasCar} />
-              </Row>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={type.body}>Start from our atlas</Text>
-                  <Text style={type.tiny}>Places we've been to or saved in this city go straight onto the shortlist.</Text>
-                </View>
-                <Switch value={seed} onValueChange={setSeed} />
-              </Row>
-            </View>
-          </FoldLine>
-        </>
-      ) : kind === 'now' ? (
-        <>
-          <Text style={type.h3}>Where you are</Text>
-          <StartHere value={herePlace} onPick={setHerePlace} />
-          <Text style={type.h3}>How long you've got</Text>
-          <TimeRangePicker start={nStart} end={nEnd} onChange={(a, b) => { setNStart(a); setNEnd(b); }} labels={['From', 'Back by']} />
-          {nameField}
-          <FoldLine label="Getting about" value={MODE_WORD[mode]} icon={mode === 'cycling' ? 'walking' : mode}>
-            <Wrap>{(['driving', 'transit', 'walking', 'cycling'] as const).map((m) => <Chip key={m} label={MODE_WORD[m]} selected={mode === m} onPress={() => setMode(m)} />)}</Wrap>
-          </FoldLine>
-          {whoLine}
-          {paceLine}
-          <Text style={type.tiny}>Next: Find looks around you, and what you keep goes on today's shortlist.</Text>
-        </>
-      ) : (
-        <>
-          <Text style={type.h3}>Where to</Text>
-          <PlacePicker value={to} onPick={setTo} near={from} kind="area" placeholder="Bath · Brighton · the Cotswolds" />
-          <Text style={type.h3}>When</Text>
-          <DateRangePicker start={start} end={start} single onApply={(s) => setStart(s)} />
-          <TimeRangePicker start={oStart} end={oEnd} onChange={(a, b) => { setOStart(a); setOEnd(b); }} labels={['Out from', 'Back by']} />
-          {nameField}
-          {/* Starting from home and driving unless it is said otherwise. */}
-          <FoldLine label="Getting there" value={`${MODE_WORD[mode]} from ${shortName(from) || 'home'}`} icon={mode === 'cycling' ? 'walking' : mode}>
-            <View style={{ gap: spacing.sm }}>
-              <Wrap>{(['driving', 'transit', 'walking', 'cycling'] as const).map((m) => <Chip key={m} label={MODE_WORD[m]} selected={mode === m} onPress={() => setMode(m)} />)}</Wrap>
-              <Text style={type.tiny}>Starting from</Text>
-              <PlacePicker value={from} onPick={setFrom} extra={home ? [home] : []} here />
-            </View>
-          </FoldLine>
-          {whoLine}
-          {paceLine}
-        </>
-      )}
-
-      {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-      <Button label={kind === 'trip' ? 'Create trip' : kind === 'now' ? 'Find something now' : 'Create day out'} onPress={() => submit(null)} loading={busy} />
-      <TakingFriends show={!groups.length} onGroup={() => submit({})} />
-    </Card>
-  );
-}
-
-/**
- * The one-time card for somebody who has never run a group (Epic 1, AC5): they
- * cannot want a feature they have not been told about, and the Group button on
- * its own does not explain itself. It goes away when it is dismissed, and for
- * good once any group exists.
- */
-const FRIENDS_KEY = 'epic.groups.pitch';
-function TakingFriends({ show, onGroup }: { show: boolean; onGroup: () => void }) {
-  const [gone, setGone] = useState(() => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(FRIENDS_KEY) === 'gone' : false));
-  if (!show || gone) return null;
   return (
-    <View style={styles.friends}>
-      <Row style={{ alignItems: 'flex-start' }}>
-        <Icon name="household" size={16} color={colors.headerSub} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={type.h3}>Taking friends?</Text>
-          <Text style={[type.small, { color: colors.headerSub }]}>
-            Two friends or a coachload: everyone books and pays their own share, and Epic chases them so you don't have to.
-          </Text>
-          <Pressable onPress={onGroup} accessibilityRole="button" style={{ paddingTop: 4 }}>
-            <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Make it a group trip →</Text>
-          </Pressable>
-        </View>
-        <Pressable
-          onPress={() => { setGone(true); if (Platform.OS === 'web' && typeof localStorage !== 'undefined') localStorage.setItem(FRIENDS_KEY, 'gone'); }}
-          accessibilityRole="button" accessibilityLabel="Not now" style={{ padding: 4 }}
-        >
-          <Icon name="close" size={15} color={colors.inkMuted} />
-        </Pressable>
-      </Row>
-    </View>
+    <TripsList
+      trips={data?.trips ?? null}
+      loading={!data}
+      error={error}
+      span={span}
+      when={when}
+      onSpan={setSpan}
+      onWhen={setWhen}
+      onOpen={(t) => navigate(paths.trip(t.id))}
+      onNew={() => { onSeedUsed?.(); setPicked(null); navigate(paths.tripsSearch()); }}
+      wide={wide}
+    />
   );
 }
 
-/**
- * Who's coming, as a filter (Group Trips v2, Epic 6).
- *
- * Two kinds of answer in one list — the people in the household, and the groups
- * the household runs — because "who" means both, and a chip row cannot carry
- * the line each group needs ("You organise · 14 of 20 in").
- */
-function WhoPanel({ open, members, groups, value, onPick, onClose }: {
-  open: boolean; members: HouseholdResponse['members']; groups: GroupSummary[];
-  value: string; onPick: (v: string) => void; onClose: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <View style={styles.whoPanel}>
-      <Pressable onPress={() => onPick('')} style={styles.whoPick} accessibilityRole="button">
-        <View style={styles.anyDot} />
-        <Text style={[type.h3, { flex: 1 }]}>Anyone</Text>
-        {!value ? <Icon name="check" size={16} color={colors.accent} /> : null}
-      </Pressable>
 
-      {members.length ? <Text style={styles.whoKicker}>HOUSEHOLD</Text> : null}
-      {members.map((m, i) => (
-        <Pressable key={m.id} onPress={() => onPick(m.id)} style={styles.whoPick} accessibilityRole="button">
-          <Avatar name={m.name} index={i} size={30} url={m.avatarUrl} pastel />
-          <Text style={[type.h3, { flex: 1 }]}>{m.name}</Text>
-          {value === m.id ? <Icon name="check" size={16} color={colors.accent} /> : null}
-        </Pressable>
-      ))}
-
-      {groups.length ? <Text style={styles.whoKicker}>GROUPS</Text> : null}
-      {groups.map((g) => (
-        <Pressable key={g.id} onPress={() => onPick(`group:${g.id}`)} style={styles.whoPick} accessibilityRole="button">
-          <View style={styles.whoTile}><Icon name="household" size={15} color={colors.icon} /></View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={type.h3}>{g.name ?? 'A group'}</Text>
-            <Text style={type.small}>
-              {g.cancelled ? 'Called off' : `${g.organiser ? `${g.organiser} organises` : 'You organise'} · ${g.joined}${g.expectedCount ? ` of ${g.expectedCount}` : ''} in`}
-            </Text>
-          </View>
-          {value === `group:${g.id}` ? <Icon name="check" size={16} color={colors.accent} /> : null}
-        </Pressable>
-      ))}
-
-      <Pressable onPress={onClose} accessibilityRole="button" style={{ alignSelf: 'flex-end', padding: 6 }}>
-        <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Close</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-/** The picked group, over its trips: asked, in, and what is still outstanding. */
-function GroupSummaryRow({ group, others, onManage }: { group: GroupSummary; others: GroupSummary[]; onManage: () => void }) {
-  const invited = others.reduce((n, g) => n + g.invited, 0);
-  const joined = others.reduce((n, g) => n + g.joined, 0);
-  const outstanding = others.reduce((n, g) => n + g.outstanding, 0);
-  return (
-    <Row style={styles.groupSummary}>
-      <View style={styles.whoTile}><Icon name="household" size={16} color={colors.icon} /></View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={type.h3}>{group.name ?? 'A group'}</Text>
-        <Text style={type.small}>
-          {group.organiser ? `${group.organiser} organises` : 'You organise'} · {invited} invited · {joined} in
-          {outstanding ? <Text style={{ color: colors.overrun, fontWeight: '700' }}> · {outstanding} outstanding</Text> : null}
-        </Text>
-      </View>
-      <Pressable onPress={onManage} accessibilityRole="button">
-        <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Manage</Text>
-      </Pressable>
-    </Row>
-  );
-}
-
-/** How a day out gets there, in the word somebody would say. */
-const MODE_WORD = { driving: 'Driving', transit: 'By train or bus', walking: 'Walking', cycling: 'Cycling' } as const;
 
 // ---------------------------------------------------------------------------
 // Trip page
@@ -855,12 +247,14 @@ function DeleteTrip({ id, onDeleted }: { id: string; onDeleted: () => Promise<vo
  * puts them ("Shortlist / Group move to the ⋯ menu"). Nothing was taken away:
  * every one of those tabs still has its own address and still opens.
  */
-function TripPage({ id, section: asked, dayId: askedDay, household, onBack, refreshHousehold, wide }: {
+function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onBack, refreshHousehold, wide }: {
   id: string;
   /** Which of the trip's tabs the address names — `/trips/<id>/places` — or null for "wherever this trip is up to". */
   section: Section | null;
   /** And which day, when the address names one — `/trips/<id>/day/<dayId>`. */
   dayId: string | null;
+  /** And which stop, when it names one — `/trips/<id>/stop/<ref>` (3d). */
+  stopRef: string | null;
   household: HouseholdResponse | null; onBack: () => Promise<void>; refreshHousehold: () => Promise<void>; wide: boolean;
 }) {
   const { query, navigate } = useRouter();
@@ -873,6 +267,14 @@ function TripPage({ id, section: asked, dayId: askedDay, household, onBack, refr
   const section: Section = asked ?? 'itinerary';
   const dayId = askedDay ?? d?.days[0]?.id ?? null;
   const setSection = (next: Section) => navigate(paths.trip(id, next, next === 'day' ? dayId : null));
+  /**
+   * The ⋯ menu and the sheets it opens (1c/3b). They are state rather than
+   * addresses because they are things opened *over* the trip — the same rule
+   * the shell keeps for a place's drawer — with the one exception the handoff
+   * makes: Share has an address of its own, because a sheet somebody is meant
+   * to be able to link to is a page.
+   */
+  const [sheet, setSheet] = useState<TripMenuAction | null>(null);
   const setDayId = (next: string) => navigate(paths.trip(id, 'day', next));
   useEffect(() => { if (asked) rememberScreen<TripPageMemory>(sectionKey, { section: asked }); }, [sectionKey, asked]);
   const [menu, setMenu] = useState(false);
@@ -1053,23 +455,116 @@ function TripPage({ id, section: asked, dayId: askedDay, household, onBack, refr
   );
 
   /**
-   * The trip is a map with a sheet over it (design handoff, 6 Sep 2026). The
-   * three views of a trip — the day, its places, the group — are what the sheet
-   * shows; the working surfaces behind the ⋯ menu keep their own full page,
-   * because they are desks rather than views of a day.
+   * The layers the trip rebuild adds (7 Sep 2026). Each is a page rather than a
+   * mode of the map screen, because each has a keyboard in it or a scroller of
+   * its own, and a thread inside a draggable sheet is two scrollers fighting.
    */
-  if (TRIP_TABS.includes(section) || section === 'map') {
+  if (section === 'travel') {
+    return <GettingThereScreen trip={d} onBack={() => setSection('itinerary')} onClose={onBack} />;
+  }
+  if (section === 'chat') {
+    return (
+      <TripChatScreen
+        trip={d}
+        onBack={() => setSection('itinerary')}
+        onOpenStop={(ref) => navigate(paths.tripStop(id, ref))}
+        onPeople={() => navigate(paths.tripShare(id))}
+      />
+    );
+  }
+  if (section === 'stop' && stopRef) {
+    return (
+      <StopAskScreen
+        trip={d}
+        venueRef={stopRef}
+        place={(tripPlaces?.places ?? []).find((p) => p.venueRef === stopRef) ?? null}
+        onClose={() => setSection('itinerary')}
+        onOpenPlace={(ref) => navigate(`${paths.trip(id)}?place=${encodeURIComponent(ref)}`)}
+      />
+    );
+  }
+
+  /**
+   * The trip is a map with a sheet over it (design handoff, 6 Sep 2026, tidied
+   * to the brand by the trip rebuild, 5c). The views of a trip — the day, its
+   * places, the group — are what the sheet shows; the working surfaces behind
+   * the ⋯ menu keep their own full page, because they are desks rather than
+   * views of a day.
+   *
+   * The ⋯ menu and its sheets sit over it (1c/3b). Share has an address of its
+   * own, so a half-shared trip can be linked to; the rest are opened over the
+   * page and closed again, which is what a sheet is.
+   */
+  if (TRIP_TABS.includes(section) || section === 'map' || section === 'share') {
+    const name = tripName(trip);
+    const closeSheet = () => (section === 'share' ? setSection('itinerary') : setSheet(null));
     return (
       <View style={{ flex: 1 }}>
         <TripMapScreen
           d={d}
-          section={section === 'map' ? 'itinerary' : section}
+          section={section === 'map' || section === 'share' ? 'itinerary' : section}
           household={household}
           onBack={onBack}
           onChanged={async () => { await load(); await loadPlaces(); await refreshHousehold(); }}
           onSection={setSection}
           onDelete={<DeleteTrip id={id} onDeleted={onBack} />}
+          onMenu={() => setSheet('menu' as TripMenuAction)}
+          onChat={() => setSection('chat')}
+          onPeople={() => setSection('share')}
+          onOpenStop={(ref) => navigate(paths.tripStop(id, ref))}
         />
+
+        {sheet === ('menu' as TripMenuAction) ? (
+          <TripMenuSheet
+            title={name}
+            isHoliday={isTrip}
+            datesFixed={trip.datesFixed !== false}
+            onClose={() => setSheet(null)}
+            onPick={async (action) => {
+              if (action === 'share') { setSheet(null); setSection('share'); return; }
+              if (action === 'date') {
+                setSheet(null);
+                // An idea has no date to change: fixing one is what the row
+                // offers, and then the day planner is where it is set.
+                if (trip.datesFixed === false) {
+                  try { await api.setTripFlags(id, { datesFixed: true }); await load(); } catch (e: any) { setError(e.message); }
+                }
+                setSection('day');
+                return;
+              }
+              if (action === 'move') {
+                setSheet(null);
+                try { await api.setTripFlags(id, { kind: isTrip ? 'day' : 'holiday' }); await load(); } catch (e: any) { setError(e.message); }
+                return;
+              }
+              setSheet(action);
+            }}
+          />
+        ) : null}
+
+        {sheet === 'rename' ? (
+          <RenameTripSheet
+            title={name}
+            onClose={() => setSheet(null)}
+            onSave={async (next) => {
+              try { await api.updateTripV2(id, { title: next }); await load(); } catch (e: any) { setError(e.message); }
+              setSheet(null);
+            }}
+          />
+        ) : null}
+
+        {sheet === 'delete' ? (
+          <DeleteTripSheet
+            tripId={id}
+            title={name}
+            onClose={() => setSheet(null)}
+            onConfirm={async () => { await api.deleteTrip(id); await onBack(); }}
+          />
+        ) : null}
+
+        {section === 'share' ? (
+          <ShareTripSheet tripId={id} title={name} onClose={closeSheet} onChanged={load} />
+        ) : null}
       </View>
     );
   }

@@ -10,6 +10,9 @@ import householdRoutes from './routes/household.js';
 import discoverRoutes from './routes/discover.js';
 import tripRoutes from './routes/trips.js';
 import stayRoutes from './routes/stays.js';
+import { router as tripTravelRoutes } from './routes/tripTravel.js';
+import { router as tripChatRoutes } from './routes/tripChat.js';
+import { router as sharedTripRoutes } from './routes/shared.js';
 import * as transit from './sources/transit.js';
 import * as transitRepo from './repositories/transit.js';
 import journeyRoutes from './routes/journey.js';
@@ -153,6 +156,11 @@ app.use('/api', activityRoutes);
 app.use('/api/household', householdRoutes);
 app.use('/api/discover', discoverRoutes);
 app.use('/api/trips', journeyRoutes);
+// Getting there, the chat and the sharing sheet (trip rebuild, 7 Sep 2026).
+// Mounted before the trip router because that one ends in patterns broad
+// enough to answer /:id/travel and /:id/chat as though they were sections.
+app.use('/api/trips', tripTravelRoutes);
+app.use('/api/trips', tripChatRoutes);
 app.use('/api/trips', tripRoutes);
 // What can be asked for near a point, counted from the beds themselves rather
 // than from a list of rules about coastlines (routes/stays.js).
@@ -179,6 +187,9 @@ app.use('/api/offline', offlineRoutes);
 // Group trips: the organiser's door (/api/trips/:id/group, /api/groups/…) and
 // the invite link's (/api/join/:token), which shows a checklist and no roster.
 app.use('/api', groupRoutes);
+// The other door into one trip: a link somebody was sent. Public (auth.js), and
+// everything in it is resolved from the token rather than from a session.
+app.use('/api/shared', sharedTripRoutes);
 
 /** Licensed review text must not be crawlable (Tripadvisor review implementation policy); the API is not a website. */
 app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));

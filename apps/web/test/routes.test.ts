@@ -12,7 +12,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery } from '../src/routes.ts';
+import { hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery } from '../src/routes.ts';
 
 /** Read it, write it back, and get the same address. */
 const roundTrip = (href: string, expected?: string) => {
@@ -83,7 +83,7 @@ test('a country is a page of its own: its areas and its trips (handover, 5 Sep 2
 });
 
 test('Trips: the list, where-to, the form, a trip, a trip’s tab, and one day of it', () => {
-  const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null };
+  const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
   assert.deepEqual(roundTrip('/trips'), trips);
   assert.deepEqual(roundTrip('/trips/search'), { ...trips, searching: true });
   assert.deepEqual(roundTrip('/trips/new'), { ...trips, creating: true });
@@ -94,6 +94,58 @@ test('Trips: the list, where-to, the form, a trip, a trip’s tab, and one day o
   assert.deepEqual(roundTrip('/trips/abc/map'), { ...trips, tripId: 'abc', section: 'map' });
   assert.deepEqual(roundTrip('/trips/abc/day/d1'), { ...trips, tripId: 'abc', section: 'day', dayId: 'd1' });
   assert.equal(paths.tripsSearch(), '/trips/search');
+});
+
+/**
+ * The layers the trip rebuild adds (7 Sep 2026). Each one is two layers into
+ * the app, which is exactly the case the rule was written for: "2 layers in, I
+ * should be able to share a URL with someone, and they should be able to get to
+ * the exact point that I was on."
+ */
+test('a trip has a chat, a way of getting there, a share sheet and a stop', () => {
+  const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
+  assert.deepEqual(roundTrip('/trips/abc/chat'), { ...trips, tripId: 'abc', section: 'chat' });
+  assert.deepEqual(roundTrip('/trips/abc/travel'), { ...trips, tripId: 'abc', section: 'travel' });
+  assert.deepEqual(roundTrip('/trips/abc/share'), { ...trips, tripId: 'abc', section: 'share' });
+  // A stop is named by its source-qualified ref, which has a colon in it and so
+  // travels encoded — and comes back decoded.
+  assert.deepEqual(parseRoute('/trips/abc/stop/osm%3Anode%2F123'), { ...trips, tripId: 'abc', section: 'stop', stopRef: 'osm:node/123' });
+  assert.equal(paths.tripStop('abc', 'osm:node/123'), '/trips/abc/stop/osm%3Anode%2F123');
+  assert.equal(paths.tripChat('abc'), '/trips/abc/chat');
+  assert.equal(paths.tripTravel('abc'), '/trips/abc/travel');
+  assert.equal(paths.tripShare('abc'), '/trips/abc/share');
+  // Up from any of them is the trip; the tab is still Trips.
+  assert.equal(parentOf(parseRoute('/trips/abc/chat')), '/trips/abc');
+  assert.equal(parentOf(parseRoute('/trips/abc/stop/x')), '/trips/abc');
+  assert.equal(tabOf(parseRoute('/trips/abc/chat')), 'trips');
+  // The chat is the trip page with the map collapsed, so it draws to every edge
+  // too; the other three are ordinary pages and keep the chrome.
+  assert.equal(isFullBleed(parseRoute('/trips/abc/chat')), true);
+  assert.equal(isFullBleed(parseRoute('/trips/abc/travel')), false);
+  assert.equal(isFullBleed(parseRoute('/trips/abc/stop/x')), false);
+});
+
+test('a trip somebody was sent has an address outside the app', () => {
+  assert.deepEqual(roundTrip('/shared/abc123'), { name: 'shared', token: 'abc123' });
+  assert.equal(paths.shared('abc123'), '/shared/abc123');
+  assert.equal(parseRoute('/shared').name, 'unknown');
+  // No tab lights up: it is not part of the household's app at all.
+  assert.equal(tabOf(parseRoute('/shared/abc123')), null);
+  assert.equal(titleOf(parseRoute('/shared/abc123')), 'A trip you have been sent · Epic');
+});
+
+test('the Trips list draws its own head now, so the shell draws none', () => {
+  // The wordmark and "+ New trip" are the screen's (1a); a lime band above them
+  // would be a second wordmark on the same screen.
+  assert.equal(ownsHeader(parseRoute('/trips')), true);
+  // And so does everything pushed on top of it: each has its own title and ×.
+  assert.equal(ownsHeader(parseRoute('/trips/search')), true);
+  assert.equal(ownsHeader(parseRoute('/trips/new')), true);
+  assert.equal(ownsHeader(parseRoute('/trips/abc/travel')), true);
+  assert.equal(ownsHeader(parseRoute('/trips/abc/stop/x')), true);
+  // The trip itself is full-bleed — no header at all, and the tab bar over it.
+  assert.equal(ownsHeader(parseRoute('/trips/abc')), false);
+  assert.equal(ownsHeader(parseRoute('/trips/abc/shortlist')), false);
 });
 
 test('where-to is a layer of Trips: it is on the tab, and Back is the trips', () => {
