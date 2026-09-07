@@ -8,6 +8,7 @@
 // takes. Everything on it survives even if the source's record goes away.
 
 import { Router } from 'express';
+import { reviewsFor } from '../sources/providerMatch.js';
 import { withTransaction } from '../db.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
@@ -626,6 +627,36 @@ places.post('/save', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+/**
+ * GET /api/places/reviews?ref=…&name=…&lat=…&lng=… — what the crowd made of a
+ * place the atlas holds.
+ *
+ * The atlas is Wikidata and OpenStreetMap: open, permanent, ours, and with no
+ * reviews in it. The owner asked for them anyway (7 Sep 2026: "for activities,
+ * get the reviews always from Google"), so this matches the place to Google's
+ * once — name and coordinates, with guards, see sources/providerMatch.js — and
+ * then reads the rating and up to five reviews.
+ *
+ * Nothing it returns is stored. The place *id* is kept, because that is the one
+ * thing the provider's terms allow us to keep and it is what makes every later
+ * open a single call instead of two; the rating and the review text live in
+ * memory for a few hours and nowhere else. The path is deliberately absent from
+ * `offline/policy.ts`, so none of it is ever written to a device.
+ *
+ * It answers whether or not there is a match, so the drawer can tell "nobody has
+ * reviewed this" from "we are still looking".
+ */
+places.get('/reviews', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const ref = String(req.query.ref || '').trim();
+    const name = String(req.query.name || '').trim();
+    const lat = Number(req.query.lat), lng = Number(req.query.lng);
+    if (!ref || !name || !Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'ref_name_and_point_required' });
+    res.json(await reviewsFor({ venueRef: ref, name, lat, lng, householdId: household.id }));
+  } catch (err) { next(err); }
 });
 
 /**
