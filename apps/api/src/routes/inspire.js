@@ -322,27 +322,30 @@ inspire.get('/near', async (req, res, next) => {
     // edge of the whole answer, which is what `radiusKm` has to report.
     const atlas = await publishedNear({
       lat: centre.lat, lng: centre.lng, km: reach, limit: ATLAS_LIMIT,
-      // The home screen is a wall of photographs; a card without one reads as
-      // broken rather than as pending.
-      illustratedOnly: true,
+      // Not any more. A photograph is preferred in the ordering, but requiring
+      // one hid Virginia Water Lake — the largest park a mile from the owner's
+      // house — because nobody has put a Commons picture of it online. A card
+      // with no photograph draws its own category icon; a home screen with no
+      // park next door just looks wrong (owner, 7 Sep 2026).
+      illustratedOnly: false,
     });
     for (const a of atlas) {
       if (a.lat == null || a.lng == null) continue;
       // The box is generous at its corners; this is the honest ring.
       if (kmBetween(centre, a) > reach) continue;
       if (seen(a)) continue;
+      const ref = a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`;
+      const shelf = shelvesForAtlas({ ref, category: a.category, kinds: a.kinds ?? [] }, taught, tax.vocab);
       items.push({
         // Wikidata's own identifier where there is no OpenStreetMap one, which
         // is most of the time. It is CC0, it outlives every provider we might
         // use, and it is the identifier this place already has.
-        venueRef: a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`,
+        venueRef: ref,
         source: 'atlas',
         name: a.name,
         category: 'attraction',
-        ...(() => {
-          const p = shelvesForAtlas({ ref: a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`, category: a.category, kinds: a.kinds ?? [] }, taught, tax.vocab);
-          return { moods: p.shelves, subcategory: p.subcategory };
-        })(),
+        moods: shelf.shelves,
+        subcategory: shelf.subcategory,
         // What the atlas calls this place — heritage, outdoors, family, museum,
         // arts, animals, active, landmark. Its own field rather than smuggled
         // into `experiences`, which is a closed vocabulary that voice is
@@ -376,7 +379,27 @@ inspire.get('/near', async (req, res, next) => {
         distanceKm: Number(kmBetween(centre, a).toFixed(1)),
         travelMinutes: estimateTravelMinutes(origin, a, mode),
         estimated: true,
-        dwellMinutes: dwellFor({ category: 'attraction', experiences: [] }, household, attendees).minutes,
+        /*
+         * How long to allow, from what kind of place this is.
+         *
+         * This used to pass `{ category: 'attraction', experiences: [] }` — a
+         * stub — so `dwellAllowance` had nothing to narrow or lengthen and
+         * every attraction in the country came back as the household's typical
+         * activity, two and a half hours. Thorpe Park and a parish church read
+         * the same (owner, 7 Sep 2026: "Thorpe Park allows 2.5 hours, which is
+         * nonsense… are you just making this up?").
+         *
+         * The shelf the place is already on is the answer: the taxonomy says a
+         * theme park is five hours and a church is thirty minutes, and it says
+         * it in a table the back office can edit. Where it has no opinion the
+         * household's own pace still applies, which is the right default for a
+         * kind nobody has thought about yet.
+         */
+        dwellMinutes: dwellFor({
+          category: 'attraction',
+          experiences: [],
+          dwellHint: tax.subByKey.get(shelf.subcategory)?.typical_minutes ?? null,
+        }, household, attendees).minutes,
         household: null,
       });
       atlasCount += 1;

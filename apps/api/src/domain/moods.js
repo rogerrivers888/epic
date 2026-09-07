@@ -168,6 +168,35 @@ export const BY_ATLAS_CATEGORY = {
 /** What an atlas place falls back to when its category is not one of the eight. */
 const ATLAS_UNKNOWN = { culture: 0.9 };
 
+/**
+ * The drawer an atlas category starts in, before anybody teaches the place.
+ *
+ * `BY_ATLAS_CATEGORY` above says which *cabinet* an untaught place goes in, and
+ * that was the whole of it — so a place nobody had taught landed on a shelf
+ * with no drawer at all. Eighteen of the hundred and forty-two places round the
+ * owner's house were in that state, Big Ben and the National Gallery among
+ * them, and it cost them twice over: they were invisible to the drawer filters
+ * on the home screen, and with no drawer there was no dwell time either, so
+ * they all read "allow 2h 30m".
+ *
+ * These are starting points, not verdicts. Anything taught in the back office
+ * wins over them, and a drawer that disagrees with the cabinet the weights
+ * chose is dropped rather than forced.
+ *
+ * `heritage` is deliberately absent. It spans Wellington Arch and a country
+ * estate — twenty minutes and half a day — and there is no honest default
+ * between them, so those keep the household's own pace until somebody says.
+ */
+const ATLAS_DRAWER = {
+  museum: 'museums',
+  arts: 'galleries',
+  landmark: 'landmarks',
+  outdoors: 'parks',
+  animals: 'zoos-wildlife',
+  family: 'days-out',
+  active: 'arenas',
+};
+
 /** The shape `rulesFor` hands over, and what an empty teaching table looks like. */
 export const NO_RULES = { place: new Map(), kind: new Map(), category: new Map(), experience: new Map() };
 
@@ -285,7 +314,12 @@ function place(chain, rules, vocab, fallback) {
   // and the drawer only survives if it agrees with them.
   const fromDrawer = hit?.hits.some((r) => r.subcategory) ? named : null;
   const category = fromDrawer ?? winner(weights, rank) ?? named;
-  const subcategory = drawer && parentOf.get(drawer) === category ? drawer : null;
+  // A taught drawer survives only if it agrees with the cabinet the weights
+  // chose. Where nothing named one at all, the caller's starting drawer stands
+  // in, on the same condition.
+  const started = !drawer && fallback.subcategory ? fallback.subcategory : null;
+  const proposed = drawer ?? started;
+  const subcategory = proposed && parentOf.get(proposed) === category ? proposed : null;
 
   return {
     category,
@@ -315,6 +349,7 @@ export function shelvesForAtlas({ ref, category, kinds = [] } = {}, rules = NO_R
     vocab,
     {
       weights,
+      subcategory: ATLAS_DRAWER[category] ?? null,
       because: {
         scope: 'default',
         subject: category ?? null,

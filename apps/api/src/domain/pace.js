@@ -61,7 +61,23 @@ export function dwellAllowance(pace, venue, attendees = []) {
     return { minutes: Math.round((new Date(venue.endsAt) - new Date(venue.startsAt)) / 60_000), cappedBy: null };
   }
   const p = pace[kindOf(venue)];
-  let minutes = QUICK[venue.category] ? Math.min(p.typicalMinutes, QUICK[venue.category]) : p.typicalMinutes;
+  /**
+   * What this kind of place is worth, when somebody has said.
+   *
+   * `typicalMinutes` is the household's own rhythm and is the right answer for
+   * a place nobody has an opinion about. It is the wrong answer for all of
+   * them: a theme park is a day and a parish church is twenty minutes, and both
+   * were coming out at two and a half hours. `dwellHint` carries what the
+   * taxonomy says about the kind (shelf_subcategories.typical_minutes) and
+   * replaces the household's default rather than narrowing it — the only thing
+   * here that is allowed to make a stop *longer*, which is why a full day was
+   * previously unsayable.
+   *
+   * It is still bounded by the household's own maximum below, so a household
+   * that never spends more than three hours anywhere keeps that.
+   */
+  let minutes = venue.dwellHint ?? p.typicalMinutes;
+  if (QUICK[venue.category]) minutes = Math.min(minutes, QUICK[venue.category]);
   const quickExp = (venue.experiences || []).map((e) => QUICK_EXPERIENCE[e]).filter(Boolean);
   if (quickExp.length) minutes = Math.min(minutes, Math.max(...quickExp));
   if (venue.quickLook) minutes = Math.min(minutes, QUICK_LOOK);

@@ -515,6 +515,27 @@ export async function publishedFor(slug) {
  */
 const NEARNESS_WEIGHT = 0.4;
 
+/**
+ * Two things this does that are worth knowing.
+ *
+ * **One row per place.** Windsor Great Park and Cumberland Lodge straddle the
+ * Surrey/Berkshire boundary, so the harvest holds each of them twice — once per
+ * county — and it is right to: the atlas is browsed by county and both counties
+ * genuinely contain them, which is why `attractions` is unique on (region_slug,
+ * wikidata_id) rather than on the id alone. Nothing should "clean that up".
+ * A search by distance is a different question though: it does not care which
+ * county a place is filed under, and two Windsor Great Parks in one carousel is
+ * a bug everybody can see (owner, 7 Sep 2026). So the counties are collapsed
+ * here, where the question stops being "what is in Surrey" and becomes "what is
+ * near me".
+ *
+ * **A photograph is preferred, not required.** `illustratedOnly` still exists
+ * for a caller that genuinely cannot draw without one, but the home screen is
+ * no longer such a caller: requiring a picture hid Virginia Water Lake, the
+ * largest park a mile from the owner's house, because nobody has contributed a
+ * Commons photograph of it. A card with no picture draws its own category icon
+ * and reads perfectly well; a home screen missing the park next door does not.
+ */
 export async function publishedNear({ lat, lng, km = 25, limit = 60, illustratedOnly = false }) {
   const dLat = km / 111;
   // Longitude degrees shorten towards the poles. Guarded so a search near a
@@ -536,11 +557,35 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
         where a.state = 'published'
           and a.lat between $3 and $4 and a.lng between $5 and $6
           ${illustratedOnly ? 'and i.id is not null' : ''}
+     ),
+     -- One place, once, whichever counties file it. The illustrated copy wins,
+     -- then the nearer. The box's corners reach ~40% further than its edges, so
+     -- the ring is applied here too.
+     one_each as (
+       select distinct on (coalesce(wikidata_id, id::text)) *
+         from candidates
+        where km <= $7
+        order by coalesce(wikidata_id, id::text), (image_id is not null) desc, km
+     ),
+     -- The same name in the same spot is the same place, whatever Wikidata
+     -- thinks. Wembley Stadium is two entities there — the 1923 one that was
+     -- demolished and the 2007 one that replaced it — and both are published,
+     -- both are at Wembley, and one of them is a car park now.
+     by_name as (
+       select *,
+              row_number() over w as rn,
+              sqrt(power((lat - first_value(lat) over w) * 111.0, 2)
+                 + power((lng - first_value(lng) over w) * 111.0 * cos(radians(lat)), 2)) as km_from_kept
+         from one_each
+       window w as (partition by lower(name) order by (image_id is not null) desc, score desc, km)
      )
-     select * from candidates
-      -- The box's corners reach ~40% further than its edges; this is the ring.
-      where km <= $7
-      order by score * (1 - ${NEARNESS_WEIGHT} * least(1.0, km / $7)) desc
+     select * from by_name
+      -- Far apart, the same name is a coincidence — there are two St Mary's
+      -- churches in most counties — so only near neighbours are collapsed.
+      where rn = 1 or km_from_kept > 0.5
+      -- A photograph first, then the score, tempered by how near it is.
+      order by (image_id is not null) desc,
+               score * (1 - ${NEARNESS_WEIGHT} * least(1.0, km / $7)) desc
       limit $8`,
     [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng, km, limit]);
   return rows;
