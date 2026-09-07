@@ -63,6 +63,7 @@ svg/
   epic-symbol-ink.svg         the pin alone, ink with a cream hole
   epic-symbol-lime.svg        the pin alone, lime with an ink hole
   epic-symbol-solid.svg       the pin alone, no hole — for use below 24px
+  epic-icon-lime-solid.svg    the 16px tile: lime, solid pin, no hole
   epic-wordmark-*.svg         the full wordmark on each ground; the
                               `-transparent` one cuts the pin's hole out of the
                               path, so whatever is behind shows through it
@@ -92,8 +93,19 @@ Generated icons live beside the app, not here:
         transparent, holed. `apps/api/src/sources/mail.js` puts it on the lime
         band, with "Epic" as its alt text for the inboxes that block images.
 
-  At 16px the tile is dropped and the solid pin is used, because the hole
-  closes into a smudge at that size.
+  At 16px the hole is dropped, because it closes into a smudge at that size.
+  The lime tile stays: an ink pin on nothing disappears into Chrome's dark tab
+  strip.
+
+  None of these are drawn by hand. `npm run brand` rewrites every one of them
+  from `scripts/brand.mjs`, which holds the pin path, the palette and the
+  wordmark metrics in one place. If an icon looks wrong, fix it there.
+
+  THE PIN. It is Roam's, geometry unchanged, exactly as §02 of the pack says.
+  Be aware that the pack's own inline SVG is not that: it is a redraw at 0.84
+  wide to tall, where the mark Roger supplied measures 0.732. The words win
+  over the redraw — the pin is the one thing carried over from Roam, and a
+  squatter copy of it is a different mark.
 
 HTML head snippet:
   <link rel="icon" href="/favicon.ico" sizes="any">

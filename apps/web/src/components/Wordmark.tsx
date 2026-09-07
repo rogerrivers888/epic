@@ -30,9 +30,13 @@ export function Wordmark({ height = 40, ink = colors.ink, ground = colors.header
   const fs = Math.round(height * 1.05);
   if (fs < 24) return <PinMark size={Math.max(8, height)} ink={ink} ground={ground} />;
 
-  // The pack's geometry, in ems of the type size: the pin is 0.3em wide and
+  // The pack's geometry, in ems of the type size: the pin is 0.3em tall and
   // sits 0.07em above the line box, nudged 0.03em right of the stem's centre.
+  // The pack sizes a square pin; Roam's is taller than it is wide, so height is
+  // what is held at 0.3em and the width follows — that keeps the clear-space
+  // rule (§03: x = the height of the pin) meaning the same thing.
   const pin = Math.round(fs * 0.3);
+  const pinW = Math.round(pin * PIN_ASPECT);
   const lineHeight = Math.round(fs * 1.15);
   // A 1.15 line box centres the 1.0 box the pack measures from, so the pack's
   // -0.07em from that top lands here: (1.15 - 1) / 2 - 0.07 ≈ 0.005em.
@@ -58,7 +62,7 @@ export function Wordmark({ height = 40, ink = colors.ink, ground = colors.header
       <View style={{ position: 'relative' }}>
         {/* U+0131, the dotless i: the pin is the dot. */}
         <Text style={letter}>{'ı'}</Text>
-        <View style={{ position: 'absolute', left: '50%', top, transform: [{ translateX: -pin / 2 + fs * 0.03 }] }}>
+        <View style={{ position: 'absolute', left: '50%', top, transform: [{ translateX: -pinW / 2 + fs * 0.03 }] }}>
           <Pin size={pin} ink={ink} ground={ground} />
         </View>
       </View>
@@ -69,14 +73,26 @@ export function Wordmark({ height = 40, ink = colors.ink, ground = colors.header
 
 /**
  * The pin on its own — the app icon, the favicon, the social avatar, a map
- * marker. Geometry unchanged from the pack; below 24px the hole is dropped,
- * because at that size it closes up into a smudge.
+ * marker.
+ *
+ * This is Roam's pin, geometry unchanged, which is what the pack asks for in
+ * §02. Note that the pack's *own* inline SVG is not that: it is a redraw at
+ * 0.84 wide to tall, where the mark Roger supplied measures 0.732 (traced from
+ * `Supporting docs/Rebrand - EPIC/.../roam-1788732531567-0gdo.png`). The words
+ * win over the redraw — the pin is the one thing carried over from Roam, and a
+ * squatter copy of it is a different mark.
+ *
+ * The viewBox is cropped to the ink, so `size` is the pin's height and the
+ * width follows from it. Below 24px the hole is dropped, because at that size
+ * it closes up into a smudge.
  */
+export const PIN_ASPECT = 38 / 52;
+
 export function Pin({ size = 24, ink = INK, ground = CREAM }: { size?: number; ink?: string; ground?: string }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Path d="M50 0 C26 0 8 18 8 42 C8 68 50 100 50 100 C50 100 92 68 92 42 C92 18 74 0 50 0 Z" fill={ink} />
-      {size >= 24 ? <Circle cx={50} cy={40} r={15} fill={ground} /> : null}
+    <Svg width={Math.round(size * PIN_ASPECT)} height={size} viewBox="5 2 38 52">
+      <Path d="M24 2C13 2 5 10.5 5 21c0 13 19 33 19 33s19-20 19-33C43 10.5 35 2 24 2z" fill={ink} />
+      {size >= 24 ? <Circle cx={24} cy={21} r={7} fill={ground} /> : null}
     </Svg>
   );
 }
