@@ -9,6 +9,7 @@ import { usageBetween, allowanceUsage, usageByMonth } from '../sources/usage.js'
 import { enabledSources, bedRatesOn } from '../sources/index.js';
 import { routingEnabled } from '../sources/routing.js';
 import { paceOf, DEFAULT_PACE } from '../domain/pace.js';
+import { browseOf, mergeBrowse } from '../domain/browse.js';
 import { isValidTimezone } from '../domain/time.js';
 import { currentAccount } from '../context.js';
 import {
@@ -187,6 +188,8 @@ router.get('/', async (_req, res, next) => {
         homePhotoUrl: household.home_photo_url ?? null,
         pace: paceOf(household),
         timezone: household.timezone,
+        /** What this household always wants when it goes looking (domain/browse.js). */
+        browse: browseOf(household),
       },
       members,
       learned: await loadLearnedPreferences(household.id),
@@ -204,7 +207,7 @@ router.get('/', async (_req, res, next) => {
 router.patch('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const { name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, home, homeText, pace, timezone, homeRadiusMiles, homePhotoUrl } = req.body;
+    const { name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, home, homeText, pace, timezone, homeRadiusMiles, homePhotoUrl, browse } = req.body;
     // How far "close to home" reaches, in miles (owner, 4 Sep 2026).
     const radius = homeRadiusMiles == null ? null : Math.min(200, Math.max(1, Math.round(Number(homeRadiusMiles))));
     if (homeRadiusMiles != null && !Number.isFinite(radius)) return res.status(400).json({ error: 'invalid_radius' });
@@ -228,10 +231,11 @@ router.patch('/', async (req, res, next) => {
       homeLabel: homePlace?.label, homeLat: homePlace?.lat, homeLng: homePlace?.lng,
       homeCountryCode: homePlace?.countryCode, homeCountry: homePlace?.country,
       pace: mergedPace, timezone, homeRadiusMiles: radius, homePhotoUrl: photo,
+      browseDefaults: browse ? mergeBrowse(household, browse) : null,
     });
     res.json({ household: { id: h.id, name: h.name, defaultVisitMinutes: h.default_visit_minutes, maxTravelMinutes: h.max_travel_minutes, defaultIntensity: h.default_intensity,
       home: h.home_lat != null ? { label: h.home_label, lat: h.home_lat, lng: h.home_lng } : null, homeRadiusMiles: h.home_radius_miles ?? 10,
-      homePhotoUrl: h.home_photo_url ?? null, pace: paceOf(h), timezone: h.timezone } });
+      homePhotoUrl: h.home_photo_url ?? null, pace: paceOf(h), timezone: h.timezone, browse: browseOf(h) } });
   } catch (err) {
     next(err);
   }

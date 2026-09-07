@@ -265,6 +265,16 @@ export type StayPricing = {
   degraded: { source: string; error: string }[];
 };
 
+export type BrowseDefaults = {
+  food: { type?: string | null; cuisine?: string | null };
+  things: { type?: string | null };
+};
+/** A change to one of them: a field left out is left alone, null clears it. */
+export type BrowseDefaultsPatch = Partial<{
+  food: Partial<BrowseDefaults['food']>;
+  things: Partial<BrowseDefaults['things']>;
+}>;
+
 export type Household = {
   id: string;
   name: string;
@@ -278,6 +288,12 @@ export type Household = {
   homePhotoUrl?: string | null;
   pace: Pace;
   timezone?: string;
+  /**
+   * What this household always wants when it goes looking — the standing
+   * answer the browse filters open on (owner, 6 Sep 2026: "I never search for
+   * pubs or bakeries. I just want to find restaurants").
+   */
+  browse?: BrowseDefaults;
 };
 
 export type PaceKind = { typicalMinutes: number; maxMinutes: number; maxTravelMinutes: number; maxTravelIfSpecialMinutes: number };
@@ -1063,7 +1079,7 @@ export const api = {
 
   // household
   household: () => request<HouseholdResponse>('/api/household'),
-  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string }) =>
+  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch }) =>
     patch<{ household: Household }>('/api/household', body),
   addMember: (body: { name: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; email?: string | null; mobile?: string | null }) => post<{ member: any }>('/api/household/members', body),
 

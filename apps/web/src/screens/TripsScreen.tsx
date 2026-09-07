@@ -1014,27 +1014,9 @@ function TripPage({ id, section: asked, dayId: askedDay, household, onBack, refr
           household={household}
           onBack={onBack}
           onChanged={async () => { await load(); await loadPlaces(); await refreshHousehold(); }}
-          onMenu={() => setMenu(true)}
           onSection={setSection}
+          onDelete={<DeleteTrip id={id} onDeleted={onBack} />}
         />
-        {menu ? (
-          <Modal visible transparent animationType="fade" onRequestClose={() => setMenu(false)}>
-            <Pressable style={styles.menuScrim} onPress={() => setMenu(false)} accessibilityLabel="Close" />
-            <View style={styles.menuSheet}>
-              {menuItems.map((m) => (
-                <Pressable key={m.value} onPress={() => { setMenu(false); setSection(m.value); }} style={styles.menuRow} accessibilityRole="button">
-                  <Icon name={m.icon} size={17} />
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={type.h3} numberOfLines={1}>{m.label}</Text>
-                    {m.hint ? <Text style={type.tiny} numberOfLines={1}>{m.hint}</Text> : null}
-                  </View>
-                  <Icon name="more" size={16} color={colors.inkMuted} />
-                </Pressable>
-              ))}
-              <View style={styles.menuRow}><DeleteTrip id={id} onDeleted={onBack} /></View>
-            </View>
-          </Modal>
-        ) : null}
       </View>
     );
   }

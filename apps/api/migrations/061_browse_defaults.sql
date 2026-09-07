@@ -1,0 +1,18 @@
+-- What a household always wants when it goes looking for somewhere to eat.
+--
+-- The owner, 6 Sep 2026: "I'd like to be able to set that as a default, because
+-- personally I never search for pubs or bakeries. I just want to find
+-- restaurants."
+--
+-- A household setting rather than a device one: the same family looking on two
+-- phones is looking for the same thing, and a preference that lived in a
+-- browser would be gone the day somebody picked up the other handset.
+--
+-- Shaped as jsonb for the same reason `pace` is: the browse filters are still
+-- moving, and a column for each one would be a migration every time somebody
+-- decides they always want a beer garden. Read through `browseOf()` in
+-- repositories/households.js, which is where the shape is agreed.
+--
+--   { "food": { "type": "restaurant", "cuisine": "italian" },
+--     "things": { "type": "walk" } }
+alter table households add column if not exists browse_defaults jsonb;
