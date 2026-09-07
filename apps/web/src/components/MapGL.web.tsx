@@ -24,7 +24,7 @@ import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { MapGLProps, MapMarker, MapShade, Point } from './MapGL';
+import type { MapCaliper, MapGLProps, MapMarker, MapShade, Point } from './MapGL';
 import { circleRing } from './searchGround';
 import { roamMapStyle } from './mapStyle';
 import { colors } from '../theme';
@@ -249,7 +249,7 @@ function markerEl(m: MapMarker): HTMLElement {
   return wrap;
 }
 
-export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, focusId, shade = null, onMapPress, dark }: MapGLProps) {
+export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, focusId, shade = null, caliper = null, coverBottom, onMapPress, dark }: MapGLProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const drawn = useRef(new Map<string, maplibregl.Marker>());
@@ -261,6 +261,8 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
   };
   const padRef = useRef(pad);
   padRef.current = pad;
+  const coverRef = useRef<number | undefined>(coverBottom);
+  coverRef.current = coverBottom;
 
   // One map, for the life of the screen.
   useEffect(() => {
@@ -545,7 +547,11 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     const box0 = m.getContainer().getBoundingClientRect();
     const pad = padRef.current;
     const bandTop = pad.top ?? 0;
-    const bandBottom = box0.height - (pad.bottom ?? 0);
+    // What is really covered, which is less than the fit reserves: the extra is
+    // there so an anchor's label clears the pills instead of being called
+    // unreadable and hidden (owner, 7 Sep 2026 — home had a label, the
+    // destination did not, and the difference was a few pixels of margin).
+    const bandBottom = box0.height - (coverRef.current ?? pad.bottom ?? 0);
     const order = [...markers].sort((a, b) =>
       (b.selected ? 1 : 0) - (a.selected ? 1 : 0) || (RANK[a.kind] ?? 9) - (RANK[b.kind] ?? 9));
     for (const spec of order) {
@@ -591,6 +597,102 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     m.on('idle', run);
     return () => { m.off('move', run); m.off('idle', run); };
   }, []);
+
+  /**
+   * The detour, drawn across the road (owner, 7 Sep 2026).
+   *
+   * A dotted line square across the route with an arrowhead on each edge of the
+   * shaded ground, and the number in the middle with a step either side of it.
+   * The line is a map layer so it sits in the scene and scales with the zoom;
+   * the arrowheads and the stepper are ordinary markers, because they have to
+   * stay legible and one of them has to be tappable.
+   */
+  const caliperRef = useRef<MapCaliper | null>(caliper);
+  caliperRef.current = caliper;
+  const caliperMarks = useRef<maplibregl.Marker[]>([]);
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+
+    const clearMarks = () => {
+      for (const mk of caliperMarks.current) mk.remove();
+      caliperMarks.current = [];
+    };
+    const teardown = () => {
+      clearMarks();
+      if (m.getLayer('roam-caliper')) m.removeLayer('roam-caliper');
+      if (m.getSource('roam-caliper')) m.removeSource('roam-caliper');
+    };
+
+    const draw = () => {
+      const c = caliperRef.current;
+      teardown();
+      if (!c) return;
+      const line = {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: [[c.a.lng, c.a.lat], [c.b.lng, c.b.lat]] },
+        }],
+      } as any;
+      m.addSource('roam-caliper', { type: 'geojson', data: line });
+      m.addLayer({
+        id: 'roam-caliper', type: 'line', source: 'roam-caliper',
+        layout: { 'line-cap': 'butt' },
+        paint: { 'line-color': '#201E1D', 'line-width': 1.6, 'line-opacity': 0.75, 'line-dasharray': [2.5, 2.5] },
+      });
+
+      // An arrowhead on each edge of the band, pointing out of it.
+      for (const [end, turn] of [[c.a, 180], [c.b, 0]] as const) {
+        const el = document.createElement('div');
+        el.style.cssText = 'width:16px;height:16px;display:flex;align-items:center;justify-content:center';
+        el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" style="transform:rotate(${c.bearingDeg + turn}deg)" fill="none" stroke="#201E1D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="m6 10 6-6 6 6"/></svg>`;
+        caliperMarks.current.push(new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([end.lng, end.lat]).addTo(m));
+      }
+
+      // The number, and the step either side of it.
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'cursor:default';
+      const chip = document.createElement('div');
+      chip.style.cssText = [
+        'position:relative', 'display:flex', 'align-items:center', 'gap:2px',
+        'padding:2px 2px', 'border-radius:999px',
+        'background:#FFFFFF', 'border:1.5px solid #201E1D',
+        'box-shadow:0 2px 8px rgba(32,30,29,0.22)',
+        'font:700 12px/1 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif', 'color:#201E1D',
+        'white-space:nowrap',
+      ].join(';');
+      const step = (glyph: string, fn: (() => void) | null, label: string) => {
+        const b = document.createElement('div');
+        b.setAttribute('role', 'button');
+        b.setAttribute('aria-label', label);
+        b.style.cssText = [
+          'width:22px', 'height:22px', 'border-radius:999px', 'flex-shrink:0',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          fn ? 'background:#EFF8F3;cursor:pointer' : 'opacity:0.3',
+        ].join(';');
+        b.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#201E1D" stroke-width="3" stroke-linecap="round"><path d="${glyph}"/></svg>`;
+        if (fn) {
+          // Its own pointerdown, so the end of a drag over the map never steps it.
+          let armed = false;
+          b.addEventListener('pointerdown', (e) => { e.stopPropagation(); armed = true; });
+          b.addEventListener('click', (e) => { e.stopPropagation(); if (!armed) return; armed = false; fn(); });
+        }
+        return b;
+      };
+      const text = document.createElement('span');
+      text.textContent = c.label;
+      text.style.cssText = 'padding:0 4px';
+      chip.appendChild(step('M5 12h14', c.onLess, 'A shorter detour'));
+      chip.appendChild(text);
+      chip.appendChild(step('M12 5v14M5 12h14', c.onMore, 'A longer detour'));
+      wrap.appendChild(chip);
+      caliperMarks.current.push(new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([c.mid.lng, c.mid.lat]).addTo(m));
+    };
+
+    if (ready.current) draw(); else m.once('load', draw);
+    return teardown;
+  }, [caliper?.a.lat, caliper?.a.lng, caliper?.b.lat, caliper?.b.lng, caliper?.label, caliper?.onLess, caliper?.onMore]);
 
   // Fit everything into the part of the map that is not under the sheet.
   useEffect(() => {

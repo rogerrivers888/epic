@@ -79,6 +79,28 @@ export type MapShade = {
   searching: boolean;
 };
 
+/**
+ * The detour, measured across the road (owner, 7 Sep 2026: "a little dotted
+ * line going across the main line with an arrow at each end saying +15
+ * minutes… a little thing that I can engage with to change it from 15 to 10").
+ *
+ * The ends sit on the edges of the shaded ground, so widening the detour
+ * widens both together — one fact drawn twice rather than two that can drift.
+ */
+export type MapCaliper = {
+  a: Point;
+  b: Point;
+  /** Where the number goes: on the road, where the width is being measured. */
+  mid: Point;
+  /** What the number says — "+15 min". */
+  label: string;
+  /** Which way the line runs, clockwise from north, so the arrowheads point out of the band. */
+  bearingDeg: number;
+  /** Stepping it: null where there is no further to go that way. */
+  onLess: (() => void) | null;
+  onMore: (() => void) | null;
+};
+
 export type MapGLProps = {
   markers: MapMarker[];
   routes?: MapRoute[];
@@ -98,6 +120,14 @@ export type MapGLProps = {
   fitToMarkers?: boolean;
   /** Centre on one marker without refitting everything. */
   focusId?: string | null;
+  /** The detour, drawn across the road with a stepper on it. */
+  caliper?: MapCaliper | null;
+  /**
+   * How much of the bottom is *actually* covered, which is less than the
+   * padding the fit is given: the fit leaves a little extra so an anchor's
+   * label clears the pills instead of being hidden as unreadable.
+   */
+  coverBottom?: number;
   /**
    * The ground the current search covers. Drawn under the route and the pins,
    * so the band is scenery the day is read against rather than something on top

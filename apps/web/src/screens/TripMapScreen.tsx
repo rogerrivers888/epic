@@ -44,6 +44,7 @@ import { VenueDrawer } from '../components/VenueDrawer';
 import { asOneOf, asText, useQueryState, useRouter } from '../router';
 import { paths, type TripSection } from '../routes';
 import { weeksOf } from './tripWeeks';
+import { caliperFor } from '../components/detourCaliper';
 import { fromName, shortPlaceName, tripName } from './tripName';
 
 const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -470,9 +471,45 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    */
   const covering = !wide && section === 'group';
   const heights = detentHeights(height, wide ? 0 : TABBAR);
+  /**
+   * Two different numbers, deliberately.
+   *
+   * `mapPadding` is what the *fit* keeps clear, and it leaves an extra line's
+   * room at the bottom so a marker landing near the pills still has somewhere
+   * to hang its label. `covered` is what is genuinely hidden, and it is what
+   * decides whether a label is worth drawing at all. Using one number for both
+   * is why home had a label and the destination did not — a few pixels either
+   * side of the same edge (owner, 7 Sep 2026).
+   */
+  const covered = heights[detent] + TABBAR + 48;
   const mapPadding = wide
     ? { top: 40, bottom: 40, left: 40, right: 460 }
-    : { top: 96, bottom: heights[detent] + TABBAR + 56, left: 28, right: 28 };
+    : { top: 96, bottom: covered + 36, left: 28, right: 28 };
+
+  /**
+   * The detour, measured across the road — a prototype the owner asked for
+   * (7 Sep 2026): "surface the detour of 15 minutes on the map, because this
+   * max detour is something that people might not even notice".
+   *
+   * Drawn from the same ground the band is drawn from, so widening one widens
+   * the other. The step either side of the number is the thing to engage with:
+   * it walks the same list of minutes the chip's dropdown offers, and the band
+   * redraws under it at once because nothing has to be fetched to know how wide
+   * fifteen minutes is.
+   */
+  const caliper = useMemo(() => {
+    if (!ground) return null;
+    const c = caliperFor(ground.spine, ground.halfWidthKm);
+    if (!c) return null;
+    const at = DETOURS.indexOf(maxDetourMin);
+    const step = (to: number | undefined) => (to == null ? null : () => setDetour(String(to)));
+    return {
+      a: c.a, b: c.b, mid: c.mid, bearingDeg: c.bearing,
+      label: `+${maxDetourMin} min`,
+      onLess: step(at > 0 ? DETOURS[at - 1] : undefined),
+      onMore: step(at >= 0 && at < DETOURS.length - 1 ? DETOURS[at + 1] : undefined),
+    };
+  }, [ground, maxDetourMin, setDetour]);
 
   // ---- adding -------------------------------------------------------------
 
@@ -743,6 +780,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         fitToMarkers={pill != null}
         focusId={selected}
         shade={ground ? { ...ground, searching: along.loading } : null}
+        coverBottom={wide ? undefined : covered}
+        caliper={caliper}
         // A tap on the map clears the chosen pin and nothing else. It used to
         // shrink the sheet too, which read well and was in fact the bug that
         // stopped the sheet opening at all: a drag that ends over the map makes
@@ -1133,8 +1172,13 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
    * offer, which is why the list is empty for one and the section folds away.
    */
   const cuisines = useMemo(() => {
-    if (pill !== 'food') return [];
-    const pool = kindOf ? along.places.filter((p) => isKind(p, kindOf)) : along.places;
+    // A drill-down, not a second list sitting open beside the first: the kind of
+    // place comes first, and the kitchen is what you narrow *within* it (owner,
+    // 7 Sep 2026: "if I click on restaurant, then I should have an extra
+    // dropdown where I can select the type of restaurant"). A pub has no
+    // kitchen to offer and simply gets none.
+    if (pill !== 'food' || !kindOf) return [];
+    const pool = along.places.filter((p) => isKind(p, kindOf));
     return CUISINES
       .map((c) => ({ kind: c, count: pool.filter((p) => isKind(p, c)).length }))
       .filter((x) => x.count)
@@ -1264,9 +1308,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           */}
           {cuisines.length ? (
             <>
-              <Text style={[styles.kicker, { marginTop: 12 }]}>
-                {kindOf ? `Kitchen · ${cap(kindOf)}` : 'Kitchen'}
-              </Text>
+              <Text style={[styles.kicker, { marginTop: 12 }]}>{`Kitchen · ${cap(kindOf ?? '')}`}</Text>
               {cuisines.map(({ kind, count }) => (
                 <Pressable key={kind} onPress={() => onCuisine(cuisine === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: cuisine === kind }}>
                   <Text style={[type.body, { flex: 1 }]}>{cap(kind)}</Text>
