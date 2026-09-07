@@ -6,7 +6,7 @@ import { Router } from 'express';
 import { withTransaction } from '../db.js';
 import * as trips from '../repositories/trips.js';
 import { computeBudget, INTENSITY_TARGETS } from '../domain/budget.js';
-import { TRAVEL_MODES } from '../domain/travel.js';
+import { isTravelMode } from '../domain/travel.js';
 import { dayAsTrip, datesBetween, slotFor } from '../domain/days.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
 import { searchAreas } from '../sources/areas.js';
@@ -214,7 +214,7 @@ router.post('/', async (req, res, next) => {
     const kind = b.kind === 'trip' ? 'trip' : 'outing';
     const travelMode = b.travelMode ?? (b.hasCar === false ? 'transit' : 'driving');
     const intensity = b.intensity ?? household.default_intensity;
-    if (!TRAVEL_MODES.includes(travelMode)) return res.status(400).json({ error: 'invalid_mode' });
+    if (!isTravelMode(travelMode)) return res.status(400).json({ error: 'invalid_mode' });
     if (!INTENSITY_TARGETS[intensity]) return res.status(400).json({ error: 'invalid_intensity' });
     const ids = async (client) => (Array.isArray(b.attendingMemberIds) && b.attendingMemberIds.length
       ? b.attendingMemberIds
@@ -404,7 +404,7 @@ router.patch('/:id', async (req, res, next) => {
   try {
     const trip = await loadTrip(req.params.id);
     const b = req.body || {};
-    if (b.travelMode && !TRAVEL_MODES.includes(b.travelMode)) return res.status(400).json({ error: 'invalid_mode' });
+    if (b.travelMode && !isTravelMode(b.travelMode)) return res.status(400).json({ error: 'invalid_mode' });
     if (b.intensity && !INTENSITY_TARGETS[b.intensity]) return res.status(400).json({ error: 'invalid_intensity' });
     let base = b.base?.lat != null ? b.base : null;
     if (!base && b.baseText) [base] = await geocode(b.baseText, { limit: 1, near: { lat: trip.base_lat ?? trip.origin_lat, lng: trip.base_lng ?? trip.origin_lng }, countryCode: trip.country_code ?? null, within: true, kind: 'lodging' });
@@ -447,7 +447,7 @@ router.patch('/:id/days/:dayId', async (req, res, next) => {
     const b = req.body || {};
     const { intensity, travelMode, startTime, endTime, notes } = b;
     if (intensity && !INTENSITY_TARGETS[intensity]) return res.status(400).json({ error: 'invalid_intensity' });
-    if (travelMode && !TRAVEL_MODES.includes(travelMode)) return res.status(400).json({ error: 'invalid_mode' });
+    if (travelMode && !isTravelMode(travelMode)) return res.status(400).json({ error: 'invalid_mode' });
     if (!await trips.updateDay(req.params.id, req.params.dayId, { intensity, travelMode, startTime, endTime, notes })) {
       return res.status(404).json({ error: 'day_not_found' });
     }
