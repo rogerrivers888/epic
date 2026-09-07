@@ -8,7 +8,7 @@
 // takes. Everything on it survives even if the source's record goes away.
 
 import { Router } from 'express';
-import { reviewsFor } from '../sources/providerMatch.js';
+import { ratingsFor, reviewsFor } from '../sources/providerMatch.js';
 import { withTransaction } from '../db.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
@@ -656,6 +656,39 @@ places.get('/reviews', async (req, res, next) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
     if (!ref || !name || !Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'ref_name_and_point_required' });
     res.json(await reviewsFor({ venueRef: ref, name, lat, lng, householdId: household.id }));
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/places/ratings?refs=a,b,c&names=…&points=… — what the crowd made of
+ * the places on screen.
+ *
+ * The click-through endpoint above answers about one place and fetches its
+ * reviews; this answers about a listful and fetches only the number and the
+ * count, because that is all a card draws. The screen sends what it is
+ * actually showing, so a four-hundred-place pool costs a dozen lookups rather
+ * than four hundred, and the rest arrive as the household scrolls. Every place
+ * asked for is looked up: the household's monthly ceiling is the guard, not a
+ * hidden cap in here.
+ *
+ * Nothing here is stored but the match, and the path is absent from
+ * `offline/policy.ts`, so none of it reaches a device.
+ */
+places.get('/ratings', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const refs = String(req.query.refs || '').split(',').map((r) => r.trim()).filter(Boolean).slice(0, 24);
+    if (!refs.length) return res.json({ ratings: {} });
+    // Each ref carries the name and point it would be matched on, because the
+    // atlas's identifiers mean nothing to a provider and looking them up again
+    // here would be a database round trip for something the screen already has.
+    const names = String(req.query.names || '').split('|');
+    const points = String(req.query.points || '').split('|');
+    const places = new Map(refs.map((ref, i) => {
+      const [lat, lng] = String(points[i] || '').split(',').map(Number);
+      return [ref, { name: names[i] ?? '', lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null }];
+    }));
+    res.json({ ratings: await ratingsFor(refs, { householdId: household.id, places }) });
   } catch (err) { next(err); }
 });
 

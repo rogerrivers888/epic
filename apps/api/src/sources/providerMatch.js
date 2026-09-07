@@ -161,3 +161,51 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
   while (kept.size > MAX) kept.delete(kept.keys().next().value);
   return value;
 }
+
+/**
+ * Ratings for a list of places, for the cards and rows that draw them.
+ *
+ * The handoff's dark card reads "20 min drive · ★ 4.5 (3.2k)", which means a
+ * rating for every place on screen and not just the one somebody opened. The
+ * owner asked for it outright (7 Sep 2026: "move Google to once per place we
+ * show… I do not want to compromise on data"), so nothing here rations it.
+ *
+ * What it does do is buy the cheap thing. A card wants a number and a count,
+ * and `googleSource.rating` asks for exactly those three fields — the full
+ * detail that the click-through uses carries hours, photos and five reviews and
+ * is billed accordingly. Asking for that to print one number would be paying
+ * enterprise rates for a star.
+ *
+ * The rest is the same bargain as everywhere else here: the match is stored for
+ * good, so a place costs two calls the first time it is ever seen, one when the
+ * six-hour memory has lapsed, and nothing in between. Only the match is
+ * written down — the number itself is rented.
+ *
+ * The household's monthly ceiling is the real guard, and it is the owner's to
+ * set. There is deliberately no second, hidden cap in here: a screen that
+ * quietly showed half its ratings would be worse than one that showed none.
+ */
+export async function ratingsFor(refs, { householdId = null, places = new Map() } = {}) {
+  const out = {};
+  for (const ref of refs) {
+    const hit = kept.get(ref);
+    if (hit && Date.now() - hit.at < TTL_MS) {
+      if (hit.value.rating != null) out[ref] = { rating: hit.value.rating, ratingCount: hit.value.ratingCount };
+      continue;
+    }
+    const p = places.get(ref);
+    if (!p?.name || p.lat == null || p.lng == null) continue;
+    const id = await googleRefFor({ venueRef: ref, name: p.name, lat: p.lat, lng: p.lng, householdId }).catch(() => null);
+    if (!id) continue;
+    const got = await googleSource.rating(id).catch(() => null);
+    await providerCalls.record(householdId, 'google', 'atlas.rating', JSON.stringify({ google: 1 })).catch(() => null);
+    if (!got) continue;
+    // Remembered under the same key the click-through reads, so opening a place
+    // whose star is already on screen does not buy the number twice.
+    const prev = kept.get(ref)?.value;
+    kept.set(ref, { at: Date.now(), value: { ...(prev ?? { reviews: [], attribution: null, matched: true }), rating: got.rating, ratingCount: got.ratingCount } });
+    if (got.rating != null) out[ref] = { rating: got.rating, ratingCount: got.ratingCount };
+  }
+  while (kept.size > MAX) kept.delete(kept.keys().next().value);
+  return out;
+}

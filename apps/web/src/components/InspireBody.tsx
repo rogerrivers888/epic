@@ -15,6 +15,25 @@ import { Icon, iconFor } from './Icon';
  */
 
 const GUTTER = 20;
+/** "3,241" is four glyphs a card cannot spare; "3.2k" is the handoff's own. */
+const briefly = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
+
+/**
+ * The star, the number and how many said so.
+ *
+ * The lifted green rather than a rating yellow: Epic has no yellow, and the
+ * handoff draws this in the same green the selected category uses.
+ */
+export function Crowd({ rating, count, size = 13 }: { rating: number | null; count?: number | null; size?: number }) {
+  if (rating == null) return null;
+  return (
+    <View style={styles.crowd}>
+      <Icon name="favourite" size={size + 1} color={colors.accent} fill />
+      <Text style={[styles.crowdValue, { fontSize: size }]}>{rating.toFixed(1)}</Text>
+      {count ? <Text style={[styles.meta, { fontSize: size }]}>({briefly(count)})</Text> : null}
+    </View>
+  );
+}
 const minutes = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`);
 /** The sweep's own words for how a place stands, in the household's language. */
 const STANDING: Record<string, string> = { top: 'Top rated', high: 'Well rated', good: 'Well liked', mixed: 'Mixed' };
@@ -54,9 +73,12 @@ export function PlaceThumb({ item, width, height }: { item: InspireItem; width: 
 }
 
 /** 8a: one category's worth, across. The title is a door into the whole of it. */
-export function Carousel({ title, count, items, onAll, onOpen }: {
+export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travelWord }: {
   title: string; count: number; items: InspireItem[];
   onAll: () => void; onOpen: (i: InspireItem) => void;
+  /** What the crowd made of it, once Google has answered for this one. */
+  crowdOf?: (i: InspireItem) => { rating: number | null; ratingCount: number | null };
+  travelWord?: string;
 }) {
   if (!items.length) return null;
   return (
@@ -73,7 +95,15 @@ export function Carousel({ title, count, items, onAll, onOpen }: {
           <Pressable key={i.venueRef} onPress={() => onOpen(i)} style={styles.card} accessibilityRole="button" accessibilityLabel={i.name}>
             <PlaceThumb item={i} width={160} height={110} />
             <Text style={styles.cardName} numberOfLines={2}>{i.name}</Text>
-            <Text style={styles.meta} numberOfLines={1}>{minutes(i.travelMinutes)} · {minutes(i.dwellMinutes)}</Text>
+            {/* "20 min drive · ★ 4.5 (3.2k)" — how far, then what people made
+                of it. The dwell moves to the place itself, where the facts grid
+                has room for it (9a, 9f). */}
+            <View style={styles.cardMeta}>
+              <Text style={styles.meta} numberOfLines={1}>{minutes(i.travelMinutes)} {travelWord ?? 'drive'}</Text>
+              {crowdOf?.(i).rating != null ? (
+                <><Text style={styles.meta}>·</Text><Crowd rating={crowdOf(i).rating} count={crowdOf(i).ratingCount} /></>
+              ) : null}
+            </View>
           </Pressable>
         ))}
       </ScrollView>
@@ -89,8 +119,10 @@ export function Carousel({ title, count, items, onAll, onOpen }: {
  * not carry yet — so the line is a slot, and an empty slot draws nothing rather
  * than a guess.
  */
-export function PlaceRow({ item, kind, status, onOpen }: {
-  item: InspireItem; kind: string | null; status?: { text: string; open: boolean } | null; onOpen: () => void;
+export function PlaceRow({ item, kind, status, crowd, onOpen }: {
+  item: InspireItem; kind: string | null; status?: { text: string; open: boolean } | null;
+  crowd?: { rating: number | null; ratingCount: number | null };
+  onOpen: () => void;
 }) {
   const bits = [kind, minutes(item.travelMinutes), `allow ${minutes(item.dwellMinutes)}`].filter(Boolean);
   return (
@@ -99,6 +131,7 @@ export function PlaceRow({ item, kind, status, onOpen }: {
       <View style={styles.rowBody}>
         <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>
         <Text style={styles.meta} numberOfLines={2}>{bits.join(' · ')}</Text>
+        <Crowd rating={crowd?.rating ?? null} count={crowd?.ratingCount} />
         {status ? <Text style={[styles.status, { color: status.open ? colors.accent : colors.inkMuted }]}>{status.text}</Text> : null}
       </View>
     </Pressable>
@@ -123,7 +156,8 @@ export function CuisineRow({ label, count, onOpen }: { label: string; count: num
  * price and the rating, and eleven thumbnails of food we do not own would say
  * less than the two numbers on the right.
  */
-export function FoodRow({ item, kind, where, status, standing, onOpen }: {
+export function FoodRow({ item, kind, where, status, standing, crowd, onOpen }: {
+  crowd?: { rating: number | null; ratingCount: number | null };
   item: InspireItem; kind: string | null; where: string | null;
   status?: { text: string; open: boolean } | null;
   /**
@@ -146,8 +180,10 @@ export function FoodRow({ item, kind, where, status, standing, onOpen }: {
       </View>
       <View style={styles.foodSide}>
         {price ? <Text style={styles.price}>{price}</Text> : null}
-        {item.rating != null
-          ? <Text style={styles.meta}>{item.rating.toFixed(1)}</Text>
+        {/* Google's number where we have it, our own band where we do not — the
+            band is a judgement of ours, and better than nothing at all. */}
+        {crowd?.rating != null
+          ? <Crowd rating={crowd.rating} count={crowd.ratingCount} />
           : standing ? <Text style={styles.meta}>{STANDING[standing] ?? standing}</Text> : null}
       </View>
     </Pressable>
@@ -172,6 +208,9 @@ const styles = StyleSheet.create({
   cardName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
 
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  crowd: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  crowdValue: { fontFamily: fonts.body, fontWeight: '700', color: colors.accent },
   status: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600' },
 
   row: {

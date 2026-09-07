@@ -1244,6 +1244,17 @@ export const api = {
    * What the crowd made of an atlas place. Matched to Google once and then
    * read; nothing it returns is stored, here or on the device.
    */
+  /**
+   * The crowd's number for a listful of places. Only what a card draws — the
+   * rating and the count — so it buys the cheap field mask, not the full detail.
+   */
+  placeRatings: (rows: { ref: string; name: string; lat: number; lng: number }[]) =>
+    request<{ ratings: Record<string, { rating: number | null; ratingCount: number | null }> }>(
+      `/api/places/ratings${qs({
+        refs: rows.map((r) => r.ref).join(','),
+        names: rows.map((r) => r.name).join('|'),
+        points: rows.map((r) => `${r.lat},${r.lng}`).join('|'),
+      })}`),
   placeReviews: (q: { ref: string; name: string; lat: number; lng: number }) =>
     request<{ rating: number | null; ratingCount: number | null; reviews: { text: string; rating: number | null; author: string | null; authorUri: string | null; when: string | null }[]; attribution: string | null; matched: boolean }>(`/api/places/reviews${qs(q)}`),
   placeRecords: (venueRefs: string[]) => request<{ records: Record<string, OwnedRecord>; missing: string[] }>(`/api/places/record${qs({ refs: venueRefs.join(',') })}`),

@@ -442,6 +442,36 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
     });
   }, [pool, cap, outing, budget, kinds, minorComing]);
 
+  /**
+   * The crowd's number for the places on screen.
+   *
+   * Owner, 7 Sep 2026: "move Google to once per place we show… I do not want to
+   * compromise on data." So the screen asks about what it is drawing rather
+   * than about the whole pool, in batches, as the household moves around — and
+   * the answers accumulate here. A match is stored server-side for good, so the
+   * second sight of a place is cheap and the third is free.
+   *
+   * It fills *beside* the list: nothing waits on it, and a card that has not
+   * had its answer yet simply has no star for a moment.
+   */
+  const [crowd, setCrowd] = useState<Record<string, { rating: number | null; ratingCount: number | null }>>({});
+  const askedFor = useRef<Set<string>>(new Set());
+  const askAbout = useCallback((rows: InspireItem[]) => {
+    const want = rows
+      .filter((i) => i.rating == null && !askedFor.current.has(i.venueRef) && i.lat != null && i.lng != null)
+      .slice(0, 24);
+    if (!want.length) return;
+    for (const i of want) askedFor.current.add(i.venueRef);
+    api.placeRatings(want.map((i) => ({ ref: i.venueRef, name: i.name, lat: i.lat, lng: i.lng })))
+      .then((d) => setCrowd((c) => ({ ...c, ...d.ratings })))
+      .catch(() => { /* a card without a star is not an error */ });
+  }, []);
+  /** A place's own rating, or the one Google gave us for it. */
+  const ratingOf = useCallback((i: InspireItem) => ({
+    rating: i.rating ?? crowd[i.venueRef]?.rating ?? null,
+    ratingCount: i.ratingCount ?? crowd[i.venueRef]?.ratingCount ?? null,
+  }), [crowd]);
+
   /** Every drawer the answer named, so a card can print its own word for itself. */
   const drawers: Drawers = useMemo(
     () => new Map((pool?.moods ?? []).flatMap((m) => (m.subcategories ?? []).map((sc) => [sc.key, sc.label] as const))),
@@ -566,6 +596,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
       items: shown.filter((i) => i.moods.includes(key)).sort((a, b) => forWhoever(a) - forWhoever(b)),
     }));
   }, [shown, mood, minorComing]);
+
+  // Whichever list is actually on screen is the one worth asking about.
+  useEffect(() => { askAbout(pick ? listed : shelves.flatMap((sh) => sh.items.slice(0, 6))); },
+    [pick, listed, shelves, askAbout]);
 
   const whoLabel = !attending || attending.size === members.length
     ? 'Family'
@@ -725,6 +759,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   items={items.slice(0, 12)}
                   onAll={() => goTo('activities', key)}
                   onOpen={open}
+                  crowdOf={ratingOf}
+                  travelWord={travelBy === 'walk' ? 'walk' : travelBy === 'transit' ? 'by transport' : 'drive'}
                 />
               )) : null}
 
@@ -771,8 +807,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               {pick ? (
                 listed.length ? listed.map((i) => (
                   mode === 'food'
-                    ? <FoodRow key={i.venueRef} item={i} kind={cap1(i.cuisines[0] ?? '')} where={i.region ? shortPlace(i.region) : null} standing={(i as any).standing ?? null} onOpen={() => open(i)} />
-                    : <PlaceRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} onOpen={() => open(i)} />
+                    ? <FoodRow key={i.venueRef} item={i} kind={cap1(i.cuisines[0] ?? '')} where={i.region ? shortPlace(i.region) : null} standing={(i as any).standing ?? null} crowd={ratingOf(i)} onOpen={() => open(i)} />
+                    : <PlaceRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} crowd={ratingOf(i)} onOpen={() => open(i)} />
                 )) : emptied ? null : (
                   /* The one above already says which setting emptied it and
                      offers the way out; two empty states is one too many. */
