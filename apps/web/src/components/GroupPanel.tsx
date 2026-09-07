@@ -597,7 +597,7 @@ function WhatThisIs({ group: g, onChange }: { group: TripGroup; onChange: (body:
           </View>
           <View>
             <Text style={styles.fieldLabel}>Expecting</Text>
-            <NumberBox value={expected} onChange={setExpected} onCommit={save} onFocus={() => setAt('expecting')} placeholder="24" />
+            <NumberBox value={expected} onChange={setExpected} onCommit={save} onFocus={() => setAt('expecting')} />
           </View>
           <View>
             <Text style={styles.fieldLabel}>Maximum</Text>
@@ -941,7 +941,7 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
         {price === 'fixed' ? (
           <View style={{ gap: 4 }}>
             <Text style={styles.fieldLabel}>Cost each</Text>
-            <NumberBox value={amount} onChange={setAmount} placeholder="12" prefix="£" width={132} />
+            <NumberBox value={amount} onChange={setAmount} prefix="£" width={132} />
           </View>
         ) : null}
 
@@ -949,7 +949,7 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
           <View style={{ gap: spacing.sm }}>
             <View style={{ gap: 4 }}>
               <Text style={styles.fieldLabel}>Total event cost</Text>
-              <NumberBox value={total} onChange={setTotal} placeholder="1000" prefix="£" width={160} />
+              <NumberBox value={total} onChange={setTotal} prefix="£" width={160} />
               <Text style={type.small}>Split by the number of people who come. Nobody is charged until the deadline below.</Text>
             </View>
             <View style={{ gap: 4 }}>
