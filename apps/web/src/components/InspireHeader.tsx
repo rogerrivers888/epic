@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts, spacing, BORDER, TARGET } from '../theme';
 import { Icon, IconName } from './Icon';
 import { Wordmark } from './Wordmark';
@@ -160,7 +160,14 @@ export function FilterButton({ label, icon, strong, on, onPress, toggle }: {
 export const styles = StyleSheet.create({
   top: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: spacing.md, paddingHorizontal: GUTTER, paddingTop: HEADER_TOP,
+    gap: spacing.md, paddingHorizontal: GUTTER,
+    /**
+     * The design's 60 from the top of the screen — which has to *include* the
+     * status bar, not sit under it. On a phone with a notch the inset is around
+     * 59, so adding 60 to it put the wordmark 119px down; `max` takes whichever
+     * is the larger and adds a little breathing room over the clock.
+     */
+    paddingTop: (Platform.OS === 'web' ? `max(${HEADER_TOP}px, calc(env(safe-area-inset-top) + 12px))` : HEADER_TOP) as any,
   },
   where: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingHorizontal: 12,
@@ -176,14 +183,23 @@ export const styles = StyleSheet.create({
   switchText: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.78 },
 
   strip: { flexGrow: 1, justifyContent: 'center', gap: 18, paddingTop: 6, paddingHorizontal: GUTTER },
-  stripItem: { paddingVertical: 6, borderBottomWidth: BORDER, borderBottomColor: 'transparent', marginBottom: -BORDER },
+  /**
+   * The selected item's marker sits inside its own box rather than being pulled
+   * down onto the block's rule with a negative margin: the strip is a scroller,
+   * a scroller clips what hangs outside it, and the marker was being clipped
+   * away entirely — so nothing on the row looked chosen (owner, 7 Sep 2026:
+   * "you've got no active 1").
+   */
+  stripItem: { paddingTop: 6, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
   stripItemOn: { borderBottomColor: colors.accent },
-  stripText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600' },
+  stripText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600' },
 
   subStrip: { flexGrow: 1, gap: 18, paddingTop: 8, paddingBottom: 6, paddingHorizontal: GUTTER },
-  subItem: { borderBottomWidth: BORDER, borderBottomColor: 'transparent', marginBottom: -1 },
+  subItem: { paddingBottom: 4, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
   subItemOn: { borderBottomColor: colors.accent },
-  subText: { fontFamily: fonts.body, fontSize: 13, color: colors.accent },
+  // One size up: at 13 the drawers under an open category were the smallest
+  // thing on the screen and the hardest to hit (owner, 7 Sep 2026).
+  subText: { fontFamily: fonts.body, fontSize: 15, color: colors.accent },
   subTextOn: { fontWeight: '600' },
   subTextOff: { fontWeight: '400', opacity: 0.75 },
 
@@ -202,5 +218,12 @@ export const styles = StyleSheet.create({
 
 export const HEADER = { top: HEADER_TOP, gutter: GUTTER };
 
-/** The 2px ink rule the switch block closes with, drawn by whoever owns the layout. */
-export const blockRule = { borderBottomWidth: BORDER, borderBottomColor: colors.ink } as const;
+/**
+ * The 2px rule the switch block closes with.
+ *
+ * `line`, not `ink`: in dark mode `ink` is the *type* colour, cream, and a
+ * full-width cream band was the brightest thing on the screen (owner, 7 Sep
+ * 2026: "the menu item line looks too bright"). `line` is ink on cream and a
+ * warm mid-grey on ink, so the rule reads as a rule in both.
+ */
+export const blockRule = { borderBottomWidth: BORDER, borderBottomColor: colors.line } as const;

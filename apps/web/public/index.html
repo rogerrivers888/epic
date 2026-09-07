@@ -52,8 +52,21 @@
       body { margin: 0; overflow: hidden; background: #FFFDF9; -webkit-text-size-adjust: 100%; }
       /* Archivo everywhere; the odd monospace value marks itself with data-font */
       #root *:not(svg):not(svg *):not([data-font]) { font-family: Archivo, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
-      /* 100vh includes Safari's bar; fill-available does not */
-      #root { min-height: 100vh; min-height: -webkit-fill-available; display: flex; }
+      /*
+        The app is exactly as tall as the screen actually is.
+
+        `100vh` is the *large* viewport — the height with the browser bars
+        retracted — so the bottom of the app is cut off while they are showing.
+        `-webkit-fill-available` is the opposite mistake: it reports the *small*
+        viewport and keeps reporting it after the bars retract, which leaves the
+        app short and a band of its own background below the tab bar (owner,
+        7 Sep 2026: "look at the amount of dead space at the top and bottom").
+
+        `100dvh` is the one that means "however tall it is right now", and it
+        updates as the bars come and go. The two before it are the fallback for
+        anything that does not know it; the last one a browser understands wins.
+      */
+      #root { display: flex; height: 100vh; height: -webkit-fill-available; height: 100dvh; }
     </style>
       <style>
       :root { --epic-bg: #FFFDF9; --epic-surface: #FFFDF9; --epic-ink: #201E1D; --epic-headerBg: #C8F542; color-scheme: light; }

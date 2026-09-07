@@ -79,7 +79,7 @@ export default function App() {
  * iPhone"). What must stay clear of them is the sheet and the tab bar, and each
  * of those keeps itself clear.
  */
-function Edges({ children, style, bleed, ownFooter }: { children: React.ReactNode; style?: any; bleed?: boolean; ownFooter?: boolean }) {
+function Edges({ children, style, bleed, ownFooter, ownHeader }: { children: React.ReactNode; style?: any; bleed?: boolean; ownFooter?: boolean; ownHeader?: boolean }) {
   const Box: any = bleed ? View : SafeAreaView;
   // The app draws under the status bar (index.html), so a screen that is not
   // full-bleed puts the inset back on rather than letting the wordmark sit
@@ -93,9 +93,13 @@ function Edges({ children, style, bleed, ownFooter }: { children: React.ReactNod
   // all. When a screen carries its own bottom chrome the bar absorbs the inset
   // instead, so its fill and its rule run to the physical edge and only the
   // labels sit clear of the indicator.
+  // The top inset is the same bargain as the bottom one: a screen that draws
+  // its own head takes the status bar into its own first row, rather than
+  // having the frame push everything down and then adding its own 60 on top of
+  // that — which is what put the wordmark a long way down the screen.
   const inset = !bleed && Platform.OS === 'web'
     ? {
-      paddingTop: 'env(safe-area-inset-top)' as any,
+      ...(ownHeader ? null : { paddingTop: 'env(safe-area-inset-top)' as any }),
       ...(ownFooter ? null : { paddingBottom: 'env(safe-area-inset-bottom)' as any }),
     }
     : null;
@@ -506,7 +510,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
   // between desktop and phone (window resize or the Web/Mobile toggle) keeps
   // whatever is open on the screen — the trip you were looking at, a search.
   return (
-    <Edges style={styles.root} bleed={fullBleed} ownFooter={hasTabs}>
+    <Edges style={styles.root} bleed={fullBleed} ownFooter={hasTabs} ownHeader={ownsHeader(route)}>
       <StatusBar style="dark" />
       <View style={desktop ? styles.desktop : styles.fill}>
         {desktop ? (
