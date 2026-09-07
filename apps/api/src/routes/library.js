@@ -274,6 +274,55 @@ adminRouter.get('/visiting', requires('view_library'), async (req, res, next) =>
 });
 
 /**
+ * POST /api/admin/library/visiting/gather — ask the open sources.
+ *
+ * OpenStreetMap and Wikipedia, both free and keyless, so this spends nothing
+ * and needs nobody's quota. Paced and resumable: it takes the best-scoring
+ * places that have not been asked about yet, so a run that is cut short is cut
+ * short in the least important place, and running it again continues rather
+ * than repeats.
+ */
+adminRouter.post('/visiting/gather', requires('manage_library'), async (req, res, next) => {
+  try {
+    const counts = await lib.gatherVisitingEvidence({
+      region: req.body?.region ?? null,
+      limit: Math.min(2000, Number(req.body?.limit) || 400),
+    });
+    res.json({ counts });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/admin/library/visiting/impact — what deny-by-default would cost.
+ *
+ * The owner asked for places nobody has established to be hidden rather than
+ * shown (7 Sep 2026). That is the right way round for a private house and the
+ * wrong way round for a cathedral with a thin Wikipedia article, so the number
+ * that matters is how many places go dark and where. County by county, because
+ * coverage is uneven and a county that would lose most of itself is a county to
+ * gather evidence for before the switch, not after.
+ */
+adminRouter.get('/visiting/impact', requires('view_library'), async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `select region_slug,
+              count(*)::int as published,
+              count(*) filter (where visiting = 'yes')::int as shown,
+              count(*) filter (where visiting = 'no')::int as refused,
+              count(*) filter (where visiting is null)::int as unestablished,
+              count(*) filter (where visiting_looked_at is not null)::int as asked
+         from attractions where state = 'published'
+        group by 1 order by 4 desc, 1`);
+    const total = rows.reduce((a, r) => ({
+      published: a.published + r.published, shown: a.shown + r.shown,
+      refused: a.refused + r.refused, unestablished: a.unestablished + r.unestablished,
+      asked: a.asked + r.asked,
+    }), { published: 0, shown: 0, refused: 0, unestablished: 0, asked: 0 });
+    res.json({ total, regions: rows });
+  } catch (err) { next(err); }
+});
+
+/**
  * POST /api/admin/library/visiting/rejudge — run the rule over the atlas again.
  *
  * Free: it reads what the harvest already stored and asks nobody's API. Run it

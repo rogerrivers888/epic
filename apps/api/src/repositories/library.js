@@ -14,6 +14,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { judgeVisiting } from '../domain/visiting.js';
+import { osmForWikidata, wikipediaCategories, titleFromUrl } from '../sources/visitingEvidence.js';
 
 // ---------------------------------------------------------------------------
 // regions
@@ -1455,19 +1456,65 @@ export async function lessonsFor({ attractionId = null, kinds = [] } = {}) {
  * A hand-set verdict is never touched. That is the whole contract with the back
  * office — somebody who has actually looked outranks the rule, permanently.
  */
+/**
+ * Ask the open sources about places nobody has asked about yet.
+ *
+ * Free and keyless — OpenStreetMap and Wikipedia — so it can be run over the
+ * whole atlas without spending anything. Paced and resumable: it takes the
+ * places that reach a screen first, remembers that it has looked, and can be
+ * stopped and started without repeating itself.
+ */
+export async function gatherVisitingEvidence({ region = null, limit = 400, onLine = null } = {}) {
+  const args = [limit];
+  const where = ["state = 'published'", 'visiting_looked_at is null', 'wikidata_id is not null'];
+  if (region) { args.push(region); where.push(`region_slug = $${args.length}`); }
+  const { rows } = await query(
+    `select id, name, wikidata_id, wikipedia_url from attractions
+      where ${where.join(' and ')}
+      order by score desc nulls last limit $1`, args);
+  if (!rows.length) return { looked: 0, withOsm: 0, withCategories: 0 };
+
+  const counts = { looked: rows.length, withOsm: 0, withCategories: 0 };
+  // Overpass is a donated service and Wikipedia asks for fifty titles a call;
+  // both are batched rather than hammered, and a batch that fails is skipped
+  // rather than losing the run.
+  for (let i = 0; i < rows.length; i += 50) {
+    const batch = rows.slice(i, i + 50);
+    const [osm, cats] = await Promise.all([
+      osmForWikidata(batch.map((r) => r.wikidata_id)).catch(() => new Map()),
+      wikipediaCategories(batch.map((r) => titleFromUrl(r.wikipedia_url)).filter(Boolean)).catch(() => new Map()),
+    ]);
+    for (const r of batch) {
+      const tags = osm.get(r.wikidata_id) ?? null;
+      const categories = cats.get(titleFromUrl(r.wikipedia_url)) ?? null;
+      if (tags) counts.withOsm += 1;
+      if (categories?.length) counts.withCategories += 1;
+      await query(
+        `update attractions set visiting_evidence = $2, visiting_looked_at = now() where id = $1`,
+        [r.id, JSON.stringify({ osm: tags, categories: categories ?? null })]);
+    }
+    onLine?.(`looked at ${Math.min(i + 50, rows.length)} of ${rows.length}`);
+  }
+  return counts;
+}
+
 export async function rejudgeVisiting({ region = null, limit = 100000 } = {}) {
   const args = [limit];
   const where = ["state <> 'hidden'"];
   if (region) { args.push(region); where.push(`region_slug = $${args.length}`); }
   const { rows } = await query(
-    `select id, kinds, summary, visiting from attractions
-      where ${where.join(' and ')} and (visiting_by is null or visiting_by = 'rule')
+    `select id, kinds, summary, visiting, visiting_evidence from attractions
+      where ${where.join(' and ')} and (visiting_by is null or visiting_by in ('rule', 'kinds', 'summary', 'osm', 'wikipedia', 'veto', 'google'))
       -- Published first: those are the only ones anybody can currently be shown.
       order by (state = 'published') desc, id limit $1`, args);
 
   const counts = { looked: rows.length, yes: 0, no: 0, unknown: 0, changed: 0 };
   for (const r of rows) {
-    const { visiting, because } = judgeVisiting({ kinds: r.kinds ?? [], summary: r.summary ?? '' });
+    const ev = r.visiting_evidence ?? {};
+    const { visiting, because, by } = judgeVisiting({
+      kinds: r.kinds ?? [], summary: r.summary ?? '',
+      osm: ev.osm ?? null, categories: ev.categories ?? null,
+    });
     counts[visiting ?? 'unknown'] += 1;
     if ((r.visiting ?? null) !== (visiting ?? null)) counts.changed += 1;
     // Stamped even when the answer is "nobody has said", so that a row the pass
@@ -1476,8 +1523,8 @@ export async function rejudgeVisiting({ region = null, limit = 100000 } = {}) {
     // has been swept.
     await query(
       `update attractions
-          set visiting = $2, visiting_because = $3, visiting_by = 'rule', visiting_at = now()
-        where id = $1`, [r.id, visiting, because]);
+          set visiting = $2, visiting_because = $3, visiting_by = $4, visiting_at = now()
+        where id = $1`, [r.id, visiting, because, by ?? 'rule']);
   }
   return counts;
 }

@@ -390,9 +390,22 @@ export const googleSource = {
    */
   async rating(id, { meter = null } = {}) {
     if (!KEY()) return null;
-    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,rating,userRatingCount', meter });
+    // `types` and `primaryType` ride along free. Places bills a request once, at
+    // the highest tier any of its fields belong to: a rating is Enterprise and a
+    // type is Essentials, so asking for both costs exactly what asking for the
+    // rating alone already cost. They are what tells a museum from somebody's
+    // house (domain/visiting.js), and they are read and dropped — only our own
+    // conclusion is ever written down.
+    const p = await call(`/places/${id}`, {
+      method: 'GET', fieldMask: 'id,rating,userRatingCount,types,primaryType', meter,
+    });
     if (!p) return null;
-    return { rating: p.rating ?? null, ratingCount: p.userRatingCount ?? null };
+    return {
+      rating: p.rating ?? null,
+      ratingCount: p.userRatingCount ?? null,
+      types: p.types ?? [],
+      primaryType: p.primaryType ?? null,
+    };
   },
 
   /**

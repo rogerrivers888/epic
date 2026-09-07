@@ -95,6 +95,33 @@ test('the home screen skips refusals and keeps the unestablished', () => {
 
 test('a verdict set by hand survives the next pass', () => {
   const src = readFileSync(new URL('../src/repositories/library.js', import.meta.url), 'utf8');
-  assert.match(src, /visiting_by is null or visiting_by = 'rule'/,
-    'rejudgeVisiting must never overwrite somebody who actually looked');
+  // The pass may overwrite its own earlier conclusions, under any of the source
+  // names the rule uses, and nothing else. A person's name is not in that list,
+  // which is the whole promise: somebody who actually looked outranks the rule
+  // permanently.
+  const m = src.match(/visiting_by is null or visiting_by in \(([^)]*)\)/);
+  assert.ok(m, 'rejudgeVisiting must restrict what it is allowed to overwrite');
+  const allowed = m[1].split(',').map((x) => x.trim().replace(/'/g, ''));
+  assert.deepEqual(allowed.sort(), ['google', 'kinds', 'osm', 'rule', 'summary', 'veto', 'wikipedia'],
+    'only the rule\u2019s own verdicts may be overwritten');
+});
+
+test('Google only ever fills a gap, and never says a place is private', () => {
+  const src = readFileSync(new URL('../src/sources/providerMatch.js', import.meta.url), 'utf8');
+  // Google has no type for a house, so its silence is a fact about Google. The
+  // update must therefore be positive-only and conditional on nothing else
+  // having answered.
+  assert.match(src, /set visiting = 'yes'/, 'Google may only establish that a place is public');
+  assert.match(src, /and visiting is null/, 'Google must not overturn an answer we already have');
+  assert.ok(!/set visiting = 'no'[\s\S]{0,200}google/i.test(src), 'Google must never conclude a place is private');
+});
+
+test('nothing of Google\u2019s is written down but our own conclusion', () => {
+  const src = readFileSync(new URL('../src/sources/providerMatch.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('async function noteGoogleVisiting'), src.indexOf('export async function ratingsFor'));
+  for (const field of ['rating', 'userRatingCount', 'types', 'primaryType', 'displayName']) {
+    assert.ok(!new RegExp(`\\$\\d[^]*${field}|${field}[^]*values`).test(fn),
+      `${field} is Google's content and is not ours to keep`);
+  }
+  assert.match(fn, /visiting_by = 'google'/, 'the rows it touched must be findable and droppable in one statement');
 });

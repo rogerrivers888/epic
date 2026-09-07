@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { googleSource } from './google.js';
+import { googleSaysPublic } from '../domain/visiting.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
 /**
@@ -185,6 +186,39 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
  * set. There is deliberately no second, hidden cap in here: a screen that
  * quietly showed half its ratings would be worse than one that showed none.
  */
+/**
+ * Note that a place is somewhere the public goes, when Google has just said so.
+ *
+ * The owner, 7 Sep 2026: "I don't feel like there's a big deal with just
+ * checking the Google data to see whether it's a private residence or not…"
+ *
+ * Two things this deliberately does not do. It never writes what Google said —
+ * no name, no rating, no hours, and not the type list either; only our own
+ * one-word conclusion, tagged `google` so every row it touched can be found and
+ * dropped in one statement if the position ever changes. And it never concludes
+ * that somewhere *is* private: Google has no type for a house, so its silence
+ * about a place is mostly a fact about Google. Silence leaves the verdict
+ * unestablished, and an unestablished place is not shown anyway — which gets
+ * the outcome asked for without putting words in anybody's mouth.
+ *
+ * It only ever fills a gap. Anything a person settled, or that the open sources
+ * already answered, is left exactly as it was.
+ */
+async function noteGoogleVisiting(venueRef, got) {
+  const said = googleSaysPublic(got);
+  if (!said) return;
+  const m = String(venueRef || '').match(/^(wikidata|osm):(.+)$/);
+  if (!m) return;
+  const [, kind, id] = m;
+  await query(
+    `update attractions
+        set visiting = 'yes', visiting_because = $2, visiting_by = 'google', visiting_at = now()
+      where ${kind === 'wikidata' ? 'wikidata_id' : 'osm_ref'} = $1
+        and visiting is null
+        and (visiting_by is null or visiting_by in ('rule', 'kinds', 'summary', 'osm', 'wikipedia', 'google'))`,
+    [id, said]).catch(() => null);
+}
+
 export async function ratingsFor(refs, { householdId = null, places = new Map() } = {}) {
   const out = {};
   for (const ref of refs) {
@@ -200,6 +234,8 @@ export async function ratingsFor(refs, { householdId = null, places = new Map() 
     const got = await googleSource.rating(id).catch(() => null);
     await providerCalls.record(householdId, 'google', 'atlas.rating', JSON.stringify({ google: 1 })).catch(() => null);
     if (!got) continue;
+    // Asked and answered on a call we were making anyway.
+    await noteGoogleVisiting(ref, got);
     // Remembered under the same key the click-through reads, so opening a place
     // whose star is already on screen does not buy the number twice.
     const prev = kept.get(ref)?.value;
