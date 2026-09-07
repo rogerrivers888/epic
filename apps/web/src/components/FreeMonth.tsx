@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, fonts, radius, spacing, type } from '../theme';
+import { colors, fonts, radius, spacing, type, BORDER } from '../theme';
 import { Button, Row } from './ui';
 import { Icon } from './Icon';
 
@@ -94,7 +94,7 @@ export function FreeMonth({ trialEndsOn, tripName, payments = [], onBack, onDone
       </View>
 
       {payments.length ? (
-        <View style={{ gap: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm }}>
+        <View style={{ gap: 4, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm }}>
           {payments.map((p, n) => (
             <Row key={n} style={{ justifyContent: 'space-between' }}>
               <Text style={type.small}>{n === 0 ? 'Trip payments' : ''}</Text>

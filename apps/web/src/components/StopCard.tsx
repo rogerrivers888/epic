@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, OptionStop, Venue } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Chip, Row, Wrap, clock, minutes } from './ui';
 import { VenuePhoto } from './VenuePhoto';
 import { CategoryIcon, Icon, IconText, Rating } from './Icon';
@@ -167,11 +167,11 @@ function StopDetails({ stop }: { stop: OptionStop }) {
 }
 
 const styles = StyleSheet.create({
-  stop: { flexDirection: 'row', gap: spacing.md, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  stop: { flexDirection: 'row', gap: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   stopPos: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.dwell, color: colors.bg, textAlign: 'center', lineHeight: 22, fontSize: 12, fontWeight: '700', overflow: 'hidden' },
   details: { minHeight: 32, justifyContent: 'center', alignSelf: 'flex-start' },
   detail: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
-  review: { gap: 2, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  review: { gap: 2, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   reactBtn: { minHeight: 40, minWidth: 96, paddingHorizontal: 10, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   reactBtnOn: { backgroundColor: colors.like },
   reactInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },

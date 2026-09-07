@@ -17,7 +17,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { api, SessionSummary } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Card, Row } from './ui';
 import { Icon } from './Icon';
 import { FreeMonth } from './FreeMonth';
@@ -165,6 +165,6 @@ export function AccountCard() {
 }
 
 const styles = StyleSheet.create({
-  list: { marginTop: spacing.sm, gap: spacing.xs, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm },
+  list: { marginTop: spacing.sm, gap: spacing.xs, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm },
   device: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.md },
 });

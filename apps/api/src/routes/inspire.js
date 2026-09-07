@@ -60,6 +60,7 @@ import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { publishedNear, heroesForPlaces } from '../repositories/library.js';
+import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
 
 /**
@@ -120,6 +121,9 @@ const ATLAS_MAX_KM = 100;
  * scroll is a round trip bought for nothing.
  */
 const ATLAS_LIMIT = 250;
+// Food is a list rather than a wall of pictures, so it can afford more of them
+// than the atlas half — but not so many that the answer stops being one page.
+const FOOD_LIMIT = 150;
 
 /**
  * The credit a picture and a rating travel with. Sources hand this over as a
@@ -252,6 +256,64 @@ inspire.get('/near', async (req, res, next) => {
     const already = items.map((i) => ({ key: nameKey(i.name), lat: i.lat, lng: i.lng }));
     const seen = (a) => already.some((b) => b.key === nameKey(a.name)
       && a.lat != null && kmBetween(a, b) < 0.25);
+
+    /**
+     * Somewhere to eat (Inspire rework, 7 Sep 2026).
+     *
+     * The note above still holds for the *activities* half: the atlas is
+     * harvested from Wikidata and holds no restaurants, and a Food shelf made
+     * of grey rectangles was the reason Food became a door into Places on
+     * 5 Sep. The rework makes Food the other half of the tab instead, so it
+     * needs a pool of its own — and there already is one. The postcode sweep
+     * has read 2,600-odd places across a hundred areas, and everything it kept
+     * is ours: open names and coordinates, cuisines and accolades from the
+     * venue's own pages, and a *band* rather than a provider's rating.
+     *
+     * These carry `moods: ['food']` and nothing else, so they cannot surface on
+     * an Activities shelf however the taxonomy is taught. The screen splits on
+     * the same word.
+     *
+     * No rating and no price travels with them, because we do not hold either
+     * as a number we are allowed to keep. The row draws what it has.
+     */
+    const food = await foodNear({ lat: centre.lat, lng: centre.lng, km: reach, limit: FOOD_LIMIT });
+    for (const f of food) {
+      if (f.lat == null || f.lng == null) continue;
+      if (seen(f)) continue;
+      const cuisines = Array.isArray(f.cuisines) ? f.cuisines : [];
+      items.push({
+        venueRef: f.venue_ref,
+        source: 'scout',
+        name: f.name,
+        category: 'restaurant',
+        moods: ['food'],
+        subcategory: f.cuisine_group ?? null,
+        atlasCategory: null,
+        experiences: [],
+        cuisines: f.cuisine_group ? [f.cuisine_group, ...cuisines.filter((c) => c !== f.cuisine_group)] : cuisines,
+        // The band is a judgement of ours and travels; the figure it was made
+        // from is the provider's and never does.
+        rating: null, ratingCount: null, priceLevel: null, goodForChildren: null,
+        standing: f.crowd_band ?? null,
+        accolades: Array.isArray(f.accolades) ? f.accolades : [],
+        chain: Boolean(f.chain),
+        photos: [],
+        image: ownedImage(ourPictures.get(f.venue_ref)),
+        summary: null, heritage: null,
+        website: f.website ?? null, wikipediaUrl: null,
+        region: f.locality_name ?? null,
+        attribution: ['OpenStreetMap contributors, ODbL'],
+        lat: f.lat, lng: f.lng,
+        distanceKm: Number(f.km.toFixed(1)),
+        travelMinutes: estimateTravelMinutes(origin, f, mode),
+        estimated: true,
+        // A meal out, at this household's pace. The atlas's attractions carry a
+        // dwell worked out per place; the sweep does not hold one, and ninety
+        // minutes is the honest default for sitting down to eat.
+        dwellMinutes: 90,
+        household: null,
+      });
+    }
 
     // Twice the OSM radius, because an attraction worth driving to is worth
     // showing from further away than a playground is. It is therefore the outer

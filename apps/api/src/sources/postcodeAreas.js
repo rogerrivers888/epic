@@ -18,8 +18,9 @@
 // enumerated rather than discovered because there is no endpoint that lists
 // them. That is cheap: a postcode area runs out well before 99.
 
+import { userAgent } from '../origins.js';
 const API = 'https://api.postcodes.io/outcodes';
-const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; area lookup)';
+const UA = userAgent('area lookup');
 const cache = new Map();
 
 /**

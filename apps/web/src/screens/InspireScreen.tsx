@@ -2,15 +2,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, Place, API_URL } from '../api';
 import { useHere } from '../hooks/useHere';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName, iconFor } from '../components/Icon';
 import { Chip, minutes } from '../components/ui';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { WhereSearch } from '../components/WhereSearch';
 import { useViewport } from '../hooks/useViewport';
 import { firstName } from '../components/Faces';
-import { asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
-import { paths, withQuery, MOODS, type Route } from '../routes';
+import { asFlag, asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
+import { paths, withQuery, MOODS, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
+import { CategoryStrip, FilterButton, FilterRow, InspireTop, ModeSwitch, SubStrip, blockRule } from '../components/InspireHeader';
+import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow } from '../components/InspireBody';
+import { TravelSheet, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
 import type { OpenTripOptions } from './PlanScreen';
 
 /**
@@ -109,7 +112,7 @@ const OUTINGS: { key: string; label: string; maxMinutes: number | null }[] = [
  * because putting it in a band would be inventing the price.
  */
 const BUDGETS: { key: string; label: string; max: number | null }[] = [
-  { key: 'all', label: 'All', max: null },
+  { key: 'all', label: 'Any budget', max: null },
   { key: 'free', label: 'Free', max: 0 },
   { key: 'low', label: '£', max: 1 },
   { key: 'mid', label: '££', max: 2 },
@@ -235,7 +238,13 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
 
   // Everything somebody chose is in the address, so the whole screen can be sent.
   const searching = route.searching;
-  const openRow = route.shelf;
+  /**
+   * Which half of the screen, and what is open inside it (Inspire rework, 7 Sep
+   * 2026). Both are the address rather than local state: the whole point of the
+   * strip is that you can send somebody "Culture near Sunningdale".
+   */
+  const mode = route.mode;
+  const pick = route.pick;
   const chosen = placeFromQuery(query);
   const fromHere = query.get('from') === 'here';
   const setWhere = (p: Place | null, from: 'here' | 'search' | null) => setQuery(placeToQuery(p, from), { replace: false });
@@ -250,7 +259,16 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   const attending = who.length ? new Set(who) : null;
   const setAttending = (next: Set<string> | null) => setWho(next && next.size !== members.length ? [...next] : []);
   const [panel, setPanel] = useState<Panel>(null);
-  const setOpenRow = (m: MoodKey | null) => navigate((m ? paths.inspireShelf(m) : paths.inspire()) + hereQuery());
+  const [travelBy, setTravelBy] = useQueryState<TravelMode>('by', 'drive', asOneOf(['drive', 'transit', 'walk'], 'drive'));
+  // Food starts closer to home than a day out does: twenty minutes, not an hour.
+  const [openNow, setOpenNow] = useQueryState<boolean>('open', false, asFlag);
+  // The drawer inside an open category, from the sub-strip.
+  // 'all' is the absence of a drawer, so it is never written into the address.
+  const [within, setWithin] = useQueryState<string>('within', 'all', {
+    read: (raw: string) => raw || null,
+    write: (v: string) => (v && v !== 'all' ? v : null),
+  });
+  const goTo = (m: 'activities' | 'food', p: string | null) => navigate(paths.inspireMode(m, p) + hereQuery());
   const hereQuery = () => { const q = query.toString(); return q ? `?${q}` : ''; };
   /** One address out of a path and a change to the query, for the taps that do both at once. */
   const here = (base: string, patch: Record<string, string | null>) => withQuery(href, patch, base);
@@ -398,6 +416,71 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   const chips: MoodKey[] = useMemo(() => (pool?.moods.length ? pool.moods.map((m) => m.key) : MOOD_ORDER), [pool]);
   const doors = useMemo(() => new Set((pool?.moods ?? []).filter((m) => m.isDoor).map((m) => m.key)), [pool]);
 
+  /**
+   * Food and everything else, told apart by what kind of place it is.
+   *
+   * The Inspire pool holds no restaurants today — `routes/inspire.js` strips
+   * them on the owner's own instruction of 5 Sep 2026, back when Food was a
+   * door into Places. The rework of 7 Sep makes Food a half of this screen, so
+   * this splits whatever does arrive and the Food side fills the moment the API
+   * is allowed to answer with it. It is written against the shape rather than
+   * against today's emptiness.
+   */
+  const FOOD_KINDS: Record<string, string> = { restaurant: 'restaurants', cafe: 'cafes', pub: 'pubs', bar: 'pubs', takeaway: 'takeaway' };
+  const isFood = useCallback((i: InspireItem) => Boolean(FOOD_KINDS[i.category]) || i.moods.includes('food'), []);
+  const inMode = useMemo(() => shown.filter((i) => (mode === 'food' ? isFood(i) : !isFood(i))), [shown, mode, isFood]);
+
+  /** The cuisines actually near, biggest first — the body of Food's home (8d). */
+  const cuisines = useMemo(() => {
+    const by = new Map<string, number>();
+    for (const i of inMode) for (const c of i.cuisines.length ? i.cuisines : ['other']) by.set(c, (by.get(c) ?? 0) + 1);
+    return [...by.entries()].filter(([k]) => k !== 'other').sort((a, b) => b[1] - a[1]).map(([key, count]) => ({ key, count }));
+  }, [inMode]);
+
+  /** What the open category or cuisine holds, as a list (8b, 8e). */
+  const listed = useMemo(() => {
+    if (!pick) return [];
+    if (mode === 'food') {
+      const asKind = (FOOD_CATEGORIES as readonly string[]).includes(pick);
+      const items = asKind ? inMode.filter((i) => FOOD_KINDS[i.category] === pick) : inMode.filter((i) => i.cuisines.includes(pick));
+      return items;
+    }
+    const inCategory = inMode.filter((i) => i.moods.includes(pick));
+    return within === 'all' ? inCategory : inCategory.filter((i) => i.subcategory === within);
+  }, [inMode, mode, pick, within]);
+
+  /** How many places each travel ceiling would give, for the sheet's counts. */
+  const countAt = useCallback((m: TravelMinutes) => (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i)) && (m == null || i.travelMinutes <= m)).length, [pool, mode, isFood]);
+
+  /**
+   * What the strip offers, per mode. `all` leads both, and is the absence of a
+   * pick rather than a category of its own.
+   *
+   * Activities is the design's five. `relaxing` and `outdoors` are moods the
+   * pool still carries and the address still accepts, so a link to one works —
+   * they simply have no entry point here until the design gives them one.
+   */
+  const FOOD_LABELS: Record<string, string> = { restaurants: 'Restaurants', pubs: 'Pubs', cafes: 'Cafés', takeaway: 'Takeaway' };
+  const stripItems = useMemo(() => {
+    const all = { key: 'all', label: 'All' };
+    // Only what is actually here. The handoff's lists are illustrative — the
+    // strip is built from the pool, so a category with nothing behind it is not
+    // offered rather than offered and empty (owner, 7 Sep 2026).
+    if (mode === 'food') {
+      const kinds = new Set(inMode.map((i) => FOOD_KINDS[i.category]).filter(Boolean));
+      return [all, ...FOOD_CATEGORIES.filter((k) => !pool || kinds.has(k)).map((k) => ({ key: k, label: FOOD_LABELS[k] }))];
+    }
+    const here = new Set((pool?.moods ?? []).filter((m) => (m.count ?? 0) > 0).map((m) => m.key));
+    const cats = ACTIVITY_CATEGORIES.filter((k) => !pool || here.has(k));
+    return [all, ...cats.map((k) => ({ key: k, label: label(k) }))];
+  }, [mode, pool, label, inMode]);
+
+  /** The drawers inside one category that actually hold something (8b's sub-strip). */
+  const drawersFor = useCallback(
+    (key: string) => (pool?.moods.find((m) => m.key === key)?.subcategories ?? []).map((sc) => ({ key: sc.key, label: sc.label })),
+    [pool],
+  );
+
   const shelves = useMemo(() => {
     const order = [mood, ...SHELVES.filter((m) => m !== mood)];
     // A stable sort over the answer's own order, so the atlas's ranking still
@@ -492,123 +575,40 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   return (
     <View style={styles.fill}>
       <ScrollView style={styles.fill} contentContainerStyle={styles.scroll} stickyHeaderIndices={[0]}>
-        <View style={[styles.top, wide && styles.topWide]}>
-          <Pressable onPress={() => navigate(paths.inspireSearch() + hereQuery())} style={[styles.search, wide && styles.searchWide]} accessibilityRole="search" accessibilityLabel="Where should we go?">
-            <Icon name="search" size={18} color={colors.ink} strokeWidth={2.2} />
-            <Text style={styles.searchText} numberOfLines={1}>
-              {chosen ? `${fromHere ? 'Near ' : ''}${shortPlace(chosen.locality ?? chosen.label)}` : 'Where should we go?'}
-            </Text>
-            {chosen ? (
-              <Pressable onPress={() => setWhere(null, null)} hitSlop={10} accessibilityLabel="Back to near home">
-                <Icon name="close" size={16} color={colors.inkMuted} />
-              </Pressable>
-            ) : null}
-          </Pressable>
-          {/* Offered, never sprung: this only appears when the browser has not
-              been asked yet, and tapping it is what asks. */}
-          {mayAsk && !chosen ? (
-            <Pressable onPress={useHereNow} disabled={me.busy} style={styles.hereOffer} accessibilityRole="button">
-              {me.busy ? <ActivityIndicator size="small" color={colors.icon} /> : <Icon name="here" size={14} color={colors.icon} />}
-              <Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>
-                {me.busy ? 'Finding you…' : 'Use my location'}
-              </Text>
-            </Pressable>
+        {/* The head of the screen (8a/8b/8d): who and where, which half, which
+            category, and how far. Sticky, because the strip is how you move
+            around this tab and it should not scroll away from you. */}
+        <View style={styles.header}>
+          <InspireTop
+            where={chosen ? `${fromHere ? 'Near ' : ''}${shortPlace(chosen.locality ?? chosen.label)}` : placeName || 'Where should we go?'}
+            onWhere={() => navigate(paths.inspireSearch() + hereQuery())}
+          />
+          <View style={styles.block}>
+            <ModeSwitch mode={mode} onMode={(m) => goTo(m, null)} />
+            <CategoryStrip
+              items={stripItems}
+              value={pick ?? 'all'}
+              onPick={(k) => goTo(mode, k === 'all' ? null : k)}
+            />
+          </View>
+          {/* The drawers inside an open Activities category (8b). Food has no
+              sub-strip: a cuisine is already the narrowest thing here. */}
+          {mode === 'activities' && pick && (drawersFor(pick).length > 0) ? (
+            <SubStrip
+              items={drawersFor(pick)}
+              value={within}
+              onPick={setWithin}
+              allLabel={`All ${label(pick).toLowerCase()}`}
+            />
           ) : null}
+          <FilterRow count={pick ? `${listed.length} place${listed.length === 1 ? '' : 's'}` : null}>
+            <FilterButton icon="driving" strong label={travelLabel(travelBy, cap as TravelMinutes)} onPress={() => setPanel(panel === 'travel' ? null : 'travel')} />
+            <FilterButton label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'} onPress={() => setPanel(panel === 'budget' ? null : 'budget')} />
+            {mode === 'food' ? <FilterButton toggle on={openNow} label="Open now" onPress={() => setOpenNow(!openNow)} /> : null}
+          </FilterRow>
         </View>
 
         <View style={[styles.column, wide && styles.columnWide]}>
-          <View style={styles.moods}>
-            <Text style={[type.label, styles.gutter]}>What's the day about?</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
-              {chips.map((m) => (
-                (doors.size ? doors.has(m) : m === 'food')
-                  ? <FoodDoor key={m} onPress={() => onFood?.()} />
-                  // What the day is about closes any opened shelf, so it is one
-                  // move and one address rather than two that race each other.
-                  : <Chip key={m} label={label(m)} selected={mood === m} onPress={() => navigate(here(paths.inspire(), { mood: m === 'fun' ? null : m }))} />
-              ))}
-            </ScrollView>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-            <FilterChip icon="driving" label={CAPS.find((c) => c.value === cap)?.label ?? 'Any distance'} open={panel === 'travel'} onPress={() => setPanel(panel === 'travel' ? null : 'travel')} />
-            <FilterChip icon="list" label={kinds.length ? `${kinds.length} kind${kinds.length === 1 ? '' : 's'}` : 'All'} open={panel === 'kind'} onPress={() => setPanel(panel === 'kind' ? null : 'kind')} />
-            {members.length > 1 ? (
-              <FilterChip icon="household" label={whoLabel} open={panel === 'who'} onPress={() => setPanel(panel === 'who' ? null : 'who')} />
-            ) : null}
-            <FilterChip label={OUTINGS.find((o) => o.key === outing)?.label ?? 'Any length'} open={panel === 'outing'} onPress={() => setPanel(panel === 'outing' ? null : 'outing')} />
-            <FilterChip icon="money" label={BUDGETS.find((b) => b.key === budget)?.label ?? 'All'} open={panel === 'budget'} onPress={() => setPanel(panel === 'budget' ? null : 'budget')} />
-          </ScrollView>
-
-          {panel ? (
-            <View style={styles.panel}>
-              <View style={styles.panelHead}>
-                <Text style={styles.panelTitle}>{PANEL_TITLE[panel]}</Text>
-                <Pressable onPress={() => setPanel(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
-                  <Icon name="close" size={16} color={colors.inkMuted} />
-                </Pressable>
-              </View>
-
-              {panel === 'travel' ? (
-                <Bands options={CAPS.map((c) => ({ key: String(c.value), label: c.label }))} value={String(cap)} onPick={(k) => setCap(k === 'null' ? null : Number(k))} />
-              ) : null}
-
-              {panel === 'outing' ? (
-                <Bands options={OUTINGS.map((o) => ({ key: o.key, label: o.label }))} value={outing} onPick={setOuting} wrap />
-              ) : null}
-
-              {panel === 'budget' ? (
-                <>
-                  <Bands options={BUDGETS.map((b) => ({ key: b.key, label: b.label }))} value={budget} onPick={setBudget} />
-                  <Text style={type.small}>
-                    {pricesKnown
-                      ? 'Defaults to All — tap a band to narrow it.'
-                      : `No source has priced anything around ${placeName} yet, so the bands are empty. All shows everything.`}
-                  </Text>
-                </>
-              ) : null}
-
-              {panel === 'kind' ? (
-                kindsHere.length ? (
-                  <>
-                    <View style={styles.wrap}>
-                      {kindsHere.map((k) => (
-                        <Chip key={k.key} label={`${cap1(k.key)} · ${k.count}`} selected={kinds.includes(k.key)}
-                          onPress={() => setKinds(kinds.includes(k.key) ? kinds.filter((x) => x !== k.key) : [...kinds, k.key])} />
-                      ))}
-                    </View>
-                    {kinds.length ? <Pressable onPress={() => setKinds([])} hitSlop={8}><Text style={type.small}>Show all kinds</Text></Pressable> : null}
-                  </>
-                ) : (
-                  <Text style={type.small}>Nothing here has said what kind of thing it is yet.</Text>
-                )
-              ) : null}
-
-              {panel === 'who' ? (
-                <>
-                  <View style={styles.wrap}>
-                    {members.map((m) => {
-                      const on = !attending || attending.has(m.id);
-                      return (
-                        <Chip key={m.id} label={firstName(m.name)} icon={on ? 'check' : undefined} selected={on}
-                          onPress={() => {
-                            const next = new Set(attending ?? members.map((x) => x.id));
-                            if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
-                            setAttending(next.size === members.length ? null : next);
-                          }} />
-                      );
-                    })}
-                  </View>
-                  <Text style={type.small}>
-                    {minorComing
-                      ? `With ${youngest != null ? `a ${youngest}-year-old` : 'a child'} coming, places built for children come first.`
-                      : 'On an adults\u2019 day out, children\u2019s places drop down the shelves rather than off them.'}
-                  </Text>
-                </>
-              ) : null}
-            </View>
-          ) : null}
-
           {loading && !pool ? (
             <View style={styles.waiting}>
               <ActivityIndicator color={colors.icon} />
@@ -627,24 +627,50 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
 
           {pool && !loading ? (
             <>
-              {shelves.map(({ key, items }) => (
-                <Shelf
+              {/* 8a: nothing picked, so every category gets a carousel and the
+                  title is the door into the whole of it. 8d: in Food, the same
+                  place in the hierarchy is a list of cuisines instead. */}
+              {!pick && mode === 'activities' ? shelves.map(({ key, items }) => (
+                <Carousel
                   key={key}
-                  title={key === mood ? `${label(key)} near ${placeName}` : label(key)}
-                  items={items}
-                  wide={wide}
-                  expanded={openRow === key}
-                  onToggle={() => setOpenRow(openRow === key ? null : key)}
+                  title={label(key)}
+                  count={items.length}
+                  items={items.slice(0, 12)}
+                  onAll={() => goTo('activities', key)}
                   onOpen={open}
-                  onKeep={keep}
-                  isKept={isKept}
-                  subcategories={pool?.moods.find((m) => m.key === key)?.subcategories}
-                  drawers={drawers}
-                  empty={key === mood
-                    ? `Nothing ${label(key).toLowerCase()} within ${CAPS.find((c) => c.value === cap)?.label.toLowerCase() ?? 'reach'} of ${placeName} — widen the distance, or search another town.`
-                    : null}
                 />
-              ))}
+              )) : null}
+
+              {!pick && mode === 'food' ? (
+                cuisines.length ? (
+                  <View>
+                    <Kicker>Cuisine</Kicker>
+                    {cuisines.map((c) => (
+                      <CuisineRow key={c.key} label={cap1(c.key)} count={c.count} onOpen={() => goTo('food', c.key)} />
+                    ))}
+                  </View>
+                ) : (
+                  <Empty
+                    title={`Nothing to eat around ${placeName} yet`}
+                    body="Epic's own atlas holds places to go rather than places to eat, so Food has nothing to draw here until a source for it is switched on."
+                  />
+                )
+              ) : null}
+
+              {/* 8b and 8e: one category or one cuisine, as a list. */}
+              {pick ? (
+                listed.length ? listed.map((i) => (
+                  mode === 'food'
+                    ? <FoodRow key={i.venueRef} item={i} kind={cap1(i.cuisines[0] ?? '')} where={i.region ? shortPlace(i.region) : null} standing={(i as any).standing ?? null} onOpen={() => open(i)} />
+                    : <PlaceRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} onOpen={() => open(i)} />
+                )) : (
+                  <Empty
+                    title={`Nothing ${label(pick).toLowerCase()} within reach of ${placeName}`}
+                    body="Widen how far you will go, or search another town."
+                  />
+                )
+              ) : null}
+
               {notice ? (
                 <Pressable onPress={() => setNotice(null)} style={[styles.gutter, styles.notice]} accessibilityRole="button">
                   <Icon name="info" size={14} color={colors.ink} />
@@ -656,7 +682,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   {pool.items.length} place{pool.items.length === 1 ? '' : 's'} within {pool.radiusKm} km of {placeName}
                   {pool.from.how === 'home' ? ' · times are from home' : ' · times are from where you are'}, estimated.
                 </Text>
-                {pool.attribution.length ? <Text style={type.tiny}>{pool.attribution.join(' · ')}</Text> : null}
+                {/* The credits are a condition of showing the pictures, so they
+                    appear when pictures do — not as forty lines under a screen
+                    that drew none. The place detail carries its own. */}
+                {pool.attribution.length && (shelves.some((sh) => sh.items.length) || listed.length) ? (
+                  <Text style={type.tiny} numberOfLines={4}>{pool.attribution.join(' · ')}</Text>
+                ) : null}
                 <Pressable onPress={load} hitSlop={8} accessibilityRole="button">
                   <Text style={[type.small, { fontWeight: '700' }]}>Look again</Text>
                 </Pressable>
@@ -665,6 +696,20 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
           ) : null}
         </View>
       </ScrollView>
+      {/* 8c: how far, as a sheet over the screen rather than a panel inside it.
+          The counts are what make it a decision instead of a guess. */}
+      {panel === 'travel' ? (
+        <TravelSheet
+          from={placeName}
+          mode={travelBy}
+          minutes={cap as TravelMinutes}
+          counts={countAt}
+          total={countAt(cap as TravelMinutes)}
+          onMode={setTravelBy}
+          onMinutes={(m) => setCap(m)}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
       <VenueDrawer
         item={drawer}
         baseLabel={placeName}
@@ -883,6 +928,9 @@ function Empty({ title, body, onRetry }: { title: string; body: string; onRetry?
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingBottom: spacing.xxl },
+  // The head of the tab: cream, and carrying the block rule that closes it.
+  header: { backgroundColor: colors.bg },
+  block: { ...blockRule },
   top: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, backgroundColor: colors.bg },
   topWide: { maxWidth: 1120, width: '100%', alignSelf: 'center' },
   column: { gap: spacing.md },
@@ -892,14 +940,14 @@ const styles = StyleSheet.create({
   search: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
     minHeight: 52, paddingHorizontal: spacing.lg, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
     boxShadow: '0 2px 10px rgba(32,30,29,0.10)',
   },
   searchWide: { maxWidth: 560, width: '100%', alignSelf: 'center' },
   hereOffer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 34, marginTop: 6 },
   foodDoor: {
     flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 12,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surfaceMuted,
   },
   foodDoorText: { fontSize: 13, fontWeight: '600', color: colors.ink },
   searchText: { fontSize: 15, fontWeight: '700', color: colors.ink },
@@ -908,7 +956,7 @@ const styles = StyleSheet.create({
   filters: { gap: 6, paddingHorizontal: spacing.lg, paddingVertical: 2 },
   filter: {
     flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 12,
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   filterOpen: { backgroundColor: colors.primary, borderColor: colors.primary },
   filterText: { fontSize: 12.5, fontWeight: '600', color: colors.ink, maxWidth: 140 },
@@ -916,7 +964,7 @@ const styles = StyleSheet.create({
   panelHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   panelTitle: { fontSize: 13, fontWeight: '700', color: colors.ink },
   bands: { flexDirection: 'row', gap: 6 },
-  band: { minHeight: 38, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  band: { minHeight: 38, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   bandWrap: { flexGrow: 0 },
   bandOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   bandText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },

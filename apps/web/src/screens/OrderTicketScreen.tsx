@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, OrderTicket } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Row, Segmented } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
@@ -151,12 +151,12 @@ const styles = StyleSheet.create({
   middle: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.lg },
   venue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, color: colors.ink },
   who: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '800', marginTop: spacing.sm },
-  line: { paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.line, gap: 2 },
+  line: { paddingVertical: 6, borderTopWidth: BORDER, borderTopColor: colors.line, gap: 2 },
   dish: { fontSize: 21, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, lineHeight: 26 },
   note: { fontSize: 16, fontWeight: '700', color: colors.accent, lineHeight: 21 },
   diet: { fontSize: 15, fontWeight: '600', color: colors.ink },
   alert: { borderWidth: 2, borderColor: colors.allergen, borderRadius: radius.sm, padding: spacing.sm, gap: 4 },
   alertText: { fontSize: 17, fontWeight: '800', color: colors.allergen, lineHeight: 22 },
   alertSmall: { fontSize: 13, fontWeight: '600', color: colors.allergen },
-  total: { borderTopWidth: 1, borderTopColor: colors.ink, paddingTop: spacing.sm, justifyContent: 'space-between' },
+  total: { borderTopWidth: BORDER, borderTopColor: colors.ink, paddingTop: spacing.sm, justifyContent: 'space-between' },
 });

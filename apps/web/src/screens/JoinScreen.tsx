@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, GroupBooking, GuestAccount, HouseholdMemberInput, JoinView } from '../api';
-import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { Icon, IconName } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
@@ -973,24 +973,24 @@ const styles = StyleSheet.create({
   previewBar: { backgroundColor: colors.lime, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
   trialCard: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },
   trialIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.lime, alignItems: 'center', justifyContent: 'center' },
-  pick: { flex: 1, gap: 4, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  pick: { flex: 1, gap: 4, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   pickOn: { borderColor: colors.ink, borderWidth: 2 },
   pickIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   pickIconOn: { backgroundColor: colors.primary },
-  memberRow: { paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.line },
+  memberRow: { paddingVertical: spacing.sm, borderBottomWidth: BORDER, borderBottomColor: colors.line },
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.ink },
-  addDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  addDot: { width: 28, height: 28, borderRadius: 14, borderWidth: BORDER, borderStyle: 'dashed', borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   comingBar: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  ageBox: { width: 72, minHeight: TARGET, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, justifyContent: 'center' },
+  ageBox: { width: 72, minHeight: TARGET, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, justifyContent: 'center' },
   ageInput: { fontFamily: fonts.body, fontSize: 15, color: colors.ink, textAlign: 'center', outlineStyle: 'none' as any },
-  bookRow: { alignItems: 'flex-start', paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.line },
+  bookRow: { alignItems: 'flex-start', paddingVertical: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
   tile: { width: 34, height: 34, borderRadius: radius.sm, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' },
-  footer: { gap: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.md },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surface },
+  footer: { gap: 4, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.md },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface },
   pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   pillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.ink },
-  yn: { minHeight: 36, paddingHorizontal: spacing.md, justifyContent: 'center', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  yn: { minHeight: 36, paddingHorizontal: spacing.md, justifyContent: 'center', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   ynLeft: { borderTopLeftRadius: radius.pill, borderBottomLeftRadius: radius.pill },
   ynRight: { borderTopRightRadius: radius.pill, borderBottomRightRadius: radius.pill, marginLeft: -1 },
   ynOn: { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -998,7 +998,7 @@ const styles = StyleSheet.create({
   ynTextOn: { color: colors.primaryFg },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body,
     // The focus ring is the leaf, not the browser's blue (style guide).
     outlineColor: colors.accent as any, outlineWidth: 2 as any, outlineOffset: 1 as any,
   },

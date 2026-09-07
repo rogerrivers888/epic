@@ -12,7 +12,7 @@
 
 import React, { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: spacing.xl },
   card: {
     width: '100%', alignItems: 'center', gap: spacing.md,
-    padding: spacing.xl, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    padding: spacing.xl, borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   lock: {
     width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
   },
   input: {
     alignSelf: 'stretch', minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
     textAlign: 'center',
   },
   inputWrong: { borderColor: colors.overrun },
@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
   mono: { fontFamily: Platform.OS === 'web' ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : undefined, color: colors.ink },
   other: {
     alignSelf: 'stretch', alignItems: 'center', gap: spacing.sm,
-    marginTop: spacing.sm, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.line,
+    marginTop: spacing.sm, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   quiet: { color: colors.inkMuted, textDecorationLine: 'underline' },
 });

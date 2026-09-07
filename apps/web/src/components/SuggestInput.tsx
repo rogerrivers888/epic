@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, Suggestion } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 
 /**
  * Type a taste, get pills. Free text is always allowed — the suggestions are a
@@ -103,14 +103,14 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   input: {
     flex: 1, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
   },
   add: { minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   addText: { fontWeight: '700', color: colors.ink },
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   pill: {
     flexDirection: 'row', alignItems: 'baseline', gap: 6, paddingHorizontal: 12, minHeight: 36,
-    borderRadius: radius.pill, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentSoft,
+    borderRadius: radius.pill, backgroundColor: colors.accentSoft, borderWidth: BORDER, borderColor: colors.accentSoft,
   },
   pillText: { fontSize: 13, fontWeight: '700', color: colors.accent, lineHeight: 34 },
   pillKind: { fontSize: 10, color: colors.accent, opacity: 0.7 },

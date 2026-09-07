@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, Place } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon } from './Icon';
 import { useHere } from '../hooks/useHere';
 
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
   box: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   boxInput: { flex: 1, minHeight: TARGET, fontSize: 15, color: colors.ink, outlineStyle: 'none' as any },
   list: { borderRadius: radius.md, overflow: 'hidden', gap: 2 },
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
   chosen: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.accentSoft },
   change: { minHeight: TARGET, justifyContent: 'center', paddingHorizontal: spacing.sm },
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  pill: { paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.line },
+  pill: { paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.surfaceMuted, borderWidth: BORDER, borderColor: colors.line },
   herePill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderColor: colors.accent },
   pillText: { fontSize: 13, fontWeight: '600', color: colors.ink },
 });

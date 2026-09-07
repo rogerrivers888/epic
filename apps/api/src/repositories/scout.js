@@ -455,3 +455,42 @@ export async function menusByOpener() {
   );
   return rows;
 }
+
+/**
+ * The food the sweep has found near a point.
+ *
+ * This is the other half of the Inspire tab (Inspire rework, 7 Sep 2026). The
+ * atlas holds places to *go* — it is harvested from Wikidata and holds no
+ * restaurants by design — so Food reads the postcode sweep instead, which is
+ * where every restaurant we know about already lives.
+ *
+ * Everything selected here is ours to keep: the name and the coordinates are
+ * open data, the cuisines and accolades are read from the venue's own published
+ * pages, and `crowd_band` is a judgement of ours rather than a provider's
+ * figure — which is why the band travels and the rating it was made from never
+ * does (§13.10, and the sweep's own note in migration 035).
+ *
+ * Chains are ranked below independents rather than dropped: a household looking
+ * for somewhere to eat on a Tuesday may well want the Pizza Express, and this
+ * is a list to choose from, not a recommendation.
+ */
+export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
+  const dLat = km / 111;
+  const dLng = km / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
+  const { rows } = await query(
+    `select distinct on (p.venue_ref)
+            p.venue_ref, p.name, p.lat, p.lng, p.website, p.cuisines, p.cuisine_group,
+            p.accolades, p.crowd_band, p.count_band, p.chain, p.chain_scale, p.epic_score,
+            l.name as locality_name,
+            sqrt(power((p.lat - $1) * 111.0, 2)
+               + power((p.lng - $2) * 111.0 * cos(radians($1)), 2)) as km
+       from scout_places p
+       left join localities l on l.slug = p.locality_slug
+      where p.lat between $3 and $4 and p.lng between $5 and $6
+      order by p.venue_ref, p.epic_score desc nulls last`,
+    [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng]);
+  return rows
+    .filter((r) => r.km <= km)
+    .sort((a, b) => (a.chain === b.chain ? (b.epic_score ?? 0) - (a.epic_score ?? 0) : a.chain ? 1 : -1))
+    .slice(0, limit);
+}

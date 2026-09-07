@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, ApiError, AuditRow, Capability, Role, SubscriptionPlan } from '../../api';
-import { colors, radius, spacing, TARGET, type } from '../../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
 import { Button, Row, Wrap } from '../../components/ui';
 import { Icon } from '../../components/Icon';
 import { SideSheet } from '../../components/SideSheet';
@@ -351,15 +351,15 @@ export function Audit() {
 
 const styles = StyleSheet.create({
   input: {
-    flex: 1, minHeight: TARGET, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    flex: 1, minHeight: TARGET, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.md, color: colors.ink, backgroundColor: colors.surface,
   },
   price: {
-    width: 84, minHeight: 34, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    width: 84, minHeight: 34, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, textAlign: 'right', color: colors.ink, backgroundColor: colors.surface,
   },
   tick: {
-    width: 18, height: 18, borderRadius: 4, borderWidth: 1, borderColor: colors.line,
+    width: 18, height: 18, borderRadius: 4, borderWidth: BORDER, borderColor: colors.line,
     alignItems: 'center', justifyContent: 'center', marginTop: 2, backgroundColor: colors.surface,
   },
   tickOn: { backgroundColor: colors.primary, borderColor: colors.primary },

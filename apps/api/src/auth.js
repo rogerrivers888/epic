@@ -40,6 +40,7 @@ import { findLiveSession, insertSession, revokeSession, touchSession } from './r
 import { accountById, touchAccount } from './repositories/accounts.js';
 import { accessFor, accessOf } from './access.js';
 import { runAsAccount } from './context.js';
+import { canonicalOrigins } from './origins.js';
 
 export const COOKIE = 'epic_session';
 /**
@@ -140,7 +141,11 @@ export function originAllowed(origin) {
   if (!origin) return true; // curl, a native app, a same-origin request: no Origin header at all.
   const list = ORIGINS();
   if (!list.length) return true;
-  return list.includes(String(origin).replace(/\/$/, ''));
+  const asked = String(origin).replace(/\/$/, '');
+  // The site itself is always allowed, whatever the variable says. An allowlist
+  // that can be emptied by forgetting to set one thing is a way to take the app
+  // down with a config change, and epic.day is not in doubt (origins.js).
+  return list.includes(asked) || canonicalOrigins().includes(asked);
 }
 
 /**

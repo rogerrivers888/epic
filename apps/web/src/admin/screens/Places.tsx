@@ -26,7 +26,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, FactKey, Locality, LocalityPage, LocalityRow, PlaceTree } from '../../api';
-import { colors, radius, spacing, type } from '../../theme';
+import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { Button, Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
 
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: 7, backgroundColor: colors.surface,
   },
   searchInput: { flex: 1, ...type.small, color: colors.ink, outlineStyle: 'none' as any },
@@ -603,7 +603,7 @@ const styles = StyleSheet.create({
   strip: { flexDirection: 'row', gap: 3, flexWrap: 'wrap' },
   band: {
     flexGrow: 1, flexBasis: 96, borderRadius: radius.sm, paddingVertical: 7, paddingHorizontal: 8,
-    borderWidth: 1, borderColor: colors.line, gap: 1,
+    borderWidth: BORDER, borderColor: colors.line, gap: 1,
   },
   bandHover: { borderColor: colors.ink },
   bandOn: { borderColor: colors.ink, borderWidth: 2 },
@@ -617,7 +617,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   thumb: {
     width: 40, height: 30, borderRadius: radius.sm, backgroundColor: colors.well,
@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 3, flexGrow: 0, flexShrink: 0, width: 69 },
   dot: { width: 9, height: 9, borderRadius: 2.5, backgroundColor: colors.line },
   dotYes: { backgroundColor: colors.accent },
-  dotNo: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.overrun },
+  dotNo: { backgroundColor: 'transparent', borderWidth: BORDER, borderColor: colors.overrun },
 
   score: { ...type.small, fontWeight: '800', width: 52, textAlign: 'right', flexGrow: 0, flexShrink: 0 },
 });

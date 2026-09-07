@@ -9,8 +9,11 @@
  *   /                                  the home screen
  *   /inspire                           what there is to do near you
  *   /inspire/search                       …the where-search, open
- *   /inspire/culture                      …one shelf, opened out
- *   /inspire?place=<ref>                  …a place's drawer, over either
+ *   /inspire/culture                      …one category, opened out as a list
+ *   /inspire/culture?within=museums       …one drawer inside it
+ *   /inspire/food                         …the other mode: what to eat
+ *   /inspire/food/italian                 …one cuisine, or one kind of place
+ *   /inspire?place=<ref>                  …a place's drawer, over any of them
  *   /plan                              the conversational planner
  *   /places                            the atlas: near home, the UK, abroad
  *   /places/home                          …everything close to home
@@ -95,6 +98,26 @@ export type Tab = 'inspire' | 'plan' | 'places' | 'trips' | 'household' | 'setti
 export const MOODS: MoodKey[] = ['fun', 'food', 'culture', 'sport', 'activity', 'adrenaline', 'relaxing', 'outdoors'];
 
 /**
+ * Inspire has two halves now (Inspire rework, 7 Sep 2026): what there is to do,
+ * and what there is to eat. Food used to be a chip that took you to Places; it
+ * is a mode of this screen instead, with its own strip and its own body.
+ */
+export type InspireMode = 'activities' | 'food';
+
+/**
+ * The category strip, per mode. Activities are moods; Food's are kinds of
+ * place. `all` is not in either list — it is the absence of a pick, and so it
+ * is the bare `/inspire` and `/inspire/food` rather than a word in the path.
+ *
+ * `relaxing` and `outdoors` are moods the strip does not name. They are still
+ * addressable, and a place still carries them, so a link to one keeps working;
+ * they simply have no entry point on this screen until the design gives them
+ * one. Asked about, 7 Sep 2026.
+ */
+export const ACTIVITY_CATEGORIES: MoodKey[] = ['fun', 'culture', 'sport', 'activity', 'adrenaline'];
+export const FOOD_CATEGORIES = ['restaurants', 'pubs', 'cafes', 'takeaway'] as const;
+
+/**
  * A trip's tabs. The first three are the ones on the segmented control
  * (handover, 5 Sep 2026: "Itinerary | Places · n | Map"); the rest are the
  * working surfaces, which moved into the ⋯ menu rather than being taken away.
@@ -132,7 +155,13 @@ export const ADMIN_SCREENS: AdminScreen[] = [
 export type PlacesScope = null | { home: true } | { country: string; city: string | null };
 
 export type Route =
-  | { name: 'inspire'; searching: boolean; shelf: MoodKey | null }
+  /**
+   * `pick` is whatever the strip or the body opened: a mood in Activities, and
+   * in Food either one of its four kinds or a cuisine from the list. One slot,
+   * because the two are alternatives — you cannot be in Italian *and* Pubs —
+   * and two would let the address say something the screen cannot draw.
+   */
+  | { name: 'inspire'; searching: boolean; mode: InspireMode; pick: string | null }
   | { name: 'plan' }
   | { name: 'places'; scope: PlacesScope }
   | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null }
@@ -162,16 +191,22 @@ export function parseRoute(path: string): Route {
   const { segments } = splitHref(path);
   const [head, a, b, c] = segments;
 
-  if (!head) return { name: 'inspire', searching: false, shelf: null };
+  if (!head) return { name: 'inspire', searching: false, mode: 'activities', pick: null };
 
   switch (head) {
     case 'inspire': {
-      if (!a) return { name: 'inspire', searching: false, shelf: null };
-      if (a === 'search') return { name: 'inspire', searching: true, shelf: null };
-      const shelf = oneOf(MOODS, a);
-      // Food is a door into Places, never a shelf, so it has no address here.
-      return shelf && shelf !== 'food'
-        ? { name: 'inspire', searching: false, shelf }
+      if (!a) return { name: 'inspire', searching: false, mode: 'activities', pick: null };
+      if (a === 'search') return { name: 'inspire', searching: true, mode: 'activities', pick: null };
+      if (a === 'food') {
+        // A cuisine is open ended — the list comes from what is actually near —
+        // so anything in the slot is taken as one rather than checked against a
+        // table the bundle would have to carry.
+        if (b && c) return { name: 'unknown', path };
+        return { name: 'inspire', searching: false, mode: 'food', pick: b ?? null };
+      }
+      const category = oneOf(ACTIVITY_CATEGORIES, a);
+      return category && !b
+        ? { name: 'inspire', searching: false, mode: 'activities', pick: category }
         : { name: 'unknown', path };
     }
 
@@ -237,8 +272,12 @@ export function parseRoute(path: string): Route {
 /** A route, written. The inverse of `parseRoute`, and the only place hrefs are spelled. */
 export function hrefOf(route: Route): string {
   switch (route.name) {
-    case 'inspire':
-      return route.searching ? '/inspire/search' : route.shelf ? buildHref(['inspire', route.shelf]) : '/inspire';
+    case 'inspire': {
+      if (route.searching) return '/inspire/search';
+      const parts = route.mode === 'food' ? ['inspire', 'food'] : ['inspire'];
+      if (route.pick) parts.push(route.pick);
+      return buildHref(parts);
+    }
     case 'plan': return '/plan';
     case 'places':
       return route.scope == null ? '/places'
@@ -263,7 +302,12 @@ export function hrefOf(route: Route): string {
 export const paths = {
   inspire: () => '/inspire',
   inspireSearch: () => '/inspire/search',
+  /** One category of Activities, opened out as a list. */
   inspireShelf: (mood: MoodKey) => buildHref(['inspire', mood]),
+  /** The other mode, and one cuisine or kind of place inside it. */
+  inspireFood: (pick?: string | null) => buildHref(pick ? ['inspire', 'food', pick] : ['inspire', 'food']),
+  inspireMode: (mode: InspireMode, pick?: string | null) =>
+    (mode === 'food' ? buildHref(pick ? ['inspire', 'food', pick] : ['inspire', 'food']) : buildHref(pick ? ['inspire', pick] : ['inspire'])),
   plan: () => '/plan',
   places: () => '/places',
   placesHome: () => '/places/home',
@@ -301,6 +345,19 @@ export function isFullBleed(route: Route): boolean {
     && !route.creating
     && route.tripId != null
     && (route.section == null || TRIP_TABS.includes(route.section));
+}
+
+/**
+ * Screens that draw their own head, so the shell must not draw one over it.
+ *
+ * Inspire's header is not a title bar — it is the wordmark, where you are
+ * looking, which half of the app you are in and which category (Inspire rework,
+ * 7 Sep 2026, screens 8a/8b/8d). The shell's lime band above that would be a
+ * second wordmark on the same screen. Unlike a full-bleed screen this one keeps
+ * the tab bar under it, because it is still a tab.
+ */
+export function ownsHeader(route: Route): boolean {
+  return route.name === 'inspire' && !route.searching;
 }
 
 /**
@@ -355,7 +412,9 @@ export function isTabHome(route: Route): boolean {
 /** One layer up, for a Back that has no history behind it (a link somebody was sent). */
 export function parentOf(route: Route): string {
   switch (route.name) {
-    case 'inspire': return route.searching || route.shelf ? '/inspire' : '/inspire';
+    // Up from a cuisine is the Food list; up from a category or the search is
+    // the mode's own home.
+    case 'inspire': return route.pick && route.mode === 'food' ? '/inspire/food' : '/inspire';
     case 'places':
       if (!route.scope) return '/inspire';
       if ('home' in route.scope) return '/places';
@@ -379,7 +438,11 @@ export function parentOf(route: Route): string {
 export function titleOf(route: Route): string {
   const epic = (s?: string) => (s ? `${s} · Epic` : 'Epic');
   switch (route.name) {
-    case 'inspire': return epic(route.searching ? 'Where should we go?' : route.shelf ? `${route.shelf[0].toUpperCase()}${route.shelf.slice(1)}` : 'Inspire');
+    case 'inspire': {
+      if (route.searching) return epic('Where should we go?');
+      const named = route.pick ? `${route.pick[0].toUpperCase()}${route.pick.slice(1).replace(/-/g, ' ')}` : null;
+      return epic(named ?? (route.mode === 'food' ? 'Food' : 'Inspire'));
+    }
     case 'plan': return epic('Plan');
     case 'places':
       return epic(route.scope == null ? 'Places' : 'home' in route.scope ? 'Close to home' : route.scope.city ?? route.scope.country);

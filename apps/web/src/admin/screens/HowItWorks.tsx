@@ -24,7 +24,7 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../../api';
-import { colors, fonts, radius, spacing, type } from '../../theme';
+import { colors, fonts, radius, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
 
@@ -477,7 +477,7 @@ export function HowItWorks() {
 
 const styles = StyleSheet.create({
   row: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: 6 },
-  rowLine: { borderTopWidth: 1, borderTopColor: colors.line },
+  rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   why: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', marginTop: 2 },
   whyLabel: { width: 34, paddingTop: 2, fontWeight: '700', letterSpacing: 0.6, color: colors.inkFaint },

@@ -41,6 +41,7 @@ import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor } from './access.js';
+import { APP_URL, canonicalRedirect } from './origins.js';
 import { generalLimit, signInLimit, spendLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
@@ -48,9 +49,33 @@ import * as providerCalls from './repositories/providerCalls.js';
 
 const app = express();
 
-// Railway terminates TLS in front of this process, so `req.ip` is the proxy
-// unless we say so — and every rate limit here counts per caller.
-app.set('trust proxy', 1);
+// Two proxies now, not one: Cloudflare terminates TLS for epic.day and hands
+// on to Railway, which terminates again and hands on to this process. Express
+// counts hops from the server outwards, so trusting one would make `req.ip` the
+// Cloudflare edge and put every household behind the world's most rate-limited
+// address. `EPIC_TRUSTED_PROXIES` exists so this can be corrected without a
+// deploy if the chain in front of us changes again.
+app.set('trust proxy', Number(process.env.EPIC_TRUSTED_PROXIES ?? 2));
+
+/**
+ * Everything answers on one address.
+ *
+ * A `*.up.railway.app` hostname somebody bookmarked, a `www.`, or plain HTTP
+ * all move to https://epic.day — permanently, so browsers and search engines
+ * stop asking. Cloudflare cannot do this for the Railway hostnames because it
+ * never sees them: they are the origin, not the edge.
+ *
+ * Two things are deliberately never redirected. `/api` is the whole point of
+ * this service and a client that followed a 301 would arrive somewhere that may
+ * not answer — a redirect there would look exactly like an outage. `/health` is
+ * how Railway decides the deployment is alive, and it is asked over plain HTTP
+ * on an internal hostname, so moving it would fail every deploy.
+ */
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api') || req.path === '/health') return next();
+  const to = canonicalRedirect(req);
+  return to ? res.redirect(301, to) : next();
+});
 
 // JSON API only — no templates, no static assets, no server-rendered HTML.
 // The web app is a separate Expo workspace that talks to this over HTTP.
@@ -157,6 +182,10 @@ app.use('/api', groupRoutes);
 
 /** Licensed review text must not be crawlable (Tripadvisor review implementation policy); the API is not a website. */
 app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
+
+// The API has nothing a person should be reading. Anything that is not a call
+// belongs on the site, so send it there rather than answering 404 in JSON.
+app.get('/', (req, res) => res.redirect(301, APP_URL));
 
 /** Which sources are live — the Settings screen shows this. */
 app.get('/api/sources', async (_req, res, next) => {

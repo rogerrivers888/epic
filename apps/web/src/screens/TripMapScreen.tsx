@@ -1452,7 +1452,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             onPress={() => onAlways(pill === 'food'
               ? { food: { type: kindOf, cuisine } }
               : { things: { type: kindOf } })}
-            style={[styles.optRow, { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 6 }]}
+            style={[styles.optRow, { borderTopWidth: BORDER, borderTopColor: colors.line, marginTop: 6 }]}
             accessibilityRole="button"
           >
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -2752,9 +2752,9 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, flexShrink: 1 },
-  party: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
+  party: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   partyText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.ink },
-  round: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  round: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
 
   tabs: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: 3, marginHorizontal: 16, marginTop: 10, marginBottom: 6 },
   tab: { flex: 1, minWidth: 0, minHeight: 34, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
@@ -2792,11 +2792,11 @@ const styles = StyleSheet.create({
   // Wide: the map keeps the left, the sheet becomes a panel on the right.
   panel: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 430, padding: 16, gap: 12 },
   panelCard: {
-    flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line,
+    flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line,
     paddingTop: 12, overflow: 'hidden',
   },
 
-  booking: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 14, marginTop: 12 },
+  booking: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: BORDER, borderColor: colors.line, borderRadius: 14, marginTop: 12 },
   bookingName: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '700', color: colors.ink },
   kicker: { fontFamily: fonts.heading, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', color: colors.inkMuted, marginTop: 16, marginBottom: 6 },
 
@@ -2806,19 +2806,19 @@ const styles = StyleSheet.create({
   beatLine: { flex: 1, width: 2, minHeight: 8, backgroundColor: colors.line },
   beatTitle: { fontFamily: fonts.heading, fontSize: 14.5, fontWeight: '700', color: colors.ink, lineHeight: 18 },
 
-  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, marginTop: 18, borderWidth: 1.5, borderColor: colors.ink, borderRadius: 10 },
+  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, marginTop: 18, borderWidth: BORDER, borderColor: colors.ink, borderRadius: 10 },
   ctaText: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '700', color: colors.ink },
 
   chips: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12, flexWrap: 'wrap' },
   chipQuiet: { borderColor: colors.ink },
-  inlineDrop: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 4 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, height: 34, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, maxWidth: 220 },
+  inlineDrop: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 4 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, maxWidth: 220 },
   chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.ink, flexShrink: 1 },
-  dropdown: { marginHorizontal: 16, marginTop: 8, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 6 },
+  dropdown: { marginHorizontal: 16, marginTop: 8, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 6 },
   optRow: { flexDirection: 'row', alignItems: 'center', minHeight: TARGET },
 
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: BORDER, borderBottomColor: colors.line },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   ratingText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.ink },
   rowActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 2 },
@@ -2827,29 +2827,29 @@ const styles = StyleSheet.create({
   rowSide: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center', flexShrink: 0 },
   cardWrap: { position: 'absolute', left: 12, right: 12, zIndex: 3 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line },
-  cardShut: { position: 'absolute', top: -8, right: -6, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  cardShut: { position: 'absolute', top: -8, right: -6, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   // The chosen place, given the room. A block of colour rather than a tint on
   // one row of many — the tint was there and he could not see it.
   chosen: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, borderWidth: BORDER, borderColor: colors.ink },
   chosenName: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, lineHeight: 23 },
   addStrong: { backgroundColor: colors.primary, borderColor: colors.primary, height: 38, paddingHorizontal: 14, flex: 1, justifyContent: 'center' },
-  backToList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: TARGET, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
+  backToList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: TARGET, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   backToListText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
   // What it serves, said once, in the row's own words.
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
-  phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + env(safe-area-inset-top))' as any) },
   driveChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill,
     backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
   },
   driveChipText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.ink },
-  callBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  callBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   bookmark: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   rowOn: { backgroundColor: colors.accentSoft },
   rowName: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '700', color: colors.ink },
   detour: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.ink },
-  add: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 11, height: 30, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.ink },
+  add: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 11, height: 30, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.ink },
   iconBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
   addText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.ink },
 
@@ -2861,19 +2861,19 @@ const styles = StyleSheet.create({
   // Clear of both edges. It was flush against the left, and a fortnight's worth
   // scrolls rather than shrinking — a day chip you cannot read is not a chip.
   strip: { gap: 8, paddingVertical: 12, paddingLeft: 16, paddingRight: 16 },
-  dayChip: { width: 44, paddingVertical: 6, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, alignItems: 'center', gap: 1 },
+  dayChip: { width: 44, paddingVertical: 6, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', gap: 1 },
   dayChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   dayChipDow: { fontFamily: fonts.body, fontSize: 10, fontWeight: '600', color: colors.inkMuted },
   dayChipNum: { fontFamily: fonts.heading, fontSize: 16, fontWeight: '800', color: colors.ink },
   dayDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.accent },
   dayDotGap: { height: 5 },
-  whoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
-  linkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line, minHeight: TARGET },
+  whoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, borderBottomWidth: BORDER, borderBottomColor: colors.line },
+  linkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 12, borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: TARGET },
   linkText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink, flexShrink: 1 },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: TARGET },
   dangerFoot: { paddingTop: 20, paddingBottom: 8, alignItems: 'flex-start' },
   caution: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
-  check: { width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  check: { width: 26, height: 26, borderRadius: 13, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   checkOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   // The banner (Hotels 2 §15): ink, one row, the whole of it a tap.
   signpost: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 14, padding: 12, paddingHorizontal: 14, borderRadius: 12, backgroundColor: colors.primary },
@@ -2884,14 +2884,14 @@ const styles = StyleSheet.create({
   progSeg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.line },
   progSegOn: { backgroundColor: colors.ink },
   backRound: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
-  tile: { flex: 1, minWidth: 0, gap: 6, padding: 12, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderColor: colors.line, backgroundColor: colors.surface },
+  tile: { flex: 1, minWidth: 0, gap: 6, padding: 12, paddingVertical: 14, borderRadius: 12, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   tileOn: { borderColor: colors.ink, backgroundColor: colors.primary },
   tileTitle: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '700', color: colors.ink, lineHeight: 17 },
   tileSub: { fontFamily: fonts.body, fontSize: 11.5, lineHeight: 15.5, color: colors.inkMuted },
   tint: { gap: 10, padding: 14, borderRadius: 12, backgroundColor: colors.surfaceMuted },
   tintLine: { fontFamily: fonts.body, fontSize: 13, lineHeight: 19, color: colors.ink },
-  townField: { height: 44, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 14, color: colors.ink, outlineWidth: 0 } as any,
-  minuteBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 52, borderWidth: 1.5, borderColor: colors.ink, borderRadius: 10, paddingHorizontal: 6, backgroundColor: colors.surface },
+  townField: { height: 44, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 14, color: colors.ink, outlineWidth: 0 } as any,
+  minuteBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 52, borderWidth: BORDER, borderColor: colors.ink, borderRadius: 10, paddingHorizontal: 6, backgroundColor: colors.surface },
   minuteNudge: { width: 36, height: 36, flexShrink: 0, borderRadius: 18, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   minuteValue: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, width: 30, textAlign: 'right', padding: 0 },
   minuteUnit: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.inkMuted },
@@ -2915,10 +2915,10 @@ const styles = StyleSheet.create({
   addHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   addTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, flex: 1 },
   legs: { flexDirection: 'row', gap: 8 },
-  leg: { alignItems: 'center', justifyContent: 'center', paddingVertical: 11, paddingHorizontal: 6, borderRadius: 10, borderWidth: 1.5, borderColor: colors.line },
+  leg: { alignItems: 'center', justifyContent: 'center', paddingVertical: 11, paddingHorizontal: 6, borderRadius: 10, borderWidth: BORDER, borderColor: colors.line },
   legOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   legText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.ink },
-  arrive: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, height: 56, borderRadius: 10, borderWidth: 1.5, borderColor: colors.line },
+  arrive: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, height: 56, borderRadius: 10, borderWidth: BORDER, borderColor: colors.line },
   arriveInput: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, padding: 0, outlineStyle: 'none' as any },
   tableChip: { paddingHorizontal: 12, height: 32, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   tableChipText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.primaryFg },

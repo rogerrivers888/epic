@@ -32,7 +32,7 @@
 import React, { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 
 /** A point on any of the time charts. */
 export type Point = { label: string; value: number; hint?: string };
@@ -361,7 +361,7 @@ const styles = StyleSheet.create({
   cell: { width: 40, textAlign: 'center' },
   cellBox: {
     height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm,
-    borderWidth: 1, borderColor: colors.line,
+    borderWidth: BORDER, borderColor: colors.line,
   },
 });
 

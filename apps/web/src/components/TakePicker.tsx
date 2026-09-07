@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Take } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Avatar } from './Faces';
 import { Icon } from './Icon';
 
@@ -86,13 +86,13 @@ export function TakePicker({ rows, onChange, subject = 'this place' }: { rows: T
 }
 
 const styles = StyleSheet.create({
-  row: { gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  row: { gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   who: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   stars: { flexDirection: 'row', gap: 2 },
   star: { width: TARGET, height: TARGET - 6, alignItems: 'center', justifyContent: 'center' },
   options: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
-  opt: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  opt: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   optOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   optText: { fontSize: 13, fontWeight: '600', color: colors.ink },
-  comment: { minHeight: 40, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: colors.surface, color: colors.ink, fontSize: 14 },
+  comment: { minHeight: 40, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: colors.surface, color: colors.ink, fontSize: 14 },
 });

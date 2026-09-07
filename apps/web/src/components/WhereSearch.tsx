@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, Place } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from './Icon';
 import { PlacePicker } from './PlacePicker';
 import { useHere } from '../hooks/useHere';
@@ -218,5 +218,5 @@ const styles = StyleSheet.create({
   bodyWide: { maxWidth: 640, width: '100%', alignSelf: 'center' },
   groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   answer: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: TARGET + 6, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
-  planner: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: TARGET + 12, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line },
+  planner: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: TARGET + 12, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line },
 });

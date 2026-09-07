@@ -28,7 +28,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, CategoryProposal, LibraryAttractionDetail, ShelfWeights } from '../../api';
-import { colors, radius, spacing, type } from '../../theme';
+import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, Chip, Row, Wrap } from '../../components/ui';
 import { AdminPage, Banner, Panel, Pill, count, plural } from '../kit';
@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
 
   fact: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
-    paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line,
+    paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   factOpen: { borderTopColor: colors.accent },
   factKey: {
@@ -352,11 +352,11 @@ const styles = StyleSheet.create({
   editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingHorizontal: 6 },
 
   teach: {
-    borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md,
+    borderWidth: BORDER, borderColor: colors.accent, borderRadius: radius.md,
     backgroundColor: colors.accentSoft, padding: spacing.md, gap: spacing.sm,
   },
   say: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, backgroundColor: colors.surface,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm, backgroundColor: colors.surface,
     padding: spacing.sm, minHeight: 74, ...type.small, color: colors.ink,
     textAlignVertical: 'top', outlineStyle: 'none' as any,
   },
@@ -365,16 +365,16 @@ const styles = StyleSheet.create({
   },
   scope: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
     backgroundColor: colors.surface, padding: spacing.sm,
   },
   scopeOn: { borderColor: colors.accent },
-  radio: { width: 15, height: 15, borderRadius: 8, borderWidth: 1.5, borderColor: colors.inkFaint, marginTop: 1 },
+  radio: { width: 15, height: 15, borderRadius: 8, borderWidth: BORDER, borderColor: colors.inkFaint, marginTop: 1 },
   check: { borderRadius: 4 },
   radioOn: { borderColor: colors.accent, backgroundColor: colors.accent },
 
   summary: {
-    borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm,
+    borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm,
   },
 
   thumb: { width: 84, height: 60, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.well },

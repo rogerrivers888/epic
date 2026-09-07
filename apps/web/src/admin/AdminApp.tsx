@@ -21,7 +21,7 @@ import React, { useMemo } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Access } from '../api';
 import { AdminScreen } from '../routes';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
 
   rail: {
-    width: 208, backgroundColor: colors.surface, borderRightWidth: 1, borderRightColor: colors.line,
+    width: 208, backgroundColor: colors.surface, borderRightWidth: BORDER, borderRightColor: colors.line,
     paddingVertical: spacing.lg, paddingHorizontal: spacing.md, gap: 2,
   },
   brand: { gap: 4, marginBottom: spacing.lg },
@@ -199,12 +199,12 @@ const styles = StyleSheet.create({
   navItemOn: { backgroundColor: colors.well },
   navLabel: { ...type.small, color: colors.inkMuted },
 
-  profile: { gap: 2, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.line },
+  profile: { gap: 2, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
   leave: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
 
   rootPhone: { flexDirection: 'column' },
   phoneHead: {
-    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.line,
+    backgroundColor: colors.surface, borderBottomWidth: BORDER, borderBottomColor: colors.line,
     paddingTop: Platform.OS === 'web' ? spacing.sm : spacing.lg, gap: 6,
   },
   phoneHeadTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md },
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   chips: { gap: 6, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: radius.pill,
-    borderWidth: 1, borderColor: colors.line, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: BORDER, borderColor: colors.line, paddingHorizontal: 10, paddingVertical: 5,
   },
   chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
 });

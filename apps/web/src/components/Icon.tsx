@@ -67,11 +67,18 @@ export type IconName = keyof typeof ICONS;
 // Icons are ink: ink on cream in light, cream on ink in dark (Epic pack §04 —
 // "Ink is every letter and line"). Lime is a ground, never a glyph colour.
 // Lucide outline at 1.8px.
-export function Icon({ name, size = 18, color = colors.icon, fill, strokeWidth = 1.8 }: {
-  name: IconName; size?: number; color?: string; fill?: boolean; strokeWidth?: number;
+export function Icon({ name, size = 18, color = colors.icon, fill, fillColor, strokeWidth = 1.8 }: {
+  name: IconName; size?: number; color?: string; fill?: boolean;
+  /**
+   * A fill that is not the stroke's colour — the tab bar's lime glyph inside an
+   * ink outline. Without it a filled icon is one flat shape, and lime on cream
+   * has no edge to read against.
+   */
+  fillColor?: string;
+  strokeWidth?: number;
 }) {
   const Glyph = ICONS[name];
-  return <Glyph size={size} color={color} strokeWidth={strokeWidth} fill={fill ? color : 'none'} />;
+  return <Glyph size={size} color={color} strokeWidth={strokeWidth} fill={fill ? (fillColor ?? color) : 'none'} />;
 }
 
 const CATEGORY: Record<string, IconName> = { restaurant: 'restaurant', cafe: 'cafe', pub: 'pub', bar: 'bar', attraction: 'attraction', event: 'event', hotel: 'hotel', lodging: 'hotel' };

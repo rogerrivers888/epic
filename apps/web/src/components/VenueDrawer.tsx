@@ -3,7 +3,7 @@ import { Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } 
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
 import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
 import { MenuPanel, OrderPanel, PastMeals, StaffSheet, useMenuOrder } from './MenuOrder';
 import { FamilyVerdict } from './FamilyVerdict';
@@ -430,6 +430,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   ) : null}
                 </Row>
               </View>
+              {/* 44×44 hit area, no border: the design is explicit, and a
+                  boxed × on a title row reads as a second control. */}
               <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
             </Row>
             {onAdd || onShortlist ? (
@@ -438,8 +440,18 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 {onShortlist ? <Button label={saved || shortlisted ? 'Shortlisted' : 'Shortlist'} icon={saved || shortlisted ? 'shortlisted' : 'shortlist'} kind="secondary" onPress={async () => { await onShortlist(item); setSaved(true); }} disabled={saved || shortlisted} /> : null}
               </Wrap>
             ) : null}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 2 }}>
-              {tabs.map((t) => <Chip key={t.value} label={t.label} selected={t.value === shown} onPress={() => setTab(t.value)} />)}
+            {/* A strip on the 2px ink rule, not a row of pills (Inspire rework,
+                8f): the selected tab's underline sits *on* that rule, which is
+                what makes the tabs part of the page rather than floating above
+                it. Same device as Inspire's own category strip. */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabStrip} style={styles.tabStripWrap}>
+              {tabs.map((t) => (
+                <Pressable key={t.value} onPress={() => setTab(t.value)} accessibilityRole="tab" accessibilityState={{ selected: t.value === shown }}>
+                  <View style={[styles.tabItem, t.value === shown && styles.tabItemOn]}>
+                    <Text style={[styles.tabText, { color: t.value === shown ? colors.ink : colors.inkMuted }]}>{t.label}</Text>
+                  </View>
+                </Pressable>
+              ))}
             </ScrollView>
             {venue === undefined ? <Text style={type.tiny}>Fetching from {sourceName}…</Text> : null}
             {error ? <Text style={[type.tiny, { color: colors.dislike }]}>{error}</Text> : null}
@@ -602,10 +614,17 @@ const styles = StyleSheet.create({
   backdropWrap: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
   panel: { backgroundColor: colors.bg },
-  head: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.line },
-  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: 1, borderLeftColor: colors.line },
+  // No rule of its own: the tab strip inside it carries the one ink rule that
+  // closes the head, and two would read as a boxed-in title.
+  head: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: 0, gap: spacing.sm },
+  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: BORDER, borderLeftColor: colors.line },
   panelSheet: { width: '100%', height: '100%' },
+  tabStripWrap: { borderBottomWidth: BORDER, borderBottomColor: colors.ink, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg },
+  tabStrip: { gap: 18, paddingTop: 4 },
+  tabItem: { paddingVertical: 6, borderBottomWidth: BORDER, borderBottomColor: 'transparent', marginBottom: -BORDER },
+  tabItemOn: { borderBottomColor: colors.ink },
+  tabText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600' },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
   hero: { width: '100%', height: 220, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
-  review: { gap: 2, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  review: { gap: 2, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
 });

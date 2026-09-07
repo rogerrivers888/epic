@@ -4,7 +4,7 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "serve dist -s -l tcp://0.0.0.0:${PORT:-8080} --no-clipboard",
+    "start": "node server.mjs",
     "web": "node scripts/flags.mjs && expo start --web",
     "ios": "expo start --ios",
     "android": "expo start --android",
@@ -28,8 +28,7 @@
     "react-leaflet": "^5.0.0",
     "react-native": "0.86.3",
     "react-native-svg": "15.15.4",
-    "react-native-web": "^0.21.2",
-    "serve": "^14.2.6"
+    "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.22",

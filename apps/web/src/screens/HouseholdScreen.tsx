@@ -4,7 +4,7 @@ import { useViewport } from '../hooks/useViewport';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { api, Constraint, Household, HouseholdInvitation, HouseholdResponse, Learned, Member, Place, SenderStatus, Suggestion } from '../api';
-import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, Wrap } from '../components/ui';
 import { asFlag, asOneOf, useQueryState, useRouter } from '../router';
 import { paths, type Route } from '../routes';
@@ -827,12 +827,12 @@ const styles = StyleSheet.create({
   sidebar: { width: 300, gap: spacing.sm },
   personRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   personRowSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
   },
   pendingBox: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, gap: spacing.sm },
   // The household's own card. One tree, two shapes: the picture sits above the
@@ -840,7 +840,7 @@ const styles = StyleSheet.create({
   homeCard: { flexDirection: 'column', gap: spacing.md },
   homeCardWide: { flexDirection: 'row', alignItems: 'flex-start' },
   homePhoto: {
-    width: '100%', height: 150, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+    width: '100%', height: 150, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line,
     backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
   homePhotoWide: { width: 240, height: 160 },

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button } from './ui';
 import { Icon } from './Icon';
 
@@ -152,8 +152,8 @@ function MonthGrid({ y, m, selStart, selEnd, onPick, onNav, navLeft, navRight, t
 const CELL = 40;
 
 const styles = StyleSheet.create({
-  trigger: { minHeight: TARGET, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
-  panel: { padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: spacing.md, alignSelf: 'flex-start', maxWidth: '100%' },
+  trigger: { minHeight: TARGET, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
+  panel: { padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, gap: spacing.md, alignSelf: 'flex-start', maxWidth: '100%' },
   months: { gap: spacing.xl, alignItems: 'flex-start' },
   month: { width: CELL * 7 },
   monthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 32, marginBottom: 4 },
@@ -165,6 +165,6 @@ const styles = StyleSheet.create({
   dayText: { fontSize: 14, color: colors.ink },
   daySelected: { backgroundColor: colors.accent },
   dayInRange: { backgroundColor: colors.accentSoft },
-  dayToday: { borderWidth: 1, borderColor: colors.accent },
-  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm },
+  dayToday: { borderWidth: BORDER, borderColor: colors.accent },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm },
 });

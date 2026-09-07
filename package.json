@@ -2,7 +2,7 @@
   "name": "epic",
   "private": true,
   "version": "0.1.0",
-  "description": "Epic \u2014 seize the day",
+  "description": "Epic — seize the day",
   "workspaces": [
     "apps/*"
   ],
@@ -19,6 +19,7 @@
     "web": "npm run web -w @epic/web",
     "test": "npm run test -w @epic/api && npm run test -w @epic/web",
     "test:api": "npm run test -w @epic/api",
-    "test:web": "npm run test -w @epic/web"
+    "test:web": "npm run test -w @epic/web",
+    "brand": "node scripts/brand.mjs"
   }
 }

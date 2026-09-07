@@ -1,7 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon } from './Icon';
 import { Row } from './ui';
 
@@ -53,8 +53,8 @@ const styles = StyleSheet.create({
   backdropWrap: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
   panel: { backgroundColor: colors.bg },
-  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: 1, borderLeftColor: colors.line },
+  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: BORDER, borderLeftColor: colors.line },
   panelSheet: { width: '100%', height: '100%' },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
-  footer: { padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surface, gap: spacing.sm },
+  footer: { padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.surface, gap: spacing.sm },
 });

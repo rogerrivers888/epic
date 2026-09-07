@@ -24,19 +24,37 @@ const roundTrip = (href: string, expected?: string) => {
 // --- every page ------------------------------------------------------------
 
 test('the home screen', () => {
-  assert.deepEqual(parseRoute('/'), { name: 'inspire', searching: false, shelf: null });
-  assert.deepEqual(parseRoute('/inspire'), { name: 'inspire', searching: false, shelf: null });
+  assert.deepEqual(parseRoute('/'), { name: 'inspire', searching: false, mode: 'activities', pick: null });
+  assert.deepEqual(parseRoute('/inspire'), { name: 'inspire', searching: false, mode: 'activities', pick: null });
   roundTrip('/inspire');
 });
 
-test('one layer into Inspire: the search, and a shelf opened out', () => {
-  assert.deepEqual(roundTrip('/inspire/search'), { name: 'inspire', searching: true, shelf: null });
-  assert.deepEqual(roundTrip('/inspire/culture'), { name: 'inspire', searching: false, shelf: 'culture' });
+test('one layer into Inspire: the search, and a category opened out', () => {
+  assert.deepEqual(roundTrip('/inspire/search'), { name: 'inspire', searching: true, mode: 'activities', pick: null });
+  assert.deepEqual(roundTrip('/inspire/culture'), { name: 'inspire', searching: false, mode: 'activities', pick: 'culture' });
   assert.equal(paths.inspireShelf('adrenaline'), '/inspire/adrenaline');
+  // A mood the strip does not name is still addressable, so a link to one keeps working.
+  assert.equal(parseRoute('/inspire/outdoors').name, 'unknown', 'only the five the strip offers are categories here');
 });
 
-test('Food is a door into Places, so it is not a shelf and has no address', () => {
-  assert.equal(parseRoute('/inspire/food').name, 'unknown');
+test('Food is the other half of Inspire now, not a door into Places', () => {
+  assert.deepEqual(roundTrip('/inspire/food'), { name: 'inspire', searching: false, mode: 'food', pick: null });
+  // A cuisine is open ended — it comes from what is near, not from a table.
+  assert.deepEqual(roundTrip('/inspire/food/italian'), { name: 'inspire', searching: false, mode: 'food', pick: 'italian' });
+  assert.deepEqual(roundTrip('/inspire/food/pubs'), { name: 'inspire', searching: false, mode: 'food', pick: 'pubs' });
+  assert.equal(paths.inspireFood(), '/inspire/food');
+  assert.equal(paths.inspireFood('italian'), '/inspire/food/italian');
+  assert.equal(paths.inspireMode('activities', 'culture'), '/inspire/culture');
+  assert.equal(paths.inspireMode('activities', null), '/inspire');
+  assert.equal(parseRoute('/inspire/food/italian/extra').name, 'unknown', 'a cuisine is the last layer');
+});
+
+test('how Inspire is set is the query, not the page', () => {
+  // The drawer inside a category, how far, by what, and the budget: all ways of
+  // setting one page, so none of them changes the path.
+  assert.deepEqual(parseRoute('/inspire/culture?within=museums&travel=30&by=transit'),
+    { name: 'inspire', searching: false, mode: 'activities', pick: 'culture' });
+  assert.deepEqual(parseRoute('/inspire/food?open=1'), { name: 'inspire', searching: false, mode: 'food', pick: null });
 });
 
 test('Places: the atlas, close to home, one country, and one area in it', () => {
@@ -144,7 +162,7 @@ test('an address with no page behind it says so rather than pretending', () => {
 
 test('the query is never part of which page it is', () => {
   assert.deepEqual(parseRoute('/places/GB/London?kind=eat&sort=recent'), { name: 'places', scope: { country: 'GB', city: 'London' } });
-  assert.deepEqual(parseRoute('/inspire/culture?travel=30'), { name: 'inspire', searching: false, shelf: 'culture' });
+  assert.deepEqual(parseRoute('/inspire/culture?travel=30'), { name: 'inspire', searching: false, mode: 'activities', pick: 'culture' });
 });
 
 // --- the links that already exist ------------------------------------------

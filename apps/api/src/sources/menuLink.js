@@ -24,11 +24,12 @@
 // Five seconds was enough from a desk and not from the server: a branch's home
 // page can be a third of a megabyte from a small host (owner, 4 Sep 2026 — the
 // Windsor menu was there and we still missed it).
+import { userAgent } from '../origins.js';
 const FETCH_TIMEOUT_MS = Number(process.env.EPIC_MENU_TIMEOUT_MS || 9000);
 const MAX_BYTES = 1_000_000;
 const CACHE_TTL_MS = 6 * 3600_000;
 // Epic identifies itself: a restaurant's host should be able to see who asked.
-const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; household menu lookup)';
+const UA = userAgent('household menu lookup');
 
 const cache = new Map();
 const inflight = new Map();

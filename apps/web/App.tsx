@@ -29,7 +29,7 @@ import { useSession } from './src/hooks/useSession';
 import { Icon, IconName } from './src/components/Icon';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { isFullBleed, isImmersive, isTabHome, legacyHref, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
+import { isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
 
 // Epic opens on Inspire (owner, 5 Sep 2026, "Supporting docs/Roam Inspire"):
 // what there is to do, with one search bar above it. The conversational planner
@@ -515,7 +515,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
             {/* The corner is who you are and how the app looks — not the API's address (owner, 4 Sep 2026). */}
             <You household={household} onOpen={() => navigate(paths.settings())} />
           </View>
-        ) : fullBleed ? null : (
+        ) : fullBleed || ownsHeader(route) ? null : (
           <View style={styles.header}>
             <Wordmark height={34} />
             {mayAdminister ? (
@@ -542,7 +542,10 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
           <View style={[styles.tabs, fullBleed && styles.tabsOver]} accessibilityRole="tablist">
             {tabs.map((t) => (
               <Pressable key={t.key} onPress={() => navigate(t.href)} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === t.key }}>
-                <Icon name={t.icon} size={20} color={tab === t.key ? colors.ink : colors.inkMuted} />
+                {/* The tab you are on is ink with a lime-filled glyph (Inspire
+                    rework, tab bar): the fill is the brand moment, and the ink
+                    outline around it is what keeps it legible on cream. */}
+                <Icon name={t.icon} size={22} color={tab === t.key ? colors.ink : colors.inkMuted} fill={tab === t.key} fillColor={tab === t.key ? colors.selected : undefined} />
                 <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
               </Pressable>
             ))}
@@ -621,13 +624,13 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   toolbar: {
     height: TOOLBAR, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md,
-    paddingHorizontal: spacing.lg, backgroundColor: colors.surfaceMuted, borderBottomWidth: 1, borderBottomColor: colors.line,
+    paddingHorizontal: spacing.lg, backgroundColor: colors.surfaceMuted, borderBottomWidth: BORDER, borderBottomColor: colors.line,
   },
-  modeSwitch: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, padding: 2 },
+  modeSwitch: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, padding: 2 },
   modeBtn: { minHeight: 28, paddingHorizontal: spacing.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   modeBtnActive: { backgroundColor: colors.selected },
   modeBtnHover: { backgroundColor: colors.surfaceMuted },
-  foot: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  foot: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   you: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.xs, borderRadius: radius.md },
   themeBtn: { width: 34, height: 34, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   themeBtnHover: { backgroundColor: colors.accentSoft, borderColor: colors.icon },

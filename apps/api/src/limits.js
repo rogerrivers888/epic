@@ -21,8 +21,18 @@
 /** window → { key → { count, resetAt } }, one map per limiter. */
 const buckets = new Map();
 
-/** Railway terminates TLS in front of us, so the caller is the first forwarded-for. */
+/**
+ * Who is calling, through two proxies.
+ *
+ * Cloudflare sets `CF-Connecting-IP` to the client it accepted the connection
+ * from and strips any copy the client sent, so it is the one value in the chain
+ * a caller cannot forge. `X-Forwarded-For` is the fallback for anything not
+ * behind Cloudflare — a direct Railway hostname, or a local run — where the
+ * first entry is the caller.
+ */
 export function callerOf(req) {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.length) return cf.trim();
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.length) return forwarded.split(',')[0].trim();
   return req.ip || req.socket?.remoteAddress || 'unknown';

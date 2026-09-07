@@ -27,7 +27,7 @@ import { AccessibilityInfo, LayoutChangeEvent, Platform, StyleSheet, Text, View 
 import Svg, { Circle, ClipPath, Defs, G, Path, Rect, Text as SvgText, Use } from 'react-native-svg';
 import { api, SketchMap, SketchEvent } from '../api';
 import { useViewport } from '../hooks/useViewport';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Chip, Row, Wrap } from './ui';
 import { Icon } from './Icon';
 
@@ -455,9 +455,9 @@ const tween = (from: Box, to: Box, k: number): Box => {
 const styles = StyleSheet.create({
   strip: { paddingBottom: spacing.sm },
   map: { backgroundColor: colors.bg, overflow: 'hidden', justifyContent: 'flex-start' },
-  mapRounded: { borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line },
+  mapRounded: { borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line },
   beat: { position: 'absolute', left: 12, top: 10, ...type.small, color: colors.inkMuted, fontWeight: '600' },
-  line: { gap: 9, alignItems: 'flex-start', paddingVertical: 7, borderTopWidth: 1, borderTopColor: colors.line },
+  line: { gap: 9, alignItems: 'flex-start', paddingVertical: 7, borderTopWidth: BORDER, borderTopColor: colors.line },
   lineMark: { width: 17, alignItems: 'center', paddingTop: 1 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.inkFaint, marginTop: 5 },
   strong: { color: colors.ink, fontWeight: '700' },
