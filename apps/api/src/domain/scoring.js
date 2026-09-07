@@ -1,4 +1,4 @@
-// What Roam thinks of a place, as one number that is ours (owner, 4 Sep 2026).
+// What Epic thinks of a place, as one number that is ours (owner, 4 Sep 2026).
 //
 // > "If we're not storing anything about the Google rating, but it is a
 // > percentage of our overall score, and then we go back 3 months later and we
@@ -35,7 +35,7 @@ const PRIOR_WEIGHT = 150;
  * The crowd signal, as one of four words.
  *
  * Called with the licensed figures and never returns them: this is the only
- * place in Roam where a rating is touched, and what leaves is a word.
+ * place in Epic where a rating is touched, and what leaves is a word.
  */
 export function crowdBand(rating, count) {
   if (!Number.isFinite(rating) || rating <= 0) return null;
@@ -131,7 +131,7 @@ export function score({ crowd = null, count = null, accolades = [], menuItems = 
   const w = CHAIN_WEIGHT[chainScale] ?? 1;
 
   const round = (x) => Math.round(x * 10) / 10;
-  return { roamScore: round(composite * w), ownedScore: round(owned * w), substance: round(substance), accolade: round(accolade), chainWeight: w };
+  return { epicScore: round(composite * w), ownedScore: round(owned * w), substance: round(substance), accolade: round(accolade), chainWeight: w };
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ export function score({ crowd = null, count = null, accolades = [], menuItems = 
 // value and significantly differs from restaurant."
 //
 // Both halves live here rather than in the harvest, so that the one place in
-// Roam that decides what a place is worth is one file.
+// Epic that decides what a place is worth is one file.
 //
 // What differs from a restaurant is worth saying plainly. A restaurant's score
 // leans on a licensed crowd rating that has to be banded at the moment of the
@@ -192,7 +192,7 @@ export const DESIGNATION_POINTS = [
 ];
 
 /**
- * Wikidata's designation and award labels, as Roam's accolades.
+ * Wikidata's designation and award labels, as Epic's accolades.
  *
  * A place carries several — Leeds Castle is a Grade I listed building *and* a
  * Grade II* listed park and garden — and migration 036 kept only the first and

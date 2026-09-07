@@ -141,7 +141,7 @@ export function applyConstraints({ venues, attendees, learned = [] }) {
     // Needs a booking and a showtime — only worth proposing as the thing you've booked.
     if (venue.ticketed && !venue.fixed) {
       score -= 40;
-      reasons.push({ kind: 'note', text: 'Needs a booking — tell Roam if you have one' });
+      reasons.push({ kind: 'note', text: 'Needs a booking — tell Epic if you have one' });
     }
 
     // A child is coming: places known not to suit children fall well down the list;

@@ -4,7 +4,7 @@
 // the household.
 import { Platform } from 'react-native';
 
-export const VIEWER_KEY = 'roam.viewer';
+export const VIEWER_KEY = 'epic.viewer';
 const isWeb = Platform.OS === 'web' && typeof localStorage !== 'undefined';
 
 /**

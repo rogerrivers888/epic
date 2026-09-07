@@ -1,5 +1,5 @@
 /**
- * The map-first canvas on the web: MapLibre GL, Roam's own style, Roam's own
+ * The map-first canvas on the web: MapLibre GL, Epic's own style, Epic's own
  * markers.
  *
  * Why MapLibre and not Apple or Google (owner asked, 6 Sep 2026):
@@ -26,7 +26,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { MapCaliper, MapGLProps, MapMarker, MapShade, Point } from './MapGL';
 import { circleRing } from './searchGround';
-import { roamMapStyle } from './mapStyle';
+import { epicMapStyle } from './mapStyle';
 import { colors } from '../theme';
 
 /** The Lucide paths the markers use, inlined: a marker is drawn before React has a chance to. */
@@ -47,15 +47,15 @@ const GLYPH: Record<string, string> = {
 /**
  * The shaded ground, and the glass going over it.
  *
- * The band is leaf over the map's mint, faint enough that the roads and the
+ * The band is lime over the map's cream, faint enough that the roads and the
  * water still read through it — it is the ground being searched, not a curtain
  * drawn over it. The lens is a hole in that band with an ink rim: what it is
  * over is the map at full strength, which is what makes it look like it is
  * lighting the ground up rather than sliding a disc across it.
  */
 const SHADE = {
-  light: { fill: '#2E8A63', fillOpacity: 0.13, line: '#201E1D', glow: '#FFFFFF', rim: '#201E1D', casing: '#FFFFFF' },
-  dark: { fill: '#B6E3CF', fillOpacity: 0.12, line: '#F3F2F2', glow: '#B6E3CF', rim: '#F3F2F2', casing: '#1E1E23' },
+  light: { fill: '#C8F542', fillOpacity: 0.34, line: '#201E1D', glow: '#FFFDF9', rim: '#201E1D', casing: '#FFFDF9' },
+  dark: { fill: '#C8F542', fillOpacity: 0.14, line: '#FFFDF9', glow: '#C8F542', rim: '#FFFDF9', casing: '#2A2725' },
 };
 
 /**
@@ -132,12 +132,14 @@ function lensFeatures(centre: Point, km: number) {
 
 /** Each kind's shape, from the handoff's design tokens. */
 const KIND: Record<MapMarker['kind'], { size: number; bg: string; border: string; borderWidth: number; dashed?: boolean; fg: string; halo?: boolean }> = {
-  home: { size: 26, bg: '#FFFFFF', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D' },
-  base: { size: 26, bg: '#FFFFFF', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D' },
-  dest: { size: 30, bg: '#EC3013', border: '#FFFFFF', borderWidth: 2.5, fg: '#FFFFFF', halo: true },
-  browse: { size: 26, bg: '#FFFFFF', border: '#201E1D', borderWidth: 2, fg: '#201E1D' },
-  added: { size: 28, bg: '#201E1D', border: '#FFFFFF', borderWidth: 2, fg: '#FFFFFF' },
-  saved: { size: 22, bg: '#FFFFFF', border: '#201E1D', borderWidth: 1.5, dashed: true, fg: '#201E1D' },
+  home: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D' },
+  base: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D' },
+  // Where we are going is the brand moment, so it is the lime one — it used to
+  // be the brand red, which Epic retires (pack §04). Ink on lime, never cream.
+  dest: { size: 30, bg: '#C8F542', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D', halo: true },
+  browse: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2, fg: '#201E1D' },
+  added: { size: 28, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, fg: '#FFFDF9' },
+  saved: { size: 22, bg: '#FFFDF9', border: '#201E1D', borderWidth: 1.5, dashed: true, fg: '#201E1D' },
 };
 
 function markerEl(m: MapMarker): HTMLElement {
@@ -176,9 +178,11 @@ function markerEl(m: MapMarker): HTMLElement {
     `width:${size}px`, `height:${size}px`, 'border-radius:999px',
     `background:${k.bg}`, `border:${k.borderWidth}px ${k.dashed ? 'dashed' : 'solid'} ${k.border}`,
     'display:flex', 'align-items:center', 'justify-content:center',
-    // The destination's ink halo, and a ring on whatever is selected.
-    k.halo ? 'box-shadow:0 0 0 1.5px #201E1D' : 'box-shadow:0 1px 4px rgba(32,30,29,0.22)',
-    m.selected ? 'outline:3px solid #2E8A63;outline-offset:2px' : '',
+    // The destination's ink halo, and a lime ring on whatever is selected. No
+    // drop shadow: Epic has none, and a 2px ink border already lifts a marker
+    // off the map (pack §07).
+    k.halo ? 'box-shadow:0 0 0 1.5px #201E1D' : '',
+    m.selected ? 'outline:3px solid #C8F542;outline-offset:2px' : '',
     'transition:width 120ms ease-out,height 120ms ease-out',
   ].join(';');
   // A numbered pin shows its number; everything else shows what it is.
@@ -188,14 +192,14 @@ function markerEl(m: MapMarker): HTMLElement {
   inner.appendChild(dot);
   if (m.label) {
     const tag = document.createElement('div');
-    // An added stop's label is ink on white; everything else is white on ink,
-    // which is what the handoff draws and what stays readable over green.
+    // An added stop's label is ink on cream; everything else is cream on ink,
+    // which is what the handoff draws and what stays readable over the map.
     const onInk = m.kind !== 'home' && m.kind !== 'base';
     tag.textContent = m.label;
     tag.style.cssText = [
       'position:absolute', 'top:100%', 'left:50%', 'transform:translate(-50%,4px)',
       'padding:3px 7px', 'border-radius:999px',
-      onInk ? 'background:#201E1D;color:#FFFFFF' : 'background:#FFFFFF;color:#201E1D;border:1px solid #E5EFEA',
+      onInk ? 'background:#201E1D;color:#FFFDF9' : 'background:#FFFDF9;color:#201E1D;border:2px solid #201E1D',
       'font:700 11px/1.1 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif',
       'white-space:nowrap', 'pointer-events:none',
       'box-shadow:0 1px 4px rgba(32,30,29,0.18)',
@@ -222,7 +226,7 @@ function markerEl(m: MapMarker): HTMLElement {
     open.style.cssText = [
       'position:absolute', 'left:100%', 'top:50%', 'transform:translate(2px,-50%)',
       'width:24px', 'height:24px', 'border-radius:999px',
-      'background:#FFFFFF', 'border:1.5px solid #201E1D',
+      'background:#FFFDF9', 'border:1.5px solid #201E1D',
       'display:flex', 'align-items:center', 'justify-content:center', 'cursor:pointer',
       'box-shadow:0 1px 4px rgba(32,30,29,0.22)',
     ].join(';');
@@ -279,7 +283,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     if (!host.current || map.current) return;
     const m = new maplibregl.Map({
       container: host.current,
-      style: roamMapStyle(dark),
+      style: epicMapStyle(dark),
       center: [-0.6, 51.4],
       zoom: 9,
       // Added by hand below, so that where it sits can be chosen.
@@ -311,13 +315,13 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
      */
     const collapse = () => {
       const el = host.current?.querySelector('.maplibregl-ctrl-attrib');
-      if (!el || el.getAttribute('data-roam-opened')) return;
+      if (!el || el.getAttribute('data-epic-opened')) return;
       if (el.classList.contains('maplibregl-compact-show')) el.classList.remove('maplibregl-compact-show');
       const button = el.querySelector('.maplibregl-ctrl-attrib-button');
-      if (button && !button.getAttribute('data-roam-bound')) {
-        button.setAttribute('data-roam-bound', '1');
+      if (button && !button.getAttribute('data-epic-bound')) {
+        button.setAttribute('data-epic-bound', '1');
         // A tap on the ⓘ is somebody asking for it, and it stays open after that.
-        button.addEventListener('click', () => el.setAttribute('data-roam-opened', '1'));
+        button.addEventListener('click', () => el.setAttribute('data-epic-opened', '1'));
       }
     };
     m.on('styledata', collapse);
@@ -340,7 +344,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
   }, []);
 
   // The palette changed under it (light ↔ dark).
-  useEffect(() => { if (map.current && ready.current) map.current.setStyle(roamMapStyle(dark)); }, [dark]);
+  useEffect(() => { if (map.current && ready.current) map.current.setStyle(epicMapStyle(dark)); }, [dark]);
 
   // The route, as a source and two layers: a soft casing and the line itself,
   // so it reads over both the green and the water.
@@ -356,16 +360,16 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
           geometry: { type: 'LineString', coordinates: r.points.map((p) => [p.lng, p.lat]) },
         })),
       } as any;
-      const src = m.getSource('roam-route') as maplibregl.GeoJSONSource | undefined;
+      const src = m.getSource('epic-route') as maplibregl.GeoJSONSource | undefined;
       if (src) { src.setData(data); return; }
-      m.addSource('roam-route', { type: 'geojson', data });
+      m.addSource('epic-route', { type: 'geojson', data });
       m.addLayer({
-        id: 'roam-route-casing', type: 'line', source: 'roam-route',
+        id: 'epic-route-casing', type: 'line', source: 'epic-route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#FFFFFF', 'line-width': 7, 'line-opacity': 0.9 },
+        paint: { 'line-color': '#FFFDF9', 'line-width': 7, 'line-opacity': 0.9 },
       });
       m.addLayer({
-        id: 'roam-route-line', type: 'line', source: 'roam-route',
+        id: 'epic-route-line', type: 'line', source: 'epic-route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': '#201E1D',
@@ -404,10 +408,10 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       : false;
 
     const teardown = () => {
-      for (const id of ['roam-lens-handle', 'roam-lens-rim', 'roam-lens-casing', 'roam-lens-glow', 'roam-shade-line', 'roam-shade-fill']) {
+      for (const id of ['epic-lens-handle', 'epic-lens-rim', 'epic-lens-casing', 'epic-lens-glow', 'epic-shade-line', 'epic-shade-fill']) {
         if (m.getLayer(id)) m.removeLayer(id);
       }
-      for (const id of ['roam-lens', 'roam-shade']) if (m.getSource(id)) m.removeSource(id);
+      for (const id of ['epic-lens', 'epic-shade']) if (m.getSource(id)) m.removeSource(id);
     };
 
     /** The band, with the glass cut out of it when there is a glass. */
@@ -426,53 +430,53 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     } as any);
 
     const paint = (lens: { at: Point; km: number } | null, glassOpacity: number) => {
-      const band = m.getSource('roam-shade') as maplibregl.GeoJSONSource | undefined;
-      const glass = m.getSource('roam-lens') as maplibregl.GeoJSONSource | undefined;
+      const band = m.getSource('epic-shade') as maplibregl.GeoJSONSource | undefined;
+      const glass = m.getSource('epic-lens') as maplibregl.GeoJSONSource | undefined;
       if (!band || !glass) return;
       band.setData(bandData(lens));
       const f = lens ? lensFeatures(lens.at, lens.km) : null;
       glass.setData({ type: 'FeatureCollection', features: f ? [f.ring, f.handle] : [] } as any);
-      for (const [id, base] of [['roam-lens-glow', GLASS.glow], ['roam-lens-casing', 0.85], ['roam-lens-rim', 1], ['roam-lens-handle', 1]] as const) {
+      for (const [id, base] of [['epic-lens-glow', GLASS.glow], ['epic-lens-casing', 0.85], ['epic-lens-rim', 1], ['epic-lens-handle', 1]] as const) {
         if (!m.getLayer(id)) continue;
-        const prop = id === 'roam-lens-glow' ? 'fill-opacity' : 'line-opacity';
+        const prop = id === 'epic-lens-glow' ? 'fill-opacity' : 'line-opacity';
         m.setPaintProperty(id, prop as any, base * glassOpacity);
       }
     };
 
     const build = () => {
-      if (!shadeRef.current || m.getLayer('roam-shade-fill')) return;
+      if (!shadeRef.current || m.getLayer('epic-shade-fill')) return;
       // Under the route when there is one, so the road still reads through the band.
-      const under = m.getLayer('roam-route-casing') ? 'roam-route-casing' : undefined;
-      m.addSource('roam-shade', { type: 'geojson', data: bandData(null) });
-      m.addSource('roam-lens', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } as any });
+      const under = m.getLayer('epic-route-casing') ? 'epic-route-casing' : undefined;
+      m.addSource('epic-shade', { type: 'geojson', data: bandData(null) });
+      m.addSource('epic-lens', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } as any });
       m.addLayer({
-        id: 'roam-shade-fill', type: 'fill', source: 'roam-shade',
+        id: 'epic-shade-fill', type: 'fill', source: 'epic-shade',
         paint: { 'fill-color': tone.fill, 'fill-opacity': tone.fillOpacity },
       }, under);
       m.addLayer({
-        id: 'roam-shade-line', type: 'line', source: 'roam-shade',
+        id: 'epic-shade-line', type: 'line', source: 'epic-shade',
         layout: { 'line-join': 'round' },
         paint: { 'line-color': tone.line, 'line-width': 1.4, 'line-opacity': 0.4, 'line-dasharray': [4, 3] },
       }, under);
       m.addLayer({
-        id: 'roam-lens-glow', type: 'fill', source: 'roam-lens',
+        id: 'epic-lens-glow', type: 'fill', source: 'epic-lens',
         filter: ['==', ['geometry-type'], 'Polygon'],
         paint: { 'fill-color': tone.glow, 'fill-opacity': 0 },
       }, under);
       // A white casing under the rim, the same trick the route uses, so the
       // glass reads over water and green alike.
       m.addLayer({
-        id: 'roam-lens-casing', type: 'line', source: 'roam-lens',
+        id: 'epic-lens-casing', type: 'line', source: 'epic-lens',
         layout: { 'line-cap': 'round' },
         paint: { 'line-color': tone.casing, 'line-width': 7, 'line-opacity': 0 },
       }, under);
       m.addLayer({
-        id: 'roam-lens-rim', type: 'line', source: 'roam-lens',
+        id: 'epic-lens-rim', type: 'line', source: 'epic-lens',
         filter: ['==', ['geometry-type'], 'Polygon'],
         paint: { 'line-color': tone.rim, 'line-width': 2.6, 'line-opacity': 0 },
       }, under);
       m.addLayer({
-        id: 'roam-lens-handle', type: 'line', source: 'roam-lens',
+        id: 'epic-lens-handle', type: 'line', source: 'epic-lens',
         filter: ['==', ['geometry-type'], 'LineString'],
         layout: { 'line-cap': 'round' },
         paint: { 'line-color': tone.rim, 'line-width': 4.5, 'line-opacity': 0 },
@@ -516,7 +520,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
      * what stops it being the write-on-every-event loop that wedged this screen
      * once already.
      */
-    const rebuild = () => { if (shadeRef.current && !m.getLayer('roam-shade-fill') && ready.current) apply(); };
+    const rebuild = () => { if (shadeRef.current && !m.getLayer('epic-shade-fill') && ready.current) apply(); };
     m.on('styledata', rebuild);
     return () => {
       cancelAnimationFrame(raf);
@@ -630,8 +634,8 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     };
     const teardown = () => {
       clearMarks();
-      for (const id of ['roam-caliper', 'roam-caliper-casing']) if (m.getLayer(id)) m.removeLayer(id);
-      if (m.getSource('roam-caliper')) m.removeSource('roam-caliper');
+      for (const id of ['epic-caliper', 'epic-caliper-casing']) if (m.getLayer(id)) m.removeLayer(id);
+      if (m.getSource('epic-caliper')) m.removeSource('epic-caliper');
     };
 
     const draw = () => {
@@ -645,17 +649,17 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
           geometry: { type: 'LineString', coordinates: [[c.a.lng, c.a.lat], [c.b.lng, c.b.lat]] },
         }],
       } as any;
-      m.addSource('roam-caliper', { type: 'geojson', data: line });
+      m.addSource('epic-caliper', { type: 'geojson', data: line });
       // A white casing under the dashes, the same trick the route uses, so the
       // measurement reads over the shaded ground and between the pins rather
       // than being lost among sixty of them.
       m.addLayer({
-        id: 'roam-caliper-casing', type: 'line', source: 'roam-caliper',
+        id: 'epic-caliper-casing', type: 'line', source: 'epic-caliper',
         layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.85 },
+        paint: { 'line-color': '#FFFDF9', 'line-width': 5, 'line-opacity': 0.85 },
       });
       m.addLayer({
-        id: 'roam-caliper', type: 'line', source: 'roam-caliper',
+        id: 'epic-caliper', type: 'line', source: 'epic-caliper',
         layout: { 'line-cap': 'butt' },
         paint: { 'line-color': '#201E1D', 'line-width': 2, 'line-opacity': 0.9, 'line-dasharray': [2.4, 2.2] },
       });
@@ -666,7 +670,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       for (const [end, turn] of [[c.a, 180], [c.b, 0]] as const) {
         const el = document.createElement('div');
         el.style.cssText = 'width:14px;height:14px;display:flex;align-items:center;justify-content:center;pointer-events:none';
-        el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" style="transform:rotate(${c.bearingDeg + turn}deg)"><path d="M12 3 20 19H4Z" fill="#201E1D" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/></svg>`;
+        el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" style="transform:rotate(${c.bearingDeg + turn}deg)"><path d="M12 3 20 19H4Z" fill="#201E1D" stroke="#FFFDF9" stroke-width="2" stroke-linejoin="round"/></svg>`;
         caliperMarks.current.push(new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([end.lng, end.lat]).addTo(m));
       }
 
@@ -677,7 +681,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       chip.style.cssText = [
         'position:relative', 'display:flex', 'align-items:center', 'gap:2px',
         'padding:2px 2px', 'border-radius:999px',
-        'background:#FFFFFF', 'border:1.5px solid #201E1D',
+        'background:#FFFDF9', 'border:1.5px solid #201E1D',
         'box-shadow:0 2px 8px rgba(32,30,29,0.22)',
         'font:700 12px/1 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif', 'color:#201E1D',
         'white-space:nowrap',
@@ -689,7 +693,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
         b.style.cssText = [
           'width:22px', 'height:22px', 'border-radius:999px', 'flex-shrink:0',
           'display:flex', 'align-items:center', 'justify-content:center',
-          fn ? 'background:#EFF8F3;cursor:pointer' : 'opacity:0.3',
+          fn ? 'background:#EAFECB;cursor:pointer' : 'opacity:0.3',
         ].join(';');
         b.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#201E1D" stroke-width="3" stroke-linecap="round"><path d="${glyph}"/></svg>`;
         if (fn) {

@@ -17,7 +17,7 @@
 // trained at a Michelin-starred kitchen", so each pattern has to match the
 // claim rather than the word.
 
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; accolade check)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; accolade check)';
 const FETCH_TIMEOUT_MS = 9000;
 const MAX_BYTES = 800_000;
 

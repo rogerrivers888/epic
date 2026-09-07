@@ -30,7 +30,7 @@ import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } fr
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
-import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
 import { Icon, IconName, Stars } from '../components/Icon';
@@ -2294,7 +2294,7 @@ function StayCriteria({
                   {placement === 'plans' ? (
                     <>
                       <Text style={styles.tintLine}>
-                        Roam ranks stays by the <Text style={{ fontWeight: '700' }}>average drive</Text> to {names}. Add more days and the fit improves.
+                        Epic ranks stays by the <Text style={{ fontWeight: '700' }}>average drive</Text> to {names}. Add more days and the fit improves.
                       </Text>
                       <Row style={{ justifyContent: 'space-between', gap: 8 }}>
                         <Text style={type.small}>Max average drive</Text>
@@ -2585,7 +2585,10 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
           <Pressable key={st.venueRef} onPress={() => onOpen(st)} style={[styles.row, selected === st.venueRef && styles.rowOn]} accessibilityRole="button">
             <View>
               <VenueThumb name={st.name} photos={st.photos} category="hotel" width={64} height={64} rounded={6} credit={false} />
-              {st.rank ? <View style={[styles.rank, st.rank === 1 && { backgroundColor: colors.red }]}><Text style={styles.rankText}>{st.rank}</Text></View> : null}
+              {/* The top pick is the brand moment: a lime fill with ink type
+                  (Epic pack §07). Cream on lime is never allowed, so the
+                  numeral flips to ink with the fill. */}
+              {st.rank ? <View style={[styles.rank, st.rank === 1 && { backgroundColor: colors.selected }]}><Text style={[styles.rankText, st.rank === 1 && { color: colors.selectedFg }]}>{st.rank}</Text></View> : null}
             </View>
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text style={styles.rowName} numberOfLines={1}>{st.name}</Text>
@@ -2706,7 +2709,7 @@ function AddSheet({ place, trip, party, onCancel, onSave }: {
 
           {opensAt ? <Text style={[type.tiny, { color: colors.inkMuted }]}>{opensAt}</Text> : null}
 
-          {/* Always editable: typing wins over the arithmetic, and Roam moves
+          {/* Always editable: typing wins over the arithmetic, and Epic moves
               the drive to match rather than arguing (handoff § Interactions). */}
           <View style={[styles.arrive, arriveAt && { borderColor: colors.ink }]}>
             <Icon name="hours" size={17} color={arriveAt ? colors.ink : colors.inkMuted} />
@@ -2766,8 +2769,7 @@ const styles = StyleSheet.create({
   pillFour: { paddingHorizontal: 9 },
   pill: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 38, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
-    shadowColor: '#201E1D', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
   },
   pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   pillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
@@ -2782,8 +2784,8 @@ const styles = StyleSheet.create({
   searchWrap: { position: 'absolute', left: 0, right: 0, top: ('calc(16px + env(safe-area-inset-top))' as any), paddingHorizontal: 20 },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 16, borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    shadowColor: '#201E1D', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.14, shadowRadius: 12, elevation: 4,
+    // Floating over the map: the 2px ink rule is what lifts it, not a shadow.
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
   },
   errorWrap: { position: 'absolute', left: 20, right: 20, top: 70 },
 
@@ -2824,11 +2826,11 @@ const styles = StyleSheet.create({
   // than it needed to be and the left of it was empty.
   rowSide: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center', flexShrink: 0 },
   cardWrap: { position: 'absolute', left: 12, right: 12, zIndex: 3 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, shadowColor: '#201E1D', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 6 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line },
   cardShut: { position: 'absolute', top: -8, right: -6, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   // The chosen place, given the room. A block of colour rather than a tint on
   // one row of many — the tint was there and he could not see it.
-  chosen: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: 16, backgroundColor: colors.surfaceMuted, borderWidth: 1.5, borderColor: colors.ink },
+  chosen: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, borderWidth: BORDER, borderColor: colors.ink },
   chosenName: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, lineHeight: 23 },
   addStrong: { backgroundColor: colors.primary, borderColor: colors.primary, height: 38, paddingHorizontal: 14, flex: 1, justifyContent: 'center' },
   backToList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: TARGET, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
@@ -2839,8 +2841,7 @@ const styles = StyleSheet.create({
   chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + env(safe-area-inset-top))' as any) },
   driveChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
-    shadowColor: '#201E1D', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
   },
   driveChipText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.ink },
   callBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },

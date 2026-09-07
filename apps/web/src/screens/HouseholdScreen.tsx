@@ -229,7 +229,7 @@ function PersonRow({ member, index, selected, onPress }: { member: Member; index
       <View style={{ flex: 1 }}>
         <Row style={{ gap: 6 }}>
           <Text style={[type.h3, { flexShrink: 1 }]} numberOfLines={1}>{member.name}</Text>
-          {/* Who has Roam on their own phone, without opening them. A tick is
+          {/* Who has Epic on their own phone, without opening them. A tick is
               somebody who has signed in; the paper plane is an invitation
               nobody has opened yet. */}
           {member.access && member.access.status !== 'none' ? (
@@ -499,7 +499,7 @@ function MemberDetail({ member, index, managedBy, relationships, allergens, lear
 
 
 /**
- * Whether this person can open Roam on their own phone, and how to send them
+ * Whether this person can open Epic on their own phone, and how to send them
  * the link (owner, 6 Sep 2026: "how can I invite Gina and anyone else that's in
  * my household to the app?").
  *
@@ -511,7 +511,7 @@ function MemberDetail({ member, index, managedBy, relationships, allergens, lear
  *
  * A household member is a full peer once they are in (owner, 6 Sep 2026:
  * "Everything, no exceptions"), so this promises nothing about what they can
- * and cannot do. It says the true thing instead: it is the same Roam.
+ * and cannot do. It says the true thing instead: it is the same Epic.
  *
  * With no sender configured nothing here fails. The link is minted, the screen
  * says plainly that it could not be sent, and shows it to be copied — the rule
@@ -553,10 +553,10 @@ function AccessGroup({ member, senders, refresh }: {
   useEffect(() => { if (!mobile && access?.mobile) setMobile(access.mobile); }, [access?.mobile]);
   useEffect(() => { if (!email && access?.email) setEmail(access.email); }, [access?.email]);
 
-  // A profile Roam knows is under thirteen is looked after by an adult (Epic 1
+  // A profile Epic knows is under thirteen is looked after by an adult (Epic 1
   // C8), so there is nothing to offer — only the reason there is nothing.
   if (access?.blocked) {
-    return <Group title="Roam on their own phone"><Text style={type.tiny}>{access.blocked}</Text></Group>;
+    return <Group title="Epic on their own phone"><Text style={type.tiny}>{access.blocked}</Text></Group>;
   }
 
   const send = async (channels: ('sms' | 'email')[]) => {
@@ -585,7 +585,7 @@ function AccessGroup({ member, senders, refresh }: {
   // the one that matters at that moment: never asked, asked and not answered,
   // and in.
   const standing = (() => {
-    if (!invited) return `${member.name} can't open Roam yet.`;
+    if (!invited) return `${member.name} can't open Epic yet.`;
     if (access!.status === 'suspended') return `${member.name}'s sign-in is switched off.`;
     if (!signedInBefore) {
       const when = access!.lastInvite?.at ? new Date(access!.lastInvite.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) : null;
@@ -613,7 +613,7 @@ function AccessGroup({ member, senders, refresh }: {
   const missing = (['sms', 'email'] as const).map((k) => senders?.[k]).filter((s) => s && !s.configured);
 
   return (
-    <Group title="Roam on their own phone">
+    <Group title="Epic on their own phone">
       <Row style={{ gap: spacing.sm }}>
         <Icon name={invited && signedInBefore ? 'check' : invited ? 'send' : 'mobile'} size={16} color={invited && signedInBefore ? colors.accent : colors.headerSub} />
         <Text style={[type.small, { flex: 1 }]}>{standing}</Text>
@@ -622,7 +622,7 @@ function AccessGroup({ member, senders, refresh }: {
         ) : null}
       </Row>
       <Text style={type.tiny}>
-        They get the same Roam you do — the same trips, the same saved places, and everybody's tastes and allergies already in it.
+        They get the same Epic you do — the same trips, the same saved places, and everybody's tastes and allergies already in it.
       </Text>
       {sent ? <Text style={[type.small, { color: colors.accent }]}>{sent}</Text> : null}
 

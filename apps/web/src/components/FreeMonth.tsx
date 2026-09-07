@@ -14,8 +14,8 @@ import { Icon } from './Icon';
  * trip's payments are listed underneath, separately, because they are not a
  * subscription and must never read as one.
  *
- * Roam cannot take a card yet: there is no payment provider connected (Open
- * question A1). Keeping Roam therefore says so rather than opening a form that
+ * Epic cannot take a card yet: there is no payment provider connected (Open
+ * question A1). Keeping Epic therefore says so rather than opening a form that
  * cannot charge anything.
  */
 
@@ -44,7 +44,7 @@ export function FreeMonth({ trialEndsOn, tripName, payments = [], onBack, onDone
     <View style={{ gap: spacing.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
         {onBack ? <Pressable onPress={onBack} accessibilityRole="button"><Icon name="back" size={18} /></Pressable> : <View />}
-        <Text style={type.h2}>Your Roam</Text>
+        <Text style={type.h2}>Your Epic</Text>
         <View style={{ width: 18 }} />
       </Row>
 
@@ -61,7 +61,7 @@ export function FreeMonth({ trialEndsOn, tripName, payments = [], onBack, onDone
       <View style={{ gap: spacing.sm }}>
         <Text style={type.label}>WHAT WE'LL SEND</Text>
         {[
-          { n: 1, text: `Welcome. You're in ${tripName ?? 'the trip'}; here's the rest of Roam.` },
+          { n: 1, text: `Welcome. You're in ${tripName ?? 'the trip'}; here's the rest of Epic.` },
           { n: 23, text: 'A week left. One tap to keep it — or do nothing and it just stops.' },
           { n: 30, text: 'Trial ends. Your trips and household stay; planning pauses until you subscribe.' },
         ].map((m) => {
@@ -79,10 +79,10 @@ export function FreeMonth({ trialEndsOn, tripName, payments = [], onBack, onDone
       </View>
 
       <View style={{ gap: 6 }}>
-        <Button label="Keep Roam · £4.99 a month" icon="forward" onPress={() => setNote(true)} />
+        <Button label="Keep Epic · £4.99 a month" icon="forward" onPress={() => setNote(true)} />
         {note ? (
           <Text style={[type.small, { color: colors.headerSub }]}>
-            There is nothing to pay yet — Roam has no card provider connected, so day {TRIAL_DAYS} will not take anything from you.
+            There is nothing to pay yet — Epic has no card provider connected, so day {TRIAL_DAYS} will not take anything from you.
             You'll be asked properly before that changes.
           </Text>
         ) : (
@@ -112,7 +112,7 @@ export function FreeMonth({ trialEndsOn, tripName, payments = [], onBack, onDone
 }
 
 const styles = StyleSheet.create({
-  hero: { backgroundColor: colors.mint, borderRadius: radius.lg, padding: spacing.lg, gap: 6 },
+  hero: { backgroundColor: colors.lime, borderRadius: radius.lg, padding: spacing.lg, gap: 6 },
   track: { height: 8, borderRadius: 4, backgroundColor: 'rgba(32,30,29,0.14)', marginTop: spacing.sm, overflow: 'hidden' },
   fill: { height: 8, backgroundColor: colors.ink },
   dot: { width: 10, height: 10, borderRadius: 5, marginTop: 5, borderWidth: 2, borderColor: colors.line, backgroundColor: colors.surface },

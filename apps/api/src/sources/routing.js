@@ -36,7 +36,7 @@ const exhausted = new Map();
 // moments; a daily one lasts until midnight Pacific. So the wait starts short
 // and lengthens each time it is refused again — a minute's limit costs one
 // wasted call, a day's costs a handful — and never runs past the daily reset.
-const BACKOFF_MINUTES = (process.env.ROAM_ROUTES_BACKOFF || '5,15,60,240').split(',').map((n) => Number(n.trim())).filter((n) => n > 0);
+const BACKOFF_MINUTES = (process.env.EPIC_ROUTES_BACKOFF || '5,15,60,240').split(',').map((n) => Number(n.trim())).filter((n) => n > 0);
 
 /** When a daily quota next resets, as an instant. */
 function nextQuotaReset(now = new Date()) {

@@ -1,5 +1,5 @@
 /**
- * Teaching Roam which shelf a place belongs on.
+ * Teaching Epic which shelf a place belongs on.
  *
  * The owner, 5 Sep 2026, looking at the home screen: "currently, on the
  * homepage under the adrenaline section, it's showing football stadiums. That's
@@ -148,7 +148,7 @@ shelves.get('/shelf', requires('view_library'), async (req, res, next) => {
     // Narrow to one drawer, which is what the second row of chips does.
     const drawer = req.query.subcategory ? String(req.query.subcategory) : null;
     const centre = await centreOf(req);
-    if (!centre) throw bad('Set a home address, or pass lat and lng, and Roam will look around it.');
+    if (!centre) throw bad('Set a home address, or pass lat and lng, and Epic will look around it.');
     const km = Math.min(200, Math.max(1, Number(req.query.km) || 60));
 
     const rules = await shelfRules.rules();
@@ -313,7 +313,7 @@ shelves.delete('/rules/:id', requires('manage_library'), async (req, res, next) 
 shelves.post('/read', requires('manage_library'), async (req, res, next) => {
   try {
     const said = String(req.body?.said || '').trim();
-    if (!said) throw bad('Say what is wrong with it and Roam will turn that into weights.');
+    if (!said) throw bad('Say what is wrong with it and Epic will turn that into weights.');
     const household = await currentHousehold();
     const proposal = await readTeaching({
       said,

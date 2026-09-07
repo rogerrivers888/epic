@@ -46,7 +46,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Animated, PanResponder, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { colors, spacing } from '../theme';
+import { colors, spacing, BORDER } from '../theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { detentHeights, type Detent } from './detents';
 
@@ -367,11 +367,9 @@ const styles = StyleSheet.create({
   sheet: {
     position: 'absolute', left: 0, right: 0,
     backgroundColor: colors.surface,
-    // Squared off and raised over the tab bar by `cover`, where it is not a
-    // sheet over anything but the screen itself.
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    // The handoff's shadow: 0 -6px 24px rgba(32,30,29,0.14).
-    shadowColor: '#201E1D', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.14, shadowRadius: 24, elevation: 16,
+    // Square, like everything else (Epic pack §07), and separated from the map
+    // by the 2px ink rule rather than by a shadow — Epic has none.
+    borderTopWidth: BORDER, borderTopColor: colors.line,
     zIndex: 2,
     overflow: 'hidden',
   },

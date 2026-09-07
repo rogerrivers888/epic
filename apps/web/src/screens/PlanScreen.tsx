@@ -690,7 +690,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
       {/* Everything found, browse-first; picks are kept in every plan and saved as the day */}
       {hasOptions ? (
         <>
-          <Text style={type.h2}>Everything Roam found near {baseLabel}</Text>
+          <Text style={type.h2}>Everything Epic found near {baseLabel}</Text>
           <Text style={type.tiny}>Built from the same {plan!.pool?.size ?? '—'} places — filtering and sorting here makes no new lookups. Tap a place for reviews, hours and photos.</Text>
           <BrowsePool
             items={plan!.browse ?? []}
@@ -712,10 +712,10 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
                 {picks.stops.map((s) => <Text key={s.id} style={type.body}>{s.arriveAt ? `${clock(s.arriveAt)} · ` : ''}{s.name}{s.fixed ? ' (your booking)' : ''} · {minutes(s.dwellMinutes)}</Text>)}
                 <Text style={type.tiny}>{minutes(picks.budget.travelMinutes)} travelling · {picks.budget.remainingMinutes >= 0 ? `${minutes(picks.budget.remainingMinutes)} free` : `over by ${minutes(-picks.budget.remainingMinutes)}`}</Text>
               </>
-            ) : <Text style={type.small}>Nothing added yet. Add places above, or let Roam fill the day.</Text>}
+            ) : <Text style={type.small}>Nothing added yet. Add places above, or let Epic fill the day.</Text>}
             <Row>
-              <Button icon={committed ? 'check' : undefined} label={committed ? 'Saved as your day' : picks ? 'Save these as the day' : 'Let Roam fill the day'} onPress={() => commit(picks?.id ?? plan!.options[0]?.id)} disabled={busy === 'updating' || !!committed || !plan!.options.length} />
-              {picks && !committed ? <Button label="Let Roam fill the rest" kind="secondary" onPress={() => commit(plan!.options.find((o) => o.id !== 'pinned')?.id ?? picks.id)} disabled={busy === 'updating'} /> : null}
+              <Button icon={committed ? 'check' : undefined} label={committed ? 'Saved as your day' : picks ? 'Save these as the day' : 'Let Epic fill the day'} onPress={() => commit(picks?.id ?? plan!.options[0]?.id)} disabled={busy === 'updating' || !!committed || !plan!.options.length} />
+              {picks && !committed ? <Button label="Let Epic fill the rest" kind="secondary" onPress={() => commit(plan!.options.find((o) => o.id !== 'pinned')?.id ?? picks.id)} disabled={busy === 'updating'} /> : null}
             </Row>
           </Card>
 

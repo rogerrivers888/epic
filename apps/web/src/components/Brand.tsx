@@ -1,40 +1,30 @@
 import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Lockup } from './Wordmark';
+import { colors, LIME, INK } from '../theme';
 
-// The signed-off mark: "Roam" in Caveat with a dotted trail to a heart-pin, the
-// heart pulsing. Source and static variants live in docs/brand. The GIF is drawn
-// on the brand ground (#f3f2f2), so the frame takes the same colour to hide
-// the rectangle.
-//
-// The mark sits in the middle of a 640×320 canvas and fills only half of it
-// (measured across every frame: x 168–489, y 76–258). Drawn edge to edge the
-// dotted trail and the heart were too small to see (owner, 3 Sep 2026), so the
-// frame crops to the mark with a little breathing room: `height` is the height
-// of the mark plus that margin, not of the whole canvas.
-const PULSE = require('../../assets/brand/roam-heart-pulse.gif');
-export const BRAND_GROUND = '#f3f2f2';
+/**
+ * The brand introducing itself: the primary lockup from the Epic pack §06 —
+ * the wordmark, a 2px rule, "Seize the day" — on the lime field.
+ *
+ * This replaces Roam's animated heart-pulse mark, which is retired along with
+ * the rest of the old guidelines (owner, 7 Sep 2026). Nothing here is an image
+ * file: the mark is drawn live, so it is sharp at any size and takes the
+ * palette rather than a baked-in colour. Square corners, no shadow (pack §07).
+ */
+export const BRAND_GROUND = LIME;
 
-const CANVAS = { w: 640, h: 320 };
-const MARK = { x: 168, y: 76, w: 322, h: 183 };
-const MARGIN = 12; // canvas pixels around the mark
-
-export function Brand({ height = 56 }: { height?: number }) {
-  const scale = height / (MARK.h + MARGIN * 2);
-  const width = Math.round((MARK.w + MARGIN * 2) * scale);
-  const image = {
-    width: CANVAS.w * scale,
-    height: CANVAS.h * scale,
-    left: -(MARK.x - MARGIN) * scale,
-    top: -(MARK.y - MARGIN) * scale,
-  };
+export function Brand({ height = 56, ground = BRAND_GROUND }: { height?: number; ground?: string }) {
+  // The letters and the pin are always the ground's opposite: ink on lime and
+  // on cream, lime on ink. Cream on lime is never allowed.
+  const ink = ground === INK ? colors.lime : colors.ink;
   return (
-    <View style={[styles.frame, { height, width }]} accessibilityRole="image" accessibilityLabel="Roam">
-      <Image source={PULSE} style={[styles.image, image]} resizeMode="stretch" />
+    <View style={[styles.frame, { backgroundColor: ground, padding: Math.round(height * 0.3) }]}>
+      <Lockup height={height} ink={ink} ground={ground} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  frame: { backgroundColor: BRAND_GROUND, borderRadius: 12, overflow: 'hidden' },
-  image: { position: 'absolute' },
+  frame: { alignSelf: 'flex-start', borderRadius: 0 },
 });

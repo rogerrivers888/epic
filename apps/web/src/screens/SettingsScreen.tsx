@@ -14,15 +14,15 @@ import { Icon } from '../components/Icon';
 import { OfflineCard } from '../components/OfflineCard';
 import { AccountCard } from '../components/AccountCard';
 
-export const SPEAK_KEY = 'roam.speakReplies';
+export const SPEAK_KEY = 'epic.speakReplies';
 export const getSpeakPref = () => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(SPEAK_KEY) !== 'off' : true);
 
-// Settings is two different things: how Roam plans for this household
+// Settings is two different things: how Epic plans for this household
 // (preferences, the customer's) and how the app is wired and what it spends
 // (sources and usage, the owner's). They share a screen, not a page.
 type Section = SettingsSection;
 const SECTION_HINT: Record<Section, string> = {
-  preferences: 'Home, pace, voice and your data: how Roam plans for this household.',
+  preferences: 'Home, pace, voice and your data: how Epic plans for this household.',
   providers: 'Every provider on one row: switch it on or off, what is free, what is paid, what it cost. Tap a row for the detail.',
 };
 
@@ -182,13 +182,13 @@ function Preferences({ data, refresh }: { data: HouseholdResponse; refresh: () =
       <SectionTitle hint="One passcode for the household, and which devices are using it. Anything written without signal waits here until it can be sent.">Account</SectionTitle>
       <AccountCard />
 
-      <SectionTitle hint="What Roam keeps on this phone so it works with no signal, and what it has researched and owns outright.">On this device</SectionTitle>
+      <SectionTitle hint="What Epic keeps on this phone so it works with no signal, and what it has researched and owns outright.">On this device</SectionTitle>
       <OfflineCard />
 
       <SectionTitle hint="Everything the household has generated. Place content from licensed sources is never included, only identifiers and what you wrote.">Your data</SectionTitle>
       <Card>
         <Button label="Export everything (JSON)" kind="secondary" onPress={() => { void api.downloadExport(); }} />
-        <Text style={[type.small, { marginTop: spacing.sm }]}>Delete everything Roam holds about this household: people, trips, visits, ratings, captured menus. Type the household name to confirm.</Text>
+        <Text style={[type.small, { marginTop: spacing.sm }]}>Delete everything Epic holds about this household: people, trips, visits, ratings, captured menus. Type the household name to confirm.</Text>
         <Row>
           <TextInput value={confirm} onChangeText={setConfirm} placeholder={household.name} placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} />
           <Button label="Delete household" kind="danger" disabled={confirm !== household.name} onPress={async () => {

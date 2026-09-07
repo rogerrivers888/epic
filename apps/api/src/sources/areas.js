@@ -17,8 +17,8 @@
 import { kmBetween } from '../domain/travel.js';
 import { geocodeAreas, localityOf, GEOCODE_ATTRIBUTION } from './geocode.js';
 
-const BASE = process.env.ROAM_PHOTON_URL || 'https://photon.komoot.io';
-const USER_AGENT = 'Roam/0.1 (private beta; +https://github.com/rogerrivers888/roam)';
+const BASE = process.env.EPIC_PHOTON_URL || 'https://photon.komoot.io';
+const USER_AGENT = 'Epic/0.1 (private beta; +https://github.com/rogerrivers888/epic)';
 export const AREA_ATTRIBUTION = `${GEOCODE_ATTRIBUTION} · search by Photon`;
 
 /**

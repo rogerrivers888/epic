@@ -12,11 +12,11 @@
 //   commons.wikimedia.org/w/api.php
 //                        The photographs, and — the part that matters — their
 //                        licence, their creator and the page where both are
-//                        stated, which is the attribution URL Roam has to keep
+//                        stated, which is the attribution URL Epic has to keep
 //                        and show.
 //
 // What we owe them in return is set out in the Wikimedia User-Agent policy:
-// identify yourself, give a contact, and do not hammer it. `UA` names Roam and
+// identify yourself, give a contact, and do not hammer it. `UA` names Epic and
 // carries a URL; `paced()` keeps every caller to one request at a time with a
 // gap; and nothing here runs on a household's request — the harvest is a back
 // office job, so a slow Wikidata query never makes a screen wait.
@@ -40,7 +40,7 @@ const PAGEVIEWS = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-artic
  * Who we are. The Wikimedia policy asks for a real contact, and a bot that does
  * not give one gets blocked without warning — so this is not cosmetic.
  */
-export const UA = 'RoamBot/1.0 (https://web-production-afce9.up.railway.app; roam atlas harvest; rogerrivers@gmail.com)';
+export const UA = 'EpicBot/1.0 (https://web-production-afce9.up.railway.app; epic atlas harvest; rogerrivers@gmail.com)';
 
 const SPARQL_TIMEOUT = 60_000;   // WDQS's own ceiling is 60s; a county takes ~2s
 const API_TIMEOUT = 20_000;
@@ -210,7 +210,7 @@ export const ATTRACTION_ROOTS = {
 
 /**
  * Every Wikidata type that descends from one of those roots — about 5,300 of
- * them — with the root it came from, so each can be given a Roam category.
+ * them — with the root it came from, so each can be given a Epic category.
  *
  * Asked once and cached in `place_kinds`, because a subclass tree does not
  * change between Tuesdays and because doing this per county would put the
@@ -482,7 +482,7 @@ export async function articleSections(title) {
 /**
  * What has been said about this place by somebody whose job it is to say it.
  *
- * The restaurant side of Roam already draws this distinction (sources/
+ * The restaurant side of Epic already draws this distinction (sources/
  * accolades.js): a rating is a licensed figure we may not keep, but that
  * somewhere is a World Heritage Site, a Grade I listed building or the holder
  * of a Green Flag is a fact about who said what, published in order to be

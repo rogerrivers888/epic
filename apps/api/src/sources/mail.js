@@ -1,7 +1,7 @@
 /**
  * Sending an e-mail, when there is anything to send it with.
  *
- * Roam has never had a sender. Group reminders already know this and record
+ * Epic has never had a sender. Group reminders already know this and record
  * `no_channel` rather than pretending (routes/groups.js), and this file follows
  * the same rule for invitations: with no key configured it does not throw, does
  * not queue and does not silently drop the message — it says it could not send,
@@ -10,8 +10,8 @@
  * The key is the owner's to add (CLAUDE.md: anything that holds a secret is the
  * owner's to do). It goes in Doppler as `RESEND_API_KEY`, never in the repo and
  * never as a Railway variable set by hand. Two non-secret companions go beside
- * it: `ROAM_MAIL_FROM` (the address invitations come from, which must be on a
- * domain verified with the sender) and `ROAM_WEB_URL` (where the app is served,
+ * it: `EPIC_MAIL_FROM` (the address invitations come from, which must be on a
+ * domain verified with the sender) and `EPIC_WEB_URL` (where the app is served,
  * so a link in an e-mail points at the app rather than at the API).
  *
  * Resend is the sender because it is one HTTPS call with no SDK — nothing to
@@ -20,7 +20,7 @@
  */
 
 const KEY = () => process.env.RESEND_API_KEY || '';
-export const mailConfigured = () => Boolean(KEY() && process.env.ROAM_MAIL_FROM);
+export const mailConfigured = () => Boolean(KEY() && process.env.EPIC_MAIL_FROM);
 
 /**
  * Why the owner cannot send yet, in two lengths.
@@ -32,13 +32,13 @@ export const mailConfigured = () => Boolean(KEY() && process.env.ROAM_MAIL_FROM)
  * can act on it will read it.
  */
 export function mailStatus() {
-  if (KEY() && !process.env.ROAM_MAIL_FROM) {
-    return { configured: false, reason: 'no_from', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add ROAM_MAIL_FROM in Doppler — the address invitations come from, on a domain verified with the sender.', message: 'A send key is set but ROAM_MAIL_FROM is not, so there is no address to send from.' };
+  if (KEY() && !process.env.EPIC_MAIL_FROM) {
+    return { configured: false, reason: 'no_from', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add EPIC_MAIL_FROM in Doppler — the address invitations come from, on a domain verified with the sender.', message: 'A send key is set but EPIC_MAIL_FROM is not, so there is no address to send from.' };
   }
   if (!KEY()) {
-    return { configured: false, reason: 'no_sender', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add RESEND_API_KEY and ROAM_MAIL_FROM in Doppler.', message: 'No mail sender is configured. Add RESEND_API_KEY and ROAM_MAIL_FROM in Doppler to send invitations from Roam; until then, copy the link and send it yourself.' };
+    return { configured: false, reason: 'no_sender', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add RESEND_API_KEY and EPIC_MAIL_FROM in Doppler.', message: 'No mail sender is configured. Add RESEND_API_KEY and EPIC_MAIL_FROM in Doppler to send invitations from Epic; until then, copy the link and send it yourself.' };
   }
-  return { configured: true, from: process.env.ROAM_MAIL_FROM };
+  return { configured: true, from: process.env.EPIC_MAIL_FROM };
 }
 
 /**
@@ -48,7 +48,7 @@ export function mailStatus() {
  * works on their machine without setting anything.
  */
 export function webUrl(req) {
-  const set = String(process.env.ROAM_WEB_URL || '').trim().replace(/\/$/, '');
+  const set = String(process.env.EPIC_WEB_URL || '').trim().replace(/\/$/, '');
   if (set) return set;
   const origin = req?.headers?.origin;
   if (origin) return String(origin).replace(/\/$/, '');
@@ -67,7 +67,7 @@ export async function sendMail({ to, subject, text, html }) {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { authorization: `Bearer ${KEY()}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: process.env.ROAM_MAIL_FROM, to: [to], subject, text, html }),
+      body: JSON.stringify({ from: process.env.EPIC_MAIL_FROM, to: [to], subject, text, html }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -93,14 +93,14 @@ export function invitationEmail({ name, url, from, expiresAt, returning = false 
   const hello = name ? `Hi ${name},` : 'Hi,';
   const days = Math.max(1, Math.round((new Date(expiresAt) - Date.now()) / 86400000));
   const opening = returning
-    ? 'Here is a fresh link to sign back in to Roam.'
-    : `${from || 'Roger'} has set you up with Roam — it remembers every place you love, and plans days out around what everybody in your household will actually eat.`;
+    ? 'Here is a fresh link to sign back in to Epic.'
+    : `${from || 'Roger'} has set you up with Epic — it remembers every place you love, and plans days out around what everybody in your household will actually eat.`;
   const text = [
     hello,
     '',
     opening,
     '',
-    'Open Roam:',
+    'Open Epic:',
     url,
     '',
     `The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.`,
@@ -110,41 +110,41 @@ export function invitationEmail({ name, url, from, expiresAt, returning = false 
   const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1c2b24">
   <p>${hello}</p>
   <p>${opening}</p>
-  <p><a href="${url}" style="display:inline-block;background:#1c2b24;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none">Open Roam</a></p>
+  <p><a href="${url}" style="display:inline-block;background:#1c2b24;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none">Open Epic</a></p>
   <p style="font-size:14px;color:#5c6b63">The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.</p>
   <p style="font-size:14px;color:#5c6b63">If you were not expecting this, ignore it — nothing happens until the link is opened.</p>
 </div>`;
-  return { subject: returning ? 'Your link back in to Roam' : 'Your invitation to Roam', text, html };
+  return { subject: returning ? 'Your link back in to Epic' : 'Your invitation to Epic', text, html };
 }
 
 /**
  * The other invitation: somebody already in the household, not a new customer.
  *
- * `invitationEmail` above is for a friend the owner is giving Roam to, and it
- * describes what Roam is because they have never heard of it. Gina has: she is
+ * `invitationEmail` above is for a friend the owner is giving Epic to, and it
+ * describes what Epic is because they have never heard of it. Gina has: she is
  * in the household the mail is about, her allergens are already in it, and what
  * she needs to be told is whose it is and that it is the same one — not a
- * second, empty Roam of her own.
+ * second, empty Epic of her own.
  */
 export function householdInvitationEmail({ name, url, household, from, expiresAt, returning = false }) {
   const hello = name ? `Hi ${name},` : 'Hi,';
   const days = Math.max(1, Math.round((new Date(expiresAt) - Date.now()) / 86400000));
   const who = from ? `${from} has` : 'You have been';
   const opening = returning
-    ? `Here is a fresh link to sign back in to ${household || 'your household'} on Roam.`
-    : `${who} added you to ${household ? `<b>${household}</b>` : 'the household'} on Roam. It is the same Roam they use — the same trips, the same saved places, and the tastes and allergies already written down for everybody at home.`;
+    ? `Here is a fresh link to sign back in to ${household || 'your household'} on Epic.`
+    : `${who} added you to ${household ? `<b>${household}</b>` : 'the household'} on Epic. It is the same Epic they use — the same trips, the same saved places, and the tastes and allergies already written down for everybody at home.`;
   const plain = opening.replace(/<\/?b>/g, '');
   const text = [
-    hello, '', plain, '', 'Open Roam:', url, '',
+    hello, '', plain, '', 'Open Epic:', url, '',
     `The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.`,
     '', 'If you were not expecting this, ignore it — nothing happens until the link is opened.',
   ].join('\n');
   const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1c2b24">
   <p>${hello}</p>
   <p>${opening}</p>
-  <p><a href="${url}" style="display:inline-block;background:#1c2b24;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none">Open Roam</a></p>
+  <p><a href="${url}" style="display:inline-block;background:#1c2b24;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none">Open Epic</a></p>
   <p style="font-size:14px;color:#5c6b63">The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.</p>
   <p style="font-size:14px;color:#5c6b63">If you were not expecting this, ignore it — nothing happens until the link is opened.</p>
 </div>`;
-  return { subject: returning ? 'Your link back in to Roam' : `You're in ${household || 'the household'} on Roam`, text, html };
+  return { subject: returning ? 'Your link back in to Epic' : `You're in ${household || 'the household'} on Epic`, text, html };
 }

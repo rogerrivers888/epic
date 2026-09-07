@@ -7,11 +7,11 @@ import type { MapLine, MapPin } from './MapView';
 import { colors, memberColors } from '../theme';
 
 const TONE: Record<NonNullable<MapPin['tone']>, string> = {
-  base: colors.ink, day: colors.accent, shortlist: colors.want, been: colors.like, special: colors.red, muted: colors.inkFaint,
-  full: colors.overrun, aside: '#fff', home: colors.ink, selected: colors.want, hollow: colors.ink,
+  base: colors.ink, day: colors.accent, shortlist: colors.want, been: colors.like, special: colors.loved, muted: colors.inkFaint,
+  full: colors.overrun, aside: colors.bg, home: colors.ink, selected: colors.want, hollow: colors.ink,
 };
 
-const HEART = `<span style="position:absolute;right:-7px;top:-7px;width:15px;height:15px;border-radius:50%;background:${colors.bg};display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 24 24" fill="${colors.red}" stroke="${colors.red}" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></span>`;
+const HEART = `<span style="position:absolute;right:-7px;top:-7px;width:15px;height:15px;border-radius:50%;background:${colors.bg};display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 24 24" fill="${colors.loved}" stroke="${colors.loved}" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></span>`;
 
 /** A numbered pin: the journey's order drawn on the marker, so the list and the map read the same. */
 function numberedIcon(p: MapPin, color: string, selected: boolean) {
@@ -23,7 +23,7 @@ function numberedIcon(p: MapPin, color: string, selected: boolean) {
   const bg = aside || hollow ? colors.bg : color;
   const border = aside ? colors.inkFaint : hollow ? colors.ink : colors.bg;
   const html = `<div style="position:relative;width:${size}px;height:${size}px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${bg};border:2px ${aside ? 'dashed' : 'solid'} ${border};display:flex;align-items:center;justify-content:center;${selected ? `outline:3px solid ${colors.icon};outline-offset:2px;` : ''}"><span style="transform:rotate(45deg);color:${aside ? colors.inkFaint : colors.bg};font:700 ${selected ? 13 : 12}px/1 Archivo,-apple-system,Inter,Segoe UI,Helvetica,sans-serif">${String(p.number ?? '')}</span>${p.heart ? `<span style="position:absolute;right:-1px;top:-1px;transform:rotate(45deg)">${HEART}</span>` : ''}</div>`;
-  return L.divIcon({ html, className: 'roam-pin', iconSize: [size, size], iconAnchor: [size / 2, size], tooltipAnchor: [0, -size] });
+  return L.divIcon({ html, className: 'epic-pin', iconSize: [size, size], iconAnchor: [size / 2, size], tooltipAnchor: [0, -size] });
 }
 
 /** Pan to the chosen pin (a tapped row) without refitting everything. */
@@ -73,7 +73,7 @@ export function MapView({ pins, lines = [], center, height = 320, fit = true, fo
             );
           }
           return (
-            <CircleMarker key={p.id} center={[p.lat, p.lng]} radius={isFocus ? 12 : p.tone === 'base' ? 10 : 7} pathOptions={{ color: isFocus ? colors.ink : '#fff', weight: isFocus ? 3 : 2, fillColor: color, fillOpacity: isFocus ? 1 : focused ? 0.6 : 0.95 }} eventHandlers={p.onPress ? { click: p.onPress } : undefined}>
+            <CircleMarker key={p.id} center={[p.lat, p.lng]} radius={isFocus ? 12 : p.tone === 'base' ? 10 : 7} pathOptions={{ color: isFocus ? colors.ink : colors.bg, weight: isFocus ? 3 : 2, fillColor: color, fillOpacity: isFocus ? 1 : focused ? 0.6 : 0.95 }} eventHandlers={p.onPress ? { click: p.onPress } : undefined}>
               <Tooltip direction="top" offset={[0, -6]} permanent={isFocus}>{p.label}</Tooltip>
             </CircleMarker>
           );

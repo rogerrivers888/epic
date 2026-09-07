@@ -9,7 +9,7 @@
  * > URL with someone, and they should be able to get to the exact point that I
  * > was on."
  *
- * Roam used to keep where you were in React state and write a summary of it
+ * Epic used to keep where you were in React state and write a summary of it
  * (`?tab=trips&trip=…`) to the address bar afterwards, which meant the address
  * was a description of the app rather than the thing that decided what it drew.
  * Anything the description left out — which day of a trip, which place's drawer,
@@ -75,19 +75,19 @@ const RouterContext = createContext<RouterValue | null>(null);
 export function RouterProvider({ children }: { children: React.ReactNode }) {
   const [href, setHref] = useState(readHref);
   /**
-   * How many moves deep into Roam this history entry is. Zero means the entry
+   * How many moves deep into Epic this history entry is. Zero means the entry
    * behind it is somebody else's page — the shared link itself — so Back must
    * be answered by going one layer up rather than handed to the browser.
    *
    * It is carried on the history entry rather than counted, because counting
-   * cannot tell Back from Forward: walking forward again would leave Roam
+   * cannot tell Back from Forward: walking forward again would leave Epic
    * thinking it was at the start of its own history.
    */
-  const [depth, setDepth] = useState(() => (onWeb ? Number(window.history.state?.roamDepth) || 0 : 0));
+  const [depth, setDepth] = useState(() => (onWeb ? Number(window.history.state?.epicDepth) || 0 : 0));
 
   useEffect(() => {
     if (onWeb) {
-      const onPop = () => { setHref(readHref()); setDepth(Number(window.history.state?.roamDepth) || 0); };
+      const onPop = () => { setHref(readHref()); setDepth(Number(window.history.state?.epicDepth) || 0); };
       window.addEventListener('popstate', onPop);
       return () => window.removeEventListener('popstate', onPop);
     }
@@ -100,9 +100,9 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
     const next = to.startsWith('/') ? to : `/${to}`;
     if (next === readHref()) return;
     if (onWeb) {
-      const at = Number(window.history.state?.roamDepth) || 0;
-      if (opts?.replace) window.history.replaceState({ roamDepth: at }, '', next);
-      else { window.history.pushState({ roamDepth: at + 1 }, '', next); setDepth(at + 1); }
+      const at = Number(window.history.state?.epicDepth) || 0;
+      if (opts?.replace) window.history.replaceState({ epicDepth: at }, '', next);
+      else { window.history.pushState({ epicDepth: at + 1 }, '', next); setDepth(at + 1); }
     } else {
       if (!opts?.replace) { memoryStack.push(memoryHref); setDepth((d) => d + 1); }
       memoryHref = next;

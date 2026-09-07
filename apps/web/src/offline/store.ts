@@ -13,7 +13,12 @@
  * which decides that and is the only thing allowed to call `put`.
  */
 
-const DB = 'roam-offline';
+const DB = 'epic-offline';
+// What the database was called before the rebrand. A copy under the old name is
+// moved across the first time this one is opened and then deleted: the outbox
+// can hold writes the household made and the server has never seen, so a rename
+// that simply orphaned it would lose them.
+const OLD_DB = 'roam-offline';
 // 2: the outbox (offline/outbox.ts). Opening an older copy adds the store and
 // keeps everything already saved — an upgrade must never cost the household the
 // atlas they filled at home.
@@ -59,7 +64,7 @@ function open(): Promise<IDBDatabase | null> {
       if (!db.objectStoreNames.contains(META)) db.createObjectStore(META);
       if (!db.objectStoreNames.contains(OUTBOX)) db.createObjectStore(OUTBOX, { keyPath: 'id', autoIncrement: true });
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => { const db = req.result; adopt(db).then(() => resolve(db), () => resolve(db)); };
     // A browser in private mode, or one that has run out of room, simply has no
     // offline copy. The app must still work, so this never throws.
     req.onerror = () => resolve(null);
@@ -67,6 +72,85 @@ function open(): Promise<IDBDatabase | null> {
   });
   return opening;
 }
+
+/**
+ * Move a copy left behind under the old name into this one, once.
+ *
+ * Answers are re-fetchable and meta is small, but the outbox is not: it holds
+ * writes the household has made that the server has never seen. Existing
+ * records win, so running this twice cannot undo anything, and a failure at any
+ * point leaves the old database in place to be tried again next time.
+ */
+async function adopt(db: IDBDatabase): Promise<void> {
+  if (!available() || typeof indexedDB.databases !== 'function') return;
+  const done = await new Promise<boolean>((resolve) => {
+    let r: IDBRequest;
+    try { r = db.transaction(META, 'readonly').objectStore(META).get('adoptedFrom'); } catch { resolve(true); return; }
+    r.onsuccess = () => resolve(Boolean(r.result));
+    r.onerror = () => resolve(true);
+  });
+  if (done) return;
+  const names = await indexedDB.databases().then((l) => l.map((d) => d.name)).catch(() => [] as (string | undefined)[]);
+  if (!names.includes(OLD_DB)) { await mark(db); return; }
+
+  const old = await new Promise<IDBDatabase | null>((resolve) => {
+    let r: IDBOpenDBRequest;
+    try { r = indexedDB.open(OLD_DB); } catch { resolve(null); return; }
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => resolve(null);
+    r.onblocked = () => resolve(null);
+    // An old copy that predates the outbox must not be upgraded here: read what
+    // stores it has and leave the rest alone.
+    r.onupgradeneeded = () => { try { r.transaction?.abort(); } catch { /* nothing to read */ } resolve(null); };
+  });
+  if (!old) { await mark(db); return; }
+
+  for (const store of [ANSWERS, META, OUTBOX]) {
+    if (!old.objectStoreNames.contains(store) || !db.objectStoreNames.contains(store)) continue;
+    const rows = await new Promise<{ key: IDBValidKey; value: unknown }[]>((resolve) => {
+      const out: { key: IDBValidKey; value: unknown }[] = [];
+      let cur: IDBRequest<IDBCursorWithValue | null>;
+      try { cur = old.transaction(store, 'readonly').objectStore(store).openCursor(); } catch { resolve([]); return; }
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (!c) { resolve(out); return; }
+        out.push({ key: c.key, value: c.value });
+        c.continue();
+      };
+      cur.onerror = () => resolve(out);
+    });
+    if (!rows.length) continue;
+    await new Promise<void>((resolve) => {
+      let tx: IDBTransaction;
+      try { tx = db.transaction(store, 'readwrite'); } catch { resolve(); return; }
+      const os = tx.objectStore(store);
+      for (const { key, value } of rows) {
+        // Anything already written under the new name is the newer truth, so
+        // `add` — which fails on a clash rather than overwriting — is right for
+        // answers and meta. An outbox row drops its old id and takes a fresh
+        // one, because the two databases numbered from 1 independently and a
+        // clash there would throw away a write nobody has sent yet.
+        const row = store === OUTBOX ? { ...(value as Pending), id: undefined } : value;
+        try { (os as IDBObjectStore).add(row as never, os.keyPath ? undefined : key); } catch { /* keep going */ }
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  }
+  old.close();
+  await mark(db);
+  try { indexedDB.deleteDatabase(OLD_DB); } catch { /* it will be tidied next time */ }
+}
+
+const mark = (db: IDBDatabase) => new Promise<void>((resolve) => {
+  let tx: IDBTransaction;
+  try { tx = db.transaction(META, 'readwrite'); } catch { resolve(); return; }
+  try { tx.objectStore(META).put(new Date().toISOString(), 'adoptedFrom'); } catch { /* nothing to record */ }
+  tx.oncomplete = () => resolve();
+  tx.onerror = () => resolve();
+  tx.onabort = () => resolve();
+});
 
 function run<T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest): Promise<T | null> {
   return open().then((db) => {

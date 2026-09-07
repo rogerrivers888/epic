@@ -132,7 +132,7 @@ async function osmNear({ lat, lng, spanKm }) {
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'RoamBot/1.0 (roam activity sweep)' },
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'EpicBot/1.0 (epic activity sweep)' },
         body: new URLSearchParams({ data: q }),
         signal: AbortSignal.timeout(180_000),
       });
@@ -315,7 +315,7 @@ async function upsertSwept(slug, p, osm, owned) {
 const slugify = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
 
-/** Roam's own word for it, from what the map says first and the query second. */
+/** Epic's own word for it, from what the map says first and the query second. */
 function categoryFor(p, osm) {
   const t = osm?.tags ?? {};
   if (t.tourism === 'zoo' || t.attraction === 'animal' || t.tourism === 'aquarium') return 'animals';

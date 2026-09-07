@@ -1,4 +1,4 @@
-// The web app talks to the Roam API over HTTP and nothing else. No provider
+// The web app talks to the Epic API over HTTP and nothing else. No provider
 // key ever reaches this bundle (Technical Constraints §13.7).
 
 import { forgetCopy, recall, remember, servingSaved, warm, warmQuietly } from './offline/cache';
@@ -129,7 +129,7 @@ export type ConstraintKind = 'allergen' | 'diet' | 'dislike' | 'like';
 export type Constraint = { id: string; kind: ConstraintKind; value: string; conceptKey: string | null; conceptKind: string | null; maxMinutes?: number | null; favourite?: boolean };
 
 /**
- * Whether one person in the household can sign in to Roam, and what happened to
+ * Whether one person in the household can sign in to Epic, and what happened to
  * the last link they were sent (`/api/household`, migration 056).
  *
  * `status: 'none'` is somebody who has never been invited. `blocked` is the one
@@ -158,7 +158,7 @@ export type MemberAccess = {
  * What came back from inviting somebody who already lives in this household.
  *
  * Distinct from `Invitation` further down, which the admin module uses for a
- * friend being given a Roam of their own: that one goes out by e-mail only and
+ * friend being given an Epic of their own: that one goes out by e-mail only and
  * reports one `delivery`, this one can go by two channels at once and reports
  * what happened to each.
  */
@@ -354,7 +354,7 @@ export type Venue = {
  * so in words worth showing.
  */
 /**
- * What Roam owns about a place: the research done when the household
+ * What Epic owns about a place: the research done when the household
  * shortlisted, saved or visited it, from OpenStreetMap, the venue's own
  * published details and the open encyclopedias. None of it expires, so it is
  * the part that is on the device when there is no signal.
@@ -398,7 +398,7 @@ export type ReadMenu = {
   how: string[]; currency: string | null; note: string | null; fetchedAt: string;
   ageDays: number; stale: boolean; staleAfterDays: number; items: number; sections: MenuSection[];
 };
-/** Roam's own line about a dish, for a menu that gives only a name. */
+/** Epic's own line about a dish, for a menu that gives only a name. */
 export type DishNote = { name: string; known: boolean; what: string; origin: string | null };
 export type MenuOpeners = { html: boolean; pdf: boolean; rendered: boolean; browser: string | null; claude: boolean; staleAfterDays: number };
 /**
@@ -485,7 +485,7 @@ export type BrowseItem = Omit<OptionStop, 'position' | 'travelFromPrevMinutes' |
   pinned: boolean; ticketed?: boolean; venueName?: string | null; externalUrl?: string | null;
   shortlisted?: boolean; score?: number | null; contributingSources?: string[];
   /**
-   * A picture Roam owns, travelling as itself rather than folded into `photos`.
+   * A picture Epic owns, travelling as itself rather than folded into `photos`.
    * It has to stay separate because the two are not interchangeable: a rented
    * photo is fetched now and dropped, ours is stored; and a logo among them must
    * be drawn contained rather than stretched across a hero.
@@ -611,7 +611,7 @@ export type SearchAnswer = { near: Place; radiusKm: number; results: (Venue & { 
 export type AtlasPlace = { venueRef: string; name: string; unnamed?: boolean; kind: 'food' | 'activity' | 'other' | null; category: string | null; lat: number | null; lng: number | null; country: string | null; countryCode: string | null; locality: string | null; venue: Partial<Venue> | null; note: string | null; visits: number; lastOn: string | null; takes: { member: string; take: Take; comment: string | null; on: string }[]; ledger: string | null; onTrips: { id: string; title: string | null; on: string | null }[]; status: 'been' | 'saved' | 'special'; special: boolean; loved: number; notForMe: number;
   /** Each person's latest score out of 5 here. */ scores: { memberId: string; member: string; score: number; on: string }[];
   /** Where it is at a glance: postcode district and the nearest station with its lines; null until looked up. */ postcode: string | null; station: string | null; stationLines: string[]; stationKind: string | null; stationDistanceM: number | null; whereChecked: string | null;
-  /** The picture Roam owns for this place, if the ladder found one. */ image?: OwnedImage | null;
+  /** The picture Epic owns for this place, if the ladder found one. */ image?: OwnedImage | null;
   /** Rented: the provider's photographs, sent only where we own none, fetched at display and never stored. */ photos?: VenuePhotoRef[] | null;
   /** What a day here is like, over the closed set of six (domain/moods.js) — the Mood filter's vocabulary. */ moods?: MoodKey[];
   /** The drawer this place is filed in ("theme-parks") and its label ("Theme parks & rides") — what a row says it is, instead of repeating "Attraction". */
@@ -631,7 +631,7 @@ export type AtlasPlace = { venueRef: string; name: string; unnamed?: boolean; ki
  * the one place somebody actually adds.
  */
 /**
- * Where you want to be, when Roam is finding you somewhere to stay (design
+ * Where you want to be, when Epic is finding you somewhere to stay (design
  * handoff, 6 Sep 2026, screen 16). Three genuinely different questions, not
  * three sorts of one list.
  */
@@ -698,11 +698,11 @@ export type TripDetail = { trip: Trip; attendees: { id: string; name: string; is
 // --- group trips -----------------------------------------------------------
 // A group hangs off a trip: one organiser, a checklist of the things the trip
 // already contains, and the people who have to do them. The organiser's screen
-// leads with what is outstanding; Roam does the chasing on a schedule.
+// leads with what is outstanding; Epic does the chasing on a schedule.
 
 export type GroupItemKind = 'stay' | 'activity' | 'fee';
 export type GroupStatus = 'booked' | 'declared' | 'paid' | 'in' | 'out';
-export type GroupItemState = { status: GroupStatus; bookingRef: string | null; whereBooked: string | null; startsOn: string | null; endsOn: string | null; amountPence: number | null; note: string | null; markedBy: 'participant' | 'organiser' | 'roam'; on: string };
+export type GroupItemState = { status: GroupStatus; bookingRef: string | null; whereBooked: string | null; startsOn: string | null; endsOn: string | null; amountPence: number | null; note: string | null; markedBy: 'participant' | 'organiser' | 'epic'; on: string };
 export type GroupPricing = 'fixed' | 'variable' | null;
 export type GroupItemState2 = 'open' | 'closed' | 'cancelled';
 /**
@@ -722,9 +722,9 @@ export type GroupItem = {
   expectedCount: number | null; minimumCount: number | null; capacity: number | null;
   closesOn: string | null; lateJoiners: 'capacity' | 'no' | 'ask'; state: GroupItemState2;
   startsOn: string | null; startsAt: string | null; endsAt: string | null;
-  bookWhere: 'roam' | 'yourself' | 'there' | null; externalUrl: string | null; guestNote: string | null;
+  bookWhere: 'epic' | 'yourself' | 'there' | null; externalUrl: string | null; guestNote: string | null;
   /** Who takes the money for this one. Null follows the group's own setting. */
-  paymentMode: 'direct' | 'roam' | null;
+  paymentMode: 'direct' | 'epic' | null;
   /** Where everybody meets, searched for rather than typed into a note. */
   meet: { label: string; lat: number | null; lng: number | null } | null;
   settledPence: number | null; settledHeads: number | null; settledAt: string | null; dueOn: string | null; cancelledNote: string | null;
@@ -751,8 +751,8 @@ export type GroupItemInput = {
   expectedCount?: number | null; minimumCount?: number | null; capacity?: number | null;
   closesOn?: string | null; lateJoiners?: 'capacity' | 'no' | 'ask';
   startsOn?: string | null; startsAt?: string | null; endsAt?: string | null;
-  bookWhere?: 'roam' | 'yourself' | 'there' | null; externalUrl?: string | null; guestNote?: string | null;
-  paymentMode?: 'direct' | 'roam' | null;
+  bookWhere?: 'epic' | 'yourself' | 'there' | null; externalUrl?: string | null; guestNote?: string | null;
+  paymentMode?: 'direct' | 'epic' | null;
   meet?: { label: string; lat?: number | null; lng?: number | null } | null;
 };
 /** One of the household's groups, as the Who's coming row and the Trips filter both need it. */
@@ -765,7 +765,7 @@ export type GroupSummary = {
 };
 export type TripGroup = {
   group: { id: string; tripId: string; name: string | null; expectedCount: number | null; minimumCount: number | null; maximumCount: number | null; wantedBy: string | null; inviteToken: string; closed: boolean; remindersOn: boolean; cadence: string; setupDone: boolean; firstReminderOn: string | null; cancelledAt: string | null; cancelledNote: string | null;
-    paymentMode: 'direct' | 'roam';
+    paymentMode: 'direct' | 'epic';
     invite: { coverKind: 'banner' | 'full'; coverUrl: string | null; coverSource: string | null; title: string | null; summary: string | null; howItWorks: string[] } };
   trip: { id: string; title: string | null; place: string | null; startDate: string | null; endDate: string | null; base: { label: string; kind: string | null } | null };
   items: GroupItem[]; participants: GroupParticipant[];
@@ -776,7 +776,7 @@ export type TripGroup = {
 };
 /** What the invite link opens: the checklist, and nothing about anybody else. */
 export type JoinView = {
-  group: { name: string | null; wantedBy: string | null; closed: boolean; cancelled: boolean; cancelledNote: string | null; organiser: string | null; expectedCount: number | null; minimumCount: number | null; maximumCount: number | null; joined: number; heads: number; paymentMode: 'direct' | 'roam'; canSendCode: boolean };
+  group: { name: string | null; wantedBy: string | null; closed: boolean; cancelled: boolean; cancelledNote: string | null; organiser: string | null; expectedCount: number | null; minimumCount: number | null; maximumCount: number | null; joined: number; heads: number; paymentMode: 'direct' | 'epic'; canSendCode: boolean };
   /** The landing page as the organiser wrote it; everything else is drawn from the group. */
   invite: { coverKind: 'banner' | 'full'; coverUrl: string | null; title: string | null; summary: string | null; howItWorks: string[]; placesLeft: number | null };
   trip: { title: string | null; place: string | null; startDate: string | null; endDate: string | null; base: { label: string } | null };
@@ -791,7 +791,7 @@ export type JoinView = {
   participantToken?: string;
 };
 
-/** What a guest gets for joining: their own Roam, on trial, signed in on this device. */
+/** What a guest gets for joining: their own Epic, on trial, signed in on this device. */
 export type GuestAccount = {
   id: string; name: string; email: string | null; mobile: string | null;
   householdId: string | null; plan: string | null; trialEndsOn: string | null; returning: boolean;
@@ -904,7 +904,7 @@ export type Mood = {
  * changing a chip never asks a provider anything (Requirements: one pool).
  */
 /**
- * A photograph Roam owns outright — harvested from Wikimedia Commons under a
+ * A photograph Epic owns outright — harvested from Wikimedia Commons under a
  * licence that lets us keep and republish it. `lqip` is a 20px JPEG as a data
  * URI, about 500 bytes, so a card paints before the network is touched.
  *
@@ -917,7 +917,7 @@ export type OwnedImage = {
   /**
    * Which rung of the ladder found it (sources/placePicture.js), because a card
    * must not draw all of them the same way. A photograph fills its tile; a
-   * `logo` is a business's mark and is contained on the mint ground with room
+   * `logo` is a business's mark and is contained on the lime ground with room
    * around it, or it comes out cropped into an abstract smear.
    */
   source: 'wikimedia' | 'logo' | 'kartaview' | 'mapillary' | 'household' | 'upload' | string;
@@ -1137,7 +1137,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `roam-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `epic-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1239,7 +1239,7 @@ export const api = {
       sourceError?: string | null;
       /** Opening it started the research that had not been done. The drawer comes back for the answer. */
       researching?: boolean }>(`/api/places/detail${qs({ ref: venueRef })}`),
-  /** What Roam owns about these places — no provider is called, and this answer keeps. */
+  /** What Epic owns about these places — no provider is called, and this answer keeps. */
   placeRecords: (venueRefs: string[]) => request<{ records: Record<string, OwnedRecord>; missing: string[] }>(`/api/places/record${qs({ refs: venueRefs.join(',') })}`),
   /** Research a place again now (Settings, and "look again" in the drawer). */
   researchPlace: (venueRef: string) => post<{ state: string; fields: number; matched: Record<string, any>; problems: string[]; record: OwnedRecord | null }>('/api/places/record', { ref: venueRef }),
@@ -1271,7 +1271,7 @@ export const api = {
   updateGroup: (id: string, body: Partial<{
     name: string; expectedCount: number | null; minimumCount: number | null; maximumCount: number | null;
     wantedBy: string | null; remindersOn: boolean; cadence: string; closed: boolean; newLink: boolean;
-    setupDone: boolean; firstReminderOn: string | null; paymentMode: 'direct' | 'roam';
+    setupDone: boolean; firstReminderOn: string | null; paymentMode: 'direct' | 'epic';
     coverKind: 'banner' | 'full'; coverUrl: string | null; coverSource: string | null;
     inviteTitle: string; inviteSummary: string; howItWorks: string[];
   }>) => patch<TripGroup>(`/api/groups/${id}`, body),
@@ -1402,7 +1402,7 @@ export const api = {
   /** What one run did, by the number shown on screen: what was asked, how long, and every call it made. */
   planRun: (ref: string) => request<{ ref: string; sessionId: string; kind: string; asked: any; startedAt: string; seconds: number; stage: string; running: boolean; error: string | null; answered: { title: string; pinned: boolean }[] | null; calls: { provider: string; purpose: string; units: any; costUsd: number | null; at: string; afterSeconds: number }[] }>(`/api/plan/runs/${ref}`),
   inspireThings: (q: { lat: number; lng: number; label: string; locality?: string }) => request<{ items: IdeaThing[]; headline: IdeaHeadline | null; cached?: boolean; tookMs?: number }>(`/api/plan/inspire/things${qs(q)}`),
-  /** Things to do and see: the idea becomes a day out in Trips, what Roam named already shortlisted. */
+  /** Things to do and see: the idea becomes a day out in Trips, what Epic named already shortlisted. */
   inspireTrip: (body: { sessionId: string; ideaId: string; attendingMemberIds?: string[] | null }) => post<{ tripId: string; title: string; date: string; seeded: string[]; reply: string; existing: boolean }>('/api/plan/inspire/trip', body),
   /** The family's table: the best places for the food the people coming love. Runs in the background like Inspire me. */
   tastes: (body: { brief: string; moods: string[]; maxTravelMinutes: number | null; budget?: IdeaBudget; attendingMemberIds?: string[] | null }) => post<TastesResponse>('/api/plan/tastes', body),
@@ -1421,7 +1421,7 @@ export const api = {
   planLatestForDay: (tripId: string, dayId: string) => request<PlanResponse & { sessionId: string | null }>(`/api/plan/day/latest${qs({ tripId, dayId })}`),
 
   // offline
-  /** What is worth having on the device, and how much of the research Roam owns. */
+  /** What is worth having on the device, and how much of the research Epic owns. */
   offlineManifest: () => request<OfflineManifest>('/api/offline/manifest'),
   /** Every owned record for this household's places, in one request. */
   offlineRecords: () => request<{ records: Record<string, OwnedRecord>; count: number; terms: string; generatedAt: string }>('/api/offline/records'),
@@ -1488,13 +1488,13 @@ export const api = {
 
   /**
    * "E-mail me a link." Answers the same whether or not the address has an
-   * account, so it cannot be used to find out who else uses Roam.
+   * account, so it cannot be used to find out who else uses Epic.
    */
   requestSignInLink: (email: string) => post<{ sent: boolean; message: string }>('/api/session/request-link', { email }),
 
   // --- the admin module: only the owner's API answers any of these ----------
 
-  /** Everybody who has Roam, with what they are on and what they have spent. */
+  /** Everybody who has Epic, with what they are on and what they have spent. */
   accounts: () => request<AccountsResponse>('/api/accounts'),
   /** One of them, with the sign-ins behind the count. */
   account: (id: string) => request<{ account: Account; signIns: { id: string; method: string; label: string | null; at: string }[]; lastInvite: AccountInvite | null }>(`/api/accounts/${id}`),
@@ -1797,7 +1797,7 @@ export type PlaceContent = {
 export type LibraryAttractionDetail = LibraryAttraction & {
   kinds: string[];
   accolades: { key: string; label: string; source: string }[];
-  acclaim: number; band: string | null; roam_score: number;
+  acclaim: number; band: string | null; epic_score: number;
   sections: { heading: string | null; level: number; text: string; doing: boolean }[] | null;
   highlights: { name: string; kind: string; note: string | null; price: string | null; hours: string | null; sourceUrl: string }[] | null;
   admission: Record<string, any> | null;
@@ -1818,7 +1818,7 @@ export type LibraryImage = {
   lqip: string | null; moderation: 'approved' | 'pending' | 'rejected'; moderation_note: string | null;
   reward_points: number; fetched_at: string; contributor_account_id: string | null;
   widths: number[] | null; held_bytes: string | number;
-  /** What Roam files the place under: heritage, outdoors, family, museum, arts, animals, active, landmark. */
+  /** What Epic files the place under: heritage, outdoors, family, museum, arts, animals, active, landmark. */
   categories: string | null;
   links: { type: string; id: string; role: string; label: string | null }[] | null;
   relevance?: number;
@@ -1925,7 +1925,7 @@ export type CoverageRow = {
 };
 
 /**
- * What Roam proposes when you say why a category is wrong.
+ * What Epic proposes when you say why a category is wrong.
  *
  * It proposes and never writes — the same rule the shelf teaching already
  * holds to, because a categorisation nobody read is the silent guessing the
@@ -1969,7 +1969,7 @@ export type MenuCause = {
 export type BenchRow = {
   venueRef: string;
   name: string | null;
-  roamScore: number | null;
+  epicScore: number | null;
   ownedScore: number | null;
   ourRank: number | null;
   theirRank: number | null;
@@ -2107,7 +2107,7 @@ export type HarvestRun = {
   error: string | null; started_by: string | null; started_at: string; finished_at: string | null;
 };
 
-/** The postcode areas Roam has swept, and how well each went (migration 035). */
+/** The postcode areas Epic has swept, and how well each went (migration 035). */
 export type ScoutArea = {
   code: string;
   label: string | null;
@@ -2152,7 +2152,7 @@ export type ScoutPlace = {
   researched: boolean;
 };
 
-/** A menu Roam could not read, and the reason — the work list, not an empty tab. */
+/** A menu Epic could not read, and the reason — the work list, not an empty tab. */
 export type ScoutMenuMiss = {
   venue_ref: string;
   venue_label: string | null;
@@ -2256,7 +2256,7 @@ export type AdminOverview = {
   daily: DailyRow[];
   screens: ScreenRow[];
   feed: FeedRow[];
-  /** Roam is an installable web app, not a store listing: added, and opened from a home screen. */
+  /** Epic is an installable web app, not a store listing: added, and opened from a home screen. */
   installs: { added_ever: number; added_window: number; households_standalone: number; opens_window: number };
   money: MoneyBlock | null;
   withheld: string[];

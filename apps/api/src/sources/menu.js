@@ -28,7 +28,7 @@ export const MENU_ATTRIBUTION = 'Read from the venue’s own menu';
 const CACHE_TTL_MS = 6 * 3600_000;
 // The month's purse for menu reads (each ≈ $0.05–0.20), separate from the
 // scout's and from the Anthropic workspace limit, which remains the hard stop.
-export const MENU_CHECKS_MONTHLY = Number(process.env.ROAM_MENU_CHECKS_MONTHLY || 120);
+export const MENU_CHECKS_MONTHLY = Number(process.env.EPIC_MENU_CHECKS_MONTHLY || 120);
 
 const cache = new Map();
 const inflight = new Map();
@@ -37,7 +37,7 @@ export const menuCheckEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY?.tri
 
 async function assertMenuBudget(householdId) {
   const n = await providerCalls.countOfPurpose(householdId, 'claude', 'menu.check');
-  if (n >= MENU_CHECKS_MONTHLY) throw new Error(`menu reading paused: ${n} of ${MENU_CHECKS_MONTHLY} reads used this month (ROAM_MENU_CHECKS_MONTHLY)`);
+  if (n >= MENU_CHECKS_MONTHLY) throw new Error(`menu reading paused: ${n} of ${MENU_CHECKS_MONTHLY} reads used this month (EPIC_MENU_CHECKS_MONTHLY)`);
   return n;
 }
 
@@ -118,7 +118,7 @@ export async function checkMenu({ householdId, sessionId = null, venue, dish = n
 
     const { text } = await searchWeb({ system: SYSTEM, prompt, householdId, sessionId, purpose: 'menu.check', maxSearches: 4, maxFetches: 5 });
     const raw = extractJson(text);
-    if (!raw) throw new Error('The menu reader did not answer in a form Roam could read — try again.');
+    if (!raw) throw new Error('The menu reader did not answer in a form Epic could read — try again.');
     const value = {
       checked: raw.checked === true,
       menuUrl: line(raw.menu_url, 300),

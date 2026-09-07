@@ -157,7 +157,7 @@ export const AttractionFacts = z.object({
  * region takes to read. Within one run the prompt is constant and every place
  * after the first is a cache read.
  */
-const BASE = `You are reading about a place to go, for Roam — a trip planner used by one family at a time to decide what to do this weekend.
+const BASE = `You are reading about a place to go, for Epic — a trip planner used by one family at a time to decide what to do this weekend.
 
 You will be given everything we hold about one attraction: the Wikipedia article in sections, a travel guide entry where one exists, what OpenStreetMap records about it, and what the venue publishes on its own site. You fill in a form about it.
 
@@ -181,7 +181,7 @@ Rules that matter more than fluency:
 
 7. WRITE LIKE A PERSON. Short sentences. No marketing ("nestled", "a hidden gem", "something for everyone"), no hedging stacks ("may possibly offer"). If you would not say it out loud to a friend, do not write it.
 
-8. THE MODEL DOES NOT SET PRICES. Admission is read from the venue's own page elsewhere in Roam and is not your job. If the sources mention a price, put it in missing as something to verify rather than in a field.`;
+8. THE MODEL DOES NOT SET PRICES. Admission is read from the venue's own page elsewhere in Epic and is not your job. If the sources mention a price, put it in missing as something to verify rather than in a field.`;
 
 /** The lessons, as an instruction block, in the order they should be read. */
 export function lessonBlock(lessons = []) {
@@ -201,7 +201,7 @@ export function lessonBlock(lessons = []) {
     '',
     '---',
     '',
-    'The owner of Roam has reviewed earlier readings and corrected them. These are his corrections. Where one of them conflicts with the general rules above, his correction wins — he is describing what he wants, and the rules above are only the starting point.',
+    'The owner of Epic has reviewed earlier readings and corrected them. These are his corrections. Where one of them conflicts with the general rules above, his correction wins — he is describing what he wants, and the rules above are only the starting point.',
     ...lines,
   ].join('\n');
 }
@@ -247,7 +247,7 @@ export function briefFor(a, detail = {}, contents = []) {
   const lines = [
     `PLACE: ${a.name}`,
     `WHERE: ${a.region_name ?? a.region_slug}`,
-    a.category ? `ROAM CALLS IT: ${a.category}` : null,
+    a.category ? `EPIC CALLS IT: ${a.category}` : null,
     a.heritage ? `DESIGNATED: ${a.heritage}` : null,
     (a.accolades ?? []).length ? `ALSO: ${(a.accolades ?? []).map((x) => x.label).join(', ')}` : null,
     '',
@@ -384,7 +384,7 @@ export function hashOf(text) {
  * could not be looked at separately when one of them is wrong. The prose is
  * kept for exactly that reason.
  */
-const VENUE_SYSTEM = `You are researching a family attraction for Roam, a trip planner, so that a parent can decide whether to take the family there on Saturday.
+const VENUE_SYSTEM = `You are researching a family attraction for Epic, a trip planner, so that a parent can decide whether to take the family there on Saturday.
 
 You will be given a venue's name, roughly where it is, and usually its own website. Search for it and read its own pages. Report what you find, in plain prose, under these headings:
 
@@ -397,7 +397,7 @@ WHEN IT IS OPEN — hours and season, and whether booking is needed.
 PRACTICALITIES — parking, food, indoors or out, wheelchair access, whether it is worth going in the rain.
 WHAT YOU COULD NOT FIND — say so plainly rather than filling gaps.
 
-Rules. Use the venue's own site first and say when a fact came from somewhere else. Quote prices and hours rather than summarising them. Do not use review-site ratings or review text — those are somebody else's property and Roam may not keep them. If the venue appears to have closed, say so and stop. If you cannot find the place at all, say that in one line and stop; do not describe a different place with a similar name.`;
+Rules. Use the venue's own site first and say when a fact came from somewhere else. Quote prices and hours rather than summarising them. Do not use review-site ratings or review text — those are somebody else's property and Epic may not keep them. If the venue appears to have closed, say so and stop. If you cannot find the place at all, say that in one line and stop; do not describe a different place with a similar name.`;
 
 /**
  * Research one venue that has no article, then fill in the same form.
@@ -444,7 +444,7 @@ export async function readVenueFromWeb({
   const facts = await parseStructured({
     meta: spend,
     system: systemFor({ lessons, examples }),
-    messages: [{ role: 'user', content: `PLACE: ${name}\nWHERE: ${locality ?? 'England'}\n${kindLabel ? `ROAM CALLS IT: ${kindLabel}\n` : ''}\n--- WHAT THE RESEARCH FOUND ---\n${found.text}` }],
+    messages: [{ role: 'user', content: `PLACE: ${name}\nWHERE: ${locality ?? 'England'}\n${kindLabel ? `EPIC CALLS IT: ${kindLabel}\n` : ''}\n--- WHAT THE RESEARCH FOUND ---\n${found.text}` }],
     schema: AttractionFacts,
     householdId, sessionId: null, purpose: 'atlas.venue.read',
     effort, maxTokens: 4096,

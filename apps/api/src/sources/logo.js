@@ -206,6 +206,6 @@ export const LOGO_BASIS = {
   licence: 'Trade mark — shown to identify the business',
   licenceUrl: null,
   usageTerms: 'Not a copyright licence. The mark belongs to the business and is drawn only on that business’s own card, to identify it.',
-  restrictions: 'Trade mark of the business. Referential use only: never on another place, never as Roam’s own mark, never altered.',
+  restrictions: 'Trade mark of the business. Referential use only: never on another place, never as Epic’s own mark, never altered.',
   attributionRequired: false,
 };

@@ -197,9 +197,9 @@ test('with no Twilio key configured the invitation says so rather than pretendin
 test('the text says who it is from before it says anything else', () => {
   // A link that arrives with no name on it looks exactly like the thing people
   // are told never to tap.
-  const body = invitationText({ name: 'Gina', url: 'https://roam.example/?signin=abc', from: 'Roger' });
+  const body = invitationText({ name: 'Gina', url: 'https://epic.example/?signin=abc', from: 'Roger' });
   assert.match(body, /^Hi Gina\. Roger has/);
-  assert.ok(body.includes('https://roam.example/?signin=abc'));
+  assert.ok(body.includes('https://epic.example/?signin=abc'));
   assert.ok(body.length < 320, `a text is short; this one was ${body.length} characters`);
 });
 
@@ -302,13 +302,13 @@ test('nothing set at all is a different fact from something set', async () => {
 });
 
 test('an alphanumeric sender is a sender, not a number to be normalised', async () => {
-  // The way round the UK long-code bundle: "Roam" as the sender name, which
+  // The way round the UK long-code bundle: "Epic" as the sender name, which
   // needs no number bought and cannot receive a reply — which an invitation
   // does not need. It must reach Twilio as typed.
-  await withEnv({ TWILIO_ACCOUNT_SID: 'AC' + '9'.repeat(32), TWILIO_AUTH_TOKEN: 'secret', TWILIO_FROM: 'Roam' }, () => {
+  await withEnv({ TWILIO_ACCOUNT_SID: 'AC' + '9'.repeat(32), TWILIO_AUTH_TOKEN: 'secret', TWILIO_FROM: 'Epic' }, () => {
     const status = smsStatus();
     assert.equal(status.configured, true);
-    assert.equal(status.from, 'Roam');
+    assert.equal(status.from, 'Epic');
   });
 });
 

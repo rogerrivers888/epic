@@ -1,5 +1,5 @@
 /**
- * The business side of the back office: what Roam earns, what it costs to run,
+ * The business side of the back office: what Epic earns, what it costs to run,
  * and what that leaves.
  *
  * Two honesty rules, both taken from the Parcelvision reporting suite the owner
@@ -8,10 +8,10 @@
  *  - **A gap is labelled, never drawn as a zero.** PV's revenue screen says in
  *    as many words that subscription revenue is absent because Stripe is not
  *    connected, rather than showing £0 and letting somebody read it as "nobody
- *    is paying". Roam has no payment provider at all, so every figure here is
+ *    is paying". Epic has no payment provider at all, so every figure here is
  *    *contracted* revenue — what the plans people are on are priced at — and the
  *    screens say so. Cash collected is not knowable from this database.
- *  - **Cost is real.** `provider_calls` is Roam's own ledger of its own
+ *  - **Cost is real.** `provider_calls` is Epic's own ledger of its own
  *    spending, written on every outbound call, so cost per household is measured
  *    rather than apportioned.
  */
@@ -25,7 +25,7 @@ import { query } from '../db.js';
 /**
  * Monthly recurring revenue, by plan, as it stands today.
  *
- * Suspended accounts are excluded: they cannot use Roam, so counting them as
+ * Suspended accounts are excluded: they cannot use Epic, so counting them as
  * revenue would flatter every figure derived from this one. `unpriced` is the
  * count of active households on a plan with no price — trials and friends —
  * because "how many people use this for free" is a business number too.

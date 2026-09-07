@@ -2,7 +2,7 @@
  * Every statement about `api_sessions`, and the only file that holds one.
  *
  * The estate's engineering standard is that all SQL lives in `repositories/`
- * and none anywhere else. Roam does not meet that yet — there are 360 query
+ * and none anywhere else. Epic does not meet that yet — there are 360 query
  * sites across the routes — but the door is new code, so it starts in the right
  * place rather than adding to the pile the extraction will have to move.
  */

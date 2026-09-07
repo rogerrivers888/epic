@@ -26,7 +26,7 @@ import { Platform } from 'react-native';
  * it would only produce a 404.
  */
 
-const PREFIX = 'roam.screen.';
+const PREFIX = 'epic.screen.';
 const LIFE_MS = 12 * 3600_000;
 
 const store = (): Storage | null =>

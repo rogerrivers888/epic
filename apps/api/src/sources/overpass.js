@@ -36,10 +36,10 @@ const DEFAULT = [
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
 
-export const ENDPOINTS = (process.env.ROAM_OVERPASS_URLS || DEFAULT.join(','))
+export const ENDPOINTS = (process.env.EPIC_OVERPASS_URLS || DEFAULT.join(','))
   .split(',').map((u) => u.trim()).filter(Boolean);
 
-export const UA = 'Roam/0.1 (+https://github.com/rogerrivers888/roam)';
+export const UA = 'Epic/0.1 (+https://github.com/rogerrivers888/epic)';
 
 // A mirror that rate-limits us stops answering altogether for a while. Asking
 // it again every time costs the full timeout on every call and is rude besides,

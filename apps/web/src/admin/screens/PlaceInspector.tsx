@@ -6,7 +6,7 @@
  * there."
  *
  * So Edit on the Category row does not open a dropdown. It opens a box you say
- * a sentence into, and Roam comes back with what it heard, which type it thinks
+ * a sentence into, and Epic comes back with what it heard, which type it thinks
  * the rule belongs on, and **how far saving it would travel** — "41 places
  * across 19 counties" — while there is still time to disagree. Nothing is
  * written until Save.
@@ -18,7 +18,7 @@
  * **Two axes, kept apart.** The category says what a place *is*; the shelf says
  * what a day there is *like*. A sentence often implies both, so both are
  * offered — but they are two saves against two tables and the panel says which
- * is which. Roam has been bitten by conflating them before.
+ * is which. Epic has been bitten by conflating them before.
  *
  * It is a column rather than a Modal on purpose: a portal has to pin itself to
  * the phone frame (CLAUDE.md) and there is nothing here that needs to float.
@@ -34,7 +34,7 @@ import { Button, Chip, Row, Wrap } from '../../components/ui';
 import { AdminPage, Banner, Panel, Pill, count, plural } from '../kit';
 import { MOODS } from '../../routes';
 
-/** Roam's own eight words, for the fallback when there is no Claude key. */
+/** Epic's own eight words, for the fallback when there is no Claude key. */
 const CATEGORIES = ['heritage', 'outdoors', 'museum', 'family', 'arts', 'animals', 'active', 'landmark'];
 
 /** Only the two strongest shelves at or above the floor ever draw a card. */
@@ -140,7 +140,7 @@ export function PlaceInspector({ id, onClose, onChanged }: {
               <Text style={type.tiny}>{plural(row.images.length, 'picture')} held, with the credit each one carries.</Text>
             </>
           ) : (
-            <Text style={[type.small, { color: colors.overrun }]}>No picture — a household sees the category icon on mint.</Text>
+            <Text style={[type.small, { color: colors.overrun }]}>No picture — a household sees the category icon on lime.</Text>
           )}
         </View>
       </View>
@@ -249,7 +249,7 @@ function Teach({ row, onCancel, onSaved }: {
 
       {proposal ? (
         <>
-          <Text style={styles.legend}>What Roam heard</Text>
+          <Text style={styles.legend}>What Epic heard</Text>
           <Text style={type.small}>{proposal.reason}</Text>
 
           <Text style={styles.legend}>File it as</Text>
@@ -338,7 +338,7 @@ function Teach({ row, onCancel, onSaved }: {
 
 const styles = StyleSheet.create({
   hero: { height: 130, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.well, justifyContent: 'flex-end' },
-  credit: { ...type.tiny, color: '#fff', opacity: 0.9, padding: 5, textAlign: 'right' },
+  credit: { ...type.tiny, color: colors.bg, opacity: 0.9, padding: 5, textAlign: 'right' },
 
   fact: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',

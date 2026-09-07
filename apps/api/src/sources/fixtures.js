@@ -181,7 +181,7 @@ function matchesQuery(venue, q) {
  */
 export const fixturesSource = {
   key: 'fixtures',
-  label: 'Roam fixtures (development only)',
+  label: 'Epic fixtures (development only)',
   // Real sources carry per-field retention; fixtures are ours, so nothing expires.
   retention: { placeId: 'indefinite', displayFields: 'indefinite' },
   attribution: { text: 'Local fixture data — not a licensed source', requiresAuthorCredit: false },

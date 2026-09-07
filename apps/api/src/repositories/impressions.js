@@ -1,7 +1,7 @@
 /**
  * The evidence a source is earning its place.
  *
- * Every venue Roam shows is recorded against the source that supplied it, and
+ * Every venue Epic shows is recorded against the source that supplied it, and
  * every one the household then acts on is marked selected. Without it there is
  * never evidence to drop a source (Technical Constraints §2), which is the
  * whole reason the table exists.

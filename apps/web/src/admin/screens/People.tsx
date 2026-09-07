@@ -1,7 +1,7 @@
 /**
  * People — every household, what they are on, and what they have been doing.
  *
- * The table is Parcelvision's Users screen in Roam's tokens: filters in one row
+ * The table is Parcelvision's Users screen in Epic's tokens: filters in one row
  * above it, sortable columns, a status pill, and a **drawer for the record**
  * rather than a second page. The drawer is the drill-down the owner asked to
  * mirror — everything about one household in one place, opened from the row and
@@ -46,7 +46,7 @@ export function People({ canManageRoles }: { canManageRoles: boolean }) {
 
   const load = useCallback(async () => {
     try { setData(await api.adminPeople(days)); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, [days]);
   useEffect(() => { void load(); }, [load]);
@@ -115,7 +115,7 @@ export function People({ canManageRoles }: { canManageRoles: boolean }) {
     <AdminPage>
       <PageHead
         title="Households"
-        sub="Every household with Roam, what they do in it, and what they cost. Tap one to open its record."
+        sub="Every household with Epic, what they do in it, and what they cost. Tap one to open its record."
         right={<RangePicker days={days} onDays={setDays} />}
       />
 
@@ -189,7 +189,7 @@ function PersonDrawer({ id, days, roles, canManageRoles, onClose, onChanged }: {
 
   const load = useCallback(async () => {
     try { setRecord(await api.adminPerson(id, days)); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, [id, days]);
   useEffect(() => { void load(); }, [load]);
@@ -222,13 +222,13 @@ function PersonDrawer({ id, days, roles, canManageRoles, onClose, onChanged }: {
           {b ? (
             <>
               <TileRow>
-                <Tile label="Time in Roam" value={duration(Number(b.summary.seconds_window ?? 0))} sub={`last ${days} days`} tone="accent" />
+                <Tile label="Time in Epic" value={duration(Number(b.summary.seconds_window ?? 0))} sub={`last ${days} days`} tone="accent" />
                 <Tile label="Days active" value={count(Number(b.summary.days_active ?? 0))} sub={`of the last ${days}`} />
                 <Tile label="Places" value={count(Number(b.summary.places ?? 0))} sub={`${b.summary.places_window ?? 0} added lately`} />
                 <Tile label="Trips" value={count(Number(b.summary.trips ?? 0))} sub={`${b.summary.visits ?? 0} visits · ${b.summary.ratings ?? 0} ratings`} />
               </TileRow>
 
-              <Panel title="Time in Roam" sub={`By day, last ${days} days.`}>
+              <Panel title="Time in Epic" sub={`By day, last ${days} days.`}>
                 <Columns
                   points={b.daily.map((d) => ({ label: new Date(d.day).toLocaleDateString([], { day: 'numeric', month: 'short' }), value: d.seconds }))}
                   format={duration}
@@ -252,7 +252,7 @@ function PersonDrawer({ id, days, roles, canManageRoles, onClose, onChanged }: {
                         <Text style={type.tiny}>{f.kind}{f.detail ? ` · ${f.detail}` : ''} · {ago(f.at)}</Text>
                       </View>
                     </Row>
-                  )) : <Text style={type.small}>They have not done anything in Roam yet.</Text>}
+                  )) : <Text style={type.small}>They have not done anything in Epic yet.</Text>}
                 </View>
               </Panel>
             </>
@@ -260,7 +260,7 @@ function PersonDrawer({ id, days, roles, canManageRoles, onClose, onChanged }: {
             <Withheld what="What this household has been doing" capability="view_activity" />
           )}
 
-          <Panel title="The household" sub="Who Roam is planning for.">
+          <Panel title="The household" sub="Who Epic is planning for.">
             {record.members.length ? (
               <View style={{ gap: 4 }}>
                 {record.members.map((m) => (

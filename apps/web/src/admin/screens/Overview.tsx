@@ -26,7 +26,7 @@ import { Columns, RankedBars } from '../charts';
 /** What each daily measure is called, and how it reads. One at a time: never two y-axes. */
 const MEASURES = [
   { key: 'households', label: 'Households here', format: (n: number) => String(n) },
-  { key: 'seconds', label: 'Time in Roam', format: duration },
+  { key: 'seconds', label: 'Time in Epic', format: duration },
   { key: 'places', label: 'Places saved', format: (n: number) => String(n) },
   { key: 'trips', label: 'Trips planned', format: (n: number) => String(n) },
 ] as const;
@@ -43,7 +43,7 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
 
   const load = useCallback(async () => {
     try { setData(await api.adminOverview(days)); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, [days]);
   useEffect(() => { void load(); }, [load]);
@@ -79,7 +79,7 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
               value={`${data.active.stickiness}%`}
               sub="of the month's households were here today"
             />
-            <Tile label="Time in Roam" value={duration(data.active.seconds_30d)} sub="last 30 days, everybody" />
+            <Tile label="Time in Epic" value={duration(data.active.seconds_30d)} sub="last 30 days, everybody" />
             <Tile label="Places saved" value={count(data.totals.places)} sub={`${data.totals.trips} trips · ${data.totals.visits} visits`} />
             <Tile
               label="Joined this month"
@@ -87,7 +87,7 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
               sub={`${data.totals.invited} invited, not in yet`}
               tone={data.totals.invited > 0 ? 'warn' : 'plain'}
             />
-            {/* Roam has no App Store listing — it is an installable web app — so
+            {/* Epic has no App Store listing — it is an installable web app — so
                 this is the honest version of that figure rather than a borrowed one. */}
             <Tile
               label="Installed"
@@ -157,7 +157,7 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
           {data.money ? (
             <Panel
               title="Contracted revenue"
-              sub="What the plans people were on were priced at, month by month. Nothing here has been collected — Roam holds no payment provider."
+              sub="What the plans people were on were priced at, month by month. Nothing here has been collected — Epic holds no payment provider."
             >
               <Columns
                 points={data.money.revenue.map((r) => ({ label: monthLabel(r.month), value: r.revenue_pence, hint: plural(r.households, 'household') }))}

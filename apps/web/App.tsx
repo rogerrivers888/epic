@@ -1,8 +1,11 @@
+// First, and deliberately: it moves this device's stored keys from `roam.` to
+// `epic.` before any module below reads one. See src/rename.ts.
+import './src/rename';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, SafeAreaView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { api, API_URL, HouseholdResponse } from './src/api';
-import { colors, radius, spacing, TARGET, type } from './src/theme';
+import { colors, radius, spacing, TARGET, type, BORDER, INK } from './src/theme';
 import { useTheme } from './src/hooks/useTheme';
 import { getViewer, onViewerChange } from './src/viewer';
 import { Avatar } from './src/components/Faces';
@@ -27,10 +30,10 @@ import { Icon, IconName } from './src/components/Icon';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { isFullBleed, isImmersive, legacyHref, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
 
-// Roam opens on Inspire (owner, 5 Sep 2026, "Supporting docs/Roam Inspire"):
+// Epic opens on Inspire (owner, 5 Sep 2026, "Supporting docs/Roam Inspire"):
 // what there is to do, with one search bar above it. The conversational planner
 // is still there and still has an address — /plan, and the door at the foot
-// of the search screen — it is simply no longer the first thing Roam says.
+// of the search screen — it is simply no longer the first thing Epic says.
 const TABS: { key: Tab; label: string; icon: IconName; href: string; owner?: true }[] = [
   { key: 'inspire', label: 'Inspire', icon: 'inspire', href: paths.inspire() },
   { key: 'places', label: 'Places', icon: 'places', href: paths.places() },
@@ -47,7 +50,7 @@ const DESKTOP = 900;
 // desktop layout at full width; "Mobile" draws the whole app inside a phone-sized
 // frame so every screen shows how it will look on the phone. The choice sticks.
 type ViewMode = 'web' | 'mobile';
-const VIEW_KEY = 'roam.viewMode';
+const VIEW_KEY = 'epic.viewMode';
 const PHONE = { width: 390, height: 844 };
 const TOOLBAR = 44;
 const BEZEL = 10;
@@ -147,7 +150,7 @@ function Frame() {
  * anything else is drawn.
  *
  * A scanned code (`/order/<token>`) is the same shape: a waiter's door into one
- * table's dinner, answered without a session and drawn without any of Roam's
+ * table's dinner, answered without a session and drawn without any of Epic's
  * chrome, because the person reading it is at work.
  *
  * An invite link (`/join/<token>`) is somebody else's door into one trip: the
@@ -155,7 +158,7 @@ function Frame() {
  * It is never behind the passcode, because the API treats it as public too
  * (auth.js), and it is read here so a participant never lands in Plan.
  *
- * The addresses Roam used to have (`/?tab=trips&trip=…`, `/?join=…`) are
+ * The addresses Epic used to have (`/?tab=trips&trip=…`, `/?join=…`) are
  * answered once and replaced with the ones it has now: the owner keeps some of
  * them on his phone, and invite links went to people who have never heard of us.
  */
@@ -176,7 +179,7 @@ function Routed() {
 
   const route = useMemo(() => parseRoute(path), [path]);
 
-  // A window full of Roam is otherwise seven identical browser tabs.
+  // A window full of Epic is otherwise seven identical browser tabs.
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     document.title = titleOf(route);
@@ -194,7 +197,7 @@ function Routed() {
 /**
  * The passcode, then the app.
  *
- * Roam's API answered anybody until 4 Sep 2026; it now wants a session for
+ * Epic's API answered anybody until 4 Sep 2026; it now wants a session for
  * everything except health, the invite link and the door itself. This is the
  * door on the app's side of that.
  *
@@ -257,7 +260,7 @@ function Gate({ route }: { route: Route }) {
   return <Shell route={route} isOwner={isOwner} mayAdminister={mayAdminister} />;
 }
 
-/** An address that is not a page — mistyped, or one Roam used to have and no longer does. */
+/** An address that is not a page — mistyped, or one Epic used to have and no longer does. */
 function NotHere({ title, body, href }: { title: string; body: string; href: string }) {
   const { navigate } = useRouter();
   return (
@@ -279,7 +282,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
   const desktop = width >= DESKTOP;
   const tab = tabOf(route);
   /**
-   * A screen that draws to every edge: no mint band above it, and the tab bar
+   * A screen that draws to every edge: no lime band above it, and the tab bar
    * over it rather than under it. A trip is one, because the trip is a map now.
    */
   const fullBleed = !desktop && isFullBleed(route);
@@ -422,7 +425,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {route.name === 'unknown' ? (
         <NotHere
           title="There is no page at that address"
-          body={`Roam has nothing at ${route.path}. It may be a link from an older version of the app, or a typo.`}
+          body={`Epic has nothing at ${route.path}. It may be a link from an older version of the app, or a typo.`}
           href={paths.inspire()}
         />
       ) : null}
@@ -486,7 +489,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
         {desktop ? (
           <View style={styles.sidebar}>
             <View style={styles.sideBrand}><Wordmark height={44} ground={colors.surface} /></View>
-            <Text style={[type.tiny, { marginBottom: spacing.lg }]}>Remember every place you love</Text>
+            <Text style={[type.tiny, { marginBottom: spacing.lg }]}>Seize the day</Text>
             {tabs.map((t) => (
               <NavItem key={t.key} icon={t.icon} label={t.label} href={t.href} on={tab === t.key} />
             ))}
@@ -547,8 +550,8 @@ function NavItem({ icon, label, href, on, quiet }: { icon: IconName; label: stri
       accessibilityRole={quiet ? 'button' : 'tab'}
       accessibilityState={{ selected: on }}
     >
-      <View style={styles.navIcon}><Icon name={icon} size={18} color={on ? colors.ink : colors.inkMuted} /></View>
-      <Text style={[styles.navLabel, on && { color: colors.ink }]}>{label}</Text>
+      <View style={styles.navIcon}><Icon name={icon} size={18} color={on ? colors.selectedFg : colors.inkMuted} /></View>
+      <Text style={[styles.navLabel, on && { color: colors.selectedFg }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -609,43 +612,44 @@ const styles = StyleSheet.create({
   },
   modeSwitch: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, padding: 2 },
   modeBtn: { minHeight: 28, paddingHorizontal: spacing.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
-  modeBtnActive: { backgroundColor: colors.primary },
+  modeBtnActive: { backgroundColor: colors.selected },
   modeBtnHover: { backgroundColor: colors.surfaceMuted },
   foot: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
-  you: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.xs, borderRadius: 10 },
-  themeBtn: { width: 34, height: 34, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  you: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.xs, borderRadius: radius.md },
+  themeBtn: { width: 34, height: 34, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   themeBtnHover: { backgroundColor: colors.accentSoft, borderColor: colors.icon },
   youHover: { backgroundColor: colors.accentSoft },
   youName: { fontSize: 14, fontWeight: '700', color: colors.ink },
   modeInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   modeText: { fontSize: 12, fontWeight: '600', color: colors.inkMuted },
-  modeTextActive: { color: colors.primaryFg },
+  modeTextActive: { color: colors.selectedFg },
   stage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceMuted, padding: spacing.xl },
   bezel: {
-    padding: BEZEL, borderRadius: 36, backgroundColor: '#1D1B16',
+    padding: BEZEL, borderRadius: 36, backgroundColor: INK,
     boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
   },
   // The screen is exactly the size the app is told it has; the bezel sits outside it.
   screen: { borderRadius: 36 - BEZEL, backgroundColor: colors.bg, overflow: 'hidden' },
   desktop: { flex: 1, flexDirection: 'row' },
-  sidebar: { width: 220, padding: spacing.lg, borderRightWidth: 1, borderRightColor: colors.line, backgroundColor: colors.surface, gap: 4 },
-  // The one mint field (style guide): no shadow, just its colour.
+  sidebar: { width: 220, padding: spacing.lg, borderRightWidth: BORDER, borderRightColor: colors.line, backgroundColor: colors.surface, gap: 4 },
+  // The one lime field (Epic pack §07): no shadow, just its colour.
   // The header centres the wordmark, so the back-office door floats at its
   // right edge rather than joining the column and pushing the mark off centre.
   headerAdmin: { position: 'absolute', right: spacing.md, top: spacing.md, padding: 6 },
   navItemQuiet: { opacity: 0.9 },
   notHereBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md, paddingHorizontal: spacing.lg, minHeight: TARGET, borderRadius: radius.md, backgroundColor: colors.primary, justifyContent: 'center' },
-  header: { alignItems: 'center', paddingVertical: spacing.md, backgroundColor: colors.headerBg, borderBottomWidth: 1, borderBottomColor: colors.line },
+  header: { alignItems: 'center', paddingVertical: spacing.md, backgroundColor: colors.headerBg, borderBottomWidth: BORDER, borderBottomColor: colors.line },
   sideBrand: { paddingVertical: spacing.sm },
-  navItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET, paddingHorizontal: spacing.sm, borderRadius: 10 },
-  navItemActive: { backgroundColor: colors.accentSoft },
+  navItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET, paddingHorizontal: spacing.sm, borderRadius: radius.md },
+  // The tab you are on is the selection moment: a lime fill with ink type.
+  navItemActive: { backgroundColor: colors.selected },
   navIcon: { width: 22, alignItems: 'center' },
   navLabel: { fontSize: 15, fontWeight: '600', color: colors.ink },
   content: { flex: 1 },
   banner: { padding: spacing.sm, backgroundColor: colors.accentSoft, alignItems: 'center' },
   bannerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   bannerDown: { backgroundColor: colors.overrunSoft },
-  tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.tabbar, paddingBottom: 4 },
+  tabs: { flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar, paddingBottom: 4 },
   // Floating over the map, and clear of the home indicator on a phone that has
   // one — the map runs under the indicator, the labels must not.
   tabsOver: {

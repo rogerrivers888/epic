@@ -2,7 +2,7 @@
 // owner reads the true figures (Technical Constraints §11 "Free evaluation
 // allowances", §12 "Cost model", §14 "cost per source").
 //
-// These are Roam's own counts and list prices — an estimate, never an invoice.
+// These are Epic's own counts and list prices — an estimate, never an invoice.
 // Every line carries the provider console link because that is where the real
 // bill lives; the point of showing the estimate is to know when to look.
 //
@@ -20,19 +20,19 @@ export const LINES = [
   {
     key: 'claude', label: 'Claude planner', source: 'anthropic', unit: 'call', unitPlural: 'calls',
     what: 'Understands what you said and refines the plan. Billed by tokens at list rates.',
-    // Not a free allowance: Roam's own ceiling, so one household cannot run up
+    // Not a free allowance: Epic's own ceiling, so one household cannot run up
     // an unbounded bill (§14). It counts every call that could cost something,
     // whoever it went to — and only those, because the open map and the
     // encyclopedias cannot bill and a guard they can fill is a guard against
-    // using Roam (owner, 6 Sep 2026).
-    cap: { kind: 'monthly', limit: HOUSEHOLD_MONTHLY_CALL_BOUND, label: 'household cap on calls that can cost money', env: 'ROAM_HOUSEHOLD_MONTHLY_CALL_BOUND', countsEveryBillableCall: true },
+    // using Epic (owner, 6 Sep 2026).
+    cap: { kind: 'monthly', limit: HOUSEHOLD_MONTHLY_CALL_BOUND, label: 'household cap on calls that can cost money', env: 'EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND', countsEveryBillableCall: true },
     hardStop: 'The workspace spend limit in the Anthropic console is the hard stop.',
     console: ANTHROPIC_CONSOLE,
   },
   {
     key: 'scout', label: 'Local scout', source: 'scout', unit: 'run', unitPlural: 'runs',
     what: "Claude reads council, local-paper and venue what's-on pages with web search. Tokens plus $10 per 1,000 searches.",
-    cap: { kind: 'monthly', limit: SCOUT_MONTHLY_RUNS, label: 'scout cap on runs', env: 'ROAM_SCOUT_MONTHLY_RUNS' },
+    cap: { kind: 'monthly', limit: SCOUT_MONTHLY_RUNS, label: 'scout cap on runs', env: 'EPIC_SCOUT_MONTHLY_RUNS' },
     hardStop: 'Pauses at the cap; the Anthropic workspace limit is the hard stop.',
     console: ANTHROPIC_CONSOLE,
   },
@@ -41,21 +41,21 @@ export const LINES = [
     what: 'A browse makes one Nearby Search request per kind (food, things to do); a dish or name search makes one Text Search; opening a place makes one Place Details request.',
     allowance: { kind: 'monthly', limit: 5000, beyondUsd: 0.032, basis: "Google's Pro-tier free threshold for Nearby and Text Search (5,000 a month each, not pooled)" },
     legacyUnitsPerCall: () => 2,
-    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=roam-507516' },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
     key: 'google-photos', label: 'Google photos', source: 'google', unit: 'photo', unitPlural: 'photos',
     what: 'Each place photo shown is one Place Photo request, streamed through the API so the key stays server-side.',
     allowance: { kind: 'monthly', limit: 1000, beyondUsd: 0.007, basis: "Google's free threshold for Place Details Photos" },
     legacyUnitsPerCall: () => 1,
-    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=roam-507516' },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
     key: 'google-routes', label: 'Google Routes', source: 'google', unit: 'element', unitPlural: 'elements',
     what: 'Real travel times. A plan asks for one origin against up to 200 places (one element each); a journey is one element.',
     allowance: { kind: 'monthly', limit: 5000, beyondUsd: 0.01, basis: "Google's free threshold for the traffic-aware (Advanced) Routes tier" },
     legacyUnitsPerCall: (purpose) => (purpose === 'plan.matrix' ? 100 : 1),
-    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=roam-507516' },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
     key: 'tripadvisor', label: 'Tripadvisor', source: 'tripadvisor', unit: 'location', unitPlural: 'locations',
@@ -92,7 +92,7 @@ export const LINES = [
   },
   {
     key: 'liteapi', label: 'LiteAPI hotel rates', source: 'liteapi', unit: 'request', unitPlural: 'requests',
-    what: 'Hotels and live room prices for the Stay tab. One look is two requests: the beds on the map, then what they cost on your nights. Free to search — LiteAPI earns a commission on a booking, and Roam takes no booking.',
+    what: 'Hotels and live room prices for the Stay tab. One look is two requests: the beds on the map, then what they cost on your nights. Free to search — LiteAPI earns a commission on a booking, and Epic takes no booking.',
     hardStop: 'Nothing to stop: searching costs nothing. Booking through LiteAPI is not built, and needs a payment route and a cap from the owner before it could be.',
     console: { label: 'LiteAPI dashboard', url: 'https://dashboard.liteapi.travel/' },
   },

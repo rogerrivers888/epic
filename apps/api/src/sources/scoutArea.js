@@ -5,7 +5,7 @@
 // > extremely quickly… we're not beholden to anyone, and we don't actually need
 // > to call the APIs."
 //
-// Until now Roam only owned what a household had already chosen. This goes the
+// Until now Epic only owned what a household had already chosen. This goes the
 // other way: pick an area, work out which of its restaurants are good, and
 // research those before anyone asks for them. Three passes, cheapest first.
 //
@@ -26,7 +26,7 @@
 // go to Google Maps… I'm interested in the highly rated restaurants."
 //
 // Nothing here writes a `place_claims` row. That table means a household asked
-// for this, and no household did — `scout_places` is the record of why Roam
+// for this, and no household did — `scout_places` is the record of why Epic
 // went looking, and the researcher is happy to be handed a place directly.
 
 import * as scout from '../repositories/scout.js';
@@ -47,7 +47,7 @@ import { firstHousehold } from '../repositories/households.js';
 /** What to ask the licensed search. Different words surface different halves of a town. */
 const QUERIES = ['restaurants', 'best restaurants', 'italian restaurant', 'indian restaurant', 'asian restaurant', 'pub food', 'fine dining', 'brunch'];
 /** A sweep comes round twice a year; a rating that has moved is rare and slow. */
-const RESWEEP_DAYS = Number(process.env.ROAM_RESWEEP_DAYS || 180);
+const RESWEEP_DAYS = Number(process.env.EPIC_RESWEEP_DAYS || 180);
 const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar']);
 /** Backoff for a menu that would not open, in hours. */
 const MENU_BACKOFF_H = [24, 168, 720, 2160];
@@ -185,7 +185,7 @@ export async function sweep(code, { dryRun = false, householdId = null } = {}) {
       menuItems: 0, cuisines: c.cuisines, website: c.website,
       summary: null, openingHours: c.openingHours, chainScale: c.chainScale,
     });
-    c.roamScore = s.roamScore;
+    c.epicScore = s.epicScore;
     c.ownedScore = s.ownedScore;
     // What kind of food this is, coarsely — decided here so the menu queue can
     // ask for "the best two Chinese" with a window function (migration 048).
@@ -195,7 +195,7 @@ export async function sweep(code, { dryRun = false, householdId = null } = {}) {
   // A place nobody has rated and nothing is known about is not "the top-rated
   // restaurant in this postcode", it is an unknown. Rank by the composite, and
   // keep the number the area asked for.
-  candidates.sort((a, b) => (b.roamScore - a.roamScore) || (b.ownedScore - a.ownedScore) || a.name.localeCompare(b.name));
+  candidates.sort((a, b) => (b.epicScore - a.epicScore) || (b.ownedScore - a.ownedScore) || a.name.localeCompare(b.name));
   const kept = candidates.slice(0, area.keep);
 
   // Whether this sweep could actually ask what people think of these places.
@@ -248,7 +248,7 @@ export async function sweep(code, { dryRun = false, householdId = null } = {}) {
  */
 export async function rescore(code) {
   const rows = await scout.placesIn(code, 500);
-  // How big each group is, from everything Roam has swept since. This is the
+  // How big each group is, from everything Epic has swept since. This is the
   // number that improves on its own: a name that was in one area in September
   // is in nine by Christmas, and the score follows without anyone editing a list.
   const sitesOf = await siteCounts();
@@ -264,11 +264,11 @@ export async function rescore(code) {
       website: r.website, summary: r.summary, openingHours: r.opening_hours,
       chainScale: scale,
     });
-    scored.push({ ...r, venueRef: r.venue_ref, roamScore: s.roamScore, ownedScore: s.ownedScore,
+    scored.push({ ...r, venueRef: r.venue_ref, epicScore: s.epicScore, ownedScore: s.ownedScore,
       crowdBand: r.crowd_band, countBand: r.count_band, chain, chainScale: scale, sites,
       cuisineGroup: cuisineGroup(r.cuisines ?? []) });
   }
-  scored.sort((a, b) => (b.roamScore - a.roamScore) || (b.ownedScore - a.ownedScore));
+  scored.sort((a, b) => (b.epicScore - a.epicScore) || (b.ownedScore - a.ownedScore));
   for (const [i, p] of scored.entries()) await scout.putPlace(code, { ...p, rank: i + 1 });
   return { code, rescored: scored.length };
 }
@@ -435,7 +435,7 @@ async function logSweepCalls(householdId, calls) {
 
 
 /**
- * How many of Roam's own areas hold a place of each name, normalised the same
+ * How many of Epic's own areas hold a place of each name, normalised the same
  * way places are matched across sources.
  */
 async function siteCounts() {

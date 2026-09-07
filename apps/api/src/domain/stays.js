@@ -4,15 +4,15 @@
 // The point of this, and the reason it is not a list of hotels sorted by
 // distance from a station: once there is a shortlist, "near the city centre" is
 // the wrong question. The right one is "how much of our week is on foot from
-// the front door", and Roam is the only thing that knows the answer, because
-// only Roam holds the shortlist (owner, 4 Sep 2026: "one of the key upsells
+// the front door", and Epic is the only thing that knows the answer, because
+// only Epic holds the shortlist (owner, 4 Sep 2026: "one of the key upsells
 // that we have is that we can choose accommodation that's close to the
 // activities").
 //
 // Prices and availability are not here. They come from a booking provider with
 // a key and a spend cap, which is the owner's to add (CLAUDE.md); until then
 // this is the open map's own list of beds, and what it is good for is the
-// geography, which is the part that actually needs Roam.
+// geography, which is the part that actually needs Epic.
 
 import { kmBetween, estimateTravelMinutes } from './travel.js';
 
@@ -80,7 +80,7 @@ export function middleOf(points) {
 // who is sleeping in the room
 // ---------------------------------------------------------------------------
 
-/** A hotel counts a child up to eighteen, whatever Roam's own `is_minor` line is. */
+/** A hotel counts a child up to eighteen, whatever Epic's own `is_minor` line is. */
 export const HOTEL_ADULT_AGE = 18;
 // Only used for somebody the household has told us is a child without saying
 // when they were born. Never silent: the answer names them so the screen can

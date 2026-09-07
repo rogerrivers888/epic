@@ -1,7 +1,7 @@
 /**
  * Inspire: the home screen's one read.
  *
- * The household opens Roam and is shown things to do, near home or near
+ * The household opens Epic and is shown things to do, near home or near
  * wherever they searched, on shelves named for what a day is about — Fun, Food,
  * Culture, Adrenaline, Relaxing, Outdoors. That is a browse, not a plan: no
  * model call, no ideas written, nothing kept.
@@ -157,7 +157,7 @@ inspire.get('/near', async (req, res, next) => {
     if (!centre) {
       return res.status(400).json({
         error: 'where_required',
-        message: 'Search for a town, or set your home address in Household, and Roam will look around it.',
+        message: 'Search for a town, or set your home address in Household, and Epic will look around it.',
       });
     }
     // Where the family sets off from. "Where I am" hands over a fix; otherwise

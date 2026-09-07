@@ -25,7 +25,7 @@
  *
  * One series everywhere, so there is no categorical palette to validate and no
  * legend box to draw — the panel's own title says what is plotted. Colour comes
- * from Roam's accent through `useTheme`, so dark mode is the palette's own step
+ * from Epic's accent through `useTheme`, so dark mode is the palette's own step
  * rather than an automatic flip, and red stays the heart's alone.
  */
 
@@ -293,8 +293,8 @@ export function RankedBars({ rows, format = shortNumber, max: given }: {
  *
  * Ordinal, so it takes a one-hue ramp — the reader sees the magnitude in the
  * depth of the colour, and the number is written in the cell for the cases the
- * eye cannot rank. The hue is Roam's accent at stepped opacity over the surface,
- * so in dark mode the ramp anchors from the mint end rather than being flipped
+ * eye cannot rank. The hue is Epic's accent at stepped opacity over the surface,
+ * so in dark mode the ramp anchors from the lime end rather than being flipped
  * automatically.
  */
 export function CohortGrid({ cohorts, cells, weeks = 8 }: {

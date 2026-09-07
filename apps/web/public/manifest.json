@@ -1,11 +1,11 @@
 {
-  "name": "Roam",
-  "short_name": "Roam",
-  "description": "Remember every place you love",
+  "name": "Epic",
+  "short_name": "Epic",
+  "description": "Seize the day",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F7F6F2",
-  "theme_color": "#1F5F5B",
+  "background_color": "#FFFDF9",
+  "theme_color": "#C8F542",
   "icons": [
     {
       "src": "/favicon-192.png",
@@ -18,7 +18,7 @@
       "type": "image/png"
     },
     {
-      "src": "/favicon-512.png",
+      "src": "/favicon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

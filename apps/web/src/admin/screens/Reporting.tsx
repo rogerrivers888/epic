@@ -6,10 +6,10 @@
  * one page means everybody scrolls past two thirds of it.
  *
  *  - **Engagement** — are people coming back, and to what. The cohort grid is
- *    the one figure that says whether Roam is worth *having* rather than worth
+ *    the one figure that says whether Epic is worth *having* rather than worth
  *    trying.
  *  - **Revenue** — what the plans people are on are priced at. Contracted, never
- *    collected: Roam holds no payment provider, and the screen says so at the
+ *    collected: Epic holds no payment provider, and the screen says so at the
  *    top rather than letting a reader assume the number is cash.
  *  - **Usage** — what serving them costs, by provider and by household, which is
  *    the number a price has to clear.
@@ -39,7 +39,7 @@ export function Reporting({ canSeeMoney }: { canSeeMoney: boolean }) {
     <AdminPage>
       <PageHead
         title="Reporting"
-        sub="How Roam is used, what it earns, and what it costs to serve."
+        sub="How Epic is used, what it earns, and what it costs to serve."
         right={<RangePicker days={days} onDays={setDays} />}
       />
       <Wrap>
@@ -64,7 +64,7 @@ function EngagementTab({ days }: { days: number }) {
 
   const load = useCallback(async () => {
     try { setData(await api.adminEngagement(days)); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, [days]);
   useEffect(() => { void load(); }, [load]);
@@ -80,8 +80,8 @@ function EngagementTab({ days }: { days: number }) {
         <Tile label="Active today" value={count(data.active.dau)} tone={data.active.dau ? 'ok' : 'plain'} sub="households with any activity" />
         <Tile label="Active this week" value={count(data.active.wau)} />
         <Tile label="Active this month" value={count(data.active.mau)} />
-        <Tile label="Stickiness" value={`${data.active.stickiness}%`} sub="daily ÷ monthly — how habitual Roam is" tone={data.active.stickiness >= 20 ? 'ok' : 'plain'} />
-        <Tile label="Time in Roam" value={duration(data.active.seconds_30d)} sub="everybody, last 30 days" />
+        <Tile label="Stickiness" value={`${data.active.stickiness}%`} sub="daily ÷ monthly — how habitual Epic is" tone={data.active.stickiness >= 20 ? 'ok' : 'plain'} />
+        <Tile label="Time in Epic" value={duration(data.active.seconds_30d)} sub="everybody, last 30 days" />
       </TileRow>
 
       <Panel
@@ -103,7 +103,7 @@ function EngagementTab({ days }: { days: number }) {
 
       <Panel
         title="Retention"
-        sub="Of the households that joined in a week, how many came back in the weeks after. The one figure that says whether Roam is worth having rather than worth trying."
+        sub="Of the households that joined in a week, how many came back in the weeks after. The one figure that says whether Epic is worth having rather than worth trying."
       >
         <CohortGrid cohorts={data.retention.cohorts} cells={data.retention.cells} />
       </Panel>
@@ -137,7 +137,7 @@ function RevenueTab() {
   useEffect(() => {
     (async () => {
       try { setData(await api.adminRevenue()); setError(null); } catch (e: any) {
-        setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+        setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
       }
     })();
   }, []);
@@ -150,7 +150,7 @@ function RevenueTab() {
       {/* Said before any figure, because everything below is read wrongly without it. */}
       <Banner tone="warn">
         <Text style={{ fontWeight: '700' }}>Contracted, not collected. </Text>
-        Roam holds no payment provider — no card, no Stripe, no payout. Every figure here is what the plans people are
+        Epic holds no payment provider — no card, no Stripe, no payout. Every figure here is what the plans people are
         on are priced at. Cash received, failed payments and refunds are not knowable from this database and are not
         shown as zero.
       </Banner>
@@ -194,7 +194,7 @@ function UsageTab({ days, canSeeMoney }: { days: number; canSeeMoney: boolean })
 
   const load = useCallback(async () => {
     try { setData(await api.adminUsage(days)); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, [days]);
   useEffect(() => { void load(); }, [load]);
@@ -215,7 +215,7 @@ function UsageTab({ days, canSeeMoney }: { days: number; canSeeMoney: boolean })
       {overCeiling.length ? (
         <Banner tone="warn">
           {overCeiling.length} household{overCeiling.length === 1 ? ' is' : 's are'} past four fifths of their monthly ceiling.
-          Roam will stop searching for them at it.
+          Epic will stop searching for them at it.
         </Banner>
       ) : null}
 

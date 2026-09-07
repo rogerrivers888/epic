@@ -1,5 +1,5 @@
 /**
- * Roam's addresses, in one place.
+ * Epic's addresses, in one place.
  *
  * Every page has one, every layer inside a page has one, and both directions —
  * an address read into a route, a route written back into an address — live
@@ -273,10 +273,10 @@ export const paths = {
 /**
  * Screens where the shell draws no chrome of its own.
  *
- * The trip is a map now (design handoff, 6 Sep 2026), and a map with a mint
+ * The trip is a map now (design handoff, 6 Sep 2026), and a map with a lime
  * band and a wordmark above it is not a map that fills the screen — the owner,
  * 6 Sep 2026: "The map is supposed to take up the entire top of the screen,
- * literally everything. There should be no Roam icon or logo. It should take up
+ * literally everything. There should be no Epic icon or logo. It should take up
  * the entire screen, all the way to the edge of the screen, including the
  * little pill in the middle of the iPhone."
  *
@@ -339,34 +339,34 @@ export function parentOf(route: Route): string {
 }
 
 /**
- * What the browser tab says. A window full of Roam tabs is otherwise seven
+ * What the browser tab says. A window full of Epic tabs is otherwise seven
  * identical ones, and the address is only half of being able to find your way
  * back to a page.
  */
 export function titleOf(route: Route): string {
-  const roam = (s?: string) => (s ? `${s} · Roam` : 'Roam');
+  const epic = (s?: string) => (s ? `${s} · Epic` : 'Epic');
   switch (route.name) {
-    case 'inspire': return roam(route.searching ? 'Where should we go?' : route.shelf ? `${route.shelf[0].toUpperCase()}${route.shelf.slice(1)}` : 'Inspire');
-    case 'plan': return roam('Plan');
+    case 'inspire': return epic(route.searching ? 'Where should we go?' : route.shelf ? `${route.shelf[0].toUpperCase()}${route.shelf.slice(1)}` : 'Inspire');
+    case 'plan': return epic('Plan');
     case 'places':
-      return roam(route.scope == null ? 'Places' : 'home' in route.scope ? 'Close to home' : route.scope.city ?? route.scope.country);
-    case 'trips': return roam(route.creating ? 'A new trip' : route.tripId ? 'Trip' : 'Trips');
-    case 'household': return roam('Household');
-    case 'settings': return roam('Settings');
-    case 'prototypes': return roam('Prototypes');
-    case 'admin': return roam(`Back office — ${route.screen}`);
-    case 'join': return roam('Your trip');
-    case 'order': return roam('The order');
-    case 'unknown': return roam('Not a page');
+      return epic(route.scope == null ? 'Places' : 'home' in route.scope ? 'Close to home' : route.scope.city ?? route.scope.country);
+    case 'trips': return epic(route.creating ? 'A new trip' : route.tripId ? 'Trip' : 'Trips');
+    case 'household': return epic('Household');
+    case 'settings': return epic('Settings');
+    case 'prototypes': return epic('Prototypes');
+    case 'admin': return epic(`Back office — ${route.screen}`);
+    case 'join': return epic('Your trip');
+    case 'order': return epic('The order');
+    case 'unknown': return epic('Not a page');
   }
 }
 
 /**
- * The addresses Roam used to have (`?tab=trips&trip=…&section=…`, `?join=…`),
+ * The addresses Epic used to have (`?tab=trips&trip=…&section=…`, `?join=…`),
  * turned into the ones it has now.
  *
  * The owner keeps these on his phone and group invites went out to people who
- * have never heard of Roam, so an old link has to keep working — it is answered
+ * have never heard of Epic, so an old link has to keep working — it is answered
  * once, with a replace, and the new address is what stays in the bar.
  */
 export function legacyHref(path: string, query: URLSearchParams): string | null {

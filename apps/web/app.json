@@ -1,20 +1,20 @@
 {
   "expo": {
-    "name": "Roam",
-    "slug": "roam",
-    "scheme": "roam",
+    "name": "Epic",
+    "slug": "epic",
+    "scheme": "epic",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.roam.app"
+      "bundleIdentifier": "com.epic.app"
     },
     "android": {
-      "package": "com.roam.app",
+      "package": "com.epic.app",
       "adaptiveIcon": {
-        "backgroundColor": "#201e1d",
+        "backgroundColor": "#C8F542",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false

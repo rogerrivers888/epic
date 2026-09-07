@@ -16,7 +16,7 @@ import { Wordmark } from '../components/Wordmark';
  * So this is written for somebody standing up, holding their own phone, in a
  * room where they cannot lean in: big type, one column, the words for the
  * kitchen under the dish they belong to, and the allergens where they cannot be
- * scrolled past. It is not the Roam app — there is no tab bar, no sign-in and
+ * scrolled past. It is not the Epic app — there is no tab bar, no sign-in and
  * nothing to tap through to — because the person reading it is at work.
  *
  * It reads itself again every twenty seconds. The table goes on choosing after
@@ -97,7 +97,7 @@ export function OrderTicketScreen({ token }: { token: string }) {
       </Row>
 
       {/* The allergens first and in the warning red: they are the one thing on
-          this page that changes what happens in the kitchen. Roam can never
+          this page that changes what happens in the kitchen. Epic can never
           clear a dish of something a menu does not have to declare, so it says
           to ask rather than pretending to know. */}
       {ticket.allergens.length ? (

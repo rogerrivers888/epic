@@ -17,7 +17,7 @@
  *
  * Two notes on the image endpoint.
  *
- * It is mounted **above** the session door, unlike everything else in Roam.
+ * It is mounted **above** the session door, unlike everything else in Epic.
  * That is a decision about what these bytes are: open-licence photographs we
  * are entitled to redistribute, already public on Wikimedia Commons, and not
  * about any household. Putting them behind a cookie would cost every card a
@@ -298,7 +298,7 @@ adminRouter.get('/images/:id', requires('view_library'), async (req, res, next) 
 /**
  * Approve, reject or re-credit an image, and award the points that go with it.
  *
- * Points rather than money, because nothing in Roam moves money and a reward
+ * Points rather than money, because nothing in Epic moves money and a reward
  * that implied a payment would be a promise the schema cannot keep. A rejection
  * that follows an award writes a reversing row rather than editing the first
  * one, so the ledger reads as what happened.
@@ -678,7 +678,7 @@ async function scopeOptions(place, kinds) {
 adminRouter.post('/attractions/:id/category/read', requires('manage_library'), async (req, res, next) => {
   try {
     const said = String(req.body?.said || '').trim();
-    if (!said) throw bad('Say what is wrong with it and Roam will turn that into a change.');
+    if (!said) throw bad('Say what is wrong with it and Epic will turn that into a change.');
     const place = await lib.attractionDetail(req.params.id);
     if (!place) return res.status(404).json({ error: 'not_found' });
 
@@ -709,7 +709,7 @@ adminRouter.post('/attractions/:id/category/read', requires('manage_library'), a
  *
  * A shelf rule is saved alongside only when one was asked for, and against
  * `shelf_rules` rather than here, because a category and a shelf are two axes
- * and Roam has been bitten by conflating them before.
+ * and Epic has been bitten by conflating them before.
  */
 adminRouter.post('/attractions/:id/category', requires('manage_library'), async (req, res, next) => {
   try {
@@ -973,7 +973,7 @@ adminRouter.post('/regions/:slug/read', requires('manage_library'), async (req, 
 /**
  * What kinds of place a region actually holds, for the filter above the list.
  *
- * Separate from `/kinds`, which is the classifier — every Wikidata type Roam
+ * Separate from `/kinds`, which is the classifier — every Wikidata type Epic
  * has ever seen and whether it counts as somewhere to go. This is the much
  * shorter question a person standing in front of one county asks: what is
  * actually here, and how much of it.

@@ -43,7 +43,7 @@ const bearerOf = (req) => {
 router.get('/session', async (req, res, next) => {
   try {
     if (!authConfigured()) {
-      return res.json({ signedIn: false, configured: false, message: 'This Roam API has no passcode set yet.' });
+      return res.json({ signedIn: false, configured: false, message: 'This Epic API has no passcode set yet.' });
     }
     const token = bearerOf(req);
     const session = token ? await findLiveSession(token) : null;
@@ -81,12 +81,12 @@ router.get('/session', async (req, res, next) => {
 router.post('/session', async (req, res, next) => {
   try {
     if (!authConfigured()) {
-      return res.status(503).json({ error: 'auth_not_configured', message: 'This Roam API has no passcode set. The owner adds ROAM_PASSCODE in Doppler.' });
+      return res.status(503).json({ error: 'auth_not_configured', message: 'This Epic API has no passcode set. The owner adds EPIC_PASSCODE in Doppler.' });
     }
     if (!passcodeMatches(req.body?.passcode)) {
       // One message for a missing passcode and a wrong one: which it was is
       // information, and the caller is not necessarily the family.
-      return res.status(401).json({ error: 'wrong_passcode', message: "That passcode doesn't open this Roam." });
+      return res.status(401).json({ error: 'wrong_passcode', message: "That passcode doesn't open this Epic." });
     }
     const label = String(req.body?.label || '').slice(0, 80) || null;
     // Once the owner has claimed an account (admin › Accounts), the passcode
@@ -178,7 +178,7 @@ router.post('/session/link', async (req, res, next) => {
  *
  * It answers exactly the same whether or not the address or number has an
  * account, and takes the same time to do it, so it cannot be used to find out
- * who Roam's customers are. It is held to the sign-in limit (limits.js) like
+ * who Epic's customers are. It is held to the sign-in limit (limits.js) like
  * the passcode.
  */
 router.post('/session/request-link', async (req, res, next) => {
@@ -192,8 +192,8 @@ router.post('/session/request-link', async (req, res, next) => {
     res.json({
       sent: true,
       message: req.body?.mobile && !req.body?.email
-        ? 'If that number has a Roam account, a link is on its way by text. It works once and lasts a week.'
-        : 'If that address has a Roam account, a link is on its way. It works once and lasts a week.',
+        ? 'If that number has a Epic account, a link is on its way by text. It works once and lasts a week.'
+        : 'If that address has a Epic account, a link is on its way. It works once and lasts a week.',
     });
   } catch (err) { next(err); }
 });

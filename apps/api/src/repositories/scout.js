@@ -68,26 +68,26 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
  */
 export async function putPlace(areaCode, p) {
   await query(
-    `insert into scout_places (area_code, venue_ref, name, rank, roam_score, owned_score, crowd_band, count_band,
+    `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
                                accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, last_seen, scored_at)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now(), now())
      on conflict (area_code, venue_ref) do update set
        name = coalesce(excluded.name, scout_places.name), rank = excluded.rank,
-       roam_score = excluded.roam_score, owned_score = excluded.owned_score,
+       epic_score = excluded.epic_score, owned_score = excluded.owned_score,
        crowd_band = excluded.crowd_band, count_band = excluded.count_band,
        accolades = excluded.accolades, cuisines = excluded.cuisines, chain = excluded.chain,
        website = coalesce(excluded.website, scout_places.website),
        lat = coalesce(excluded.lat, scout_places.lat), lng = coalesce(excluded.lng, scout_places.lng),
        chain_scale = excluded.chain_scale, sites = excluded.sites, cuisine_group = excluded.cuisine_group,
        last_seen = now(), scored_at = now()`,
-    [areaCode, p.venueRef, p.name ?? null, p.rank, p.roamScore, p.ownedScore, p.crowdBand, p.countBand,
+    [areaCode, p.venueRef, p.name ?? null, p.rank, p.epicScore, p.ownedScore, p.crowdBand, p.countBand,
       JSON.stringify(p.accolades ?? []), JSON.stringify(p.cuisines ?? []), p.chain === true,
       p.website ?? null, p.lat ?? null, p.lng ?? null, p.chainScale ?? 'independent', p.sites ?? 1, p.cuisineGroup ?? null],
   );
   await query(
-    `insert into scout_score_history (area_code, venue_ref, roam_score, owned_score, crowd_band, count_band, rank)
+    `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score, crowd_band, count_band, rank)
      values ($1,$2,$3,$4,$5,$6,$7) on conflict do nothing`,
-    [areaCode, p.venueRef, p.roamScore, p.ownedScore, p.crowdBand, p.countBand, p.rank],
+    [areaCode, p.venueRef, p.epicScore, p.ownedScore, p.crowdBand, p.countBand, p.rank],
   );
 }
 
@@ -246,7 +246,7 @@ export async function retryCause(cause) {
   return rowCount;
 }
 
-/** Every menu Roam could not read, with the reason. The work list. */
+/** Every menu Epic could not read, with the reason. The work list. */
 export async function menuMisses(limit = 100) {
   const { rows } = await query(
     `select m.venue_ref, m.venue_label, m.state, m.why, m.cause, m.menu_url, m.attempts, m.read_at, r.website
@@ -367,7 +367,7 @@ export async function spend() {
 }
 
 /**
- * Every name Roam has kept, and which area it was in.
+ * Every name Epic has kept, and which area it was in.
  *
  * Deliberately raw: how many sites a group has is decided in JavaScript, with
  * the same `norm` that matches places across sources, because a count computed
@@ -410,7 +410,7 @@ export async function setCuisineGroup(areaCode, venueRef, group) {
   await query('update scout_places set cuisine_group = $3 where area_code = $1 and venue_ref = $2', [areaCode, venueRef, group]);
 }
 
-/** What Roam already knows about one place's menu, if anything. */
+/** What Epic already knows about one place's menu, if anything. */
 export async function menuStateOf(venueRef) {
   const { rows } = await query('select state, menu_url, attempts from place_menus where venue_ref = $1', [venueRef]);
   return rows[0] ?? null;
@@ -420,7 +420,7 @@ export async function menuStateOf(venueRef) {
  * Enough to go looking for one place's menu, from wherever we know it.
  *
  * A claimed place may never have been swept — a household can shortlist
- * somewhere in a county Roam has not reached — so the owned record is the
+ * somewhere in a county Epic has not reached — so the owned record is the
  * first source and the sweep's row is the fallback.
  */
 export async function placeForMenu(venueRef) {

@@ -28,7 +28,7 @@ export const TAKES = ['loved', 'fine', 'not_for_me'];
 /**
  * The sources that cannot send a bill, whatever we ask of them.
  *
- * Roam's household ceiling exists "so one household cannot run up an unbounded
+ * Epic's household ceiling exists "so one household cannot run up an unbounded
  * bill" (Technical Constraints §14), and it was counting every row in
  * `provider_calls` — including the open map, the encyclopedias and the address
  * lookup, which are free. One afternoon of research put a household over three

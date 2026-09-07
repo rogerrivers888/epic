@@ -10,7 +10,7 @@
  * and sent when there is signal (offline/outbox.ts). Almost always that happens
  * without anybody noticing. When it cannot — the server refused it, because the
  * trip it belonged to has since been deleted — the write is *still kept*, and
- * this is where it is shown. Nothing Roam is given is thrown away without the
+ * this is where it is shown. Nothing Epic is given is thrown away without the
  * person who wrote it seeing it first.
  */
 
@@ -74,7 +74,7 @@ export function AccountCard() {
       <Card>
         <Text style={type.body}>This household signs in with one passcode.</Text>
         <Text style={type.small}>
-          Everything Roam holds is behind it — the people, the places you've been and what each of you thought of them.
+          Everything Epic holds is behind it — the people, the places you've been and what each of you thought of them.
           A device stays signed in for 90 days.
         </Text>
 
@@ -129,7 +129,7 @@ export function AccountCard() {
             {outbox.sending ? <Text style={type.tiny}>Sending…</Text> : null}
           </Row>
           <Text style={type.small}>
-            Written without signal and kept on this device. They send themselves as soon as Roam can reach the API.
+            Written without signal and kept on this device. They send themselves as soon as Epic can reach the API.
           </Text>
 
           <View style={styles.list}>

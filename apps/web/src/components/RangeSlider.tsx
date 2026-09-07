@@ -5,7 +5,7 @@ import { colors, type } from '../theme';
 /**
  * A from–to slider (a budget for the day). Two handles on one track, with the
  * spread of what days like this tend to cost drawn behind it so the range means
- * something. Ink handles on a Leaf range in light mode; mint in dark.
+ * something. Ink handles on a moss range in light mode; lime in dark.
  */
 export function RangeSlider({ min, max, step = 10, low, high, onChange, format = (v) => `£${v}`, bars, plain }: {
   min: number; max: number; step?: number; low: number; high: number;

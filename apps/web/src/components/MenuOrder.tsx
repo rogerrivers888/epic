@@ -37,7 +37,7 @@ import { useRouter } from '../router';
  *
  * A guest is the owner's, 7 Sep 2026 — "there could be other guests with me…
  * I'd like to be able to say, when I go into the menu, 'Add other guests'" —
- * and they belong to the sitting, not to the family: no allergens Roam knows,
+ * and they belong to the sitting, not to the family: no allergens Epic knows,
  * no place in Who's coming, and nothing they say goes into the household's
  * tastes. `ref` is this phone's own id for them, which is what keeps their
  * dinner attached to them when the order is written again.
@@ -62,7 +62,7 @@ const keyOf = (memberId: string | null | undefined, guestRef: string | null | un
 type Pick = { on: boolean; note: string };
 type Picks = Record<string, Record<string, Pick>>;
 /**
- * A dish on the order that is not on the menu Roam holds — because their menu
+ * A dish on the order that is not on the menu Epic holds — because their menu
  * has changed, or because we have never managed to read it. It is carried by
  * name so the order survives either.
  */
@@ -159,7 +159,7 @@ function FlagChip({ flag }: { flag: Flag }) {
  * A face is one person wanting one dish; "Table" is a plate to share.
  *
  * A guest wears the same face with a dashed edge: they are at the table tonight
- * and gone tomorrow, and nothing they order teaches Roam anything about the
+ * and gone tomorrow, and nothing they order teaches Epic anything about the
  * family's taste.
  */
 function Face({ label, on, onPress, size = 30, guest = false }: { label: string; on: boolean; onPress: () => void; size?: number; guest?: boolean }) {
@@ -352,7 +352,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     for (const [itemId, item] of itemsById) push(itemId, { name: item.name, price: item.price ?? null, priceText: item.priceText ?? null });
     // Then the dishes that are not on the menu we hold. A plate ordered last
     // time is still a plate whether or not their menu still lists it — and at a
-    // place whose menu Roam has never read, it is every plate there is.
+    // place whose menu Epic has never read, it is every plate there is.
     for (const [itemId, dish] of Object.entries(extra)) if (!itemsById.has(itemId)) push(itemId, dish);
     return lines;
   };
@@ -362,7 +362,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   /**
    * An order from the server, read back into picks: the inverse of `linesFrom`.
    *
-   * A row with no menu item behind it — a dish typed at a place whose menu Roam
+   * A row with no menu item behind it — a dish typed at a place whose menu Epic
    * has never read, or one their menu no longer lists — is carried by its own
    * name so that editing the order cannot quietly drop it.
    */
@@ -676,7 +676,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     for (const i of from.items) {
       if (!again[i.id]) continue;
       // The same dish on the menu we hold, or the dish as it was written down
-      // that night. A menu Roam has never read is not a reason to refuse to
+      // that night. A menu Epic has never read is not a reason to refuse to
       // order what you had last time.
       const id = (i.menuItemId && itemsById.has(i.menuItemId) ? i.menuItemId : byName(i.name)?.id) ?? `past:${i.id}`;
       if (!itemsById.has(id)) kept[id] = { name: i.name, price: i.price ?? null, priceText: i.priceText ?? null };
@@ -740,7 +740,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
 /**
  * Who is at this table tonight (owner, 7 Sep 2026).
  *
- * The household is a line of names, because Roam already knows them. A guest is
+ * The household is a line of names, because Epic already knows them. A guest is
  * a name somebody types, one at a time, and stays only for this meal — so the
  * control says what that means rather than leaving somebody to wonder whether
  * they have just added a person to the family.
@@ -786,7 +786,7 @@ function WhoIsHere({ ctl }: { ctl: MenuOrderCtl }) {
           </Row>
           <Text style={type.tiny}>
             A first name is enough. They get a face on every dish and their own word for the waiter; they are here for this
-            meal only, and nothing they order changes what Roam knows about your family's taste.
+            meal only, and nothing they order changes what Epic knows about your family's taste.
           </Text>
         </View>
       ) : null}
@@ -839,7 +839,7 @@ function BasketPeek({ ctl }: { ctl: MenuOrderCtl }) {
  * and then I can give it to Gina").
  *
  * One row per person who ate, with what they have already said. A guest is not
- * on it: there is nowhere to put a guest's stars, because Roam only learns from
+ * on it: there is nowhere to put a guest's stars, because Epic only learns from
  * the household's own palate.
  */
 function RatingBoard({ ctl, footer }: { ctl: MenuOrderCtl; footer?: React.ReactNode }) {
@@ -890,7 +890,7 @@ function RatingBoard({ ctl, footer }: { ctl: MenuOrderCtl; footer?: React.ReactN
         {guests.length ? (
           <Text style={type.tiny}>
             {guests.join(' and ')} {guests.length === 1 ? 'was a guest, so that plate is' : 'were guests, so those plates are'} not
-            rated — Roam only learns your family's taste.
+            rated — Epic only learns your family's taste.
           </Text>
         ) : null}
         {ctl.error ? <Text style={[type.tiny, { color: colors.allergen }]}>{ctl.error}</Text> : null}
@@ -982,7 +982,7 @@ function Turn({ ctl, memberId, footer }: { ctl: MenuOrderCtl; memberId: string; 
                   />
                   {/*
                     A star on a plate is a star on the dish itself, and that is
-                    what Roam plans from — so a menu's own words are matched to
+                    what Epic plans from — so a menu's own words are matched to
                     the family's ("Spaghettoni al Ragù" → bolognese) on a tap,
                     never silently (Epic 2 C7).
                   */}
@@ -1158,13 +1158,13 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
 
               Both are named, and which one you are looking at is said out loud —
               because they are not the same thing and can disagree. Ours is what
-              Roam read on a date, in one shape whatever the restaurant published;
+              Epic read on a date, in one shape whatever the restaurant published;
               theirs is whatever is on their site this minute. When a price
               matters, the honest answer is "we read this on the 4th, go and look".
             */}
             <View style={styles.twoWays}>
               <View style={{ flex: 1, gap: 2, minWidth: 0 }}>
-                <Text style={type.small}>Roam's copy</Text>
+                <Text style={type.small}>Epic's copy</Text>
                 <Text style={type.tiny}>
                   {menu.items} {menu.items === 1 ? 'dish' : 'dishes'}, tap a face to order
                   {menu.stale ? ` · read ${menu.ageDays} days ago` : ''}
@@ -1213,9 +1213,9 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
                       {note === 'failed' ? <Text style={type.tiny}>Could not look that one up just now.</Text> : null}
                       {typeof note === 'object' ? (
                         <>
-                          <Text style={type.small}>{note.known ? note.what : `Not a dish Roam knows — ask at the table. ${note.what}`}</Text>
+                          <Text style={type.small}>{note.known ? note.what : `Not a dish Epic knows — ask at the table. ${note.what}`}</Text>
                           {note.origin ? <Text style={type.tiny}>{note.origin}</Text> : null}
-                          <Text style={type.tiny}>Roam's own words about the dish, not the restaurant's.</Text>
+                          <Text style={type.tiny}>Epic's own words about the dish, not the restaurant's.</Text>
                         </>
                       ) : null}
                     </View>
@@ -1460,21 +1460,21 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
    *
    * Three things, in the order they matter: what each person said, what it adds
    * up to for that person and that dish — the count toward the threshold at
-   * which Roam starts planning around it — and where to go and look at it later.
+   * which Epic starts planning around it — and where to go and look at it later.
    */
   if (phase === 'saved') {
     const rated = order.items.flatMap((i) => (i.ratings ?? []).map((r) => ({ item: i, r })));
     const loved = rated.filter((x) => x.r.score);
     // Two people starring one shared plate is two stars and one plate.
     const platesStarred = new Set(loved.map((x) => x.item.id)).size;
-    // Every dish this meal could have taught Roam something about: the ones a
+    // Every dish this meal could have taught Epic something about: the ones a
     // menu names outright, and the ones somebody matched by hand on their turn.
     const concepts = [...new Set(order.items.flatMap((i) => [i.concept?.key, i.conceptSuggestion?.key]).filter(Boolean) as string[])];
     const counting = (ctl.learned ?? []).filter((l) => concepts.includes(l.conceptKey));
-    // Starred, but not a dish Roam has a name for — so the star is kept against
+    // Starred, but not a dish Epic has a name for — so the star is kept against
     // this plate and this place, and cannot follow the dish anywhere else. Said
     // out loud, because the alternative is wondering why a five-star plate
-    // never turned up in what Roam thinks you like.
+    // never turned up in what Epic thinks you like.
     const unknown = [...new Set(order.items
       .filter((i) => !i.concept && !i.conceptSuggestion && (i.ratings ?? []).some((r) => r.score))
       .map((i) => i.name))];
@@ -1517,7 +1517,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
 
         {/*
           What it counts toward. A star is not filed away — it is one of three
-          before Roam will plan around it (routes/household.js LEARN_THRESHOLD),
+          before Epic will plan around it (routes/household.js LEARN_THRESHOLD),
           and saying which number you are on is the difference between a rating
           somebody keeps giving and a rating that feels like it went nowhere.
         */}
@@ -1531,7 +1531,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                 </Text>
                 <Text style={type.tiny}>
                   {l.confirmed
-                    ? `${l.kind === 'like' ? 'Roam plans around it' : 'ranked lower'} · ${l.count} meals`
+                    ? `${l.kind === 'like' ? 'Epic plans around it' : 'ranked lower'} · ${l.count} meals`
                     : `${l.count} of ${l.threshold}`}
                 </Text>
               </Row>
@@ -1545,7 +1545,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
             ) : null}
             {unknown.length ? (
               <Text style={type.tiny}>
-                {unknown.join(', ')} — {unknown.length === 1 ? 'not a dish' : 'not dishes'} Roam has a name for yet, so
+                {unknown.join(', ')} — {unknown.length === 1 ? 'not a dish' : 'not dishes'} Epic has a name for yet, so
                 {unknown.length === 1 ? ' that star stays' : ' those stars stay'} with this plate and this place rather than
                 following the dish to anywhere else that serves it.
               </Text>
@@ -1562,7 +1562,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
           <Text style={type.small}>· Household → the person → Food → “Learned from visits”: what their stars add up to.</Text>
           <Wrap><Button label="Open Household" icon="household" kind="secondary" onPress={() => navigate(paths.household())} /></Wrap>
           <Text style={type.tiny}>
-            Roam uses it when it ranks anywhere to eat: a dish somebody has starred enough times becomes a reason on the card
+            Epic uses it when it ranks anywhere to eat: a dish somebody has starred enough times becomes a reason on the card
             (“Phoenix loves this”) and a table of its own on the home screen, and one they would not have again ranks a place
             lower without ever hiding it.
           </Text>
@@ -1678,7 +1678,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
           <View style={styles.warn}>
             <Icon name="allergen" size={14} color={colors.allergen} />
             <Text style={[type.small, { color: colors.allergen, flex: 1 }]}>
-              {allergenLines.join(' ')} Roam can never clear a dish of an allergen a menu does not have to declare — ask at the table.
+              {allergenLines.join(' ')} Epic can never clear a dish of an allergen a menu does not have to declare — ask at the table.
             </Text>
           </View>
         ) : null}
@@ -1789,7 +1789,7 @@ export function StaffSheet({ ctl }: { ctl: MenuOrderCtl }) {
    */
   const link = useMemo(() => {
     if (!order?.shareToken) return null;
-    const base = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : 'https://roam.app';
+    const base = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : 'https://epic.app';
     return `${base}${paths.order(order.shareToken)}`;
   }, [order?.shareToken]);
   const [by, setBy] = useState<'code' | 'person' | 'course'>(link ? 'code' : 'person');

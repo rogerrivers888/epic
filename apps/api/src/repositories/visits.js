@@ -1,6 +1,6 @@
 /**
  * Visits and what everybody thought of them — the household's own history, and
- * the most irreplaceable thing Roam holds.
+ * the most irreplaceable thing Epic holds.
  *
  * A provider can be asked again for a rating. Nobody can be asked again what
  * they thought of a meal in 2024, which is why the deletes here are narrow and

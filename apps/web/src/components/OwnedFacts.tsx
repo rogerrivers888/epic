@@ -6,11 +6,11 @@ import { Chip, Wrap } from './ui';
 import { IconText } from './Icon';
 
 /**
- * What Roam knows about a place on its own account — the part that is still
+ * What Epic knows about a place on its own account — the part that is still
  * there with no signal.
  *
  * It exists because of what the household did: shortlisting, saving or saying
- * they went sends Roam to research the place from OpenStreetMap, the venue's own
+ * they went sends Epic to research the place from OpenStreetMap, the venue's own
  * published details and Wikipedia, all of which we may keep for good
  * (api/src/sources/own.js). Everything the drawer shows above this comes from a
  * provider, is fetched fresh every time, and disappears when the signal does.
@@ -46,8 +46,8 @@ export function OwnedFacts({ record, offline = false, onResearch }: {
   if (!record) {
     return offline ? (
       <View style={{ gap: 2 }}>
-        <IconText name="offline" color={colors.inkMuted}>No signal, and Roam has not researched this one yet.</IconText>
-        <Text style={type.tiny}>Shortlisting a place, or saying you have been, is what sends Roam to research it. Do that once with signal and it is yours from then on.</Text>
+        <IconText name="offline" color={colors.inkMuted}>No signal, and Epic has not researched this one yet.</IconText>
+        <Text style={type.tiny}>Shortlisting a place, or saying you have been, is what sends Epic to research it. Do that once with signal and it is yours from then on.</Text>
       </View>
     ) : null;
   }
@@ -62,7 +62,7 @@ export function OwnedFacts({ record, offline = false, onResearch }: {
         <Text style={type.tiny}>
           {offline
             ? 'You are offline, so this is what is on your phone. It stays here whatever happens to the signal.'
-            : 'Researched by Roam when you kept this place. Open data and their own published details — it works with no signal and it never expires.'}
+            : 'Researched by Epic when you kept this place. Open data and their own published details — it works with no signal and it never expires.'}
         </Text>
       </View>
 
@@ -113,8 +113,8 @@ export function OwnedFacts({ record, offline = false, onResearch }: {
 
       {!anything ? (
         <Text style={type.small}>
-          {record.state === 'pending' ? 'Roam is researching this one now — come back in a minute.'
-            : record.state === 'failed' ? `Roam could not find this one in the open sources. ${record.why ?? ''}`
+          {record.state === 'pending' ? 'Epic is researching this one now — come back in a minute.'
+            : record.state === 'failed' ? `Epic could not find this one in the open sources. ${record.why ?? ''}`
             : 'Nothing found in the open sources for this one, so there is no offline copy of its details.'}
         </Text>
       ) : null}

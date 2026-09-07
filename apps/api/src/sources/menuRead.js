@@ -13,7 +13,7 @@
 //      in the browser. There is nothing in the HTML to read, so the page has
 //      to be *rendered*: run it in a headless browser, let it fetch its own
 //      data, then take the text the browser laid out. Free where a browser
-//      binary exists (ROAM_CHROME_PATH, or one of the usual paths).
+//      binary exists (EPIC_CHROME_PATH, or one of the usual paths).
 //   4. Nothing readable at all — a photograph of a blackboard, a menu behind a
 //      booking flow. Claude reads it with web search and web fetch. This is
 //      the only step that costs money beyond the parse.
@@ -39,10 +39,10 @@ import { parseStructured } from '../claude.js';
 import { searchWeb } from '../claude.js';
 import { z } from 'zod/v4';
 
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; household menu read)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; household menu read)';
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_BYTES = 12_000_000;
-const RENDER_TIMEOUT_MS = Number(process.env.ROAM_RENDER_TIMEOUT_MS || 25_000);
+const RENDER_TIMEOUT_MS = Number(process.env.EPIC_RENDER_TIMEOUT_MS || 25_000);
 // Below this much readable text a page is a shell, not a menu.
 const THIN_TEXT = 700;
 // A page of markup this small has not been drawn for anybody: no menu, and no
@@ -56,19 +56,19 @@ const MAX_CHUNKS = 8;
 const MAX_ANSWER_TOKENS = 16_000;
 // Menus are read by the model the owner is paying for; a menu is mechanical
 // extraction, not reasoning, so the default is the cheaper current-generation
-// model. ROAM_MENU_MODEL moves it without a deploy.
-const MODEL = process.env.ROAM_MENU_MODEL || 'claude-sonnet-5';
+// model. EPIC_MENU_MODEL moves it without a deploy.
+const MODEL = process.env.EPIC_MENU_MODEL || 'claude-sonnet-5';
 
 /* ------------------------------------------------------------------ fetching */
 
 /**
  * An ordinary browser's user agent, for the one case it is warranted.
  *
- * Roam identifies itself everywhere by default, and that is the right thing:
+ * Epic identifies itself everywhere by default, and that is the right thing:
  * a restaurant's host should be able to see who asked. But a great many small
  * sites sit behind an IIS or Cloudflare rule that refuses anything not shaped
  * like a browser — switched on by their host, never thought about by them.
- * Boleros Pizzeria answers 403 to RoamBot and 200 to Chrome, and its
+ * Boleros Pizzeria answers 403 to EpicBot and 200 to Chrome, and its
  * robots.txt is itself a 403, so there is no stated policy to respect
  * (owner approved, 5 Sep 2026).
  */
@@ -94,7 +94,10 @@ async function robotsForbids(url) {
     const blocks = text.split(/^user-agent:/gim).slice(1);
     for (const block of blocks) {
       const who = block.split(/\r?\n/)[0].trim().toLowerCase();
-      if (who !== '*' && !who.includes('roam')) continue;
+      // Our own name, and the one we used to answer to: a site that wrote a
+      // rule for RoamBot meant this crawler, and the rebrand does not give us
+      // permission it withheld.
+      if (who !== '*' && !who.includes('epic') && !who.includes('roam')) continue;
       for (const [, path] of block.matchAll(/^\s*disallow:\s*(\S+)/gim)) {
         if (path === '/') return true;
         if (path && target.pathname.startsWith(path)) return true;
@@ -207,7 +210,7 @@ export async function pdfText(buffer) {
 /* ------------------------------------------------------------------ rendering */
 
 const CHROME_PATHS = [
-  process.env.ROAM_CHROME_PATH,
+  process.env.EPIC_CHROME_PATH,
   process.env.PUPPETEER_EXECUTABLE_PATH,
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
@@ -412,7 +415,7 @@ export async function renderTabbedText(url, { maxTabs = 8 } = {}) {
         }
         if (el.querySelector('a, button, li')) continue;   // a container, not the control
         seen.add(text.toLowerCase());
-        el.setAttribute('data-roam-tab', String(out.length));
+        el.setAttribute('data-epic-tab', String(out.length));
         out.push(name);
       }
       return out;
@@ -426,7 +429,7 @@ export async function renderTabbedText(url, { maxTabs = 8 } = {}) {
     for (let i = 0; i < Math.min(tabs.length, maxTabs); i += 1) {
       if (Date.now() > deadline) break;
       try {
-        await page.evaluate((n) => document.querySelector(`[data-roam-tab="${n}"]`)?.click(), i);
+        await page.evaluate((n) => document.querySelector(`[data-epic-tab="${n}"]`)?.click(), i);
       } catch { continue; }
       // Let the swap happen, then wait for it to stop growing.
       let text = '';
@@ -472,7 +475,7 @@ export async function renderProbe(url) {
   const executablePath = await chromePath();
   if (!executablePath) return { ok: false, why: 'no browser on this machine' };
   const started = Date.now();
-  const target = url && /^https?:\/\//i.test(url) ? url : 'data:text/html,<h1>Roam can render</h1>' + 'x'.repeat(THIN_TEXT);
+  const target = url && /^https?:\/\//i.test(url) ? url : 'data:text/html,<h1>Epic can render</h1>' + 'x'.repeat(THIN_TEXT);
   const { text, why } = await renderText(target);
   return {
     ok: !why && text.length > 0, why, ms: Date.now() - started, executablePath, chars: text.length,
@@ -531,7 +534,7 @@ const NOT_A_MENU_IMAGE = /logo|favicon|icon|avatar|badge|banner|header|hero|spri
 // Names that usually are one.
 const MENU_WORDS = /menu|a-?la-?carte|carte|food|drink|wine|lunch|dinner|brunch|breakfast|sunday|roast|specials?|tasting|set-|kids|children|dessert|front|back|takeaway/i;
 /** Four is enough for a pub with a front, a back and a Sunday, and bounds the bill. */
-const MAX_MENU_IMAGES = Number(process.env.ROAM_MENU_IMAGES || 4);
+const MAX_MENU_IMAGES = Number(process.env.EPIC_MENU_IMAGES || 4);
 const MAX_IMAGE_BYTES = 5_000_000;
 
 /**
@@ -708,7 +711,7 @@ const DishNote = z.object({
   origin: z.string().nullable(),
 });
 
-/** Roam's own line about a dish, for a menu that gives only a name. */
+/** Epic's own line about a dish, for a menu that gives only a name. */
 export async function describeDish({ name, hint, householdId, sessionId }) {
   return parseStructured({
     system: DISH_SYSTEM,

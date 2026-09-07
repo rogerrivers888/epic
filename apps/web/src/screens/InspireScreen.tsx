@@ -16,7 +16,7 @@ import type { OpenTripOptions } from './PlanScreen';
 /**
  * Inspire — the home screen (owner, 5 Sep 2026; "Supporting docs/Roam Inspire").
  *
- * Roam opens on what there is to do, not on a form. A search bar at the top
+ * Epic opens on what there is to do, not on a form. A search bar at the top
  * asks the only question the household has to answer — where — and everything
  * under it is shelves of real places, drawn from one retrieved pool.
  *
@@ -219,7 +219,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    * rather than growing a second version of any of it here.
    */
   onCreateTrip?: (p: { place: Place; seed: { venueRef: string; name: string; category?: string | null; lat?: number | null; lng?: number | null } }) => void;
-  /** The other way to ask: say what the day is for and let Roam think about it. */
+  /** The other way to ask: say what the day is for and let Epic think about it. */
   onPlanner?: () => void;
   /** Somewhere to eat is Places' question, not this screen's. */
   onFood?: () => void;
@@ -318,7 +318,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
       setPool(r);
     } catch (e: any) {
       setPool(null);
-      setError(e?.message ?? 'Roam could not look around just now.');
+      setError(e?.message ?? 'Epic could not look around just now.');
     } finally {
       setLoading(false);
     }
@@ -618,7 +618,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
 
           {!centre && !loading ? (
             <Empty
-              title="Roam does not know where you are yet"
+              title="Epic does not know where you are yet"
               body="Search for a town above, or set your home address in Household, and this screen fills with what is around it."
             />
           ) : null}
@@ -800,7 +800,7 @@ function Shelf({ title, items, wide, expanded, onToggle, onOpen, onKeep, isKept,
 /**
  * One place.
  *
- * The picture is Roam's own: harvested from Wikimedia Commons under a licence
+ * The picture is Epic's own: harvested from Wikimedia Commons under a licence
  * that lets us keep it, held in our database at three widths, and served from
  * `/api/images/:id/500` outside the session door with a year's immutable
  * caching — so the second time anybody sees this card the bytes come from the
@@ -816,7 +816,7 @@ function Shelf({ title, items, wide, expanded, onToggle, onOpen, onKeep, isKept,
  * being allowed to show the picture, not a nicety, so it is inside this
  * component rather than left to each caller to remember.
  *
- * A place with no photograph of ours still gets its own icon on the mint tile,
+ * A place with no photograph of ours still gets its own icon on the lime tile,
  * so a shelf reads as deliberate rather than broken.
  */
 function Card({ item, wide, onOpen, onKeep, kept, drawers }: {
@@ -857,7 +857,7 @@ function Card({ item, wide, onOpen, onKeep, kept, drawers }: {
           accessibilityState={{ selected: kept }}
           accessibilityLabel={kept ? `Remove ${item.name} from your places` : `Keep ${item.name}`}
         >
-          <Icon name="keep" size={16} color={kept ? colors.red : colors.ink} fill={kept} strokeWidth={2} />
+          <Icon name="keep" size={16} color={kept ? colors.loved : colors.ink} fill={kept} strokeWidth={2} />
         </Pressable>
       </View>
       <View style={{ gap: 2 }}>

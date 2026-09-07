@@ -15,7 +15,7 @@ import { useViewport } from '../hooks/useViewport';
  * phone frame by hand, and every screen that has needed one has had to
  * (CLAUDE.md). This one does not need one, so it does not have one.
  *
- * The typing is `PlacePicker` in area mode, which is the searching Roam already
+ * The typing is `PlacePicker` in area mode, which is the searching Epic already
  * knows how to do: Photon, matched on the letters typed so far, the household's
  * own country first, everywhere else folded behind a count. Nothing here is a
  * second implementation of that.
@@ -27,7 +27,7 @@ import { useViewport } from '../hooks/useViewport';
  * one opens on the four or five places they actually go.
  */
 
-const RECENT_KEY = 'roam.inspire.recent';
+const RECENT_KEY = 'epic.inspire.recent';
 const RECENT_MAX = 6;
 
 const store = (): Storage | null => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage : null);
@@ -62,7 +62,7 @@ export function WhereSearch({ home, onPick, onClose, onPlanner }: {
   home: Place | null;
   onPick: (place: Place) => void;
   onClose: () => void;
-  /** The other way to answer this question: say what you're after and let Roam think. */
+  /** The other way to answer this question: say what you're after and let Epic think. */
   onPlanner?: () => void;
 }) {
   const { width } = useViewport();
@@ -155,7 +155,7 @@ export function WhereSearch({ home, onPick, onClose, onPlanner }: {
             <Icon name="plan" size={18} color={colors.icon} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={type.h3}>Not somewhere — something</Text>
-              <Text style={type.small}>Tell Roam what the day is for and it will find the place.</Text>
+              <Text style={type.small}>Tell Epic what the day is for and it will find the place.</Text>
             </View>
             <Icon name="more" size={16} color={colors.inkMuted} />
           </Pressable>

@@ -1,7 +1,7 @@
-# Invite covers — the Roam gallery
+# Invite covers — the Epic gallery
 
 Six photographs offered to a group organiser as the cover of their invite page
-(GroupPanel → step 5 → What the link opens → Edit → Roam gallery).
+(GroupPanel → step 5 → What the link opens → Edit → Epic gallery).
 
 Source: Unsplash, under the Unsplash Licence (free to use, no permission needed,
 no attribution required). Downloaded 6 Sep 2026 at 900×600 and served from this

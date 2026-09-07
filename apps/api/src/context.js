@@ -14,7 +14,7 @@
  * middleware sets it for every request that has a session, and anything that
  * reads it inside that request gets that account or nothing at all.
  *
- * The honest cost, named: this only works because Roam is plain async/await on
+ * The honest cost, named: this only works because Epic is plain async/await on
  * one process. Anything that breaks the async chain — a callback handed to a
  * library that queues it outside the request, a worker thread — loses the store
  * and falls back to the founding household. That is why `runOutsideRequest`

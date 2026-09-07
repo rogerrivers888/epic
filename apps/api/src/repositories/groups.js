@@ -1,6 +1,6 @@
 /**
  * Group trips: the organiser's checklist, the people on it, what each of them
- * has done, and every line Roam has written to them.
+ * has done, and every line Epic has written to them.
  *
  * Two audiences read these tables and they must never see the same thing. The
  * organiser sees the roster. A participant behind an invite link sees their own
@@ -97,7 +97,7 @@ export async function outsidersJoined(groupId) {
   return rows[0].n;
 }
 
-/** Every group Roam should be chasing for. */
+/** Every group Epic should be chasing for. */
 export async function groupsToChase() {
   const { rows } = await query('select * from trip_groups where reminders_on = true and wanted_by is not null');
   return rows;
@@ -140,7 +140,7 @@ export async function nextItemPosition(groupId) {
  * A column not named here keeps its default.
  *
  * That is why the statement is assembled rather than written out with nineteen
- * placeholders: the first checklist Roam proposes gives a stay and an activity
+ * placeholders: the first checklist Epic proposes gives a stay and an activity
  * a label and a position and nothing else, and `late_joiners` is `not null`
  * with a default. Passing an explicit null for every field the caller did not
  * set overrides the default and the insert fails — which is exactly what
@@ -410,7 +410,7 @@ export async function headsOnItemExcluding(itemId, participantId) {
 }
 
 // ---------------------------------------------------------------------------
-// what Roam has written to people
+// what Epic has written to people
 // ---------------------------------------------------------------------------
 
 export async function remindersOf(groupId, limit = 200) {

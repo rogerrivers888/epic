@@ -1,4 +1,4 @@
-# Roam — data and imagery
+# Epic — data and imagery
 
 | | |
 |---|---|
@@ -13,7 +13,7 @@
 
 ## 1. The one rule
 
-**Everything Roam shows is either rented or owned, and the two are never mixed in a stored record.**
+**Everything Epic shows is either rented or owned, and the two are never mixed in a stored record.**
 
 - **Rented** is somebody else's product. We may look at it, show it to a household while they are looking, and then we must let go of it. Google's names, photographs, ratings and reviews are rented. So are Tripadvisor's and Yelp's.
 - **Owned** is what we may keep for good: open data, openly licensed pictures, a business's own published facts, and everything a household generates.
@@ -39,7 +39,7 @@ What we use today, what it lets us keep, and what it costs.
 | **Google Places** | **That a place exists, and its place ID** | Google Maps Platform terms | **Place ID only.** Coordinates 30 days. Names, photos, ratings, reviews: never | $0.032/request past 5,000 free a month |
 | **Foursquare OS Places** | Bulk venue index | Apache 2.0 | Yes, everything, indefinitely | Free — needs a HuggingFace token, dataset is gated |
 
-Everything above the Google row needs no account and no key. That is deliberate: the parts of Roam that must never stop working are built only on those.
+Everything above the Google row needs no account and no key. That is deliberate: the parts of Epic that must never stop working are built only on those.
 
 ---
 
@@ -67,7 +67,7 @@ There is no free, storable source of star ratings. Not OpenStreetMap, not Wikida
 
 1. **Popularity we own** — readership, visitor figures. This answers *"is this a big deal"*, not *"is it any good"*, and it should never be presented as a rating.
 2. **A licensed star, fetched at display and shown as a band** — `top` / `high` / `good` / `mixed`. A dozen different ratings map to each band, so the band cannot be read backwards into the figure behind it. Never written down.
-3. **The household's own ratings**, which Roam already collects and owns outright. Over time this is the only rating that is genuinely ours.
+3. **The household's own ratings**, which Epic already collects and owns outright. Over time this is the only rating that is genuinely ours.
 
 ### 3.4 Imagery
 
@@ -125,7 +125,7 @@ Rules that live only in a document get broken. These live in code.
 
 ## 7. What is outstanding
 
-- **Household upload flow** — schema exists, camera does not. Before it ships: the licence grant a household gives Roam, recorded with the file; a bystander rule (a photograph of a playground contains other people's children); a takedown route.
+- **Household upload flow** — schema exists, camera does not. Before it ships: the licence grant a household gives Epic, recorded with the file; a bystander rule (a photograph of a playground contains other people's children); a takedown route.
 - **Foursquare OS Places** — the storable bulk index. Gated; needs a token.
 - **Soft play imagery** — no free licensed source exists. The realistic routes are operator uploads, household uploads, or honestly-labelled category imagery.
 - **A rated source with storable ratings** — none found. Assume there isn't one.

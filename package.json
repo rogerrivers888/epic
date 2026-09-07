@@ -1,8 +1,8 @@
 {
-  "name": "roam",
+  "name": "epic",
   "private": true,
   "version": "0.1.0",
-  "description": "Roam \u2014 remember every place you love",
+  "description": "Epic \u2014 seize the day",
   "workspaces": [
     "apps/*"
   ],
@@ -13,12 +13,12 @@
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d && sleep 3 && npm run migrate && npm run seed",
-    "migrate": "npm run migrate -w @roam/api",
-    "seed": "npm run seed -w @roam/api",
-    "api": "npm run dev -w @roam/api",
-    "web": "npm run web -w @roam/web",
-    "test": "npm run test -w @roam/api && npm run test -w @roam/web",
-    "test:api": "npm run test -w @roam/api",
-    "test:web": "npm run test -w @roam/web"
+    "migrate": "npm run migrate -w @epic/api",
+    "seed": "npm run seed -w @epic/api",
+    "api": "npm run dev -w @epic/api",
+    "web": "npm run web -w @epic/web",
+    "test": "npm run test -w @epic/api && npm run test -w @epic/web",
+    "test:api": "npm run test -w @epic/api",
+    "test:web": "npm run test -w @epic/web"
   }
 }

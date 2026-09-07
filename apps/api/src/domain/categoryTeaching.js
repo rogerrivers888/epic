@@ -16,7 +16,7 @@
  *
  * **Two axes, kept apart.** A category says what a place is; a shelf says what a
  * day there is like (`domain/moods.js`). They are different questions with
- * different answers — a castle is `heritage` and a Culture day — and Roam has
+ * different answers — a castle is `heritage` and a Culture day — and Epic has
  * been bitten by conflating them before. So this returns both when the sentence
  * implies both, but they are saved as two rules against two tables and the
  * screen says which is which.
@@ -28,7 +28,7 @@ import { z } from 'zod/v4';
 import { parseStructured } from '../claude.js';
 import { MAX_SHELVES, MOOD_KEYS, SHELF_FLOOR } from './moods.js';
 
-/** Roam's own eight words for what a place is (sources/wikimedia.js). */
+/** Epic's own eight words for what a place is (sources/wikimedia.js). */
 export const CATEGORIES = ['heritage', 'outdoors', 'museum', 'family', 'arts', 'animals', 'active', 'landmark'];
 
 const Weight = z.number().min(0).max(1);
@@ -54,9 +54,9 @@ const Proposal = z.object({
   adrenaline: Weight, relaxing: Weight, outdoors: Weight,
 });
 
-const SYSTEM = `You are helping the owner of Roam, a family trip planner, correct how it files a place.
+const SYSTEM = `You are helping the owner of Epic, a family trip planner, correct how it files a place.
 
-Roam has two separate vocabularies and you must not mix them.
+Epic has two separate vocabularies and you must not mix them.
 
 **The category** — what a place *is*. Exactly one of:
 - heritage — castles, ruins, historic houses, monuments, listed buildings, churches
@@ -108,7 +108,7 @@ export async function readCategoryTeaching({ said, place, kinds = [], householdI
   const lines = [
     `The place: ${place.name}.`,
     place.summary ? `What is known about it: ${String(place.summary).slice(0, 700)}` : null,
-    `Roam currently files it as: ${place.category ?? 'nothing'}.`,
+    `Epic currently files it as: ${place.category ?? 'nothing'}.`,
     kinds.length
       ? `Its Wikidata types, in the order Wikidata stated them:\n${kinds.map((k) => `- ${k.qid}${k.label ? ` (${k.label})` : ''}${k.category ? ` — currently filed as ${k.category}` : ''}`).join('\n')}`
       : 'It has no Wikidata types, so a type-wide rule is not available and the scope must be "place".',

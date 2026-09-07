@@ -1,5 +1,5 @@
 /**
- * The atlas library — the back office screen for the attractions Roam knows
+ * The atlas library — the back office screen for the attractions Epic knows
  * about and the pictures it owns.
  *
  * Owner, 4 Sep 2026: "I'd like you to create an admin screen where we can
@@ -63,7 +63,7 @@ const size = (bytes: number | string | null | undefined) => {
   return `${n} B`;
 };
 
-/** Roam's own eight words for what a place is (sources/wikimedia.js). */
+/** Epic's own eight words for what a place is (sources/wikimedia.js). */
 const CATEGORIES = ['heritage', 'outdoors', 'museum', 'family', 'arts', 'animals', 'active', 'landmark'];
 
 const STATE_TONE: Record<string, 'plain' | 'ok' | 'warn' | 'crit' | 'accent'> = {
@@ -104,7 +104,7 @@ export function Library({ canManage }: { canManage: boolean }) {
     <AdminPage>
       <PageHead
         title="Atlas library"
-        sub="The attractions in every UK county, and the pictures Roam owns of them."
+        sub="The attractions in every UK county, and the pictures Epic owns of them."
       />
 
       {error ? <Banner tone="crit">{error}</Banner> : null}
@@ -508,7 +508,7 @@ function Pictures({ regions, canManage, wide }: { regions: LibraryRegion[]; canM
           <FilterChip label="Free of conditions" on={credit === false} onPress={() => setCredit(credit === false ? null : false)} />
           <FilterChip label="Attached to nothing" on={unlinked} onPress={() => setUnlinked(!unlinked)} />
         </FilterRow>
-        {/* What Roam files the place under. Stacked under the region chips on
+        {/* What Epic files the place under. Stacked under the region chips on
             purpose: "kids' things in Berkshire" is two taps, and the pair
             together is the question the owner actually asks of this screen. */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.xs }}>
@@ -708,7 +708,7 @@ function Uploads({ canManage }: { canManage: boolean }) {
       </Panel>
 
       <Panel title="What households have earned"
-             sub="Points, not money — nothing in Roam moves money, and a reward that implied a payment would be a promise we cannot keep.">
+             sub="Points, not money — nothing in Epic moves money, and a reward that implied a payment would be a promise we cannot keep.">
         {!board.length ? <Text style={type.small}>Nobody has contributed a picture yet.</Text> : null}
         {board.map((c) => (
           <Row key={c.id} style={styles.boardRow}>
@@ -742,7 +742,7 @@ function Types({ canManage }: { canManage: boolean }) {
 
   return (
     <Panel title="What counts as somewhere to go"
-           sub="Wikidata says a place is a castle or a metro station; this is where Roam decides which of those is a day out. About 5,300 types, ordered by how often they have come back."
+           sub="Wikidata says a place is a castle or a metro station; this is where Epic decides which of those is a day out. About 5,300 types, ordered by how often they have come back."
            padded={false}>
       <View style={{ padding: spacing.md, gap: spacing.sm }}>
         <View style={styles.search}>

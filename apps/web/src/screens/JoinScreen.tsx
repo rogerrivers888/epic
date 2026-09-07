@@ -13,7 +13,7 @@ import { setSessionToken } from '../session';
 /**
  * What an invite link opens (Group Trips, Epic 3).
  *
- * The person holding it has never heard of Roam and is not signed in to
+ * The person holding it has never heard of Epic and is not signed in to
  * anything: they see what is being asked of them first, and are asked who they
  * are at the first thing they tap. Possession of the link is not proof of
  * identity, so their name is whatever they type — and the screen says so.
@@ -24,7 +24,7 @@ import { setSessionToken } from '../session';
  * be saved to their device and lets the organiser's view nowhere near it.
  */
 
-const KEY = 'roam.join';
+const KEY = 'epic.join';
 const money = (p?: number | null) => (p == null ? '' : `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`);
 const day = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) : '');
 const shortDay = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '');
@@ -215,7 +215,7 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
   const them = v.group.organiser ?? 'The organiser';
   const named = v.expecting.length > 0;
 
-  // Somebody who already uses Roam and is signed in on this device is not being
+  // Somebody who already uses Epic and is signed in on this device is not being
   // asked who they are — they are being asked to confirm it (Epic 4, AC6). The
   // API recognises the same contact and signs them into the account they have.
   useEffect(() => {
@@ -242,13 +242,13 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
       </Row>
 
       <View style={{ gap: 4 }}>
-        <Text style={type.title}>{known ? "You're in Roam already" : named ? 'First, which one are you?' : 'First, who are you?'}</Text>
+        <Text style={type.title}>{known ? "You're in Epic already" : named ? 'First, which one are you?' : 'First, who are you?'}</Text>
         <Text style={type.small}>
           {known
-            ? `Your Roam account joins this trip — ${them} sees your name and how to reach you, and nothing else. Your own trips and household stay yours.`
+            ? `Your Epic account joins this trip — ${them} sees your name and how to reach you, and nothing else. Your own trips and household stay yours.`
             : named
-            ? `${them} added a few names when he set this up. Tap yours, or type it if it isn't there. This also makes you a Roam account.`
-            : `${them} shared this link openly, so we don't know you yet. They'll see your name and how to reach you — nothing else. This also makes you a Roam account.`}
+            ? `${them} added a few names when he set this up. Tap yours, or type it if it isn't there. This also makes you an Epic account.`
+            : `${them} shared this link openly, so we don't know you yet. They'll see your name and how to reach you — nothing else. This also makes you an Epic account.`}
         </Text>
       </View>
 
@@ -301,13 +301,13 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
           placeholderTextColor={colors.inkFaint}
           style={styles.input}
         />
-        {/* Roam has no message channel until one is configured, so this says
+        {/* Epic has no message channel until one is configured, so this says
             which of the two things is about to happen rather than promising a
             text nobody can send. */}
         <Text style={type.small}>
           {v.group.canSendCode
             ? "We'll send a 6-digit code. No password."
-            : 'No password. Roam cannot send a code yet, so this device is signed in now and your contact is kept for reminders.'}
+            : 'No password. Epic cannot send a code yet, so this device is signed in now and your contact is kept for reminders.'}
         </Text>
       </View>
 
@@ -316,7 +316,7 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
         <Row style={{ alignItems: 'flex-start' }}>
           <View style={styles.trialIcon}><Icon name="gift" size={16} color={colors.headerSub} /></View>
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={type.h3}>Roam is yours free for 30 days</Text>
+            <Text style={type.h3}>Epic is yours free for 30 days</Text>
             <Text style={[type.small, { color: colors.headerSub }]}>
               The whole app — planning, places, your own trips. <Text style={{ fontWeight: '700', color: colors.headerSub }}>No card, nothing to cancel.</Text> The only thing you'll ever pay here is your share of the trip.
             </Text>
@@ -333,7 +333,7 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
         />
         {known ? null : (
           <Text style={[type.small, { textAlign: 'center' }]}>
-            Already use Roam? <Text style={{ color: colors.accent, fontWeight: '700' }}>Sign in</Text> with the same mobile or email above.
+            Already use Epic? <Text style={{ color: colors.accent, fontWeight: '700' }}>Sign in</Text> with the same mobile or email above.
           </Text>
         )}
       </View>
@@ -344,7 +344,7 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
 /**
  * Who's coming with you (Epic 4).
  *
- * The people they name become their own household in Roam — not the
+ * The people they name become their own household in Epic — not the
  * organiser's — and how many of them are coming is what every per-person price
  * divides by. A child's age is asked because a trip that is priced or booked by
  * age needs it, and it stays as long as the household does.
@@ -361,7 +361,7 @@ function HouseholdStep({ v, account, busy, onBack, onDone }: {
   const [child, setChild] = useState(false);
   const [age, setAge] = useState('');
 
-  // Somebody who already had a Roam account arrives with a household; it is
+  // Somebody who already had an Epic account arrives with a household; it is
   // theirs, so it is offered ticked rather than asked for again.
   useEffect(() => {
     if (!account?.returning) return;
@@ -388,7 +388,7 @@ function HouseholdStep({ v, account, busy, onBack, onDone }: {
       <View style={{ gap: 4 }}>
         <Text style={type.title}>Who's coming with you, {firstName(you)}?</Text>
         <Text style={type.small}>
-          Anything priced per person counts everyone here, and one bill comes to you. They're your household in Roam from now on.
+          Anything priced per person counts everyone here, and one bill comes to you. They're your household in Epic from now on.
         </Text>
       </View>
 
@@ -512,7 +512,7 @@ function BookStep({ v, busy, heads: pretendHeads, preview, onBack, onConfirm }: 
 }) {
   const [picks, setPicks] = useState<Record<string, Pick>>(() => seed(v));
   const them = v.group.organiser ?? 'the organiser';
-  const roam = v.group.paymentMode === 'roam';
+  const epic = v.group.paymentMode === 'epic';
   const items = v.items.filter((i) => i.state !== 'cancelled');
 
   // By day, in the order the trip happens; anything without a date last.
@@ -537,7 +537,7 @@ function BookStep({ v, busy, heads: pretendHeads, preview, onBack, onConfirm }: 
     if (!chosen(i) || !i.pricing) continue;
     if (i.pricing === 'variable' && i.state !== 'closed') { later.push(i); continue; }
     if (i.bookWhere === 'there') continue;
-    if (roam) payNow += fixedYours(i); else toThem += fixedYours(i);
+    if (epic) payNow += fixedYours(i); else toThem += fixedYours(i);
   }
   const laterLow = later.reduce((n, i) => n + (i.money?.likelyYoursPence ?? 0) * mult(i), 0);
   const laterHigh = later.reduce((n, i) => n + (i.money?.ceilingYoursPence ?? 0) * mult(i), 0);
@@ -566,7 +566,7 @@ function BookStep({ v, busy, heads: pretendHeads, preview, onBack, onConfirm }: 
           {d.items.map((i) => (
             <BookRow
               key={i.id}
-              item={i} pick={picks[i.id] ?? null} organiser={them} roam={roam} heads={v.you?.heads ?? pretendHeads ?? 1}
+              item={i} pick={picks[i.id] ?? null} organiser={them} epic={epic} heads={v.you?.heads ?? pretendHeads ?? 1}
               onPick={(p) => setPicks({ ...picks, [i.id]: p })}
             />
           ))}
@@ -574,7 +574,7 @@ function BookStep({ v, busy, heads: pretendHeads, preview, onBack, onConfirm }: 
       ))}
 
       <View style={styles.footer}>
-        {payNow ? <Money2 label={`Pay now · ${roam ? 'via Roam' : 'card'}`} value={money(payNow)} /> : null}
+        {payNow ? <Money2 label={`Pay now · ${epic ? 'via Epic' : 'card'}`} value={money(payNow)} /> : null}
         {later.length ? <Money2 label={`On ${shortDay(settles)} · ${later.map((i) => i.label).join(', ')}`} value={laterLow === laterHigh ? money(laterHigh) : `${money(laterLow)}–${money(laterHigh)}`} /> : null}
         {toThem ? <Money2 label={`To ${them}`} value={money(toThem)} /> : null}
         {!payNow && !later.length && !toThem ? <Text style={type.small}>Nothing to pay on this trip.</Text> : null}
@@ -607,8 +607,8 @@ function Money2({ label, value }: { label: string; value: string }) {
 }
 
 /** One thing to decide, with the control that names what deciding it means. */
-function BookRow({ item: i, pick, organiser, roam, heads, onPick }: {
-  item: BookItem; pick: Pick; organiser: string; roam: boolean; heads: number; onPick: (p: Pick) => void;
+function BookRow({ item: i, pick, organiser, epic, heads, onPick }: {
+  item: BookItem; pick: Pick; organiser: string; epic: boolean; heads: number; onPick: (p: Pick) => void;
 }) {
   const m = i.money;
   const perYou = i.perHead && heads > 1;
@@ -620,8 +620,8 @@ function BookRow({ item: i, pick, organiser, roam, heads, onPick }: {
   // What happens to the money, in the guest's words, or the organiser's own line.
   const paymentLine = i.guestNote
     ?? (i.bookWhere === 'yourself' ? `Book yourself${host(i.externalUrl) ? ` at ${host(i.externalUrl)}` : ''}, then tell us`
-      : i.pricing === 'variable' ? `${roam ? 'Via Roam' : `Pay ${organiser}`} · settles ${shortDay(m?.closesOn)}, nothing taken until then`
-      : i.pricing === 'fixed' ? (roam ? 'Pre-book · pay now via Roam' : `Pay ${organiser} directly · ticked off when it arrives`)
+      : i.pricing === 'variable' ? `${epic ? 'Via Epic' : `Pay ${organiser}`} · settles ${shortDay(m?.closesOn)}, nothing taken until then`
+      : i.pricing === 'fixed' ? (epic ? 'Pre-book · pay now via Epic' : `Pay ${organiser} directly · ticked off when it arrives`)
       : i.bookWhere === 'there' ? 'Pay there on the day'
       : i.required ? 'Part of the trip' : `${organiser} just needs to know`);
 
@@ -736,7 +736,7 @@ function TheirList({ v, token, me, busy, account, onAct, onBook, onTrial }: {
 
       <Row>
         <Button label="Change my picks" kind="secondary" icon="edit" onPress={onBook} />
-        {account ? <Button label="Your Roam" kind="ghost" icon="gift" onPress={onTrial} /> : null}
+        {account ? <Button label="Your Epic" kind="ghost" icon="gift" onPress={onTrial} /> : null}
       </Row>
 
       {v.group.cancelled ? (
@@ -783,7 +783,7 @@ function ItemCard({ item, organiser, joined, trip, onAsk, onSet }: {
             </Text>
           ) : null}
           {item.kind === 'fee' && item.refundRule === 'until' && item.refundUntil ? (
-            <Text style={type.small}>Refundable until {day(item.refundUntil)}. Pay {organiser ?? 'the organiser'} directly — Roam does not take the money.</Text>
+            <Text style={type.small}>Refundable until {day(item.refundUntil)}. Pay {organiser ?? 'the organiser'} directly — Epic does not take the money.</Text>
           ) : null}
           {s ? (
             <Text style={[type.small, { color: colors.like, fontWeight: '700' }]}>
@@ -814,7 +814,7 @@ function ItemCard({ item, organiser, joined, trip, onAsk, onSet }: {
                 </Row>
               </View>
             ) : null}
-            <Text style={type.small}>Because you booked it away from Roam, nobody can confirm it. It shows on their list as your word for it.</Text>
+            <Text style={type.small}>Because you booked it away from Epic, nobody can confirm it. It shows on their list as your word for it.</Text>
             <Row>
               <Button label="That's booked" onPress={() => { onSet({ status: 'declared', whereBooked: where.trim() || null, bookingRef: ref.trim() || null, startsOn: item.kind === 'stay' ? from || null : null, endsOn: item.kind === 'stay' ? to || null : null }); setDeclaring(false); }} />
               <Button label="Cancel" kind="ghost" onPress={() => setDeclaring(false)} />
@@ -970,9 +970,9 @@ function JoinForm({ v, busy, onJoin, onCancel }: { v: JoinView; busy: boolean; o
 const styles = StyleSheet.create({
   page: { padding: spacing.lg, gap: spacing.md, width: '100%' },
   hint: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },
-  previewBar: { backgroundColor: colors.mint, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
+  previewBar: { backgroundColor: colors.lime, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
   trialCard: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },
-  trialIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
+  trialIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.lime, alignItems: 'center', justifyContent: 'center' },
   pick: { flex: 1, gap: 4, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   pickOn: { borderColor: colors.ink, borderWidth: 2 },
   pickIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },

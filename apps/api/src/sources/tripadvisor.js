@@ -29,7 +29,7 @@ const BASE = 'https://terra.tripadvisor.com/api';
 export const TRIPADVISOR_ATTRIBUTION = 'Reviews and photos © Tripadvisor';
 
 /** Discover: 20 is the page maximum, but every ID returned is billed, so browse takes fewer. */
-const NEARBY_PAGE = Math.min(20, Math.max(1, Number(process.env.ROAM_TRIPADVISOR_PAGE) || 10));
+const NEARBY_PAGE = Math.min(20, Math.max(1, Number(process.env.EPIC_TRIPADVISOR_PAGE) || 10));
 const REVIEWS_PER_VENUE = 3;
 
 async function get(path, params = {}, meter = null) {
@@ -83,7 +83,7 @@ function formattedHours(h) {
 }
 
 /**
- * Map a Terra location (catalog or full) onto Roam's venue shape.
+ * Map a Terra location (catalog or full) onto Epic's venue shape.
  * `fallbackCategory` is the category the nearby call was filtered by, since
  * catalog results do not carry one.
  */
@@ -131,7 +131,7 @@ export function toVenue(loc, fallbackCategory = 'attraction') {
 const tokens = (q) => String(q || '').toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
 
 /** How many of the other sources' venues an opt-in search looks up by name. */
-const ENRICH_LIMIT = Math.max(0, Number(process.env.ROAM_TRIPADVISOR_ENRICH ?? 8));
+const ENRICH_LIMIT = Math.max(0, Number(process.env.EPIC_TRIPADVISOR_ENRICH ?? 8));
 /** Name matches per lookup: Terra ranks loosely ("Trafalgar Square" → "Colonel Saab Trafalgar Square" first), so two tries. */
 const ENRICH_SIZE = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

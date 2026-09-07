@@ -6,8 +6,8 @@
 // at most one request per second, and no bulk use; a family's searches are far
 // below that. A commercial geocoder slots in behind the same two functions.
 
-const BASE = process.env.ROAM_NOMINATIM_URL || 'https://nominatim.openstreetmap.org';
-const USER_AGENT = 'Roam/0.1 (private beta; +https://github.com/rogerrivers888/roam)';
+const BASE = process.env.EPIC_NOMINATIM_URL || 'https://nominatim.openstreetmap.org';
+const USER_AGENT = 'Epic/0.1 (private beta; +https://github.com/rogerrivers888/epic)';
 export const GEOCODE_ATTRIBUTION = '© OpenStreetMap contributors';
 
 let lastCall = 0;

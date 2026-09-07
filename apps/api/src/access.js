@@ -2,13 +2,13 @@
  * Doors and capabilities: who may enter which application, and what they may do
  * once they are inside.
  *
- * The model is Parcelvision's, which the owner asked Roam to mirror
+ * The model is Parcelvision's, which the owner asked Epic to mirror
  * (`backend/app/constants/identity.py`). Three ideas, and the reason each is
  * separate from the others:
  *
  *  - **A door** is which application you may enter: `client` (a household's own
- *    Roam) or `admin` (the back office). Somebody without the admin door is not
- *    shown a refusal — the API answers 404, because a household using Roam has
+ *    Epic) or `admin` (the back office). Somebody without the admin door is not
+ *    shown a refusal — the API answers 404, because a household using Epic has
  *    no business learning that a back office exists.
  *  - **A capability** is what you may do inside. Reading and changing are always
  *    a pair, and the trap PV names in its own docstring is worth repeating: a
@@ -36,7 +36,7 @@ export const CAPABILITIES = [
   { key: 'view_accounts', area: 'People', label: 'See accounts', note: 'The list of households, their plan, and when they were last in.' },
   { key: 'manage_accounts', area: 'People', label: 'Manage accounts', note: 'Invite, change a plan or ceiling, suspend, remove.', manages: true },
   { key: 'manage_roles', area: 'People', label: 'Manage roles', note: 'Create roles and grant capabilities — including these.', manages: true },
-  { key: 'view_activity', area: 'Behaviour', label: 'See activity', note: 'What a household has done in Roam, and how long they spend in it.' },
+  { key: 'view_activity', area: 'Behaviour', label: 'See activity', note: 'What a household has done in Epic, and how long they spend in it.' },
   { key: 'view_reporting', area: 'Behaviour', label: 'See reporting', note: 'Engagement, retention and usage across every household.' },
   { key: 'view_financials', area: 'Money', label: 'See financials', note: 'Revenue, what plans earn, and what providers cost.' },
   { key: 'manage_plans', area: 'Money', label: 'Manage plans', note: 'Set what a plan is called, what it costs and what it allows.', manages: true },

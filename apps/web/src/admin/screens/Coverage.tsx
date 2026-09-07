@@ -15,7 +15,7 @@
  *
  * The filter travels in the address — `/admin/places?where=berkshire&missing=picture`
  * — so a work queue is a URL somebody can be sent, which is the working
- * agreement for every page in Roam.
+ * agreement for every page in Epic.
  *
  * **The shade is a hint, never the information.** Tints of the one green rather
  * than a red-to-amber-to-green ramp: the style guide has no colour-coding of
@@ -50,9 +50,11 @@ const KIND_WORD: Record<Locality['kind'], string> = { county: 'county', town: 't
 const shadeOf = (pc: number | null) => {
   if (pc == null) return { bg: 'transparent', fg: colors.inkFaint, edge: colors.line };
   if (pc >= 90) return { bg: colors.accent, fg: colors.primaryFg, edge: 'transparent' };
-  if (pc >= 70) return { bg: '#63B48F', fg: colors.primaryFg, edge: 'transparent' };
-  if (pc >= 45) return { bg: '#9CD2B8', fg: colors.ink, edge: 'transparent' };
-  if (pc >= 20) return { bg: '#C4E5D5', fg: colors.ink, edge: 'transparent' };
+  // A sequential ramp cut from the brand: ink at the top, through lime, to the
+  // lime tint. Ink type on every step of it — cream on lime is never allowed.
+  if (pc >= 70) return { bg: colors.primary, fg: colors.primaryFg, edge: 'transparent' };
+  if (pc >= 45) return { bg: colors.lime, fg: colors.ink, edge: 'transparent' };
+  if (pc >= 20) return { bg: colors.surfaceMuted, fg: colors.ink, edge: 'transparent' };
   if (pc > 0) return { bg: colors.accentSoft, fg: colors.ink, edge: 'transparent' };
   return { bg: colors.well, fg: colors.inkMuted, edge: colors.line };
 };

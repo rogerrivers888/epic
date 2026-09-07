@@ -33,13 +33,13 @@ export const menu = Router();
 export const orders = Router();
 // The code on the table (owner, 7 Sep 2026). Mounted outside the door in
 // server.js: whoever scans it is a waiter holding an unguessable link, not
-// somebody with a Roam account.
+// somebody with a Epic account.
 export const ticket = Router();
 
 // A menu older than this is still shown, with its date, and its prices marked
 // as printed then rather than now (Epic 6 C8; the threshold was the owner's to
 // set and 30 days is the standing suggestion until he moves it).
-export const STALE_DAYS = Number(process.env.ROAM_MENU_STALE_DAYS || 30);
+export const STALE_DAYS = Number(process.env.EPIC_MENU_STALE_DAYS || 30);
 
 const SYMBOLS = { GBP: '£', '£': '£', EUR: '€', '€': '€', USD: '$', $: '$' };
 /**
@@ -229,12 +229,12 @@ menu.post('/read', async (req, res, next) => {
       });
       if (read.dryRun) return res.json({ dryRun: read });
     } catch (err) {
-      // Roam's own ceiling, not their menu. Saying "photograph it instead" when
+      // Epic's own ceiling, not their menu. Saying "photograph it instead" when
       // we found four photographs of it and stopped ourselves is the kind of
       // wrong answer that sends somebody to do a job we had already done
       // (owner, 6 Sep 2026).
       // The owner's own limit in the Anthropic console. Nothing is wrong with
-      // the menu and nothing is wrong with Roam; there is no more budget until
+      // the menu and nothing is wrong with Epic; there is no more budget until
       // it is raised, and saying anything else sends somebody to fix the wrong
       // thing (owner, 6 Sep 2026).
       if (err?.code === 'model_budget_reached') {
@@ -242,8 +242,8 @@ menu.post('/read', async (req, res, next) => {
           error: err.code,
           until: err.until,
           message: err.until
-            ? `Roam's reading budget for this month is spent — menus can be read again on ${new Date(`${err.until}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}, or sooner if the limit is raised.`
-            : "Roam's reading budget is spent, so nothing new can be read until it is raised.",
+            ? `Epic's reading budget for this month is spent — menus can be read again on ${new Date(`${err.until}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}, or sooner if the limit is raised.`
+            : "Epic's reading budget is spent, so nothing new can be read until it is raised.",
           how: err.steps ?? [],
           url,
         });
@@ -255,7 +255,7 @@ menu.post('/read', async (req, res, next) => {
           bound: err.bound,
           message: err.scope === 'session'
             ? "That's as much as one sitting will spend. Come back to it in a moment."
-            : "Roam has used up this month's allowance for your household, so nothing new can be read until it is raised.",
+            : "Epic has used up this month's allowance for your household, so nothing new can be read until it is raised.",
           how: err.steps ?? [],
           url,
         });
@@ -301,7 +301,7 @@ menu.post('/read', async (req, res, next) => {
 });
 
 /**
- * GET /api/menu/known?ref=… — the menu Roam knows for a place, whoever read it.
+ * GET /api/menu/known?ref=… — the menu Epic knows for a place, whoever read it.
  *
  * Not the household's own copy (that is GET /api/menu?ref=…, and it carries the
  * restaurant's descriptions). This is the pooled record: dish names, prices and
@@ -323,7 +323,7 @@ menu.get('/known', async (req, res, next) => {
  * POST /api/menu/dish { name, hint? } — "What's this?"
  *
  * A line about the dish itself, for a menu that gives only a name in another
- * language. Written once and kept for everyone: it is Roam's own words about a
+ * language. Written once and kept for everyone: it is Epic's own words about a
  * dish in general, not the restaurant's copy, so the next household to ask a
  * question about supplì does not pay for the answer again.
  */
@@ -345,7 +345,7 @@ menu.post('/dish', async (req, res, next) => {
       householdId: household.id,
       sessionId: req.body?.sessionId ?? null,
     });
-    await menusRepo.saveDishNote(key, name, { known: note.known !== false, what: note.what, origin: note.origin ?? null }, process.env.ROAM_MENU_MODEL || 'claude-sonnet-5');
+    await menusRepo.saveDishNote(key, name, { known: note.known !== false, what: note.what, origin: note.origin ?? null }, process.env.EPIC_MENU_MODEL || 'claude-sonnet-5');
     res.json({ dish: { name, known: note.known !== false, what: note.what, origin: note.origin ?? null }, cached: false });
   } catch (err) { next(err); }
 });
@@ -573,7 +573,7 @@ orders.post('/:id/ratings', async (req, res, next) => {
  * about anywhere else this family has ever been.
  *
  * The allergens are the reason this page is worth more than a photograph of a
- * notepad: they are the household's own and they must reach the kitchen. Roam
+ * notepad: they are the household's own and they must reach the kitchen. Epic
  * can never clear a dish it did not see declared, so the page says to ask.
  */
 ticket.get('/:token', async (req, res, next) => {

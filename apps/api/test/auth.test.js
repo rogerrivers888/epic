@@ -11,10 +11,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const withPasscode = async (value, fn) => {
-  const before = process.env.ROAM_PASSCODE;
-  if (value === null) delete process.env.ROAM_PASSCODE; else process.env.ROAM_PASSCODE = value;
+  const before = process.env.EPIC_PASSCODE;
+  if (value === null) delete process.env.EPIC_PASSCODE; else process.env.EPIC_PASSCODE = value;
   try { return await fn(); } finally {
-    if (before === undefined) delete process.env.ROAM_PASSCODE; else process.env.ROAM_PASSCODE = before;
+    if (before === undefined) delete process.env.EPIC_PASSCODE; else process.env.EPIC_PASSCODE = before;
   }
 };
 
@@ -48,7 +48,7 @@ test('with no passcode set, nothing matches at all', async () => {
     // way the empty string must never be the passcode.
     assert.equal(passcodeMatches(''), false);
     assert.equal(passcodeMatches(undefined), false);
-    if (!configured) assert.equal(passcodeMatches('roam-dev'), false);
+    if (!configured) assert.equal(passcodeMatches('epic-dev'), false);
   });
 });
 
@@ -81,18 +81,18 @@ test('a path that merely starts with a public one is not public', () => {
 });
 
 test('the origin list, when the owner has set one', () => {
-  const before = process.env.ROAM_WEB_ORIGIN;
+  const before = process.env.EPIC_WEB_ORIGIN;
   try {
-    process.env.ROAM_WEB_ORIGIN = 'https://roam.example.com, https://roam-web.up.railway.app/';
-    assert.equal(originAllowed('https://roam.example.com'), true);
-    assert.equal(originAllowed('https://roam-web.up.railway.app'), true, 'a trailing slash is the same origin');
-    assert.equal(originAllowed('https://roam.example.com.evil.test'), false);
-    assert.equal(originAllowed('http://roam.example.com'), false, 'scheme is part of an origin');
+    process.env.EPIC_WEB_ORIGIN = 'https://epic.example.com, https://epic-web.up.railway.app/';
+    assert.equal(originAllowed('https://epic.example.com'), true);
+    assert.equal(originAllowed('https://epic-web.up.railway.app'), true, 'a trailing slash is the same origin');
+    assert.equal(originAllowed('https://epic.example.com.evil.test'), false);
+    assert.equal(originAllowed('http://epic.example.com'), false, 'scheme is part of an origin');
     assert.equal(originAllowed(undefined), true, 'no Origin header at all: curl, a native app, same-origin');
 
-    process.env.ROAM_WEB_ORIGIN = '';
+    process.env.EPIC_WEB_ORIGIN = '';
     assert.equal(originAllowed('https://anything.test'), true, 'unset: the passcode is the guard');
   } finally {
-    if (before === undefined) delete process.env.ROAM_WEB_ORIGIN; else process.env.ROAM_WEB_ORIGIN = before;
+    if (before === undefined) delete process.env.EPIC_WEB_ORIGIN; else process.env.EPIC_WEB_ORIGIN = before;
   }
 });

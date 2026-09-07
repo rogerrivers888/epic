@@ -33,7 +33,7 @@ export function Activity() {
 
   const load = useCallback(async () => {
     try { setData(await api.adminActivity(days)); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, [days]);
   useEffect(() => { void load(); }, [load]);
@@ -55,7 +55,7 @@ export function Activity() {
             <Tile label="Active today" value={count(data.active.dau)} tone={data.active.dau ? 'ok' : 'plain'} />
             <Tile label="This week" value={count(data.active.wau)} />
             <Tile label="This month" value={count(data.active.mau)} />
-            <Tile label="Time in Roam" value={duration(data.active.seconds_30d)} sub="last 30 days" />
+            <Tile label="Time in Epic" value={duration(data.active.seconds_30d)} sub="last 30 days" />
           </TileRow>
 
           <Panel title="Households here, by day">

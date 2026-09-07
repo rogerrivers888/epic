@@ -1,5 +1,5 @@
 /**
- * The menu Roam owns for a place, as against the copy one household captured.
+ * The menu Epic owns for a place, as against the copy one household captured.
  *
  * `menus` is a household's own fetch. `place_menus` is the shared record: read
  * from the venue's own published page, which is the licence that lets it be
@@ -67,7 +67,7 @@ export async function placeMenuItems(venueRef) {
   return rows;
 }
 
-/** How much of a menu dataset Roam has built, for the owner's own figures. */
+/** How much of a menu dataset Epic has built, for the owner's own figures. */
 export async function datasetSummary() {
   const { rows } = await query(
     `select count(*)::int as places, coalesce(sum(item_count), 0)::int as dishes,

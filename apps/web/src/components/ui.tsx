@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, StyleProp, Text, TextInput, View, ViewStyle, ActivityIndicator } from 'react-native';
-import { colors, fonts, radius, spacing, type, TARGET } from '../theme';
+import { colors, fonts, radius, spacing, type, TARGET, BORDER } from '../theme';
 import { Icon, IconName } from './Icon';
 
 export function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
@@ -18,12 +18,14 @@ export function SectionTitle({ children, hint }: { children: React.ReactNode; hi
 
 type ChipTone = 'neutral' | 'allergen' | 'like' | 'dislike' | 'want' | 'accent';
 const chipTones: Record<ChipTone, { bg: string; fg: string; border: string }> = {
+  // Every chip carries the same ink rule; the tone is what fills it. The one
+  // exception is an allergen, whose rule stays red because it means danger.
   neutral: { bg: colors.surface, fg: colors.ink, border: colors.line },
   allergen: { bg: colors.allergenSoft, fg: colors.allergen, border: colors.allergen },
-  like: { bg: colors.likeSoft, fg: colors.like, border: colors.likeSoft },
-  dislike: { bg: colors.dislikeSoft, fg: colors.dislike, border: colors.dislikeSoft },
-  want: { bg: colors.wantSoft, fg: colors.want, border: colors.wantSoft },
-  accent: { bg: colors.accentSoft, fg: colors.accent, border: colors.accentSoft },
+  like: { bg: colors.likeSoft, fg: colors.like, border: colors.line },
+  dislike: { bg: colors.dislikeSoft, fg: colors.dislike, border: colors.line },
+  want: { bg: colors.wantSoft, fg: colors.want, border: colors.line },
+  accent: { bg: colors.accentSoft, fg: colors.accent, border: colors.line },
 };
 
 export function Chip({
@@ -45,8 +47,10 @@ export function Chip({
   /** Fill the icon (a kept heart, a favourite star). */
   iconFill?: boolean;
 }) {
-  // A selected chip is an ink pill with white type (style guide); tones are tints of the one green and of ink.
-  const t = selected ? { bg: colors.primary, fg: colors.primaryFg, border: colors.primary } : chipTones[tone];
+  // Selected is the brand moment: a lime fill with ink type, inside the same
+  // ink rule as every other chip (Epic pack §07). Tones are the lime tint,
+  // moss and ink — there are no other colours.
+  const t = selected ? { bg: colors.selected, fg: colors.selectedFg, border: colors.ink } : chipTones[tone];
   const body = (
     <View style={[styles.chip, { backgroundColor: t.bg, borderColor: t.border }]}>
       {icon ? <View style={{ marginRight: 5 }}><Icon name={icon} size={14} color={t.fg} fill={iconFill} /></View> : null}
@@ -86,7 +90,9 @@ export function Button({
   icon?: IconName;
   iconFill?: boolean;
 }) {
-  // Buttons are ink (style guide): a primary is an ink fill, a secondary is a 1px ink outline.
+  // A primary is an ink fill with cream type on light grounds and a lime fill
+  // with ink type on dark ones — which is what `primary`/`primaryFg` already
+  // are in each palette. A secondary is a 2px ink outline (Epic pack §07).
   const bg = kind === 'primary' ? colors.primary : kind === 'danger' ? colors.overrunSoft : kind === 'secondary' ? colors.surface : 'transparent';
   const fg = kind === 'primary' ? colors.primaryFg : kind === 'danger' ? colors.overrun : colors.ink;
   const border = kind === 'secondary' ? colors.ink : kind === 'ghost' ? colors.line : 'transparent';
@@ -119,7 +125,7 @@ export function Segmented<T extends string>({
 }) {
   return (
     <View style={styles.segmented}>
-      {options.map((o) => {
+      {options.map((o, i) => {
         const active = o.value === value;
         return (
           <Pressable
@@ -127,12 +133,12 @@ export function Segmented<T extends string>({
             onPress={() => onChange(o.value)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            style={[styles.segment, active && styles.segmentActive]}
+            style={[styles.segment, i > 0 && styles.segmentDivider, active && styles.segmentActive]}
           >
             {/* One line, always. Four tabs across a 390px phone leaves about
                 86px each, and a label that does not fit must shorten rather
                 than wrap the control to two rows or run out of it. */}
-            {o.icon ? <Icon name={o.icon} size={13} color={active ? colors.primaryFg : colors.ink} /> : null}
+            {o.icon ? <Icon name={o.icon} size={13} color={active ? colors.selectedFg : colors.ink} /> : null}
             <Text numberOfLines={1} style={[styles.segmentText, active && styles.segmentTextActive]}>{o.label}</Text>
           </Pressable>
         );
@@ -256,7 +262,7 @@ export const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    borderWidth: 1,
+    borderWidth: BORDER,
     borderColor: colors.line,
     gap: spacing.sm,
   },
@@ -268,37 +274,43 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
     minHeight: 34,
     borderRadius: radius.pill,
-    borderWidth: 1,
+    borderWidth: BORDER,
   },
   chipText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600' },
   button: {
     minHeight: TARGET,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
-    borderWidth: 1,
+    borderWidth: BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   buttonText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700' },
+  // A row of choices inside one ink rule, divided by the same rule — the
+  // pack's Selection panel. No track, no inset, no radius.
   segmented: {
     flexDirection: 'row',
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
-    padding: 3,
+    borderWidth: BORDER,
+    borderColor: colors.line,
+    overflow: 'hidden',
   },
-  segment: { flex: 1, minWidth: 0, minHeight: 38, paddingHorizontal: 4, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
-  // The selected segment is ink with white type, like a selected chip (style guide).
-  segmentActive: { backgroundColor: colors.primary },
+  segment: { flex: 1, minWidth: 0, minHeight: 38, paddingHorizontal: 4, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center' },
+  segmentDivider: { borderLeftWidth: BORDER, borderLeftColor: colors.line },
+  // The selected segment is a lime fill with ink type, like a selected chip.
+  segmentActive: { backgroundColor: colors.selected },
   segmentText: { fontFamily: fonts.body, fontSize: 12.5, color: colors.inkMuted, fontWeight: '600', flexShrink: 1 },
-  segmentTextActive: { color: colors.primaryFg },
+  segmentTextActive: { color: colors.selectedFg },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET },
   numberBox: {
-    width: 72, minHeight: TARGET - 6, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+    width: 72, minHeight: TARGET - 6, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line,
     backgroundColor: colors.surface, textAlign: 'center', fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.ink,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  meterTrack: { height: 6, borderRadius: radius.pill, backgroundColor: colors.surfaceMuted, overflow: 'hidden' },
+  // A groove is a shape, not a rule: an ink one would read as already full.
+  meterTrack: { height: 6, borderRadius: radius.pill, backgroundColor: colors.lineSoft, overflow: 'hidden' },
   meterFill: { height: 6, borderRadius: radius.pill },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   foldLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 34, paddingHorizontal: 4 },

@@ -1,11 +1,11 @@
-// Group trips: a group hangs off a trip that already exists (Roam — Group Trips
+// Group trips: a group hangs off a trip that already exists (Epic — Group Trips
 // Requirements v1.0, and the mock-ups at /mockups/group-trips*.html).
 //
 // One organiser, a checklist of the things the trip already contains, and the
 // people who have to do them. Three rules from the owner (4 Sep 2026) shape
 // what is here:
 //
-//   * Roam chases, not the organiser. The schedule is computed from the date
+//   * Epic chases, not the organiser. The schedule is computed from the date
 //     everything is wanted by (domain/reminders.js); the organiser sees when
 //     the next run goes and how many have gone, and sending by hand is there
 //     but is not the way it works.
@@ -41,6 +41,19 @@ const ITEM_KINDS = ['stay', 'activity', 'fee'];
 const PARTICIPANT_STATUSES = ['booked', 'declared', 'in', 'out'];
 const ALL_STATUSES = [...PARTICIPANT_STATUSES, 'paid'];
 const token = (n = 9) => crypto.randomBytes(n).toString('base64url');
+/**
+ * "We take the money" and "we take the booking", across the rename.
+ *
+ * These two are stored values, not code: rows written before the rebrand say
+ * `roam` and a device running an older bundle still sends it. Migration 065
+ * rewrites what is already in the table; this is what stops a phone that has
+ * not reloaded from writing the old word back in. Everything leaves here as
+ * `epic`, so nothing downstream has to know either name.
+ */
+const WE_COLLECT = new Set(['epic', 'roam']);
+const paymentMode = (v) => (WE_COLLECT.has(v) ? 'epic' : v === 'direct' ? 'direct' : null);
+const bookWhere = (v) => (WE_COLLECT.has(v) ? 'epic' : ['yourself', 'there'].includes(v) ? v : null);
+
 const ymd = (d) => (d ? String(d).slice(0, 10) : null);
 const num = (v) => (v == null || v === '' ? null : Math.max(0, Math.round(Number(v))));
 /** "Priya Shah" → "Priya S." */
@@ -483,7 +496,7 @@ router.post('/trips/:id/group', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** PATCH /api/groups/:id — the name, the number expected, the date, and how Roam chases. */
+/** PATCH /api/groups/:id — the name, the number expected, the date, and how Epic chases. */
 router.patch('/groups/:id', async (req, res, next) => {
   try {
     const group = await loadGroup(req.params.id);
@@ -501,7 +514,7 @@ router.patch('/groups/:id', async (req, res, next) => {
     if (b.firstReminderOn !== undefined) put('first_reminder_on', ymd(b.firstReminderOn));
     if (b.closed !== undefined) put('closed_at', b.closed ? new Date() : null);
     if (b.setupDone !== undefined) put('setup_done', Boolean(b.setupDone));
-    if (b.paymentMode !== undefined) put('payment_mode', b.paymentMode === 'roam' ? 'roam' : 'direct');
+    if (b.paymentMode !== undefined) put('payment_mode', WE_COLLECT.has(b.paymentMode) ? 'epic' : 'direct');
     if (b.coverKind !== undefined) put('cover_kind', b.coverKind === 'full' ? 'full' : 'banner');
     if (b.coverUrl !== undefined) put('cover_url', b.coverUrl || null);
     if (b.coverSource !== undefined) put('cover_source', b.coverSource || null);
@@ -552,10 +565,10 @@ router.post('/groups/:id/items', async (req, res, next) => {
       lateJoiners: ['capacity', 'no', 'ask'].includes(b.lateJoiners) ? b.lateJoiners : 'capacity',
       // v2: when it is, where it is booked, and the line the guest reads.
       startsOn: ymd(b.startsOn), startsAt: b.startsAt || null, endsAt: b.endsAt || null,
-      bookWhere: ['roam', 'yourself', 'there'].includes(b.bookWhere) ? b.bookWhere : null,
+      bookWhere: bookWhere(b.bookWhere),
       externalUrl: b.externalUrl?.trim() || null, guestNote: b.guestNote?.trim() || null,
       // Who takes the money for this one; null follows the group's setting.
-      paymentMode: ['roam', 'direct'].includes(b.paymentMode) ? b.paymentMode : null,
+      paymentMode: paymentMode(b.paymentMode),
       meetLabel: b.meet?.label?.trim() || null, meetLat: b.meet?.lat ?? null, meetLng: b.meet?.lng ?? null,
     });
     res.status(201).json(await groupPayload(group.id));
@@ -586,10 +599,10 @@ router.patch('/groups/:id/items/:itemId', async (req, res, next) => {
     if (b.startsOn !== undefined) put('starts_on', ymd(b.startsOn));
     if (b.startsAt !== undefined) put('starts_at', b.startsAt || null);
     if (b.endsAt !== undefined) put('ends_at', b.endsAt || null);
-    if (b.bookWhere !== undefined) put('book_where', ['roam', 'yourself', 'there'].includes(b.bookWhere) ? b.bookWhere : null);
+    if (b.bookWhere !== undefined) put('book_where', bookWhere(b.bookWhere));
     if (b.externalUrl !== undefined) put('external_url', b.externalUrl?.trim() || null);
     if (b.guestNote !== undefined) put('guest_note', b.guestNote?.trim() || null);
-    if (b.paymentMode !== undefined) put('payment_mode', ['roam', 'direct'].includes(b.paymentMode) ? b.paymentMode : null);
+    if (b.paymentMode !== undefined) put('payment_mode', paymentMode(b.paymentMode));
     if (b.meet !== undefined) {
       put('meet_label', b.meet?.label?.trim() || null);
       put('meet_lat', b.meet?.lat ?? null);
@@ -719,7 +732,7 @@ router.post('/groups/:id/participants/:pid/items/:itemId', async (req, res, next
 
 /**
  * The closing day, by hand: close it and send the bill, give it another week,
- * or call it off. Roam does this by itself on the day (runDueClosings) — this
+ * or call it off. Epic does this by itself on the day (runDueClosings) — this
  * is the organiser being asked first, which is what the first time should be.
  */
 router.post('/groups/:id/items/:itemId/close', async (req, res, next) => {
@@ -1005,7 +1018,7 @@ async function joinPayload(group, participantToken) {
       // Which control every priced row shows on Book your itinerary depends on
       // it, so the guest is told how they pay before they are asked to.
       paymentMode: group.payment_mode ?? 'direct',
-      // Whether a six-digit code can actually be sent anywhere. Roam has no
+      // Whether a six-digit code can actually be sent anywhere. Epic has no
       // message channel until NOTIFY_WEBHOOK_URL is set, and the account screen
       // says which of the two things is about to happen rather than promising a
       // text nobody can send.
@@ -1105,7 +1118,7 @@ router.post('/join/:token', async (req, res, next) => {
 });
 
 /**
- * POST /api/join/:token/account — the guest becomes a Roam user.
+ * POST /api/join/:token/account — the guest becomes a Epic user.
  *
  * One screen asked their name and one way to reach them; this is what that
  * costs them. An account of their own (accounts, 033) with a household of their
@@ -1113,7 +1126,7 @@ router.post('/join/:token', async (req, res, next) => {
  * session on this device, because they are standing in front of it holding a
  * link somebody sent them, which is the only proof this journey can have.
  *
- * Somebody who already has a Roam account is recognised by their contact and
+ * Somebody who already has a Epic account is recognised by their contact and
  * signed into the one they have; their household is not touched.
  */
 router.post('/join/:token/account', async (req, res, next) => {
@@ -1170,7 +1183,7 @@ router.post('/join/:token/account', async (req, res, next) => {
 /**
  * POST /api/join/:token/household — who is coming with them.
  *
- * The people they live with become members of their own household in Roam (so
+ * The people they live with become members of their own household in Epic (so
  * the next trip knows them), and how many of those are coming becomes the
  * participant's headcount, which is what every per-person price divides by.
  */
@@ -1253,7 +1266,7 @@ router.post('/join/:token/book', async (req, res, next) => {
       if (i.pricing === 'variable' && i.state !== 'closed') {
         later += (cost.ceilingPence ?? 0) * shares;
         lines.push({ itemId: i.id, label: i.label, when: 'settles', pence: (cost.likelyPence ?? 0) * shares, ceilingPence: (cost.ceilingPence ?? 0) * shares, on: cost.closesOn });
-      } else if ((i.payment_mode ?? group.payment_mode) === 'roam') {
+      } else if (WE_COLLECT.has(i.payment_mode ?? group.payment_mode)) {
         paid += amount;
         lines.push({ itemId: i.id, label: i.label, when: 'now', pence: amount });
       } else {
@@ -1262,7 +1275,7 @@ router.post('/join/:token/book', async (req, res, next) => {
       }
     }
 
-    // Roam holds no money yet, so a booking is a record of what was agreed and
+    // Epic holds no money yet, so a booking is a record of what was agreed and
     // says so; when a provider exists this is where `paid` becomes true.
     const booking = await groupsRepo.insertBooking({
       groupId: group.id, participantId: me.id, heads: me.heads,
@@ -1274,7 +1287,7 @@ router.post('/join/:token/book', async (req, res, next) => {
 
 /**
  * POST /api/join/:token/items/:itemId — a participant saying where they are up
- * to: booked through Roam, booked elsewhere (their word for it, and shown as
+ * to: booked through Epic, booked elsewhere (their word for it, and shown as
  * such), or in and out of something optional.
  */
 router.post('/join/:token/items/:itemId', async (req, res, next) => {

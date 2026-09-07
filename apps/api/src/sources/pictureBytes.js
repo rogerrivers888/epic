@@ -23,7 +23,7 @@
 const TIMEOUT_MS = 8000;
 const MAX_BYTES = 3_000_000;
 
-export const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; place picture; rogerrivers@gmail.com)';
+export const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; place picture; rogerrivers@gmail.com)';
 
 /**
  * What this file actually is, from its first bytes rather than from what the

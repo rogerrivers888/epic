@@ -84,7 +84,7 @@ export function AccountsScreen() {
   const [invitation, setInvitation] = useState<(Invitation & { email: string }) | null>(null);
 
   const load = useCallback(async () => {
-    try { setData(await api.accounts()); setError(null); } catch (e: any) { setError(e instanceof ApiError ? e.message : 'Could not reach Roam.'); }
+    try { setData(await api.accounts()); setError(null); } catch (e: any) { setError(e instanceof ApiError ? e.message : 'Could not reach Epic.'); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -96,7 +96,7 @@ export function AccountsScreen() {
       await load();
       return r;
     } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
       return null;
     } finally { setBusy(false); }
   };
@@ -142,9 +142,9 @@ export function AccountsScreen() {
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>No mail sender configured</Text>
               <Text style={type.tiny}>
-                Roam will still make the link — it appears here for you to copy and send yourself. To have Roam e-mail it,
-                add <Text style={styles.mono}>RESEND_API_KEY</Text> and <Text style={styles.mono}>ROAM_MAIL_FROM</Text> in Doppler
-                (and <Text style={styles.mono}>ROAM_WEB_URL</Text> so links point at the app). Keys are yours to add, not mine.
+                Epic will still make the link — it appears here for you to copy and send yourself. To have Epic e-mail it,
+                add <Text style={styles.mono}>RESEND_API_KEY</Text> and <Text style={styles.mono}>EPIC_MAIL_FROM</Text> in Doppler
+                (and <Text style={styles.mono}>EPIC_WEB_URL</Text> so links point at the app). Keys are yours to add, not mine.
               </Text>
             </View>
           </Row>
@@ -156,7 +156,7 @@ export function AccountsScreen() {
       {/* Inviting is what this screen is for, so it is the first thing on it —
           open by default until there is somebody in the list to look at. */}
       <Row style={styles.head}>
-        <SectionTitle hint={customers.length ? `${customers.length} ${customers.length === 1 ? 'person' : 'people'}` : undefined}>Who has Roam</SectionTitle>
+        <SectionTitle hint={customers.length ? `${customers.length} ${customers.length === 1 ? 'person' : 'people'}` : undefined}>Who has Epic</SectionTitle>
         {customers.length ? <Button label={adding ? 'Cancel' : 'Invite someone'} icon={adding ? 'close' : 'add'} onPress={() => setAdding((v) => !v)} /> : null}
       </Row>
 
@@ -343,7 +343,7 @@ function AccountRow({ account: a, wide, open, onOpen, busy, plans, defaultBound,
                 style={styles.numberBox}
               />
               <Text style={[type.tiny, { flex: 1 }]}>
-                provider calls a month before Roam stops searching for them. The default for somebody new is {defaultBound.toLocaleString()}.
+                provider calls a month before Epic stops searching for them. The default for somebody new is {defaultBound.toLocaleString()}.
               </Text>
             </Row>
           </FoldLine>
@@ -366,7 +366,7 @@ function AccountRow({ account: a, wide, open, onOpen, busy, plans, defaultBound,
             <Text style={type.tiny}>All time: {a.usage.callsEver.toLocaleString()} calls · {money(a.usage.costEver)}</Text>
             {a.lastInvite ? (
               <Text style={type.tiny}>
-                Last invitation {day(a.lastInvite.at)} — {a.lastInvite.usedAt ? `opened ${day(a.lastInvite.usedAt)}` : a.lastInvite.delivery === 'email' ? 'sent, not opened yet' : 'made but not sent by Roam'}
+                Last invitation {day(a.lastInvite.at)} — {a.lastInvite.usedAt ? `opened ${day(a.lastInvite.usedAt)}` : a.lastInvite.delivery === 'email' ? 'sent, not opened yet' : 'made but not sent by Epic'}
               </Text>
             ) : null}
           </View>
@@ -435,7 +435,7 @@ function InvitationCard({ invitation, onDone }: { invitation: Invitation & { ema
 /**
  * Your own household in the list — optional, and the last thing on the screen.
  *
- * You sign in with the passcode, which means Roam has no e-mail for you and
+ * You sign in with the passcode, which means Epic has no e-mail for you and
  * your household is not one of the rows above. Nothing is broken by leaving it
  * that way, so this is one folded line rather than a card demanding an action:
  * the first version of this screen led with it, and the owner's reaction was
@@ -448,7 +448,7 @@ function IncludeMine({ onClaim, busy }: { onClaim: (email: string, name: string)
     <FoldLine label="Optional" value="Show my own household in this list too" icon="person">
       <Card>
         <Text style={type.tiny}>
-          You sign in with the passcode, so Roam has no e-mail for you and your own household is not one of the rows above.
+          You sign in with the passcode, so Epic has no e-mail for you and your own household is not one of the rows above.
           Adding one changes nothing about how you sign in — the passcode goes on working — but it means your household's usage
           is counted alongside everybody else's, and you can get in by e-mail on a device that has never had the passcode.
         </Text>
@@ -493,7 +493,7 @@ function AddAccount({ plans, defaultBound, canSend, busy, onAdd }: {
 
   return (
     <Card>
-      <SectionTitle hint="they get a Roam of their own — their places, their people, nothing of yours">Invite someone</SectionTitle>
+      <SectionTitle hint="they get an Epic of their own — their places, their people, nothing of yours">Invite someone</SectionTitle>
       <Row style={{ gap: spacing.sm, flexWrap: 'wrap' }}>
         <TextInput value={name} onChangeText={setName} placeholder="Their name" placeholderTextColor={colors.inkMuted} style={[styles.input, { flex: 1, minWidth: 130 }]} />
         <TextInput
@@ -515,7 +515,7 @@ function AddAccount({ plans, defaultBound, canSend, busy, onAdd }: {
         <TextInput value={bound} onChangeText={setBound} keyboardType="number-pad" selectTextOnFocus accessibilityLabel="Monthly call ceiling" style={styles.numberBox} />
       </Row>
       <Text style={type.tiny}>
-        How many provider calls a month Roam will spend on them. Everybody draws on the same free allowances, so this is what stops one household emptying the pot.
+        How many provider calls a month Epic will spend on them. Everybody draws on the same free allowances, so this is what stops one household emptying the pot.
       </Text>
 
       <Wrap>

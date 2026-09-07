@@ -12,7 +12,7 @@
 //
 // Licence note for the owner: CC BY-SA is share-alike on the *text*. Storing an
 // extract and showing it with credit is the ordinary use and is what every
-// travel app does; it does not put any licence on Roam's own data. Rewriting
+// travel app does; it does not put any licence on Epic's own data. Rewriting
 // the extract into our own words would remove the condition entirely, and is
 // the thing to do if that text is ever wanted without the credit line.
 
@@ -20,7 +20,7 @@ import { FOOD_CATEGORIES as EATING } from '../constants.js';
 
 const WIKI = 'https://en.wikipedia.org/w/api.php';
 const WIKIDATA = 'https://www.wikidata.org/w/api.php';
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; place research)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; place research)';
 const TIMEOUT = 8000;
 
 // An article about a building that happens to be near is not an article about

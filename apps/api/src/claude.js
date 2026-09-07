@@ -14,8 +14,8 @@ export const MODEL = 'claude-opus-5';
 
 // Per-session and per-household bounds (Epic 3 C10). Overridable by env so
 // they can be tuned without a deploy; the numbers themselves are open (A5).
-export const SESSION_CALL_BOUND = Number(process.env.ROAM_SESSION_CALL_BOUND || 40);
-export const HOUSEHOLD_MONTHLY_CALL_BOUND = Number(process.env.ROAM_HOUSEHOLD_MONTHLY_CALL_BOUND || 3000);
+export const SESSION_CALL_BOUND = Number(process.env.EPIC_SESSION_CALL_BOUND || 40);
+export const HOUSEHOLD_MONTHLY_CALL_BOUND = Number(process.env.EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND || 3000);
 
 // Indicative list rates ($ per million tokens) for the cost instrumentation, per
 // model: the planner runs on Opus, while a mechanical read like a menu runs on
@@ -104,7 +104,7 @@ export class ModelBudgetError extends Error {
   }
 }
 
-/** Anthropic's wording for it, turned into something the rest of Roam can act on. */
+/** Anthropic's wording for it, turned into something the rest of Epic can act on. */
 export function asBudgetError(err) {
   const text = String(err?.error?.error?.message ?? err?.message ?? '');
   if (!/workspace API usage limits/i.test(text)) return null;

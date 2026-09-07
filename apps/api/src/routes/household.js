@@ -26,14 +26,14 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const RELATIONSHIPS = ['parent', 'partner', 'child', 'grandparent', 'sibling', 'friend', 'other'];
 const KINDS = ['allergen', 'diet', 'dislike', 'like'];
-export const LEARN_THRESHOLD = Number(process.env.ROAM_LEARN_THRESHOLD || 3);
-const HALF_LIFE_DAYS = Number(process.env.ROAM_LEARN_HALF_LIFE_DAYS || 180);
+export const LEARN_THRESHOLD = Number(process.env.EPIC_LEARN_THRESHOLD || 3);
+const HALF_LIFE_DAYS = Number(process.env.EPIC_LEARN_HALF_LIFE_DAYS || 180);
 
 /**
  * Whose household this request is about — the one seam every read and write in
  * the API goes through, all 86 of them.
  *
- * It used to be "the first row in the table", which was true while Roam was one
+ * It used to be "the first row in the table", which was true while Epic was one
  * family's app and became a way to serve one household's data to another the
  * moment it was not. It now answers from the account the request is being
  * served as (context.js, set by `requireSession` in auth.js), and falls back to
@@ -310,7 +310,7 @@ router.delete('/members/:id', async (req, res, next) => {
 // anyone else that's in my household to the app?"
 //
 // This is not the admin module's invitation, and the difference matters. There
-// (routes/accounts.js) the owner is giving Roam to a friend, and the friend
+// (routes/accounts.js) the owner is giving Epic to a friend, and the friend
 // gets a household of their own — an empty one, on purpose. Here somebody
 // already in *this* household is being given a way in to it: the same trips,
 // the same saved places, and the allergens and dislikes already written down
@@ -350,7 +350,7 @@ function accessView(member, account, lastLink) {
       status: 'none',
       // Why the button is off, in the words the screen shows. A child is not
       // refused an account because of a rule about children — it is refused
-      // because a profile Roam knows is under thirteen is managed by an adult
+      // because a profile Epic knows is under thirteen is managed by an adult
       // (Epic 1 C8), and a sign-in of their own would be around that.
       blocked: member.is_minor ? 'A profile under thirteen is looked after by an adult, so it has no sign-in of its own.' : null,
     };
@@ -484,7 +484,7 @@ router.post('/members/:id/invite', async (req, res, next) => {
     if (!channels.length) return res.status(400).json({ error: 'no_channel', message: `There is no ${asked.map((c) => deliveryWord[c] ?? c).join(' or ')} for ${member.name}.` });
 
     // Whoever else is already using this contact. An address or a number is one
-    // person's way in to one Roam, so lending it to a second account would mean
+    // person's way in to one Epic, so lending it to a second account would mean
     // a link opening the wrong household.
     for (const [value, finder, what] of [[email, accountByEmail, 'e-mail address'], [mobile, accountByMobile, 'mobile number']]) {
       if (!value) continue;
@@ -492,7 +492,7 @@ router.post('/members/:id/invite', async (req, res, next) => {
       if (taken && taken.member_id !== member.id) {
         return res.status(409).json({
           error: 'contact_taken',
-          message: `That ${what} already signs somebody in to Roam${taken.household_id === household.id ? ' in this household' : ''}. Use a different one.`,
+          message: `That ${what} already signs somebody in to Epic${taken.household_id === household.id ? ' in this household' : ''}. Use a different one.`,
         });
       }
     }
@@ -505,7 +505,7 @@ router.post('/members/:id/invite', async (req, res, next) => {
         memberId: member.id, email, mobile, name: member.name,
         // Not 'owner' — that is the estate's single owner row and there is an
         // index making a second one impossible. A person in a household is a
-        // customer of Roam like the household is, on the household's own plan
+        // customer of Epic like the household is, on the household's own plan
         // and with no ceiling of their own: the family shares one (claude.js,
         // and `callBoundFor` orders by the lead so a member cannot raise it).
         role: 'customer', plan: 'household', monthlyCallBound: null,
@@ -614,7 +614,7 @@ router.post('/members/:id/constraints', async (req, res, next) => {
       resolved: concept ? { key: concept.key, label: concept.label, kind: concept.kind } : null,
       suggestions: concept || negated ? [] : matchConcepts(value, { kinds: kindsFor(kind), limit: 5 }).map((c) => ({ key: c.key, label: c.label, kind: c.kind })),
       hint: negated
-        ? `Kept "${value.trim()}" as typed, but Roam doesn't read "not". Put "${value.trim().replace(NEGATION_PREFIX, '')}" in ${kind === 'like' ? 'Dislikes' : 'Likes'} instead — the two lists do the negating.`
+        ? `Kept "${value.trim()}" as typed, but Epic doesn't read "not". Put "${value.trim().replace(NEGATION_PREFIX, '')}" in ${kind === 'like' ? 'Dislikes' : 'Likes'} instead — the two lists do the negating.`
         : kind === 'allergen' && !ALLERGENS.includes(value.trim().toLowerCase())
           ? `Added. Place listings rarely state "${value.trim()}", so it will flag menu items once a menu is captured rather than excluding venues today.`
           : null,
@@ -662,8 +662,8 @@ router.get('/learned', async (_req, res, next) => {
  * Cost per household per period — the instrumentation §14 asks for, as
  * Settings › Usage shows it: a period (this month, last month, all time, or
  * from/to dates), a total, one line per provider with calls, billable units,
- * estimated cost and how much of its free allowance or Roam cap has gone, and
- * the activity in that period. Figures are Roam's own counts at list prices;
+ * estimated cost and how much of its free allowance or Epic cap has gone, and
+ * the activity in that period. Figures are Epic's own counts at list prices;
  * each line links to the provider console where the real bill is.
  */
 router.get('/spend', async (req, res, next) => {
@@ -761,7 +761,7 @@ router.get('/export', async (_req, res, next) => {
     const household = await currentHousehold();
     const members = await loadMembers(household.id);
     const { trips, stops, visits, ratings, ledger } = await households.everythingFor(household.id);
-    res.setHeader('content-disposition', `attachment; filename="roam-export-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.setHeader('content-disposition', `attachment; filename="epic-export-${new Date().toISOString().slice(0, 10)}.json"`);
     res.json({
       exportedAt: new Date().toISOString(),
       note: 'Place content from licensed sources is not included — only identifiers and what the household wrote.',

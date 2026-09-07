@@ -1,3 +1,6 @@
+// First, so .env is loaded and the old EPIC_* names are aliased before any
+// module below reads one. See env.js.
+import './env.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

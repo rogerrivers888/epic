@@ -629,7 +629,7 @@ places.post('/save', async (req, res, next) => {
 });
 
 /**
- * GET /api/places/record?ref=osm:node/123 (or ?refs=a,b,c) — what Roam owns
+ * GET /api/places/record?ref=osm:node/123 (or ?refs=a,b,c) — what Epic owns
  * about a place: the research done when the household claimed it. No provider
  * is called and nothing here expires, so this is the endpoint a device can keep.
  */

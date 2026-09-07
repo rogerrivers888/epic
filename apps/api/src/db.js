@@ -1,17 +1,14 @@
+// First: it loads .env and aliases the old EPIC_* variables onto their EPIC_*
+// names before anything reads one. See env.js.
+import './env.js';
 import pg from 'pg';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(here, '../../../.env'), quiet: true });
 
 // DATE columns come back as 'YYYY-MM-DD', not a local-midnight Date that shifts with timezone.
 pg.types.setTypeParser(1082, (v) => v);
 
 export const pool = new pg.Pool({
   connectionString:
-    process.env.DATABASE_URL || 'postgres://roam:roam@localhost:5432/roam',
+    process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5432/epic',
 });
 
 export const query = (text, params) => pool.query(text, params);

@@ -1,5 +1,5 @@
 /**
- * The spend ledger: every outbound call Roam has made, what it was for, and
+ * The spend ledger: every outbound call Epic has made, what it was for, and
  * what it is estimated to have cost.
  *
  * Technical Constraints §2 — every provider call is attributed to a household
@@ -45,7 +45,7 @@ export async function recordTokens(c) {
 // The two counts the spend bounds are judged on. Both ask what could have cost
 // money rather than what happened: the open map, the encyclopedias and the
 // address lookup are free, and a guard against an unbounded bill that they can
-// fill is a guard against using Roam (owner, 6 Sep 2026). `constants.js`
+// fill is a guard against using Epic (owner, 6 Sep 2026). `constants.js`
 // `canBill` holds the list; everything is still recorded either way.
 const billable = (rows) => rows.reduce((n, r) => n + (canBill(r.provider) ? r.n : 0), 0);
 

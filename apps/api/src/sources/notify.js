@@ -1,6 +1,6 @@
 // How a reminder actually leaves the building.
 //
-// Roam writes the reminder either way, and the record of it is the same either
+// Epic writes the reminder either way, and the record of it is the same either
 // way — what changes is whether it could be delivered. There is no channel in
 // the repo and there will not be one: an SMS or email provider is a key, and
 // keys come from Doppler and are the owner's to add (CLAUDE.md). Until one is
@@ -11,7 +11,7 @@
 // When the key exists, `NOTIFY_WEBHOOK_URL` is posted the reminder as JSON and
 // the row is marked sent. That is deliberately the smallest possible contract:
 // whatever sends the message — a provider, a queue, a Zap — sits behind it, and
-// Roam does not learn a vendor's API to find out whether groups work.
+// Epic does not learn a vendor's API to find out whether groups work.
 
 const url = () => process.env.NOTIFY_WEBHOOK_URL || null;
 

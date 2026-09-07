@@ -20,7 +20,7 @@ import { findMenuUrl } from './menuLink.js';
 
 const TIMEOUT_MS = 6000;
 const MAX_BYTES = 1_500_000;
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; household place record)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; household place record)';
 
 const BOOKING_HOSTS = /opentable|resdiary|sevenrooms|bookatable|quandoo|thefork|exploretock|tock\.|resy\.|dishcult|collinsbookings|designmynight|eveve|tablepath|now-book-it|obee|guestline|toasttab|booking\.resos/i;
 const SOCIAL = {

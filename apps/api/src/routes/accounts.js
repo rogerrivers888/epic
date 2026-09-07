@@ -1,5 +1,5 @@
 /**
- * The admin module: who has Roam, and what it is costing.
+ * The admin module: who has Epic, and what it is costing.
  *
  * The owner's words on 4 Sep 2026: "I'd like to be able to enter their email
  * into the site and for you to send them a magic link... we need to build out
@@ -11,7 +11,7 @@
  * they've logged in, how much their usage is".
  *
  * Every route here is behind the admin door (access.js `requireDoor`), which
- * answers 404 rather than 403 to everybody else: a household using Roam has no
+ * answers 404 rather than 403 to everybody else: a household using Epic has no
  * business learning that a back office exists on the API they are using. The
  * guard is mounted with the router, on `/api/accounts` and nothing above it — a
  * guard mounted on `/api` would 404 every other route in the app.
@@ -45,7 +45,7 @@ import { listPlans, recordPlanChange, priceOfPlan, writeAudit } from '../reposit
 const router = express.Router();
 
 /**
- * What somebody can be on. No money moves through Roam — the same rule group
+ * What somebody can be on. No money moves through Epic — the same rule group
  * costs follow — so a plan is a label, a date and a ceiling, not a card.
  */
 /**
@@ -53,7 +53,7 @@ const router = express.Router();
  *
  * Rows in `plans` since the back office arrived, because a plan now carries a
  * price and revenue reporting is arithmetic over those prices. No money moves
- * through Roam — the same rule group costs follow — so a price is what a
+ * through Epic — the same rule group costs follow — so a price is what a
  * household is *on*, never a card.
  */
 const plansForScreen = async () => (await listPlans({ includeInactive: false })).map((p) => ({
@@ -69,7 +69,7 @@ const STATUSES = new Set(['invited', 'active', 'suspended']);
  * allowance the owner's own searching does. A friend therefore starts on a
  * quarter of the estate bound rather than all of it, and the owner can raise or
  * lower any of them on the admin screen. Spend caps at the provider are still
- * his to set (CLAUDE.md); this is only Roam declining to spend.
+ * his to set (CLAUDE.md); this is only Epic declining to spend.
  */
 export const GUEST_MONTHLY_CALL_BOUND = Math.max(50, Math.round(HOUSEHOLD_MONTHLY_CALL_BOUND / 4));
 
@@ -263,7 +263,7 @@ router.post('/', requires('manage_accounts'), async (req, res, next) => {
     if (existing) {
       return res.status(409).json({
         error: 'account_exists',
-        message: `${email} already has a Roam account.`,
+        message: `${email} already has a Epic account.`,
         account: view(existing),
       });
     }

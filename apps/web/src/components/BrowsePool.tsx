@@ -140,7 +140,7 @@ export function BrowsePool({ items, eventsSource, baseLabel, pinned, busy, addLa
 
       {tab === 'events' && !eventsSource ? (
         <View style={styles.notice}>
-          <Text style={type.body}>No event listings source is switched on, so Roam can't see what's on that day.</Text>
+          <Text style={type.body}>No event listings source is switched on, so Epic can't see what's on that day.</Text>
           <Text style={type.small}>Ticketmaster (free key) lists shows, gigs, sport, exhibitions and family events with their times. Street performers and pop-ups aren't in any listing we can query. The owner switches it on in Settings › Sources.</Text>
         </View>
       ) : null}
@@ -189,7 +189,7 @@ function BrowseRow({ item, isPinned, isShortlisted, busy, addLabel, addedLabel, 
       </Pressable>
       <View style={{ gap: 6 }}>
         <Pressable onPress={isPinned && onRemove ? onRemove : onAdd} disabled={busy || (isPinned && !onRemove)} style={[styles.btn, isPinned && styles.btnOn]} accessibilityRole="button">
-          <Icon name={isPinned ? 'keep' : 'add'} size={14} color={isPinned ? colors.bg : colors.ink} fill={isPinned} /><Text style={[styles.btnText, isPinned && { color: '#fff' }]}>{isPinned ? addedLabel : addLabel}</Text>
+          <Icon name={isPinned ? 'keep' : 'add'} size={14} color={isPinned ? colors.bg : colors.ink} fill={isPinned} /><Text style={[styles.btnText, isPinned && { color: colors.primaryFg }]}>{isPinned ? addedLabel : addLabel}</Text>
         </Pressable>
         {onShortlist ? (
           <Pressable onPress={async () => { await onShortlist(); setSaved(true); }} disabled={busy || saved || isShortlisted} style={styles.btn} accessibilityRole="button">

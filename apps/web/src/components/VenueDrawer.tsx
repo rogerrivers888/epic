@@ -22,7 +22,7 @@ import { VenueThumb } from './VenueThumb';
  * rented, identifiers are ours (Technical Constraints §4).
  *
  * Underneath all of that sits the part that does not disappear (owner, 4 Sep
- * 2026): Roam's own record of the place, researched when the household kept it,
+ * 2026): Epic's own record of the place, researched when the household kept it,
  * from sources whose licences let us hold on to the answer. With no signal the
  * provider's half of this drawer is empty and that record is the whole of it —
  * the address, the phone number, the hours, the menu — which is what makes a
@@ -234,7 +234,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const [menu, setMenu] = useState<MenuLink | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  // Roam's own record: what survives when the provider cannot be reached.
+  // Epic's own record: what survives when the provider cannot be reached.
   const [ownRecord, setOwnRecord] = useState<OwnedRecord | null | undefined>(undefined);
   /**
    * Every visit this household has made here, with every star given on it —
@@ -475,7 +475,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                       // research — so saying "no signal" would be inventing a
                       // fault to explain the absence of something that was
                       // never going to be there.
-                      <IconText name="owned" color={colors.inkMuted}>Roam&#39;s own record — open data we hold outright, so it reads the same with no signal.</IconText>
+                      <IconText name="owned" color={colors.inkMuted}>Epic&#39;s own record — open data we hold outright, so it reads the same with no signal.</IconText>
                     ) : (
                       <IconText name="offline" color={colors.inkMuted}>No signal — showing what is saved on this device.</IconText>
                     )
@@ -506,7 +506,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                       : ownRecord?.openingHours ? (
                         <>
                           <Text style={type.small}>{ownRecord.openingHours}</Text>
-                          <Text style={type.tiny}>Roam's own record, from {ownRecord.provenance?.opening_hours === 'site' ? 'their own website' : 'OpenStreetMap'} — kept, so it is here with no signal.</Text>
+                          <Text style={type.tiny}>Epic's own record, from {ownRecord.provenance?.opening_hours === 'site' ? 'their own website' : 'OpenStreetMap'} — kept, so it is here with no signal.</Text>
                         </>
                       ) : <Text style={type.small}>{venue === undefined ? '' : `No opening hours from ${sourceName}.`}</Text>}
                   </View>

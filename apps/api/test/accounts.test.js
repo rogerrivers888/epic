@@ -4,7 +4,7 @@
  * The dangerous failure here is not a screen that looks wrong. It is one
  * household being served another household's data, which looks exactly like a
  * working app to everybody except the person whose home address it was. Two
- * things stand between Roam and that, and both are tested here:
+ * things stand between Epic and that, and both are tested here:
  *
  *   * the async-local store (context.js) keeping two requests in flight apart;
  *   * `requireOwner` refusing a customer, and refusing them in a way that does
@@ -36,7 +36,7 @@ const withEnv = async (vars, fn) => {
 test('two requests in flight at once never see each other\'s account', async () => {
   // The whole reason `currentHousehold()` could be changed without touching its
   // 86 call sites. If this ever fails, those call sites are reading whichever
-  // request happened to start last, and Roam is serving households to each
+  // request happened to start last, and Epic is serving households to each
   // other.
   const seen = [];
   const request = (account, delay) => runAsAccount(account, async () => {
@@ -129,7 +129,7 @@ test('signing in by link answers without a session, and nothing else new does', 
 const { invitationEmail, mailConfigured, mailStatus, sendMail, webUrl } = await import('../src/sources/mail.js');
 
 test('with no key, sending says so rather than pretending', async () => {
-  await withEnv({ RESEND_API_KEY: null, ROAM_MAIL_FROM: null }, async () => {
+  await withEnv({ RESEND_API_KEY: null, EPIC_MAIL_FROM: null }, async () => {
     assert.equal(mailConfigured(), false);
     assert.equal(mailStatus().reason, 'no_sender');
     const result = await sendMail({ to: 'friend@example.com', subject: 'x', text: 'y' });
@@ -141,7 +141,7 @@ test('with no key, sending says so rather than pretending', async () => {
 });
 
 test('a key with no from-address is not a working sender', async () => {
-  await withEnv({ RESEND_API_KEY: 're_test', ROAM_MAIL_FROM: null }, () => {
+  await withEnv({ RESEND_API_KEY: 're_test', EPIC_MAIL_FROM: null }, () => {
     assert.equal(mailConfigured(), false);
     assert.equal(mailStatus().reason, 'no_from');
   });
@@ -149,28 +149,28 @@ test('a key with no from-address is not a working sender', async () => {
 
 test('the invitation says what the link is and what to do if it was not expected', () => {
   const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
-  const { subject, text, html } = invitationEmail({ name: 'Ella', url: 'https://roam.app/?signin=abc', from: 'Roger', expiresAt });
+  const { subject, text, html } = invitationEmail({ name: 'Ella', url: 'https://epic.app/?signin=abc', from: 'Roger', expiresAt });
   assert.match(subject, /invitation/i);
   assert.match(text, /Hi Ella,/);
-  assert.match(text, /https:\/\/roam\.app\/\?signin=abc/);
+  assert.match(text, /https:\/\/epic\.app\/\?signin=abc/);
   assert.match(text, /works once, within 7 days/);
   assert.match(text, /If you were not expecting this/);
-  assert.match(html, /https:\/\/roam\.app\/\?signin=abc/);
+  assert.match(html, /https:\/\/epic\.app\/\?signin=abc/);
 });
 
-test('a link sent to somebody signing back in does not welcome them to Roam again', () => {
+test('a link sent to somebody signing back in does not welcome them to Epic again', () => {
   const expiresAt = new Date(Date.now() + 86400000).toISOString();
-  const { subject, text } = invitationEmail({ url: 'https://roam.app/?signin=abc', expiresAt, returning: true });
+  const { subject, text } = invitationEmail({ url: 'https://epic.app/?signin=abc', expiresAt, returning: true });
   assert.match(subject, /back in/i);
   assert.match(text, /sign back in/i);
   assert.match(text, /within 1 day\b/, 'one day, not "1 days"');
 });
 
 test('links point at the app, not at the API', async () => {
-  await withEnv({ ROAM_WEB_URL: 'https://roam.example.com/' }, () => {
-    assert.equal(webUrl({ headers: { origin: 'https://api.example.com' } }), 'https://roam.example.com', 'the setting wins, and the trailing slash goes');
+  await withEnv({ EPIC_WEB_URL: 'https://epic.example.com/' }, () => {
+    assert.equal(webUrl({ headers: { origin: 'https://api.example.com' } }), 'https://epic.example.com', 'the setting wins, and the trailing slash goes');
   });
-  await withEnv({ ROAM_WEB_URL: null }, () => {
+  await withEnv({ EPIC_WEB_URL: null }, () => {
     assert.equal(webUrl({ headers: { origin: 'http://localhost:8081' } }), 'http://localhost:8081', 'a developer gets a link that works with nothing set');
   });
 });
