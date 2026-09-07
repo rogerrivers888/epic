@@ -438,8 +438,17 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
 
   async function writeOrder(from: Picks = picks, who: Guest[] = guests, extra: Carried = carried) {
     const seated = [...members.map(memberDiner), ...who.map(guestDiner), TABLE];
+    /**
+     * A meal that has become a visit is history and is never written over.
+     *
+     * It can be *loaded* — that is how a past meal gets its stars (§13.16) —
+     * and from there a tap on the menu is somebody starting tonight's dinner,
+     * not editing last week's. Dropping the client id makes the next save a new
+     * order rather than a rewrite of the one the visit hangs off.
+     */
+    const writing = order?.visitId ? null : order;
     const d = await api.saveOrder({
-      clientId: order?.clientId ?? undefined,
+      clientId: writing?.clientId ?? undefined,
       ref: venueRef,
       label: venueLabel,
       menuId: menu?.id ?? null,
@@ -1576,7 +1585,9 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
             </Row>
           </Card>
         ) : null}
-        <WhoIsHere ctl={ctl} />
+        {/* Who is at the table is a thing about tonight; a meal already eaten
+            has the table it had. */}
+        {eaten ? null : <WhoIsHere ctl={ctl} />}
         {groups.map((g) => (
           <View key={g.key} style={{ gap: 4 }}>
             <Row>

@@ -9,12 +9,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { verdictOf } from '../src/components/verdict.ts';
+import { verdictOf, type VerdictTake } from '../src/components/verdict.ts';
 
-const take = (memberId: string, member: string, subject: string, over: Record<string, unknown> = {}) =>
-  ({ memberId, member, subject, take: 'loved' as const, comment: null, ...over });
+const take = (memberId: string, member: string, subject: string, over: Partial<VerdictTake> = {}): VerdictTake =>
+  ({ memberId, member, subject, take: 'loved', comment: null, ...over });
 
-const meal = (id: string, on: string, takes: ReturnType<typeof take>[]) => ({ id, visitedOn: on, takes });
+const meal = (id: string, on: string, takes: VerdictTake[]) => ({ id, visitedOn: on, takes });
 
 test('a plate starred and the place starred are the same kind of thing', () => {
   const v = verdictOf([meal('v1', '2026-09-06', [
@@ -82,7 +82,7 @@ test('the place itself is named as such when it is expanded', () => {
 });
 
 test('a name comes from the household when the rating does not carry one', () => {
-  const v = verdictOf([meal('v1', '2026-09-06', [{ memberId: 'p', subject: 'Ribs', take: 'loved' as const, comment: null, score: 5 }])],
+  const v = verdictOf([meal('v1', '2026-09-06', [{ memberId: 'p', subject: 'Ribs', take: 'loved', comment: null, score: 5 }])],
     [{ id: 'p', name: 'Phoenix Sumner-Rivers' }]);
   assert.equal(v.said[0].first, 'Phoenix');
 });
