@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
-import { api, HouseholdResponse, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, DayStop } from '../api';
+import { api, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
 import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
@@ -55,7 +55,15 @@ export type TripSeed = {
    * It goes on the new trip's shortlist as a must-do the moment the trip
    * exists, so the day is built around it rather than merely near it.
    */
-  seed?: { venueRef: string; name: string; category?: string | null; lat?: number | null; lng?: number | null; note?: string };
+  seed?: {
+    venueRef: string; name: string; category?: string | null; lat?: number | null; lng?: number | null; note?: string;
+    /**
+     * The picture of the place, as whatever opened the drawer already had it:
+     * ours as `image`, a provider's as `photos` — shown live, never written
+     * down. The create screen leads with it (5a).
+     */
+    image?: OwnedImage | null; photos?: VenuePhotoRef[] | null;
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +189,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
             ? {
               venueRef: from.seed.venueRef, name: from.seed.name,
               lat: from.seed.lat ?? null, lng: from.seed.lng ?? null, category: from.seed.category ?? null,
+              image: from.seed.image ?? null, photos: from.seed.photos ?? null,
             }
             : null,
           kind: askedKind === 'holiday' || from?.kind === 'trip' ? 'holiday'

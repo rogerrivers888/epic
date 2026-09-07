@@ -28,7 +28,7 @@ export const timeLabel = (hhmm: string) => {
 };
 
 /** Every quarter hour of the day, which is how people say a time. */
-function slots(step: number, from = '00:00', to = '23:45') {
+export function slots(step: number, from = '00:00', to = '23:45') {
   const [fh, fm] = from.split(':').map(Number);
   const [th, tm] = to.split(':').map(Number);
   const out: string[] = [];
@@ -52,8 +52,20 @@ function nearest(value: string, list: string[]) {
   return best;
 }
 
-function Wheel({ label, value, options, onChange }: {
+/**
+ * One wheel you slide (owner, 4 Sep 2026: "the iPhone-like time wheel where I
+ * can just slide it up and down"; again 7 Sep 2026, on the create screen: "I
+ * don't want to hit arrows to move it in increments of 15 minutes").
+ *
+ * Exported because it is not only about clocks now: the create screen puts how
+ * long to allow somewhere on one too, and a second wheel written next door
+ * would be a second wheel to keep in step with this one. `format` is how a
+ * value reads — a time by default, and anything else where the caller says.
+ */
+export function Wheel({ label, value, options, onChange, format = timeLabel }: {
   label: string; value: string; options: string[]; onChange: (v: string) => void;
+  /** How a value reads on the wheel. Defaults to the clock. */
+  format?: (v: string) => string;
 }) {
   const ref = useRef<ScrollView | null>(null);
   const settle = useRef<any>(null);
@@ -98,9 +110,9 @@ function Wheel({ label, value, options, onChange }: {
               style={styles.slot}
               accessibilityRole="button"
               accessibilityState={{ selected: o === chosen }}
-              accessibilityLabel={`${label} ${timeLabel(o)}`}
+              accessibilityLabel={`${label} ${format(o)}`}
             >
-              <Text style={[styles.slotText, o === chosen && styles.slotTextOn]}>{timeLabel(o)}</Text>
+              <Text style={[styles.slotText, o === chosen && styles.slotTextOn]}>{format(o)}</Text>
             </Pressable>
           ))}
         </ScrollView>

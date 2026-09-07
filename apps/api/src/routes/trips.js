@@ -274,6 +274,42 @@ router.get('/search', async (req, res, next) => {
 });
 
 /**
+ * GET /api/trips/picture?venueRef=…  or  ?country=GB&locality=Windsor
+ *
+ * The photograph at the top of the create screen (5a/5b): the place the trip is
+ * *for*. Ours, from the picture library — a Commons photograph, a street-level
+ * frame, or the venue's own mark — so it costs nothing and may be kept.
+ *
+ * A venue answers with its own hero. A town answers with the atlas's
+ * representative picture for that area, which is the same one the trips list
+ * puts on a row, and a photograph beats a logo: a restaurant's mark is not a
+ * picture of where you are going.
+ */
+router.get('/picture', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const ref = req.query.venueRef ? String(req.query.venueRef) : null;
+    if (ref) {
+      const heroes = await heroesForPlaces([ref]);
+      const found = heroes.get(ref) ?? null;
+      if (found) return res.json({ image: ownedImage(found) });
+    }
+    const country = req.query.country ? String(req.query.country).toUpperCase() : null;
+    const locality = req.query.locality ? String(req.query.locality) : null;
+    if (!country && !locality) return res.json({ image: null });
+
+    const areaRefs = await atlasRepo.areaPictureRefs(household.id);
+    const here = areaRefs.filter((r) => (!country || r.country_code === country)
+      && (!locality || r.locality === locality));
+    // Nothing saved in that town yet: anywhere in the same country beats a blank.
+    const pool = here.length ? here : areaRefs.filter((r) => !country || r.country_code === country);
+    const heroes = await heroesForPlaces(pool.map((r) => r.venue_ref));
+    const found = pool.map((r) => heroes.get(r.venue_ref)).filter(Boolean);
+    res.json({ image: ownedImage(found.find((h) => h.source !== 'logo') ?? found[0] ?? null) });
+  } catch (err) { next(err); }
+});
+
+/**
  * GET /api/trips/from-home?lat=&lng=&mode=driving — how long it takes to get there.
  *
  * The create screen needs it for one line: "Leave home 08:55 · 5 min", which is

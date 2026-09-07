@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, Place, API_URL } from '../api';
+import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, API_URL } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName, iconFor } from '../components/Icon';
@@ -238,7 +238,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    * Everything he lists is already Trips' job, so this hands the place over
    * rather than growing a second version of any of it here.
    */
-  onCreateTrip?: (p: { place: Place; seed: { venueRef: string; name: string; category?: string | null; lat?: number | null; lng?: number | null } }) => void;
+  onCreateTrip?: (p: { place: Place; seed: { venueRef: string; name: string; category?: string | null; lat?: number | null; lng?: number | null; image?: OwnedImage | null; photos?: VenuePhotoRef[] | null } }) => void;
   /** The other way to ask: say what the day is for and let Epic think about it. */
   onPlanner?: () => void;
   /** Somewhere to eat is Places' question, not this screen's. */
@@ -891,7 +891,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
             // seed: a day out to a place somebody tapped has that place *on*
             // it, as the stop the day is built around, and a stop needs a ref.
             place: { ref: it.venueRef, label: it.name, lat: it.lat as number, lng: it.lng as number },
-            seed: { venueRef: it.venueRef, name: it.name, category: it.category, lat: it.lat, lng: it.lng },
+            // The picture goes with it: the create screen shows the place the
+            // trip is for at the top (5a), and the drawer already has it, so
+            // there is nothing to fetch.
+            seed: { venueRef: it.venueRef, name: it.name, category: it.category, lat: it.lat, lng: it.lng, image: it.image, photos: it.photos },
           });
         } : undefined}
       />

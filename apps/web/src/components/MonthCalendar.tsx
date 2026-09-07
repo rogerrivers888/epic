@@ -67,6 +67,8 @@ export function MonthCalendar({ start, end, onChange, minMonth }: {
     onPanResponderRelease: (_e, g) => { if (g.dx < -40) step(1); else if (g.dx > 40) step(-1); },
   })).current;
 
+  const now = today();
+
   const cells = useMemo(() => {
     const firstOfMonth = new Date(year, month, 1);
     const lead = mondayIndex(firstOfMonth);
@@ -74,10 +76,20 @@ export function MonthCalendar({ start, end, onChange, minMonth }: {
     const out: (string | null)[] = Array(lead).fill(null);
     for (let d = 1; d <= days; d += 1) out.push(ymd(new Date(year, month, d)));
     while (out.length % 7 !== 0) out.push(null);
-    return out;
-  }, [year, month]);
 
-  const now = today();
+    /**
+     * A week that is entirely behind us is not shown (owner, 7 Sep 2026: "if we
+     * finish the first week, then the month should start on the 7th today, and
+     * the first row should be removed. It just creates more room").
+     *
+     * Whole weeks only, so the grid keeps its Monday-to-Sunday columns — and
+     * only leading ones, so a month you have paged back to is still whole.
+     */
+    const weeks: (string | null)[][] = [];
+    for (let i = 0; i < out.length; i += 7) weeks.push(out.slice(i, i + 7));
+    while (weeks.length > 1 && weeks[0].every((d) => d == null || d < now)) weeks.shift();
+    return weeks.flat();
+  }, [year, month, now]);
 
   const pick = (date: string) => {
     if (!start) return onChange({ start: date, end: null });

@@ -1500,6 +1500,10 @@ export const api = {
   /** "Where are you going?" — countries first, then cities and towns (3a). */
   searchTrips: (q: string) => request<TripSearchAnswer>(`/api/trips/search${qs({ q })}`),
 
+  /** The picture at the top of the create screen: ours, from the library, never a provider's. */
+  tripPicture: (p: { venueRef?: string | null; country?: string | null; locality?: string | null }) =>
+    request<{ image: OwnedImage | null }>(`/api/trips/picture${qs(p as any)}`),
+
   /** How long it takes to get there from home — Epic's own arithmetic, no route bought. */
   fromHome: (p: { lat: number; lng: number; mode?: Trip['travelMode'] }) =>
     request<{ minutes: number | null; estimated: boolean; home: string | null; mode?: string }>(`/api/trips/from-home${qs(p as any)}`),
