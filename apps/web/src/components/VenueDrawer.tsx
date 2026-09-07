@@ -435,6 +435,34 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const shown = tabs.some((t) => t.value === tab) ? tab : 'overview';
 
   const openNow = openState(v);
+  /**
+   * Everything the screen owes a credit to, as one line.
+   *
+   * A photograph's licence, the encyclopaedia the description came from, and
+   * the provider whose rating and reviews are on screen — gathered rather than
+   * printed three times in three places.
+   */
+  const credits = [...new Set([
+    v?.attribution ?? item.attribution ?? null,
+    crowd?.attribution ?? null,
+  ].flatMap((a) => (a ? String(a).split(' · ') : [])))].join(' · ');
+  /** "20 min drive" reads better than "20 min driving"; the sheet's own words. */
+  const travelWord = 'drive';
+  /**
+   * The picture, for the hero.
+   *
+   * Ours first — an atlas image is served from our own origin and carries an
+   * `lqip` so the frame has the photograph's colours before a byte of the real
+   * one has arrived. A provider's is fetched at display time and never stored.
+   */
+  const hero = (() => {
+    const owned = item.image;
+    // A mark stretched across 220px is a smear; it has its own place below.
+    if (owned && owned.source !== 'logo') return { uri: `${API_URL}/api/images/${owned.id}/960`, lqip: owned.lqip ?? null };
+    const photo = item.photos?.[0];
+    const uri = photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=960` : null);
+    return uri ? { uri, lqip: null } : null;
+  })();
   const travelBits = [
     item.distanceKm != null ? `${item.distanceKm} km from ${baseLabel ?? 'base'}` : null,
     item.travelFromBaseMinutes != null ? `about ${item.travelFromBaseMinutes} min` : null,
@@ -454,27 +482,42 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               came for — start above the fold (owner, 4 Sep 2026). */}
           <View style={styles.head}>
             <Row style={{ alignItems: 'flex-start' }}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={type.title}>{title}</Text>
-                <Text style={type.small}>{typeLine(item)}{price ? ` · ${price}` : ''}{item.chain ? ` · chain${item.brand ? ` (${item.brand})` : ''}` : ''}</Text>
-                <Row style={{ flexWrap: 'wrap', gap: spacing.sm }}>
-                  {rating != null ? <Rating value={rating}>{ratingCount ? ` (${ratingCount.toLocaleString()})` : ''}</Rating> : null}
-                  {openNow ? (
-                    <IconText name={openNow.open === false ? 'full' : 'booked'} color={openNow.open === false ? colors.inkMuted : colors.like}>
-                      <Text style={{ fontWeight: '700', color: colors.ink }}>{openNow.state}</Text>{openNow.detail ? ` · ${openNow.detail}` : ''}
-                    </IconText>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.name}>{title}</Text>
+                {/* One line, in the handoff's own order: what it is, how far,
+                    and what the crowd made of it (9f). The star is the lifted
+                    green rather than a colour of its own. */}
+                <View style={styles.metaRow}>
+                  <Text style={styles.meta} numberOfLines={2}>
+                    {[typeLine(item), price, item.travelFromBaseMinutes != null ? `${item.travelFromBaseMinutes} min ${travelWord}` : null]
+                      .filter(Boolean).join(' · ')}
+                  </Text>
+                  {rating != null ? (
+                    <View style={styles.ratingBit}>
+                      <Icon name="favourite" size={14} color={colors.accent} fill />
+                      <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
+                      {ratingCount ? <Text style={styles.meta}>({ratingCount.toLocaleString()})</Text> : null}
+                    </View>
                   ) : null}
-                </Row>
+                </View>
+                {openNow ? (
+                  <IconText name={openNow.open === false ? 'full' : 'booked'} color={openNow.open === false ? colors.inkMuted : colors.accent}>
+                    <Text style={{ fontWeight: '700', color: colors.ink }}>{openNow.state}</Text>{openNow.detail ? ` · ${openNow.detail}` : ''}
+                  </IconText>
+                ) : null}
               </View>
               {/* 44×44 hit area, no border: the design is explicit, and a
                   boxed × on a title row reads as a second control. */}
               <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
             </Row>
-            {onAdd || onShortlist ? (
-              <Wrap>
-                {onAdd ? <Button label={added ? 'In the plan' : addLabel ?? 'Add to plan'} icon={added ? 'keep' : addIcon ?? 'add'} iconFill={added} kind={added ? 'secondary' : 'primary'} onPress={() => onAdd(item)} disabled={added} /> : null}
-                {onShortlist ? <Button label={saved || shortlisted ? 'Shortlisted' : 'Shortlist'} icon={saved || shortlisted ? 'shortlisted' : 'shortlist'} kind="secondary" onPress={async () => { await onShortlist(item); setSaved(true); }} disabled={saved || shortlisted} /> : null}
-              </Wrap>
+            {/* The picture, straight under the title and running to both edges
+                (9f). It was a long way down the scroll before, under whatever
+                the source happened to return first. */}
+            {hero ? (
+              <View style={styles.hero}>
+                {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
+                <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
+              </View>
             ) : null}
             {/* A strip on the 2px ink rule, not a row of pills (Inspire rework,
                 8f): the selected tab's underline sits *on* that rule, which is
@@ -547,44 +590,52 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     {externalUrl && !mapsUrl ? <Button label={item.category === 'event' ? 'Tickets' : `On ${sourceName}`} kind="ghost" onPress={() => Linking.openURL(externalUrl)} /> : null}
                   </Wrap>
 
-                  {/* Hours and photos lost their tabs and live here (owner, 4 Sep 2026). */}
-                  <View style={{ gap: 2, marginTop: spacing.sm }}>
-                    <Text style={type.h3}>Opening hours</Text>
-                    {hours.length ? foldHours(hours).map((h, i) => <Text key={i} style={type.small}>{h}</Text>)
+                  {/*
+                    The facts grid (8f): two columns, ruled top, bottom and
+                    between. Hours on the left, how long to allow on the right —
+                    the two things you plan a day around, side by side rather
+                    than a paragraph apart.
+                  */}
+                  <View style={styles.facts}>
+                    <View style={styles.fact}>
+                      <Text style={styles.factKicker}>Opening hours</Text>
+                      {hours.length ? foldHours(hours).map((h, i) => <Text key={i} style={styles.factValue}>{h}</Text>)
                       : ownRecord?.openingHours ? (
-                        <>
-                          <Text style={type.small}>{ownRecord.openingHours}</Text>
-                          <Text style={type.tiny}>Epic's own record, from {ownRecord.provenance?.opening_hours === 'site' ? 'their own website' : 'OpenStreetMap'} — kept, so it is here with no signal.</Text>
-                        </>
+                        <Text style={styles.factValue}>{ownRecord.openingHours}</Text>
                       ) : (
                         /* "Not available", never where we looked and failed to
                            find it (Inspire rework, 8f). Which source was asked
                            is our problem; the household only needs to know
                            whether they can plan around it. */
-                        <Text style={type.small}>{venue === undefined ? '' : 'Not available'}</Text>
+                        <Text style={styles.factValue}>{venue === undefined ? '' : 'Not available'}</Text>
                       )}
+                    </View>
+                    <View style={[styles.fact, styles.factDivider]}>
+                      <Text style={styles.factKicker}>Time to allow</Text>
+                      <Text style={styles.factValue}>
+                        {item.dwellMinutes > 0 ? minutes(item.dwellMinutes) : 'Not available'}
+                      </Text>
+                    </View>
                   </View>
 
-                  {/* Ours first, and full size, because the drawer is where a
-                      picture is large enough to be the point — and so where the
-                      licence line has to appear. A mark is not blown up to 800
-                      wide: it is shown at the size it was drawn, on its ground,
-                      captioned with where it came from. */}
-                  {item.image ? (
+                  {/*
+                    A business's own mark is not a photograph and is not the
+                    hero: it is drawn at the size it was made, on its ground.
+                    Everything else is already the full-bleed picture at the top
+                    of the screen (8f), and drawing it twice was drawing it
+                    twice.
+                  */}
+                  {item.image?.source === 'logo' ? (
                     <View style={{ gap: 4 }}>
                       <VenueThumb
-                                        name={title}
+                        name={title}
                         image={item.image}
                         category={item.category}
                         experiences={experiences}
-                        width={item.image.source === 'logo' ? 140 : 320}
-                        height={item.image.source === 'logo' ? 140 : 200}
+                        width={140}
+                        height={140}
                       />
-                      {item.image.source === 'logo' ? (
-                        <Text style={type.tiny}>Their own mark, from their website. Shown to identify them; the mark is theirs.</Text>
-                      ) : item.image.sourceUrl ? (
-                        <Text style={type.tiny}>{item.image.licence} · <Text onPress={() => Linking.openURL(item.image!.sourceUrl!)} style={{ textDecorationLine: 'underline' }}>source</Text></Text>
-                      ) : <Text style={type.tiny}>{item.image.licence}</Text>}
+                      <Text style={type.tiny}>Their own mark, from their website. Shown to identify them; the mark is theirs.</Text>
                     </View>
                   ) : null}
 
@@ -646,9 +697,31 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 </View>
               ) : null}
 
-              <Text style={type.tiny}>{v?.attribution ?? item.attribution ?? ''}</Text>
+              {/* One line, at the very end, 12px grey 700 — not overlaid on the
+                  picture and not repeated (8f). This is where a licence is
+                  actually satisfied: beside the thing somebody is looking at. */}
+              {credits ? <Text style={styles.credit}>{credits}</Text> : null}
             </ScrollView>
           )}
+
+          {/* Pinned, so the one thing to do with a place does not scroll away
+              from it. Ink on light, lime on dark — `primary` is already both. */}
+          {onAdd && shown !== 'menu' && shown !== 'order' ? (
+            <View style={styles.footer}>
+              <Pressable
+                onPress={() => onAdd(item)}
+                disabled={added}
+                accessibilityRole="button"
+                style={[styles.footerBtn, added && { opacity: 0.5 }]}
+              >
+                <View style={styles.footerLabel}>
+                  <Icon name={added ? 'keep' : addIcon ?? 'trips'} size={18} color={colors.primaryFg} fill={added} />
+                  <Text style={styles.footerText}>{added ? 'In the plan' : addLabel ?? 'Create trip'}</Text>
+                </View>
+                <Icon name="forward" size={18} color={colors.primaryFg} />
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -657,6 +730,35 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 }
 
 const styles = StyleSheet.create({
+  // The place, as 8f/9f draws it.
+  name: { fontFamily: fonts.heading, fontSize: 32, fontWeight: '800', letterSpacing: -0.96, lineHeight: 34, color: colors.ink },
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  meta: { fontFamily: fonts.body, fontSize: 14, color: colors.inkMuted },
+  ratingBit: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ratingValue: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.accent },
+  // Full-bleed: the head's gutter is given back on both sides.
+  hero: { height: 220, marginHorizontal: -spacing.lg, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
+  // Two columns, ruled top and bottom and between — the handoff's facts grid.
+  facts: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.lineSoft, marginTop: spacing.sm },
+  fact: { flex: 1, paddingVertical: spacing.md, paddingRight: spacing.md, gap: 4 },
+  factDivider: { borderLeftWidth: 1, borderLeftColor: colors.lineSoft, paddingLeft: spacing.md },
+  factKicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: colors.inkMuted },
+  factValue: { fontFamily: fonts.body, fontSize: 16, color: colors.ink },
+  // One line, at the very end of the scroll, in grey 700 — grey 500 fails here.
+  credit: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted, marginTop: spacing.xl },
+  // Pinned: the action does not scroll away from the thing it acts on.
+  footer: {
+    borderTopWidth: 1, borderTopColor: colors.lineSoft, paddingHorizontal: spacing.lg, paddingTop: 12,
+    paddingBottom: (Platform.OS === 'web' ? 'calc(16px + var(--epic-sab))' : 24) as any,
+    backgroundColor: colors.bg,
+  },
+  footerBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.primary, paddingHorizontal: 20, minHeight: 56,
+  },
+  footerLabel: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  footerText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.primaryFg },
+
   backdropWrap: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
   panel: { backgroundColor: colors.bg },
@@ -681,6 +783,5 @@ const styles = StyleSheet.create({
   tabItemOn: { borderBottomColor: colors.ink },
   tabText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600' },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
-  hero: { width: '100%', height: 220, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
   review: { gap: 2, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
 });
