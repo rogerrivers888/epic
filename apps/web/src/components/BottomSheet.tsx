@@ -62,7 +62,7 @@ const FLICK_VELOCITY = 0.4;
 
 const isWeb = Platform.OS === 'web';
 
-export function BottomSheet({ detent, onDetent, header, children, screenHeight, insetBottom = 0, cover = false }: {
+export function BottomSheet({ detent, onDetent, header, children, screenHeight, insetBottom = 0, cover = false, listRef }: {
   detent: Detent;
   onDetent: (d: Detent) => void;
   /** Always visible, at every detent, and the place a drag always moves the sheet. */
@@ -71,6 +71,13 @@ export function BottomSheet({ detent, onDetent, header, children, screenHeight, 
   children: React.ReactNode;
   screenHeight: number;
   insetBottom?: number;
+  /**
+   * The body's scroller, handed out so a screen can bring a row into view —
+   * tapping a pin on the map has to be able to say "and there it is in the
+   * list" (owner, 7 Sep 2026: "it doesn't take me to that part of the list
+   * where that place is shown").
+   */
+  listRef?: React.RefObject<ScrollView | null>;
   /**
    * The sheet takes the whole screen and stops being a sheet: no detents, no
    * grabber, nothing of the map behind it (owner, 6 Sep 2026, on configuring a
@@ -339,6 +346,7 @@ export function BottomSheet({ detent, onDetent, header, children, screenHeight, 
       </View>
       <View ref={bodyRef} style={{ flex: 1, minHeight: 0 }} {...responder.body}>
         <ScrollView
+          ref={listRef}
           scrollEnabled={cover || detent !== 'peek'}
           onScroll={(e) => { scrollTop.current = e.nativeEvent.contentOffset.y; }}
           scrollEventThrottle={16}

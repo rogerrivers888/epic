@@ -91,6 +91,23 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   const [pill, setPill] = useQueryState<Pill | null>('pill', null, asOneOf(['activities', 'food', 'stay', 'shortlist'] as const, null));
   /**
+   * How a pin and its row talk to each other — three ways, to be tried against
+   * each other rather than argued about (owner, 7 Sep 2026: "I'd like to go on
+   * a journey with you, actually, to try these different options out to get it
+   * right, because this is a really important one to get right").
+   *
+   *   `list`  the list scrolls to the place and lights it up. Nothing is
+   *           hidden, nothing new appears, and you can still see what else
+   *           was near it. The default.
+   *   `only`  the sheet shows that one place while it is chosen, and tapping
+   *           it again gives the list back. His first option.
+   *   `card`  a card rises over the sheet with the place on it, and opens
+   *           into the full drawer. His second, and what most map apps do.
+   *
+   * In the address, so the three are three links he can put side by side.
+   */
+  const [pins, setPins] = useQueryState<'list' | 'only' | 'card'>('pins', 'list', asOneOf(['list', 'only', 'card'] as const, 'list'));
+  /**
    * The household's standing answer to "what are you looking for" (owner,
    * 6 Sep 2026: "I never search for pubs or bakeries. I just want to find
    * restaurants"). It is what the browse *opens* on; the address always wins,
@@ -152,7 +169,29 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const [detent, setDetent] = useState<Detent>('half');
   /** The group has handed the screen to a page of its own, which draws its own way back. */
   const [groupPage, setGroupPage] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  /**
+   * The place being looked at. In the address, because "this one, on the map"
+   * is a page somebody can be sent — and because it is the thing every one of
+   * the three ways below turns on.
+   */
+  const [selected, setSelected] = useQueryState<string | null>('place', null, asText);
+  /** The sheet's own scroller, so a pin can bring its row into view. */
+  const listRef = useRef<ScrollView | null>(null);
+  /** Where each row sits in that scroller, recorded as it lays out. */
+  const rowTops = useRef<Map<string, number>>(new Map());
+  /**
+   * Tapping a pin takes you to its row (owner, 7 Sep 2026: "when I click on
+   * one, it just shows me a name. It doesn't take me to that part of the list
+   * where that place is shown"). The sheet comes up to half if it was peeking,
+   * because there is no list to scroll at a peek.
+   */
+  useEffect(() => {
+    if (!selected || pins !== 'list') return;
+    const y = rowTops.current.get(selected);
+    if (y == null) return;
+    const t = setTimeout(() => listRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }), 60);
+    return () => clearTimeout(t);
+  }, [selected, pins]);
   const [adding, setAdding] = useState<TripAlongPlace | null>(null);
   /**
    * What the drawer is showing. One piece of state whatever was tapped — a row,
@@ -220,6 +259,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const kitchenOf = cuisine ?? (forKind === 'food' ? browseDefaults?.food?.cuisine ?? null : null);
   const kindNow = kind === 'any' ? null : kind;
   const cuisineNow = kitchenOf === 'any' ? null : kitchenOf;
+
+  /** The place the card is for: only ever one of the ones on the map. */
+  const cardFor = useMemo(
+    () => (selected ? along.places.find((p) => p.venueRef === selected) ?? null : null),
+    [selected, along.places],
+  );
 
   const shownAlong = useMemo(
     () => along.places.filter((p) => (!kindNow || isKind(p, kindNow)) && (!cuisineNow || isKind(p, cuisineNow))),
@@ -383,7 +428,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             first tap is what made looking at three restaurants in turn a
             chore, because the map moved every time (owner, 6 Sep 2026).
           */
-          onPress: () => setSelected(p.venueRef),
+          /*
+            A pin picks its place; the chevron that then appears opens it. In
+            `list` the sheet comes up to half at the same time, because a list
+            you cannot scroll is not somewhere a pin can take you.
+          */
+          onPress: () => { setSelected(p.venueRef); if (pins === 'list' && detent === 'peek') setDetent('half'); },
           onExpand: () => openPlace(p),
         });
       }
@@ -678,6 +728,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       pill={pill}
       along={along}
       shown={shownAlong}
+      onRowLayout={(ref, y) => rowTops.current.set(ref, y)}
+      pins={pins}
       shortlisted={(places?.places ?? []).filter(stillSaved)}
       onUnshortlist={unshortlist}
       onOpenSaved={(p) => { setSelected(p.venueRef); setDrawer(tripPlaceToItem(p)); }}
@@ -844,7 +896,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           </View>
         </View>
       ) : (
-        <BottomSheet detent={covering ? 'full' : detent} onDetent={setDetent} header={header} screenHeight={height} insetBottom={TABBAR} cover={covering}>
+        <BottomSheet detent={covering ? 'full' : detent} onDetent={setDetent} header={header} screenHeight={height} insetBottom={TABBAR} cover={covering} listRef={listRef}>
           {body}
         </BottomSheet>
       )}
@@ -873,6 +925,42 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           }
           : undefined}
       />
+
+      {/*
+        The card (the owner's second option, 7 Sep 2026): "It can open up a
+        card, and then I can expand the card to show the full side drawer. I
+        can click again to remove the card."
+
+        It sits above the sheet, over the map, so the list underneath is not
+        disturbed — which is the argument for it over showing one row. The
+        whole card opens the place; the × puts it away.
+      */}
+      {pins === 'card' && cardFor && !drawer ? (
+        <View style={[styles.cardWrap, { bottom: heights[detent] + TABBAR + 62 }]} pointerEvents="box-none">
+          <Pressable onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
+            <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={52} height={52} rounded={6} credit={false} />
+            <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+              <Text style={styles.rowName} numberOfLines={1}>{cardFor.name}</Text>
+              <View style={styles.rowMeta}>
+                <Text style={type.small} numberOfLines={1}>
+                  {[kitchen(cardFor) ?? plainCategory(cardFor.category), money(cardFor.priceLevel)].filter(Boolean).join(' · ')}
+                </Text>
+                {cardFor.rating != null ? (
+                  <Stars value={cardFor.rating} size={11}><Text style={styles.ratingText}>{cardFor.rating.toFixed(1)}</Text></Stars>
+                ) : null}
+              </View>
+              <Text style={styles.detour} numberOfLines={1}>
+                {cardFor.detourMinutes != null ? `+${cardFor.detourMinutes} min` : 'nearby'}
+                <Text style={{ color: colors.inkMuted, fontWeight: '400' }}>{` · ${cardFor.detourMiles} mi`}</Text>
+              </Text>
+            </View>
+            <Icon name="more" size={18} color={colors.ink} />
+          </Pressable>
+          <Pressable onPress={() => setSelected(null)} hitSlop={8} style={styles.cardShut} accessibilityRole="button" accessibilityLabel="Put the card away">
+            <Icon name="close" size={14} color={colors.ink} />
+          </Pressable>
+        </View>
+      ) : null}
 
       {searching ? (
         <SearchAlong
@@ -1126,7 +1214,7 @@ function TripPlacesList({ data, onSelect, onDelete }: {
 
 const DETOURS = [5, 10, 15, 30];
 
-function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
+function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
   pill: Pill;
   along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number };
   shortlisted: TripPlace[];
@@ -1141,7 +1229,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   maxDetourMin: number;
   onDetour: (n: number) => void;
   selected: string | null;
-  onSelect: (ref: string) => void;
+  onSelect: (ref: string | null) => void;
   /** Tapping the row opens the place over the map, the way Places does. */
   onOpen: (p: TripAlongPlace) => void;
   onAdd: (p: TripAlongPlace) => void;
@@ -1156,6 +1244,10 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   isDefault: boolean;
   /** The pool with the type applied — the same list the map is pinning. */
   shown: TripAlongPlace[];
+  /** Where a row sits in the sheet's scroller, so a pin can bring it into view. */
+  onRowLayout: (ref: string, y: number) => void;
+  /** Which of the three ways a pin and its row talk to each other. */
+  pins: 'list' | 'only' | 'card';
 }) {
   const [openDetour, setOpenDetour] = useState(false);
   const [openKind, setOpenKind] = useState(false);
@@ -1378,6 +1470,20 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
 
       {/* Named against the band on the map behind the sheet, so the words and
           the shading are plainly the same thing. */}
+      {/*
+        How this page works, said once, in a line (owner, 7 Sep 2026: "I think
+        we need to be very clear with the user about how to interact on this
+        page"). It goes once a place is chosen, because by then it has been
+        read and the row itself is showing what it meant.
+      */}
+      {!along.loading && shown.length && !selected ? (
+        <Text style={[type.tiny, { paddingHorizontal: 16, paddingTop: 10 }]}>
+          {pins === 'card' ? 'Tap a place to see its card · the card opens it'
+            : pins === 'only' ? 'Tap a place to see just that one · tap it again for the rest'
+              : 'Tap a place to find it on the map · the arrow opens it'}
+        </Text>
+      ) : null}
+
       {along.loading ? (
         <Text style={[type.small, { padding: spacing.lg }]}>
           {anchorLabel
@@ -1422,7 +1528,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
       ) : null}
 
       <View style={{ paddingHorizontal: 16 }}>
-        {shown.map((p) => (
+        {(pins === 'only' && selected ? shown.filter((p) => p.venueRef === selected) : shown).map((p) => (
           /*
             Tapping a row shows it on the map, it does not open it (owner,
             6 Sep 2026: "I can see lots of icons on a map, but I don't know
@@ -1435,11 +1541,24 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           */
           <Pressable
             key={p.venueRef}
-            onPress={() => (selected === p.venueRef ? onOpen(p) : onSelect(p.venueRef))}
+            onLayout={(e) => onRowLayout(p.venueRef, e.nativeEvent.layout.y)}
+            /*
+              One tap picks a place and shows it on the map; the same tap again
+              lets it go. It does **not** open anything — opening has a button
+              of its own, at the end of the row and on the pin.
+
+              It used to open on the second tap, and the owner named exactly
+              what is wrong with that (7 Sep 2026): "How am I supposed to know
+              as a user that that's what happens, that I need to click twice?"
+              Nothing on screen said so, and a hidden gesture is not an
+              affordance. A toggle is at least the thing people expect a second
+              tap to do.
+            */
+            onPress={() => onSelect(selected === p.venueRef ? null : p.venueRef)}
             style={[styles.row, selected === p.venueRef && styles.rowOn]}
             accessibilityRole="button"
             accessibilityState={{ selected: selected === p.venueRef }}
-            accessibilityLabel={selected === p.venueRef ? `Open ${p.name}` : `${p.name} — show on the map`}
+            accessibilityLabel={selected === p.venueRef ? `${p.name} — hide on the map` : `${p.name} — show on the map`}
           >
             <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={56} height={56} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
@@ -1490,6 +1609,10 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               <Pressable onPress={() => onAdd(p)} style={styles.add} accessibilityRole="button">
                 <Icon name={p.onDay ? 'check' : 'add'} size={13} color={colors.ink} />
                 <Text style={styles.addText}>{p.onDay ? 'Added' : 'Add'}</Text>
+              </Pressable>
+              {/* The way in, drawn. This is the button the second tap used to be. */}
+              <Pressable onPress={() => onOpen(p)} hitSlop={6} style={styles.openBtn} accessibilityRole="button" accessibilityLabel={`Open ${p.name}`}>
+                <Icon name="more" size={16} color={colors.ink} />
               </Pressable>
             </View>
           </Pressable>
@@ -2293,7 +2416,7 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
   mode: 'driving' | 'walking'; onMode: (m: 'driving' | 'walking') => void;
   /** Each chip re-opens the wizard at the step it came from (§19). */
   onCriteria: (step: 1 | 2) => void; nights: number; budget: [number, number]; planned: number;
-  selected: string | null; onSelect: (ref: string) => void;
+  selected: string | null; onSelect: (ref: string | null) => void;
   /** Tapping a stay opens it, the same as tapping its pin. */
   onOpen: (s: Stay) => void;
   onChoose: (s: Stay) => Promise<void>;
@@ -2624,7 +2747,11 @@ const styles = StyleSheet.create({
   rowActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 2 },
   // Beside the three lines, not under them: the row was three lines taller
   // than it needed to be and the left of it was empty.
-  rowSide: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', flexShrink: 0 },
+  rowSide: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center', flexShrink: 0 },
+  cardWrap: { position: 'absolute', left: 12, right: 12, zIndex: 3 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, shadowColor: '#201E1D', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 6 },
+  cardShut: { position: 'absolute', top: -8, right: -6, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  openBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceMuted },
   // What it serves, said once, in the row's own words.
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
