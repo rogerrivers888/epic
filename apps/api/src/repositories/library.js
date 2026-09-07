@@ -495,13 +495,28 @@ export async function publishedFor(slug) {
  * at 6.3 km. That is a list of Britain's best museums, not an answer to what a
  * family might do on Saturday.
  *
- * The damping is deliberately gentle. Somebody in Ascot really can spend a day
- * at the Tower of London, and a home screen that buried it under every local
- * garden because the garden is closer would be just as wrong in the other
- * direction. At `NEARNESS_WEIGHT` of 0.4 a place at the very edge of the search
- * keeps 60% of its score, which is enough for something exceptional an hour
- * away to hold its own against something merely good round the corner, and not
- * enough for it to lead.
+ * How much nearer has to beat how much better is the whole question, and the
+ * first answer was too gentle. It damped by a fraction of the *search radius*,
+ * so the same place was ranked differently depending on how wide the question
+ * was, and at the top of that range it barely bit: Hyde Park at 34km led the
+ * Outdoors row ahead of Virginia Water Lake at 3km, and the owner noticed the
+ * lake was not on his home screen at all (7 Sep 2026: "that's the closest park
+ * to me, and it's huge"). It was 16th of 21.
+ *
+ * `NEARNESS_HALF_KM` is the distance at which a place needs to be twice as good
+ * to hold the same position — 30km here, so somewhere an hour away has to be
+ * roughly three times the place to lead something on the doorstep. It is an
+ * absolute distance rather than a fraction of the radius, which is the point: a
+ * park three kilometres away is three kilometres away whether the household
+ * asked about the county or the country.
+ *
+ * Thirty was chosen against the owner's own home screen rather than by feel,
+ * because the two failure modes are both real and they pull opposite ways.
+ * Somebody in Ascot really can spend a day at the Tower of London, and burying
+ * it under every local garden would be as wrong as the bug being fixed. At 30km
+ * a row of twelve holds both ends: Virginia Water Lake rises from 16th to 5th,
+ * and the Tower of London, Westminster Abbey and the British Museum all keep
+ * their place on the Culture row.
  *
  * The distance here is a flat-earth approximation, which over sixty kilometres
  * is out by centimetres and is only ever used for ordering — the caller's
@@ -513,7 +528,7 @@ export async function publishedFor(slug) {
  * one for as long as it takes the next image pass to reach it. Nothing is
  * hidden by this: the back office counts them on its own tile.
  */
-const NEARNESS_WEIGHT = 0.4;
+const NEARNESS_HALF_KM = 30;
 
 /**
  * Two things this does that are worth knowing.
@@ -590,10 +605,10 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
      ),
      ranked as (
        select *,
-              -- A photograph first, then the score, tempered by how near it is.
+              -- A photograph first, then the score, against how far it is.
               row_number() over (
                 order by (image_id is not null) desc,
-                         score * (1 - ${NEARNESS_WEIGHT} * least(1.0, km / $7)) desc
+                         score / (1 + km / ${NEARNESS_HALF_KM}.0) desc
               ) as by_merit,
               row_number() over (order by km) as by_nearness
          from kept

@@ -126,3 +126,13 @@ test('the SQL carries no backtick, which would end the template literal', () => 
   assert.ok(!body.includes('`'), 'a backtick inside the SQL would truncate the query');
   assert.match(body, /limit \$8/, 'the query body should reach its limit clause');
 });
+
+test('nearness is damped by an absolute distance, not a fraction of the search', () => {
+  // The first version damped by km/radius, so the same park ranked differently
+  // depending on how wide the question was, and at 60km it barely bit: Hyde Park
+  // at 34km led the Outdoors row over Virginia Water Lake at 3km.
+  const sql = readFileSync(new URL('../src/repositories/library.js', import.meta.url), 'utf8');
+  assert.match(sql, /score \/ \(1 \+ km \/ \$\{NEARNESS_HALF_KM\}\.0\)/,
+    'the merit ordering must divide by an absolute distance');
+  assert.ok(!/NEARNESS_WEIGHT/.test(sql), 'the old radius-relative damping is back');
+});
