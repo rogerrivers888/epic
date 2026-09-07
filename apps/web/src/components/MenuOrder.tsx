@@ -61,6 +61,13 @@ const keyOf = (memberId: string | null | undefined, guestRef: string | null | un
  */
 type Pick = { on: boolean; note: string };
 type Picks = Record<string, Record<string, Pick>>;
+/**
+ * A dish on the order that is not on the menu Roam holds — because their menu
+ * has changed, or because we have never managed to read it. It is carried by
+ * name so the order survives either.
+ */
+type Carried = Record<string, { name: string; price: number | null; priceText: string | null }>;
+
 /** One person, one dish: what goes to the kitchen and what shows in the basket. */
 type Line = {
   itemId: string; key: string; who: string; kind: Diner['kind']; memberId: string | null; guestRef: string | null;
@@ -198,6 +205,8 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   // Who else is at the table tonight, and the field that asks their names.
   const [guests, setGuests] = useState<Guest[]>([]);
   const [seating, setSeating] = useState(false);
+  // Dishes on the order that the held menu does not list (see `Carried`).
+  const [carried, setCarried] = useState<Carried>({});
   // The basket, so a tap is visibly a thing that happened (owner, 7 Sep 2026:
   // "maybe I could see it going into a basket or something, so I know it's
   // actually worked"). `added` is the line just put in, said once and faded.
@@ -229,6 +238,15 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   // and what a table orders from when it comes back (owner, 4 Sep 2026).
   const [history, setHistory] = useState<(Order & { visitedOn: string | null })[]>([]);
   const [again, setAgain] = useState<Record<string, boolean>>({});
+  /**
+   * Who is eating tonight (owner, 7 Sep 2026: "I can say who's dining, or is it
+   * the same people? Do you want to add new ones?").
+   *
+   * It starts as whoever ate here last time, because a family coming back is
+   * usually the same family; taking one person off is one tap, and it takes
+   * their old plates off the order with them.
+   */
+  const [dining, setDining] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!enabled) return;
@@ -237,9 +255,14 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     api.orderHistory(venueRef).then((d) => {
       if (!live) return;
       setHistory(d.orders);
-      // Coming back, everything from last time is ticked: taking two things off
-      // is quicker than putting six on.
-      setAgain(Object.fromEntries((d.orders[0]?.items ?? []).map((i) => [i.id, true])));
+      // Coming back, everything the household had last time is ticked: taking
+      // two things off is quicker than putting six on. A guest's plate is not
+      // — a guest belongs to one evening (migration 060), and assuming Kate is
+      // coming again is the kind of guess that puts a stranger's dinner on
+      // tonight's order. Her plates tick themselves the moment she is seated.
+      setAgain(Object.fromEntries((d.orders[0]?.items ?? []).map((i) => [i.id, !i.guestId])));
+      // And whoever was eating is who is eating, until somebody says otherwise.
+      setDining(Object.fromEntries((d.orders[0]?.items ?? []).map((i) => i.memberId).filter(Boolean).map((id) => [id as string, true])));
     }).catch(() => {});
     api.order(venueRef).then((d) => {
       if (!live || !d.order || d.order.visitId) return;
@@ -250,7 +273,9 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
       // would quietly wipe it — and the people it was for have to come back
       // with it, or a guest's dinner would have nobody to belong to.
       setGuests(d.order.guests.map((g) => ({ ref: g.ref, name: g.name })));
-      setPicks(picksOf(d.order));
+      const read = picksOf(d.order);
+      setPicks(read.picks);
+      setCarried(read.carried);
     }).catch(() => {});
     return () => { live = false; };
   }, [venueRef, enabled]);
@@ -308,34 +333,47 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
    * Walked in menu order rather than in the order things were tapped, so the
    * basket reads like the menu and does not reshuffle itself as it fills.
    */
-  const linesFrom = (from: Picks, who: Diner[] = diners): Line[] => {
+  const linesFrom = (from: Picks, who: Diner[] = diners, extra: Carried = carried): Line[] => {
     const lines: Line[] = [];
-    for (const [itemId, item] of itemsById) {
+    const push = (itemId: string, dish: { name: string; price: number | null; priceText: string | null }) => {
       const at = from[itemId];
-      if (!at) continue;
+      if (!at) return;
       for (const d of who) {
         const p = at[d.key];
         if (!p?.on) continue;
         lines.push({
           itemId, key: d.key, who: d.name, kind: d.kind, memberId: d.memberId, guestRef: d.guestRef,
-          name: item.name, price: item.price ?? null, priceText: item.priceText ?? null, note: p.note ?? '',
+          name: dish.name, price: dish.price, priceText: dish.priceText, note: p.note ?? '',
         });
       }
-    }
+    };
+    for (const [itemId, item] of itemsById) push(itemId, { name: item.name, price: item.price ?? null, priceText: item.priceText ?? null });
+    // Then the dishes that are not on the menu we hold. A plate ordered last
+    // time is still a plate whether or not their menu still lists it — and at a
+    // place whose menu Roam has never read, it is every plate there is.
+    for (const [itemId, dish] of Object.entries(extra)) if (!itemsById.has(itemId)) push(itemId, dish);
     return lines;
   };
-  const chosen = useMemo(() => linesFrom(picks), [picks, itemsById, diners]);
+  const chosen = useMemo(() => linesFrom(picks), [picks, itemsById, diners, carried]);
   const total = chosen.reduce((n, r) => n + (r.price ?? 0), 0);
 
-  /** An order from the server, read back into picks: the inverse of `linesFrom`. */
-  function picksOf(from: Order): Picks {
+  /**
+   * An order from the server, read back into picks: the inverse of `linesFrom`.
+   *
+   * A row with no menu item behind it — a dish typed at a place whose menu Roam
+   * has never read, or one their menu no longer lists — is carried by its own
+   * name so that editing the order cannot quietly drop it.
+   */
+  function picksOf(from: Order): { picks: Picks; carried: Carried } {
     const next: Picks = {};
+    const kept: Carried = {};
     for (const i of from.items) {
-      if (!i.menuItemId) continue;
+      const id = i.menuItemId && itemsById.has(i.menuItemId) ? i.menuItemId : `past:${i.id}`;
+      if (!itemsById.has(id)) kept[id] = { name: i.name, price: i.price ?? null, priceText: i.priceText ?? null };
       const key = keyOf(i.memberId, i.guestRef);
-      next[i.menuItemId] = { ...(next[i.menuItemId] ?? {}), [key]: { on: true, note: i.note ?? '' } };
+      next[id] = { ...(next[id] ?? {}), [key]: { on: true, note: i.note ?? '' } };
     }
-    return next;
+    return { picks: next, carried: kept };
   }
 
   /**
@@ -343,10 +381,13 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
    * before anything is ordered is still a guest, and a name typed into a phone
    * that forgets it on the next screen was never worth typing.
    */
-  async function addGuest(name: string) {
+  async function addGuest(name: string, ref?: string) {
     const first = name.trim().slice(0, 40);
     if (!first) return;
-    const guest = { ref: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name: first };
+    // Somebody who was here before keeps the id they had, so the plates they
+    // ordered last time are still theirs when they are seated again.
+    const guest = { ref: ref ?? `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name: first };
+    if (guests.some((g) => g.ref === guest.ref)) return;
     const next = [...guests, guest];
     setGuests(next);
     setBusy(true);
@@ -395,7 +436,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     }
   }
 
-  async function writeOrder(from: Picks = picks, who: Guest[] = guests) {
+  async function writeOrder(from: Picks = picks, who: Guest[] = guests, extra: Carried = carried) {
     const seated = [...members.map(memberDiner), ...who.map(guestDiner), TABLE];
     const d = await api.saveOrder({
       clientId: order?.clientId ?? undefined,
@@ -403,12 +444,18 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
       label: venueLabel,
       menuId: menu?.id ?? null,
       guests: who,
-      items: linesFrom(from, seated).map((l) => ({
-        menuItemId: l.itemId, memberId: l.memberId, guestRef: l.guestRef,
+      items: linesFrom(from, seated, extra).map((l) => ({
+        menuItemId: l.itemId.startsWith('past:') ? null : l.itemId, memberId: l.memberId, guestRef: l.guestRef,
         name: l.name, priceText: l.priceText, note: l.note || null,
       })),
     });
     setOrder(d.order);
+    // Read straight back: the rows the server just wrote have ids of their own,
+    // and a dish carried by name (`Carried`) has to be keyed by the row it is
+    // now, or taking it off the order later would find nothing to take off.
+    const read = picksOf(d.order);
+    setPicks(read.picks);
+    setCarried(read.carried);
     return d.order;
   }
 
@@ -427,10 +474,13 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     try { await writeOrder(next); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
+  /** Which pick a row on the order came from — a menu dish, or one carried by name. */
+  const pickIdOf = (item: OrderItem) =>
+    (item.menuItemId && itemsById.has(item.menuItemId) ? item.menuItemId : `past:${item.id}`);
+
   /** The same, from the order itself, where a row already knows whose it is. */
   async function removeFromOrder(item: OrderItem) {
-    if (!item.menuItemId) return;
-    await dropLine(item.menuItemId, keyOf(item.memberId, item.guestRef));
+    await dropLine(pickIdOf(item), keyOf(item.memberId, item.guestRef));
   }
 
   /**
@@ -438,11 +488,11 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
    * It belongs to this person's plate, so changing Gina's leaves Roger's alone.
    */
   async function noteOnOrder(item: OrderItem, note: string) {
-    if (!item.menuItemId) return;
+    const id = pickIdOf(item);
     const key = keyOf(item.memberId, item.guestRef);
     const next: Picks = {
       ...picks,
-      [item.menuItemId]: { ...(picks[item.menuItemId] ?? {}), [key]: { ...pickOf(item.menuItemId, key), note } },
+      [id]: { ...(picks[id] ?? {}), [key]: { ...pickOf(id, key), note } },
     };
     setPicks(next);
     try { await writeOrder(next); } catch (e: any) { setError(e.message); }
@@ -454,7 +504,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     try {
       if (order && !order.visitId) await api.clearOrder(order.id);
       setOrder(null); setPicks({}); setGuests([]); setMarks({}); setResumed(false); setPhase('order');
-      setAdded(null); setPeek(false); setTurn(null); setTookATurn({});
+      setAdded(null); setPeek(false); setTurn(null); setTookATurn({}); setCarried({});
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -594,24 +644,29 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   async function orderAgain(from: Order) {
     const byName = (name: string) => [...itemsById.values()].find((i) => i.name.toLowerCase() === name.toLowerCase());
     const next: Picks = {};
+    const kept: Carried = {};
     const seatedRefs = new Set<string>();
-    let lost = 0;
     for (const i of from.items) {
       if (!again[i.id]) continue;
-      const id = i.menuItemId && itemsById.has(i.menuItemId) ? i.menuItemId : byName(i.name)?.id;
-      if (!id) { lost += 1; continue; }   // the menu has changed since
+      // The same dish on the menu we hold, or the dish as it was written down
+      // that night. A menu Roam has never read is not a reason to refuse to
+      // order what you had last time.
+      const id = (i.menuItemId && itemsById.has(i.menuItemId) ? i.menuItemId : byName(i.name)?.id) ?? `past:${i.id}`;
+      if (!itemsById.has(id)) kept[id] = { name: i.name, price: i.price ?? null, priceText: i.priceText ?? null };
       if (i.guestRef) seatedRefs.add(i.guestRef);
       next[id] = { ...(next[id] ?? {}), [keyOf(i.memberId, i.guestRef)]: { on: true, note: i.note ?? '' } };
     }
-    const who = from.guests.filter((g) => seatedRefs.has(g.ref)).map((g) => ({ ref: g.ref, name: g.name }));
+    // Whoever is at the table now: the guests seated on the way in, not the
+    // ones who happened to be here the last time (owner, 7 Sep 2026).
+    const who = guests.length ? guests : from.guests.filter((g) => seatedRefs.has(g.ref)).map((g) => ({ ref: g.ref, name: g.name }));
     setPicks(next);
+    setCarried(kept);
     setGuests(who);
     setBusy(true);
     try {
-      await writeOrder(next, who);
+      await writeOrder(next, who, kept);
       setResumed(false);
       setPhase('order');
-      if (lost) setError(`${lost} thing${lost === 1 ? ' is' : 's are'} not on the menu any more.`);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -648,6 +703,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     peek, setPeek, added, chosen, total, dropLine, order, resumed, marks, setMarks, markOf, setMark, busy, staff, setStaff, phase, setPhase,
     noting, setNoting, asked, groups, allergenLines, dietLines, history, again, setAgain,
     turn, setTurn, tookATurn, raters, platesFor, learned, handTo, finishTurn, finishRating, rateTheMeal, rateThatMeal,
+    dining, setDining,
     readTheMenu, toTheOrder, removeFromOrder, noteOnOrder, startAgain, whatIsThis, orderAgain,
   };
 }
@@ -925,6 +981,101 @@ function Turn({ ctl, memberId, footer }: { ctl: MenuOrderCtl; memberId: string; 
   );
 }
 
+/**
+ * The table, before the order (owner, 7 Sep 2026).
+ *
+ * Coming back to a place asks one question first — is it the same people? —
+ * and answers it with last time's table already laid: the household who ate
+ * here, and the guests who were with them offered by name. Taking a person off
+ * takes their old plates off the order; seating a guest again brings hers back,
+ * because she keeps the id she had (`addGuest(name, ref)`).
+ */
+function WhosEating({ ctl, last }: { ctl: MenuOrderCtl; last: Order & { visitedOn: string | null } }) {
+  const [name, setName] = useState('');
+  const seated = (ref: string) => ctl.guests.some((g) => g.ref === ref);
+  const platesOf = (key: string) => last.items.filter((i) => keyOf(i.memberId, i.guestRef) === key);
+
+  /** On, and their plates come back; off, and they go with them. */
+  const toggleMember = (id: string) => {
+    const on = !ctl.dining[id];
+    ctl.setDining((d) => ({ ...d, [id]: on }));
+    const theirs = platesOf(`m:${id}`);
+    if (theirs.length) ctl.setAgain((a) => ({ ...a, ...Object.fromEntries(theirs.map((i) => [i.id, on])) }));
+  };
+  const toggleGuest = async (g: { ref: string; name: string }) => {
+    const theirs = platesOf(`g:${g.ref}`);
+    if (seated(g.ref)) {
+      ctl.setAgain((a) => ({ ...a, ...Object.fromEntries(theirs.map((i) => [i.id, false])) }));
+      await ctl.removeGuest(g.ref);
+    } else {
+      ctl.setAgain((a) => ({ ...a, ...Object.fromEntries(theirs.map((i) => [i.id, true])) }));
+      await ctl.addGuest(g.name, g.ref);
+    }
+  };
+  const add = async () => {
+    const first = name.trim();
+    if (!first) return;
+    setName('');
+    await ctl.addGuest(first);
+  };
+
+  const coming = ctl.members.filter((m) => ctl.dining[m.id]).length + ctl.guests.length;
+  return (
+    <Card>
+      <Text style={type.h3}>Who is eating tonight?</Text>
+      <Text style={type.tiny}>
+        {coming ? `${coming} at the table` : 'Nobody yet'} · tap a face to take somebody off, and their plates come off with them.
+      </Text>
+      <Row style={{ flexWrap: 'wrap', gap: 6 }}>
+        {ctl.members.map((m) => (
+          <Face key={m.id} label={m.name.split(' ')[0]} on={!!ctl.dining[m.id]} onPress={() => toggleMember(m.id)} size={34} />
+        ))}
+      </Row>
+      {/* Last time's guests, by name, and never assumed. */}
+      {last.guests.length || ctl.guests.length ? (
+        <Wrap>
+          {last.guests.map((g) => (
+            <Chip
+              key={g.ref}
+              label={g.name}
+              icon={seated(g.ref) ? 'check' : 'addPerson'}
+              selected={seated(g.ref)}
+              onPress={() => toggleGuest(g)}
+            />
+          ))}
+          {ctl.guests.filter((g) => !last.guests.some((o) => o.ref === g.ref)).map((g) => (
+            <Chip key={g.ref} label={g.name} icon="person" selected onRemove={() => ctl.removeGuest(g.ref)} />
+          ))}
+        </Wrap>
+      ) : null}
+      {ctl.seating ? (
+        <Row>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            autoFocus
+            placeholder="their first name"
+            placeholderTextColor={colors.inkFaint}
+            onSubmitEditing={add}
+            returnKeyType="done"
+            style={[styles.noteInput, { flex: 1 }]}
+            accessibilityLabel="A guest's first name"
+          />
+          <Button label="Add" icon="add" onPress={add} disabled={!name.trim() || ctl.busy} />
+        </Row>
+      ) : null}
+      <Wrap>
+        <Chip
+          label={ctl.seating ? 'Done' : last.guests.length ? 'Somebody else' : 'Add other guests'}
+          icon={ctl.seating ? 'check' : 'addPerson'}
+          selected={ctl.seating}
+          onPress={() => ctl.setSeating(!ctl.seating)}
+        />
+      </Wrap>
+    </Card>
+  );
+}
+
 export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => void }) {
   const { menu, link, reading, error, held, members, how, sections, shown, chosen, total, asked } = ctl;
   // Opening the Menu tab is the household asking for the menu: read it, rather
@@ -1176,15 +1327,27 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                 </Card>
               );
             })()}
+            {/*
+              Who is eating, before what they are eating (owner, 7 Sep 2026: "I
+              can say who's dining, or is it the same people? Do you want to add
+              new ones? Then I can reuse the order").
+
+              It opens on the table you had last time, so the common case is no
+              taps at all; taking somebody off takes their plates off with them,
+              and a guest from last time is offered by name rather than assumed
+              — seating her again brings back what she ordered.
+            */}
+            <WhosEating ctl={ctl} last={last} />
             <Text style={type.h3}>The same again?</Text>
             <Text style={type.small}>
               What you had here{last.visitedOn ? ` on ${day(last.visitedOn)}` : ' last time'}. Untick anything nobody wants twice, order the rest,
               and add to it from the menu.
             </Text>
             {[{ key: 'table', name: 'For the table', kind: 'table' as const },
-              ...ctl.members.map((m) => ({ key: `m:${m.id}`, name: m.name.split(' ')[0], kind: 'member' as const })),
-              // Whoever was eating with you that night, named as a guest again.
-              ...last.guests.map((g) => ({ key: `g:${g.ref}`, name: g.name, kind: 'guest' as const }))]
+              ...ctl.members.filter((m) => ctl.dining[m.id]).map((m) => ({ key: `m:${m.id}`, name: m.name.split(' ')[0], kind: 'member' as const })),
+              // Only the guests actually seated tonight; the rest are offered
+              // by name in the row above and bring their plates when they sit.
+              ...ctl.guests.map((g) => ({ key: `g:${g.ref}`, name: g.name, kind: 'guest' as const }))]
               .map((g) => ({ ...g, items: last.items.filter((i) => keyOf(i.memberId, i.guestRef) === g.key) }))
               .filter((g) => g.items.length)
               .map((g) => (
@@ -1520,7 +1683,7 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
         const stars = meal.items.flatMap((i) => i.ratings ?? []).filter((r) => r.score).length;
         return (
           <View key={meal.id} style={{ gap: 4 }}>
-            <Text style={styles.mealWhen}>{meal.visitedOn ?? 'A visit'}{stars ? ` · ${stars} starred` : ''}</Text>
+            <Text style={styles.mealWhen}>{meal.visitedOn ? day(meal.visitedOn) : 'A visit'}{stars ? ` · ${stars} starred` : ''}</Text>
             {meal.items.map((i) => {
               const rs = (i.ratings ?? []).filter((r) => r.score || r.take === 'not_for_me');
               const who = whoHad(i);
@@ -1532,12 +1695,17 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
                       <Text style={type.tiny}>{who}{rs.length ? '' : ' · nobody said, so it was fine'}</Text>
                     </View>
                   </Row>
-                  {rs.map((r, n) => (
+                  {rs.map((r, n) => {
+                    // Whose star this is, said only when it is not obvious: a
+                    // plate of Roger's starred by Roger does not need his name
+                    // twice, a plate for the table starred by three people does.
+                    const rater = ctl.members.find((m) => m.id === r.memberId)?.name.split(' ')[0] ?? who;
+                    const said = [rater === who ? null : rater, r.take === 'not_for_me' ? 'not great' : null].filter(Boolean).join(' · ');
+                    return (
                     <Row key={n} style={{ alignItems: 'center' }}>
                       <Text style={[type.tiny, { flex: 1 }]}>
-                        {ctl.members.find((m) => m.id === r.memberId)?.name.split(' ')[0] ?? who}
-                        {r.take === 'not_for_me' ? ' · not great' : ''}
-                        {r.comment ? ` — “${r.comment}”` : ''}
+                        {said}
+                        {r.comment ? `${said ? ' — ' : ''}“${r.comment}”` : ''}
                       </Text>
                       {r.score ? (
                         <Row style={{ gap: 1 }}>
@@ -1545,7 +1713,8 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
                         </Row>
                       ) : null}
                     </Row>
-                  ))}
+                    );
+                  })}
                 </View>
               );
             })}
