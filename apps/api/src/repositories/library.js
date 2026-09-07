@@ -536,7 +536,10 @@ const NEARNESS_WEIGHT = 0.4;
  * Commons photograph of it. A card with no picture draws its own category icon
  * and reads perfectly well; a home screen missing the park next door does not.
  */
-export async function publishedNear({ lat, lng, km = 25, limit = 60, illustratedOnly = false }) {
+export async function publishedNear({ lat, lng, km = 25, limit = 60, illustratedOnly = false, nearest = null }) {
+  // How many of the seats are held for the nearest places rather than the best.
+  // A quarter, and never so few that a short list has none.
+  const reserved = Math.min(limit, Math.max(12, nearest ?? Math.round(limit / 4)));
   const dLat = km / 111;
   // Longitude degrees shorten towards the poles. Guarded so a search near a
   // pole cannot divide by nothing and ask for the whole planet.
@@ -578,16 +581,51 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
                  + power((lng - first_value(lng) over w) * 111.0 * cos(radians(lat)), 2)) as km_from_kept
          from one_each
        window w as (partition by lower(name) order by (image_id is not null) desc, score desc, km)
+     ),
+     kept as (
+       select * from by_name
+        -- Far apart, the same name is a coincidence — there are two St Mary's
+        -- churches in most counties — so only near neighbours are collapsed.
+        where rn = 1 or km_from_kept > 0.5
+     ),
+     ranked as (
+       select *,
+              -- A photograph first, then the score, tempered by how near it is.
+              row_number() over (
+                order by (image_id is not null) desc,
+                         score * (1 - ${NEARNESS_WEIGHT} * least(1.0, km / $7)) desc
+              ) as by_merit,
+              row_number() over (order by km) as by_nearness
+         from kept
+     ),
+     picked as (
+       select * from ranked
+      -- The last seat is not won on merit.
+      --
+      -- The damping above is gentle on purpose, and over sixty kilometres that
+      -- means the Tower of London and Kew outrank everything within walking
+      -- distance — which is right, until the limit bites. At 250 the places
+      -- that fall off the bottom are precisely the local ones, and the owner
+      -- counted them: 27 of 247 within ten kilometres, and Virginia Water Lake,
+      -- three kilometres away and enormous, in 245th place (7 Sep 2026: "that's
+      -- the closest park to me, and it's huge").
+      --
+      -- So a quarter of the answer is reserved for what is simply nearest,
+      -- whatever anybody scored it. Everything else is still won on merit, and
+      -- the two overlap heavily, so this costs far fewer than a quarter of the
+      -- seats in practice.
+      -- Seat the reserved places first so they cannot be cut, then fill every
+      -- remaining seat on merit. Exactly as many rows as asked for, none
+      -- wasted on the
+      -- overlap between the two — which is most of them, since the best places
+      -- near somebody are usually both.
+      order by (case when by_nearness <= $9::int then 0 else 1 end), by_merit
+      limit $8
      )
-     select * from by_name
-      -- Far apart, the same name is a coincidence — there are two St Mary's
-      -- churches in most counties — so only near neighbours are collapsed.
-      where rn = 1 or km_from_kept > 0.5
-      -- A photograph first, then the score, tempered by how near it is.
-      order by (image_id is not null) desc,
-               score * (1 - ${NEARNESS_WEIGHT} * least(1.0, km / $7)) desc
-      limit $8`,
-    [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng, km, limit]);
+     -- Presented on merit all the same. Reserving a seat says the local park
+     -- belongs on the screen; it does not say it leads.
+     select * from picked order by by_merit`,
+    [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng, km, limit, reserved]);
   return rows;
 }
 

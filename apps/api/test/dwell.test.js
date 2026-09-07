@@ -105,3 +105,24 @@ test('the proximity search collapses a place filed under two counties', () => {
   assert.match(sql, /partition by lower\(name\)/,
     'the demolished Wembley Stadium is a second Wikidata entity with the same name');
 });
+
+test('the nearest places keep their seats when the pool is capped', () => {
+  const sql = readFileSync(new URL('../src/repositories/library.js', import.meta.url), 'utf8');
+  assert.match(sql, /row_number\(\) over \(order by km\) as by_nearness/,
+    'nothing is holding a seat for what is simply nearest');
+  assert.match(sql, /case when by_nearness <= \$9::int then 0 else 1 end/,
+    'the reservation must be seated before the cap, or merit takes every seat');
+  assert.match(sql, /select \* from picked order by by_merit/,
+    'a reserved seat says the local park belongs on the screen, not that it leads');
+});
+
+test('the SQL carries no backtick, which would end the template literal', () => {
+  // Twice now a prose comment inside the query has closed the string it lives
+  // in and broken the module at import. Cheap to check, invisible otherwise.
+  const src = readFileSync(new URL('../src/repositories/library.js', import.meta.url), 'utf8');
+  const start = src.indexOf('`with candidates as (');
+  assert.ok(start > 0, 'the proximity query moved; update this test');
+  const body = src.slice(start + 1, src.indexOf('`', start + 1));
+  assert.ok(!body.includes('`'), 'a backtick inside the SQL would truncate the query');
+  assert.match(body, /limit \$8/, 'the query body should reach its limit clause');
+});
