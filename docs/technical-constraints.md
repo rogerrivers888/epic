@@ -678,6 +678,8 @@ Collapsed it is one line; opened it is each person's own number and then the mea
 
 **A dish is no longer dropped because the menu we hold does not list it.** Rebuilding an order from last time kept only the dishes that could be matched to the current menu — which lost three plates out of four in testing, and *every* plate at a place whose menu Roam has never read. A plate with no menu item behind it is carried by its own name (`Carried`, `past:<id>` keys) and can still be removed, noted and rated like any other.
 
+**Any meal in the record can still be starred, and a visit is never written over.** Every meal under "What we had here" carries its own way back to the stars, so a plate nobody starred — or one two of the three people who ate it starred — is reachable whenever somebody thinks of it. Opening an old meal loads it as the order (that is how the board works), so two rules hold it in place: tonight's order is held aside and handed back by name, and a save on an order with a visit behind it drops the client id and starts a new order instead of rewriting the rows the visit hangs off.
+
 Files: `web/src/components/verdict.ts`, `web/src/components/FamilyVerdict.tsx`, `web/src/components/VenueDrawer.tsx`, `web/src/components/MenuOrder.tsx`, `web/test/verdict.test.ts`.
 
 ### 13.5 Closed-vocabulary matching for voice
