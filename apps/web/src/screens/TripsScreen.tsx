@@ -3,7 +3,7 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextI
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
 import { api, BrowseItem, GroupSummary, HouseholdResponse, Place, PlanAction, PlanResponse, ShortlistItem, Stay, StayPricing, TripDay, TripDetail, TripPlace, TripSummary, Venue, DayStop } from '../api';
-import { colors, fonts, memberColors, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, FoldLine, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
 import { TimeBar } from '../components/TimeBar';
