@@ -520,7 +520,13 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                           <Text style={type.small}>{ownRecord.openingHours}</Text>
                           <Text style={type.tiny}>Epic's own record, from {ownRecord.provenance?.opening_hours === 'site' ? 'their own website' : 'OpenStreetMap'} — kept, so it is here with no signal.</Text>
                         </>
-                      ) : <Text style={type.small}>{venue === undefined ? '' : `No opening hours from ${sourceName}.`}</Text>}
+                      ) : (
+                        /* "Not available", never where we looked and failed to
+                           find it (Inspire rework, 8f). Which source was asked
+                           is our problem; the household only needs to know
+                           whether they can plan around it. */
+                        <Text style={type.small}>{venue === undefined ? '' : 'Not available'}</Text>
+                      )}
                   </View>
 
                   {/* Ours first, and full size, because the drawer is where a
@@ -595,7 +601,11 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                       <Text style={type.body}>{r.text}</Text>
                     </View>
                   ))}
-                  {venue !== undefined && !reviews.length ? <Text style={type.small}>{source === 'osm' || source === 'fixtures' ? 'OpenStreetMap carries no reviews. Google Places and Tripadvisor return up to five each when the place is theirs.' : `No review text returned by ${sourceName} for this place.`}</Text> : null}
+                  {/* Plain words, not an account of which source was asked and
+                      what it said (the rule that keeps 429s off a phone). Why
+                      we have none is our problem; whether there are any is
+                      theirs. */}
+                  {venue !== undefined && !reviews.length ? <Text style={type.small}>No reviews yet.</Text> : null}
                   {reviews.length ? <Text style={type.tiny}>{v?.attribution ?? item.attribution ?? ''} · Up to five reviews are available through the API; the rest are on the source's own page.</Text> : null}
                 </View>
               ) : null}
