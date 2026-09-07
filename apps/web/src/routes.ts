@@ -25,13 +25,18 @@
  *   /trips/new                            …the new-trip form
  *   /trips/<id>                           …one trip
  *   /trips/<id>/places                    …on one of its tabs
+ *   /trips/<id>/chat                      …the group's conversation
+ *   /trips/<id>/travel                    …getting there: flights, trains, the drive
+ *   /trips/<id>/share                     …who is coming, and the link
+ *   /trips/<id>/stop/<ref>                …one stop, and its Ask thread
  *   /trips/<id>/day/<dayId>               …on one day of it
  *   /household                         the family
  *   /household/<memberId>                 …one person
  *   /settings, /settings/providers     settings, and its two halves
  *   /prototypes, /prototypes/trips     the mock-ups, filed by part of the app
  *   /admin/<screen>                    the back office
- *   /join/<token>                      somebody else's door into one trip
+ *   /join/<token>                      somebody else's door into a group trip
+ *   /shared/<token>                    somebody else's door into one trip
  *
  * The query string is never the page — it is how the page is set: which filter,
  * which sort, which drawer is open over it. That split is what keeps one page
@@ -127,8 +132,25 @@ export const FOOD_CATEGORIES = ['restaurants', 'pubs', 'cafes', 'takeaway'] as c
  * (handover, 5 Sep 2026: "Itinerary | Places · n | Map"); the rest are the
  * working surfaces, which moved into the ⋯ menu rather than being taken away.
  */
-export type TripSection = 'itinerary' | 'places' | 'map' | 'find' | 'shortlist' | 'day' | 'stay' | 'group' | 'data';
-export const TRIP_SECTIONS: TripSection[] = ['itinerary', 'places', 'map', 'find', 'shortlist', 'day', 'stay', 'group', 'data'];
+export type TripSection =
+  | 'itinerary' | 'places' | 'map'
+  /**
+   * The three the trip rebuild adds (7 Sep 2026). Each is a layer inside the
+   * trip rather than a screen of its own, and each has an address, because
+   * "2 layers in, I should be able to share a URL" is the rule.
+   *
+   *   chat    the group's conversation, with the map collapsed behind it (5e)
+   *   travel  getting there: flights, trains, the drive, the crossing (5d)
+   *   share   who is coming and the link (3b)
+   */
+  | 'chat' | 'travel' | 'share'
+  /** One stop's Ask thread — `/trips/<id>/stop/<ref>` (3d). */
+  | 'stop'
+  | 'find' | 'shortlist' | 'day' | 'stay' | 'group' | 'data';
+export const TRIP_SECTIONS: TripSection[] = [
+  'itinerary', 'places', 'map', 'chat', 'travel', 'share', 'stop',
+  'find', 'shortlist', 'day', 'stay', 'group', 'data',
+];
 /**
  * The tabs the segmented control draws; the others are reached from the ⋯ menu.
  *
@@ -169,12 +191,22 @@ export type Route =
   | { name: 'inspire'; searching: boolean; mode: InspireMode; pick: string | null }
   | { name: 'plan' }
   | { name: 'places'; scope: PlacesScope }
-  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null }
+  /**
+   * `stopRef` is the source-qualified identifier of the stop whose Ask thread is
+   * open — one more layer inside a trip, and one more address (3d).
+   */
+  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null; stopRef: string | null }
   | { name: 'household'; memberId: string | null }
   | { name: 'settings'; section: SettingsSection }
   | { name: 'prototypes'; section: PrototypeSection | null }
   | { name: 'admin'; screen: AdminScreen }
   | { name: 'join'; token: string }
+  /**
+   * A trip somebody was sent (trip rebuild, 3b): "anyone with the link sees the
+   * plan, people and chat as a guest — no account needed". Outside the app, like
+   * the waiter's order page: no tab, no wordmark band, no sign-in.
+   */
+  | { name: 'shared'; token: string }
   /**
    * What the waiter's camera opens (owner, 7 Sep 2026: "maybe there could be a
    * QR code that the waiter could scan to then see what I've ordered"). Its own
@@ -227,7 +259,7 @@ export function parseRoute(path: string): Route {
     }
 
     case 'trips': {
-      const list = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null } as const;
+      const list = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null } as const;
       if (!a) return { ...list };
       /**
        * "Where are you going?" — the same question Inspire's search bar asks,
@@ -240,7 +272,13 @@ export function parseRoute(path: string): Route {
       if (a === 'new') return { ...list, creating: true };
       const section = oneOf(TRIP_SECTIONS, b);
       if (b && !section) return { name: 'unknown', path };
-      return { ...list, tripId: a, section, dayId: section === 'day' ? c ?? null : null };
+      // A stop's Ask thread names the stop; a day names the day. Both are the
+      // third segment, and which it is depends on the second.
+      return {
+        ...list, tripId: a, section,
+        dayId: section === 'day' ? c ?? null : null,
+        stopRef: section === 'stop' ? c ?? null : null,
+      };
     }
 
     case 'household':
@@ -265,6 +303,9 @@ export function parseRoute(path: string): Route {
 
     case 'join':
       return a ? { name: 'join', token: a } : { name: 'unknown', path };
+
+    case 'shared':
+      return a ? { name: 'shared', token: a } : { name: 'unknown', path };
 
     case 'order':
       return a ? { name: 'order', token: a } : { name: 'unknown', path };
@@ -292,12 +333,14 @@ export function hrefOf(route: Route): string {
       return route.searching ? '/trips/search'
         : route.creating ? '/trips/new'
           : route.tripId == null ? '/trips'
-            : buildHref(['trips', route.tripId, route.section, route.section === 'day' ? route.dayId : null]);
+            : buildHref(['trips', route.tripId, route.section,
+              route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : null]);
     case 'household': return buildHref(['household', route.memberId]);
     case 'settings': return route.section === 'preferences' ? '/settings' : buildHref(['settings', route.section]);
     case 'prototypes': return buildHref(['prototypes', route.section]);
     case 'admin': return buildHref(['admin', route.screen]);
     case 'join': return buildHref(['join', route.token]);
+    case 'shared': return buildHref(['shared', route.token]);
     case 'order': return buildHref(['order', route.token]);
     case 'unknown': return route.path;
   }
@@ -323,11 +366,18 @@ export const paths = {
   newTrip: () => '/trips/new',
   trip: (id: string, section?: TripSection | null, dayId?: string | null) =>
     buildHref(['trips', id, section, section === 'day' ? dayId : null]),
+  /** The three layers the trip rebuild adds, and the Ask thread on one stop. */
+  tripChat: (id: string) => buildHref(['trips', id, 'chat']),
+  tripTravel: (id: string) => buildHref(['trips', id, 'travel']),
+  tripShare: (id: string) => buildHref(['trips', id, 'share']),
+  tripStop: (id: string, venueRef: string) => buildHref(['trips', id, 'stop', venueRef]),
   household: (memberId?: string | null) => buildHref(['household', memberId]),
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
   join: (token: string) => buildHref(['join', token]),
+  /** Somebody else's door into one trip. */
+  shared: (token: string) => buildHref(['shared', token]),
   order: (token: string) => buildHref(['order', token]),
 };
 
@@ -346,10 +396,10 @@ export const paths = {
  * shortlist, Stay — are ordinary pages and keep the chrome.
  */
 export function isFullBleed(route: Route): boolean {
-  return route.name === 'trips'
-    && !route.creating
-    && route.tripId != null
-    && (route.section == null || TRIP_TABS.includes(route.section));
+  if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
+  // The chat is the same screen with the map collapsed to a strip (5e), so it
+  // draws to every edge too; it is not in TRIP_TABS because it is not a tab.
+  return route.section == null || route.section === 'chat' || TRIP_TABS.includes(route.section);
 }
 
 /**
@@ -362,7 +412,27 @@ export function isFullBleed(route: Route): boolean {
  * the tab bar under it, because it is still a tab.
  */
 export function ownsHeader(route: Route): boolean {
-  return route.name === 'inspire' && !route.searching;
+  if (route.name === 'inspire') return !route.searching;
+  /**
+   * The Trips list draws the same head (trip rebuild, 1a): the wordmark on the
+   * left and "+ New trip" on the right, then the Day trips / Holidays switch
+   * and the Upcoming · Past · Ideas strip on one 2px ink rule. The shell's lime
+   * band above that would be a second wordmark on the same screen.
+   */
+  if (route.name === 'trips') {
+    /**
+     * The list draws it (1a), and so does every screen the rebuild pushes on
+     * top of it: the new-trip search (3a), the create screen (5a/5b), Getting
+     * there (5d), a stop's Ask (3d) and the share sheet's page. Each of those
+     * is drawn to the top of the phone with its own title and its own ×, and
+     * the shell's lime band over it would be a heading nobody asked for.
+     *
+     * They keep the tab bar, unlike a full-bleed screen: they are still Trips.
+     */
+    if (!route.tripId) return true;
+    return route.section === 'travel' || route.section === 'stop' || route.section === 'share';
+  }
+  return false;
 }
 
 /**
@@ -426,6 +496,7 @@ export function parentOf(route: Route): string {
       return route.scope.city ? paths.placesCountry(route.scope.country) : '/places';
     case 'trips':
       if (route.dayId) return paths.trip(route.tripId!, 'day');
+      // Up from a stop's Ask, or from Getting there, is the trip itself.
       if (route.section) return paths.trip(route.tripId!);
       if (route.tripId || route.creating || route.searching) return '/trips';
       return '/inspire';
@@ -451,12 +522,22 @@ export function titleOf(route: Route): string {
     case 'plan': return epic('Plan');
     case 'places':
       return epic(route.scope == null ? 'Places' : 'home' in route.scope ? 'Close to home' : route.scope.city ?? route.scope.country);
-    case 'trips': return epic(route.searching ? 'Where are you going?' : route.creating ? 'A new trip' : route.tripId ? 'Trip' : 'Trips');
+    case 'trips': {
+      if (route.searching) return epic('Where are you going?');
+      if (route.creating) return epic('A new trip');
+      if (!route.tripId) return epic('Trips');
+      const layer = route.section === 'chat' ? 'Chat'
+        : route.section === 'travel' ? 'Getting there'
+          : route.section === 'share' ? 'Share trip'
+            : route.section === 'stop' ? 'A stop' : null;
+      return epic(layer ? `Trip — ${layer}` : 'Trip');
+    }
     case 'household': return epic('Household');
     case 'settings': return epic('Settings');
     case 'prototypes': return epic('Prototypes');
     case 'admin': return epic(`Back office — ${route.screen}`);
     case 'join': return epic('Your trip');
+    case 'shared': return epic('A trip you have been sent');
     case 'order': return epic('The order');
     case 'unknown': return epic('Not a page');
   }

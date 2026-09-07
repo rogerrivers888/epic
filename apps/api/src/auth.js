@@ -217,6 +217,13 @@ const PUBLIC = [
   (req) => req.path === '/api/session/link',
   (req) => req.path === '/api/session/request-link',
   (req) => req.path === '/api/join' || req.path.startsWith('/api/join/'),
+  /**
+   * A trip somebody was sent (trip rebuild, 7 Sep 2026): "anyone with the link
+   * sees the plan, people and chat as a guest — no account needed". Everything
+   * under it resolves the trip from the token and the reader from their own
+   * guest token; `currentHousehold()` is never reached from inside it.
+   */
+  (req) => req.path.startsWith('/api/shared/'),
   (req) => /^\/api\/order\/[^/]+$/.test(req.path),
 ];
 

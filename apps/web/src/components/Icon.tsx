@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
-  Archive, ArrowLeft, ArrowRight, Baby, Ban, BedDouble, Beer, Bookmark, BookmarkCheck, Calendar, Camera, Car, CarTaxiFront, Check, ChevronDown, ChevronRight, ChevronUp, CircleCheck,
+  Archive, ArrowLeft, ArrowRight, ChevronLeft, Baby, Ban, BedDouble, Beer, Bookmark, BookmarkCheck, Calendar, Camera, Car, CarTaxiFront, Check, ChevronDown, ChevronRight, ChevronUp, CircleCheck,
   Bird, Fish,
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
@@ -28,6 +28,13 @@ const ICONS = {
   mic: Mic, stop: Square, check: Check, close: X, add: Plus, minus: Minus,
   back: ArrowLeft, forward: ArrowRight, external: ExternalLink,
   expand: ChevronDown, collapse: ChevronUp, more: ChevronRight,
+  /**
+   * The other chevron. `more` is the one a row ends in and means "there is a
+   * page behind this"; this is its mirror, for the pair of arrows that step a
+   * month or nudge a time (trip rebuild, 5a) — where an arrow would read as
+   * "go back" rather than "one less".
+   */
+  previous: ChevronLeft,
   // The ⋯ that opens the rest of a screen's controls. `more` is the chevron a
   // row ends in and means "there is a page behind this"; this one means "there
   // is a menu here", and drawing one as the other reads as a broken link.

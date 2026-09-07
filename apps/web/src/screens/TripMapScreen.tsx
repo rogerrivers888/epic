@@ -73,7 +73,7 @@ const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string;
 /** The height of the tab bar the shell draws under this screen. */
 const TABBAR = 70;
 
-export function TripMapScreen({ d, section, household, onBack, onChanged, onSection, onDelete }: {
+export function TripMapScreen({ d, section, household, onBack, onChanged, onSection, onDelete, onMenu, onChat, onPeople, onOpenStop, chatUnread = 0 }: {
   d: TripDetail;
   /** Which view the sheet is showing: the day, the trip's places, or the group. */
   section: TripSection;
@@ -83,6 +83,17 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   onSection: (s: TripSection) => void;
   /** The delete control, passed in so the sheet does not own the confirming. */
   onDelete: React.ReactNode;
+  /**
+   * The three controls the trip rebuild puts in the drawer's header (5c): the
+   * ⋯ menu, the people count, and the chat button. They are passed in because
+   * what they open — a sheet, an address — belongs to the page above this one.
+   */
+  onMenu?: () => void;
+  onChat?: () => void;
+  onPeople?: () => void;
+  /** One stop's Ask thread (3d). */
+  onOpenStop?: (venueRef: string) => void;
+  chatUnread?: number;
 }) {
   const { width, height } = useViewport();
   const wide = width >= 900;
@@ -666,12 +677,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View style={styles.titleRow}>
           <Text style={styles.title} numberOfLines={1}>{tripName(trip)}</Text>
-          {party ? (
-            <Pressable onPress={() => setWho(true)} style={styles.party} accessibilityRole="button" accessibilityLabel="Who's coming">
-              <Icon name="household" size={13} color={colors.ink} />
-              <Text style={styles.partyText}>+{party}</Text>
-            </Pressable>
-          ) : null}
         </View>
         {/* The dates of the whole trip, not one day of it: the day strip below
             says which day, and saying it twice made the header disagree with
@@ -709,7 +714,33 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         <Pressable onPress={() => setPill(null)} style={styles.round} accessibilityRole="button" accessibilityLabel="Back to the trip">
           <Icon name="trips" size={18} color={colors.ink} />
         </Pressable>
-      ) : null}
+      ) : (
+        /**
+         * The header's right-hand side (5c): who is coming, in an outlined box,
+         * and a solid chat button — ink in light, lime in the dark, which is
+         * what `colors.primary` already is in each palette. Plus the ⋯, which
+         * is back with a list nothing else on the screen carries: rename,
+         * change date, move, share, delete (1c).
+         */
+        <View style={styles.headEnd}>
+          {onPeople ? (
+            <Pressable onPress={onPeople} style={styles.people} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
+              <Icon name="household" size={16} color={colors.ink} strokeWidth={2.2} />
+              <Text style={styles.peopleText}>{party || 1}</Text>
+            </Pressable>
+          ) : null}
+          {onChat ? (
+            <Pressable onPress={onChat} style={styles.chatBtn} accessibilityRole="button" accessibilityLabel={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'}>
+              <Icon name="message" size={22} color={colors.primaryFg} strokeWidth={2.2} />
+            </Pressable>
+          ) : null}
+          {onMenu ? (
+            <Pressable onPress={onMenu} style={styles.round} accessibilityRole="button" accessibilityLabel="More">
+              <Icon name="menu" size={18} color={colors.ink} />
+            </Pressable>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 
@@ -816,7 +847,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
                   onFind={() => { setCriteriaStep(1); setCriteria(true); }}
                 />
               ) : null}
-              <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} />
+              <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} />
             </>
           )}
     </SheetTabs>
@@ -1093,7 +1124,11 @@ function SheetTabs({ section, counts, onSection, children }: {
   );
 }
 
-function TheDay({ d, day, onAdd }: { d: TripDetail; day: TripDay | null; onAdd: () => void }) {
+function TheDay({ d, day, onAdd, onOpenStop }: {
+  d: TripDetail; day: TripDay | null; onAdd: () => void;
+  /** A stop opens its own page, where the Ask thread lives (3d). */
+  onOpenStop?: (venueRef: string) => void;
+}) {
   const { trip, days } = d;
   const isTrip = trip.kind === 'trip';
   const stops = (day?.slots ?? []).flatMap((s) => s.stops);
@@ -1151,7 +1186,14 @@ function TheDay({ d, day, onAdd }: { d: TripDetail; day: TripDay | null; onAdd: 
       {stops.map((s, i) => (
         <Fragment key={s.id}>
           {i === anchorAt ? <Beat time={null} icon="pinned" title={tripName(trip)} detail={isTrip ? null : 'All day'} /> : null}
-          <Beat time={s.startTime} icon="place" title={s.name} detail={s.dwellMinutes ? mins(s.dwellMinutes) : null} />
+          <Beat
+          time={s.startTime}
+          icon="place"
+          title={s.name}
+          detail={s.dwellMinutes ? mins(s.dwellMinutes) : null}
+          on
+          onPress={onOpenStop ? () => onOpenStop(s.venueRef) : undefined}
+        />
         </Fragment>
       ))}
       {/* The one thing the day is for, where the day has not got it as a stop.
@@ -1168,20 +1210,32 @@ function TheDay({ d, day, onAdd }: { d: TripDetail; day: TripDay | null; onAdd: 
   );
 }
 
-function Beat({ time, icon, title, detail, last }: { time: string | null; icon: IconName; title: string; detail: string | null; last?: boolean }) {
-  return (
+/**
+ * One line on the spine (5c). `on` is the stop itself — a lime-filled node —
+ * where leaving home and heading home are outlined; `onPress` opens that stop's
+ * own page and its Ask thread (3d).
+ */
+function Beat({ time, icon, title, detail, last, on, onPress }: {
+  time: string | null; icon: IconName; title: string; detail: string | null;
+  last?: boolean; on?: boolean; onPress?: () => void;
+}) {
+  const body = (
     <View style={styles.beat}>
       <Text style={styles.beatTime}>{time ?? ''}</Text>
       <View style={{ alignItems: 'center' }}>
-        <View style={styles.beatDot}><Icon name={icon} size={15} color={colors.accent} /></View>
+        <View style={[styles.beatDot, on && styles.beatDotOn]}>
+          <Icon name={icon} size={15} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+        </View>
         {!last ? <View style={styles.beatLine} /> : null}
       </View>
-      <View style={{ flex: 1, minWidth: 0, paddingTop: 6, paddingBottom: last ? 0 : 10, gap: 1 }}>
+      <View style={{ flex: 1, minWidth: 0, paddingTop: 5, paddingBottom: last ? 0 : 16, gap: 2 }}>
         <Text style={styles.beatTitle} numberOfLines={2}>{title}</Text>
         {detail ? <Text style={type.small} numberOfLines={1}>{detail}</Text> : null}
       </View>
     </View>
   );
+  if (!onPress) return body;
+  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title}>{body}</Pressable>;
 }
 
 function TripPlacesList({ data, onSelect, onDelete }: {
@@ -2754,12 +2808,27 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, flexShrink: 1 },
   party: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   partyText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.ink },
+  // The header's right-hand cluster (5c): an outlined people count, a solid
+  // chat button, and the ⋯. Three 40px targets, which is what fits beside a
+  // 26px title on a 390px phone.
+  headEnd: { flexDirection: 'row', gap: 6, flexShrink: 0 },
+  people: {
+    height: 40, paddingHorizontal: 10, borderWidth: BORDER, borderColor: colors.ink,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+  },
+  peopleText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  // Ink in light, lime in the dark — which is what `primary` already is in each
+  // palette, with `primaryFg` the glyph that reads on it.
+  chatBtn: { width: 40, height: 40, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   round: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
 
-  tabs: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: 3, marginHorizontal: 16, marginTop: 10, marginBottom: 6 },
-  tab: { flex: 1, minWidth: 0, minHeight: 34, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
-  tabOn: { backgroundColor: colors.primary },
-  tabText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
+  // The switch inside the drawer (5c): "joined pair, Archivo 800 18px, full
+  // width". A lime fill says which half you are in and the tint is the other,
+  // which is the same pair the Trips list and Inspire both draw.
+  tabs: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, marginBottom: 6 },
+  tab: { flex: 1, minWidth: 0, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentSoft },
+  tabOn: { backgroundColor: colors.selected },
+  tabText: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.inkMuted },
 
   // The three pills over the map.
   // Four pills (§15: padding 9px 9px, gap 6px, label "Food") have to fit 390px
@@ -2800,11 +2869,16 @@ const styles = StyleSheet.create({
   bookingName: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '700', color: colors.ink },
   kicker: { fontFamily: fonts.heading, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', color: colors.inkMuted, marginTop: 16, marginBottom: 6 },
 
-  beat: { flexDirection: 'row', gap: 12 },
-  beatTime: { width: 44, textAlign: 'right', paddingTop: 9, fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.ink },
-  beatDot: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
-  beatLine: { flex: 1, width: 2, minHeight: 8, backgroundColor: colors.line },
-  beatTitle: { fontFamily: fonts.heading, fontSize: 14.5, fontWeight: '700', color: colors.ink, lineHeight: 18 },
+  // The timeline (5c): a 48px time column, 30px square nodes with a 2px ink
+  // rule, joined by a 2px soft one. Square, like everything else — a round dot
+  // was the last radius left on this screen.
+  beat: { flexDirection: 'row', gap: 14 },
+  beatTime: { width: 48, paddingTop: 6, fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  beatDot: { width: 30, height: 30, borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  /** The stop itself is lime-filled; the beats either side of it are outlined. */
+  beatDotOn: { backgroundColor: colors.selected, borderColor: colors.selected },
+  beatLine: { flex: 1, width: 2, minHeight: 22, backgroundColor: colors.lineSoft },
+  beatTitle: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink, lineHeight: 20 },
 
   cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, marginTop: 18, borderWidth: BORDER, borderColor: colors.ink, borderRadius: 10 },
   ctaText: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '700', color: colors.ink },

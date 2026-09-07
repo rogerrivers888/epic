@@ -140,6 +140,23 @@ export async function updateTrip(id, b, client) {
   return rows[0] ?? null;
 }
 
+/**
+ * The two things about a trip that are not a field on a form.
+ *
+ * `dates_fixed` false files it under Ideas and makes every screen say "Date not
+ * fixed"; the dates themselves stay, as the placeholder the day machinery needs
+ * (migration 068). `kind` is what the ⋯ menu's "Move to Holidays" changes, and
+ * it is the only place either is written.
+ */
+export async function setTripFlags(id, { datesFixed = null, kind = null }, client) {
+  const { rows } = await on(client)(
+    `update trips set dates_fixed = coalesce($2, dates_fixed), kind = coalesce($3, kind)
+      where id = $1 returning *`,
+    [id, datesFixed, kind],
+  );
+  return rows[0] ?? null;
+}
+
 /** Which place sources this trip may use; null means the default set. */
 export async function setTripSources(id, list, client) {
   await on(client)('update trips set sources = $2 where id = $1', [id, list && list.length ? JSON.stringify(list) : null]);

@@ -13,6 +13,7 @@ import { OpenTripOptions, PlanScreen } from './src/screens/PlanScreen';
 import { InspireScreen } from './src/screens/InspireScreen';
 import { PlacesScreen } from './src/screens/PlacesScreen';
 import { TripsScreen, TripSeed } from './src/screens/TripsScreen';
+import { SharedTripScreen } from './src/screens/SharedTripScreen';
 import { HouseholdScreen } from './src/screens/HouseholdScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
@@ -185,6 +186,9 @@ function Frame() {
  * table's dinner, answered without a session and drawn without any of Epic's
  * chrome, because the person reading it is at work.
  *
+ * A shared trip (`/shared/<token>`) is the same idea one layer up: the whole
+ * plan, the people and the chat, for somebody with no Epic account at all.
+ *
  * An invite link (`/join/<token>`) is somebody else's door into one trip: the
  * checklist a group organiser asked them for, and none of the household's app.
  * It is never behind the passcode, because the API treats it as public too
@@ -223,6 +227,13 @@ function Routed() {
   // waiter holding one link, so it is answered before the passcode, exactly as
   // an invite is, and it opens one sitting's dishes and nothing else of ours.
   if (route.name === 'order') return <OrderTicketScreen token={route.token} />;
+  /**
+   * A trip somebody was sent (trip rebuild, 7 Sep 2026): "anyone with the link
+   * sees the plan, people and chat as a guest — no account needed". Same shape
+   * as the two above — answered before the passcode, because the API treats it
+   * as public too (auth.js), and drawn without any of the household's app.
+   */
+  if (route.name === 'shared') return <SharedTripScreen token={route.token} you={query.get('you')} />;
   return <Gate route={route} />;
 }
 
