@@ -240,6 +240,21 @@ const SECTIONS: Section[] = [
         where: 'apps/api/src/routes/places.js',
       },
       {
+        title: 'A search is held for twelve hours, in memory, and a restart empties it',
+        rule: 'The same point, radius, words, source set and event window is the same search, and it is answered from what is held for twelve hours \u2014 in memory only. It is never written to disk, so every deploy or restart of the API starts it empty again.',
+        why: 'Not an oversight and not a thing to fix: Google\u2019s display content has a retention allowance of *none* (\u00a74). Holding it in memory to draw the screen in front of somebody is what we are allowed to do; writing it down is not. So on a day of deploys a search that was held an hour ago will be asked again, and on an ordinary day it will not. What does survive a restart is the household\u2019s own records \u2014 which is why Find falls back to them rather than to a blank screen.',
+        state: 'live',
+        where: 'apps/api/src/sources/cache.js \u00b7 docs/technical-constraints.md \u00a74',
+        said: { who: 'the owner', on: '7 Sep 2026', words: 'I just want to make sure that we are caching this data for 8 hours. If I do the same search again, we should not have to start calling APIs again.' },
+      },
+      {
+        title: 'A screen gets a clock; a background sweep does not',
+        rule: 'Every search somebody is waiting on \u2014 a trip\u2019s Find tab, Browse along the way, the Plan screen\u2019s pool, the taste tables, Places \u2014 passes a deadline. A search filling a cache in the background passes none, and waits for everything.',
+        why: 'Passing no deadline means \u201cgive me everything, however long it takes\u201d, which is right for a sweep and wrong for a tab somebody has just tapped. Four paths were doing it because there was nothing to write instead: the Find tab measured 11.1 seconds on a cold search and 0.78 after. The second and third look were 90ms either way \u2014 the cache was never the problem, the first look was.',
+        state: 'live',
+        where: 'apps/api/src/sources/index.js \u00b7 SCREEN_DEADLINE_MS',
+      },
+      {
         title: 'A slow source is told apart from a broken one',
         rule: 'A source we chose not to wait for is recorded as `slow`, not as a failure. The cache keeps a degraded answer for ten minutes but a merely-slow one for the full twelve hours.',
         why: 'They look identical on screen and mean opposite things. Treating \u201cwe did not wait\u201d as \u201cit let us down\u201d would re-ask Google every ten minutes all afternoon for a search that was already answered.',
