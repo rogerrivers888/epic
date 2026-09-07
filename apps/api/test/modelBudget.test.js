@@ -7,7 +7,7 @@
  * is a 400 the way a locked door is a 400: nothing about the request is wrong.
  * Read as an ordinary failure it came out of the app as "their menu would not
  * open… photograph it instead", which blames the restaurant, sends somebody to
- * do a job Roam had already done, and hides the one fact that would have fixed
+ * do a job Epic had already done, and hides the one fact that would have fixed
  * it (owner, 6 Sep 2026).
  */
 

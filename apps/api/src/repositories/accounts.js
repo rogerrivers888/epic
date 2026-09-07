@@ -91,8 +91,8 @@ export async function ownerAccount() {
 /**
  * Every account with the numbers the admin screen asks for.
  *
- * The usage figures are counted from `provider_calls`, which is Roam's own
- * record of Roam's own spending — nothing rented, nothing about a place. Two
+ * The usage figures are counted from `provider_calls`, which is Epic's own
+ * record of Epic's own spending — nothing rented, nothing about a place. Two
  * windows, because "how much are they costing me" and "how much have they ever
  * cost me" are different questions: this calendar month, and all time.
  */
@@ -172,7 +172,7 @@ export async function createGuestAccount({ name, email, mobile, trialDays = 30 }
   return withTransaction(async (client) => {
     const { rows: households } = await client.query(
       'insert into households (name) values ($1) returning id',
-      [name || 'A Roam household'],
+      [name || 'A Epic household'],
     );
     const ends = new Date();
     ends.setDate(ends.getDate() + trialDays);
@@ -196,7 +196,7 @@ export async function createGuestAccount({ name, email, mobile, trialDays = 30 }
  *
  * A friend still gets a household of their own through `createAccount`. The
  * difference between the two functions is the whole distinction between "I am
- * giving you Roam" and "you are already in mine".
+ * giving you Epic" and "you are already in mine".
  */
 export async function createAccountOnHousehold(householdId, { email, mobile, name, role = 'owner', plan = 'owner', memberId = null, monthlyCallBound = null }) {
   const { rows } = await query(

@@ -44,7 +44,7 @@ export const CAUSES = [
     key: 'delivery_platform',
     label: 'The menu is on a delivery platform',
     detail: 'Deliveroo, Just Eat or an ordering page rather than the venue’s own.',
-    fix: 'A decision, not a bug: whether Roam reads a platform’s copy of a menu.',
+    fix: 'A decision, not a bug: whether Epic reads a platform’s copy of a menu.',
   },
   {
     key: 'social_only',
@@ -84,8 +84,8 @@ export const CAUSES = [
   },
   {
     key: 'ours',
-    label: 'Roam’s own fault',
-    detail: 'A missing key, a quota, or an error inside Roam — not anything about their site.',
+    label: 'Epic’s own fault',
+    detail: 'A missing key, a quota, or an error inside Epic — not anything about their site.',
     fix: 'Fix it here and re-queue. These must never be counted as a place we cannot read.',
   },
   {
@@ -123,14 +123,14 @@ export function causeOf({ why = null, state = null, website = null, menuUrl = nu
   const site = String(website ?? '');
   const url = String(menuUrl ?? '');
 
-  // Ours before theirs. A read that failed because Roam had no key, or hit a
+  // Ours before theirs. A read that failed because Epic had no key, or hit a
   // quota, or threw inside the SDK, says nothing whatever about the restaurant
   // — and counting it as "a menu we cannot read" would put our own outage in
   // the middle of a report about their websites. It is a retry, not a finding.
   if (/could not resolve authentication|api[_ ]?key|unauthori[sz]ed|rate.?limit|quota|429|credit balance|budget is spent|model budget|overloaded|insufficient|ECONNRESET|socket hang up|internal server error/i.test(w)) {
     return 'ours';
   }
-  // A crash in Roam's own code, which is the same class of thing and the one
+  // A crash in Epic's own code, which is the same class of thing and the one
   // this cause was worth adding for. `searchTheWeb is not defined` — a
   // parameter added to two call sites and never to the function that holds them
   // — failed a hundred and one reads on production and sat in the backlog

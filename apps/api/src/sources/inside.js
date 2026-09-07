@@ -31,7 +31,7 @@ import { OSM_ATTRIBUTION } from './osm.js';
 // than a screen may — but the order and the ten-minute rest are shared.
 const WIKIDATA = 'https://www.wikidata.org/w/api.php';
 const WIKI = 'https://en.wikipedia.org/w/api.php';
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; place research)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; place research)';
 
 /** How far a place's grounds reach, by what kind of place it is. */
 export const GROUNDS_KM = { 'theme-park': 1.2, zoo: 1.0, 'water-park': 0.8, aquarium: 0.4, 'safari-park': 3.0 };

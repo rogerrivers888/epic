@@ -94,7 +94,7 @@ export function ProvidersTable() {
       {!spend ? <Text style={type.small}>Adding it up…</Text> : null}
       {spend && total ? (
         <Text style={type.small}>
-          {PERIOD_LABEL[period]}: {count(total.calls)} provider {plural(total.calls, 'call', 'calls')} · estimated {money(total.costUsd)}{paidTotal > 0 ? ` · paid ${money(paidTotal)}` : ' · nothing beyond the free allowances'}. Roam's own counts at list prices; each provider's console holds the real bill.
+          {PERIOD_LABEL[period]}: {count(total.calls)} provider {plural(total.calls, 'call', 'calls')} · estimated {money(total.costUsd)}{paidTotal > 0 ? ` · paid ${money(paidTotal)}` : ' · nothing beyond the free allowances'}. Epic's own counts at list prices; each provider's console holds the real bill.
         </Text>
       ) : null}
 
@@ -179,7 +179,7 @@ function KeyWiring() {
 
           {/* The lesson from 5 Sep 2026, written where it will be read again.
               Doppler said "In Sync" and was telling the truth: its sync was
-              pointed at roam / Shared / production, so the secret landed in
+              pointed at epic / Shared / production, so the secret landed in
               Railway's project-level shared pool — and a Railway shared
               variable is not on a service until that service is told to take
               it. Every key set up earlier worked; the new one did not. */}
@@ -318,7 +318,7 @@ function ProviderDrawer({ line, period, spend, series, initialMonth, source, onC
                 ) : null}
                 {a ? (
                   <Card>
-                    <Text style={type.h3}>{line.allowance ? 'Free allowance' : 'Roam cap'}</Text>
+                    <Text style={type.h3}>{line.allowance ? 'Free allowance' : 'Epic cap'}</Text>
                     <Meter used={a.used} limit={a.limit} label={`${count(a.used)} of ${count(a.limit)} ${plural(a.limit, line.unit, line.unitPlural)} ${a.kind === 'monthly' ? 'this month' : a.kind === 'daily' ? 'today' : 'ever'} · ${a.kind === 'lifetime' ? 'never renews' : a.resetsAt ? `resets ${shortDate(a.resetsAt)}` : ''}${a.estimated ? ' · estimated' : ''}`} />
                     <Text style={type.tiny}>{line.allowance?.basis ? `${line.allowance.basis}.` : ''}{line.allowance?.beyondUsd ? ` Beyond it about $${line.allowance.beyondUsd.toFixed(3)} per ${line.unit}.` : ''}{line.cap?.env ? ` Set by ${line.cap.env}.` : ''}{line.hardStop ? ` ${line.hardStop}` : ''}</Text>
                   </Card>

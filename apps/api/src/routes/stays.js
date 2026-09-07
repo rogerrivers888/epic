@@ -177,7 +177,7 @@ router.get('/transit/near', async (req, res, next) => {
       ...got,
       stops: got.stops.map((s) => ({
         ...s,
-        // At 4.8 km/h, which is what "walking" means everywhere else in Roam.
+        // At 4.8 km/h, which is what "walking" means everywhere else in Epic.
         walkMinutes: Math.max(1, Math.round((s.distanceM / 1000 / 4.8) * 60)),
       })),
       attribution: '© OpenStreetMap contributors',

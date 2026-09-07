@@ -1,5 +1,5 @@
 /**
- * The basemap, in Roam's colours.
+ * The basemap, in Epic's colours.
  *
  * The owner, 6 Sep 2026, on the Airbnb screenshots: "that is the level of polish
  * that I want to achieve."
@@ -10,8 +10,10 @@
  * like it. So the polish is bought here, in a style file we own, rather than
  * bought from a provider by the map load.
  *
- * The colours are the handoff's, not invented: map ground `#EFF8F3`, roads
- * `#DCEAE2`. They are Roam's own mint and hairline, so the map is a part of the
+ * The colours are the palette's, not invented: the map's ground is the reading
+ * ground, cream, and its parks are the lime tint — which is the one place on a
+ * map where lime is the honest colour for the thing itself. Roads and buildings
+ * are warm neutrals cut from the cream, so the map is a part of the
  * app rather than a rectangle of somebody else's software embedded in it.
  *
  * **The tiles.** Vector tiles from OpenFreeMap, which is free, needs no key and
@@ -33,24 +35,24 @@
 const TILES = 'https://tiles.openfreemap.org/planet';
 
 const INK = '#201E1D';
-const MUTED = '#6B6663';
-const GROUND = '#EFF8F3';
-const ROAD = '#DCEAE2';
-const WATER = '#CBE3EE';
-const GREEN = '#DFF0E5';
-const BUILDING = '#E7F1EB';
-const LINE = '#E5EFEA';
+const MUTED = '#605D5D';
+const GROUND = '#FFFDF9';   // cream
+const ROAD = '#EFEBE3';
+const WATER = '#D6E6EE';
+const GREEN = '#EAFECB';    // lime tint: parks and open ground
+const BUILDING = '#F4F0E8';
+const LINE = '#E4DFD6';
 
-/** The style, in Roam's palette. `dark` inverts the ground so the pins still read at night. */
-export function roamMapStyle(dark = false): any {
-  const ground = dark ? '#1E1E23' : GROUND;
-  const road = dark ? '#2B2B30' : ROAD;
-  const water = dark ? '#1B2A31' : WATER;
-  const green = dark ? '#212A25' : GREEN;
-  const building = dark ? '#24242A' : BUILDING;
-  const label = dark ? '#8F8D93' : MUTED;
-  const halo = dark ? '#17171A' : '#FFFFFF';
-  const placeLabel = dark ? '#F3F2F2' : INK;
+/** The style, in Epic's palette. `dark` inverts the ground so the pins still read at night. */
+export function epicMapStyle(dark = false): any {
+  const ground = dark ? '#201E1D' : GROUND;
+  const road = dark ? '#332F2D' : ROAD;
+  const water = dark ? '#1E2B31' : WATER;
+  const green = dark ? '#2B3320' : GREEN;
+  const building = dark ? '#2A2725' : BUILDING;
+  const label = dark ? '#A8A29C' : MUTED;
+  const halo = dark ? '#201E1D' : GROUND;
+  const placeLabel = dark ? '#FFFDF9' : INK;
 
   return {
     version: 8,
@@ -96,7 +98,7 @@ export function roamMapStyle(dark = false): any {
         id: 'road-primary', type: 'line', source: 'openmaptiles', 'source-layer': 'transportation',
         filter: ['in', 'class', 'primary', 'trunk'],
         paint: {
-          'line-color': dark ? '#33333A' : '#D2E4DA',
+          'line-color': dark ? '#3B3733' : '#E6E1D8',
           'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 6, 0.8, 18, 14],
         },
       },
@@ -104,14 +106,14 @@ export function roamMapStyle(dark = false): any {
         id: 'road-motorway', type: 'line', source: 'openmaptiles', 'source-layer': 'transportation',
         filter: ['==', 'class', 'motorway'],
         paint: {
-          'line-color': dark ? '#3B3B43' : '#C6DED2',
+          'line-color': dark ? '#443F3A' : '#DCD6CC',
           'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 5, 1, 18, 18],
         },
       },
       {
         id: 'boundary', type: 'line', source: 'openmaptiles', 'source-layer': 'boundary',
         filter: ['<=', 'admin_level', 4],
-        paint: { 'line-color': dark ? '#3A3A42' : LINE, 'line-width': 1, 'line-dasharray': [3, 2] },
+        paint: { 'line-color': dark ? '#3A3634' : LINE, 'line-width': 1, 'line-dasharray': [3, 2] },
       },
       // Labels. Places first and small; the household's own pins are what the
       // eye should find, so the basemap's names stay quiet.

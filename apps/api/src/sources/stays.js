@@ -7,7 +7,7 @@
 // they move, so they are held for minutes, not hours (sources/liteapi.js).
 //
 // The two lists are merged into one pool before anything is ranked, because
-// ranking is Roam's own — how much of the week is on foot from the front door
+// ranking is Epic's own — how much of the week is on foot from the front door
 // (domain/stays.js) — and it has to see every bed at once to be worth anything.
 // Where a bed is in both lists the open record wins the row: the name, the
 // address and the reference we keep are OpenStreetMap's, which are ours to
@@ -163,7 +163,7 @@ export async function bedsNear(centre, radiusKm, { stay = null, meter = null } =
   // have matched, and that is recoverable: picking a bed looks it up in the
   // open map at that moment anyway (routes/trips.js POST /:id/stay), which is
   // one lookup for the one place they chose instead of forty they did not.
-  const OPEN_MAP_DEADLINE_MS = Number(process.env.ROAM_STAYS_OPEN_DEADLINE_MS) || 10_000;
+  const OPEN_MAP_DEADLINE_MS = Number(process.env.EPIC_STAYS_OPEN_DEADLINE_MS) || 10_000;
   const openWithin = (ms) => Promise.race([
     openLeg,
     new Promise((resolve) => setTimeout(() => resolve(null), ms)),

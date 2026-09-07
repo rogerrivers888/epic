@@ -20,7 +20,7 @@ import { kmBetween } from '../domain/travel.js';
 import * as settings from '../repositories/settings.js';
 
 // Licensed sources register here and switch on when their key exists;
-// ROAM_SOURCES still narrows the set (Epic 2 C10: no code change to enable/disable).
+// EPIC_SOURCES still narrows the set (Epic 2 C10: no code change to enable/disable).
 const REGISTRY = [fixturesSource, osmSource, googleSource, tripadvisorSource, ticketmasterSource, seatgeekSource, predicthqSource, datathistleSource, localScoutSource];
 
 /**
@@ -79,7 +79,7 @@ export const sourceOff = (key) => offKeys.has(key);
 export const sourceKeys = () => [...REGISTRY, ...ASIDE].map((s) => s.key);
 
 export function enabledSources({ only = null, includeOptIn = false } = {}) {
-  const configured = (process.env.ROAM_SOURCES || 'fixtures,osm,google,tripadvisor,ticketmaster,seatgeek,predicthq,datathistle,scout')
+  const configured = (process.env.EPIC_SOURCES || 'fixtures,osm,google,tripadvisor,ticketmaster,seatgeek,predicthq,datathistle,scout')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -158,7 +158,7 @@ export function matchConfidence(a, b) {
   return 0.2;
 }
 
-export const MERGE_THRESHOLD = Number(process.env.ROAM_MERGE_THRESHOLD || 0.75);
+export const MERGE_THRESHOLD = Number(process.env.EPIC_MERGE_THRESHOLD || 0.75);
 
 /**
  * Fold raw provider records into resolved venues, carrying per-field provenance.
@@ -262,7 +262,7 @@ export const recallVenue = (ref) => recent.get(ref) ?? null;
  * A source may set `deadlineMs` when it is meant to take longer: the local
  * scout reads the open web and keeps its own ninety-second clock.
  */
-const SOURCE_DEADLINE_MS = Number(process.env.ROAM_SOURCE_DEADLINE_MS || 25_000);
+const SOURCE_DEADLINE_MS = Number(process.env.EPIC_SOURCE_DEADLINE_MS || 25_000);
 
 function withDeadline(source, work) {
   const ms = source.deadlineMs ?? SOURCE_DEADLINE_MS;
@@ -296,7 +296,7 @@ function withDeadline(source, work) {
 // a second fast source to join, short enough that nobody watches a blank tile.
 // Two and a half seconds: comfortably more than a licensed provider takes to
 // answer, and far less than the fourteen to twenty-five OpenStreetMap needs.
-const GRACE_MS = Number(process.env.ROAM_SOURCE_GRACE_MS || 2500);
+const GRACE_MS = Number(process.env.EPIC_SOURCE_GRACE_MS || 2500);
 
 /**
  * How long a search may take when somebody is watching it happen.
@@ -311,7 +311,7 @@ const GRACE_MS = Number(process.env.ROAM_SOURCE_GRACE_MS || 2500);
  * answers in about half a second and the fan-out leaves as soon as the rest are
  * in. It is the backstop for the afternoon when something else is unwell.
  */
-export const SCREEN_DEADLINE_MS = Number(process.env.ROAM_SCREEN_DEADLINE_MS || 8000);
+export const SCREEN_DEADLINE_MS = Number(process.env.EPIC_SCREEN_DEADLINE_MS || 8000);
 
 /**
  * Exported for the tests. This is concurrency with money and a spinner on the

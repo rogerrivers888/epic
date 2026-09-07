@@ -186,7 +186,7 @@ export function venueFromOsmElement(el) {
 // list that begins with two mirrors that are currently down is a minute of
 // somebody watching a spinner; a working mirror answers in under a second and a
 // slow one in ten, so anything past twelve is not coming.
-const ENDPOINT_TIMEOUT_MS = Number(process.env.ROAM_OVERPASS_TIMEOUT_MS) || 12_000;
+const ENDPOINT_TIMEOUT_MS = Number(process.env.EPIC_OVERPASS_TIMEOUT_MS) || 12_000;
 
 async function overpass(body, meter = null) {
   bump(meter, 'osm');
@@ -294,7 +294,7 @@ export const osmSource = {
     const d2 = (v) => (v.lat - center.lat) ** 2 + ((v.lng - center.lng) * Math.cos((center.lat * Math.PI) / 180)) ** 2;
     // Nearest first, capped PER GROUP: in a city centre the 250 nearest places
     // are nearly all cafés and restaurants, and the museums never made the cut
-    // — which read as "Roam has no ideas for things to do".
+    // — which read as "Epic has no ideas for things to do".
     const sorted = [...seen.values()].sort((a, b) => d2(a) - d2(b));
     const isFoodCat = (v) => ['restaurant', 'cafe', 'pub', 'bar'].includes(v.category);
     return [...sorted.filter(isFoodCat).slice(0, 200), ...sorted.filter((v) => !isFoodCat(v)).slice(0, 200)];

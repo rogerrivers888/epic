@@ -91,7 +91,7 @@ router.post('/menus/fill', requires('manage_library'), async (req, res, next) =>
   } catch (err) { next(err); }
 });
 
-/** Every menu Roam could not read, with the reason — the work list, not silence. */
+/** Every menu Epic could not read, with the reason — the work list, not silence. */
 router.get('/menus/missing', requires('view_library'), async (_req, res, next) => {
   try {
     res.json({ misses: await scout.menuMisses(200) });
@@ -183,9 +183,9 @@ router.get('/model/check', requires('view_library'), async (_req, res, next) => 
     res.json({
       ok: false,
       code: err?.code ?? null,
-      // What Roam says, and what the provider said. The first is what a
+      // What Epic says, and what the provider said. The first is what a
       // household would ever see; the second is what fixes it.
-      roamSays: err?.message ?? String(err),
+      epicSays: err?.message ?? String(err),
       providerSaid: err?.detail ?? null,
       until: err?.until ?? null,
     });
@@ -310,7 +310,7 @@ areaRouter.get('/area/:code', async (req, res, next) => {
   try {
     const code = String(req.params.code).toUpperCase();
     const area = await scout.areaFor(code);
-    if (!area) return res.status(404).json({ error: 'not_swept', message: `Roam has not looked at ${code} yet.` });
+    if (!area) return res.status(404).json({ error: 'not_swept', message: `Epic has not looked at ${code} yet.` });
     const rows = await scout.placesIn(code, Math.min(100, Number(req.query.limit) || 25));
     res.json({
       area: { code: area.code, label: area.label, sweptAt: area.swept_at, kept: area.kept },
@@ -318,10 +318,10 @@ areaRouter.get('/area/:code', async (req, res, next) => {
         venueRef: r.venue_ref, name: r.name, rank: r.rank,
         // Our number and our words. The figures they were built from were never
         // written down (migration 035).
-        score: r.roam_score, standing: r.crowd_band, howMany: r.count_band,
+        score: r.epic_score, standing: r.crowd_band, howMany: r.count_band,
         accolades: r.accolades ?? [], cuisines: r.cuisines ?? [],
         // Kept and weighted rather than dropped: how big a group this belongs
-        // to, and how many of Roam's own areas hold one (migration 038).
+        // to, and how many of Epic's own areas hold one (migration 038).
         chain: r.chain === true, chainScale: r.chain_scale ?? 'independent', sites: r.sites ?? 1,
         address: r.address, postcode: r.postcode, openingHours: r.opening_hours,
         summary: r.summary, website: r.website, menuUrl: r.menu_url,
@@ -383,7 +383,7 @@ router.post('/bench/:code', requires('manage_library'), async (req, res, next) =
 
     // Ours, best first, exactly as the app would order them.
     const { rows: ours } = await query(
-      `select venue_ref as "venueRef", name, roam_score as "roamScore", owned_score as "ownedScore",
+      `select venue_ref as "venueRef", name, epic_score as "epicScore", owned_score as "ownedScore",
               crowd_band as "ourCrowdBand", rank
          from scout_places where area_code = $1 order by rank`, [code]);
 

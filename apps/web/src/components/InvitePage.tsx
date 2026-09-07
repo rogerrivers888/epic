@@ -21,9 +21,9 @@ import { Wordmark } from './Wordmark';
  * that could go up.
  */
 
-const ROAM_GALLERY = ['/covers/1.jpg', '/covers/2.jpg', '/covers/3.jpg', '/covers/4.jpg', '/covers/5.jpg', '/covers/6.jpg'];
+const EPIC_GALLERY = ['/covers/1.jpg', '/covers/2.jpg', '/covers/3.jpg', '/covers/4.jpg', '/covers/5.jpg', '/covers/6.jpg'];
 const SOURCES: { key: string; label: string; icon: IconName }[] = [
-  { key: 'gallery', label: 'Roam gallery', icon: 'climbing' },
+  { key: 'gallery', label: 'Epic gallery', icon: 'climbing' },
   { key: 'trip', label: 'From the trip', icon: 'picture' },
   { key: 'upload', label: 'Upload one of yours', icon: 'upload' },
 ];
@@ -183,7 +183,7 @@ export function InviteLanding({ data, cta, onNext, onBack, backLabel, busy, narr
         {data.organiser ? <Text style={type.label}>INVITED BY {data.organiser.toUpperCase()}</Text> : null}
       </Row>
 
-      {/* The hero: a photograph the type sits on, or a strip above the mint. */}
+      {/* The hero: a photograph the type sits on, or a strip above the lime. */}
       <View style={styles.hero}>
         {uri ? <Image source={{ uri }} style={[styles.heroImg, { height: full ? (narrow ? 260 : 300) : 104 }]} accessibilityIgnoresInvertColors /> : null}
         {full ? <View style={styles.scrim} /> : null}
@@ -249,7 +249,7 @@ export function InviteLanding({ data, cta, onNext, onBack, backLabel, busy, narr
         <View style={{ gap: 6 }}>
           <Button label={cta ?? 'Next · Book your itinerary'} icon="forward" loading={busy} onPress={onNext} />
           <Text style={[type.small, { textAlign: 'center' }]}>
-            Free Roam account first (30 days, no card){invite.placesLeft != null ? ` · ${invite.placesLeft} place${invite.placesLeft === 1 ? '' : 's'} left` : ''}
+            Free Epic account first (30 days, no card){invite.placesLeft != null ? ` · ${invite.placesLeft} place${invite.placesLeft === 1 ? '' : 's'} left` : ''}
           </Text>
         </View>
       ) : null}
@@ -335,7 +335,7 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
     input.click();
   };
 
-  const gallery = source === 'trip' ? (tripPhotos ?? []) : ROAM_GALLERY;
+  const gallery = source === 'trip' ? (tripPhotos ?? []) : EPIC_GALLERY;
   return (
     <View style={{ gap: spacing.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
@@ -473,12 +473,12 @@ const styles = StyleSheet.create({
   },
   dropdownList: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, overflow: 'hidden' },
   dropdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET, paddingHorizontal: spacing.md },
-  hero: { borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.mint },
+  hero: { borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.lime },
   heroImg: { width: '100%' },
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(32,30,29,0.42)' },
   heroText: { padding: spacing.md, gap: 2 },
   heroOver: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  heroUnder: { backgroundColor: colors.mint },
+  heroUnder: { backgroundColor: colors.lime },
   getRow: { alignItems: 'flex-start', paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
   tile: { width: 34, height: 34, borderRadius: radius.sm, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' },
   totals: { gap: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm },

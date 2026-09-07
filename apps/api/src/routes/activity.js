@@ -23,7 +23,7 @@ const router = express.Router();
  * POST /api/activity — a batch from one device.
  *
  * Answers 202 with a count. It is deliberately unfussy: telemetry that fails
- * must never be something the person using Roam notices, so a malformed batch
+ * must never be something the person using Epic notices, so a malformed batch
  * is dropped quietly rather than argued with.
  */
 router.post('/activity', async (req, res, next) => {

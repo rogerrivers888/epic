@@ -136,7 +136,7 @@ export async function nameKinds(labels) {
   return rowCount;
 }
 
-/** What Roam calls these types, for a screen that has to name them. */
+/** What Epic calls these types, for a screen that has to name them. */
 export async function kindsByQid(qids) {
   if (!qids.length) return new Map();
   const { rows } = await query('select qid, label, category, admit from place_kinds where qid = any($1)', [qids]);
@@ -315,10 +315,10 @@ export async function atlasRowsFor(refs) {
   if (!qids.length && !refs.length) return new Map();
   const { rows } = await query(
     `select distinct on (coalesce(venue_ref, 'wikidata:' || wikidata_id))
-            coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref, category, kinds, roam_score
+            coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref, category, kinds, epic_score
        from attractions
       where (wikidata_id = any($1) or venue_ref = any($2))
-      order by coalesce(venue_ref, 'wikidata:' || wikidata_id), roam_score desc`,
+      order by coalesce(venue_ref, 'wikidata:' || wikidata_id), epic_score desc`,
     [qids, refs],
   );
   return new Map(rows.map((r) => [r.ref, r]));
@@ -378,7 +378,7 @@ export async function rankRegion(slug) {
             -- the score is final: scoreOf measures a place against the best-read
             -- place in its own region, and until every candidate is scored there
             -- is no best.
-            roam_score = round((a.score * 10)::numeric, 1),
+            epic_score = round((a.score * 10)::numeric, 1),
             band = case
               when a.score >= 0.62 then 'top'
               when a.score >= 0.52 then 'high'
@@ -414,7 +414,7 @@ export async function listAttractions({ region, state, q, category, kind, limit 
   if (category) { args.push(category); where.push(`a.category = $${args.length}`); }
 
   // The granular layer: a Wikidata type the place actually is. `category` is
-  // Roam's eight words and is too coarse to pick out a theme park from a
+  // Epic's eight words and is too coarse to pick out a theme park from a
   // cathedral — both are somewhere to go, and only one of them has rides.
   if (kind) { args.push(kind); where.push(`$${args.length} = any(a.kinds)`); }
 
@@ -678,7 +678,7 @@ export async function searchImages({
     args.push(subjectType, subjectId);
     where.push(`exists (select 1 from image_links l where l.image_id = i.id and l.subject_type = $${args.length - 1} and l.subject_id = $${args.length})`);
   }
-  // What Roam decided this is a picture of — heritage, outdoors, family… The
+  // What Epic decided this is a picture of — heritage, outdoors, family… The
   // category lives on the attraction rather than on the image, because the same
   // photograph can illustrate two places; this asks whether any of them is of
   // this kind.
@@ -914,17 +914,17 @@ export const RESTARTED = 'The API restarted while this was running.';
  * second, small SPARQL query over the published ids, rather than two more label
  * joins hung off the one that already walks a whole county.
  */
-export async function saveAccolades(id, { accolades = [], acclaim = 0, score, scoreParts, band, roamScore }) {
+export async function saveAccolades(id, { accolades = [], acclaim = 0, score, scoreParts, band, epicScore }) {
   const { rows } = await query(
     `update attractions
         set accolades = $2, acclaim = $3,
             score = coalesce($4, score), score_parts = coalesce($5, score_parts),
-            band = coalesce($6, band), roam_score = coalesce($7, roam_score),
+            band = coalesce($6, band), epic_score = coalesce($7, epic_score),
             updated_at = now()
       where id = $1 returning *`,
     [id, JSON.stringify(accolades), acclaim,
      score ?? null, scoreParts ? JSON.stringify(scoreParts) : null,
-     band ?? null, roamScore ?? null]);
+     band ?? null, epicScore ?? null]);
   return rows[0] ?? null;
 }
 

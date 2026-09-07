@@ -38,7 +38,7 @@ const WIDE = 1000;
 
 /** The six facts, in the order the strip draws them, with what each one is. */
 const FACTS: { key: FactKey; label: string; blank: string }[] = [
-  { key: 'picture', label: 'Picture', blank: 'no card image — a household sees the category icon on mint' },
+  { key: 'picture', label: 'Picture', blank: 'no card image — a household sees the category icon on lime' },
   { key: 'description', label: 'Description', blank: 'nothing to read in the drawer' },
   { key: 'hours', label: 'Hours', blank: 'we cannot say whether it is open' },
   { key: 'website', label: 'Website', blank: 'nowhere to send anybody' },
@@ -64,9 +64,10 @@ const KIND: Record<Locality['kind'], { word: string; icon: IconName }> = {
 const shadeOf = (pc: number | null) => {
   if (pc == null) return { bg: colors.surface, fg: colors.inkFaint };
   if (pc >= 90) return { bg: colors.accent, fg: colors.primaryFg };
-  if (pc >= 70) return { bg: '#63B48F', fg: colors.primaryFg };
-  if (pc >= 45) return { bg: '#9CD2B8', fg: colors.ink };
-  if (pc >= 20) return { bg: '#C4E5D5', fg: colors.ink };
+  // The same ramp as Coverage: ink, lime, lime tint. Ink type throughout.
+  if (pc >= 70) return { bg: colors.primary, fg: colors.primaryFg };
+  if (pc >= 45) return { bg: colors.lime, fg: colors.ink };
+  if (pc >= 20) return { bg: colors.surfaceMuted, fg: colors.ink };
   if (pc > 0) return { bg: colors.accentSoft, fg: colors.ink };
   return { bg: colors.well, fg: colors.inkMuted };
 };
@@ -153,7 +154,7 @@ export function Places({ canManage }: { canManage: boolean }) {
     <AdminPage>
       <PageHead
         title="Places"
-        sub="Every county, town and postcode district Roam holds anything in — and what it holds"
+        sub="Every county, town and postcode district Epic holds anything in — and what it holds"
       />
 
       {error ? <Banner tone="crit">{error}</Banner> : null}
@@ -485,7 +486,7 @@ function Place({ page, wide, busy, missing, onMissing, side, onSide, onOpen, ope
 
         <View style={{ flex: wide ? 2 : undefined, minWidth: 0, gap: spacing.md }}>
           <Panel title={`What ${place.name} is made of`}
-                 sub="Roam's own eight words. A zero is the finding.">
+                 sub="Epic's own eight words. A zero is the finding.">
             {breakdown.map((b) => (
               <Row key={b.category} style={{ justifyContent: 'space-between', paddingVertical: 3 }}>
                 <Text style={[type.small, b.n === 0 && { color: colors.overrun }]}>

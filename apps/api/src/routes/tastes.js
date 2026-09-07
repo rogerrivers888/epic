@@ -33,12 +33,12 @@ import { FOOD_CATEGORY_LIST as FOOD_CATEGORIES, FOOD_CATEGORIES as FOOD } from '
 const router = Router();
 
 // How many foods get their own table, and how many places each table shows.
-const MAX_TABLES = Number(process.env.ROAM_TASTE_TABLES || 4);
+const MAX_TABLES = Number(process.env.EPIC_TASTE_TABLES || 4);
 const PLACES_PER_TABLE = 3;
 // A cap of "anywhere" is still a day out: this is as far as one is worth driving.
 const ANYWHERE_MINUTES = 180;
 // How long one food may keep the screen waiting before it gives up its turn.
-const TABLE_DEADLINE_MS = Number(process.env.ROAM_TASTE_DEADLINE_MS || 45_000);
+const TABLE_DEADLINE_MS = Number(process.env.EPIC_TASTE_DEADLINE_MS || 45_000);
 
 // The tables themselves, in memory only, per session.
 const RUNS = new Map();
@@ -138,7 +138,7 @@ async function buildTable({ household, attending, attendees, session, taste, hom
   const finalists = scored.slice(0, PLACES_PER_TABLE + 1);
   const paused = routingPaused('matrix');
   let travelNote = !routingEnabled() ? 'Google Routes is not switched on here, so the drive is worked out from the distance.'
-    : paused ? `Google Routes is out of quota just now, so these are worked out from the distance — a road is longer than a straight line. Roam tries it again at ${new Date(paused.until).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })}.`
+    : paused ? `Google Routes is out of quota just now, so these are worked out from the distance — a road is longer than a straight line. Epic tries it again at ${new Date(paused.until).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })}.`
     : routing.note;
   // One refusal from Routes stands for the whole run: the next table does not
   // ask again to be told the same thing (and billed for asking).
@@ -417,7 +417,7 @@ router.post('/tastes/menu', async (req, res, next) => {
     })
       // Kept with the place in memory only, never on the session row.
       .then((menu) => { place.menu = menu; })
-      .catch((err) => { place.menuError = /paused:/.test(String(err?.message)) ? err.message : `Roam could not read that menu: ${err?.message || err}`; })
+      .catch((err) => { place.menuError = /paused:/.test(String(err?.message)) ? err.message : `Epic could not read that menu: ${err?.message || err}`; })
       .finally(() => { place.menuReading = false; run.at = Date.now(); });
   } catch (err) {
     next(err);
@@ -487,7 +487,7 @@ router.post('/tastes/trip', async (req, res, next) => {
     await addShortlistItem(trip, household, {
       venueRef: place.venueRef, venueLabel: place.name, kind: 'food', category: place.category,
       lat: place.lat, lng: place.lng, mustDo: true,
-      note: `Roam suggested: best ${table.label.toLowerCase()}${table.loved?.length ? ` for ${namesOf(table.loved)}` : ''}`,
+      note: `Epic suggested: best ${table.label.toLowerCase()}${table.loved?.length ? ` for ${namesOf(table.loved)}` : ''}`,
     });
     // The restaurant is named once, whatever the look-around also called it.
     const norm = (n) => String(n).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

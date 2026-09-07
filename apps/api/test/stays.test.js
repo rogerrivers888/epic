@@ -170,7 +170,7 @@ test('nobody named yet is two adults, and says it was not derived', () => {
   assert.equal(p.derived, false);
 });
 
-test('a seventeen-year-old is a child to a hotel even though Roam calls them an adult', () => {
+test('a seventeen-year-old is a child to a hotel even though Epic calls them an adult', () => {
   const p = partyForStay([{ name: 'Alex', is_minor: false, birth_year: 2010 }], { on: '2026-10-10' });
   assert.deepEqual(p.childAges, [15]);
   // And a room of children alone is never asked for.

@@ -8,7 +8,7 @@
 //
 // Rules this keeps (CLAUDE.md, Technical Constraints §13):
 //   • It spends money (web searches + tokens), so it is off until the owner
-//     sets ROAM_LOCAL_SCOUT=on; each call is written to provider_calls with the
+//     sets EPIC_LOCAL_SCOUT=on; each call is written to provider_calls with the
 //     household and session, inside the same spend bounds as the planner.
 //   • Nothing is stored: results live in memory for a few hours per place+date
 //     so a household refining a plan does not pay for the same search twice.
@@ -21,21 +21,21 @@ import * as providerCalls from '../repositories/providerCalls.js';
 import { geocode } from './geocode.js';
 import { wallClock, wallToUtc, DEFAULT_TZ } from '../domain/time.js';
 
-export const SCOUT_ATTRIBUTION = "Found by Roam's local scout";
+export const SCOUT_ATTRIBUTION = "Found by Epic's local scout";
 const KINDS = ['festival', 'market', 'live-music', 'theatre', 'comedy', 'cinema', 'sports-game', 'museum', 'art-gallery', 'history', 'walk', 'park', 'farm', 'bookshop', 'playground', 'theme-park', 'other'];
 const MAX_EVENTS = 8;
 const CACHE_TTL_MS = 6 * 3600_000;
 // A plan must not wait on the open web: past this the plan goes ahead without
 // the scout, whose search carries on and fills the cache for the next request.
-const DEADLINE_MS = Number(process.env.ROAM_SCOUT_DEADLINE_MS || 90_000);
+const DEADLINE_MS = Number(process.env.EPIC_SCOUT_DEADLINE_MS || 90_000);
 // The scout's own purse: at most this many runs per household per month
 // (each ≈ $0.6), separate from the planner's bounds and from the Anthropic
 // workspace limit, which remains the hard stop. Counted from provider_calls.
-export const SCOUT_MONTHLY_RUNS = Number(process.env.ROAM_SCOUT_MONTHLY_RUNS || 60);
+export const SCOUT_MONTHLY_RUNS = Number(process.env.EPIC_SCOUT_MONTHLY_RUNS || 60);
 
 async function assertScoutBudget(householdId) {
   const n = await providerCalls.countOfPurpose(householdId, 'scout', 'scout.events');
-  if (n >= SCOUT_MONTHLY_RUNS) throw new Error(`local scout paused: ${n} of ${SCOUT_MONTHLY_RUNS} runs used this month (ROAM_SCOUT_MONTHLY_RUNS)`);
+  if (n >= SCOUT_MONTHLY_RUNS) throw new Error(`local scout paused: ${n} of ${SCOUT_MONTHLY_RUNS} runs used this month (EPIC_SCOUT_MONTHLY_RUNS)`);
   return n;
 }
 const cache = new Map();
@@ -78,7 +78,7 @@ export const localScoutSource = {
   deadlineMs: DEADLINE_MS + 10_000,
   retention: { placeId: 'indefinite', displayFields: 'none' },
   attribution: { text: SCOUT_ATTRIBUTION, requiresAuthorCredit: false },
-  enabled: () => /^(on|true|1|yes)$/i.test(process.env.ROAM_LOCAL_SCOUT || '') && Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+  enabled: () => /^(on|true|1|yes)$/i.test(process.env.EPIC_LOCAL_SCOUT || '') && Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
 
   /**
    * Events on the outing's date near its base. Needs the household and session

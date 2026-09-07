@@ -2,7 +2,7 @@
  * The back office API.
  *
  * Mounted behind `requireDoor('admin')` (access.js), which answers 404 to
- * anybody without the door — so a household using Roam cannot discover that any
+ * anybody without the door — so a household using Epic cannot discover that any
  * of this exists. Inside, each route names the capability it needs, and a
  * refusal there is a 403 that says which capability, because the caller is a
  * colleague who can go and ask for it.
@@ -66,7 +66,7 @@ router.get('/overview', async (req, res, next) => {
           cost,
           costMonthUsd: totals.cost_month_usd,
           // Said plainly wherever it is shown: nothing here has been collected,
-          // because Roam has no payment provider. It is what the plans people
+          // because Epic has no payment provider. It is what the plans people
           // are on are priced at.
           basis: 'contracted',
         };
@@ -85,7 +85,7 @@ router.get('/overview', async (req, res, next) => {
       daily,
       screens,
       feed,
-      // Roam has no store listing; it is an installable web app, so this is the
+      // Epic has no store listing; it is an installable web app, so this is the
       // honest version of an install figure rather than a borrowed one.
       installs,
       money,
@@ -207,7 +207,7 @@ router.get('/people/:id', requires('view_accounts'), async (req, res, next) => {
         timezone: household.timezone, createdAt: household.created_at,
       } : null,
       // Names and dietary constraints, because a support question is usually
-      // "why is Roam refusing to suggest anywhere" and the answer is an allergen.
+      // "why is Epic refusing to suggest anywhere" and the answer is an allergen.
       members: members.map((m) => ({
         id: m.id, name: m.name, relationship: m.relationship, isMinor: m.is_minor,
         allergens: (m.constraints ?? []).filter((c) => c.kind === 'allergen').length,
@@ -316,7 +316,7 @@ router.get('/reporting/revenue', requires('view_financials'), async (req, res, n
     const paying = byPlan.reduce((n, p) => n + (p.price_pence ? p.households : 0), 0);
     res.json({
       // Named on the screen as well as here: none of this has been collected.
-      // Roam holds no card and no payment provider, so "revenue" is what the
+      // Epic holds no card and no payment provider, so "revenue" is what the
       // plans people are on are priced at, and cash is not knowable from here.
       basis: 'contracted',
       missing: ['collected', 'failed_payments', 'refunds'],
@@ -421,7 +421,7 @@ router.delete('/roles/:id', requires('manage_roles'), async (req, res, next) => 
   try {
     const role = await rolesRepo.roleById(req.params.id);
     if (!role) return res.status(404).json({ error: 'not_found', message: 'No such role.' });
-    if (role.is_system) throw bad('That role is one Roam ships with. It can be changed, but not deleted.');
+    if (role.is_system) throw bad('That role is one Epic ships with. It can be changed, but not deleted.');
     const removed = await rolesRepo.deleteRole(req.params.id);
     await rolesRepo.writeAudit({ ...actor(req), action: 'role.delete', subjectType: 'role', subjectId: role.id, subjectLabel: role.label, before: role });
     res.json({ removed: removed > 0 });

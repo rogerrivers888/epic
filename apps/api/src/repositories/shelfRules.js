@@ -1,5 +1,5 @@
 /**
- * The teaching table: what the owner has told Roam about which shelf a place
+ * The teaching table: what the owner has told Epic about which shelf a place
  * belongs on.
  *
  * Read on every home-screen answer, so it is cached in the process for a few

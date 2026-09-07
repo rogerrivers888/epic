@@ -39,7 +39,7 @@ const isJoin = (p: string) => /^\/api\/join\/[^/]+$/.test(p);
  * photograph, sent only for rows we own no picture of (sources/rentedPhoto.js),
  * and it is rented in the strictest sense there is: a reference Google reissues,
  * under a retention allowance of none. On the network it fills a tile that would
- * otherwise be a mint square; on a device it would be a licence breach we could
+ * otherwise be a lime square; on a device it would be a licence breach we could
  * not reach to undo. So the card draws its category icon offline, which is the
  * honest thing for it to draw — we do not have that picture, we were only
  * allowed to look at it.
@@ -101,7 +101,7 @@ export function storable(fullPath: string, body: any): any | null {
   // travels on the row. Nothing rented is in this answer, so the rule that
   // sends nothing licensed to a device does not bite here.
   //
-  // It is also the one part of Roam where holding a copy is the *point*: an
+  // It is also the one part of Epic where holding a copy is the *point*: an
   // 18-row county with its placeholders is about 25KB, so a phone in a lane
   // with no signal still has somewhere to go. The photographs themselves are
   // not here — they are `/api/images/…`, cached by the service worker as
@@ -134,7 +134,7 @@ export function storable(fullPath: string, body: any): any | null {
   if (isJoin(p)) return { ...body, expecting: [] };
 
   // --- the day itself, when the times in it are our own -----------------
-  // A journey worked out from straight-line distance is Roam's own arithmetic
+  // A journey worked out from straight-line distance is Epic's own arithmetic
   // and is ours to keep, so the day someone is actually on is on their phone.
   // The same journey with real times in it is Google Routes' answer, which is
   // not, so that one is left behind and recomputed when there is signal.
@@ -163,7 +163,7 @@ export function storable(fullPath: string, body: any): any | null {
   // person, this minute. It is used and dropped, never written down.
   //
   // The home screen is deliberately not here either. `/api/inspire/near` is the
-  // first thing Roam draws, so it is the first thing somebody will want on a
+  // first thing Epic draws, so it is the first thing somebody will want on a
   // train — but it is a provider search, carrying their names, photos and
   // ratings, and being the home screen does not change whose they are. With no
   // signal it says so, and the household's own atlas (above) is what is there.

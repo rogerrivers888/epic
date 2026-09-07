@@ -67,7 +67,7 @@ test('a tram stop is a tram stop, which is not the same promise as a station', (
   assert.equal(kindOf({ railway: 'tram_stop', name: 'Piccadilly Gardens' }), 'tram');
   assert.equal(isServiceStop({ railway: 'tram_stop', name: 'Piccadilly Gardens' }), true);
   // Metrolink, Supertram, NET and Edinburgh are all tagged this way, and none
-  // of them existed as far as Roam was concerned before 6 Sep 2026.
+  // of them existed as far as Epic was concerned before 6 Sep 2026.
   assert.equal(kindOf({ railway: 'station', station: 'tram', name: 'Cathedral' }), 'tram');
 });
 

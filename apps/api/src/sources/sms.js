@@ -217,7 +217,7 @@ export function explain(code, said, status) {
       // account's Auth Token are two different strings, and the console calls
       // both of them things you would type into a variable named AUTH_TOKEN.
       return KEY_SID()
-        ? 'Twilio refused the credentials. TWILIO_API_KEY_SID is set, so TWILIO_AUTH_TOKEN has to hold that API key\u2019s secret — the account\u2019s Auth Token is a different string and will not sign for a key. If what you have is the account\u2019s Auth Token, delete TWILIO_API_KEY_SID and Roam will sign as the account instead.'
+        ? 'Twilio refused the credentials. TWILIO_API_KEY_SID is set, so TWILIO_AUTH_TOKEN has to hold that API key\u2019s secret — the account\u2019s Auth Token is a different string and will not sign for a key. If what you have is the account\u2019s Auth Token, delete TWILIO_API_KEY_SID and Epic will sign as the account instead.'
         : 'Twilio refused the credentials. Check TWILIO_AUTH_TOKEN, and that TWILIO_ACCOUNT_SID is the AC… account rather than an SK… API key.';
     default:
       return `The text sender refused it (${status}).${theirs}`;
@@ -281,7 +281,7 @@ export async function sendSms({ to, text }) {
 export function invitationText({ name, url, from, returning = false }) {
   const who = from ? `${from} has` : 'You have been';
   const opening = returning
-    ? 'Here is a fresh link to sign back in to Roam:'
-    : `${who} added you to their household on Roam — where the family's places, tastes and trips live. Open it here:`;
+    ? 'Here is a fresh link to sign back in to Epic:'
+    : `${who} added you to their household on Epic — where the family's places, tastes and trips live. Open it here:`;
   return `${name ? `Hi ${name}. ` : ''}${opening}\n${url}\nThe link works once, on the phone you open it on.`;
 }

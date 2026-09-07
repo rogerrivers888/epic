@@ -1,3 +1,6 @@
+// First, so .env is loaded and the old EPIC_* names are aliased before any
+// module below reads one. See env.js.
+import './env.js';
 // Seeds the founding household (Requirements §3, "Create the household record").
 // Idempotent: does nothing if a household already exists, unless run with --force.
 

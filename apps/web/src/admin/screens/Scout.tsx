@@ -1,5 +1,5 @@
 /**
- * The sweep — the back office screen for the areas Roam has gone looking in.
+ * The sweep — the back office screen for the areas Epic has gone looking in.
  *
  * Owner, 4 Sep 2026: "for every postcode sector I need to find the top-rated
  * restaurants… we want a select number of highly rated restaurants in each
@@ -11,12 +11,12 @@
  *            the buttons that sweep one again or score it afresh.
  *   Places   The selection for one area, best first, with the working shown:
  *            our score, our word for the crowd, and how many dishes we hold.
- *   Menus    Every menu Roam could not read, and why. The owner opened tabs
+ *   Menus    Every menu Epic could not read, and why. The owner opened tabs
  *            and found them empty with no explanation; this is that list with
  *            a cause against each line, so a change to the crawler is a number
  *            that moves rather than an anecdote.
  *
- * What is deliberately not on this screen: a rating. Roam does not keep the
+ * What is deliberately not on this screen: a rating. Epic does not keep the
  * licensed figure — it is banded at the moment of the call and discarded — so
  * the column says "top" or "high", which is our judgement and ours to show.
  *
@@ -75,7 +75,7 @@ const ACCOLADE: Record<string, string> = {
  * Anything not in here is already a sentence and is shown as it is.
  */
 const REASON: Record<string, string> = {
-  menu_had_no_items: 'Roam opened their menu page and there were no dishes on it — it may be a picture, or a page that only links elsewhere.',
+  menu_had_no_items: 'Epic opened their menu page and there were no dishes on it — it may be a picture, or a page that only links elsewhere.',
   menu_unreadable: 'Nothing readable on the page, even after running it in a browser.',
   menu_url_required: 'No menu address to open.',
 };
@@ -167,7 +167,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
     <AdminPage>
       <PageHead
         title="The sweep"
-        sub="Postcode areas Roam has gone looking in, and what it owns of them"
+        sub="Postcode areas Epic has gone looking in, and what it owns of them"
       />
 
       <TileRow>
@@ -413,7 +413,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
           </Panel>
 
           <Panel
-            title={cause ? `${causes.find((c) => c.key === cause)?.label ?? cause}` : 'What Roam could not read, and why'}
+            title={cause ? `${causes.find((c) => c.key === cause)?.label ?? cause}` : 'What Epic could not read, and why'}
             sub={cause
               ? 'The places behind that cause, each with the sentence the crawler wrote about it'
               : 'An empty tab with a cause against it, so a change to the crawler is a number that moves'}
@@ -507,7 +507,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
                         {r.crowdBand ? <Pill label={r.crowdBand} /> : null}
                       </Row>
                       <Text style={type.tiny}>
-                        {r.roamScore != null ? `ours ${r.roamScore.toFixed(1)}` : 'not scored'}
+                        {r.epicScore != null ? `ours ${r.epicScore.toFixed(1)}` : 'not scored'}
                         {r.ownedScore != null ? ` · without them ${r.ownedScore.toFixed(1)}` : ''}
                         {r.countBand ? ` · ${r.countBand} have spoken` : ''}
                       </Text>

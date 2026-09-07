@@ -1,10 +1,10 @@
 /**
  * The back office's own components — Parcelvision's reporting grammar, in
- * Roam's tokens.
+ * Epic's tokens.
  *
  * The owner asked for PV's suite mirrored: "revenue reporting, mirror that UI,
  * the stuff that we've come up with there, the side draws, the drill-downs,
- * everything" (4 Sep 2026). PV is Tailwind over the DOM and Roam is React
+ * everything" (4 Sep 2026). PV is Tailwind over the DOM and Epic is React
  * Native Web, so what is mirrored is the *grammar*, not the class names:
  *
  *  - **A stat tile is a label, a figure and a caption**, with tone as a left

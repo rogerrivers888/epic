@@ -153,7 +153,7 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
             <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={type.h3}>A group</Text>
-                <Text style={type.small}>Two friends or a coachload. Everyone books and pays their own share; Roam chases them for you.</Text>
+                <Text style={type.small}>Two friends or a coachload. Everyone books and pays their own share; Epic chases them for you.</Text>
               </View>
               <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Set up →</Text>
             </Row>

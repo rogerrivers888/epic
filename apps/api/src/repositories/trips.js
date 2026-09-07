@@ -186,7 +186,7 @@ export async function attendeeIds(tripId) {
 /**
  * Who is coming, with enough on each of them to fill a hotel room: a booking
  * platform prices an adult and a child differently and asks each child's age,
- * and `is_minor` is Roam's own line at thirteen rather than a hotel's at
+ * and `is_minor` is Epic's own line at thirteen rather than a hotel's at
  * eighteen. Both are returned and the caller decides.
  */
 export async function partyOf(tripId) {

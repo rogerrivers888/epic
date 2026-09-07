@@ -1,20 +1,20 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: roam-postgres
+    container_name: epic-postgres
     environment:
-      POSTGRES_USER: roam
-      POSTGRES_PASSWORD: roam
-      POSTGRES_DB: roam
+      POSTGRES_USER: epic
+      POSTGRES_PASSWORD: epic
+      POSTGRES_DB: epic
     ports:
       - "5434:5432"
     volumes:
-      - roam-pgdata:/var/lib/postgresql/data
+      - epic-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U roam -d roam"]
+      test: ["CMD-SHELL", "pg_isready -U epic -d epic"]
       interval: 5s
       timeout: 3s
       retries: 10
 
 volumes:
-  roam-pgdata:
+  epic-pgdata:

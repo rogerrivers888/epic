@@ -45,7 +45,7 @@ const Proposal = z.object({
   reason: z.string(),
 });
 
-const SYSTEM = `You are helping the owner of Roam, a family trip planner, correct how it sorts places onto the six shelves its home screen shows.
+const SYSTEM = `You are helping the owner of Epic, a family trip planner, correct how it sorts places onto the six shelves its home screen shows.
 
 The six shelves and what each means to this household:
 - Fun — a good day out. Somewhere you go and enjoy yourself. Watching sport is here: a stadium, a racecourse, an arena.
@@ -89,7 +89,7 @@ export async function readTeaching({ said, subject, subjectLabel, scope, current
 
   const lines = [
     subjectLabel || subject ? `The subject: ${subjectLabel ?? subject}${subject && subjectLabel ? ` (${subject})` : ''}.` : null,
-    scope ? `Roam thinks this is a rule about a ${scope}.` : null,
+    scope ? `Epic thinks this is a rule about a ${scope}.` : null,
     current ? `Where it sits today: ${named(current)}.` : null,
     '',
     'What the owner says about it:',

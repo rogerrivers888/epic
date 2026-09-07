@@ -1,5 +1,5 @@
 /**
- * Putting every place Roam holds into a place a person would name.
+ * Putting every place Epic holds into a place a person would name.
  *
  * Owner, 5 Sep 2026: "I can select a county, or I can select a city, or I can
  * select a postcode, and I can see all my stats and all my data for that
@@ -36,7 +36,7 @@ import { reverseGeocode } from './geocode.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
 const POSTCODES_API = 'https://api.postcodes.io';
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; locality lookup)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; locality lookup)';
 
 /**
  * The zoom at which Nominatim reliably answers with a full address.
@@ -124,7 +124,7 @@ export async function townAt(lat, lng) {
   //
   // Falling through to `hit.locality` is what keeps London whole: inside Greater
   // London there is no town or village, only a borough, and `localityOf` is the
-  // one place in Roam that turns all 33 of them into London.
+  // one place in Epic that turns all 33 of them into London.
   const name = a.town || a.village || hit.locality || null;
   if (!name) return null;
   return {
@@ -227,7 +227,7 @@ export async function postalPass({ limit = 4000, householdId = null } = {}) {
   }
 
   // ONS is free and unmetered, but the ledger is the record of every outbound
-  // call Roam makes and a free source that is missing from it is a source
+  // call Epic makes and a free source that is missing from it is a source
   // nobody can prove the cost of later (Technical Constraints §2).
   if (requests && householdId) {
     await providerCalls.record(householdId, 'ons-postcodes', 'localities.postal', String(requests)).catch(() => null);

@@ -28,11 +28,11 @@ test('too few places to say anything gives null, not a confident number', () => 
 });
 
 const ours = [
-  { venueRef: 'a', name: 'Antalya', roamScore: 6.7, ownedScore: 3.4 },
-  { venueRef: 'b', name: 'Meimo', roamScore: 6.7, ownedScore: 3.5 },
-  { venueRef: 'c', name: "Sebastian's", roamScore: 6.5, ownedScore: 3.9 },
-  { venueRef: 'd', name: 'Sushi Point', roamScore: 5.9, ownedScore: 1.7 },
-  { venueRef: 'e', name: 'Kept by us alone', roamScore: 5.0, ownedScore: 2.0 },
+  { venueRef: 'a', name: 'Antalya', epicScore: 6.7, ownedScore: 3.4 },
+  { venueRef: 'b', name: 'Meimo', epicScore: 6.7, ownedScore: 3.5 },
+  { venueRef: 'c', name: "Sebastian's", epicScore: 6.5, ownedScore: 3.9 },
+  { venueRef: 'd', name: 'Sushi Point', epicScore: 5.9, ownedScore: 1.7 },
+  { venueRef: 'e', name: 'Kept by us alone', epicScore: 5.0, ownedScore: 2.0 },
 ];
 
 const theirs = [

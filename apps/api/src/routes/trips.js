@@ -912,9 +912,9 @@ router.get('/:id/along', async (req, res, next) => {
  * Somewhere to sleep, ranked by how much of the shortlist is on foot from the
  * front door (domain/stays.js), and priced for the nights this trip is away.
  *
- * The ranking is the half only Roam can do: it is the only thing that holds the
+ * The ranking is the half only Epic can do: it is the only thing that holds the
  * shortlist, so it is the only thing that can say "eight minutes from four of
- * your five plans". The price is the half everybody else can do and Roam could
+ * your five plans". The price is the half everybody else can do and Epic could
  * not, until LiteAPI (sources/liteapi.js). Both are needed — a hotel on the
  * doorstep at £600 a night is not an answer either.
  *
@@ -992,7 +992,7 @@ router.get('/:id/stays', async (req, res, next) => {
      * sorts of the same one:
      *
      *   plans    — best placed for the days already planned. The default, and
-     *              the only one only Roam can answer, because it is the only
+     *              the only one only Epic can answer, because it is the only
      *              thing that holds the shortlist.
      *   town     — near a centre, when the plans are thin or scattered.
      *   station  — happy to be further out if the train is a short walk, which
@@ -1471,7 +1471,7 @@ export async function addShortlistItem(trip, household, b) {
     lat: b.lat ?? null, lng: b.lng ?? null, venue: snapshot, note: b.note?.trim() || null,
     mustDo: b.mustDo, preferredDayId: b.preferredDayId ?? null,
   });
-  // The atlas is what the household chose, not what Roam proposed (owner,
+  // The atlas is what the household chose, not what Epic proposed (owner,
   // 4 Sep 2026: "you have added stuff that I did not add… I want to see stuff
   // that I like, that I've curated, not random stuff"). A suggestion lives on
   // the trip's shortlist until someone keeps it; only then does it file here.

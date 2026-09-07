@@ -40,7 +40,7 @@ function MenuLines({ menu }: { menu: MenuRead }) {
   // can look themselves.
   if (!menu.checked) return (
     <View style={styles.menu}>
-      <Text style={[type.tiny, { color: colors.ink }]}>{menu.whyNot || menu.summary || 'No menu published anywhere Roam could read.'}</Text>
+      <Text style={[type.tiny, { color: colors.ink }]}>{menu.whyNot || menu.summary || 'No menu published anywhere Epic could read.'}</Text>
       {menu.menuUrl ? <Pressable onPress={() => Linking.openURL(menu.menuUrl!)} accessibilityRole="link"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Open the menu yourself</Text></Pressable> : null}
       {menu.allergens.length ? <Text style={[type.tiny, { color: colors.overrun }]}>Nothing was read, so nothing is known about {menu.allergens.map((a) => `${a.allergen} for ${a.person}`).join(', ')}. Ask when you book.</Text> : null}
     </View>
@@ -222,7 +222,7 @@ function TableCard({ table, sessionId, attendingIds, onOpenTrip }: {
       {!table.error && !table.places.length ? (
         <Text style={type.small}>
           {table.nearest
-            ? `The best ${table.label.toLowerCase()} Roam found is ${table.nearest.name}, ${minutes(table.nearest.travelMinutes)} away by road — further than you said. Widen the travel cap and it comes back.`
+            ? `The best ${table.label.toLowerCase()} Epic found is ${table.nearest.name}, ${minutes(table.nearest.travelMinutes)} away by road — further than you said. Widen the travel cap and it comes back.`
             : `Nothing within reach came back for ${table.label.toLowerCase()} — try a wider travel cap.`}
         </Text>
       ) : null}

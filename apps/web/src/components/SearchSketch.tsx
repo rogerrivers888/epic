@@ -377,12 +377,12 @@ function Scene({ t, reduced, w, h, country, countryBox, cityBox, groundBox, area
   return (
     <Svg width="100%" height="100%" viewBox={view.join(' ')}>
       <Defs>
-        <ClipPath id="roam-lens">
+        <ClipPath id="epic-lens">
           <Circle cx={lens[0]} cy={lens[1]} r={33 * u} />
         </ClipPath>
       </Defs>
 
-      <G id="roam-sketch">
+      <G id="epic-sketch">
         {country ? (
           <>
             <Path d={country.d} fill={colors.surfaceMuted} opacity={clamp((tt - 0.35) / 0.5, 0, 1) * 0.9 * countryFade} />
@@ -395,7 +395,7 @@ function Scene({ t, reduced, w, h, country, countryBox, cityBox, groundBox, area
         ) : null}
 
         {/* The ground the search covers: a radius, drawn as the circle it is. */}
-        <Path d={ground} fill={colors.mint} opacity={groundIn * 0.18} />
+        <Path d={ground} fill={colors.lime} opacity={groundIn * 0.18} />
         <Path
           d={ground} fill="none" stroke={colors.ink} strokeWidth={2.1 * u} opacity={groundIn * 0.85}
           strokeDasharray={groundIn < 1 ? [pathLength(ground)] : [7 * u, 5 * u]}
@@ -432,8 +432,8 @@ function Scene({ t, reduced, w, h, country, countryBox, cityBox, groundBox, area
       {sweeping ? (
         <>
           {Platform.OS === 'web' ? (
-            <G clipPath="url(#roam-lens)" opacity={clamp(d / 0.4, 0, 1)}>
-              <Use href="#roam-sketch" transform={`translate(${lens[0] * -0.55} ${lens[1] * -0.55}) scale(1.55)`} />
+            <G clipPath="url(#epic-lens)" opacity={clamp(d / 0.4, 0, 1)}>
+              <Use href="#epic-sketch" transform={`translate(${lens[0] * -0.55} ${lens[1] * -0.55}) scale(1.55)`} />
             </G>
           ) : null}
           <Circle cx={lens[0]} cy={lens[1]} r={33 * u} fill="none" stroke={colors.ink} strokeWidth={2.6 * u} opacity={clamp(d / 0.4, 0, 1)} />

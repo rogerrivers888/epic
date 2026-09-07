@@ -2,8 +2,8 @@
  * A database of its own, built from the migrations, for the tests to ruin.
  *
  * Never the development database. These tests delete households to prove the
- * cascades behave, and the local `roam` database is somebody's working copy —
- * so this creates `roam_test` beside it, runs every migration into it from
+ * cascades behave, and the local `epic` database is somebody's working copy —
+ * so this creates `epic_test` beside it, runs every migration into it from
  * nothing, and hands back a pool pointed at that.
  *
  * Building it from the migration files is half the point: "the migrations apply
@@ -20,7 +20,7 @@ import dotenv from 'dotenv';
 const here = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(here, '../../../../.env'), quiet: true });
 
-const BASE = process.env.DATABASE_URL || 'postgres://roam:roam@localhost:5434/roam';
+const BASE = process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5434/epic';
 
 /**
  * One database per test file.
@@ -31,7 +31,7 @@ const BASE = process.env.DATABASE_URL || 'postgres://roam:roam@localhost:5434/ro
  * leftover from a crashed run is reused rather than accumulating.
  */
 const suite = (process.argv[1] || 'suite').split('/').pop().replace(/\.test\.js$/, '').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-const TEST_DB = process.env.ROAM_TEST_DB || `roam_test_${suite}`;
+const TEST_DB = process.env.EPIC_TEST_DB || `epic_test_${suite}`;
 
 const urlFor = (database) => {
   const u = new URL(BASE);

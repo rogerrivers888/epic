@@ -112,9 +112,9 @@ type InspireMemory = {
 
 /**
  * Inspire me: a loose brief (typed or spoken), a mood or two, a travel cap →
- * ideas that say why. As the ideas land, Roam looks around each one in the
+ * ideas that say why. As the ideas land, Epic looks around each one in the
  * background and says what is there. "Things to do and see" opens the idea as
- * a day out in Trips — the Find tab already filled, what Roam named on the
+ * a day out in Trips — the Find tab already filled, what Epic named on the
  * shortlist — and "Plan this" hands the idea to the rows instead.
  */
 export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The family', home = null, onPlan, onOpenTrip, listening, transcript, supported, onSpeak, onStop }: {
@@ -124,7 +124,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
   who: React.ReactNode;
   /** Who is coming, in a few words, for that line. */
   whoLabel?: string;
-  /** Home, so the wait can be a map of where Roam is looking rather than a spinner. */
+  /** Home, so the wait can be a map of where Epic is looking rather than a spinner. */
   home?: { label: string; lat: number; lng: number } | null;
   onPlan: (utterance: string) => void;
   onOpenTrip?: (tripId: string, opts?: OpenTripOptions) => void;
@@ -239,7 +239,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       let s: Awaited<ReturnType<typeof api.inspireStatus>> | null = null;
       try { s = await api.inspireStatus(ofSession); } catch { /* a dropped poll is harmless; the next one asks again */ }
       if (!s) {
-        if (Date.now() - startedAt > 100_000) throw new Error(`Roam has not answered for over a minute and a half. Try Inspire me again${ref ? ` — quote run ${ref} if it keeps happening` : ''}.`);
+        if (Date.now() - startedAt > 100_000) throw new Error(`Epic has not answered for over a minute and a half. Try Inspire me again${ref ? ` — quote run ${ref} if it keeps happening` : ''}.`);
         continue;
       }
       // Whatever it has so far goes on screen now: the titles arrive before
@@ -293,7 +293,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
         if (inspireRun.current !== id) return;
         let s: Awaited<ReturnType<typeof api.inspireStatus>> | null = null;
         try { s = await api.inspireStatus(sessionId); } catch { /* the next poll asks again */ }
-        if (!s) { if (Date.now() - startedAt > 100_000) throw new Error(`Roam has not answered for over a minute and a half — quote run ${started.ref} if it keeps happening.`); continue; }
+        if (!s) { if (Date.now() - startedAt > 100_000) throw new Error(`Epic has not answered for over a minute and a half — quote run ${started.ref} if it keeps happening.`); continue; }
         if (s.ideas) setIdeas(s.ideas);
         setStage(s.stage); setPlaced(s.placed ?? 0);
         if (s.error) throw new Error(`${s.error} (run ${started.ref})`);
@@ -309,7 +309,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
 
   /** An idea, as the drawer every other place on the screen opens as. */
   const openDetail = (idea: Idea, head: IdeaHeadline | null) => {
-    // Open with whatever there is. A place looked up before Roam kept the map's
+    // Open with whatever there is. A place looked up before Epic kept the map's
     // own identifier — or one whose look-around has not come back — still has a
     // name, a distance and a reason, and those are worth reading (owner, 4 Sep
     // 2026: "I can't click on Thorpe Park… I can't see any information").
@@ -520,13 +520,13 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
   const nextUnanswered = STEPS.find((step) => !picks[step.key]) ?? null;
   const openStep = editing ? STEPS.find((step) => step.key === editing) ?? null : nextUnanswered;
   const formOpen = formChoice ?? !(ideas && ideas.length);
-  // The map is fed by the run: Roam is thinking, then each idea that has found
+  // The map is fed by the run: Epic is thinking, then each idea that has found
   // its place drops a pin. Nothing here is a timer — it is what has happened.
   const sketchEvents = useMemo<SketchEvent[]>(() => {
-    const out: SketchEvent[] = [{ type: 'asking', sources: [{ key: 'roam', label: 'Roam' }] }];
+    const out: SketchEvent[] = [{ type: 'asking', sources: [{ key: 'epic', label: 'Epic' }] }];
     for (const idea of ideas ?? []) {
       if (!idea.place) continue;
-      out.push({ type: 'answered', source: 'roam', label: idea.title, count: 1, points: [[Number(idea.place.lat.toFixed(5)), Number(idea.place.lng.toFixed(5))]] });
+      out.push({ type: 'answered', source: 'epic', label: idea.title, count: 1, points: [[Number(idea.place.lat.toFixed(5)), Number(idea.place.lng.toFixed(5))]] });
     }
     return out;
   }, [ideas]);
@@ -652,7 +652,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
         attendingIds={attendingIds} onOpenTrip={onOpenTrip}
       />
 
-      {/* The wait is a map of where Roam is looking, and each idea drops onto it
+      {/* The wait is a map of where Epic is looking, and each idea drops onto it
           as it is pinned (owner, 4 Sep 2026: "I'd like to see, while I'm
           waiting, the map, because the app is very slow… we need to find ways
           to make this acceptable and keep people engaged"). */}
@@ -680,7 +680,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
           <Chip label="Stop waiting" icon="stop" onPress={stopWaiting} />
         </Row>
       ) : null}
-      {busy && elapsed > 25 && runRef ? <Text style={type.tiny}>Taking longer than it should. This is run {runRef} — quote that number and Roam can say exactly where it got stuck.</Text> : null}
+      {busy && elapsed > 25 && runRef ? <Text style={type.tiny}>Taking longer than it should. This is run {runRef} — quote that number and Epic can say exactly where it got stuck.</Text> : null}
 
       {restoring && !ideas ? <Text style={type.tiny}>Putting back what you were looking at…</Text> : null}
 

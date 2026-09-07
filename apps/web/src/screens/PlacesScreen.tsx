@@ -1039,7 +1039,7 @@ function PlaceRow({ place, kind, viewer, members, first, selected, onPress }: { 
           the building, the shopfront — then, only where we own nothing, the
           provider's photograph fetched at display and never stored (owner,
           5 Sep 2026: "at least that we can have restaurant pictures, which is
-          really useful in some instances"), and the same icon on the same mint
+          really useful in some instances"), and the same icon on the same lime
           ground when there is neither. A list with three pictures in it still
           reads as one list.
 
@@ -1076,7 +1076,7 @@ function PlaceRow({ place, kind, viewer, members, first, selected, onPress }: { 
         <View style={styles.tick} accessibilityLabel="Been here"><Icon name="check" size={13} color={colors.headerSub} strokeWidth={3} /></View>
       ) : (
         <View style={{ paddingHorizontal: 2 }} accessibilityLabel={place.special ? 'Loved' : 'Shortlisted'}>
-          <Icon name="keep" size={17} color={colors.red} fill={place.special} />
+          <Icon name="keep" size={17} color={colors.loved} fill={place.special} />
         </View>
       )}
     </Pressable>
@@ -1403,10 +1403,10 @@ const styles = StyleSheet.create({
   // The green status line under every row: what the household did here.
   green: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.accent },
   arow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 11, paddingHorizontal: spacing.md, minHeight: TARGET },
-  tick: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
+  tick: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.lime, alignItems: 'center', justifyContent: 'center' },
   /**
-   * The screen's own header. It used to be a second mint field stacked under
-   * the shell's — the shell already carries the one mint band with the wordmark
+   * The screen's own header. It used to be a second lime field stacked under
+   * the shell's — the shell already carries the one lime band with the wordmark
    * on it (App.tsx) — and the redesign draws these screens white, so it is the
    * ground with room around it and nothing else.
    */

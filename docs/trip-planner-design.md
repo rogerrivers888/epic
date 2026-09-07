@@ -1,4 +1,4 @@
-# Roam — Trips: Competitive Analysis and Design
+# Epic — Trips: Competitive Analysis and Design
 
 | | |
 |---|---|
@@ -7,7 +7,7 @@
 | **Status** | Design — drives the trip rebuild |
 | **Supersedes** | The single-outing "Trip" in Requirements v5.0 §5, which becomes one kind of trip |
 
-> The requirements defined a trip as a same-day outing. The household plans holidays too: several days in another country, a hotel to come back to, some days packed and some slow, restaurants and activities researched into lists before any day is planned. This document looks at what the best trip products do, names what Roam must match and where it can be decisively better, and specifies the model and screens.
+> The requirements defined a trip as a same-day outing. The household plans holidays too: several days in another country, a hotel to come back to, some days packed and some slow, restaurants and activities researched into lists before any day is planned. This document looks at what the best trip products do, names what Epic must match and where it can be decisively better, and specifies the model and screens.
 
 ---
 
@@ -24,17 +24,17 @@
 | **Mapstr** | Map-first saving with unlimited tags and colours; friends' places; "alert me when I pass a saved place"; book a table from the pin | Not an itinerary tool; subscription backlash (300-place cap on free) | [Mapstr](https://en.mapstr.com/), [Compass & Key](https://thecompassandkey.com/mapstr-app-review), [App Store reviews](https://apps.apple.com/us/app/mapstr-save-follow-places/id917288465?see-all=reviews) |
 | **Google Maps lists / Apple Guides** | Free, shareable, synced lists of places; the maps everyone already has | No multi-day planner at all — "how do I get there", not "what do we do each day" | [Yopki](https://yopki.com/guides/how-to-plan-a-trip-on-google-maps/), [Simology](https://simology.io/blog/build-shareable-maps-lists-googleapple-maps-itinerary-planning) |
 
-Two things every serious planner has converged on, and Roam must simply have:
+Two things every serious planner has converged on, and Epic must simply have:
 
 1. **Trip → days → items, with a per-trip shortlist of saved places and a map** (Wanderlog, Stippl, Mindtrip). Lodging is a first-class item on the day.
 2. **Travel time between items and a per-day total** (Wanderlog, Tripomatic), shown as you build.
 
 And what none of them has — the wedge:
 
-- **They plan for a generic traveller.** None knows that Phoenix is 8, that Gina is vegetarian and allergic to carrots, that Roger likes historical things but not for six hours, that walks are fine up to 40 minutes, or that the family will drive three hours for something special but thirty minutes for dinner. Roam already holds all of that and applies it to every candidate.
-- **They start from a blank canvas.** Wanderlog's own reviewers call it hours of manual work; Mindtrip fills the canvas but can't reason about trade-offs. Roam composes *options* from one pool and lets the household react — by tapping or by talking — which is faster than both.
-- **They don't learn.** A visit in Roam changes the next recommendation. Nothing above does that.
-- **Families specifically** want shared visibility, kid-aware filtering, offline, and the flexibility to change the day when a child is tired ([Chasin' Surf](https://www.chasinsurf.com/best-family-travel-apps-2026/), [Nori](https://heynori.com/blog/best-family-trip-planner-apps), [Stardrift](https://stardrift.ai/resources/best-ai-trip-planner-family-group-travel)). Roam's re-planning from the same pool is exactly the "child is tired, what now?" move.
+- **They plan for a generic traveller.** None knows that Phoenix is 8, that Gina is vegetarian and allergic to carrots, that Roger likes historical things but not for six hours, that walks are fine up to 40 minutes, or that the family will drive three hours for something special but thirty minutes for dinner. Epic already holds all of that and applies it to every candidate.
+- **They start from a blank canvas.** Wanderlog's own reviewers call it hours of manual work; Mindtrip fills the canvas but can't reason about trade-offs. Epic composes *options* from one pool and lets the household react — by tapping or by talking — which is faster than both.
+- **They don't learn.** A visit in Epic changes the next recommendation. Nothing above does that.
+- **Families specifically** want shared visibility, kid-aware filtering, offline, and the flexibility to change the day when a child is tired ([Chasin' Surf](https://www.chasinsurf.com/best-family-travel-apps-2026/), [Nori](https://heynori.com/blog/best-family-trip-planner-apps), [Stardrift](https://stardrift.ai/resources/best-ai-trip-planner-family-group-travel)). Epic's re-planning from the same pool is exactly the "child is tired, what now?" move.
 
 ---
 
@@ -55,7 +55,7 @@ A **trip** is any span of time away from the normal routine, from a two-hour out
 | **Trip** | A title, a **place** (country + city/region, from geocoding), **start and end dates**, a **base** (hotel, rental, or home for a day out), whether there's a **car**, who's coming, a default pace. A same-day outing is a one-day trip whose base is home. |
 | **Day** | One calendar date of the trip, with its own **pace** (relaxed / balanced / packed), **travel mode** (car, transit, walking), optional start and end times, and notes. Days are created automatically from the dates. |
 | **Shortlist** | Places the household has researched *for this trip*, before or while planning days: **Restaurants**, **Things to do**, and **Saved** (anything else). Each entry can carry a note, a "must do" flag, and a preferred day. Lists are per trip; the household's global ledger remembers them too. |
-| **Stop** | A place scheduled on a day, in a **slot** (morning / afternoon / evening) with an optional start time and a time allowance. Stops come from the shortlist or from Roam's options. |
+| **Stop** | A place scheduled on a day, in a **slot** (morning / afternoon / evening) with an optional start time and a time allowance. Stops come from the shortlist or from Epic's options. |
 | **Visit** | Unchanged: a stop the household actually went to, with takes. |
 
 Rules that carry over unchanged from the requirements: allergens exclude; dislikes, diets, limits and learned preferences rank; pace differs by kind; the time budget is recalculated whenever a day changes; options for a day come from **one** pool.
@@ -75,12 +75,12 @@ Trips
     └── Map        every pin, coloured by day; unscheduled shortlist in grey
 ```
 
-**Day planner** (the core screen): the day's pace and mode at the top; a **time bar**; three slots — Morning, Afternoon, Evening — each holding stops with travel legs between them; an **Unscheduled** drawer at the bottom holding shortlist items not yet placed; **Plan this day with Roam** to compose options from the shortlist plus what's near the base (the same options-and-react loop as today, with "plan around the activities", "plan around the meals", "stay near the hotel" as the stated bases); each stop has *We went* → rate.
+**Day planner** (the core screen): the day's pace and mode at the top; a **time bar**; three slots — Morning, Afternoon, Evening — each holding stops with travel legs between them; an **Unscheduled** drawer at the bottom holding shortlist items not yet placed; **Plan this day with Epic** to compose options from the shortlist plus what's near the base (the same options-and-react loop as today, with "plan around the activities", "plan around the meals", "stay near the hotel" as the stated bases); each stop has *We went* → rate.
 
 **Three ways to plan, all supported:**
 
 1. *Research first.* Search restaurants and things to do near the base or a neighbourhood, save to the shortlist over days or weeks, then drop them onto days.
-2. *Activities first.* Put the anchors on days (the castle on Tuesday, the boat on Thursday), then ask Roam to fill meals and gaps around them.
+2. *Activities first.* Put the anchors on days (the castle on Tuesday, the boat on Thursday), then ask Epic to fill meals and gaps around them.
 3. *Talk.* "Wednesday: something packed, castle in the morning, lunch near it, back to the hotel by six" — options appear, react, accept.
 
 **Desktop:** Trip pages are two-column — left: days or shortlist; right: the map, with the selected day's pins highlighted. **Phone:** the same sections as a segmented control under the trip header; map as its own section; day planner full-screen with the Unscheduled drawer sliding up.
@@ -115,7 +115,7 @@ The time budget runs per day (day start/end times default from the household's p
 
 ## 5. Build order
 
-**P1 — this iteration.** Trip creation with dates, place, base, car, who; days generated; shortlist with search near base / any area and "add to day"; day planner with slots, travel legs, budget bar, unscheduled drawer, per-day pace and mode; "Plan this day with Roam" reusing the options loop; map section; trips list grouped by country with outings separated.
+**P1 — this iteration.** Trip creation with dates, place, base, car, who; days generated; shortlist with search near base / any area and "add to day"; day planner with slots, travel legs, budget bar, unscheduled drawer, per-day pace and mode; "Plan this day with Epic" reusing the options loop; map section; trips list grouped by country with outings separated.
 
 **P2.** Drag between days and slots; a stay with check-in/out on the first/last day timeline; import a booking by pasting confirmation text; collaboration; offline day view; "near my hotel now" from the phone at night.
 

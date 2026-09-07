@@ -2,7 +2,7 @@
  * The map, as a first-class citizen (owner, 6 Sep 2026).
  *
  * `MapGL` is the map-first trip screen's canvas: a full-bleed vector map you
- * can pinch, rotate and throw, with Roam's own markers drawn on top of it as
+ * can pinch, rotate and throw, with Epic's own markers drawn on top of it as
  * ordinary elements rather than as pictures baked into a tile.
  *
  * The web implementation is `MapGL.web.tsx` (MapLibre GL). This file is the

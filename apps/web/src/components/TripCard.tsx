@@ -55,7 +55,7 @@ export function TripCard({ trip: t, members = [], onPress }: {
                 ))}
               </View>
             ) : null}
-            <Text style={[type.tiny, note.warn && { color: colors.red, fontWeight: '700' }]} numberOfLines={1}>{note.text}</Text>
+            <Text style={[type.tiny, note.warn && { color: colors.overrun, fontWeight: '700' }]} numberOfLines={1}>{note.text}</Text>
           </Row>
         </View>
       </View>

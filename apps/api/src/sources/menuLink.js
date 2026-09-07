@@ -24,11 +24,11 @@
 // Five seconds was enough from a desk and not from the server: a branch's home
 // page can be a third of a megabyte from a small host (owner, 4 Sep 2026 — the
 // Windsor menu was there and we still missed it).
-const FETCH_TIMEOUT_MS = Number(process.env.ROAM_MENU_TIMEOUT_MS || 9000);
+const FETCH_TIMEOUT_MS = Number(process.env.EPIC_MENU_TIMEOUT_MS || 9000);
 const MAX_BYTES = 1_000_000;
 const CACHE_TTL_MS = 6 * 3600_000;
-// Roam identifies itself: a restaurant's host should be able to see who asked.
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; household menu lookup)';
+// Epic identifies itself: a restaurant's host should be able to see who asked.
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; household menu lookup)';
 
 const cache = new Map();
 const inflight = new Map();
@@ -38,10 +38,10 @@ const GUESSES = ['/menu', '/menus', '/food', '/order', '/our-menu', '/menu.pdf']
 
 const clean = (s) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;|&#\d+;/gi, ' ').replace(/\s+/g, ' ').trim();
 
-// The same rule as the reader's (sources/menuRead.js): Roam says who it is,
+// The same rule as the reader's (sources/menuRead.js): Epic says who it is,
 // and a blanket "not a browser" refusal is retried once as one, where robots
 // does not object. Owner approved 5 Sep 2026 — Boleros Pizzeria answers 403 to
-// RoamBot, 200 to Chrome, and its robots.txt is a 403 too, so there is no
+// EpicBot, 200 to Chrome, and its robots.txt is a 403 too, so there is no
 // stated policy to respect.
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
@@ -56,7 +56,10 @@ async function robotsForbids(url) {
     const text = (await res.text()).slice(0, 100_000);
     for (const block of text.split(/^user-agent:/gim).slice(1)) {
       const who = block.split(/\r?\n/)[0].trim().toLowerCase();
-      if (who !== '*' && !who.includes('roam')) continue;
+      // Our own name, and the one we used to answer to: a site that wrote a
+      // rule for RoamBot meant this crawler, and the rebrand does not give us
+      // permission it withheld.
+      if (who !== '*' && !who.includes('epic') && !who.includes('roam')) continue;
       for (const [, path] of block.matchAll(/^\s*disallow:\s*(\S+)/gim)) {
         if (path === '/') return true;
         if (path && target.pathname.startsWith(path)) return true;

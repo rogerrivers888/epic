@@ -1,5 +1,5 @@
 // Usage per provider from provider_calls: calls, billable units and estimated
-// cost for a window, plus how much of each free allowance or Roam cap has gone.
+// cost for a window, plus how much of each free allowance or Epic cap has gone.
 // Feeds Settings › Usage and the source picker (Technical Constraints §14
 // "cost per household per period, and cost per source").
 

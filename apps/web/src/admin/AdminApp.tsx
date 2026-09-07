@@ -1,7 +1,7 @@
 /**
- * The back office — the second of Roam's two profiles.
+ * The back office — the second of Epic's two profiles.
  *
- * The owner, 4 Sep 2026: "in the Roam desktop app we need to have 2 profiles:
+ * The owner, 4 Sep 2026: "in the Epic desktop app we need to have 2 profiles:
  * web client, web admin, which has all the admin stuff". So this is a whole
  * application rather than a tab: its own rail, its own screens, and a way back
  * to the household app that says which one you are in.
@@ -65,7 +65,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities' },
   { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on' },
   { key: 'audit', label: 'Audit', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom' },
-  // No capability: the decisions behind what Roam does are not a privilege, and
+  // No capability: the decisions behind what Epic does are not a privilege, and
   // an account that can see any of this should be able to see why.
   { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives' },
 ];

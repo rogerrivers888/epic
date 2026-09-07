@@ -1,6 +1,6 @@
 // Nuitee Connect (LiteAPI): real beds, at a real price, for a real night.
 //
-// The Stay tab has always known the one thing only Roam knows — how much of a
+// The Stay tab has always known the one thing only Epic knows — how much of a
 // household's week is on foot from a given front door — and never the one thing
 // everybody else knows, which is what the room costs. This is that half.
 //
@@ -142,7 +142,7 @@ const STAY_WORDS = {
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
-/** LiteAPI's hotel record, in the shape the rest of Roam speaks (a resolved venue). */
+/** LiteAPI's hotel record, in the shape the rest of Epic speaks (a resolved venue). */
 function asVenue(h) {
   const lat = num(h.latitude ?? h.lat);
   const lng = num(h.longitude ?? h.lng ?? h.lon);
@@ -165,7 +165,7 @@ function asVenue(h) {
     // `stars` is the classification the operator is graded at and allowed to
     // advertise — a fact about the building, the same kind of thing as its
     // address. `rating` is what guests thought, aggregated, which is an opinion
-    // and a rented one. LiteAPI reports the second out of ten; Roam shows every
+    // and a rented one. LiteAPI reports the second out of ten; Epic shows every
     // provider's score out of five (Google's arrives that way), so it is halved
     // here rather than in each screen that draws it.
     stars: num(h.stars ?? h.starRating),
@@ -377,7 +377,7 @@ export function nightsBetween(checkin, checkout) {
  *
  * One room by default, holding everybody, because that is the cheapest honest
  * answer and the household can say otherwise. Beyond one room the adults are
- * spread evenly and the children go with the first — Roam does not know who
+ * spread evenly and the children go with the first — Epic does not know who
  * shares with whom, and rather than invent it the screen shows what was asked
  * for so it can be corrected (owner: ask, do not guess).
  */

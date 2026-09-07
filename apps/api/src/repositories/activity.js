@@ -72,7 +72,7 @@ export async function recordEvents({ accountId, householdId, events }) {
  * Each branch names itself in the words the screen shows, so the feed reads as
  * sentences rather than table names: "saved a place", "rated a dish", "planned
  * a trip". `weight` is what the activity score counts — a rating is a bigger
- * signal of a household using Roam than a screen view is.
+ * signal of a household using Epic than a screen view is.
  */
 export async function feedFor(householdId, { limit = 60, since = null } = {}) {
   const { rows } = await query(
@@ -216,9 +216,9 @@ export async function estateDaily({ days = 30 } = {}) {
 }
 
 /**
- * How Roam is reached: added to a home screen, and opened from one.
+ * How Epic is reached: added to a home screen, and opened from one.
  *
- * Roam has no App Store listing — it is an installable web app — so this is the
+ * Epic has no App Store listing — it is an installable web app — so this is the
  * honest version of the figure a store would give. `added` counts the browser
  * confirming an install; `standalone` counts sessions opened from the home
  * screen, which is the number that says whether an install is actually used.
@@ -252,7 +252,7 @@ export async function activeCounts() {
  * Retention by joining week: of the households that started in a week, how many
  * came back in each of the weeks after it.
  *
- * The standard cohort grid, and the one figure that says whether Roam is worth
+ * The standard cohort grid, and the one figure that says whether Epic is worth
  * having rather than worth trying.
  */
 export async function retentionCohorts({ weeks = 8 } = {}) {

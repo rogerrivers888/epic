@@ -41,12 +41,12 @@ export const sourceName = (key) => NAMES[key] ?? String(key || 'That source').re
  *
  * "Over its allowance" is the one worth separating out, because it is the only
  * one where the answer is not "try again in a minute" — it is somebody's to
- * raise in a console, and until then the place reads from what Roam owns.
+ * raise in a console, and until then the place reads from what Epic owns.
  */
 export function whySourceFailed(key, err) {
   const who = sourceName(key);
   const text = String(err?.message ?? err ?? '');
-  if (/quota|RESOURCE_EXHAUSTED|\b429\b|rate.?limit/i.test(text)) return `${who} has used up today's allowance — showing what Roam knows itself.`;
+  if (/quota|RESOURCE_EXHAUSTED|\b429\b|rate.?limit/i.test(text)) return `${who} has used up today's allowance — showing what Epic knows itself.`;
   if (/not set|no key|missing key|unauthor|401|403/i.test(text)) return `${who} is not switched on here.`;
   if (/timed? ?out|AbortError|TimeoutError|ETIMEDOUT/i.test(text)) return `${who} did not answer in time.`;
   return `${who} could not be reached just now.`;

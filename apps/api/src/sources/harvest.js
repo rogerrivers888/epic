@@ -20,7 +20,7 @@
 //
 // Nothing here costs money and nothing here needs an account. What it costs is
 // somebody else's bandwidth, which is why `sources/wikimedia.js` paces every
-// request and identifies Roam in the User-Agent.
+// request and identifies Epic in the User-Agent.
 
 import crypto from 'node:crypto';
 import * as wm from './wikimedia.js';
@@ -84,7 +84,7 @@ export async function refreshKinds({ onLine } = {}) {
   onLine?.(`${kinds.length.toLocaleString()} Wikidata types descend from an attraction root; ${written.toLocaleString()} written`);
   // The refusals go in second, so they win on conflict and stay refused.
   await lib.upsertKinds(Object.entries(DENY).map(([qid, label]) => ({ qid, label, rootQid: null, category: 'excluded' })));
-  for (const qid of Object.keys(DENY)) await lib.setKind(qid, { admit: false, by: 'Roam' });
+  for (const qid of Object.keys(DENY)) await lib.setKind(qid, { admit: false, by: 'Epic' });
   onLine?.(`${Object.keys(DENY).length} types refused outright: towns, stations, schools, businesses`);
   return kinds.length;
 }
@@ -573,7 +573,7 @@ const COOL_OFF_MS = 4 * 60_000;
  * periodic check killing the harvest it exists to protect. Staleness is judged
  * on `touched_at` instead (repositories/library.js `runningRun`).
  */
-export async function resumeInterrupted({ atBoot = false, startedBy = 'Roam (resumed after a restart)' } = {}) {
+export async function resumeInterrupted({ atBoot = false, startedBy = 'Epic (resumed after a restart)' } = {}) {
   const justClosed = atBoot ? await lib.recoverAbandonedRuns() : [];
 
   if (!atBoot) {
@@ -656,7 +656,7 @@ export async function designationsPass(slug, { onLine, cancelled } = {}) {
     });
     await lib.saveAccolades(a.id, {
       accolades, acclaim, score, scoreParts: parts,
-      band: bandOf(score), roamScore: Math.round(score * 100) / 10,
+      band: bandOf(score), epicScore: Math.round(score * 100) / 10,
     });
     if (accolades.length) decorated += 1;
   }

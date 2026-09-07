@@ -14,7 +14,7 @@ import { colors, spacing, type } from '../theme';
 
 /**
  * One icon set for the whole app: Lucide, drawn as SVG at the size and colour
- * the caller asks for. Every icon is named for what it means in Roam, not for
+ * the caller asks for. Every icon is named for what it means in Epic, not for
  * the picture, so a screen says `name="favourite"` and the set decides the
  * glyph. Emoji and symbol characters are not icons here (owner, 3 Sep 2026).
  */
@@ -34,7 +34,7 @@ const ICONS = {
   menu: Ellipsis,
   keep: Heart, favourite: Star, halfStar: StarHalf, shortlist: Bookmark, shortlisted: BookmarkCheck, pinned: Pin,
   allergen: TriangleAlert, archived: Archive, refresh: RefreshCw, delete: Trash2,
-  // the device's own copy: no signal, saving it, and what Roam owns outright
+  // the device's own copy: no signal, saving it, and what Epic owns outright
   offline: CloudOff, download: Download, owned: Database,
   // facts about a place
   address: MapPin, hours: Clock, children: Baby, phone: Phone, message: MessageSquare, camera: Camera, calendar: Calendar, ticket: Ticket,
@@ -42,7 +42,7 @@ const ICONS = {
   walking: Footprints, driving: Car, transit: TrainFront, taxi: CarTaxiFront, directions: Navigation, home: House,
   // where the device says the household is standing, right now
   here: LocateFixed,
-  // who has Roam, and getting a link to them: the admin module
+  // who has Epic, and getting a link to them: the admin module
   accounts: UserCog, mail: Mail, send: Send, copy: Copy,
   // Somebody joining a table for one meal, what the order goes into while it is
   // being chosen, and the code a waiter points a camera at (owner, 7 Sep 2026).
@@ -64,7 +64,9 @@ const ICONS = {
 
 export type IconName = keyof typeof ICONS;
 
-// One icon colour per mode (style guide): leaf in light, off-white in dark; Lucide outline at 1.8px.
+// Icons are ink: ink on cream in light, cream on ink in dark (Epic pack §04 —
+// "Ink is every letter and line"). Lime is a ground, never a glyph colour.
+// Lucide outline at 1.8px.
 export function Icon({ name, size = 18, color = colors.icon, fill, strokeWidth = 1.8 }: {
   name: IconName; size?: number; color?: string; fill?: boolean; strokeWidth?: number;
 }) {
@@ -139,8 +141,8 @@ export function Rating({ value, children }: { value: number; children?: React.Re
 
 /**
  * A rating drawn as stars (owner, 4 Sep 2026: reviews should have stars). Five
- * glyphs, filled to the nearest half, in the icon colour — never a ★ character,
- * and never red, which the guide keeps for the heart.
+ * glyphs, filled to the nearest half, in ink — never a ★ character, and never
+ * a colour: Epic has no rating yellow and no brand red to reach for.
  */
 export function Stars({ value, size = 15, children }: { value: number; size?: number; children?: React.ReactNode }) {
   const halves = Math.max(0, Math.min(10, Math.round(value * 2)));

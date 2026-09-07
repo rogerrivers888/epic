@@ -13,7 +13,7 @@ import { forgetCopy } from '../offline/cache';
  * research every time they come back to the page."
  *
  * The card says three things, because a household is entitled to know all three:
- * what is on the phone, what Roam owns outright, and what is deliberately not
+ * what is on the phone, what Epic owns outright, and what is deliberately not
  * kept. The last one is not an apology — it is why the hours in the drawer come
  * from the venue's own page rather than from a provider's copy of them.
  */
@@ -99,14 +99,14 @@ export function OfflineCard() {
             {owned.failed ? ` · ${owned.failed} could not be found` : ''}
           </Text>
           <Text style={type.tiny}>
-            When you shortlist, save or say you have been somewhere, Roam goes and researches it from OpenStreetMap, the venue's own
+            When you shortlist, save or say you have been somewhere, Epic goes and researches it from OpenStreetMap, the venue's own
             published details and Wikipedia. Those licences let us keep the answer for good, so it is on your phone and it never expires.
           </Text>
         </View>
       ) : null}
 
       <Text style={[type.tiny, { marginTop: spacing.sm }]}>
-        Roam fills this quietly once a day on its own, using only what costs nothing to fetch. Saving everything also fetches your
+        Epic fills this quietly once a day on its own, using only what costs nothing to fetch. Saving everything also fetches your
         city lists, which can ask Google what kind of place a few unlabelled rows are — the same lookup as opening the Places tab.
       </Text>
 

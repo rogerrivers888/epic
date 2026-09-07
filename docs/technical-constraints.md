@@ -1,4 +1,4 @@
-# Roam — Technical Constraints & API Reference
+# Epic — Technical Constraints & API Reference
 
 | | |
 |---|---|
@@ -105,7 +105,7 @@ You can bias to a portion of the route rather than the whole thing — useful fo
 
 **Retention:** `place_id` indefinite; latitude/longitude 30 days; **everything else, none** — except as the owner has decided below.
 
-**Owner's decision, 4 Sep 2026:** *"You can persist them for 10 hours."* A place's photograph, its rating and its review count may sit on the device for **ten hours** so that reopening the app shows what it already had instead of fetching every card again. Implemented as a private, ten-hour `cache-control` on `/api/photos/google` (`ROAM_PHOTO_CACHE_SECONDS`) and a ten-hour window on what the Inspire me screen remembers, dropped on the way back in when older. It is one household's own browser, never a shared cache, and it expires by itself. Nothing else about this section changes: no licensed field is written to the database, and the server still holds a search in memory only.
+**Owner's decision, 4 Sep 2026:** *"You can persist them for 10 hours."* A place's photograph, its rating and its review count may sit on the device for **ten hours** so that reopening the app shows what it already had instead of fetching every card again. Implemented as a private, ten-hour `cache-control` on `/api/photos/google` (`EPIC_PHOTO_CACHE_SECONDS`) and a ten-hour window on what the Inspire me screen remembers, dropped on the way back in when older. It is one household's own browser, never a shared cache, and it expires by itself. Nothing else about this section changes: no licensed field is written to the database, and the server still holds a search in memory only.
 
 ### 3.2 Yelp — Places API
 
@@ -129,7 +129,7 @@ A separate **Yelp AI API** runs at $25 per 1,000 calls with a 1,000-call daily m
 
 ### 3.3 TripAdvisor Content API
 
-Tripadvisor replaced the v1 Content API with the **Terra** platform in 2026 (docs.terra.tripadvisor.com). Roam integrates the self-serve **Discover** plan; the v1 terms below it are kept for the record.
+Tripadvisor replaced the v1 Content API with the **Terra** platform in 2026 (docs.terra.tripadvisor.com). Epic integrates the self-serve **Discover** plan; the v1 terms below it are kept for the record.
 
 - Self-serve: sign up at Tripadvisor for Business, pick Discover, set a daily budget, get an `X-API-Key`.
 - **Billed per entity, not per call.** Every location ID returned by a search, nearby or details response counts once; a reviews or photos call counts once. Errors do not count.
@@ -137,7 +137,7 @@ Tripadvisor replaced the v1 Content API with the **Terra** platform in 2026 (doc
 - Discover: 10 requests/second, 10,000 calls/day per API (lower in the dashboard), up to **3 reviews and 5 photos** per location.
 - Endpoints: Catalog nearby and text search (rating, count, coordinates, address, URL only), Location Details, Reviews, Photos, batch Details.
 - **What the catalog does in practice (probed 3 Sep 2026, ~50 entities):** the radius form of nearby search returns almost nothing (2 results within 5 km of Trafalgar Square, radius > ~20 rejected); the bounding-box form works (2,262 in a 1 km box) but `category`, `sort` and `min_rating` are silently ignored, so a page is an arbitrary slice of mostly obscure listings. Text search by name is accurate and fast (~150 ms) and returns the real venue with its rating, though ranking is loose ("The Ivy" → "The Ivy House").
-- **Roam's use:** Tripadvisor is opt-in per search or per trip. Alongside other sources it *enriches*: up to 8 of their venues (unrated first, then nearest) are looked up by name with `geo_name`, two hits each, and only a hit whose normalised name and position agree is returned for the resolver to merge. Alone, it takes one bounding-box page as a testing view.
+- **Epic's use:** Tripadvisor is opt-in per search or per trip. Alongside other sources it *enriches*: up to 8 of their venues (unrated first, then nearest) are looked up by name with `geo_name`, two hits each, and only a hit whose normalised name and position agree is returned for the resolver to merge. Alone, it takes one bounding-box page as a testing view.
 - Caching: only the location ID may be stored. Review text must be loaded via a call crawlers cannot index (robots.txt Disallow on the API).
 - Strong international coverage — the best of the three outside the US for attractions and tourist-facing venues.
 
@@ -279,7 +279,7 @@ Two endpoints, and they are deliberately separate:
 | `GET /data/hotels?latitude&longitude&radius` | the beds on a patch of map: name, address, point, stars, guest score | 6 hours — hotels do not open and close while somebody decides |
 | `POST /hotels/rates` | what those beds cost for these dates and this party, by room type, with board and cancellation terms | 10 minutes — a price shown after it has moved is worse than no price |
 
-**The join is the product.** Roam is the only thing that holds the shortlist, so it is the only thing that can rank a bed by *how much of the week is on foot from its front door* (`domain/stays.js`). LiteAPI is what everybody has and Roam did not: the price. Neither is an answer alone — a hotel on the doorstep at £600 a night is not somewhere to stay. So the two lists are merged into one pool before anything is ranked (`sources/stays.js` `mergeBeds`, 250 m and an agreeing name, the same rule §13.10 uses for restaurants) and **the price never enters the sort**.
+**The join is the product.** Epic is the only thing that holds the shortlist, so it is the only thing that can rank a bed by *how much of the week is on foot from its front door* (`domain/stays.js`). LiteAPI is what everybody has and Epic did not: the price. Neither is an answer alone — a hotel on the doorstep at £600 a night is not somewhere to stay. So the two lists are merged into one pool before anything is ranked (`sources/stays.js` `mergeBeds`, 250 m and an agreeing name, the same rule §13.10 uses for restaurants) and **the price never enters the sort**.
 
 **Rented, and merged so that it stays rented.** Where a bed is in both lists the open record wins the row — its reference, its name, its address are OpenStreetMap's and ours to keep — and LiteAPI contributes only the price. Picking one is a claim, so it goes through `POST /api/trips/:id/stay`, which looks a licensed hotel up in the open map (`sources/openMatch.js`) before storing anything; unmatched, the trip keeps the point and the household's own words for it. `/api/trips/:id/stays` is **not** in `offline/policy.ts` and must not be added: no price and no provider name reaches a device.
 
@@ -525,7 +525,7 @@ Three parts:
 
 > "For the UK, I'd like to find the top 15 to 20 attractions in each county and the top 100 or so in London. I would like to get images that we can hold in a database… I've been looking at Airbnb and other sites, and they're almost instant loading. Having users wait for a minute or more to get data is unacceptable."
 
-The first thing in Roam that is *published* rather than searched, and the first table that holds content rather than identifiers. Both are only possible because of what it is made of.
+The first thing in Epic that is *published* rather than searched, and the first table that holds content rather than identifiers. Both are only possible because of what it is made of.
 
 **Where it comes from.** Four Wikimedia endpoints, none of which needs a key, an account or a card:
 
@@ -536,9 +536,9 @@ The first thing in Roam that is *published* rather than searched, and the first 
 | Wikipedia (extracts) | The description on the card | CC BY-SA 4.0, credit and link | free, no key |
 | Wikimedia Commons | The photographs, and — the part that matters — the licence, the photographer and the page that states both | CC0 / PD / CC BY / CC BY-SA per file | free, no key |
 
-What is owed in return is a User-Agent that identifies Roam with a contact, and a rate that is defensible. `sources/wikimedia.js` does both: every request is serialised with a gap, and nothing runs on a household's request.
+What is owed in return is a User-Agent that identifies Epic with a contact, and a rate that is defensible. `sources/wikimedia.js` does both: every request is serialised with a gap, and nothing runs on a household's request.
 
-**What is explicitly not admissible.** Google Places photos, Tripadvisor photos, Yelp photos, and anything scraped. §4 gives Google's display content a retention allowance of *none*, and there is no version of "keep it on our own storage" that survives it. This is not caution: it is the difference between a library Roam owns and a folder of other people's property. `image_assets.may_store` is the column that records that a licence was read and permitted it, and `saveImage()` throws without it.
+**What is explicitly not admissible.** Google Places photos, Tripadvisor photos, Yelp photos, and anything scraped. §4 gives Google's display content a retention allowance of *none*, and there is no version of "keep it on our own storage" that survives it. This is not caution: it is the difference between a library Epic owns and a folder of other people's property. `image_assets.may_store` is the column that records that a licence was read and permitted it, and `saveImage()` throws without it.
 
 **The ranking.** Six parts, weighted, with the working kept on the row (`attractions.score_parts`), because "why is this fourth" is the first question anybody asks of a ranked list: pageviews 0.40, open-to-visitors 0.20, published visitor figure 0.15, Wikidata sitelinks 0.15, heritage designation 0.05, has a photograph at all 0.05.
 
@@ -552,7 +552,7 @@ The fix is in `publishedNear`, not in the score: ordering damps by distance, gen
 
 **Why it is instant.** Every slow thing happens in a back office job that runs weekly. The read path is one indexed query against one table: a full county with every card's placeholder inlined is **46KB and answers in 10ms**, and the images are served from `/api/images/:id/:width` with `immutable` caching for a year, so a card's second view never reaches the API at all. The placeholder is a 20px JPEG held as a data URI (~500 bytes), which means the first paint owes nothing to the image network — the perceived-speed win, and the reason this reads like Airbnb rather than like a search.
 
-**The layers, again.** `place_records` (§13.10) is the household's owned copy of somewhere it cared about; this is Roam's own published atlas of somewhere anybody might. They meet at `attractions.venue_ref`. Neither is a cache of a provider's answer.
+**The layers, again.** `place_records` (§13.10) is the household's owned copy of somewhere it cared about; this is Epic's own published atlas of somewhere anybody might. They meet at `attractions.venue_ref`. Neither is a cache of a provider's answer.
 
 **The home screen reads it** (owner, 5 Sep 2026). `/api/inspire/near` is served from the atlas alone — no provider call, ~20ms — with the live OpenStreetMap look-around behind `live=1` for a deliberate "see everything around here". Two decisions worth keeping: no Food shelf, because restaurants rarely have a photograph anybody may republish and a wall of pictures with a row of grey rectangles in it reads as broken (the chip is a door into Places instead); and only attractions we actually hold a picture of, for the same reason.
 
@@ -562,7 +562,7 @@ Files: `api/migrations/036_image_library.sql`, `api/migrations/039_image_pass_st
 
 > "Currently, on the homepage under the adrenaline section, it's showing football stadiums. That's not what I consider adrenaline. Adrenaline might be an activity like a flying lesson… if there are any water skiing-type activities or anything like that around, that would be adrenaline… parachuting, anything like that. Go-karting, etc. I would like to be able to train it on anything that appears in the categorisation where I believe it's wrong."
 
-**Two vocabularies, and they answer different questions.** The atlas has eight words for what a thing *is* (§13.12, `ATTRACTION_ROOTS`); the home screen has six for what a day there is *like*. Roam had been deriving the second from the first by table lookup, and `active` — one of the eight — covers a Formula One circuit and a football ground alike. So the Adrenaline shelf near London was Wembley, Tottenham Hotspur Stadium, Twickenham, Stamford Bridge and the Royal Military Academy Sandhurst: every place in the county whose Wikidata type descends from *sports venue*.
+**Two vocabularies, and they answer different questions.** The atlas has eight words for what a thing *is* (§13.12, `ATTRACTION_ROOTS`); the home screen has six for what a day there is *like*. Epic had been deriving the second from the first by table lookup, and `active` — one of the eight — covers a Formula One circuit and a football ground alike. So the Adrenaline shelf near London was Wembley, Tottenham Hotspur Stadium, Twickenham, Stamford Bridge and the Royal Military Academy Sandhurst: every place in the county whose Wikidata type descends from *sports venue*.
 
 That is not a mapping that can be re-guessed correctly. Watching sport and doing something dangerous are the same word in every taxonomy that describes *things*, and different words in the only taxonomy that matters here, which describes *afternoons*.
 
@@ -592,19 +592,19 @@ Files: `api/migrations/040_shelf_teaching.sql`, `api/src/domain/moods.js`, `api/
 
 > "Every page of our site needs a unique URL. When I go 1 layer in, that should also have a unique URL. Or, 2 layers in, I should be able to share a URL with someone, and they should be able to get to the exact point that I was on."
 
-**The address decides what is drawn, not the other way round.** Roam kept where you were in React state and wrote a summary of it (`?tab=trips&trip=…`) to the bar afterwards, so the address was a description of the app. Anything the description left out — which day of a trip, which place's drawer, how a list was filtered — could not be sent to anybody. `src/router.tsx` holds the address; `src/routes.ts` reads it into a route and writes a route back out; every screen takes its position as a prop and changes it by navigating.
+**The address decides what is drawn, not the other way round.** Epic kept where you were in React state and wrote a summary of it (`?tab=trips&trip=…`) to the bar afterwards, so the address was a description of the app. Anything the description left out — which day of a trip, which place's drawer, how a list was filtered — could not be sent to anybody. `src/router.tsx` holds the address; `src/routes.ts` reads it into a route and writes a route back out; every screen takes its position as a prop and changes it by navigating.
 
 **Path is the page; query is how the page is set.** `/trips/<id>/day/<dayId>` is a page. `?kind=eat&status=been&sort=recent` is how a page is filtered, `?place=<venueRef>` is a drawer over it. That split is what stops one page having a dozen spellings, and it is why only values that differ from the default are written down: a screen nobody has touched keeps a clean `/inspire`.
 
 **A move is a push; a filter is a replace.** Opening a trip is a step the browser's Back should walk back over. Changing a sort order is not, or Back becomes a tour of every chip somebody tapped.
 
-**Back has to have somewhere to go.** Somebody who arrives on a shared link has nothing behind them in the browser's history, so `back(fallback)` goes one layer up instead of leaving the site. The depth is carried on the history entry (`roamDepth`) rather than counted, because a counter cannot tell Back from Forward.
+**Back has to have somewhere to go.** Somebody who arrives on a shared link has nothing behind them in the browser's history, so `back(fallback)` goes one layer up instead of leaving the site. The depth is carried on the history entry (`epicDepth`) rather than counted, because a counter cannot tell Back from Forward.
 
 **Coming back to where you were is a separate mechanism, and it never redirects.** A typed `/places` is the atlas list, always. What the tab in the rail carries is the address that tab was last left at, and per-page filters are filled in only when the address is silent about them (`useRememberedAddress`, `useStickyQuery`). An address that quietly turned into a different page would not be an address.
 
 **Two things are deliberately absent from it.** A half-filled new-trip form (`/trips/new` is the form; what somebody typed into it is theirs), and a magic-link token, which is stripped from the bar the moment it is spent. What a *link* carries about a new trip is the question — `?place=Bath&kind=outing` — not the answer.
 
-**The old addresses still answer.** `?tab=…&trip=…&section=…` and `?join=…` are translated once, with a replace, because the owner keeps some on his phone and invite links went to people who have never heard of Roam. An invite is now its own page, `/join/<token>`, rather than a query on whatever page the organiser happened to be looking at when they copied it.
+**The old addresses still answer.** `?tab=…&trip=…&section=…` and `?join=…` are translated once, with a replace, because the owner keeps some on his phone and invite links went to people who have never heard of Epic. An invite is now its own page, `/join/<token>`, rather than a query on whatever page the organiser happened to be looking at when they copied it.
 
 **Anything that is not a page says so.** An unknown path draws "there is no page at that address" rather than silently becoming the home screen.
 
@@ -628,7 +628,7 @@ Files: `web/src/router.tsx`, `web/src/routes.ts`, `web/test/routes.test.ts`, and
 
 **The code is minted with the order, not asked for.** `orders.share_token` is written by `insertOrder`, so the QR draws from what the phone is already holding — a restaurant basement is exactly where a token fetched on demand cannot be fetched. `GET /api/order/:token` is public, in the same short list as the group invite link (`auth.js`): the waiter has no account, is standing in front of the household, and the unguessable token is the whole credential. What it opens is one sitting — the dishes, the words for the waiter, first names, and the allergens of the people eating — and nothing else: no household, no history, no roster. It is its own page (`/order/<token>`, §13.14), drawn with no chrome and no tab bar, and it re-reads itself every twenty seconds because the table goes on choosing after the code has been scanned.
 
-**Whose allergens go to the kitchen.** Only the people with a plate on the order — a household of five at a table of two must not put three absent people's allergens in front of a chef, because a warning that is usually irrelevant stops being read. The exception is a plate for the table: everybody there eats off that one, so it puts the whole household's lines back on. Roam still never clears a dish of an allergen a menu does not have to declare; the page says to ask.
+**Whose allergens go to the kitchen.** Only the people with a plate on the order — a household of five at a table of two must not put three absent people's allergens in front of a chef, because a warning that is usually irrelevant stops being read. The exception is a plate for the table: everybody there eats off that one, so it puts the whole household's lines back on. Epic still never clears a dish of an allergen a menu does not have to declare; the page says to ask.
 
 Files: `api/migrations/060_order_guests_and_share.sql`, `api/src/repositories/menus.js`, `api/src/routes/menus.js`, `api/src/auth.js`, `web/src/components/MenuOrder.tsx`, `web/src/screens/OrderTicketScreen.tsx`, `web/src/routes.ts`.
 
@@ -644,17 +644,17 @@ Files: `api/migrations/060_order_guests_and_share.sql`, `api/src/repositories/me
 
 **The visit is dated from the order, not from now.** A meal rated over breakfast the next morning is still recorded as having been eaten the night before, and only the people with a plate are its attendees.
 
-**Guests are not rated.** There is nowhere to put a guest's stars (§13.15) and Roam only learns the household's own palate; the board says so rather than leaving a name off with no explanation.
+**Guests are not rated.** There is nowhere to put a guest's stars (§13.15) and Epic only learns the household's own palate; the board says so rather than leaving a name off with no explanation.
 
 **A meal that is already history can still be rated.** Saying "we ate it" turns the order into a visit, and the drawer stops treating a visit as "the order" — so the plates became unrateable the moment the drawer closed, and the only chance to rate a meal was the sitting in which you said you had eaten it. The Order tab now offers the last meal at this place ("Nobody has rated this meal · you ate here on Sunday 6 September") and hands the phone round for it exactly as for tonight's, which is also how somebody who missed their turn gets one. Such a meal is read-only otherwise: no removing a plate, no rewriting a word for the waiter. The stars are the only thing about a visit that can still change.
 
 **Where a star goes, in three layers.** This is the part that had never been said on a screen:
 
 1. *The plate.* A `ratings` row against the order item and the visit — what "What we had here" in the drawer shows, per person, per meal.
-2. *The dish.* If the plate matches a dish concept, the rating carries `concept_key`, and `loadLearnedPreferences` weights it by recency and counts it toward `ROAM_LEARN_THRESHOLD` (three). Household → the person → Food → "Learned from visits" is that count, and the summary after rating now says the same thing at the moment it changes: "Ada · Arrabbiata — 1 of 3".
+2. *The dish.* If the plate matches a dish concept, the rating carries `concept_key`, and `loadLearnedPreferences` weights it by recency and counts it toward `EPIC_LEARN_THRESHOLD` (three). Household → the person → Food → "Learned from visits" is that count, and the summary after rating now says the same thing at the moment it changes: "Ada · Arrabbiata — 1 of 3".
 3. *The planning.* Confirmed, it becomes a `learned-like` reason on every card the ranker touches, and — new — a food the family loves, so it earns a table of its own on the home screen (`withStarredFoods`, `domain/tastes.js`) beside the foods somebody typed in by hand. It is added, never substituted: a like written by a person always wins, and an unconfirmed one stays out.
 
-**Burrata is not a burrito.** The chip that files a plate under a dish used to be offered on string similarity alone, which is how a seven-letter cheese matched a seven-letter wrap. A near match is now only offered when the menu's own words share a meaningful word with the concept's (`suggestConcept`): "Spaghettoni al Ragù" and "tagliatelle al ragù" share *ragù* and are the same dish; burrata and burrito share only their spelling. A dish Roam cannot name says so on the summary — "not a dish Roam has a name for yet, so that star stays with this plate and this place" — rather than counting for nothing in silence.
+**Burrata is not a burrito.** The chip that files a plate under a dish used to be offered on string similarity alone, which is how a seven-letter cheese matched a seven-letter wrap. A near match is now only offered when the menu's own words share a meaningful word with the concept's (`suggestConcept`): "Spaghettoni al Ragù" and "tagliatelle al ragù" share *ragù* and are the same dish; burrata and burrito share only their spelling. A dish Epic cannot name says so on the summary — "not a dish Epic has a name for yet, so that star stays with this plate and this place" — rather than counting for nothing in silence.
 
 Files: `web/src/components/MenuOrder.tsx`, `api/src/domain/concepts.js`, `api/src/domain/tastes.js`, `api/src/routes/tastes.js`, `api/src/routes/menus.js`, `api/test/dishSuggestion.test.js`, `api/test/starredFoods.test.js`.
 
@@ -676,7 +676,7 @@ Collapsed it is one line; opened it is each person's own number and then the mea
 
 **Coming back asks who is eating before it asks what.** The Order tab opens on the table you had last time, so the common case is no taps at all. Taking somebody off takes their plates off the order with them; a guest from that night is offered by name and never assumed, and seating her again brings back what she ordered, because `addGuest(name, ref)` re-seats her under the id she already had. Then the order you had, to reuse or untick, and the menu to add anything else.
 
-**A dish is no longer dropped because the menu we hold does not list it.** Rebuilding an order from last time kept only the dishes that could be matched to the current menu — which lost three plates out of four in testing, and *every* plate at a place whose menu Roam has never read. A plate with no menu item behind it is carried by its own name (`Carried`, `past:<id>` keys) and can still be removed, noted and rated like any other.
+**A dish is no longer dropped because the menu we hold does not list it.** Rebuilding an order from last time kept only the dishes that could be matched to the current menu — which lost three plates out of four in testing, and *every* plate at a place whose menu Epic has never read. A plate with no menu item behind it is carried by its own name (`Carried`, `past:<id>` keys) and can still be removed, noted and rated like any other.
 
 **Any meal in the record can still be starred, and a visit is never written over.** Every meal under "What we had here" carries its own way back to the stars, so a plate nobody starred — or one two of the three people who ate it starred — is reachable whenever somebody thinks of it. Opening an old meal loads it as the order (that is how the board works), so two rules hold it in place: tonight's order is held aside and handed back by name, and a save on an order with a visit behind it drops the client id and starts a new order instead of rewriting the rows the visit hangs off.
 
@@ -755,8 +755,8 @@ Cost is the central commercial risk: provider content cannot be retained between
 | L16 | **Data export and deletion** | Not started | Any public release | CCPA/CPRA and GDPR both require it. Exclusion from recommendation calculations is not deletion. Bound by Epic 1 C9 and C10 |
 | L14 | **App Store privacy disclosures** | Not started | **V2** native submission | Privacy nutrition labels covering location, microphone, camera, and children's data. Apps directed at children face additional review scrutiny |
 | L15 | **[V3] Video and image rights** | Not started | Video memories feature | User-generated video in a public venue may capture other patrons and staff. Retention, deletion and export obligations apply |
-| L17 | **Stored image licensing (the atlas library)** | **Built** (4 Sep 2026) | Any release showing an atlas card | Every picture Roam holds carries its licence, its photographer, the page that states both and whether a credit is required, on the same row as the bytes (`image_assets`). An allow-list of licences decides what may be stored at all — CC0, public domain, CC BY, CC BY-SA, OGL — and a `Restrictions` note on the file (trademark, personality rights) refuses it whatever the copyright licence says. `may_store` is checked twice: where the licence is read, and again before the row is written. **The obligation this creates is on screens, not on the database:** wherever `attribution_required` is true, the credit line must appear with the picture. See §13.12 |
-| L18 | **Household-uploaded photographs** | **Schema built, flow not** (4 Sep 2026) | Any upload feature reaching households | The tables exist (`image_assets.contributor_account_id`, `moderation`, `image_rewards`) and nothing publishes without a person approving it. What is still needed before the camera flow ships: the licence grant a household gives Roam, stated in the Terms and recorded with the file; a bystander rule (a photograph of a playground contains other people's children); and a takedown route. Rewards are points, never money — Roam has no payment provider |
+| L17 | **Stored image licensing (the atlas library)** | **Built** (4 Sep 2026) | Any release showing an atlas card | Every picture Epic holds carries its licence, its photographer, the page that states both and whether a credit is required, on the same row as the bytes (`image_assets`). An allow-list of licences decides what may be stored at all — CC0, public domain, CC BY, CC BY-SA, OGL — and a `Restrictions` note on the file (trademark, personality rights) refuses it whatever the copyright licence says. `may_store` is checked twice: where the licence is read, and again before the row is written. **The obligation this creates is on screens, not on the database:** wherever `attribution_required` is true, the credit line must appear with the picture. See §13.12 |
+| L18 | **Household-uploaded photographs** | **Schema built, flow not** (4 Sep 2026) | Any upload feature reaching households | The tables exist (`image_assets.contributor_account_id`, `moderation`, `image_rewards`) and nothing publishes without a person approving it. What is still needed before the camera flow ships: the licence grant a household gives Epic, stated in the Terms and recorded with the file; a bystander rule (a photograph of a playground contains other people's children); and a takedown route. Rewards are points, never money — Epic has no payment provider |
 
 ---
 
@@ -765,10 +765,10 @@ Cost is the central commercial risk: provider content cannot be retained between
 Relevant to the naming decision and commonly misunderstood.
 
 - **App names are globally unique across the entire App Store.** Two apps cannot share a name, including two apps from the same developer.
-- Uniqueness is **case-insensitive** — "ROAM" does not get around a taken "Roam".
+- Uniqueness is **case-insensitive** — "EPIC" does not get around a taken "Epic".
 - **Name limit: 2–30 characters.** Single-character names are not permitted.
 - **The subtitle is a separate 30-character field with no uniqueness requirement.** Many apps share subtitles.
-- **The home screen display name is a third, separate value and need not be globally unique.** The store listing can be "Roam: Places You'll Love" while the icon reads "Roam".
+- **The home screen display name is a third, separate value and need not be globally unique.** The store listing can be "Epic: Places You'll Love" while the icon reads "Epic".
 - **Promotional text** is 170 characters, editable without shipping a new build. Useful for a secondary line.
 - Other limits: keywords 100 bytes, description 4,000 characters. The 30-character name limit applies per localisation.
 - **A domain is not required and is entirely independent** of App Store naming.

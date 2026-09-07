@@ -1,4 +1,4 @@
-// When Roam chases, and what it says.
+// When Epic chases, and what it says.
 //
 // The organiser does not chase people (owner, 4 Sep 2026: "reminders should
 // actually be out of the box… as long as they're assured that the reminders are
@@ -14,7 +14,7 @@
 
 import { wallToUtc, DEFAULT_TZ } from './time.js';
 
-/** How many times Roam writes to somebody who still has something outstanding. */
+/** How many times Epic writes to somebody who still has something outstanding. */
 export const CADENCES = {
   gentle: { label: 'Gently', count: 2 },
   standard: { label: 'Standard', count: 3 },
@@ -91,5 +91,5 @@ export function reminderBody({ organiser, groupName, participant, outstanding, w
   // A cost that is short of its minimum is the one thing worth adding: it is
   // the only line in a reminder anybody can do something about together.
   const nudge = short ? ` ${short.more} more and ${short.label} runs.` : '';
-  return `${who}${organiser} still needs ${list || 'a couple of things'} from you for ${groupName}${by}.${nudge} Your list is in Roam.`;
+  return `${who}${organiser} still needs ${list || 'a couple of things'} from you for ${groupName}${by}.${nudge} Your list is in Epic.`;
 }

@@ -32,7 +32,7 @@ test('sharing nothing but the little words a menu joins names with is not a matc
   assert.equal(suggestConcept('Bruschetta Classica'), null);
 });
 
-test('a dish Roam has never heard of says so rather than guessing', () => {
+test('a dish Epic has never heard of says so rather than guessing', () => {
   assert.equal(suggestConcept('Gamberoni alla Sebastian'), null);
   assert.equal(suggestConcept('Patate al Rosmarino'), null);
 });

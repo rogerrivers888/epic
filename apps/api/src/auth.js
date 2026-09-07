@@ -1,7 +1,7 @@
 /**
  * The door.
  *
- * Roam's API answered anybody. `currentHousehold()` is "the first household in
+ * Epic's API answered anybody. `currentHousehold()` is "the first household in
  * the table", so every request from anywhere on the internet resolved to this
  * family: their home address, their children's names and birthdays, every place
  * they have been and what each of them thought of it — and, two requests deep,
@@ -19,7 +19,7 @@
  * With no passcode set the API serves nothing to anybody it does not already
  * know. An account holder with a live session is somebody it knows, so they
  * keep working: the 503 exists to stop the household being served to the
- * internet, not to stop Roam being run on accounts alone.
+ * internet, not to stop Epic being run on accounts alone.
  *
  * Two ways in, on purpose:
  *
@@ -41,7 +41,14 @@ import { accountById, touchAccount } from './repositories/accounts.js';
 import { accessFor, accessOf } from './access.js';
 import { runAsAccount } from './context.js';
 
-export const COOKIE = 'roam_session';
+export const COOKIE = 'epic_session';
+/**
+ * What the cookie was called before the rebrand. Read, never written: a browser
+ * that signed in under the old name keeps its session until the token is next
+ * refreshed, rather than everyone being asked for the passcode again on the
+ * morning of the release. It is cleared alongside the new one on sign-out.
+ */
+const OLD_COOKIE = 'roam_session';
 
 /** Whether this process is the deployed one, rather than somebody's laptop. */
 export const deployed = () => Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_GIT_COMMIT_SHA || process.env.NODE_ENV === 'production');
@@ -54,7 +61,7 @@ export const deployed = () => Boolean(process.env.RAILWAY_ENVIRONMENT || process
  * passcode set refuses every request rather than quietly serving the household
  * to the internet, which is the failure this whole file exists to prevent.
  */
-export const passcode = () => process.env.ROAM_PASSCODE || (deployed() ? null : 'roam-dev');
+export const passcode = () => process.env.EPIC_PASSCODE || (deployed() ? null : 'epic-dev');
 export const authConfigured = () => Boolean(passcode());
 
 /** Constant-time, and safe on a length mismatch (timingSafeEqual throws on one). */
@@ -101,25 +108,33 @@ function bearer(req) {
 function cookieToken(req) {
   const raw = req.headers.cookie;
   if (!raw) return null;
+  let old = null;
   for (const part of raw.split(';')) {
     const eq = part.indexOf('=');
     if (eq < 0) continue;
-    if (part.slice(0, eq).trim() !== COOKIE) continue;
-    try { return decodeURIComponent(part.slice(eq + 1).trim()); } catch { return null; }
+    const name = part.slice(0, eq).trim();
+    if (name !== COOKIE && name !== OLD_COOKIE) continue;
+    try {
+      const token = decodeURIComponent(part.slice(eq + 1).trim());
+      // A request carrying both wins on the new one; keep looking rather than
+      // settling for the old cookie the browser happened to send first.
+      if (name === COOKIE) return token;
+      old = token;
+    } catch { return null; }
   }
-  return null;
+  return old;
 }
 
 /**
  * Which origins the browser app may be served from, when the owner has said.
  *
- * `ROAM_WEB_ORIGIN` is a comma-separated list and is not a secret, so it is a
+ * `EPIC_WEB_ORIGIN` is a comma-separated list and is not a secret, so it is a
  * plain Railway/Doppler variable. Unset, the API still answers any origin — the
  * passcode is doing the work either way — but setting it is what stops another
  * site from being able to open a stream on the family's session, so the README
  * asks for it.
  */
-const ORIGINS = () => String(process.env.ROAM_WEB_ORIGIN || '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
+const ORIGINS = () => String(process.env.EPIC_WEB_ORIGIN || '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
 
 export function originAllowed(origin) {
   if (!origin) return true; // curl, a native app, a same-origin request: no Origin header at all.
@@ -161,7 +176,9 @@ export function sessionCookie(res, token) {
 }
 
 export function clearSessionCookie(res) {
-  res.clearCookie(COOKIE, { httpOnly: true, secure: deployed(), sameSite: deployed() ? 'none' : 'lax', path: '/' });
+  const gone = { httpOnly: true, secure: deployed(), sameSite: deployed() ? 'none' : 'lax', path: '/' };
+  res.clearCookie(COOKIE, gone);
+  res.clearCookie(OLD_COOKIE, gone);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +196,7 @@ export function clearSessionCookie(res) {
  *    and it is held to the same sign-in limit as the passcode.
  *  - `/api/session/request-link` — asking for a new link by e-mail. Answers the
  *    same way whether or not the address has an account, so it cannot be used
- *    to find out who Roam's customers are.
+ *    to find out who Epic's customers are.
  *  - `/api/join/:token` and below — somebody else's door into one trip. The
  *    unguessable link *is* the credential (routes/groups.js), and it shows a
  *    checklist and never the roster.
@@ -216,15 +233,15 @@ export async function requireSession(req, res, next) {
       // nobody's passcode on it must not serve the household to the internet —
       // but an account holder signed in on their own link is not the internet,
       // and refusing them would mean the owner could never take the shared
-      // passcode away without locking every friend out of their own Roam.
+      // passcode away without locking every friend out of their own Epic.
       if (!account) {
         return res.status(503).json({
           error: 'auth_not_configured',
-          message: 'This Roam API has no passcode set. The owner adds ROAM_PASSCODE in Doppler; nothing is served until then.',
+          message: 'This Epic API has no passcode set. The owner adds EPIC_PASSCODE in Doppler; nothing is served until then.',
         });
       }
     } else if (!session) {
-      return res.status(401).json({ error: 'signed_out', message: 'Sign in to Roam to continue.' });
+      return res.status(401).json({ error: 'signed_out', message: 'Sign in to Epic to continue.' });
     }
 
     // A suspended account keeps its data and loses its way in. Checked on every
@@ -233,7 +250,7 @@ export async function requireSession(req, res, next) {
     if (session.account_id && (!account || account.status === 'suspended')) {
       return res.status(403).json({
         error: 'account_suspended',
-        message: 'This Roam account is not active. Ask whoever invited you.',
+        message: 'This Epic account is not active. Ask whoever invited you.',
       });
     }
 

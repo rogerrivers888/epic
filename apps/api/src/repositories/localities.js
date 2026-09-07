@@ -164,7 +164,7 @@ export async function contentsOf(loc, { kind = null, missing = null, limit = 200
     const { rows } = await query(
       `select distinct on (s.venue_ref)
               s.venue_ref as id, s.name, null as slug, 'eat' as side,
-              'restaurant' as type, s.roam_score as score, s.owned_score, s.rank, null as state,
+              'restaurant' as type, s.epic_score as score, s.owned_score, s.rank, null as state,
               coalesce(r.website, s.website) as website, s.outcode, s.locality_slug, null as region_slug,
               null as hero_id, 0 as image_count,
               (r.summary is not null) as has_description,
@@ -175,7 +175,7 @@ export async function contentsOf(loc, { kind = null, missing = null, limit = 200
          from scout_places s
          left join place_records r on r.venue_ref = s.venue_ref
         where ${where.join(' and ')}
-        order by s.venue_ref, s.roam_score desc nulls last
+        order by s.venue_ref, s.epic_score desc nulls last
         limit $2`, [v, limit]);
     out.push(...rows.map((r) => ({ ...r, has_picture: false })));
   }
@@ -211,10 +211,10 @@ export async function coverageOf(loc) {
   // sweep's row (§13.10).
   const { rows: eat } = await query(
     `select count(*)::int as total, ${eatSelects}
-       from (select distinct on (s.venue_ref) s.venue_ref, s.website, s.roam_score
+       from (select distinct on (s.venue_ref) s.venue_ref, s.website, s.epic_score
                from scout_places s
               where ${eatWhere}
-              order by s.venue_ref, s.roam_score desc nulls last) s
+              order by s.venue_ref, s.epic_score desc nulls last) s
        left join place_records r on r.venue_ref = s.venue_ref`, [v]);
 
   const facts = {};
@@ -254,7 +254,7 @@ export const pendingNaming = async () => Number((await query(
 )).rows[0].n);
 
 /**
- * What a place is made of, in Roam's own eight words.
+ * What a place is made of, in Epic's own eight words.
  *
  * Every category is returned, including the ones at zero, because a zero is the
  * finding: Windsor holds forty-three places to go and not one of them is filed

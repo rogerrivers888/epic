@@ -1,5 +1,5 @@
 /**
- * The owned layer: what Roam has researched for itself about a place, and may
+ * The owned layer: what Epic has researched for itself about a place, and may
  * keep for good.
  *
  * This is the other half of the rented/owned split (Technical Constraints

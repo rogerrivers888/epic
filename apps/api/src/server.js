@@ -1,3 +1,6 @@
+// First, so .env is loaded and the old EPIC_* names are aliased before any
+// module below reads one. See env.js.
+import './env.js';
 import express from 'express';
 import { perSearchCost } from './sources/pricing.js';
 import { usageBetween, windows } from './sources/usage.js';
@@ -54,7 +57,7 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' })); // member photos travel as data URLs
 // `credentials` is on so the sign-in response can set the session cookie, which
 // exists only for the two GETs that cannot carry a header (auth.js). Which
-// origins may do that is `ROAM_WEB_ORIGIN`; unset, this behaves as it always
+// origins may do that is `EPIC_WEB_ORIGIN`; unset, this behaves as it always
 // did and the passcode is the only guard.
 app.use(cors({ origin: (origin, cb) => cb(null, originAllowed(origin)), credentials: true }));
 
@@ -66,12 +69,12 @@ app.get('/health', async (_req, res) => {
     // `auth` is reported because an API that is not asking for a passcode is a
     // fact the owner needs to be able to see without reading the logs.
     res.json({
-      ok: true, service: 'roam-api', db: 'up',
+      ok: true, service: 'epic-api', db: 'up',
       commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
       auth: authConfigured() ? 'on' : 'not-configured',
     });
   } catch (err) {
-    res.status(503).json({ ok: false, service: 'roam-api', db: 'down', error: err.message });
+    res.status(503).json({ ok: false, service: 'epic-api', db: 'down', error: err.message });
   }
 });
 
@@ -91,7 +94,7 @@ app.use('/api', sessionRoutes);
 app.use('/api/images', libraryImageRoutes);
 
 // The code on a restaurant table (routes/menus.js). Outside the door, like the
-// group invite link: the waiter scanning it has no Roam account, and the
+// group invite link: the waiter scanning it has no Epic account, and the
 // unguessable token is the whole credential. Mounted before `requireSession`
 // so it is answered rather than turned away.
 app.use('/api/order', orderTicketRoutes);
@@ -106,7 +109,7 @@ app.use('/api', deviceRoutes);
 for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/photos', '/api/places']) app.use(path, spendLimit);
 
 // The back office, behind the admin door (access.js). `requireDoor` answers 404
-// rather than 403, so a household using Roam never learns any of it is there;
+// rather than 403, so a household using Epic never learns any of it is there;
 // each route inside then names the capability it needs.
 //
 // Mounted before the household routes so nothing about other people's accounts
@@ -188,7 +191,7 @@ app.get('/api/sources', async (_req, res, next) => {
       { key: 'seatgeek', label: 'SeatGeek events', env: 'SEATGEEK_CLIENT_ID' },
       { key: 'predicthq', label: 'PredictHQ events (incl. community)', env: 'PREDICTHQ_API_KEY' },
       { key: 'datathistle', label: 'Data Thistle UK listings', env: 'DATATHISTLE_API_KEY' },
-      { key: 'scout', label: 'Local scout (Claude reads local what\'s-on pages)', env: 'ROAM_LOCAL_SCOUT=on' },
+      { key: 'scout', label: 'Local scout (Claude reads local what\'s-on pages)', env: 'EPIC_LOCAL_SCOUT=on' },
       // Not a place search: it prices beds on the Stay tab and never runs
       // inside a browse (sources/index.js ASIDE).
       { key: 'liteapi', label: 'LiteAPI hotel rates (Stay tab)', env: 'LITEAPI_KEY' },
@@ -257,7 +260,7 @@ app.get('/api/keys', requireOwner, (_req, res) => {
   };
 
   const expected = [
-    'DATABASE_URL', 'ROAM_PASSCODE', 'ANTHROPIC_API_KEY', 'GOOGLE_MAPS_API_KEY',
+    'DATABASE_URL', 'EPIC_PASSCODE', 'ANTHROPIC_API_KEY', 'GOOGLE_MAPS_API_KEY',
     'TRIPADVISOR_API_KEY', 'TICKETMASTER_API_KEY', 'SEATGEEK_CLIENT_ID',
     'PREDICTHQ_API_KEY', 'DATATHISTLE_API_KEY', 'LITEAPI_KEY', 'MAPILLARY_TOKEN',
   ];
@@ -321,8 +324,8 @@ app.patch('/api/sources/:key', async (req, res, next) => {
  * of holding it is that we stopped asking.
  */
 // How long a device may hold a provider's photograph. The owner set ten hours
-// (ROAM_PHOTO_CACHE_SECONDS moves it without a deploy).
-const PHOTO_CACHE_SECONDS = Number(process.env.ROAM_PHOTO_CACHE_SECONDS || 36_000);
+// (EPIC_PHOTO_CACHE_SECONDS moves it without a deploy).
+const PHOTO_CACHE_SECONDS = Number(process.env.EPIC_PHOTO_CACHE_SECONDS || 36_000);
 
 app.get('/api/photos/google', async (req, res) => {
   try {
@@ -363,9 +366,9 @@ await loadSourceSettings();
 // serves nothing (auth.js) — that is deliberate, and it must be obvious in the
 // logs why, rather than looking like the database is down.
 if (authConfigured()) {
-  console.log(deployed() ? 'roam-api: passcode set; sessions last 90 days' : "roam-api: local passcode 'roam-dev' (ROAM_PASSCODE overrides)");
+  console.log(deployed() ? 'epic-api: passcode set; sessions last 90 days' : "epic-api: local passcode 'epic-dev' (EPIC_PASSCODE overrides)");
 } else {
-  console.warn('roam-api: ROAM_PASSCODE is not set. Every /api request will answer 503 until the owner adds it in Doppler.');
+  console.warn('epic-api: EPIC_PASSCODE is not set. Every /api request will answer 503 until the owner adds it in Doppler.');
 }
 // Two sweeps, once on start and then daily.
 //
@@ -376,7 +379,7 @@ if (authConfigured()) {
 const sweep = async () => {
   await sweepDeadSessions().catch(() => null);
   const plans = await sweepExpiredPlanSessions().catch(() => null);
-  if (plans) console.log(`roam-api: swept ${plans} expired planning session(s)`);
+  if (plans) console.log(`epic-api: swept ${plans} expired planning session(s)`);
 };
 void sweep();
 setInterval(() => { void sweep(); }, 24 * 3600_000).unref?.();
@@ -387,7 +390,7 @@ setInterval(() => { void sweep(); }, 24 * 3600_000).unref?.();
 startOwnLoop();
 // The sweep: one area at a time, then the menus it claimed (sources/scoutArea.js).
 startScoutLoop();
-// Roam chases the group, the organiser does not (owner, 4 Sep 2026): any run
+// Epic chases the group, the organiser does not (owner, 4 Sep 2026): any run
 // whose morning has passed is written once, whether or not anyone is looking.
 startReminderLoop();
 // A harvest of the atlas cannot survive a restart, and this process restarting
@@ -402,15 +405,15 @@ startReminderLoop();
 // tell those apart from the outside — so it waits until this process has been
 // up and answering for a minute. If the container is going to fall over, it
 // falls over first, on its own, with nothing of ours in the frame.
-const RESUME_AFTER_MS = Number(process.env.ROAM_HARVEST_RESUME_DELAY_MS || 60_000);
+const RESUME_AFTER_MS = Number(process.env.EPIC_HARVEST_RESUME_DELAY_MS || 60_000);
 // And then again every few minutes, for as long as this process is up. Deploys
 // in this tree land minutes apart, and a resume that gets a single attempt will
 // sooner or later spend it inside somebody else's deploy — which is exactly
 // what happened, and left ninety-five counties unharvested with nothing due to
 // ask again (sources/harvest.js).
-const RESUME_EVERY_MS = Number(process.env.ROAM_HARVEST_RESUME_EVERY_MS || 5 * 60_000);
+const RESUME_EVERY_MS = Number(process.env.EPIC_HARVEST_RESUME_EVERY_MS || 5 * 60_000);
 const tryResume = (atBoot) => resumeInterrupted({ atBoot })
-  .then((r) => { if (r?.resumed || (atBoot && r)) console.log(`roam-api: harvest ${r.resumed ? `resumed over ${r.regions} region(s)` : `not resumed — ${r.reason}`}`); })
+  .then((r) => { if (r?.resumed || (atBoot && r)) console.log(`epic-api: harvest ${r.resumed ? `resumed over ${r.regions} region(s)` : `not resumed — ${r.reason}`}`); })
   .catch((err) => console.error('harvest recovery', err.message));
 setTimeout(() => { void tryResume(true); }, RESUME_AFTER_MS).unref?.();
 
@@ -426,13 +429,13 @@ const resumeTransit = () => transit.resumeHarvest({
   record: transitRepo.recordCoverage,
   covered: (cell) => transitRepo.cellCovered(transit.cellArea(cell)),
   remaining: () => transitRepo.cellsOutstanding(TRANSIT_CELLS),
-}).then((r) => { if (r && !r.done && r.cells) console.log(`roam-api: stations, ${r.cells} more cell(s), ${r.stored} stops`); })
+}).then((r) => { if (r && !r.done && r.cells) console.log(`epic-api: stations, ${r.cells} more cell(s), ${r.stored} stops`); })
   .catch((err) => console.error('stations harvest', err.message));
 setTimeout(() => { void resumeTransit(); }, RESUME_AFTER_MS + 30_000).unref?.();
 setInterval(() => { void resumeTransit(); }, RESUME_EVERY_MS).unref?.();
 setInterval(() => { void tryResume(false); }, RESUME_EVERY_MS).unref?.();
 const server = app.listen(port, '0.0.0.0', () => {
-  console.log(`roam-api listening on 0.0.0.0:${port}`);
+  console.log(`epic-api listening on 0.0.0.0:${port}`);
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {

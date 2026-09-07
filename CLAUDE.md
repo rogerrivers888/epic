@@ -1,4 +1,4 @@
-# Roam — working agreements for agents
+# Epic — working agreements for agents
 
 Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` before changing behaviour. `docs/ux-research.md` explains why screens look the way they do.
 
@@ -17,8 +17,11 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
 - **A device may hold less than the server may.** Every API answer passes `apps/web/src/offline/policy.ts` before it is written to IndexedDB, and an endpoint not named there is not saved. Add new endpoints to that file deliberately; never make the fallback "save it unless it looks licensed".
 - Every outbound provider call is attributed to a household and session in `provider_calls`; new integrations must log there before they are enabled.
 - Allergens exclude; dislikes rank. They never share a control, a colour, or a code path.
+- **The brand is the Epic pack v1** (`Supporting docs/Rebrand - EPIC`, September 2026), and it retires the Roam guidelines entirely (owner, 7 Sep 2026). Lime `#C8F542` is the brand and is used big and flat — the header, the primary action, and the moment something is selected. Ink `#201E1D` is every letter and every rule; cream `#FFFDF9` is the reading ground. Lime tint and moss are UI only. Square corners throughout, 2px ink rules, no shadows. **Never cream or white type on lime** (1.25:1); lime type only ever sits on ink. Archivo is the whole type system — there is no second face, and Caveat is gone. Every colour comes from `apps/web/src/theme.ts`; never a hex in a screen.
+- **Roam red is retired, with one exception the owner kept**: allergen and overrun warnings stay red, because they mean danger rather than brand (7 Sep 2026). The loved heart is ink now. Nothing else in the app is red.
+- **The mark is drawn, not a file.** `apps/web/src/components/Wordmark.tsx` — "Epic" in Archivo 800 at −0.06em with the pin as the dot of a dotless ı. The pin never sits beside the word, is never recoloured, and below 24px the wordmark becomes the pin alone. `docs/brand/README.txt` is the reference; the strapline is "Seize the day".
 - Voice is interpreted against a closed set that is visible on screen, and every voice action has a tap equivalent that produces the same state change.
-- While the household is speaking, the screen shows only the live transcript (`Listening` component): suggestions and everything else collapse, listening continues until they tap Done, and nothing is sent before then. Use `useSpeech` (continuous, accumulating) for every mic; never send on the first pause. Exception (owner, 3 Sep 2026, Plan screen): the criteria rows stay in view and fill as the words arrive (`/api/plan/preview`), with a small live box and one red Stop; the rest of the rule holds.
+- While the household is speaking, the screen shows only the live transcript (`Listening` component): suggestions and everything else collapse, listening continues until they tap Done, and nothing is sent before then. Use `useSpeech` (continuous, accumulating) for every mic; never send on the first pause. Exception (owner, 3 Sep 2026, Plan screen): the criteria rows stay in view and fill as the words arrive (`/api/plan/preview`), with a small live box and one red Stop; the rest of the rule holds. That Stop is the third thing allowed to be red, beside allergens and overruns — it is an urgent action, not brand colour.
 - Options are composed from one retrieved pool; adding an option must not add a provider call.
 - **Every page has an address, and the address is what decides what is drawn** (owner, 5 Sep 2026: "Every page of our site needs a unique URL… 2 layers in, I should be able to share a URL with someone, and they should be able to get to the exact point that I was on"). `src/routes.ts` is the only place a URL is spelled; `src/router.tsx` is the only thing that reads or writes the address bar. A new screen or a new layer inside one is not done until it has a route in `routes.ts` and a case in `test/routes.test.ts`. The path is the page (`/trips/<id>/day/<dayId>`); the query is how that page is set (`?kind=eat`, `?place=<ref>`), and only what differs from the default is written down. A move pushes, a filter replaces. Never read or write `window.location` or `window.history` from a screen. Technical Constraints §13.14.
 
@@ -36,3 +39,8 @@ The owner reviews every screen in both views on the deployed site: the shell (`a
 ## Running
 
 See `README.md`. Postgres is on `localhost:5434` locally because 5432/5433 are used by other projects on the owner's machine.
+
+The rebrand left four things outside the repo still called Roam — the `ROAM_*`
+variables in Doppler (aliased for now by `apps/api/src/env.js`), the Railpack
+commands on Railway, the Railway project and service names, and a local `.env`.
+README › "The rebrand: what is still called Roam" says what each one needs.

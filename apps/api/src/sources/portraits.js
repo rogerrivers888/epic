@@ -164,7 +164,7 @@ function namesThePlace(title, name) {
  * Find, licence-check, download and store one portrait.
  *
  * `subjectType` is 'country' or 'locality'; `subjectId` is what the rest of
- * Roam calls the place — an ISO code, or `GB:Bath`.
+ * Epic calls the place — an ISO code, or `GB:Bath`.
  */
 export async function portraitFor({ subjectType, subjectId, name, lat, lng, countryCode, onLine, replace = false }) {
   const held = await lib.portraitOf(subjectType, subjectId);

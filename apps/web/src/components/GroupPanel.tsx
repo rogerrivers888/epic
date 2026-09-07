@@ -18,7 +18,7 @@ import { paths } from '../routes';
  * The group, from the organiser's side.
  *
  * Setting one up is four numbered questions in the owner's order (4 Sep 2026):
- * what everyone must do, how people get in, how often Roam chases, and what you
+ * what everyone must do, how people get in, how often Epic chases, and what you
  * are charging for. They read as a wizard the first time — numbered, the one
  * you are on is the one that is open — and are a settings page ever after,
  * because the second visit is always "the coach quote came back higher".
@@ -52,7 +52,7 @@ const STEPS: { key: StepKey; title: string; blurb?: string; next: string; skip?:
     next: 'Next · Reminders',
     skip: 'Skip — nothing is mandatory',
   },
-  { key: 'chasing', title: 'Reminders', blurb: 'Roam writes to whoever still has something outstanding, so you never ask twice.', next: 'Next · Ask them in' },  // "None" is one of the frequencies, so this step has no skip
+  { key: 'chasing', title: 'Reminders', blurb: 'Epic writes to whoever still has something outstanding, so you never ask twice.', next: 'Next · Ask them in' },  // "None" is one of the frequencies, so this step has no skip
   { key: 'invite', title: 'Ask them in', blurb: 'A code to hold up, a link, a WhatsApp group, or the names you already know.', next: "That's my group set up" },
 ];
 
@@ -309,7 +309,7 @@ export function GroupPanel({ d, onChanged, onPage }: {
     wanted: `${items.filter((i) => i.required).length} mandatory, ${items.filter((i) => !i.required).length} optional${costs.length ? ` · ${costs.length} priced` : ''}`,
     chasing: !reminders.on ? 'Off — you are chasing them yourself'
       : reminders.next ? `${reminders.cadence} — next on ${day(reminders.next.date)}`
-      : group.wantedBy ? 'Every reminder has been sent' : 'Set a date and Roam will chase',
+      : group.wantedBy ? 'Every reminder has been sent' : 'Set a date and Epic will chase',
     invite: settingUp ? 'Nobody asked in yet' : `${summary.joined} joined of ${group.expectedCount ?? '—'}`,
   };
 
@@ -750,7 +750,7 @@ function GroupScene({ wide }: { wide: boolean }) {
         <Rect x={14} y={28} width={92} height={124} rx={10} fill={colors.surface} stroke={colors.ink} strokeWidth={2} />
         <Rect x={28} y={44} width={64} height={9} rx={4.5} fill={colors.ink} opacity={0.85} />
         <Rect x={28} y={60} width={44} height={6} rx={3} fill={colors.ink} opacity={0.25} />
-        <Rect x={28} y={76} width={64} height={20} rx={4} fill={colors.mint} />
+        <Rect x={28} y={76} width={64} height={20} rx={4} fill={colors.lime} />
         <Rect x={28} y={106} width={64} height={6} rx={3} fill={colors.ink} opacity={0.25} />
         <Rect x={28} y={119} width={38} height={6} rx={3} fill={colors.ink} opacity={0.25} />
 
@@ -782,13 +782,13 @@ function GroupScene({ wide }: { wide: boolean }) {
  * Three lines, one sentence each.
  *
  * The middle one is deliberately not "we collect the cash and pay you
- * directly": Roam holds no money yet, so it works out every share and tells you
+ * directly": Epic holds no money yet, so it works out every share and tells you
  * who has paid, and you are paid directly. The day a payment account exists
  * that line becomes the owner's original.
  */
 const SELL: { title: string; line: string }[] = [
   { title: 'Mandatory or not, you choose', line: 'Say what everyone must do and what is only being asked about.' },
-  { title: 'Add your own events', line: 'A coach, a band, a boat: they pay you directly, or Roam collects and pays you out.' },
+  { title: 'Add your own events', line: 'A coach, a band, a boat: they pay you directly, or Epic collects and pays you out.' },
   { title: 'A minimum and a maximum', line: 'Under the minimum nothing runs and nothing is taken; at the maximum the link stops taking people.' },
 ];
 
@@ -813,13 +813,13 @@ function MustAsk({ value, onChange }: { value: boolean; onChange: (must: boolean
  * second step it is "priced in" (owner, 7 Sep 2026: "I don't understand what
  * step 3 is when I've already created my event in step 2").
  */
-function itemMeta(i: GroupItem, mode: 'direct' | 'roam') {
+function itemMeta(i: GroupItem, mode: 'direct' | 'epic') {
   const bits: string[] = [];
   if (i.startsOn) bits.push(`${day(i.startsOn)}${i.startsAt ? ` ${i.startsAt}` : ''}`);
   else if (i.detail) bits.push(i.detail);
   if (i.pricing === 'fixed' && i.amountPence) bits.push(`${money(i.amountPence)} each`);
   if (i.pricing === 'variable' && i.totalPence) bits.push(`${money(i.totalPence)} split by numbers`);
-  if (i.pricing) bits.push((i.paymentMode ?? mode) === 'roam' ? 'Roam collects' : 'paid to you');
+  if (i.pricing) bits.push((i.paymentMode ?? mode) === 'epic' ? 'Epic collects' : 'paid to you');
   if (i.minimumCount) bits.push(`needs ${i.minimumCount}`);
   if (i.closesOn) bits.push(`by ${day(i.closesOn)}`);
   if (i.bookWhere === 'yourself') bits.push('book your own');
@@ -889,7 +889,7 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
   const [total, setTotal] = useState(item?.totalPence != null ? String(item.totalPence / 100) : '');
   const [minimum, setMinimum] = useState(item?.minimumCount != null ? String(item.minimumCount) : '');
   const [deadline, setDeadline] = useState(item?.closesOn ?? '');
-  const [mode, setMode] = useState<'direct' | 'roam'>(item?.paymentMode ?? g.group.paymentMode);
+  const [mode, setMode] = useState<'direct' | 'epic'>(item?.paymentMode ?? g.group.paymentMode);
   const [said, setSaid] = useState<string | null>(null);
 
   const body = (): GroupItemInput => ({
@@ -906,7 +906,7 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
     startsOn: on || null, startsAt: at || null,
     meet: meet ? { label: meet.label, lat: meet.lat || null, lng: meet.lng || null } : null,
     guestNote: note.trim() || null,
-    bookWhere: item?.bookWhere ?? (price === 'free' ? null : 'roam'),
+    bookWhere: item?.bookWhere ?? (price === 'free' ? null : 'epic'),
   });
 
   const save = () => {
@@ -1027,12 +1027,12 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
               <Text style={styles.section}>Who takes the money</Text>
               <Segmented
                 value={mode}
-                options={[{ value: 'direct' as const, label: 'Straight to you' }, { value: 'roam' as const, label: 'Roam collects' }]}
+                options={[{ value: 'direct' as const, label: 'Straight to you' }, { value: 'epic' as const, label: 'Epic collects' }]}
                 onChange={setMode}
               />
               <Text style={type.small}>
-                {mode === 'roam'
-                  ? 'Roam takes it with their booking and pays it out to you.'
+                {mode === 'epic'
+                  ? 'Epic takes it with their booking and pays it out to you.'
                   : 'They pay you however you normally do it, and you tick it off here.'}
               </Text>
             </View>
@@ -1043,7 +1043,7 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
           {item && onSettle && item.pricing === 'variable' && item.state === 'open' && m ? (
             <View style={{ gap: spacing.sm }}>
               <Text style={styles.section}>This one is running</Text>
-              <Text style={type.small}>{m.shares} on it so far. Roam settles it on the deadline by itself — these are for when it changes.</Text>
+              <Text style={type.small}>{m.shares} on it so far. Epic settles it on the deadline by itself — these are for when it changes.</Text>
               <Wrap>
                 <Chip label="Settle it now" icon="check" onPress={() => onSettle({ action: 'close' })} />
                 <Chip label="Give it a week" icon="hours" onPress={() => onSettle({ action: 'extend', closesOn: plusWeek(m.closesOn) })} />
@@ -1081,7 +1081,7 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
   // The invite is its own page (`/join/<token>`), not a query on whatever page
   // the organiser happened to be on when they copied it.
   const link = useMemo(() => {
-    const base = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : 'https://roam.app';
+    const base = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : 'https://epic.app';
     return `${base}${paths.join(g.group.inviteToken)}`;
   }, [g.group.inviteToken]);
   const message = `${g.group.name ?? 'A trip'} — say you're coming and see what's needed: ${link}`;
@@ -1126,7 +1126,7 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
         <View style={{ gap: spacing.sm }}>
           <Text style={styles.section}>Add the ones you know</Text>
           <TextInput value={name} onChangeText={setName} placeholder="Their name" placeholderTextColor={colors.inkFaint} style={styles.input} />
-          <TextInput value={contact} onChangeText={setContact} placeholder="Mobile or email, so Roam can remind them" placeholderTextColor={colors.inkFaint} style={styles.input} autoCapitalize="none" />
+          <TextInput value={contact} onChangeText={setContact} placeholder="Mobile or email, so Epic can remind them" placeholderTextColor={colors.inkFaint} style={styles.input} autoCapitalize="none" />
           <Row>
             <Button label="Add them" kind="secondary" onPress={() => { if (!name.trim()) return; onAdd({ name: name.trim(), contact: contact.trim() || undefined }); setName(''); setContact(''); }} />
             <Button label="Done" kind="ghost" onPress={() => setAdding(false)} />
@@ -1381,7 +1381,7 @@ const styles = StyleSheet.create({
   // in capitals (owner, 7 Sep 2026).
   section: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
   fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, marginBottom: 4 },
-  pagePreview: { width: 76, height: 92, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.mint, borderWidth: 1, borderColor: colors.line },
+  pagePreview: { width: 76, height: 92, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.lime, borderWidth: 1, borderColor: colors.line },
   pagePreviewImg: { width: '100%', height: '100%' },
   pagePreviewBlank: { flex: 1, backgroundColor: colors.surface, margin: 8, padding: 6, gap: 5, justifyContent: 'flex-end' },
   pagePreviewBar: { height: 5, borderRadius: 2, backgroundColor: colors.line },
@@ -1399,7 +1399,7 @@ const styles = StyleSheet.create({
   numberInput: { flex: 1, textAlign: 'center', fontFamily: fonts.body, fontSize: 17, fontWeight: '700', color: colors.ink, minWidth: 40, outlineStyle: 'none' as any },
   wantedRow: { gap: 6, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
   hero: {
-    // The one mint field in light; in dark the header ground is the page ground,
+    // The one lime field in light; in dark the header ground is the page ground,
     // so a rule gives the panel its edge back.
     backgroundColor: colors.headerBg, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.md, overflow: 'hidden',
     borderWidth: 1, borderColor: colors.line,

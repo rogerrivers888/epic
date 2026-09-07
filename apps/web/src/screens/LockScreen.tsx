@@ -1,7 +1,7 @@
 /**
  * The passcode.
  *
- * Roam's API used to answer anybody who found its address, which meant the
+ * Epic's API used to answer anybody who found its address, which meant the
  * family's home, the children's names and every rating they had ever given were
  * a URL away. This is the door that closed it.
  *
@@ -43,7 +43,7 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
       const r = await api.requestSignInLink(email.trim());
       setAsked(r.message);
     } catch (err: any) {
-      setProblem(err instanceof ApiError ? err.message : 'Could not reach Roam. Check your connection and try again.');
+      setProblem(err instanceof ApiError ? err.message : 'Could not reach Epic. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -60,7 +60,7 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
     } catch (err: any) {
       // The API says how long a locked-out device has to wait; anything else is
       // simply wrong, and it does not say which part was wrong.
-      setProblem(err instanceof ApiError ? err.message : 'Could not reach Roam. Check your connection and try again.');
+      setProblem(err instanceof ApiError ? err.message : 'Could not reach Epic. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -74,9 +74,9 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
         <View style={[styles.card, { maxWidth: Math.min(380, width - spacing.xl * 2) }]}>
           <Wordmark height={40} ground={colors.surface} />
           <View style={styles.lock}><Icon name="locked" size={20} color={colors.inkMuted} /></View>
-          <Text style={type.body}>This Roam has no passcode set yet.</Text>
+          <Text style={type.body}>This Epic has no passcode set yet.</Text>
           <Text style={type.small}>
-            Nothing is being served until there is one. Add <Text style={styles.mono}>ROAM_PASSCODE</Text> in Doppler and redeploy the API.
+            Nothing is being served until there is one. Add <Text style={styles.mono}>EPIC_PASSCODE</Text> in Doppler and redeploy the API.
           </Text>
         </View>
       </View>
@@ -87,7 +87,7 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
     <View style={styles.root}>
       <View style={[styles.card, { maxWidth: Math.min(380, width - spacing.xl * 2) }]}>
         <Wordmark height={40} ground={colors.surface} />
-        <Text style={type.small}>Remember every place you love</Text>
+        <Text style={type.small}>Seize the day</Text>
 
         <View style={styles.lock}><Icon name="locked" size={20} color={colors.inkMuted} /></View>
 
@@ -117,7 +117,7 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
           </View>
         ) : null}
 
-        <Button label="Open Roam" onPress={submit} loading={busy} disabled={!passcode.trim()} style={{ alignSelf: 'stretch' }} />
+        <Button label="Open Epic" onPress={submit} loading={busy} disabled={!passcode.trim()} style={{ alignSelf: 'stretch' }} />
         <Text style={type.tiny}>This device stays signed in for 90 days. You can sign it out from Settings.</Text>
 
         {/* The other way in. Everybody except the owner signs in by link, so
@@ -130,7 +130,7 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
             </View>
           ) : asking ? (
             <>
-              <Text style={type.small}>Roam will e-mail you a link.</Text>
+              <Text style={type.small}>Epic will e-mail you a link.</Text>
               <TextInput
                 value={email}
                 onChangeText={(t) => { setEmail(t); if (problem) setProblem(null); }}

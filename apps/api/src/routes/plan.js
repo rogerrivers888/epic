@@ -17,10 +17,10 @@ import { parseStructured, spendSummary, SpendBoundError, ModelBudgetError, MODEL
 
 // How many candidates get a real road time from Google Routes on each plan.
 // Billed per element against a daily quota, so it is a budget, not a maximum.
-const MATRIX_MAX = Number(process.env.ROAM_MATRIX_MAX || 60);
+const MATRIX_MAX = Number(process.env.EPIC_MATRIX_MAX || 60);
 
 // Rows fill while the household is still talking: a smaller, quicker model reads the words so far.
-const PREVIEW_MODEL = process.env.ROAM_PREVIEW_MODEL || 'claude-sonnet-5';
+const PREVIEW_MODEL = process.env.EPIC_PREVIEW_MODEL || 'claude-sonnet-5';
 import { searchAllSources, searchCorridor, eventSources, optInFrom, defaultSourceKeys, enabledSources, sourceHasKey, sourceOff, SCREEN_DEADLINE_MS } from '../sources/index.js';
 import { resolvePlace, KNOWN_PLACES } from '../sources/fixtures.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
@@ -1393,10 +1393,10 @@ router.post('/inspire', async (req, res, next) => {
 // quicker model with thinking off (owner, 4 Sep 2026: "I've been waiting more
 // than a minute and a half… we need to find ways to speed this up, even if it's
 // just rendering some stuff and then rendering other stuff in the background").
-const INSPIRE_MODEL = process.env.ROAM_INSPIRE_MODEL || 'claude-sonnet-5';
+const INSPIRE_MODEL = process.env.EPIC_INSPIRE_MODEL || 'claude-sonnet-5';
 // A model call that has not answered by now is not going to: the run says so
 // rather than leaving a spinner turning.
-const INSPIRE_DEADLINE_MS = Number(process.env.ROAM_INSPIRE_DEADLINE_MS || 75_000);
+const INSPIRE_DEADLINE_MS = Number(process.env.EPIC_INSPIRE_DEADLINE_MS || 75_000);
 
 const deadline = (promise, ms, message) => Promise.race([
   promise,
@@ -1429,7 +1429,7 @@ async function runInspire({ household, attending, session, state, append = false
       model: INSPIRE_MODEL,
       thinking: 'off',
     });
-    let out = await deadline(ask(), INSPIRE_DEADLINE_MS, 'Roam took too long thinking of places — try Inspire me again.');
+    let out = await deadline(ask(), INSPIRE_DEADLINE_MS, 'Epic took too long thinking of places — try Inspire me again.');
     // Nothing said and no mood picked is the commonest way in, and it was
     // coming back with an empty list. Asked once more, plainly, before giving up.
     if (!out.ideas?.length) {
@@ -1446,7 +1446,7 @@ async function runInspire({ household, attending, session, state, append = false
           thinking: 'off',
         }),
         INSPIRE_DEADLINE_MS,
-        'Roam took too long thinking of places — try Inspire me again.',
+        'Epic took too long thinking of places — try Inspire me again.',
       );
     }
 
@@ -1526,7 +1526,7 @@ const placeSourceKeys = () => enabledSources().filter((src) => !src.events && sr
 // Google answers in about a second; OpenStreetMap takes fourteen and its entries
 // carry no rating, so they sort to the bottom of this list and are never seen —
 // waiting for them bought nothing and cost the picture (owner, 4 Sep 2026).
-const THINGS_DEADLINE_MS = Number(process.env.ROAM_THINGS_DEADLINE_MS || 8000);
+const THINGS_DEADLINE_MS = Number(process.env.EPIC_THINGS_DEADLINE_MS || 8000);
 const thingsSearch = (place) => ({ center: { lat: place.lat, lng: place.lng }, radiusKm: THINGS_RADIUS_KM, categories: [], query: '', includeEvents: false, sources: placeSourceKeys(), locality: place.locality ?? null, deadlineMs: THINGS_DEADLINE_MS });
 export async function thingsAround({ household, session, place }) {
   const r = await searchCached(thingsSearch(place));
@@ -1637,7 +1637,7 @@ export async function seedShortlistFromIdea({ household, session, trip, idea }) 
     if (names.some((o) => o !== n && o.includes(n))) continue;
     const c = matched.get(n);
     const line = lines.slice(1).find((l) => normName(l).includes(n)) ?? null;
-    await addShortlistItem(trip, household, { ...c, note: line ? `Roam suggested: ${line}` : 'Roam suggested it', mustDo: true, suggested: true });
+    await addShortlistItem(trip, household, { ...c, note: line ? `Epic suggested: ${line}` : 'Epic suggested it', mustDo: true, suggested: true });
     seeded.push(c.venueLabel);
     seededNorm.push(n);
   }
@@ -1660,7 +1660,7 @@ export async function seedShortlistFromIdea({ household, session, trip, idea }) 
       if (!hitNorm.includes(n) && !n.includes(hitNorm)) continue;
       const label = hit.name || phrase;
       const line = lines.slice(1).find((l) => normName(l).includes(n)) ?? null;
-      await addShortlistItem(trip, household, { venueRef: `${hit.source}:${hit.sourcePlaceId}`, venueLabel: label, kind: 'activity', category: 'attraction', lat: hit.lat, lng: hit.lng, note: line ? `Roam suggested: ${line}` : 'Roam suggested it', mustDo: true, suggested: true });
+      await addShortlistItem(trip, household, { venueRef: `${hit.source}:${hit.sourcePlaceId}`, venueLabel: label, kind: 'activity', category: 'attraction', lat: hit.lat, lng: hit.lng, note: line ? `Epic suggested: ${line}` : 'Epic suggested it', mustDo: true, suggested: true });
       seeded.push(label);
       seededNorm.push(hitNorm);
     } catch { /* not on the map: it stays in the idea's words */ }
@@ -1698,7 +1698,7 @@ router.get('/inspire/:sessionId', async (req, res, next) => {
 
 /**
  * Things to do and see (owner, 3 Sep 2026): an idea opens as a day out in
- * Trips — home to the place and back, what Roam named already on the
+ * Trips — home to the place and back, what Epic named already on the
  * shortlist, the Find tab showing everything around it from the same look
  * the ideas took. Body: { sessionId, ideaId, attendingMemberIds? }.
  */
@@ -1711,7 +1711,7 @@ router.post('/inspire/trip', async (req, res, next) => {
     const state = session.state || {};
     const idea = (state.ideas || []).find((i) => i.id === ideaId);
     if (!idea) return res.status(404).json({ error: 'idea_not_found', message: 'That idea is no longer on this session — ask for ideas again.' });
-    if (!idea.place) return res.status(400).json({ error: 'idea_unpinned', message: "Roam couldn't pin this one on the map, so there is no day to open — Plan this still works from the idea itself." });
+    if (!idea.place) return res.status(400).json({ error: 'idea_unpinned', message: "Epic couldn't pin this one on the map, so there is no day to open — Plan this still works from the idea itself." });
     if (household.home_lat == null) return res.status(400).json({ error: 'home_required', message: 'Set a home address in Settings first.' });
     // Tapped twice: the same day opens again, nothing is duplicated.
     if (idea.tripId) {
@@ -2518,15 +2518,15 @@ router.get('/:sessionId', async (req, res, next) => {
 // Spend bounds surface as a status the UI can render calmly (Epic 3 C10).
 router.use((err, _req, res, next) => {
   // The owner's limit in the Anthropic console, which is a different thing from
-  // Roam's own ceiling and needs a different sentence: one is raised in the back
+  // Epic's own ceiling and needs a different sentence: one is raised in the back
   // office and one is raised at Anthropic (owner, 6 Sep 2026).
   if (err instanceof ModelBudgetError) {
     return res.status(429).json({
       error: err.code,
       until: err.until,
       message: err.until
-        ? `Roam's planning budget for this month is spent — it comes back on ${new Date(`${err.until}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}, or sooner if the limit is raised. What's on screen still works.`
-        : "Roam's planning budget is spent until the limit is raised. What's on screen still works.",
+        ? `Epic's planning budget for this month is spent — it comes back on ${new Date(`${err.until}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}, or sooner if the limit is raised. What's on screen still works.`
+        : "Epic's planning budget is spent until the limit is raised. What's on screen still works.",
     });
   }
   if (err instanceof SpendBoundError) {

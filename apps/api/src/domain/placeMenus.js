@@ -1,4 +1,4 @@
-// What Roam knows about a restaurant's menu, kept for everyone.
+// What Epic knows about a restaurant's menu, kept for everyone.
 //
 // The household's own copy of a menu it fetched lives in `menus` and stays
 // there, household-scoped, exactly as before. This is the layer beside it: the
@@ -51,7 +51,7 @@ export async function recordMenuRead({ venueRef, venueLabel, read }) {
   }
 }
 
-/** The menu Roam knows for a place, whoever read it, or null. */
+/** The menu Epic knows for a place, whoever read it, or null. */
 export async function knownMenu(venueRef) {
   const m = await placeMenus.placeMenu(venueRef);
   if (!m) return null;
@@ -75,7 +75,7 @@ export async function knownMenu(venueRef) {
     readAt: m.read_at, firstReadAt: m.first_read_at, reads: m.reads,
     // Said on screen rather than assumed: a menu read in June is not a promise
     // about tonight, and the descriptions are not here on purpose.
-    terms: 'Dish names and prices as Roam last read them from the restaurant’s own menu. Their own descriptions of each dish stay with the household that fetched them.',
+    terms: 'Dish names and prices as Epic last read them from the restaurant’s own menu. Their own descriptions of each dish stay with the household that fetched them.',
   };
 }
 

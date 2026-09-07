@@ -1,3 +1,5 @@
+// Before anything else, for the same reason as in App.tsx.
+import './src/rename';
 import { registerRootComponent } from 'expo';
 
 import App from './App';

@@ -85,7 +85,7 @@ export function compare({ ours = [], theirs = [] } = {}) {
   ours.forEach((o, i) => {
     const ourRank = i + 1;
     const t = theirsByRef.get(o.venueRef);
-    if (o.roamScore != null && o.ownedScore != null) ownedPairs.push([o.roamScore, o.ownedScore]);
+    if (o.epicScore != null && o.ownedScore != null) ownedPairs.push([o.epicScore, o.ownedScore]);
     if (!t) {
       rows.push({ ...o, ourRank, theirRank: null, delta: null, only: 'ours' });
       return;
@@ -105,7 +105,7 @@ export function compare({ ours = [], theirs = [] } = {}) {
   for (const t of theirs) {
     if (oursByRef.has(t.venueRef)) continue;
     rows.push({
-      venueRef: t.venueRef, name: t.name, roamScore: null, ownedScore: null,
+      venueRef: t.venueRef, name: t.name, epicScore: null, ownedScore: null,
       ourRank: null, theirRank: t.theirRank, delta: null,
       crowdBand: t.crowdBand, countBand: t.countBand, only: 'theirs',
     });

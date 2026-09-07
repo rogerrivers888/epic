@@ -91,7 +91,7 @@ let warming: Promise<void> | null = null;
 /**
  * Fetch everything worth having offline. The API says what that is
  * (/api/offline/manifest): the household, the atlas, every city, every trip,
- * the visit history, and every place record Roam owns for the places this
+ * the visit history, and every place record Epic owns for the places this
  * household claimed.
  *
  * Sequential on purpose — this runs behind whatever the household is doing and

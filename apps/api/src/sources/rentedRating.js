@@ -3,7 +3,7 @@
 // If I haven't rated it, then you should show the general rating."
 //
 // The household's own mark comes first and always will — it is ours, it is in
-// the database, and it is the only opinion Roam is really about. This is the
+// the database, and it is the only opinion Epic is really about. This is the
 // rung below it: the crowd rating, for a place nobody here has scored yet.
 //
 // It is rented, so it obeys the same bargain as the kinds of place in

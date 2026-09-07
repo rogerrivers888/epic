@@ -20,15 +20,15 @@ import { colors, radius, spacing, type } from '../theme';
  *   a photograph   Commons, or a street-level frame of the shopfront. Fills the
  *                  tile, because that is what a photograph is for.
  *   a logo         The business's own mark. *Contained*, with room around it, on
- *                  the mint ground. Cropping a 180px square logo to fill a 240×180
+ *                  the lime ground. Cropping a 180px square logo to fill a 240×180
  *                  tile turns a wordmark into an abstract smear, which is worse
  *                  than no picture at all.
  *   a rented photo A provider's, fetched at display time and never stored
  *                  (Technical Constraints §4). Fills the tile, credited.
- *   the floor      No picture. The category icon on the one mint ground, the
- *                  same as everywhere else in Roam.
+ *   the floor      No picture. The category icon on the one lime ground, the
+ *                  same as everywhere else in Epic.
  *
- * The floor is honest by construction: nobody reads an icon on a mint square as
+ * The floor is honest by construction: nobody reads an icon on a lime square as
  * a photograph of that restaurant's food. That is exactly what a bank of stock
  * food photography could not promise.
  *
@@ -37,8 +37,8 @@ import { colors, radius, spacing, type } from '../theme';
  * shelf of twelve would not read as twelve identical boxes. It does not survive
  * this palette: `surfaceMuted`, `accentSoft` and `well` are the same value in
  * light mode and again in dark, so "four tones" was in fact one tone and one
- * bright mint, and every fourth row lit up for no reason a household could
- * explain. The style guide has one mint and says there is no colour-coding of
+ * bright lime, and every fourth row lit up for no reason a household could
+ * explain. The style guide has one lime and says there is no colour-coding of
  * rows; inventing a second step to get around that would be arguing with it.
  * So the distinguishing is left to the picture, and the answer to a shelf of
  * identical tiles is to find more pictures, not to tint the empties.

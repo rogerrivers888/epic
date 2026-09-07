@@ -1,5 +1,5 @@
 /**
- * How it works — the decisions behind what Roam does, written down.
+ * How it works — the decisions behind what Epic does, written down.
  *
  * The owner, 6 Sep 2026: "I think we need a 'how it works' in the desktop back
  * office thing, and you can put all of these assumptions there in terms of what
@@ -29,7 +29,7 @@ import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
 
 /**
- * `live` — Roam does this today.
+ * `live` — Epic does this today.
  * `planned` — decided, and the code does not do it yet.
  * `partial` — the rule is real but only part of it has been built.
  */
@@ -37,7 +37,7 @@ type State = 'live' | 'partial' | 'planned';
 
 type Decision = {
   title: string;
-  /** What Roam does, in one or two sentences. The rule itself. */
+  /** What Epic does, in one or two sentences. The rule itself. */
   rule: string;
   /** What it buys and what it costs. The part a decision is actually made on. */
   why: string;
@@ -57,7 +57,7 @@ const SECTIONS: Section[] = [
   {
     key: 'money',
     title: 'What things cost, and where we cut',
-    blurb: 'Every outbound call is somebody’s money. These are the places Roam deliberately spends less, and what it gives up to do it.',
+    blurb: 'Every outbound call is somebody’s money. These are the places Epic deliberately spends less, and what it gives up to do it.',
     icon: 'money',
     decisions: [
       {
@@ -170,7 +170,7 @@ const SECTIONS: Section[] = [
       },
       {
         title: 'A spent quota is a fallback, not a failure',
-        rule: 'When Google Routes refuses for want of quota, Roam stops asking for a while — per method, because the quotas are per method — and works every travel time out from the distance instead. Anything worked out that way is flagged, and the screen says so.',
+        rule: 'When Google Routes refuses for want of quota, Epic stops asking for a while — per method, because the quotas are per method — and works every travel time out from the distance instead. Anything worked out that way is flagged, and the screen says so.',
         why: 'The alternative is a screen full of errors, or a retry loop that spends the next day’s quota the moment it resets. A journey with estimated times is still a usable journey.',
         state: 'live',
         where: 'apps/api/src/sources/routing.js',
@@ -228,7 +228,7 @@ const SECTIONS: Section[] = [
       {
         title: 'What the screens actually take',
         rule: 'Measured against production on 6 Sep 2026: home 0.17s, Places 0.09s, the atlas 0.16s, a place drawer 0.29s, directions 0.22s, a photograph 0.16\u20130.37s cold and 0.07s once held. A first search of an area is about half a second; the same search again is instant.',
-        why: 'Written down because \u201cit feels slow\u201d and \u201cit is slow\u201d are different claims and only one of them names a number. The pattern is the point: everything that reads Roam\u2019s own data is one indexed query and lands under 300ms, and all the time that is left is in the calls that leave the building. That is what makes it worth spending effort on the fan-out rather than on the screens.',
+        why: 'Written down because \u201cit feels slow\u201d and \u201cit is slow\u201d are different claims and only one of them names a number. The pattern is the point: everything that reads Epic\u2019s own data is one indexed query and lands under 300ms, and all the time that is left is in the calls that leave the building. That is what makes it worth spending effort on the fan-out rather than on the screens.',
         state: 'live',
         where: 'apps/api/src/routes/inspire.js \u00b7 routes/atlas.js \u00b7 routes/places.js',
       },
@@ -271,7 +271,7 @@ const SECTIONS: Section[] = [
     decisions: [
       {
         title: 'Rented and owned are two different layers',
-        rule: 'A household act — shortlist, save, special, visited — claims a place. Roam then researches it from OpenStreetMap, the venue’s own published page and the open encyclopedias, and that research is kept for good. A provider’s name, hours, reviews, photos or rating is never written down.',
+        rule: 'A household act — shortlist, save, special, visited — claims a place. Epic then researches it from OpenStreetMap, the venue’s own published page and the open encyclopedias, and that research is kept for good. A provider’s name, hours, reviews, photos or rating is never written down.',
         why: 'The licences we hold permit keeping an identifier indefinitely and keeping what we generated ourselves. They do not permit keeping display content. When a drawer needs a fact that survives the signal going, it comes from the owned record.',
         state: 'live',
         where: 'apps/api/src/sources/own.js · docs/technical-constraints.md §13.10',
@@ -308,7 +308,7 @@ const SECTIONS: Section[] = [
   },
   {
     key: 'decides',
-    title: 'How Roam decides',
+    title: 'How Epic decides',
     blurb: 'The rules behind the words on screen — what counts as a holiday, what a mood means, what excludes a place and what merely ranks it.',
     icon: 'plan',
     decisions: [
@@ -364,7 +364,7 @@ const SECTIONS: Section[] = [
     decisions: [
       {
         title: 'The ladder, and the floor underneath it',
-        rule: 'For each place, in order: a photograph the household took, the business’s own published mark, a Wikimedia Commons photograph, a street-level frame of the shopfront from KartaView or Mapillary. If none of those, the category icon on the mint ground.',
+        rule: 'For each place, in order: a photograph the household took, the business’s own published mark, a Wikimedia Commons photograph, a street-level frame of the shopfront from KartaView or Mapillary. If none of those, the category icon on the lime ground.',
         why: 'The delivery apps have one food photo each because the restaurant uploaded it under a contract. We have no such contract, so we go and find the pictures that are already ours to hold. The icon floor is honest by construction — nobody reads it as a photograph of that restaurant’s food.',
         state: 'live',
         where: 'apps/api/src/sources/placePicture.js',
@@ -373,7 +373,7 @@ const SECTIONS: Section[] = [
       {
         title: 'Where we own nothing, the provider\u2019s photograph is shown and never kept',
         rule: 'A card prefers our own picture. Where the ladder has found nothing and the place is a licensed one, the provider\u2019s photograph is drawn instead \u2014 fetched at display, never written to the database, and stripped before anything reaches a device. Where a search from the last twelve hours already carried the reference, it costs no call at all. The day the ladder finds a mark for that place, this stops being asked for it.',
-        why: 'The ladder finds nothing for most restaurants \u2014 Commons does not photograph the inside of a curry house \u2014 and the alternative was a wall of mint squares. Offline the card falls back to its category icon, which is the honest thing for it to draw: we do not have that picture, we were only ever allowed to look at it.',
+        why: 'The ladder finds nothing for most restaurants \u2014 Commons does not photograph the inside of a curry house \u2014 and the alternative was a wall of lime squares. Offline the card falls back to its category icon, which is the honest thing for it to draw: we do not have that picture, we were only ever allowed to look at it.',
         state: 'live',
         where: 'apps/api/src/sources/rentedPhoto.js \u00b7 apps/web/src/offline/policy.ts \u00b7 cleanPlaceRow',
         said: { who: 'the owner', on: '5 Sep 2026', words: 'It means at least that we can have restaurant pictures, which is really useful in some instances.' },
@@ -388,7 +388,7 @@ const SECTIONS: Section[] = [
       },
       {
         title: 'A mark is drawn differently from a photograph',
-        rule: 'A photograph fills its tile. A logo is contained on the mint ground with room around it. On an area or a trip tile, a photograph is preferred over a mark even when the mark is closer to hand.',
+        rule: 'A photograph fills its tile. A logo is contained on the lime ground with room around it. On an area or a trip tile, a photograph is preferred over a mark even when the mark is closer to hand.',
         why: 'Cropping a square logo to fill a wide tile turns a wordmark into a smear. And a restaurant’s blue square says nothing at all about Puglia.',
         state: 'live',
         where: 'apps/web/src/components/VenueThumb.tsx',
@@ -424,7 +424,7 @@ export function HowItWorks() {
     <AdminPage>
       <PageHead
         title="How it works"
-        sub="The decisions behind what Roam does — what each one buys, what it gives up, and where the rule lives."
+        sub="The decisions behind what Epic does — what each one buys, what it gives up, and where the rule lives."
       />
 
       <Banner tone={paused ? 'warn' : 'plain'}>
@@ -467,7 +467,7 @@ export function HowItWorks() {
           Anything that changes by the minute — whether travel times are real right now — is read from the API at the top of this page rather
           than written down here.
         </Text>
-        <Pressable onPress={() => Linking.openURL('https://github.com/rogerrivers888/roam/blob/main/CLAUDE.md')} accessibilityRole="link">
+        <Pressable onPress={() => Linking.openURL('https://github.com/rogerrivers888/epic/blob/main/CLAUDE.md')} accessibilityRole="link">
           <Text style={styles.link}>The working agreements this page draws on →</Text>
         </Pressable>
       </Panel>

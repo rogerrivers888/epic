@@ -1,5 +1,5 @@
 /**
- * Every address Roam has, read and written — src/routes.ts.
+ * Every address Epic has, read and written — src/routes.ts.
  *
  * This is the file that decides what a link means, so it is the file where a
  * mistake is silent and expensive: a shape that parses one way and writes back
@@ -128,7 +128,7 @@ test('the query is never part of which page it is', () => {
 
 // --- the links that already exist ------------------------------------------
 
-test('the addresses Roam used to have still land somewhere', () => {
+test('the addresses Epic used to have still land somewhere', () => {
   const q = (s: string) => new URLSearchParams(s);
   assert.equal(legacyHref('/', q('tab=places')), '/places');
   assert.equal(legacyHref('/', q('tab=trips')), '/trips');
@@ -168,11 +168,11 @@ test('Back has somewhere to go for somebody who arrived on a shared link', () =>
   assert.equal(parentOf(parseRoute('/admin/audit')), '/admin/overview');
 });
 
-test('a window of Roam tabs is not seven identical ones', () => {
-  assert.equal(titleOf(parseRoute('/places/GB/London')), 'London · Roam');
-  assert.equal(titleOf(parseRoute('/places/IT')), 'IT · Roam');
-  assert.equal(titleOf(parseRoute('/inspire/culture')), 'Culture · Roam');
-  assert.equal(titleOf(parseRoute('/nowhere')), 'Not a page · Roam');
+test('a window of Epic tabs is not seven identical ones', () => {
+  assert.equal(titleOf(parseRoute('/places/GB/London')), 'London · Epic');
+  assert.equal(titleOf(parseRoute('/places/IT')), 'IT · Epic');
+  assert.equal(titleOf(parseRoute('/inspire/culture')), 'Culture · Epic');
+  assert.equal(titleOf(parseRoute('/nowhere')), 'Not a page · Epic');
 });
 
 // --- changing part of an address -------------------------------------------

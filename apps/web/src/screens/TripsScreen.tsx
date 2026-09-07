@@ -441,7 +441,7 @@ function NewTripForm({ household, startFrom, onCreated }: {
   const [end, setEnd] = useState(new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10));
   const [base, setBase] = useState<Place | null>(null);
   const [baseKind, setBaseKind] = useState<'hotel' | 'rental' | 'friends' | 'home' | 'other'>('hotel');
-  // Booked already, or wanting Roam to look. Looking is the default, because a
+  // Booked already, or wanting Epic to look. Looking is the default, because a
   // trip being made is usually a trip not yet booked.
   const [stayMode, setStayMode] = useState<'known' | 'find'>('find');
   const [hasCar, setHasCar] = useState(true);
@@ -672,7 +672,7 @@ function NewTripForm({ household, startFrom, onCreated }: {
  * its own does not explain itself. It goes away when it is dismissed, and for
  * good once any group exists.
  */
-const FRIENDS_KEY = 'roam.groups.pitch';
+const FRIENDS_KEY = 'epic.groups.pitch';
 function TakingFriends({ show, onGroup }: { show: boolean; onGroup: () => void }) {
   const [gone, setGone] = useState(() => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(FRIENDS_KEY) === 'gone' : false));
   if (!show || gone) return null;
@@ -683,7 +683,7 @@ function TakingFriends({ show, onGroup }: { show: boolean; onGroup: () => void }
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>Taking friends?</Text>
           <Text style={[type.small, { color: colors.headerSub }]}>
-            Two friends or a coachload: everyone books and pays their own share, and Roam chases them so you don't have to.
+            Two friends or a coachload: everyone books and pays their own share, and Epic chases them so you don't have to.
           </Text>
           <Pressable onPress={onGroup} accessibilityRole="button" style={{ paddingTop: 4 }}>
             <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Make it a group trip →</Text>
@@ -1374,7 +1374,7 @@ function StopRow({ stop, leg, trip, day, household, onChanged }: { stop: DayStop
  * The day planner (owner, 3 Sep 2026): lead with everything found near the
  * base in three lists — things to do, places to eat, what's on — with filter
  * and sort; add a place straight onto the day, or shortlist it for the trip.
- * No algorithm-named plans on top; "Let Roam fill the day" is one button.
+ * No algorithm-named plans on top; "Let Epic fill the day" is one button.
  * Voice and typing refine the same session ("somewhere upmarket", "no chains").
  */
 function DayPlanPanel({ trip, day, initial, onCommitted }: { trip: TripDetail; day: TripDay; initial: PlanResponse | null; onCommitted: () => Promise<void> }) {
@@ -1416,7 +1416,7 @@ function DayPlanPanel({ trip, day, initial, onCommitted }: { trip: TripDetail; d
   return (
     <Card style={{ borderColor: colors.accent, gap: spacing.md }}>
       <Text style={type.h3}>Filling {fmtDate(day.date)}</Text>
-      <Text style={type.tiny}>Say what you're after and Roam works from the same pool Find searches, around whatever is already on the day. To browse that pool yourself, use Find.{plan?.resumed ? ' Picked up where you left off.' : ''}</Text>
+      <Text style={type.tiny}>Say what you're after and Epic works from the same pool Find searches, around whatever is already on the day. To browse that pool yourself, use Find.{plan?.resumed ? ' Picked up where you left off.' : ''}</Text>
       {busy === 'thinking' ? <StatusLine>Looking around {baseLabel}…</StatusLine> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       {reply ? <View style={styles.bubble}><Text style={type.body}>{reply}</Text></View> : null}
@@ -1486,7 +1486,7 @@ function partyWords(p: StayPricing) {
  *
  * A trip away has exactly two states (owner, 4 Sep 2026): "I'm staying
  * somewhere" and "I need to find somewhere to stay". The second is the one
- * Roam is actually good at, because it is the only thing that knows the
+ * Epic is actually good at, because it is the only thing that knows the
  * shortlist: a bed is ranked by how much of the week is on foot from its front
  * door, not by how near it is to a station.
  *
@@ -1640,7 +1640,7 @@ function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
                         the provider's, drawn from their URL and never stored —
                         VenueThumb already knows the difference and carries the
                         credit; with no picture it falls back to the bed icon on
-                        the one mint ground rather than inventing something. */}
+                        the one lime ground rather than inventing something. */}
                     <Row style={{ gap: spacing.md, alignItems: 'flex-start' }}>
                       <VenueThumb name={s.name} photos={s.photos} category="hotel" width={92} height={70} credit={false} rounded={radius.sm} />
                       <View style={{ flex: 1, gap: 3 }}>
@@ -1690,7 +1690,7 @@ function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
                 ))}
                 <Text style={type.tiny}>
                   {credits.length ? credits.join(' · ') : '© OpenStreetMap contributors'}.
-                  {' '}Prices are for the party above and were live when this list was drawn; the hotel takes the booking, not Roam.
+                  {' '}Prices are for the party above and were live when this list was drawn; the hotel takes the booking, not Epic.
                 </Text>
               </View>
             ) : null}
@@ -1746,8 +1746,9 @@ const styles = StyleSheet.create({
   green: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.accent },
   // What the room costs: the second-loudest thing on a stay row, after its name.
   stayPrice: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.ink },
-  // The one red thing on a past trip: somewhere they went and nobody has said what they thought.
-  rate: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.red },
+  // The one coloured thing on a past trip: somewhere they went and nobody has
+  // said what they thought. Moss, not red — red is retired (Epic pack §04).
+  rate: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.accent },
   mapWrap: { position: 'relative' },
   pinCard: { position: 'absolute', left: spacing.sm, right: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, overflow: 'hidden' },
   mapHint: { position: 'absolute', left: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.md, overflow: 'hidden' },

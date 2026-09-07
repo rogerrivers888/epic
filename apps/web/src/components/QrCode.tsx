@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import qrcode from 'qrcode-generator';
-import { radius } from '../theme';
+import { radius, CREAM, INK } from '../theme';
 
 /**
  * The invite link as a code to point a phone at (owner, 4 Sep 2026: "it should
@@ -28,11 +28,11 @@ export function QrCode({ value, size = 148, quiet = 2 }: { value: string; size?:
   }, [value, quiet]);
 
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.md, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
+    <View style={{ width: size, height: size, borderRadius: radius.md, overflow: 'hidden', backgroundColor: CREAM }}>
       <Svg width={size} height={size} viewBox={`0 0 ${span} ${span}`}>
-        <Rect x={0} y={0} width={span} height={span} fill="#FFFFFF" />
+        <Rect x={0} y={0} width={span} height={span} fill={CREAM} />
         {/* Always ink on white, in both palettes: a scanner needs the contrast, not the theme. */}
-        <Path d={d} fill="#201E1D" />
+        <Path d={d} fill={INK} />
       </Svg>
     </View>
   );

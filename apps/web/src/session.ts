@@ -1,7 +1,7 @@
 /**
  * The token this device signs in with.
  *
- * One passcode opens the household's Roam (api/src/auth.js); what comes back is
+ * One passcode opens the household's Epic (api/src/auth.js); what comes back is
  * a token that lasts ninety days, so the family types the passcode about four
  * times a year rather than every morning.
  *
@@ -14,7 +14,7 @@
 
 import { Platform } from 'react-native';
 
-export const TOKEN_KEY = 'roam.session';
+export const TOKEN_KEY = 'epic.session';
 
 const store = Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage : null;
 
@@ -72,7 +72,7 @@ export function deviceLabel(): string {
  * passcode is 'owner', and stays 'owner' when he later claims an account row,
  * so claiming does not cost him the copy on his phone.
  */
-const HOLDER_KEY = 'roam.copyHolder';
+const HOLDER_KEY = 'epic.copyHolder';
 
 export const copyHolder = (): string | null => store?.getItem(HOLDER_KEY) ?? null;
 

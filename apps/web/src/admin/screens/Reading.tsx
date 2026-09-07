@@ -135,7 +135,7 @@ export function Reading({ canManage }: { canManage: boolean }) {
         ))}
       </FilterRow>
 
-      {/* The granular layer. Roam's eight categories cannot tell a theme park
+      {/* The granular layer. Epic's eight categories cannot tell a theme park
           from a cathedral, and a lesson is taught against one of these, so this
           is also how you review every castle's reading together. Ordered by how
           many places carry the type: the tail is long and mostly ones. */}
@@ -261,7 +261,7 @@ function Compare({ id, canManage, wide, onClose, onChanged }: {
           <Text style={type.tiny}>
             {attraction.region_name}
             {attraction.band ? ` · ${attraction.band}` : ''}
-            {attraction.roam_score ? ` · ${attraction.roam_score.toFixed(1)}` : ''}
+            {attraction.epic_score ? ` · ${attraction.epic_score.toFixed(1)}` : ''}
             {attraction.contents_count ? ` · ${plural(attraction.contents_count, 'thing')} inside` : ''}
           </Text>
         </View>

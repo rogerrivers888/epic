@@ -45,7 +45,7 @@ offline.get('/manifest', async (_req, res, next) => {
       ...cities.map((c) => `/api/atlas/places?country=${encodeURIComponent(c.country_code)}&city=${encodeURIComponent(c.locality)}`),
       ...trips.map((t) => `/api/trips/${t.id}`),
       // The day itself, so a trip someone is on opens with no signal. Kept only
-      // when the times in it are Roam's own estimate rather than Google Routes'
+      // when the times in it are Epic's own estimate rather than Google Routes'
       // answer — that decision is made on the device (web/src/offline/policy.ts).
       ...trips.map((t) => `/api/trips/${t.id}/journey`),
     ];

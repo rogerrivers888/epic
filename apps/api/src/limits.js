@@ -5,16 +5,16 @@
  *
  *  - the door, hardest. A passcode with no limit on it is a passcode somebody
  *    guesses overnight;
- *  - anything that spends money. Roam's searches call Google Places and Routes
+ *  - anything that spends money. Epic's searches call Google Places and Routes
  *    and every call is billed to this household (`provider_calls`), so an
  *    unthrottled search endpoint is somebody else's hand in the owner's wallet;
  *  - everything else, loosely, so one misbehaving script cannot hold the API
  *    down for the family.
  *
- * In memory, on purpose. Roam is a single API service; a shared counter would
+ * In memory, on purpose. Epic is a single API service; a shared counter would
  * mean Redis, and Redis for this would be the sidecar the standard says not to
  * add. The trade is honest and worth naming: a restart forgets the counters and
- * a second instance would count separately. If Roam is ever scaled past one
+ * a second instance would count separately. If Epic is ever scaled past one
  * instance, this file is the thing that has to change.
  */
 

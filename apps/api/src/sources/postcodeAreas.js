@@ -19,7 +19,7 @@
 // them. That is cheap: a postcode area runs out well before 99.
 
 const API = 'https://api.postcodes.io/outcodes';
-const UA = 'RoamBot/1.0 (+https://web-production-afce9.up.railway.app; area lookup)';
+const UA = 'EpicBot/1.0 (+https://web-production-afce9.up.railway.app; area lookup)';
 const cache = new Map();
 
 /**
@@ -93,7 +93,7 @@ const belongs = (o, place) =>
  */
 export async function outcodesIn(name, { maxNumber = 99, giveUpAfter = 12 } = {}) {
   const place = PLACES[String(name).toLowerCase()];
-  if (!place) throw Object.assign(new Error(`Roam does not know where ${name} is.`), { status: 400 });
+  if (!place) throw Object.assign(new Error(`Epic does not know where ${name} is.`), { status: 400 });
 
   const found = [];
   for (const area of place.areas) {

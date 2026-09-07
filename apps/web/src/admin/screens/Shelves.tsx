@@ -1,5 +1,5 @@
 /**
- * Shelves — teaching Roam what a day somewhere is like.
+ * Shelves — teaching Epic what a day somewhere is like.
  *
  * The owner, 5 Sep 2026, looking at the home screen: "currently, on the
  * homepage under the adrenaline section, it's showing football stadiums. That's
@@ -197,7 +197,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
                 const r = await api.shelfNameKinds(400);
                 setNote(r.named
                   ? `Named ${r.named} types from Wikidata. ${count(r.remaining)} still read as a Q-number — press again.`
-                  : 'Every type Roam has seen already has a name.');
+                  : 'Every type Epic has seen already has a name.');
                 await refresh();
               } catch (err) { setNote(String((err as Error).message)); }
               finally { setBusy(false); }
@@ -284,7 +284,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
 
       {section === 'shelf' || section === 'find' ? (
         <Panel
-          title={section === 'find' ? 'What Roam thinks of these' : `${shelfLabel(mood)}, as the home screen draws it`}
+          title={section === 'find' ? 'What Epic thinks of these' : `${shelfLabel(mood)}, as the home screen draws it`}
           sub={section === 'find'
             ? 'Where each one sits, and why'
             : 'The same list, composed the same way. Tap anything that does not belong.'}
@@ -349,7 +349,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
                 <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
                   <Text style={styles.rowName}>{r.subject_label ?? r.subject}</Text>
                   <Pill label={SCOPE_WORD[r.scope]} />
-                  {r.seeded ? <Pill label="where Roam started" /> : <Pill label="you decided this" tone="accent" />}
+                  {r.seeded ? <Pill label="where Epic started" /> : <Pill label="you decided this" tone="accent" />}
                 </Row>
                 <Wrap style={{ gap: 4 }}>
                   {Object.entries(r.weights)
@@ -747,7 +747,7 @@ function TeachForm({ place, vocab, order, floor, max, wide, onClose, onSaved, on
     setReason(p.reason);
     if (p.suggestedScope !== chosen.scope) {
       const better = subjects.find((s) => s.scope === p.suggestedScope);
-      if (better) setErr(`Roam thinks this is really about ${SCOPE_WORD[p.suggestedScope]} — "${better.label}". The numbers below are filled in either way; switch above if you agree.`);
+      if (better) setErr(`Epic thinks this is really about ${SCOPE_WORD[p.suggestedScope]} — "${better.label}". The numbers below are filled in either way; switch above if you agree.`);
     }
   };
 
@@ -782,7 +782,7 @@ function TeachForm({ place, vocab, order, floor, max, wide, onClose, onSaved, on
 
       <View style={styles.divider} />
 
-      <Text style={type.small}>Say it in a sentence, and Roam will fill the numbers in.</Text>
+      <Text style={type.small}>Say it in a sentence, and Epic will fill the numbers in.</Text>
       <TextInput
         value={said}
         onChangeText={setSaid}

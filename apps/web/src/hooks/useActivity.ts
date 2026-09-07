@@ -3,7 +3,7 @@
  *
  * Two events and no more: a `screen` when the tab changes, and a `heartbeat`
  * while the app is open *and visible*. That second word is the whole design —
- * a tab left open behind a browser window is not somebody using Roam, and
+ * a tab left open behind a browser window is not somebody using Epic, and
  * counting it would make "time on site" a number that flatters itself.
  *
  * Batched and fire-and-forget. Reporting must never be something the household
@@ -74,7 +74,7 @@ export function useActivity(screen: string, { enabled = true }: { enabled?: bool
   /**
    * Installed, and running as an installed app.
    *
-   * Roam is an installable web app (public/manifest.json), which is as close as
+   * Epic is an installable web app (public/manifest.json), which is as close as
    * it has to a store listing — so "installs" is the App Store figure that can
    * honestly be reported. Two signals, and both are one event each:
    *

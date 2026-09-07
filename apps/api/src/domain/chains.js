@@ -50,7 +50,7 @@ export function detectChain(venue) {
  *                   is right about the ones that matter most.
  *   the OSM brand   a mapper has said this place belongs to a brand, which they
  *                   do for groups rather than for a family's second restaurant.
- *   our own count   how many of Roam's own areas hold a place of this name. This
+ *   our own count   how many of Epic's own areas hold a place of this name. This
  *                   is the signal that needs no list and gets better as the
  *                   sweep covers more of the country — the only one that will
  *                   ever notice a nine-site regional group nobody has heard of.

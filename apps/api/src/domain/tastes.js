@@ -26,7 +26,7 @@ const conceptFor = (pref) => (pref.conceptKey ? conceptByKey(pref.conceptKey) : 
  * Which foods the people coming actually love, best first.
  *
  * One entry per food, carrying everyone who loves it (a favourite counts for
- * more than a like) and anyone coming who would rather not — Roam says both
+ * more than a like) and anyone coming who would rather not — Epic says both
  * rather than quietly dropping the food someone else's favourite clashes with.
  */
 /**

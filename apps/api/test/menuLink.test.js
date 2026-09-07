@@ -3,7 +3,7 @@
  *
  * A menu for the wrong town is worse than no menu: it puts the wrong prices and
  * the wrong dishes on a place the family is standing outside. Sebastian's has a
- * restaurant in Windsor and one in Richmond on two separate sites, and Roam
+ * restaurant in Windsor and one in Richmond on two separate sites, and Epic
  * stored Richmond's menu on the Windsor one (found 6 Sep 2026) because nothing
  * downstream of the researcher knew which town it was looking for.
  *

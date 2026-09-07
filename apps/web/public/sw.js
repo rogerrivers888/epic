@@ -1,5 +1,5 @@
 /*
- * Roam's service worker: the part that makes the app open at all with no signal.
+ * Epic's service worker: the part that makes the app open at all with no signal.
  *
  * The device's copy of the household's data lives in IndexedDB and is managed
  * by the app (src/offline/cache.ts). This file is only about the app itself —
@@ -14,7 +14,7 @@
  *     stored, here or anywhere.
  */
 
-const VERSION = 'roam-shell-v1';
+const VERSION = 'epic-shell-v1';
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 

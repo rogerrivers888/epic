@@ -118,7 +118,7 @@ async function osmStation(lat, lng) {
   return {
     name: n.name,
     lines: n.network ? [n.network] : [],
-    // The word the rest of Roam has always used for each of these.
+    // The word the rest of Epic has always used for each of these.
     kind: n.kind === 'subway' ? 'metro' : n.kind === 'rail' ? 'rail' : n.kind === 'tram' ? 'tram' : 'light-rail',
     distanceM: n.distanceM,
   };

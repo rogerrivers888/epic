@@ -7,7 +7,7 @@
  * is written on the screen: a capability that nearly fits gets borrowed, and
  * then whoever may invite a friend may also delete a household.
  *
- * **Plans** is where a price comes from. Nothing here moves money — Roam holds
+ * **Plans** is where a price comes from. Nothing here moves money — Epic holds
  * no payment provider — so a price is what a household is *on*, and it is what
  * makes the revenue report arithmetic rather than invention.
  *
@@ -43,7 +43,7 @@ export function Roles({ canManage }: { canManage: boolean }) {
     try {
       const r = await api.adminRoles();
       setRoles(r.roles); setCapabilities(r.capabilities); setDoors(r.doors); setError(null);
-    } catch (e: any) { setError(e instanceof ApiError ? e.message : 'Could not reach Roam.'); }
+    } catch (e: any) { setError(e instanceof ApiError ? e.message : 'Could not reach Epic.'); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -177,7 +177,7 @@ function RoleDrawer({ role, capabilities, areas, doors, canManage, onClose, onSa
         </Banner>
       ) : null}
       {role.is_system && !role.is_owner ? (
-        <Banner>This is a role Roam ships with. Its capabilities can be changed; it cannot be deleted.</Banner>
+        <Banner>This is a role Epic ships with. Its capabilities can be changed; it cannot be deleted.</Banner>
       ) : null}
 
       <Panel title="Applications it opens">
@@ -238,7 +238,7 @@ export function Plans({ canManage }: { canManage: boolean }) {
 
   const load = useCallback(async () => {
     try { setPlans((await api.adminPlans()).plans); setError(null); } catch (e: any) {
-      setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+      setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -260,8 +260,8 @@ export function Plans({ canManage }: { canManage: boolean }) {
 
       <Banner tone="warn">
         <Text style={{ fontWeight: '700' }}>A price here is not a charge. </Text>
-        Roam holds no payment provider, so setting one changes what the revenue report says is contracted — it does not
-        take anybody's money, and nothing in Roam will.
+        Epic holds no payment provider, so setting one changes what the revenue report says is contracted — it does not
+        take anybody's money, and nothing in Epic will.
       </Banner>
 
       <Panel padded={false}>
@@ -316,7 +316,7 @@ export function Audit() {
   useEffect(() => {
     (async () => {
       try { setRows((await api.adminAudit()).audit); setError(null); } catch (e: any) {
-        setError(e instanceof ApiError ? e.message : 'Could not reach Roam.');
+        setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
       }
     })();
   }, []);
