@@ -19,8 +19,8 @@ import { fillWhere } from '../sources/where.js';
 import { fillTaxonomy, needsTaxonomy, taxonomyKept } from '../sources/taxonomy.js';
 import { fillPhotos, needsPhoto, photosKept } from '../sources/rentedPhoto.js';
 import { countryOutline, sketchFor, SKETCH_ATTRIBUTION } from '../sources/sketch.js';
-import { heroesForPlaces } from '../repositories/library.js';
-import { shelvesForVenue } from '../domain/moods.js';
+import { atlasRowsFor, heroesForPlaces } from '../repositories/library.js';
+import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
 import { fillRatings, needsRating, ratingKept } from '../sources/rentedRating.js';
@@ -273,7 +273,9 @@ atlas.get('/places', async (req, res, next) => {
     // the area screen's Mood dropdown is the same vocabulary as the home
     // screen's shelves. Nothing here fetches: it reads the experiences and the
     // category a search already returned.
-    const [rules, tax] = await Promise.all([shelfRules(), shelfTaxonomy()]);
+    const [rules, tax, atlasRows] = await Promise.all([
+      shelfRules(), shelfTaxonomy(), atlasRowsFor(places.map((p) => p.venueRef)).catch(() => new Map()),
+    ]);
     places = places.map((p) => {
       const ours = ownedImage(ourPictures.get(p.venueRef) ?? null);
       return {
@@ -292,16 +294,25 @@ atlas.get('/places', async (req, res, next) => {
         // should "say what type of attraction it is, like theme park or
         // whatever… the subcategory, not just say attractions repeatedly").
         ...(() => {
-          const shelf = shelvesForVenue({
-            source: p.venueRef.split(':')[0], sourcePlaceId: p.venueRef.split(':').slice(1).join(':'),
-            category: p.category ?? p.venue?.category ?? null, experiences: p.venue?.experiences ?? [],
-          }, rules, tax.vocab);
+          // A place kept from the atlas is filed the way the atlas is filed:
+          // by its Wikidata types, which is what migration 054's hundred and
+          // thirteen rules are keyed by and the only thing fine enough to tell
+          // a country park from a stadium. Anything else is filed by the
+          // experiences a search returned and the research wrote down.
+          const a = atlasRows.get(p.venueRef);
+          const shelf = a
+            ? shelvesForAtlas({ ref: p.venueRef, category: a.category, kinds: a.kinds ?? [] }, rules, tax.vocab)
+            : shelvesForVenue({
+              source: p.venueRef.split(':')[0], sourcePlaceId: p.venueRef.split(':').slice(1).join(':'),
+              category: p.category ?? p.venue?.category ?? null, experiences: p.venue?.experiences ?? [],
+            }, rules, tax.vocab);
           // The cabinet's name is only worth putting on a row when something
-          // actually decided it. A place the map gave no tags for lands on Fun
+          // actually decided it. A place with no tags and no type lands on Fun
           // because a place has to be somewhere, and "Fun" on the National
           // Gallery is a worse answer than saying nothing — so the label is
-          // sent only where a rule or a tag put it there.
-          const grounded = shelf.because.some((r) => r.scope !== 'default') || (p.venue?.experiences ?? []).length > 0;
+          // sent only where a rule, a tag or a category put it there, which is
+          // exactly what a default with no subject means.
+          const grounded = shelf.because.some((r) => r.scope !== 'default' || r.subject);
           return {
             moods: shelf.shelves,
             subcategory: shelf.subcategory,

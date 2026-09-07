@@ -298,6 +298,33 @@ export async function noteImagePass(id, state) {
 }
 
 /**
+ * The atlas rows behind a household's own places, by the reference they were
+ * saved under.
+ *
+ * A place shortlisted or visited from the atlas is held as `wikidata:Q3569306`,
+ * and the harvested row it came from is the only thing that still knows what
+ * kind of thing it is — the Wikidata types migration 054's hundred and thirteen
+ * rules are keyed by. Without this, Windsor Great Park reaches the Places
+ * screen with nothing but the word "attraction" (owner, 7 Sep 2026).
+ *
+ * Everything here is ours: harvested from Wikidata and the encyclopedias under
+ * licences that do not run out.
+ */
+export async function atlasRowsFor(refs) {
+  const qids = refs.filter((r) => String(r).startsWith('wikidata:')).map((r) => String(r).slice('wikidata:'.length));
+  if (!qids.length && !refs.length) return new Map();
+  const { rows } = await query(
+    `select distinct on (coalesce(venue_ref, 'wikidata:' || wikidata_id))
+            coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref, category, kinds, roam_score
+       from attractions
+      where (wikidata_id = any($1) or venue_ref = any($2))
+      order by coalesce(venue_ref, 'wikidata:' || wikidata_id), roam_score desc`,
+    [qids, refs],
+  );
+  return new Map(rows.map((r) => [r.ref, r]));
+}
+
+/**
  * Regions with work outstanding: never listed, or listed and still holding
  * published attractions nobody has looked for a picture for.
  *
