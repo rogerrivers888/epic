@@ -494,9 +494,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
       const kinds = new Set(inMode.map((i) => FOOD_KINDS[i.category]).filter(Boolean));
       return [all, ...FOOD_CATEGORIES.filter((k) => !pool || kinds.has(k)).map((k) => ({ key: k, label: FOOD_LABELS[k] }))];
     }
-    const here = new Set((pool?.moods ?? []).filter((m) => (m.count ?? 0) > 0).map((m) => m.key));
-    const cats = ACTIVITY_CATEGORIES.filter((k) => !pool || here.has(k));
-    return [all, ...cats.map((k) => ({ key: k, label: label(k) }))];
+    // The taxonomy's own order and its own words, minus Food (which is the
+    // other half of the screen) and minus anything with nothing behind it.
+    const cats = (pool?.moods ?? [])
+      .filter((m) => m.key !== 'food' && (m.count ?? 0) > 0)
+      .map((m) => ({ key: m.key, label: m.label }));
+    return [all, ...(pool ? cats : ACTIVITY_CATEGORIES.map((k) => ({ key: k, label: label(k) })))];
   }, [mode, pool, label, inMode]);
 
   /** The drawers inside one category that actually hold something (8b's sub-strip). */

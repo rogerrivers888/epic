@@ -109,12 +109,17 @@ export type InspireMode = 'activities' | 'food';
  * place. `all` is not in either list — it is the absence of a pick, and so it
  * is the bare `/inspire` and `/inspire/food` rather than a word in the path.
  *
- * `relaxing` and `outdoors` are moods the strip does not name. They are still
- * addressable, and a place still carries them, so a link to one keeps working;
- * they simply have no entry point on this screen until the design gives them
- * one. Asked about, 7 Sep 2026.
+ * The handoff names five, but that list is illustrative — the categories are a
+ * table the back office writes (migration 053), and the screen builds its strip
+ * from whatever the pool actually answered with. Hardcoding the five here lost
+ * Outdoors and Relaxing, which have twenty and ten places near Sunningdale
+ * (owner, 7 Sep 2026: "there are some other categories that we had, like walks,
+ * etc… you seem to be missing those").
+ *
+ * So this is only the *address* guard: every mood but Food may be a page here,
+ * and which of them are offered is decided by what is near you.
  */
-export const ACTIVITY_CATEGORIES: MoodKey[] = ['fun', 'culture', 'sport', 'activity', 'adrenaline'];
+export const ACTIVITY_CATEGORIES: MoodKey[] = MOODS.filter((m) => m !== 'food');
 export const FOOD_CATEGORIES = ['restaurants', 'pubs', 'cafes', 'takeaway'] as const;
 
 /**

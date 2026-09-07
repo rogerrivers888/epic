@@ -33,8 +33,12 @@ test('one layer into Inspire: the search, and a category opened out', () => {
   assert.deepEqual(roundTrip('/inspire/search'), { name: 'inspire', searching: true, mode: 'activities', pick: null });
   assert.deepEqual(roundTrip('/inspire/culture'), { name: 'inspire', searching: false, mode: 'activities', pick: 'culture' });
   assert.equal(paths.inspireShelf('adrenaline'), '/inspire/adrenaline');
-  // A mood the strip does not name is still addressable, so a link to one keeps working.
-  assert.equal(parseRoute('/inspire/outdoors').name, 'unknown', 'only the five the strip offers are categories here');
+  // Every mood but Food is a page here. Which of them the strip *offers* is
+  // decided by what is actually near you, not by this list — hardcoding the
+  // handoff's five lost Outdoors and Relaxing, which have places in them.
+  assert.deepEqual(roundTrip('/inspire/outdoors'), { name: 'inspire', searching: false, mode: 'activities', pick: 'outdoors' });
+  assert.deepEqual(roundTrip('/inspire/relaxing'), { name: 'inspire', searching: false, mode: 'activities', pick: 'relaxing' });
+  assert.equal(parseRoute('/inspire/nonsense').name, 'unknown');
 });
 
 test('Food is the other half of Inspire now, not a door into Places', () => {
