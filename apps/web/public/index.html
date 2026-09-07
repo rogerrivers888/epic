@@ -48,6 +48,19 @@
     <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
     <style>
+      /*
+        The safe area, once, in one place.
+
+        `env(safe-area-inset-*)` is read here and nowhere else. Everything in the
+        app asks for these variables instead, which makes the insets a single
+        source of truth — and, as importantly, something a test can override.
+        The bug this fixes was invisible for four attempts because
+        react-native-web's SafeAreaView builds its own `env(...)` string at
+        runtime out of two halves, so it never appears in the bundle to be found
+        or substituted, and `env()` is nought in a headless browser. It was
+        adding a second full inset on a real phone and only on a real phone.
+      */
+      :root { --epic-sat: env(safe-area-inset-top); --epic-sab: env(safe-area-inset-bottom); }
       html, body, #root { height: 100%; }
       body { margin: 0; overflow: hidden; background: #FFFDF9; -webkit-text-size-adjust: 100%; }
       /* Archivo everywhere; the odd monospace value marks itself with data-font */

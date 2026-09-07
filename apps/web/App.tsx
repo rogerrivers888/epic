@@ -2,7 +2,7 @@
 // `epic.` before any module below reads one. See src/rename.ts.
 import './src/rename';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, SafeAreaView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { api, API_URL, HouseholdResponse } from './src/api';
 import { colors, radius, spacing, TARGET, type, BORDER, INK } from './src/theme';
@@ -72,7 +72,7 @@ export default function App() {
 }
 
 /**
- * The outermost box. Normally `SafeAreaView`, which keeps the app clear of the
+ * The outermost box, which keeps the app clear of the
  * notch and the home indicator; on a full-bleed screen a plain `View`, because
  * the whole point is that the map runs under both (owner, 6 Sep 2026: "all the
  * way to the edge of the screen, including the little pill in the middle of the
@@ -80,7 +80,20 @@ export default function App() {
  * of those keeps itself clear.
  */
 function Edges({ children, style, bleed, ownFooter, ownHeader }: { children: React.ReactNode; style?: any; bleed?: boolean; ownFooter?: boolean; ownHeader?: boolean }) {
-  const Box: any = bleed ? View : SafeAreaView;
+  /**
+   * A plain View, deliberately — never `SafeAreaView`.
+   *
+   * react-native-web's SafeAreaView pads all four edges by the safe area
+   * itself, so wrapping the app in one and then adding an inset anywhere inside
+   * it counts the same space twice. That is what put a band of dead app above
+   * the wordmark and below the tab bar, and it hid from four rounds of testing
+   * because the component builds its `env(...)` string at runtime from two
+   * halves: it is not in the bundle to be found, and `env()` is nought in a
+   * headless browser, so the fault only ever existed on a real phone.
+   *
+   * The insets are applied here, once, and only where nothing else is going to.
+   */
+  const Box: any = View;
   // The app draws under the status bar (index.html), so a screen that is not
   // full-bleed puts the inset back on rather than letting the wordmark sit
   // under the clock. `env()` is nought in a browser tab and only bites in the
@@ -99,8 +112,8 @@ function Edges({ children, style, bleed, ownFooter, ownHeader }: { children: Rea
   // that — which is what put the wordmark a long way down the screen.
   const inset = !bleed && Platform.OS === 'web'
     ? {
-      ...(ownHeader ? null : { paddingTop: 'env(safe-area-inset-top)' as any }),
-      ...(ownFooter ? null : { paddingBottom: 'env(safe-area-inset-bottom)' as any }),
+      ...(ownHeader ? null : { paddingTop: 'var(--epic-sat)' as any }),
+      ...(ownFooter ? null : { paddingBottom: 'var(--epic-sab)' as any }),
     }
     : null;
   return <Box style={[style, inset]}>{children}</Box>;
@@ -283,7 +296,7 @@ function Gate({ route }: { route: Route }) {
 function NotHere({ title, body, href }: { title: string; body: string; href: string }) {
   const { navigate } = useRouter();
   return (
-    <SafeAreaView style={[styles.root, { alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.sm }]}>
+    <Edges style={[styles.root, { alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.sm }]}>
       <Wordmark height={40} />
       <Text style={type.h3}>{title}</Text>
       <Text style={[type.small, { textAlign: 'center' }]}>{body}</Text>
@@ -291,7 +304,7 @@ function NotHere({ title, body, href }: { title: string; body: string; href: str
         <Icon name="inspire" size={16} color={colors.primaryFg} />
         <Text style={{ color: colors.primaryFg, fontWeight: '700' }}>Take me home</Text>
       </Pressable>
-    </SafeAreaView>
+    </Edges>
   );
 }
 
@@ -698,13 +711,13 @@ const styles = StyleSheet.create({
    */
   tabs: {
     flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar,
-    paddingBottom: (Platform.OS === 'web' ? 'max(8px, env(safe-area-inset-bottom))' : 8) as any,
+    paddingBottom: (Platform.OS === 'web' ? 'max(8px, var(--epic-sab))' : 8) as any,
   },
   // Floating over the map, and clear of the home indicator on a phone that has
   // one — the map runs under the indicator, the labels must not.
   tabsOver: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
-    paddingBottom: (Platform.OS === 'web' ? 'calc(4px + env(safe-area-inset-bottom))' : 20) as any,
+    paddingBottom: (Platform.OS === 'web' ? 'calc(4px + var(--epic-sab))' : 20) as any,
   },
   // A 44pt target with no slack around it: the icon and its label are 37 of
   // those 44, and the ten extra were another few millimetres of nothing.

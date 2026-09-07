@@ -330,7 +330,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     // out from under it.
     requestAnimationFrame(() => {
       const corner = host.current?.querySelector('.maplibregl-ctrl-top-right') as HTMLElement | null;
-      if (corner) corner.style.marginTop = 'env(safe-area-inset-top)';
+      if (corner) corner.style.marginTop = 'var(--epic-sat)';
     });
     m.on('load', () => { ready.current = true; });
     // The same rule for the map itself: a click that began somewhere else — the

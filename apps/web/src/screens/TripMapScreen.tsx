@@ -2781,7 +2781,7 @@ const styles = StyleSheet.create({
 
   // The app draws under the clock now, so anything floating at the top of the
   // map puts the inset back on for itself.
-  searchWrap: { position: 'absolute', left: 0, right: 0, top: ('calc(16px + env(safe-area-inset-top))' as any), paddingHorizontal: 20 },
+  searchWrap: { position: 'absolute', left: 0, right: 0, top: ('calc(16px + var(--epic-sat))' as any), paddingHorizontal: 20 },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 16, borderRadius: radius.pill,
     // Floating over the map: the 2px ink rule is what lifts it, not a shadow.
@@ -2838,7 +2838,7 @@ const styles = StyleSheet.create({
   // What it serves, said once, in the row's own words.
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + env(safe-area-inset-top))' as any) },
+  chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + var(--epic-sat))' as any) },
   driveChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill,
     backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
@@ -2853,7 +2853,7 @@ const styles = StyleSheet.create({
   iconBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
   addText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.ink },
 
-  searchSheet: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: colors.surface, paddingTop: ('calc(20px + env(safe-area-inset-top))' as any), paddingHorizontal: 16, paddingBottom: 16, gap: 10 },
+  searchSheet: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: colors.surface, paddingTop: ('calc(20px + var(--epic-sat))' as any), paddingHorizontal: 16, paddingBottom: 16, gap: 10 },
   searchField: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surfaceMuted },
   searchInput: { flex: 1, fontFamily: fonts.body, fontSize: 15, color: colors.ink, outlineStyle: 'none' as any },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
