@@ -376,7 +376,7 @@ const styles = StyleSheet.create({
   headerZone: { paddingBottom: 2 },
   // Covering the screen, the sheet's top edge is the top of the screen: it
   // keeps clear of the notch itself rather than of a grabber that is not there.
-  headerZoneCover: { paddingTop: (isWeb ? 'calc(8px + env(safe-area-inset-top))' : 8) as any },
+  headerZoneCover: { paddingTop: (isWeb ? 'calc(8px + var(--epic-sat))' : 8) as any },
   // The grabber is 40×4, and its hit area is the 44 the rest of the app uses.
   grabHit: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 24 },
   grab: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.line },

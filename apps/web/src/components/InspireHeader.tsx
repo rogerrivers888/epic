@@ -174,7 +174,7 @@ export const styles = StyleSheet.create({
      * needs clearing and nothing else does, so this is the inset plus a gap,
      * with a floor for a phone that reports no inset at all.
      */
-    paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(env(safe-area-inset-top) + 10px))' : 16) as any,
+    paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any,
   },
   where: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingHorizontal: 12,
