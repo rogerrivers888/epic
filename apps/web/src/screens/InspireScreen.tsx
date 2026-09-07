@@ -463,11 +463,17 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   const FOOD_LABELS: Record<string, string> = { restaurants: 'Restaurants', pubs: 'Pubs', cafes: 'Cafés', takeaway: 'Takeaway' };
   const stripItems = useMemo(() => {
     const all = { key: 'all', label: 'All' };
-    if (mode === 'food') return [all, ...FOOD_CATEGORIES.map((k) => ({ key: k, label: FOOD_LABELS[k] }))];
-    const here = new Set((pool?.moods ?? []).map((m) => m.key));
+    // Only what is actually here. The handoff's lists are illustrative — the
+    // strip is built from the pool, so a category with nothing behind it is not
+    // offered rather than offered and empty (owner, 7 Sep 2026).
+    if (mode === 'food') {
+      const kinds = new Set(inMode.map((i) => FOOD_KINDS[i.category]).filter(Boolean));
+      return [all, ...FOOD_CATEGORIES.filter((k) => !pool || kinds.has(k)).map((k) => ({ key: k, label: FOOD_LABELS[k] }))];
+    }
+    const here = new Set((pool?.moods ?? []).filter((m) => (m.count ?? 0) > 0).map((m) => m.key));
     const cats = ACTIVITY_CATEGORIES.filter((k) => !pool || here.has(k));
     return [all, ...cats.map((k) => ({ key: k, label: label(k) }))];
-  }, [mode, pool, label]);
+  }, [mode, pool, label, inMode]);
 
   /** The drawers inside one category that actually hold something (8b's sub-strip). */
   const drawersFor = useCallback(
@@ -655,7 +661,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               {pick ? (
                 listed.length ? listed.map((i) => (
                   mode === 'food'
-                    ? <FoodRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} where={shortPlace(i.region)} onOpen={() => open(i)} />
+                    ? <FoodRow key={i.venueRef} item={i} kind={cap1(i.cuisines[0] ?? '')} where={i.region ? shortPlace(i.region) : null} standing={(i as any).standing ?? null} onOpen={() => open(i)} />
                     : <PlaceRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} onOpen={() => open(i)} />
                 )) : (
                   <Empty

@@ -191,10 +191,13 @@ export const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     gap: spacing.md, paddingHorizontal: GUTTER, paddingTop: 12, minHeight: TARGET,
   },
-  filterItems: { flexDirection: 'row', alignItems: 'center', gap: 16, flexShrink: 1 },
+  // The filters wrap rather than run under the count: three of them plus
+  // "14 places" does not fit 390px on one line, and the count is the thing you
+  // read to decide whether to change them.
+  filterItems: { flexDirection: 'row', alignItems: 'center', gap: 16, flexShrink: 1, flexWrap: 'wrap' },
   filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
   filterText: { fontFamily: fonts.body, fontSize: 13 },
-  count: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  count: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, flexShrink: 0 },
 });
 
 export const HEADER = { top: HEADER_TOP, gutter: GUTTER };

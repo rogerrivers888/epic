@@ -16,6 +16,9 @@ import { Icon, iconFor } from './Icon';
 
 const GUTTER = 20;
 const minutes = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`);
+/** The sweep's own words for how a place stands, in the household's language. */
+const STANDING: Record<string, string> = { top: 'Top rated', high: 'Well rated', good: 'Well liked', mixed: 'Mixed' };
+
 export const priceBand = (p: number | null) => (p == null ? null : p === 0 ? 'Free' : '£'.repeat(Math.max(1, Math.min(4, p))));
 
 /**
@@ -120,9 +123,17 @@ export function CuisineRow({ label, count, onOpen }: { label: string; count: num
  * price and the rating, and eleven thumbnails of food we do not own would say
  * less than the two numbers on the right.
  */
-export function FoodRow({ item, kind, where, status, onOpen }: {
+export function FoodRow({ item, kind, where, status, standing, onOpen }: {
   item: InspireItem; kind: string | null; where: string | null;
-  status?: { text: string; open: boolean } | null; onOpen: () => void;
+  status?: { text: string; open: boolean } | null;
+  /**
+   * What the crowd makes of it, as a word: 'top' | 'high' | 'good' | 'mixed'.
+   * A band, not a number — the figure it was worked out from is the provider's
+   * and is never stored, so the row shows the judgement we are allowed to keep
+   * instead of a rating we are not (§13.10).
+   */
+  standing?: string | null;
+  onOpen: () => void;
 }) {
   const bits = [kind, where, minutes(item.travelMinutes)].filter(Boolean);
   const price = priceBand(item.priceLevel);
@@ -135,7 +146,9 @@ export function FoodRow({ item, kind, where, status, onOpen }: {
       </View>
       <View style={styles.foodSide}>
         {price ? <Text style={styles.price}>{price}</Text> : null}
-        {item.rating != null ? <Text style={styles.meta}>{item.rating.toFixed(1)}</Text> : null}
+        {item.rating != null
+          ? <Text style={styles.meta}>{item.rating.toFixed(1)}</Text>
+          : standing ? <Text style={styles.meta}>{STANDING[standing] ?? standing}</Text> : null}
       </View>
     </Pressable>
   );
