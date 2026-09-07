@@ -42,6 +42,13 @@ export const OPEN_KINDS = new Set([
   'Q24354',      // theatre building
   'Q483110',     // stadium
   'Q39614',      // cemetery
+  // Palaces. Holyrood, Hampton Court, Kensington and the State Rooms at
+  // Buckingham Palace are all somewhere you buy a ticket, and Holyrood is
+  // "the official residence of the monarch in Scotland" in its own first
+  // sentence — which is how it was wrongly hidden before this line existed.
+  'Q16560',      // palace
+  'Q15835',      // Japanese garden
+  'Q1107656',    // garden (again, for clarity beside its neighbour)
 ]);
 
 /**
@@ -90,9 +97,21 @@ export function judgeVisiting({ kinds = [], summary = '' } = {}) {
   const open = text.match(SAYS_OPEN);
   if (open) return { visiting: 'yes', because: `its description says "${open[0].toLowerCase()}"` };
   for (const [q, why] of CLOSED_KINDS) if (set.has(q)) return { visiting: 'no', because: why };
-  const shut = text.match(SAYS_CLOSED);
-  if (shut && !WAS_ONCE.test(text)) {
-    return { visiting: 'no', because: `its description says "${shut[0].toLowerCase()}"` };
+  // Only the defining sentence counts.
+  //
+  // Read over the whole summary this was wrong about as often as it was right.
+  // "Following its dissolution in 1536, the buildings were converted to a
+  // private residence" hid Reigate Priory, which is a school, a museum and a
+  // park; "it was closed to the public in 1955 after an act of vandalism" hid
+  // the Japanese garden at Cowden, which reopened after restoration. Both
+  // sentences are about the seventeenth and twentieth centuries respectively.
+  //
+  // What a Wikipedia article says in its first sentence is what the place *is*.
+  // Anything after it is history, and history is not opening hours.
+  const first = text.split(/(?<=\.)\s/)[0] ?? '';
+  const shut = first.match(SAYS_CLOSED);
+  if (shut && !WAS_ONCE.test(first)) {
+    return { visiting: 'no', because: `its description opens "${shut[0].toLowerCase()}"` };
   }
   return { visiting: null, because: null };
 }

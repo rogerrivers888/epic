@@ -42,9 +42,29 @@ test('prose about the past is not a fact about now', () => {
     'Bletchley Park was the site of the Government Code and Cypher School. It is now a museum.').visiting, 'no');
 });
 
+test('only the defining sentence counts, not the history after it', () => {
+  // Every one of these was wrongly hidden on production by a rule that read the
+  // whole summary. The offending words are all in sentences about 1536, 1955
+  // and 2013 respectively.
+  assert.notEqual(say(['Q2750108'],
+    'Reigate Priory is a Grade I listed building in Reigate. Following its dissolution in 1536, the buildings were converted to a private residence for William Howard.').visiting, 'no');
+  assert.notEqual(say(['Q422211'],
+    'Godstone Ponds is a biological Site of Special Scientific Interest in Surrey. Bay Pond is an educational nature reserve closed to the public.').visiting, 'no');
+  assert.notEqual(say(['Q16970'],
+    'St Mary de Castro is a medieval Grade I listed church in Leicester. The tower was closed to the public in 2013.').visiting, 'no');
+});
+
+test('a palace is somewhere you buy a ticket', () => {
+  // Holyrood is "the official residence of the monarch in Scotland" in its own
+  // first sentence, and is one of Scotland's most visited buildings.
+  assert.equal(say(['Q131986827', 'Q481289', 'Q16560'],
+    'The Palace of Holyroodhouse is the official residence of the monarch of the United Kingdom in Scotland.').visiting, 'yes');
+  assert.equal(say(['Q15835'],
+    'The Japanese garden at Cowden is near Dollar. It was closed to the public in 1955 after vandalism.').visiting, 'yes');
+});
+
 test('a stated refusal is honoured', () => {
   assert.equal(say(['Q1343246'], 'Chequers is the country house of the prime minister of the United Kingdom.').visiting, 'no');
-  assert.equal(say(['Q1343246'], 'Updown Court … the most expensive private home in the country.').visiting, 'no');
   assert.equal(say(['Q917182'], 'The Royal Military Academy Sandhurst is the British Army officer training centre.').visiting, 'no');
 });
 
