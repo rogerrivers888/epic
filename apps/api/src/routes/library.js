@@ -218,16 +218,68 @@ adminRouter.get('/attractions', requires('view_library'), async (req, res, next)
  */
 adminRouter.patch('/attractions/:id', requires('manage_library'), async (req, res, next) => {
   try {
-    const { state, pinned, note } = req.body ?? {};
+    const { state, pinned, note, visiting } = req.body ?? {};
     if (state && !['candidate', 'published', 'hidden'].includes(state)) throw bad('Unknown state');
-    const row = await lib.setAttractionState(req.params.id, { state, pinned, note, by: actorOf(req) });
+    if (visiting !== undefined && ![null, 'yes', 'no'].includes(visiting)) throw bad('visiting must be yes, no or null');
+    let row = await lib.setAttractionState(req.params.id, { state, pinned, note, by: actorOf(req) });
     if (!row) return res.status(404).json({ error: 'not_found' });
+    // Settled by a person, which outranks the rule for good: `rejudgeVisiting`
+    // skips anything whose verdict is not its own.
+    if (visiting !== undefined) {
+      row = await lib.setVisiting(req.params.id, {
+        visiting,
+        because: req.body?.visitingBecause ?? `settled by ${actorOf(req)}`,
+        by: actorOf(req),
+      }) ?? row;
+    }
     await query(
       `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
        values ($1,$2,$3,'attraction',$4,$5,$6)`,
       [req.account?.id ?? null, actorOf(req), 'attraction.curate', row.id, row.name,
-       JSON.stringify({ state: row.state, pinned: row.pinned, note: row.note })]);
+       JSON.stringify({ state: row.state, pinned: row.pinned, note: row.note, visiting: row.visiting })]);
     res.json({ attraction: row });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/admin/library/visiting — who has been settled, and who is waiting.
+ *
+ * The list is the point. A rule that hides places without showing its working
+ * is indistinguishable from a bug, so the back office can see every verdict,
+ * the sentence behind it, and the ones nobody has settled — best-scoring first,
+ * because a place nobody will ever be shown is not worth a decision.
+ */
+adminRouter.get('/visiting', requires('view_library'), async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `select visiting, visiting_by, count(*)::int as n from attractions
+        where state = 'published' group by 1, 2 order by 3 desc`);
+    const { rows: closed } = await query(
+      `select id, name, region_slug, visiting_because, visiting_by from attractions
+        where visiting = 'no' and state = 'published' order by name limit 300`);
+    res.json({
+      counts: rows,
+      closed,
+      unsettled: await lib.unsettledVisiting({ limit: Math.min(300, Number(req.query.limit) || 100) }),
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /api/admin/library/visiting/rejudge — run the rule over the atlas again.
+ *
+ * Free: it reads what the harvest already stored and asks nobody's API. Run it
+ * after `domain/visiting.js` learns something. Hand-set verdicts are skipped.
+ */
+adminRouter.post('/visiting/rejudge', requires('manage_library'), async (req, res, next) => {
+  try {
+    const counts = await lib.rejudgeVisiting({ region: req.body?.region ?? null });
+    await query(
+      `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+       values ($1,$2,$3,'atlas',null,$4,$5)`,
+      [req.account?.id ?? null, actorOf(req), 'atlas.visiting.rejudge',
+       req.body?.region ?? 'the whole atlas', JSON.stringify(counts)]);
+    res.json({ counts });
   } catch (err) { next(err); }
 });
 

@@ -13,6 +13,7 @@
 // wrong is a takedown rather than a bug.
 
 import { query, withTransaction } from '../db.js';
+import { judgeVisiting } from '../domain/visiting.js';
 
 // ---------------------------------------------------------------------------
 // regions
@@ -387,6 +388,10 @@ export async function rankRegion(slug) {
             updated_at = now()
        from ordered o where a.id = o.id and a.state <> 'hidden'`,
     [slug, region.target_count]);
+  // Whether the public can go there, settled in the same breath as what is
+  // published. It reads only what the harvest already wrote, so it costs
+  // nothing and cannot be forgotten on the way in (domain/visiting.js).
+  await rejudgeVisiting({ region: slug });
   await refreshRegionCounts(slug);
   return regionBySlug(slug);
 }
@@ -573,6 +578,10 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
          left join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero'
          left join image_assets i on i.id = l.image_id and i.moderation = 'approved'
         where a.state = 'published'
+          -- Somewhere that has been established as closed to the public is not
+          -- an answer to "what shall we do". Null is "nobody has established
+          -- it" and stays in; only a refusal is skipped (domain/visiting.js).
+          and a.visiting is distinct from 'no'
           and a.lat between $3 and $4 and a.lng between $5 and $6
           ${illustratedOnly ? 'and i.id is not null' : ''}
      ),
@@ -1433,6 +1442,64 @@ export async function lessonsFor({ attractionId = null, kinds = [] } = {}) {
           or (scope = 'place' and subject = $2))
       order by case scope when 'all' then 0 when 'kind' then 1 else 2 end, created_at`,
     [kinds ?? [], attractionId ? String(attractionId) : null]);
+  return rows;
+}
+
+/**
+ * Settle whether the public can visit, across the atlas.
+ *
+ * Cheap and idempotent: it reads what Wikidata already gave us and writes a
+ * verdict, asking nobody's API and spending nothing. Safe to re-run, and worth
+ * re-running whenever `domain/visiting.js` learns something.
+ *
+ * A hand-set verdict is never touched. That is the whole contract with the back
+ * office — somebody who has actually looked outranks the rule, permanently.
+ */
+export async function rejudgeVisiting({ region = null, limit = 20000 } = {}) {
+  const args = [limit];
+  const where = ["state <> 'hidden'"];
+  if (region) { args.push(region); where.push(`region_slug = $${args.length}`); }
+  const { rows } = await query(
+    `select id, kinds, summary, visiting from attractions
+      where ${where.join(' and ')} and (visiting_by is null or visiting_by = 'rule')
+      order by id limit $1`, args);
+
+  const counts = { looked: rows.length, yes: 0, no: 0, unknown: 0, changed: 0 };
+  for (const r of rows) {
+    const { visiting, because } = judgeVisiting({ kinds: r.kinds ?? [], summary: r.summary ?? '' });
+    counts[visiting ?? 'unknown'] += 1;
+    if ((r.visiting ?? null) === (visiting ?? null)) continue;
+    counts.changed += 1;
+    await query(
+      `update attractions
+          set visiting = $2, visiting_because = $3, visiting_by = 'rule', visiting_at = now()
+        where id = $1`, [r.id, visiting, because]);
+  }
+  return counts;
+}
+
+/** One place, settled by hand. Outranks the rule and survives every later pass. */
+export async function setVisiting(id, { visiting, because, by }) {
+  if (visiting != null && !['yes', 'no'].includes(visiting)) throw new Error('visiting must be yes, no or null');
+  const { rows } = await query(
+    `update attractions
+        set visiting = $2, visiting_because = $3, visiting_by = $4, visiting_at = now()
+      where id = $1 returning *`,
+    [id, visiting ?? null, because ?? null, by || 'hand']);
+  return rows[0] ?? null;
+}
+
+/**
+ * The ones worth somebody's time: published, nobody has established either way,
+ * and best-scoring first — because a place nobody will ever be shown is not
+ * worth a decision.
+ */
+export async function unsettledVisiting({ limit = 100 } = {}) {
+  const { rows } = await query(
+    `select id, name, region_slug, category, kinds, summary, score, website
+       from attractions
+      where state = 'published' and visiting is null
+      order by score desc nulls last limit $1`, [limit]);
   return rows;
 }
 

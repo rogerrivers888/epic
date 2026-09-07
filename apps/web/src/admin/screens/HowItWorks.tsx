@@ -341,6 +341,21 @@ const SECTIONS: Section[] = [
         where: 'apps/api/src/domain/moods.js · back office › Shelves',
       },
       {
+        title: 'A place is hidden only when something says the public cannot go',
+        rule: 'Every atlas place carries a visiting verdict: yes, no, or null for "nobody has established it". Only a "no" is kept off the home screen. Null is the common answer and is shown. A verdict set by hand outranks the rule for good \u2014 a later pass never overwrites it.',
+        why: 'The atlas is harvested from Wikidata, which measures how notable a building is, not whether you may walk into it \u2014 so the Culture row read Windsor Castle, then Bagshot Park Mansion, which is the Duke of Edinburgh\u2019s house. The tempting rule, hiding any country house nobody has vouched for, was run against the real table first: it would have hidden Chatsworth, Blenheim, Highclere, Leeds Castle and Hever Castle, because a summary that happens not to mention visiting is the ordinary case rather than a signal. Being wrong in the hiding direction is far worse than the bug it fixes, so the rule only ever answers when something answers it.',
+        state: 'live',
+        where: 'apps/api/src/domain/visiting.js \u00b7 back office \u203a Library',
+        said: { who: 'Roger', on: '7 Sep 2026', words: 'That definitely needs to be fixed, and you need to put it into our knowledge bank in the admin section also.' },
+      },
+      {
+        title: 'What settles it is a type, not a sentence',
+        rule: 'A place that is a museum, a park, a garden, a nature reserve or a castle is open by definition. A residence of the royal family that is not also a museum is closed \u2014 which separates Bagshot Park, Highgrove and Gatcombe Park from Windsor Castle, Sandringham and Osborne House in one line. Wording is read only where it states the case outright, and the open tests always run first.',
+        why: 'Matching prose alone was tried and was dangerously wrong: it marked Osborne House, Bletchley Park, Broughton Castle and the Royal Pavilion as closed, all of them major attractions, because the words private, school and demolished appear in their histories. Wikidata types are stated facts; a Wikipedia sentence is a story. Of 193 published country houses the rule settles six, and each was checked by hand.',
+        state: 'live',
+        where: 'apps/api/src/domain/visiting.js \u00b7 OPEN_KINDS, CLOSED_KINDS',
+      },
+      {
         title: 'Voice is interpreted against a closed set that is on screen',
         rule: 'Speech is matched to the vocabulary the screen is already showing, and every voice action has a tap that produces the same state change.',
         why: 'An open-ended interpreter fails invisibly and cannot be corrected. A closed set can only fail in ways somebody can see and fix by tapping.',
