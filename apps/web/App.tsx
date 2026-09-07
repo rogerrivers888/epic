@@ -28,6 +28,7 @@ import { useOutbox } from './src/hooks/useOutbox';
 import { useSession } from './src/hooks/useSession';
 import { Icon, IconName } from './src/components/Icon';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { isFullBleed, isImmersive, legacyHref, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
 
 // Epic opens on Inspire (owner, 5 Sep 2026, "Supporting docs/Roam Inspire"):
@@ -98,7 +99,10 @@ function Frame() {
     if (Platform.OS === 'web' && typeof localStorage !== 'undefined') localStorage.setItem(VIEW_KEY, m);
   };
 
-  const app = <Routed />;
+  // Last line of defence. The boundary inside the Shell keeps a broken screen
+  // from taking the tabs with it; this one is for everything above the tabs —
+  // the passcode, the profile, the frame's own chrome.
+  const app = <ErrorBoundary what="Epic"><Routed /></ErrorBoundary>;
   // A narrow window is a phone already: no toggle, no frame.
   if (window.width < DESKTOP) return app;
 
@@ -520,7 +524,10 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
         <View style={styles.content}>
           {desktop ? waitingBanner : null}
           {desktop && showingSaved ? offlineBanner : desktop && health === 'down' ? banner : null}
-          {screen}
+          {/* A screen that throws loses the screen, not the app: the tabs stay
+              under it, and moving to another one clears it (resetKey is the
+              address). Owner, 7 Sep 2026: "I get a blank page". */}
+          <ErrorBoundary resetKey={here}>{screen}</ErrorBoundary>
         </View>
         {!desktop && !immersive ? (
           // On a full-bleed screen the tab bar floats over the map instead of

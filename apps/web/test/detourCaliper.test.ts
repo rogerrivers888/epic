@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bearingBetween, caliperFor, offset } from '../src/components/detourCaliper';
+import { bearingBetween, caliperFor, offset } from '../src/components/detourCaliper.ts';
 
 const km = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
   const R = 6371, r = (d: number) => (d * Math.PI) / 180;

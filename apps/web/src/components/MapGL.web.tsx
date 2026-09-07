@@ -632,8 +632,21 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       for (const mk of caliperMarks.current) mk.remove();
       caliperMarks.current = [];
     };
+    /**
+     * The markers always go; the layers only if there is still a map under them.
+     *
+     * On unmount React runs this component's cleanups in the order the effects
+     * were written, and the first of them is the one that calls `m.remove()`.
+     * By the time this runs the map has no style left, and `getLayer` reads
+     * straight off it — so leaving the trip threw, and with nothing catching it
+     * the whole app went blank rather than just the map (7 Sep 2026).
+     *
+     * `getStyle()` is the test because it is the one accessor MapLibre wrote
+     * defensively; it answers undefined on a removed map instead of throwing.
+     */
     const teardown = () => {
       clearMarks();
+      if (map.current !== m || !m.getStyle()) return;
       for (const id of ['epic-caliper', 'epic-caliper-casing']) if (m.getLayer(id)) m.removeLayer(id);
       if (m.getSource('epic-caliper')) m.removeSource('epic-caliper');
     };
