@@ -140,20 +140,27 @@ export function FilterRow({ children, count }: { children: React.ReactNode; coun
   );
 }
 
-export function FilterButton({ label, icon, strong, on, onPress, toggle }: {
+export function FilterButton({ label, icon, strong, on, narrowed, onPress, toggle }: {
   label: string;
   icon?: IconName;
   /** The travel filter, which always has a value and so is always ink. */
   strong?: boolean;
   /** A toggle that is currently on (Open now). */
   on?: boolean;
+  /**
+   * Set to something other than its default, and therefore cutting the list
+   * down. A filter that is quietly doing that should look like it is: the
+   * alternative is a screen with nothing on it and three small grey words as
+   * the only explanation.
+   */
+  narrowed?: boolean;
   onPress: () => void;
   /** A toggle has no chevron: there is no sheet behind it. */
   toggle?: boolean;
 }) {
-  const colour = strong || on ? colors.ink : colors.inkMuted;
+  const colour = strong || on || narrowed ? colors.ink : colors.inkMuted;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={toggle ? { checked: !!on } : undefined} style={styles.filterBtn}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={toggle ? { checked: !!on } : undefined} style={[styles.filterBtn, narrowed && styles.filterOn]}>
       {icon ? <Icon name={icon} size={18} color={colour} /> : null}
       <Text style={[styles.filterText, { color: colour, fontWeight: on ? '700' : '600' }]}>{label}</Text>
       {toggle ? null : <Icon name="expand" size={12} color={colour} />}
@@ -219,6 +226,7 @@ export const styles = StyleSheet.create({
   // read to decide whether to change them.
   filterItems: { flexDirection: 'row', alignItems: 'center', gap: 16, flexShrink: 1, flexWrap: 'wrap' },
   filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
+  filterOn: { backgroundColor: colors.accentSoft, paddingHorizontal: 8, marginHorizontal: -2 },
   filterText: { fontFamily: fonts.body, fontSize: 13 },
   count: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, flexShrink: 0 },
 });
