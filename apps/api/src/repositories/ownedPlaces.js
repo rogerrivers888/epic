@@ -176,6 +176,29 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
   return rows.map((r) => r.venue_ref);
 }
 
+/**
+ * The sweep's places that have never been told apart.
+ *
+ * A place with no `category` is one the Food strip cannot offer under any word
+ * but Restaurants, and the reason is almost always that it was never matched to
+ * the open map. Ordered by how prominent the sweep thought it was, so the ones
+ * a household would actually see are identified first.
+ */
+export async function needingKind(limit = 25) {
+  const { rows } = await query(
+    `select distinct on (r.venue_ref) r.venue_ref
+       from place_records r
+       join scout_places p on p.venue_ref = r.venue_ref
+      where r.category is null
+        and r.osm_ref is null
+        and r.enrich_attempts < 4
+      order by r.venue_ref, p.epic_score desc nulls last
+      limit $1`,
+    [limit],
+  );
+  return rows.map((r) => r.venue_ref);
+}
+
 /** How much of the household's research is owned, for Settings and the offline card. */
 export async function summaryFor(householdId, behindVersion = 3) {
   const { rows } = await query(

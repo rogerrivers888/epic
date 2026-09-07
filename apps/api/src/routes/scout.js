@@ -16,6 +16,7 @@ import express from 'express';
 import { requires } from '../access.js';
 import * as scout from '../repositories/scout.js';
 import { fillMenus, readFoundMenus, rescore, sweep } from '../sources/scoutArea.js';
+import { identifyKinds } from '../sources/own.js';
 import { geocode } from '../sources/geocode.js';
 import { benchArea } from '../sources/google.js';
 import { compare } from '../domain/bench.js';
@@ -81,6 +82,20 @@ router.post('/areas/:code/sweep', requires('manage_library'), async (req, res, n
 router.post('/areas/:code/rescore', requires('manage_library'), async (req, res, next) => {
   try {
     res.json(await rescore(String(req.params.code).toUpperCase()));
+  } catch (err) { next(err); }
+});
+
+/**
+ * Work out what kind of place the sweep's finds actually are.
+ *
+ * Free, and deliberately so: it is `enrich` with its two paid lookups off, so
+ * it asks the open map and nothing else. `manage_library` all the same, because
+ * it writes to the owned record and it is somebody else's server it is asking.
+ */
+router.post('/kinds', requires('manage_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold().catch(() => null);
+    res.json(await identifyKinds({ limit: Math.min(50, Number(req.body?.limit) || 25), householdId: household?.id ?? null }));
   } catch (err) { next(err); }
 });
 

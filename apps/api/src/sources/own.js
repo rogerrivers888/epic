@@ -376,7 +376,7 @@ async function websiteLead(venueRef, householdId) {
  * Returns `{ state, fields, matched }`. Never throws — a place that cannot be
  * researched today is left for the next attempt with the reason on the row.
  */
-export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force } = {}) {
+export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true } = {}) {
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
   if (!force) {
@@ -497,14 +497,20 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
   //     their own page — read that page, and store what *they* publish. Nothing
   //     Google returns is written down, and the call is attributed like every
   //     other (Technical Constraints §13.10).
-  if (!seed.website) {
+  //
+  // `paid: false` stops here and at the search below. Both of those are the two
+  // places research can cost anything, and a pass run to fill in what kind of
+  // place something is has no business spending on either: the open map above
+  // already answered that question, and everything after this is about their
+  // website (owner, 8 Sep 2026, was promised "no provider spend").
+  if (!seed.website && paid) {
     const lead = await websiteLead(venueRef, householdId);
     if (lead?.website) seed.website = lead.website;
     if (lead && !seed.name) seed.name = lead.name ?? seed.name;
     if (lead?.problem) problems.push(lead.problem);
   }
   // Still nothing, and somebody asked for this place by name: go and find it.
-  if (!seed.website && !osm && askAgain) {
+  if (!seed.website && !osm && askAgain && paid) {
     try {
       const asked = await findTheirPage({
         venueRef, name: seed.name, category: seed.category,
@@ -775,6 +781,31 @@ export async function sweepExpired() {
   const refs = [...new Set(discarded)];
   for (const ref of refs) await compose(ref).catch(() => null);
   return { discarded: discarded.length, recomposed: refs.length };
+}
+
+/**
+ * What kind of place, for everything a sweep found and never identified.
+ *
+ * The open map is the only source that answers "is this a bar or a bakery", and
+ * it is free — so this is `enrich` with its two paid lookups switched off. It
+ * exists because 114 of the 150 places near the household had never been
+ * matched to OpenStreetMap, so the Food strip could only offer the kinds the
+ * other 36 happened to be (owner, 8 Sep 2026).
+ *
+ * Batched, because each one is an Overpass query and Overpass is somebody
+ * else's server being generous.
+ */
+export async function identifyKinds({ limit = 25, householdId = null } = {}) {
+  const refs = await owned.needingKind(limit);
+  let found = 0;
+  const kinds = {};
+  for (const ref of refs) {
+    // Never throws; a place the open map has never heard of is left as it was.
+    await enrich(ref, { householdId, force: true, replace: false, paid: false }).catch(() => null);
+    const rec = await ownedRecord(ref).catch(() => null);
+    if (rec?.category) { found += 1; kinds[rec.category] = (kinds[rec.category] ?? 0) + 1; }
+  }
+  return { asked: refs.length, identified: found, kinds };
 }
 
 /** Places claimed but never researched, or due to be tried again. */
