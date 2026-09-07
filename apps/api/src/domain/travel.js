@@ -59,13 +59,35 @@ export function kmBetween(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+/**
+ * The words a caller might use for a way of getting about, in this file's own.
+ *
+ * The screens say `drive`, `walk`, `transit`; the profiles above are keyed
+ * `driving`, `walking`, `transit`. An unknown word falls back to driving, which
+ * is a sensible default and a terrible silence: `walk` matched nothing, took
+ * the fallback, and every walking time came back as a driving time — so the
+ * travel sheet's counts did not move when the mode did (owner, 7 Sep 2026:
+ * "when I change from Drive to Public Transport to Walk, the number of places
+ * doesn't change at all"). Both spellings are accepted now.
+ */
+const MODE_ALIAS = {
+  drive: 'driving', driving: 'driving', car: 'driving',
+  walk: 'walking', walking: 'walking', foot: 'walking',
+  cycle: 'cycling', cycling: 'cycling', bike: 'cycling',
+  transit: 'transit', public: 'transit', pt: 'transit',
+};
+
+/** A caller's word for a mode, as one of the four this file models. */
+export const travelMode = (m) => MODE_ALIAS[String(m || '').toLowerCase()] ?? 'driving';
+
 export function estimateTravelMinutes(from, to, mode = 'driving') {
-  const profile = MODE_PROFILE[mode] || MODE_PROFILE.driving;
+  const kind = travelMode(mode);
+  const profile = MODE_PROFILE[kind];
   const straight = kmBetween(from, to);
   const km = straight * profile.detourFactor;
   // Beyond city scale, transit means rail: faster, and paid for with a change
   // or two rather than with the wait at one stop.
-  const overhead = mode === 'transit' && straight > 8 ? 18 : profile.fixedOverheadMinutes;
+  const overhead = kind === 'transit' && straight > 8 ? 18 : profile.fixedOverheadMinutes;
   return Math.round((km / speedFor(profile, straight)) * 60 + overhead);
 }
 
