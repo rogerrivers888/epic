@@ -254,11 +254,19 @@ adminRouter.get('/visiting', requires('view_library'), async (req, res, next) =>
     const { rows } = await query(
       `select visiting, visiting_by, count(*)::int as n from attractions
         where state = 'published' group by 1, 2 order by 3 desc`);
+    // How much of the atlas the rule has actually been over. A verdict of null
+    // means it looked and found nothing to go on; a `visiting_by` of null means
+    // it has not looked at all, and the two must not read the same.
+    const { rows: [swept] } = await query(
+      `select count(*)::int as total,
+              count(*) filter (where visiting_by is not null)::int as considered
+         from attractions where state <> 'hidden'`);
     const { rows: closed } = await query(
       `select id, name, region_slug, visiting_because, visiting_by from attractions
         where visiting = 'no' and state = 'published' order by name limit 300`);
     res.json({
       counts: rows,
+      swept,
       closed,
       unsettled: await lib.unsettledVisiting({ limit: Math.min(300, Number(req.query.limit) || 100) }),
     });
@@ -273,7 +281,10 @@ adminRouter.get('/visiting', requires('view_library'), async (req, res, next) =>
  */
 adminRouter.post('/visiting/rejudge', requires('manage_library'), async (req, res, next) => {
   try {
-    const counts = await lib.rejudgeVisiting({ region: req.body?.region ?? null });
+    const counts = await lib.rejudgeVisiting({
+      region: req.body?.region ?? null,
+      ...(req.body?.limit ? { limit: Math.min(200000, Number(req.body.limit)) } : {}),
+    });
     await query(
       `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
        values ($1,$2,$3,'atlas',null,$4,$5)`,

@@ -1455,21 +1455,25 @@ export async function lessonsFor({ attractionId = null, kinds = [] } = {}) {
  * A hand-set verdict is never touched. That is the whole contract with the back
  * office — somebody who has actually looked outranks the rule, permanently.
  */
-export async function rejudgeVisiting({ region = null, limit = 20000 } = {}) {
+export async function rejudgeVisiting({ region = null, limit = 100000 } = {}) {
   const args = [limit];
   const where = ["state <> 'hidden'"];
   if (region) { args.push(region); where.push(`region_slug = $${args.length}`); }
   const { rows } = await query(
     `select id, kinds, summary, visiting from attractions
       where ${where.join(' and ')} and (visiting_by is null or visiting_by = 'rule')
-      order by id limit $1`, args);
+      -- Published first: those are the only ones anybody can currently be shown.
+      order by (state = 'published') desc, id limit $1`, args);
 
   const counts = { looked: rows.length, yes: 0, no: 0, unknown: 0, changed: 0 };
   for (const r of rows) {
     const { visiting, because } = judgeVisiting({ kinds: r.kinds ?? [], summary: r.summary ?? '' });
     counts[visiting ?? 'unknown'] += 1;
-    if ((r.visiting ?? null) === (visiting ?? null)) continue;
-    counts.changed += 1;
+    if ((r.visiting ?? null) !== (visiting ?? null)) counts.changed += 1;
+    // Stamped even when the answer is "nobody has said", so that a row the pass
+    // has considered is distinguishable from one it has never reached. Without
+    // it the two look identical and there is no way to tell whether the atlas
+    // has been swept.
     await query(
       `update attractions
           set visiting = $2, visiting_because = $3, visiting_by = 'rule', visiting_at = now()
