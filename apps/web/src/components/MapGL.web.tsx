@@ -642,11 +642,13 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
         paint: { 'line-color': '#201E1D', 'line-width': 1.6, 'line-opacity': 0.75, 'line-dasharray': [2.5, 2.5] },
       });
 
-      // An arrowhead on each edge of the band, pointing out of it.
+      // An arrowhead on each edge of the band, pointing out of it. A filled
+      // triangle rather than a drawn arrow: at twelve pixels a stroke reads as
+      // a smudge, and this has to be legible at the size a kilometre is.
       for (const [end, turn] of [[c.a, 180], [c.b, 0]] as const) {
         const el = document.createElement('div');
-        el.style.cssText = 'width:16px;height:16px;display:flex;align-items:center;justify-content:center';
-        el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" style="transform:rotate(${c.bearingDeg + turn}deg)" fill="none" stroke="#201E1D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="m6 10 6-6 6 6"/></svg>`;
+        el.style.cssText = 'width:14px;height:14px;display:flex;align-items:center;justify-content:center;pointer-events:none';
+        el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" style="transform:rotate(${c.bearingDeg + turn}deg)"><path d="M12 3 20 19H4Z" fill="#201E1D" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/></svg>`;
         caliperMarks.current.push(new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([end.lng, end.lat]).addTo(m));
       }
 
@@ -687,7 +689,16 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       chip.appendChild(text);
       chip.appendChild(step('M12 5v14M5 12h14', c.onMore, 'A longer detour'));
       wrap.appendChild(chip);
-      caliperMarks.current.push(new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([c.mid.lng, c.mid.lat]).addTo(m));
+      /*
+        Above the line, not on it. A band a kilometre wide is twenty pixels
+        across at the zoom a day trip sits at, and a chip centred on it is wider
+        than the thing it is measuring — the measurement disappeared behind its
+        own label (seen on the deployed screen, 7 Sep 2026).
+      */
+      caliperMarks.current.push(
+        new maplibregl.Marker({ element: wrap, anchor: 'bottom', offset: [0, -12] })
+          .setLngLat([c.mid.lng, c.mid.lat]).addTo(m),
+      );
     };
 
     if (ready.current) draw(); else m.once('load', draw);
