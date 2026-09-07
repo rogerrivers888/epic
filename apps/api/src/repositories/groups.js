@@ -216,6 +216,20 @@ export async function shortlistForChecklist(tripId, client) {
   return rows;
 }
 
+/**
+ * The places already on the trip's days. A group is made from a trip and the
+ * trip is planned afterwards, so what the household put on a day is as much
+ * "on the trip" as what is sitting on the shortlist.
+ */
+export async function stopsForChecklist(tripId, client) {
+  const { rows } = await on(client)(
+    `select venue_ref, venue_name, start_time, day_id from trip_stops
+      where trip_id = $1 and venue_ref <> 'base' order by position`,
+    [tripId],
+  );
+  return rows;
+}
+
 /** What the group has already been told about, so the trip's new places can be spotted. */
 export async function itemRefs(groupId) {
   const { rows } = await query('select venue_ref, stop_id, label from group_items where group_id = $1', [groupId]);

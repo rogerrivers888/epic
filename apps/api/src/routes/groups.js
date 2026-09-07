@@ -356,23 +356,32 @@ router.get('/groups', async (req, res, next) => {
  * not that one".
  */
 async function syncFromTrip(group) {
-  const [shortlist, existing] = await Promise.all([
+  // Both halves of "on the trip": what is on the shortlist, and what has been
+  // put on a day. The second is the one the organiser had just done.
+  const [shortlist, stops, existing] = await Promise.all([
     groupsRepo.shortlistForChecklist(group.trip_id),
+    groupsRepo.stopsForChecklist(group.trip_id),
     groupsRepo.itemRefs(group.id),
   ]);
   const known = new Set(existing.map((i) => i.venue_ref).filter(Boolean));
   const labels = new Set(existing.map((i) => (i.label ?? '').trim().toLowerCase()));
   const dropped = new Set(Array.isArray(group.dropped_refs) ? group.dropped_refs : []);
+  const onTrip = [
+    ...shortlist.map((s) => ({ ref: s.venue_ref, label: s.venue_label, food: s.kind === 'food', at: null })),
+    ...stops.map((s) => ({ ref: s.venue_ref, label: s.venue_name, food: false, at: s.start_time ? String(s.start_time).slice(0, 5) : null })),
+  ];
   let position = await groupsRepo.nextItemPosition(group.id);
-  for (const s of shortlist) {
-    if (!s.venue_ref || known.has(s.venue_ref) || dropped.has(s.venue_ref)) continue;
-    if (labels.has((s.venue_label ?? '').trim().toLowerCase())) continue;
+  for (const s of onTrip) {
+    if (!s.ref || known.has(s.ref) || dropped.has(s.ref)) continue;
+    if (labels.has((s.label ?? '').trim().toLowerCase())) continue;
+    known.add(s.ref);
+    labels.add((s.label ?? '').trim().toLowerCase());
     // A meal is asked about rather than required: what the organiser needs from
     // it is a number for the table.
     await groupsRepo.insertItem(group.id, {
-      kind: 'activity', required: s.kind !== 'food', label: s.venue_label,
-      detail: s.kind === 'food' ? 'Are you coming to this?' : null,
-      venueRef: s.venue_ref, position: position++,
+      kind: 'activity', required: !s.food, label: s.label,
+      detail: s.food ? 'Are you coming to this?' : null,
+      startsAt: s.at, venueRef: s.ref, position: position++,
     });
   }
 }
