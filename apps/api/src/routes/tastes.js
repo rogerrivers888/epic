@@ -18,7 +18,7 @@ import * as planSessions from '../repositories/planSessions.js';
 import * as tripsRepo from '../repositories/trips.js';
 import { currentHousehold, loadMembers, toAttendees, loadLearnedPreferences } from './household.js';
 import { searchCached } from '../sources/cache.js';
-import { defaultSourceKeys, sourceHasKey, sourceOff } from '../sources/index.js';
+import { defaultSourceKeys, sourceHasKey, sourceOff, SCREEN_DEADLINE_MS } from '../sources/index.js';
 import { applyConstraints } from '../domain/ranking.js';
 import { estimateTravelMinutes, kmBetween } from '../domain/travel.js';
 import { routingEnabled, routingPaused, travelMatrixMinutes } from '../sources/routing.js';
@@ -110,7 +110,9 @@ async function buildTable({ household, attending, attendees, session, taste, hom
   // its widest). Without it there is no dish search at all, only the ordinary
   // nearby look, which must stay small or Overpass times out on a whole county.
   const radiusKm = Math.min(dishSearch ? 50 : 15, Math.max(2, driveRadiusKm(capMinutes)));
-  const params = { center: home, radiusKm, categories: FOOD_CATEGORIES, query: queryFor(taste), includeEvents: false, sources };
+  // Drawn on screen while somebody waits, so it takes what has arrived rather
+  // than waiting out the slowest source (sources/index.js SCREEN_DEADLINE_MS).
+  const params = { center: home, radiusKm, categories: FOOD_CATEGORIES, query: queryFor(taste), includeEvents: false, sources, deadlineMs: SCREEN_DEADLINE_MS };
   const r = await searchCached(params);
   if (r.fetched) {
     await planSessions.recordSessionCall(household.id, session?.id ?? null, r.sourcesQueried.join('+') || 'none', 'plan.tastes', r.units);

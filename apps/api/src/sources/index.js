@@ -299,6 +299,21 @@ function withDeadline(source, work) {
 const GRACE_MS = Number(process.env.ROAM_SOURCE_GRACE_MS || 2500);
 
 /**
+ * How long a search may take when somebody is watching it happen.
+ *
+ * Passing no deadline means "I want everything, however long it takes", which
+ * is right for a sweep filling a cache and wrong for a screen. Four search
+ * paths had no deadline because there was nothing to write instead of one, and
+ * the trip's Find tab measured **11.1 seconds** on production for a cold search
+ * (6 Sep 2026) — the whole of it waiting out Overpass.
+ *
+ * With `slow` sources no longer holding the answer this rarely binds: Google
+ * answers in about half a second and the fan-out leaves as soon as the rest are
+ * in. It is the backstop for the afternoon when something else is unwell.
+ */
+export const SCREEN_DEADLINE_MS = Number(process.env.ROAM_SCREEN_DEADLINE_MS || 8000);
+
+/**
  * Exported for the tests. This is concurrency with money and a spinner on the
  * other end of it, and the two things that matter — answering without waiting
  * for a source that cannot make it, and still waiting when nothing else found

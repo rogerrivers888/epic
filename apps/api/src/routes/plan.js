@@ -21,7 +21,7 @@ const MATRIX_MAX = Number(process.env.ROAM_MATRIX_MAX || 60);
 
 // Rows fill while the household is still talking: a smaller, quicker model reads the words so far.
 const PREVIEW_MODEL = process.env.ROAM_PREVIEW_MODEL || 'claude-sonnet-5';
-import { searchAllSources, searchCorridor, eventSources, optInFrom, defaultSourceKeys, enabledSources, sourceHasKey, sourceOff } from '../sources/index.js';
+import { searchAllSources, searchCorridor, eventSources, optInFrom, defaultSourceKeys, enabledSources, sourceHasKey, sourceOff, SCREEN_DEADLINE_MS } from '../sources/index.js';
 import { resolvePlace, KNOWN_PLACES } from '../sources/fixtures.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
 import { deriveCatchment, reachRadiusKm, estimateTravelMinutes, detourMinutes as estimateDetour, TRAVEL_MODES, kmBetween } from '../domain/travel.js';
@@ -609,6 +609,9 @@ async function retrievePool({ household, trip, attendees, intent, sessionId, sou
     placeLabel: trip.origin_label,
     timezone: trip.timezone || household.timezone || null,
     householdId: household.id,
+    // A person is waiting on a plan. Same rule as the Find tab: answer with
+    // what has arrived, and let the stragglers reach the cache behind it.
+    deadlineMs: SCREEN_DEADLINE_MS,
     sessionId,
   });
   // Only the caller that actually asked the providers is billed for it.

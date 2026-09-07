@@ -10,7 +10,7 @@ import { TRAVEL_MODES } from '../domain/travel.js';
 import { dayAsTrip, datesBetween, slotFor } from '../domain/days.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
 import { searchAreas } from '../sources/areas.js';
-import { optInFrom, enabledSources, pointsAlong, resolveVenues } from '../sources/index.js';
+import { optInFrom, enabledSources, pointsAlong, resolveVenues, SCREEN_DEADLINE_MS } from '../sources/index.js';
 import { searchCached } from '../sources/cache.js';
 import { bedsNear, OSM_ATTRIBUTION, LITEAPI_ATTRIBUTION } from '../sources/stays.js';
 import { stationsNear } from '../sources/where.js';
@@ -509,6 +509,11 @@ async function runShortlistSearch(req, { onProgress = null } = {}) {
       includeEvents: true, outingStart: trip.depart_at, outingEnd: trip.return_at,
       placeLabel: trip.base_label ?? trip.origin_label, timezone: trip.timezone ?? null,
       householdId: household.id,
+      // Somebody is watching this. Without it the tab waited for every source
+      // including Overpass — 11.1 seconds, measured on production 6 Sep 2026.
+      // Nothing is lost: what arrives late lands in the cache behind it, so the
+      // next look at this trip has it (sources/cache.js).
+      deadlineMs: SCREEN_DEADLINE_MS,
     },
     { refresh: req.query.refresh === '1', onProgress },
   ), deadline]);
@@ -677,6 +682,7 @@ router.get('/:id/along', async (req, res, next) => {
     const answers = await Promise.race([Promise.all(spots.map((spot) => searchCached(
       {
         center: spot.center, radiusKm: spot.radiusKm, categories: [kind], query: q, sources,
+        deadlineMs: SCREEN_DEADLINE_MS,
         locality: trip.locality ?? null, householdId: household.id,
         placeLabel: trip.base_label ?? trip.origin_label, timezone: trip.timezone ?? null,
       },
