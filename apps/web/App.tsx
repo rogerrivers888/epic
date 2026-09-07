@@ -682,12 +682,19 @@ const styles = StyleSheet.create({
   banner: { padding: spacing.sm, backgroundColor: colors.accentSoft, alignItems: 'center' },
   bannerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   bannerDown: { backgroundColor: colors.overrunSoft },
-  // The design's own 28px, or the home indicator plus a little, whichever is
-  // the larger — so the bar looks the same in a browser tab as it does in the
-  // installed app, and never has the indicator sitting on its labels.
+  /**
+   * As close to the bottom as the phone allows, and no closer.
+   *
+   * The design's 28px is measured on a drawing with no home indicator in it, so
+   * taking it literally left half a centimetre of dead app under the labels
+   * (owner, 7 Sep 2026: "it can probably move at least half a centimetre
+   * down"). On a phone that has an indicator the inset *is* the clearance the
+   * labels need and nothing more; on one that has none, 8px is enough to keep
+   * them off the edge.
+   */
   tabs: {
     flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar,
-    paddingBottom: (Platform.OS === 'web' ? 'max(28px, calc(env(safe-area-inset-bottom) + 8px))' : 28) as any,
+    paddingBottom: (Platform.OS === 'web' ? 'max(8px, env(safe-area-inset-bottom))' : 8) as any,
   },
   // Floating over the map, and clear of the home indicator on a phone that has
   // one — the map runs under the indicator, the labels must not.
@@ -695,7 +702,9 @@ const styles = StyleSheet.create({
     position: 'absolute', left: 0, right: 0, bottom: 0,
     paddingBottom: (Platform.OS === 'web' ? 'calc(4px + env(safe-area-inset-bottom))' : 20) as any,
   },
-  tab: { flex: 1, minHeight: TARGET + 10, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  // A 44pt target with no slack around it: the icon and its label are 37 of
+  // those 44, and the ten extra were another few millimetres of nothing.
+  tab: { flex: 1, minHeight: TARGET, alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: 4 },
   tabText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },
   tabTextActive: { color: colors.ink },
 });
