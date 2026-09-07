@@ -185,15 +185,22 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
  * a household would actually see are identified first.
  */
 export async function needingKind(limit = 25) {
+  // `distinct on` has to be ordered by its own key first, so the ranking has to
+  // happen outside it — ordered inside, the limit took an arbitrary slice in
+  // venue_ref order and the batch was whichever places sorted early by id.
   const { rows } = await query(
-    `select distinct on (r.venue_ref) r.venue_ref, p.name, p.lat, p.lng, p.website
-       from place_records r
-       join scout_places p on p.venue_ref = r.venue_ref
-      where r.category is null
-        and r.osm_ref is null
-        and r.enrich_attempts < 4
-        and p.name is not null and p.lat is not null and p.lng is not null
-      order by r.venue_ref, p.epic_score desc nulls last
+    `select venue_ref, name, lat, lng, website from (
+       select distinct on (r.venue_ref)
+              r.venue_ref, p.name, p.lat, p.lng, p.website, p.epic_score
+         from place_records r
+         join scout_places p on p.venue_ref = r.venue_ref
+        where r.category is null
+          and r.osm_ref is null
+          and r.enrich_attempts < 4
+          and p.name is not null and p.lat is not null and p.lng is not null
+        order by r.venue_ref, p.epic_score desc nulls last
+     ) best
+      order by epic_score desc nulls last
       limit $1`,
     [limit],
   );
