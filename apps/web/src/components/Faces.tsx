@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, fonts, memberColor, memberPastel, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, memberColor, memberPastel, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Chip, FoldLine, Row } from './ui';
 import { Icon } from './Icon';
 
@@ -186,6 +186,6 @@ const styles = StyleSheet.create({
   face: { alignItems: 'center', gap: 3, minWidth: TARGET, minHeight: TARGET },
   whoRow: { minHeight: TARGET, alignItems: 'center' },
   whoTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: TARGET },
-  whoTile: { gap: 2, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  whoTile: { gap: 2, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   whoTileOn: { borderColor: colors.ink, borderWidth: 2 },
 });

@@ -63,12 +63,20 @@ svg/
   epic-symbol-ink.svg         the pin alone, ink with a cream hole
   epic-symbol-lime.svg        the pin alone, lime with an ink hole
   epic-symbol-solid.svg       the pin alone, no hole — for use below 24px
-  epic-wordmark-*.svg         the full wordmark on each ground
+  epic-wordmark-*.svg         the full wordmark on each ground; the
+                              `-transparent` one cuts the pin's hole out of the
+                              path, so whatever is behind shows through it
 
   The symbol and icon SVGs are pure vector with no font dependency. The
   wordmark SVGs set live text in Archivo, so open them online or install
   Archivo (Google Fonts, OFL); for anything that cannot load a font, render
   the component or use a PNG.
+
+  Their geometry is measured, not derived: Archivo 800 at -0.06em gives an ink
+  box of 2.011em ("Epic") or 1.931em ("epic"), and the dotless i's own centre
+  sits at 1.326em / 1.246em from the text origin — which is where the pin goes,
+  plus the pack's 0.03em nudge. Deriving those from glyph advances puts the pin
+  a stem's width to the right and clips the c.
 
 Generated icons live beside the app, not here:
   apps/web/public/favicon.ico            16 + 32 + 48
@@ -80,6 +88,9 @@ Generated icons live beside the app, not here:
   apps/web/assets/icon.png               1024, master for iOS/Android
   apps/web/assets/android-icon-foreground.png
   apps/web/assets/splash-icon.png
+  apps/web/public/brand/epic-wordmark-ink.png   the mark for e-mail: 2x,
+        transparent, holed. `apps/api/src/sources/mail.js` puts it on the lime
+        band, with "Epic" as its alt text for the inboxes that block images.
 
   At 16px the tile is dropped and the solid pin is used, because the hole
   closes into a smudge at that size.

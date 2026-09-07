@@ -33,7 +33,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, HarvestRun, LibraryAttraction, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
-import { colors, radius, spacing, TARGET, type } from '../../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -777,7 +777,7 @@ function Types({ canManage }: { canManage: boolean }) {
 const styles = StyleSheet.create({
   tab: {
     paddingHorizontal: spacing.md, height: 34, justifyContent: 'center',
-    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   tabOn: { backgroundColor: colors.primary, borderColor: colors.primary },
 
@@ -787,7 +787,7 @@ const styles = StyleSheet.create({
   regionRow: {
     flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center',
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   rowHover: { backgroundColor: colors.surfaceMuted },
   rowName: { ...type.body, fontWeight: '700', color: colors.ink },
@@ -796,7 +796,7 @@ const styles = StyleSheet.create({
   attractionRow: {
     flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'flex-start',
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   thumb: {
     width: 96, height: 72, borderRadius: radius.lg, overflow: 'hidden',
@@ -806,7 +806,7 @@ const styles = StyleSheet.create({
 
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flex: 1, minWidth: 0,
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.lg,
     paddingHorizontal: spacing.sm, height: TARGET, backgroundColor: colors.surface,
   },
   searchInput: { flex: 1, minWidth: 0, ...type.body, color: colors.ink, outlineStyle: 'none' as any },
@@ -829,11 +829,11 @@ const styles = StyleSheet.create({
 
   boardRow: {
     gap: spacing.sm, alignItems: 'center', flexWrap: 'wrap',
-    paddingVertical: spacing.xs, borderTopWidth: 1, borderTopColor: colors.line,
+    paddingVertical: spacing.xs, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   typeRow: {
     gap: spacing.sm, alignItems: 'center', flexWrap: 'wrap',
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
 });

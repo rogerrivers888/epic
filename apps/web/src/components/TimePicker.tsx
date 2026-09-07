@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button } from './ui';
 import { Icon } from './Icon';
 
@@ -195,16 +195,16 @@ const styles = StyleSheet.create({
   trigger: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  panel: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface, padding: spacing.md, gap: spacing.md },
+  panel: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface, padding: spacing.md, gap: spacing.md },
   wheels: { flexDirection: 'row', gap: spacing.md },
   wheel: { height: ROW * VISIBLE, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, overflow: 'hidden' },
   // The chosen row sits in a lit window, the way a wheel reads on a phone. It is
   // painted behind the times, not over them.
   window: {
     position: 'absolute', left: 0, right: 0, top: ((VISIBLE - 1) / 2) * ROW, height: ROW,
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line, backgroundColor: colors.accentSoft, zIndex: 0,
+    borderTopWidth: BORDER, borderBottomWidth: BORDER, borderColor: colors.line, backgroundColor: colors.accentSoft, zIndex: 0,
   },
   scroll: { zIndex: 1, backgroundColor: 'transparent' },
   slot: { height: ROW, alignItems: 'center', justifyContent: 'center' },

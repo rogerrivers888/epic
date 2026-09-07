@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, HouseholdResponse, Take, Venue, Visit, VisitTake, VisitTakeInput } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from './ui';
 import { CategoryIcon, Icon } from './Icon';
 import { VenuePhoto } from './VenuePhoto';
@@ -242,7 +242,7 @@ export function VisitForm({ venue, household, onDone, onCancel, initial, createV
 const styles = StyleSheet.create({
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
   },
   form: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.panel },
   visitRow: { gap: 6, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.panel },
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
   answers: { flexDirection: 'row', gap: 6, alignItems: 'stretch' },
   answer: {
     flex: 1, minHeight: TARGET + 8, paddingHorizontal: 8, paddingVertical: 8, gap: 3,
-    borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surface,
+    borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center',
   },
   answerOn: { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   capture: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.panel },
   whoLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET - 6 },
   whoPicks: { flexDirection: 'row', gap: 6 },
-  whoPick: { width: 40, height: 34, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  whoPick: { width: 40, height: 34, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
   whoPickOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   moreLink: { fontSize: 13, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline' },
   scoreInline: { flexDirection: 'row', alignItems: 'center', gap: 3 },

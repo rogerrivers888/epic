@@ -82,6 +82,53 @@ export async function sendMail({ to, subject, text, html }) {
 }
 
 /**
+ * The Epic shell every message is drawn in.
+ *
+ * A lime band with the wordmark, then ink type on cream, an ink button with
+ * square corners, and the strapline under a 2px rule. It is a table because
+ * Outlook still lays messages out with tables, and the palette is written in
+ * literally because a mail client has no access to `theme.ts` — these are the
+ * pack's own values (`docs/brand/README.txt`), and they are the only place in
+ * the codebase allowed to repeat them.
+ *
+ * The mark is an image, so it is the real lockup where images load, with the
+ * word itself as the alt text where they do not — which is most inboxes by
+ * default. It is served from the web app's own origin, taken from the sign-in
+ * link rather than from a second setting that could drift out of step with it.
+ * The PNG is transparent with the pin's hole cut out of the path, so the band
+ * shows through it: a mark exported on its own lime ground leaves a seam
+ * wherever a client nudges the colour, and nothing renders identically twice
+ * across inboxes. Archivo is asked for and will not be honoured by most
+ * clients; the fallback stack is what actually renders, and the layout does
+ * not depend on it.
+ */
+const LIME = '#C8F542', INK = '#201E1D', CREAM = '#FFFDF9', MUTED = '#605D5D';
+const FONT = "Archivo,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
+
+const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
+
+function shell({ url, body, action = 'Open Epic' }) {
+  const origin = originOf(url);
+  const mark = origin
+    ? `<img src="${origin}/brand/epic-wordmark-ink.png" width="150" height="117" alt="Epic" style="display:block;border:0;outline:none;text-decoration:none">`
+    : `<span style="font-family:${FONT};font-weight:800;font-size:44px;letter-spacing:-2.6px;color:${INK}">Epic</span>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${CREAM};margin:0;padding:0">
+  <tr><td align="center" style="padding:24px 12px">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="520" style="width:520px;max-width:100%;border:2px solid ${INK};background:${CREAM}">
+      <tr><td style="background:${LIME};padding:18px 24px;border-bottom:2px solid ${INK}">${mark}</td></tr>
+      <tr><td style="padding:24px;font-family:${FONT};font-size:16px;line-height:1.5;color:${INK}">
+${body}
+        <p style="margin:24px 0 0"><a href="${url}" style="display:inline-block;background:${INK};color:${CREAM};font-weight:700;padding:14px 22px;text-decoration:none;border-radius:0">${action}</a></p>
+      </td></tr>
+      <tr><td style="border-top:2px solid ${INK};padding:14px 24px;font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">Seize the day</td></tr>
+    </table>
+  </td></tr>
+</table>`;
+}
+
+const note = (t) => `        <p style="margin:16px 0 0;font-size:14px;line-height:1.5;color:${MUTED}">${t}</p>`;
+
+/**
  * The invitation itself.
  *
  * Plain words, one link, and no tracking pixel or redirect: the address in the
@@ -107,13 +154,12 @@ export function invitationEmail({ name, url, from, expiresAt, returning = false 
     '',
     'If you were not expecting this, ignore it — nothing happens until the link is opened.',
   ].join('\n');
-  const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1c2b24">
-  <p>${hello}</p>
-  <p>${opening}</p>
-  <p><a href="${url}" style="display:inline-block;background:#1c2b24;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none">Open Epic</a></p>
-  <p style="font-size:14px;color:#5c6b63">The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.</p>
-  <p style="font-size:14px;color:#5c6b63">If you were not expecting this, ignore it — nothing happens until the link is opened.</p>
-</div>`;
+  const html = shell({ url, body: [
+    `        <p style="margin:0">${hello}</p>`,
+    `        <p style="margin:16px 0 0">${opening}</p>`,
+    note(`The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.`),
+    note('If you were not expecting this, ignore it — nothing happens until the link is opened.'),
+  ].join('\n') });
   return { subject: returning ? 'Your link back in to Epic' : 'Your invitation to Epic', text, html };
 }
 
@@ -139,12 +185,11 @@ export function householdInvitationEmail({ name, url, household, from, expiresAt
     `The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.`,
     '', 'If you were not expecting this, ignore it — nothing happens until the link is opened.',
   ].join('\n');
-  const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1c2b24">
-  <p>${hello}</p>
-  <p>${opening}</p>
-  <p><a href="${url}" style="display:inline-block;background:#1c2b24;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none">Open Epic</a></p>
-  <p style="font-size:14px;color:#5c6b63">The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.</p>
-  <p style="font-size:14px;color:#5c6b63">If you were not expecting this, ignore it — nothing happens until the link is opened.</p>
-</div>`;
+  const html = shell({ url, body: [
+    `        <p style="margin:0">${hello}</p>`,
+    `        <p style="margin:16px 0 0">${opening}</p>`,
+    note(`The link signs you in on the device you open it on and works once, within ${days} day${days === 1 ? '' : 's'}. After that the app stays signed in for ninety days.`),
+    note('If you were not expecting this, ignore it — nothing happens until the link is opened.'),
+  ].join('\n') });
   return { subject: returning ? 'Your link back in to Epic' : `You're in ${household || 'the household'} on Epic`, text, html };
 }

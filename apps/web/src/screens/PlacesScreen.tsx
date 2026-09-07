@@ -11,7 +11,7 @@ import type { TripSeed } from './TripsScreen';
 import { TripCard } from '../components/TripCard';
 import { asList, asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
 import { MOODS, paths, type Route } from '../routes';
-import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 
 /** The picture square at the head of a place row, and at the head of an area row (handover §6: 56–64px). */
 const WELL = 56;
@@ -1399,7 +1399,7 @@ const styles = StyleSheet.create({
   // room around it rather than a second one (CLAUDE.md: one tree shape).
   fieldWideCentred: { width: '100%', maxWidth: 860, alignSelf: 'center' },
   bodyCentred: { width: '100%', maxWidth: 860, alignSelf: 'center' },
-  roundBtn: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  roundBtn: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   // The green status line under every row: what the household did here.
   green: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.accent },
   arow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 11, paddingHorizontal: spacing.md, minHeight: TARGET },
@@ -1413,20 +1413,20 @@ const styles = StyleSheet.create({
   field: { backgroundColor: colors.bg, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   fieldWide: { backgroundColor: 'transparent', paddingBottom: 0 },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, gap: spacing.md },
-  list: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, overflow: 'hidden' },
+  list: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.md, minHeight: TARGET },
-  rowLine: { borderTopWidth: 1, borderTopColor: colors.line },
+  rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
   rowSub: { paddingLeft: 40, backgroundColor: colors.panel },
   rowOn: { backgroundColor: colors.accentSoft },
   counts: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  count: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, height: 20, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
+  count: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, height: 20, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   countText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },
   filters: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  fchip: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 32, paddingLeft: 10, paddingRight: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, maxWidth: 150 },
+  fchip: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 32, paddingLeft: 10, paddingRight: 7, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, maxWidth: 150 },
   fchipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   fchipOpen: { borderColor: colors.ink, backgroundColor: colors.panel },
   fchipText: { fontSize: 12, fontWeight: '600', color: colors.ink, flexShrink: 1 },
-  viewToggle: { flexDirection: 'row', height: 32, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, padding: 2, gap: 2 },
+  viewToggle: { flexDirection: 'row', height: 32, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, padding: 2, gap: 2 },
   viewBtn: { width: 30, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   viewBtnOn: { backgroundColor: colors.primary },
   split: { gap: spacing.md },
@@ -1437,34 +1437,34 @@ const styles = StyleSheet.create({
   heart: { position: 'absolute', right: -5, top: -5, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 3, minWidth: 0 },
   // A ring the type colour, so the Northern line's black reads on the dark ground and the Circle line's yellow on the light one.
-  dot: { width: 8, height: 8, borderRadius: 4, borderWidth: 1, borderColor: colors.inkMuted },
+  dot: { width: 8, height: 8, borderRadius: 4, borderWidth: BORDER, borderColor: colors.inkMuted },
   score: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 4 },
   scoreText: { fontSize: 13, fontWeight: '700', color: colors.ink },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  pill: { height: 18, paddingHorizontal: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  pill: { height: 18, paddingHorizontal: 7, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   pillText: { fontSize: 11, fontWeight: '700', color: colors.inkMuted },
-  getting: { gap: 4, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
-  line: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 24, paddingHorizontal: 9, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
+  getting: { gap: 4, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
+  line: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 24, paddingHorizontal: 9, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   lineText: { fontSize: 12, fontWeight: '600', color: colors.ink },
-  tryChip: { height: 24, paddingHorizontal: 9, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  tryChip: { height: 24, paddingHorizontal: 9, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   tryText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },
   mapWrap: { position: 'relative' },
-  pinCard: { position: 'absolute', left: spacing.sm, right: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, overflow: 'hidden' },
+  pinCard: { position: 'absolute', left: spacing.sm, right: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, overflow: 'hidden' },
   mapHint: { position: 'absolute', left: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.md, overflow: 'hidden' },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
   sheetWrapWide: { justifyContent: 'center', alignItems: 'center' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
   sheet: { backgroundColor: colors.panel, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, maxHeight: '80%' },
-  sheetWide: { width: 360, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line },
+  sheetWide: { width: 360, borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
   opt: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md },
   optOn: { backgroundColor: colors.primary },
-  capturePanel: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.panel },
-  ours: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  capturePanel: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.panel },
+  ours: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line },
   scores: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'center' },
   scoreLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
   },
 });

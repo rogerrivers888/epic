@@ -41,7 +41,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, MoodKey, ShelfPlace, ShelfProposal, ShelfRule, ShelfVocabulary, ShelfWeights } from '../../api';
-import { colors, radius, spacing, type } from '../../theme';
+import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { Button, Chip, Row, Stepper, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -863,16 +863,16 @@ function TeachForm({ place, vocab, order, floor, max, wide, onClose, onSaved, on
 const styles = StyleSheet.create({
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, backgroundColor: colors.surface,
   },
   searchInput: { flex: 1, paddingVertical: 9, color: colors.ink, outlineStyle: 'none' as never },
   input: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, paddingVertical: 9, color: colors.ink, backgroundColor: colors.surface,
   },
   say: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm,
+    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
     paddingHorizontal: spacing.sm, paddingVertical: 9, color: colors.ink, backgroundColor: colors.surface,
     minHeight: 72, textAlignVertical: 'top',
   },
@@ -883,7 +883,7 @@ const styles = StyleSheet.create({
   ruleRow: {
     gap: spacing.sm,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
   rowName: { ...type.body, fontWeight: '700' },
   thumb: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
   gridWide: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md },
   weightCell: { width: '100%' },
 
-  placeWrap: { borderTopWidth: 1, borderTopColor: colors.line },
+  placeWrap: { borderTopWidth: BORDER, borderTopColor: colors.line },
   thumbTap: { borderRadius: radius.sm },
   // The quick move, opened under the row it belongs to rather than in a sheet:
   // it has to be obvious which place is being moved.
@@ -906,6 +906,6 @@ const styles = StyleSheet.create({
   pickerGroup: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs, flexWrap: 'wrap' },
   catBlock: {
     gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    borderTopWidth: BORDER, borderTopColor: colors.line,
   },
 });

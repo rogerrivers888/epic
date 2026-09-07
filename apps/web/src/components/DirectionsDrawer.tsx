@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
 import { api, Directions, JourneyLeg, LegMode } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Row, Segmented, minutes as fmtMinutes } from './ui';
 import { Icon } from './Icon';
 
@@ -114,11 +114,11 @@ const styles = StyleSheet.create({
   backdropWrap: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
   panel: { backgroundColor: colors.bg },
-  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: 1, borderLeftColor: colors.line },
+  panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: BORDER, borderLeftColor: colors.line },
   panelSheet: { width: '100%', height: '100%' },
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
   summary: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.accentSoft },
-  step: { flexDirection: 'row', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  step: { flexDirection: 'row', gap: 10, paddingVertical: 8, borderTopWidth: BORDER, borderTopColor: colors.line },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent, marginTop: 7 },
   line: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: 5 },
   lineText: { fontSize: 11, fontWeight: '800' },

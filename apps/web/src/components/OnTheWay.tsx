@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PlanRoute, RouteStop } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Chip, Row, Wrap, clock, minutes } from './ui';
 import { priceMarks, typeLine } from './StopCard';
 import { VenuePhoto } from './VenuePhoto';
@@ -128,7 +128,7 @@ function WayRow({ stop, busy, onOpen, onPress }: { stop: RouteStop; busy: boolea
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line, flexWrap: 'wrap' },
+  row: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line, flexWrap: 'wrap' },
   btn: { minHeight: 36, minWidth: 104, paddingHorizontal: 10, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center' },
   btnOn: { backgroundColor: colors.like },
   btnText: { fontSize: 12, fontWeight: '700', color: colors.ink },

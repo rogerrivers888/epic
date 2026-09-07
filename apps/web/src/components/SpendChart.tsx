@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Row } from './ui';
 
 /**
@@ -90,7 +90,7 @@ export function Comparison({ points, selected }: { points: MonthValue[]; selecte
 }
 
 const styles = StyleSheet.create({
-  plot: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, borderBottomWidth: 1, borderBottomColor: colors.line, position: 'relative' },
+  plot: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, borderBottomWidth: BORDER, borderBottomColor: colors.line, position: 'relative' },
   grid: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: colors.surfaceMuted },
   slot: { flex: 1, height: '100%', justifyContent: 'flex-end', alignItems: 'center' },
   bar: { width: '70%', maxWidth: 24, borderTopLeftRadius: 4, borderTopRightRadius: 4 },

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, AroundThing, MenuRead, Taste, TasteFit, TastePlace, TasteTable } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Card, Chip, Row, StatusLine, Wrap, minutes } from './ui';
 import { Icon, IconName, Rating } from './Icon';
 import { VenuePhoto } from './VenuePhoto';
@@ -268,7 +268,7 @@ export function TasteTables({ sessionId, tastes, tables, running, note, error, c
 }
 
 const styles = StyleSheet.create({
-  place: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm, gap: 6 },
+  place: { borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm, gap: 6 },
   placeHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   quote: { ...type.small, color: colors.ink, fontStyle: 'italic' },
   menu: { gap: 4, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },

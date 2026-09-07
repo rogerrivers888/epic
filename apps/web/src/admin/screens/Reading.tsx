@@ -40,7 +40,7 @@ import {
   api, AttractionFacts, AttractionFactsRow, ExtractionLesson,
   LibraryAttraction, LibraryAttractionDetail, LibraryType, PlaceContent, ReadingStats,
 } from '../../api';
-import { colors, radius, spacing, TARGET, type } from '../../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
   split: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
     borderRadius: radius.lg, paddingHorizontal: spacing.sm, minHeight: TARGET,
   },
   searchInput: { ...type.small, color: colors.ink, flex: 1, minWidth: 0, paddingVertical: spacing.sm },

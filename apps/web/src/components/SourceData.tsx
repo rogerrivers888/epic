@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, SourcesStatus, SourceTrace, SourceTraceVenue, TripDetail } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Wrap, clock } from './ui';
 import { isAdmin } from '../admin';
 
@@ -178,11 +178,11 @@ function TraceRow({ v, open, onToggle }: { v: SourceTraceVenue; open: boolean; o
 }
 
 const styles = StyleSheet.create({
-  table: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, overflow: 'hidden' },
-  tr: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.line, paddingVertical: 6, paddingHorizontal: 8, gap: 4 },
+  table: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm, overflow: 'hidden' },
+  tr: { flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, paddingVertical: 6, paddingHorizontal: 8, gap: 4 },
   th: { flex: 1, minWidth: 56, fontSize: 11, fontWeight: '700', color: colors.inkMuted, textAlign: 'right' },
   td: { flex: 1, minWidth: 56, fontSize: 12, color: colors.inkMuted, textAlign: 'right' },
-  row: { paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line, gap: 4 },
+  row: { paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line, gap: 4 },
   raw: { backgroundColor: colors.surfaceMuted, borderRadius: radius.sm, padding: spacing.sm, gap: 4 },
   mono: { fontFamily: 'Menlo, monospace', fontSize: 11, color: colors.ink },
 });

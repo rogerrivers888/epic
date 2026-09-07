@@ -25,7 +25,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Row, Wrap } from '../components/ui';
 import { useViewport } from '../hooks/useViewport';
@@ -344,30 +344,30 @@ const styles = StyleSheet.create({
     // as a banner rather than a figure. (CSS grid's auto-fit does not have this
     // problem; flex-wrap does, and this is the fix that keeps one tree.)
     flexGrow: 1, flexBasis: 180, minWidth: 150, maxWidth: 420,
-    borderWidth: 1, borderLeftWidth: 4, borderColor: colors.line, borderRadius: radius.lg,
+    borderWidth: BORDER, borderLeftWidth: 4, borderColor: colors.line, borderRadius: radius.lg,
     backgroundColor: colors.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 2,
   },
   tileLabel: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
   tileValue: { ...type.h2, color: colors.ink, fontVariant: ['tabular-nums'] },
 
-  panel: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, backgroundColor: colors.surface, overflow: 'hidden' },
+  panel: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.lg, backgroundColor: colors.surface, overflow: 'hidden' },
   panelTitle: { ...type.small, fontWeight: '700', color: colors.ink },
 
   withheld: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', padding: spacing.md, backgroundColor: colors.well, borderRadius: radius.md },
-  banner: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, borderWidth: 1, borderLeftWidth: 4, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface },
+  banner: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, borderWidth: BORDER, borderLeftWidth: 4, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface },
 
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: BORDER, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' },
 
-  head: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.line },
+  head: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line },
   headText: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted },
-  row: { borderBottomWidth: 1, borderBottomColor: colors.line, minHeight: TARGET },
+  row: { borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: TARGET },
   rowWide: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   rowNarrow: { gap: 6, padding: spacing.md },
   rowHover: { backgroundColor: colors.well },
   cellLabel: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, color: colors.inkMuted },
   empty: { padding: spacing.lg, alignItems: 'center' },
 
-  filter: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.surface },
+  filter: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.surface },
   filterOn: { backgroundColor: colors.primary, borderColor: colors.primary },
 
   range: { gap: 2, backgroundColor: colors.well, borderRadius: radius.pill, padding: 2 },

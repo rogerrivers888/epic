@@ -26,7 +26,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, CoverageRow, FactKey, Locality, PlaceTree } from '../../api';
-import { colors, radius, spacing, type } from '../../theme';
+import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Row } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -229,7 +229,7 @@ export function Coverage() {
 const styles = StyleSheet.create({
   head: {
     flexDirection: 'row', gap: 3, paddingHorizontal: spacing.md, paddingBottom: 5,
-    borderBottomWidth: 1, borderBottomColor: colors.line,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
   },
   headCell: { paddingTop: spacing.sm },
   cellHead: {
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   rowHead: { width: 168, justifyContent: 'center', paddingRight: spacing.sm, gap: 1 },
   rowName: { ...type.small, fontWeight: '700', color: colors.ink },
   cell: {
-    width: 84, borderRadius: radius.sm, borderWidth: 1,
+    width: 84, borderRadius: radius.sm, borderWidth: BORDER,
     alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 0,
   },
   cellHover: { borderColor: colors.ink, borderWidth: 2 },
@@ -251,6 +251,6 @@ const styles = StyleSheet.create({
   cellGap: { ...type.tiny, fontSize: 9.5 },
   foot: {
     flexDirection: 'row', gap: spacing.xs, alignItems: 'flex-start',
-    padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.line,
+    padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line,
   },
 });

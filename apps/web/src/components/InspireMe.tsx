@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BrowseItem, IdeaBudget, SketchEvent, Idea, IdeaHeadline, IdeaThing, InspireStage, Taste, TasteTable } from '../api';
-import { colors, radius, spacing, TARGET, type } from '../theme';
+import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap, minutes } from './ui';
 import { Icon, CategoryIcon, Rating } from './Icon';
 import { VenuePhoto } from './VenuePhoto';
@@ -751,15 +751,15 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
 }
 
 const styles = StyleSheet.create({
-  box: { minHeight: 64, padding: spacing.md, borderRadius: radius.md, textAlignVertical: 'top', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 16, lineHeight: 22, color: colors.ink },
+  box: { minHeight: 64, padding: spacing.md, borderRadius: radius.md, textAlignVertical: 'top', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 16, lineHeight: 22, color: colors.ink },
   boxLive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  mic: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.ink },
+  mic: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.ink },
   stop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET, paddingHorizontal: spacing.lg, borderRadius: radius.pill, backgroundColor: colors.overrun },
   stopText: { color: colors.bg, fontWeight: '700', fontSize: 15 },
-  ideaWrap: { paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.line, gap: 6 },
+  ideaWrap: { paddingVertical: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line, gap: 6 },
   idea: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
   tile: { width: 84, height: 84, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
-  settings: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm },
+  settings: { borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm },
   settingsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 38 },
-  rowRule: { borderTopWidth: 1, borderTopColor: colors.line },
+  rowRule: { borderTopWidth: BORDER, borderTopColor: colors.line },
 });

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, GroupItem, GroupItemInput, GroupItemKind, GroupParticipant, Place, TripDetail, TripGroup } from '../api';
-import { colors, fonts, radius, spacing, TARGET, type } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Meter, Row, Segmented, StatusLine, Wrap } from './ui';
 import { Icon, IconName } from './Icon';
 import { QrCode } from './QrCode';
@@ -1381,41 +1381,41 @@ const styles = StyleSheet.create({
   // in capitals (owner, 7 Sep 2026).
   section: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
   fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, marginBottom: 4 },
-  pagePreview: { width: 76, height: 92, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.lime, borderWidth: 1, borderColor: colors.line },
+  pagePreview: { width: 76, height: 92, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.lime, borderWidth: BORDER, borderColor: colors.line },
   pagePreviewImg: { width: '100%', height: '100%' },
   pagePreviewBlank: { flex: 1, backgroundColor: colors.surface, margin: 8, padding: 6, gap: 5, justifyContent: 'flex-end' },
   pagePreviewBar: { height: 5, borderRadius: 2, backgroundColor: colors.line },
   columns: { flexDirection: 'row', gap: spacing.lg, alignItems: 'flex-start' },
   blockNumber: {
-    width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: colors.line,
+    width: 24, height: 24, borderRadius: 12, borderWidth: BORDER, borderColor: colors.line,
     alignItems: 'center', justifyContent: 'center',
   },
   blockNumberText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '800', color: colors.inkMuted },
   numberBox: {
     flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.sm,
-    minHeight: TARGET - 6, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    minHeight: TARGET - 6, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
   },
   numberBoxOn: { borderColor: colors.accent, borderWidth: 2 },
   numberInput: { flex: 1, textAlign: 'center', fontFamily: fonts.body, fontSize: 17, fontWeight: '700', color: colors.ink, minWidth: 40, outlineStyle: 'none' as any },
-  wantedRow: { gap: 6, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },
+  wantedRow: { gap: 6, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   hero: {
     // The one lime field in light; in dark the header ground is the page ground,
     // so a rule gives the panel its edge back.
     backgroundColor: colors.headerBg, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.md, overflow: 'hidden',
-    borderWidth: 1, borderColor: colors.line,
+    borderWidth: BORDER, borderColor: colors.line,
   },
   scene: { width: 280, height: 175, alignSelf: 'center' },
   eyebrow: { fontFamily: fonts.body, fontSize: 11, fontWeight: '800', letterSpacing: 1.4, color: colors.headerSub },
   hugeText: { fontFamily: fonts.heading, fontSize: 34, lineHeight: 36, fontWeight: '800', letterSpacing: -1, color: colors.ink },
   heroSub: { fontFamily: fonts.body, fontSize: 15, lineHeight: 21, color: colors.headerSub, maxWidth: 520 },
   sellGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  sell: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start', padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  sell: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start', padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   sellHalf: { width: '48%', flexGrow: 1 },
   sellThird: { width: '31%', flexGrow: 1, minWidth: 220 },
   sellNumber: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink },
   sellIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
   sellTitle: { fontFamily: fonts.heading, fontSize: 16, fontWeight: '800', letterSpacing: -0.3, color: colors.ink },
-  dateCard: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
+  dateCard: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
   timeline: { flexDirection: 'row', gap: spacing.sm },
   timelineDot: { height: 12, justifyContent: 'center' },
   timelineDotInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
@@ -1437,10 +1437,10 @@ const styles = StyleSheet.create({
   colRight: { width: 380 },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body,
+    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body,
     // The focus ring is the leaf, not the browser's blue (style guide).
     outlineColor: colors.accent as any, outlineWidth: 2 as any, outlineOffset: 1 as any,
   },
-  person: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm, marginTop: spacing.sm },
-  warnBox: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.overrun, backgroundColor: colors.overrunSoft },
+  person: { borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm, marginTop: spacing.sm },
+  warnBox: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', padding: spacing.sm, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.overrun, backgroundColor: colors.overrunSoft },
 });

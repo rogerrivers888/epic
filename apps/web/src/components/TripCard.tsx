@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { TripSummary } from '../api';
-import { colors, radius, spacing, type } from '../theme';
+import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Row } from './ui';
 import { Avatar } from './Faces';
 import { VenueThumb } from './VenueThumb';
@@ -64,5 +64,5 @@ export function TripCard({ trip: t, members = [], onPress }: {
 }
 
 const styles = StyleSheet.create({
-  tripCard: { flexDirection: 'row', gap: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, backgroundColor: colors.surface },
+  tripCard: { flexDirection: 'row', gap: spacing.md, padding: spacing.md, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.lg, backgroundColor: colors.surface },
 });
