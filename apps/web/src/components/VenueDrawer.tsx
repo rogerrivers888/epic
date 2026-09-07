@@ -237,6 +237,17 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   // Epic's own record: what survives when the provider cannot be reached.
   const [ownRecord, setOwnRecord] = useState<OwnedRecord | null | undefined>(undefined);
   /**
+   * What the crowd made of an atlas place.
+   *
+   * The atlas is Wikidata and OpenStreetMap and has no reviews in it, so an
+   * attraction opened from Inspire showed none however many Google had (owner,
+   * 7 Sep 2026: "for activities, get the reviews always from Google"). This is
+   * fetched *beside* the drawer rather than before it — the screen opens on
+   * what we already hold and the stars arrive a moment later, because "I don't
+   * want there to be any delays. I want it to be snappy."
+   */
+  const [crowd, setCrowd] = useState<{ rating: number | null; ratingCount: number | null; reviews: Venue['reviews']; attribution: string | null } | null>(null);
+  /**
    * Every visit this household has made here, with every star given on it —
    * the place itself and each plate on the table (routes/places.js
    * `visitPayload`). It is what the family's own rating is worked out from
@@ -281,7 +292,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
 
   useEffect(() => {
-    setTab('overview'); setVenue(undefined); setMenu(undefined); setError(null); setSaved(false); setOwnRecord(undefined); setInside(null); setVisits(undefined);
+    setTab('overview'); setVenue(undefined); setMenu(undefined); setError(null); setSaved(false); setOwnRecord(undefined); setInside(null); setVisits(undefined); setCrowd(null);
     if (!item) return;
     let live = true;
     // A place the household has never opened has no saved answer of its own, but
@@ -300,6 +311,22 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     // and no source holds that identifier, so the round trip could only ever
     // come back empty — and an empty answer is what the screen was reading as
     // "no signal".
+    /**
+     * An atlas place: ours, and with no reviews in it.
+     *
+     * The atlas identifies a place by Wikidata or OpenStreetMap, so it is the
+     * *source* that decides this and not the prefix — plenty of attractions
+     * carry an `osm:` ref and they need the reviews just as much. Google is
+     * asked once by name and coordinates, and the answer arrives beside the
+     * drawer rather than in front of it: the screen is already up, and it gains
+     * its stars a moment later (owner, 7 Sep 2026: "I want it to be snappy").
+     */
+    if (item.source === 'atlas' && item.lat != null && item.lng != null) {
+      api.placeReviews({ ref: item.venueRef, name: item.name, lat: item.lat, lng: item.lng })
+        .then((d) => { if (live && d.matched) setCrowd({ rating: d.rating, ratingCount: d.ratingCount, reviews: d.reviews, attribution: d.attribution }); })
+        .catch(() => { /* no reviews is not an error worth a message */ });
+    }
+    // No provider holds a `wikidata:` id, so there is no venue to fetch for one.
     if (item.venueRef.startsWith('wikidata:')) { setVenue(null); return () => { live = false; }; }
     // Opening a place we never managed to identify sends the researcher out
     // again (owner, 5 Sep 2026: "we should call the API as soon as a user opens
@@ -358,14 +385,16 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   // A place the atlas holds only by identifier takes its name from the source when the drawer opens.
   const title = item.name === item.venueRef && v?.name ? v.name : item.name;
   const photos = (v?.photos?.length ? v.photos : item.photos) ?? [];
-  const reviews = [...(v?.reviews ?? [])].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  const reviews = [...(v?.reviews ?? crowd?.reviews ?? [])].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   const hours = (v?.openingHours ?? item.openingHours ?? '').split(' · ').filter(Boolean);
   const website = v?.website ?? ownRecord?.website ?? item.website;
   const mapsUrl = v?.mapsUrl ?? item.mapsUrl;
   const externalUrl = v?.externalUrl ?? item.externalUrl;
   const price = priceMarks(v?.priceLevel ?? item.priceLevel);
-  const rating = v?.rating ?? item.rating;
-  const ratingCount = v?.ratingCount ?? item.ratingCount;
+  // Ours first, then the card's, then the crowd's — an atlas place has neither
+  // of the first two and is the whole reason the third is fetched.
+  const rating = v?.rating ?? item.rating ?? crowd?.rating ?? null;
+  const ratingCount = v?.ratingCount ?? item.ratingCount ?? crowd?.ratingCount ?? null;
   const source = item.source ?? item.venueRef.split(':')[0];
   /** Ours outright: the atlas researched it, and there is no provider behind it. */
   const ours0wn = source === 'atlas' || item.venueRef.startsWith('wikidata:');

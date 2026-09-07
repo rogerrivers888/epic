@@ -1240,6 +1240,12 @@ export const api = {
       /** Opening it started the research that had not been done. The drawer comes back for the answer. */
       researching?: boolean }>(`/api/places/detail${qs({ ref: venueRef })}`),
   /** What Epic owns about these places — no provider is called, and this answer keeps. */
+  /**
+   * What the crowd made of an atlas place. Matched to Google once and then
+   * read; nothing it returns is stored, here or on the device.
+   */
+  placeReviews: (q: { ref: string; name: string; lat: number; lng: number }) =>
+    request<{ rating: number | null; ratingCount: number | null; reviews: { text: string; rating: number | null; author: string | null; authorUri: string | null; when: string | null }[]; attribution: string | null; matched: boolean }>(`/api/places/reviews${qs(q)}`),
   placeRecords: (venueRefs: string[]) => request<{ records: Record<string, OwnedRecord>; missing: string[] }>(`/api/places/record${qs({ refs: venueRefs.join(',') })}`),
   /** Research a place again now (Settings, and "look again" in the drawer). */
   researchPlace: (venueRef: string) => post<{ state: string; fields: number; matched: Record<string, any>; problems: string[]; record: OwnedRecord | null }>('/api/places/record', { ref: venueRef }),
