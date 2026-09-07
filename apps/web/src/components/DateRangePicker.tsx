@@ -38,17 +38,24 @@ export function monthSpanLabel(startIso: string, endIso: string): string {
   return `${ma} ${a.getFullYear()}`;
 }
 
-export function DateRangePicker({ start, end, onApply, single = false }: {
+export function DateRangePicker({ start, end, onApply, single = false, inline = false, onCancel }: {
   start: string | null;
   end: string | null;
   /** Both ISO dates; for `single`, end === start. */
   onApply: (start: string, end: string) => void;
   /** One date rather than a range (a day out). */
   single?: boolean;
+  /**
+   * The calendar itself, with no row above it to open it. For a screen that has
+   * already said which date it is asking about — a second line saying the same
+   * date is a control to tap twice, not a calendar (owner, 7 Sep 2026).
+   */
+  inline?: boolean;
+  onCancel?: () => void;
 }) {
   const { width } = useViewport();
   const sideBySide = width >= 680;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(inline);
   const [selStart, setSelStart] = useState<Date | null>(fromIso(start));
   const [selEnd, setSelEnd] = useState<Date | null>(fromIso(end));
   // The applied dates are the source of truth: reopening never shows a draft the form doesn't have.
@@ -68,24 +75,31 @@ export function DateRangePicker({ start, end, onApply, single = false }: {
     else if (ds.getTime() < selStart.getTime()) { setSelEnd(selStart); setSelStart(ds); }
     else setSelEnd(ds);
   };
-  const apply = () => { if (!selStart) return; onApply(toIso(selStart), toIso(selEnd ?? selStart)); setOpen(false); };
-  const cancel = () => { setSelStart(fromIso(start)); setSelEnd(fromIso(end)); setOpen(false); };
+  const apply = () => { if (!selStart) return; onApply(toIso(selStart), toIso(selEnd ?? selStart)); setOpen(inline); };
+  const cancel = () => { setSelStart(fromIso(start)); setSelEnd(fromIso(end)); setOpen(inline); onCancel?.(); };
 
   const applied = { s: fromIso(start), e: fromIso(end) };
   const draftLabel = selStart ? rangeLabel(selStart, selEnd) : single ? 'Tap a day' : 'Tap a start date, then an end date';
 
   return (
     <View style={{ gap: spacing.sm }}>
+      {inline ? null : (
       <Pressable onPress={() => (open ? cancel() : setOpen(true))} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel={single ? 'Choose the date' : 'Choose the dates'}>
         <Icon name="calendar" size={16} color={colors.inkMuted} />
         <Text style={[type.body, { flex: 1 }, !applied.s && { color: colors.inkFaint }]}>{rangeLabel(applied.s, single ? applied.s : applied.e, single ? 'Pick a date' : 'Pick dates')}</Text>
         <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} />
       </Pressable>
+      )}
       {open ? (
         <View style={styles.panel}>
-          <View style={[styles.months, sideBySide ? { flexDirection: 'row' } : { flexDirection: 'column' }]}>
-            <MonthGrid y={vy} m={vm} selStart={selStart} selEnd={selEnd} onPick={pick} onNav={nav} navLeft navRight={!sideBySide} today={today} />
-            <MonthGrid y={next.y} m={next.m} selStart={selStart} selEnd={selEnd} onPick={pick} onNav={nav} navLeft={!sideBySide} navRight today={today} />
+          {/* One date needs one month. Two stacked months on a phone push
+              Apply and Cancel below the fold, which is where they cannot be
+              tapped (owner, 7 Sep 2026: "you should just show 1… so that I can
+              see the Apply and Cancel above the fold"). A range still needs
+              both, because a range crosses them. */}
+          <View style={[styles.months, sideBySide && !single ? { flexDirection: 'row' } : { flexDirection: 'column' }]}>
+            <MonthGrid y={vy} m={vm} selStart={selStart} selEnd={selEnd} onPick={pick} onNav={nav} navLeft navRight={single || !sideBySide} today={today} />
+            {single ? null : <MonthGrid y={next.y} m={next.m} selStart={selStart} selEnd={selEnd} onPick={pick} onNav={nav} navLeft={!sideBySide} navRight today={today} />}
           </View>
           <View style={styles.footer}>
             <Text style={[type.small, { flex: 1 }]}>{draftLabel}</Text>

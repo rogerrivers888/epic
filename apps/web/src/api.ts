@@ -717,6 +717,8 @@ export type GroupItem = {
   closesOn: string | null; lateJoiners: 'capacity' | 'no' | 'ask'; state: GroupItemState2;
   startsOn: string | null; startsAt: string | null; endsAt: string | null;
   bookWhere: 'roam' | 'yourself' | 'there' | null; externalUrl: string | null; guestNote: string | null;
+  /** Who takes the money for this one. Null follows the group's own setting. */
+  paymentMode: 'direct' | 'roam' | null;
   settledPence: number | null; settledHeads: number | null; settledAt: string | null; dueOn: string | null; cancelledNote: string | null;
   done: number; declared: number; confirmed: number; coming: number; notComing: number; heads: number;
   outstanding: number; outstandingNames: string[]; money: GroupMoney | null; paidPence: number | null; duePence: number | null;
@@ -742,6 +744,7 @@ export type GroupItemInput = {
   closesOn?: string | null; lateJoiners?: 'capacity' | 'no' | 'ask';
   startsOn?: string | null; startsAt?: string | null; endsAt?: string | null;
   bookWhere?: 'roam' | 'yourself' | 'there' | null; externalUrl?: string | null; guestNote?: string | null;
+  paymentMode?: 'direct' | 'roam' | null;
 };
 /** One of the household's groups, as the Who's coming row and the Trips filter both need it. */
 export type GroupSummary = {

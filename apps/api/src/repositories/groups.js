@@ -157,6 +157,8 @@ const ITEM_COLUMNS = {
   // booked and a line for the guest.
   startsOn: 'starts_on', startsAt: 'starts_at', endsAt: 'ends_at',
   bookWhere: 'book_where', externalUrl: 'external_url', guestNote: 'guest_note',
+  // Who takes the money for this one. Null follows the group's own setting.
+  paymentMode: 'payment_mode',
 };
 
 export async function insertItem(groupId, i, client) {

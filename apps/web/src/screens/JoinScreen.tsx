@@ -50,13 +50,29 @@ const firstName = (n?: string | null) => (n ?? '').trim().split(/\s+/)[0] ?? '';
  * the middle of it should put them back where they were, which is what the
  * remembered participant token does.
  */
-export function JoinScreen({ token }: { token: string }) {
+export function JoinScreen({ token, preview, onExit }: {
+  token: string;
+  /**
+   * The organiser walking their own invite (GroupPanel → Preview). Every screen
+   * is the one a guest gets; nothing is written — no account, no household, no
+   * booking — because the organiser is not joining their own group (owner,
+   * 7 Sep 2026: "I would like to see the exact itinerary that the user is going
+   * to see and the journey that they're going to go on").
+   */
+  preview?: boolean;
+  onExit?: () => void;
+}) {
   const { width } = useViewport();
-  const [me, setMe] = useState<string | null>(() => remembered(token));
+  const [me, setMe] = useState<string | null>(() => (preview ? null : remembered(token)));
   const [v, setV] = useState<JoinView | null>(null);
   const [account, setAccount] = useState<GuestAccount | null>(null);
   const [booking, setBooking] = useState<GroupBooking | null>(null);
-  const [stage, setStage] = useState<Stage>('landing');
+  // A preview begins where the organiser left off: they have just read the
+  // landing page, and the thing they asked to see is what happens next.
+  const [stage, setStage] = useState<Stage>(preview ? 'account' : 'landing');
+  // In preview nobody has joined, so how many are coming is whatever the
+  // organiser typed on the household screen a moment ago.
+  const [heads, setHeads] = useState(1);
   const [moved, setMoved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,7 +83,7 @@ export function JoinScreen({ token }: { token: string }) {
       setV(r); setError(null);
       // Somebody coming back to a link they have already used lands on their
       // own list, not on the sales page they have already read.
-      if (r.you && !moved) setStage('list');
+      if (r.you && !moved && !preview) setStage('list');
     } catch (e: any) { setError(e.message); }
   }, [token, me, moved]);
   useEffect(() => { load(); }, [load]);
@@ -94,13 +110,17 @@ export function JoinScreen({ token }: { token: string }) {
       <InviteLanding
         data={pageFromJoin(v)}
         narrow={!wide}
-        onNext={() => go(v.you ? 'book' : 'account')}
+        onNext={() => go(preview || !v.you ? 'account' : 'book')}
       />
     ) : stage === 'account' ? (
       <AccountStep
-        v={v} busy={busy}
-        onBack={() => go('landing')}
+        v={v} busy={busy} preview={preview}
+        onBack={() => (preview ? onExit?.() : go('landing'))}
         onDone={async (body) => {
+          if (preview) {
+            setAccount({ id: 'preview', name: body.name, email: null, mobile: null, householdId: null, plan: 'trial', trialEndsOn: inDays(30), returning: false });
+            go('household'); return;
+          }
           setBusy(true);
           try {
             const r = await api.joinAccount(token, body);
@@ -115,15 +135,17 @@ export function JoinScreen({ token }: { token: string }) {
         v={v} account={account} busy={busy}
         onBack={() => go('account')}
         onDone={async (members) => {
+          if (preview) { setHeads(Math.max(1, members.filter((m) => m.coming !== false).length)); go('book'); return; }
           await act(() => api.joinHousehold(token, { participantToken: me!, members }));
           go('book');
         }}
       />
     ) : stage === 'book' ? (
       <BookStep
-        v={v} busy={busy}
+        v={v} busy={busy} heads={heads}
         onBack={() => go(v.you?.joinedAt ? 'landing' : 'household')}
         onConfirm={async (picks) => {
+          if (preview) { go('trial'); return; }
           setBusy(true);
           try {
             const r = await api.joinBook(token, { participantToken: me!, picks });
@@ -144,13 +166,32 @@ export function JoinScreen({ token }: { token: string }) {
     )
   );
 
-  return (
-    <ScrollView contentContainerStyle={[styles.page, wide && { maxWidth: 720, alignSelf: 'center' }]}>
+  const body = (
+    <>
+      {preview ? (
+        <Row style={styles.previewBar}>
+          <Pressable onPress={onExit} accessibilityRole="button" hitSlop={8}>
+            <Row><Icon name="back" size={16} color={colors.headerSub} /><Text style={[type.small, { color: colors.headerSub, fontWeight: '700' }]}>Back to edit</Text></Row>
+          </Pressable>
+          <View style={{ flex: 1 }} />
+          <Text style={[type.small, { color: colors.headerSub }]}>Preview · nothing is saved</Text>
+        </Row>
+      ) : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       {inner}
+    </>
+  );
+
+  // Inside the group panel the page it is previewed on does its own scrolling.
+  if (preview) return <View style={{ gap: spacing.md, width: '100%' }}>{body}</View>;
+  return (
+    <ScrollView contentContainerStyle={[styles.page, wide && { maxWidth: 720, alignSelf: 'center' }]}>
+      {body}
     </ScrollView>
   );
 }
+
+const inDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
 /**
  * Create your account (Epic 4).
@@ -160,8 +201,9 @@ export function JoinScreen({ token }: { token: string }) {
  * who is holding it. The second is the one that needs the explaining, because
  * the name they type is what the organiser will tick them off by.
  */
-function AccountStep({ v, busy, onBack, onDone }: {
-  v: JoinView; busy: boolean; onBack: () => void; onDone: (body: { name: string; contact: string; matchId?: string | null }) => void;
+function AccountStep({ v, busy, preview, onBack, onDone }: {
+  v: JoinView; busy: boolean; preview?: boolean; onBack: () => void;
+  onDone: (body: { name: string; contact: string; matchId?: string | null }) => void;
 }) {
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
@@ -174,6 +216,7 @@ function AccountStep({ v, busy, onBack, onDone }: {
   // asked who they are — they are being asked to confirm it (Epic 4, AC6). The
   // API recognises the same contact and signs them into the account they have.
   useEffect(() => {
+    if (preview) return;
     let live = true;
     api.sessionState().then((st) => {
       const acc: any = st.account;
@@ -444,8 +487,8 @@ const host = (url?: string | null) => {
  * are re-worked by the API on Confirm: a price is the group's fact, not the
  * browser's.
  */
-function BookStep({ v, busy, onBack, onConfirm }: {
-  v: JoinView; busy: boolean; onBack: () => void; onConfirm: (picks: Record<string, Pick>) => void;
+function BookStep({ v, busy, heads: pretendHeads, onBack, onConfirm }: {
+  v: JoinView; busy: boolean; heads?: number; onBack: () => void; onConfirm: (picks: Record<string, Pick>) => void;
 }) {
   const [picks, setPicks] = useState<Record<string, Pick>>(() => seed(v));
   const them = v.group.organiser ?? 'the organiser';
@@ -462,7 +505,10 @@ function BookStep({ v, busy, onBack, onConfirm }: {
   }
 
   const chosen = (i: BookItem) => picks[i.id] === 'in' || picks[i.id] === 'booked' || picks[i.id] === 'declared';
-  const fixedYours = (i: BookItem) => i.money?.yoursPence ?? i.amountPence ?? 0;
+  // Nobody has joined in a preview, so the API's figures are for one head and
+  // the pretend household is multiplied in here instead.
+  const mult = (i: BookItem) => (v.you || !i.perHead ? 1 : Math.max(1, pretendHeads ?? 1));
+  const fixedYours = (i: BookItem) => (i.money?.yoursPence ?? i.amountPence ?? 0) * mult(i);
 
   // The same three sums the API will work out, so the footer and the receipt agree.
   let payNow = 0; let toThem = 0;
@@ -473,8 +519,8 @@ function BookStep({ v, busy, onBack, onConfirm }: {
     if (i.bookWhere === 'there') continue;
     if (roam) payNow += fixedYours(i); else toThem += fixedYours(i);
   }
-  const laterLow = later.reduce((n, i) => n + (i.money?.likelyYoursPence ?? 0), 0);
-  const laterHigh = later.reduce((n, i) => n + (i.money?.ceilingYoursPence ?? 0), 0);
+  const laterLow = later.reduce((n, i) => n + (i.money?.likelyYoursPence ?? 0) * mult(i), 0);
+  const laterHigh = later.reduce((n, i) => n + (i.money?.ceilingYoursPence ?? 0) * mult(i), 0);
   // The earliest of them: the first date any of this money is owed is the one
   // the guest has to know, and a later one is not a promise they can rely on.
   const settles = later.map((i) => i.money?.closesOn).filter(Boolean).sort()[0] ?? v.group.wantedBy;
@@ -497,7 +543,7 @@ function BookStep({ v, busy, onBack, onConfirm }: {
           {d.items.map((i) => (
             <BookRow
               key={i.id}
-              item={i} pick={picks[i.id] ?? null} organiser={them} roam={roam} heads={v.you?.heads ?? 1}
+              item={i} pick={picks[i.id] ?? null} organiser={them} roam={roam} heads={v.you?.heads ?? pretendHeads ?? 1}
               onPick={(p) => setPicks({ ...picks, [i.id]: p })}
             />
           ))}
@@ -900,6 +946,7 @@ function JoinForm({ v, busy, onJoin, onCancel }: { v: JoinView; busy: boolean; o
 const styles = StyleSheet.create({
   page: { padding: spacing.lg, gap: spacing.md, width: '100%' },
   hint: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },
+  previewBar: { backgroundColor: colors.mint, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
   trialCard: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },
   trialIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
   pick: { flex: 1, gap: 4, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },

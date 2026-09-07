@@ -6,6 +6,7 @@ import { Button, Card, Chip, Meter, Row, Segmented, StatusLine, Wrap } from './u
 import { Icon, IconName } from './Icon';
 import { QrCode } from './QrCode';
 import { InviteEdit, InviteEditor, InviteLanding, InvitePageData, coverUri, pageFromGroup } from './InvitePage';
+import { JoinScreen } from '../screens/JoinScreen';
 import { DateRangePicker } from './DateRangePicker';
 import Svg, { Circle, ClipPath, Defs, G, Image as SvgImage, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { useViewport } from '../hooks/useViewport';
@@ -33,17 +34,24 @@ import { paths } from '../routes';
  * 4 Sep 2026). The same five are the wizard on the first run and the settings
  * afterwards.
  */
-type StepKey = 'what' | 'wanted' | 'costs' | 'chasing' | 'invite';
+type StepKey = 'what' | 'wanted' | 'chasing' | 'invite';
 /**
  * `next` names the step it leads to, so the button says where it is going
  * rather than "Next"; `skip` says what skipping this one means, because "Skip"
  * on its own asks the organiser to guess what they are giving up.
  */
-const STEPS: { key: StepKey; title: string; blurb: string; next: string; skip?: string }[] = [
-  { key: 'what', title: 'What this is', blurb: 'Name it, and say how many it needs, expects and can take.', next: 'Next · What must everyone do', skip: 'Skip — name it later' },
-  { key: 'wanted', title: 'What must everyone do?', blurb: 'Must is chased until booked. Ask counts heads.', next: "Next · Anything you're paying for", skip: 'Skip — nothing is mandatory' },
-  { key: 'costs', title: "Anything you're paying for?", blurb: 'A coach, tickets, a kitty. Everyone pays a share, or only the people who opt in.', next: 'Next · Reminders', skip: "Skip — I'm not charging" },
-  { key: 'chasing', title: 'Notifications and reminders', blurb: 'Roam writes to whoever still has something outstanding, so you never ask twice.', next: 'Next · Ask them in', skip: "Off — I'll chase them myself" },
+const STEPS: { key: StepKey; title: string; blurb?: string; next: string; skip?: string }[] = [
+  // Step 1 carries its own headers — Trip name, Trip numbers — so a title and a
+  // sentence above them would be saying it twice (owner, 7 Sep 2026).
+  { key: 'what', title: 'Trip details', next: "Next · What's on the trip", skip: 'Skip — name it later' },
+  {
+    key: 'wanted',
+    title: "What's on the trip?",
+    blurb: 'Everything people are coming for, and what it costs them. Mandatory things are chased until each person has booked; optional ones just need a yes or no.',
+    next: 'Next · Reminders',
+    skip: 'Skip — nothing is mandatory',
+  },
+  { key: 'chasing', title: 'Reminders', blurb: 'Roam writes to whoever still has something outstanding, so you never ask twice.', next: 'Next · Ask them in' },  // "None" is one of the frequencies, so this step has no skip
   { key: 'invite', title: 'Ask them in', blurb: 'A code to hold up, a link, a WhatsApp group, or the names you already know.', next: "That's my group set up" },
 ];
 
@@ -87,7 +95,7 @@ function NumberBox({ value, onChange, onCommit, onFocus, placeholder, width = 88
 
 /** One of the four numbered questions: open, or folded to a line. */
 function Block({ n, title, blurb, summary, open, onToggle, children }: {
-  n: number; title: string; blurb: string; summary: string; open: boolean; onToggle: () => void; children?: React.ReactNode;
+  n: number; title: string; blurb?: string; summary: string; open: boolean; onToggle: () => void; children?: React.ReactNode;
 }) {
   return (
     <Card style={{ gap: open ? spacing.sm : 0 }}>
@@ -103,14 +111,18 @@ function Block({ n, title, blurb, summary, open, onToggle, children }: {
           <Icon name={open ? 'collapse' : 'expand'} size={16} />
         </Row>
       </Pressable>
-      {open ? <Text style={type.small}>{blurb}</Text> : null}
+      {open && blurb ? <Text style={type.small}>{blurb}</Text> : null}
       {open ? children : null}
     </Card>
   );
 }
 
 
-export function GroupPanel({ d, onChanged }: { d: TripDetail; onChanged?: () => Promise<void> }) {
+export function GroupPanel({ d, onChanged, onPage }: {
+  d: TripDetail; onChanged?: () => Promise<void>;
+  /** True while a page of the group's own has the screen, so the trip's chrome can stand down. */
+  onPage?: (on: boolean) => void;
+}) {
   const { width } = useViewport();
   const wide = width >= WIDE;
   const [g, setG] = useState<TripGroup | null>(null);
@@ -121,10 +133,16 @@ export function GroupPanel({ d, onChanged }: { d: TripDetail; onChanged?: () => 
   const [block, setBlock] = useState<number | null>(1);
   // The invite page is a page, not a panel: writing it or looking at it takes
   // the whole screen, because that is the shape the guest will see it in.
-  const [page, setPage] = useState<null | 'edit' | 'preview'>(null);
-  // Adding an event takes the panel over, so it is held here rather than inside
-  // the row that starts it.
-  const [adding, setAdding] = useState(false);
+  const [page, setPage] = useState<null | 'edit' | 'preview' | 'journey'>(null);
+  // The wizard's place is kept here, so going off to the invite page and coming
+  // back returns to the step it was left on rather than to step 1 (owner,
+  // 7 Sep 2026: "If I preview and click back, it should take me back to step 5").
+  const [step, setStep] = useState(0);
+  useEffect(() => { onPage?.(page !== null); }, [page, onPage]);
+  useEffect(() => () => onPage?.(false), [onPage]);
+  // Which event has the panel: 'new', an item's id, or nothing. Held here
+  // because the form takes the whole step over.
+  const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<InviteEdit | null>(null);
 
   const load = useCallback(async () => {
@@ -229,59 +247,47 @@ export function GroupPanel({ d, onChanged }: { d: TripDetail; onChanged?: () => 
   // settings page shows them folded.
   const content: Record<StepKey, React.ReactNode> = {
     what: <WhatThisIs group={g} onChange={(body) => run(() => api.updateGroup(group.id, body))} />,
-    wanted: adding ? (
-      <AddEvent group={g} onClose={() => setAdding(false)} onAdd={(body) => { setAdding(false); return run(() => api.addGroupItem(group.id, body)); }} />
+    wanted: editing !== null ? (
+      <EventForm
+        group={g}
+        item={editing === 'new' ? null : items.find((i) => i.id === editing) ?? null}
+        busy={busy}
+        onClose={() => setEditing(null)}
+        onSave={(body) => {
+          const id = editing === 'new' ? null : editing;
+          setEditing(null);
+          void run(() => (id ? api.updateGroupItem(group.id, id, body) : api.addGroupItem(group.id, body)));
+        }}
+        onRemove={editing === 'new' ? undefined : () => { const id = editing; setEditing(null); void run(() => api.removeGroupItem(group.id, id)); }}
+        onSettle={editing === 'new' ? undefined : (body) => { const id = editing; void run(() => api.closeGroupItem(group.id, id, body)); }}
+      />
     ) : (
       <>
-        {wanted.map((i) => (
-          <View key={i.id} style={styles.wantedRow}>
+        {/* One row per thing on the trip, and tapping it opens everything about
+            it: what it is, when, what it costs, and who takes the money. There
+            is no second step it is "priced in" (owner, 7 Sep 2026). */}
+        {items.map((i) => (
+          <Pressable key={i.id} style={styles.wantedRow} onPress={() => setEditing(i.id)} accessibilityRole="button">
             <Row style={{ alignItems: 'flex-start' }}>
               <View style={styles.itemIcon}><Icon name={ICON[i.kind]} size={16} /></View>
               <View style={{ flex: 1, gap: 2 }}>
-                <Text style={type.h3}>{i.label}</Text>
-                {itemMeta(i) ? <Text style={type.small}>{itemMeta(i)}</Text> : null}
+                <Row><Text style={[type.h3, { flex: 1 }]}>{i.label}</Text><Icon name="edit" size={14} color={colors.inkMuted} /></Row>
+                {itemMeta(i, group.paymentMode) ? <Text style={type.small}>{itemMeta(i, group.paymentMode)}</Text> : null}
+                {costNow(i) ? <Text style={[type.small, { color: colors.accent }]}>{costNow(i)}</Text> : null}
               </View>
+            </Row>
+            <Row style={{ marginTop: spacing.sm }}>
+              <View style={{ flex: 1 }} />
               <MustAsk value={i.required} onChange={(must) => setItem(i.id, { required: must })} />
             </Row>
-          </View>
+          </Pressable>
         ))}
-        {wanted.length === 0 ? <Text style={type.small}>Nothing on this trip yet.</Text> : null}
-        <Pressable onPress={() => setAdding(true)} style={styles.addRow} accessibilityRole="button">
+        {items.length === 0 ? <Text style={type.small}>Nothing on this trip yet.</Text> : null}
+        <Pressable onPress={() => setEditing('new')} style={styles.addRow} accessibilityRole="button">
           <Icon name="add" size={16} />
           <Text style={[type.h3, { flex: 1 }]}>Add your own event</Text>
           <Icon name="more" size={16} />
         </Pressable>
-      </>
-    ),
-    costs: (
-      <>
-        {costs.map((i) => (
-          <CostCard
-            key={i.id}
-            item={i}
-            group={g}
-            busy={busy}
-            onEdit={(body) => setItem(i.id, body)}
-            onClose={(body) => run(() => api.closeGroupItem(group.id, i.id, body))}
-            onRemove={() => run(() => api.removeGroupItem(group.id, i.id))}
-          />
-        ))}
-        <AddCost group={g} onAdd={(body) => run(() => api.addGroupItem(group.id, body))} />
-        <View>
-          <Text style={type.label}>How you get paid</Text>
-          <Segmented
-            value={group.paymentMode}
-            // Two of these have to fit side by side on a 390px phone, so the
-            // sentence is under the control rather than inside it.
-            options={[{ value: 'direct' as const, label: 'Straight to you' }, { value: 'roam' as const, label: 'Roam collects' }]}
-            onChange={(mode) => run(() => api.updateGroup(group.id, { paymentMode: mode }))}
-          />
-          <Text style={type.small}>
-            {group.paymentMode === 'roam'
-              ? 'Roam takes the money with the booking and pays it out to you after each cost settles.'
-              : 'Everyone pays you directly — bank transfer, cash, however you already do it — and you tick it off here.'}
-          </Text>
-        </View>
       </>
     ),
     chasing: <Chasing group={g} settingUp={settingUp} onChange={(body) => run(() => api.updateGroup(group.id, body))} />,
@@ -299,8 +305,7 @@ export function GroupPanel({ d, onChanged }: { d: TripDetail; onChanged?: () => 
 
   const summaries: Record<StepKey, string> = {
     what: `${group.name ?? 'Unnamed'}${group.expectedCount ? ` · ${group.expectedCount} expected` : ''}${group.minimumCount ? ` · needs ${group.minimumCount}` : ''}`,
-    wanted: `${wanted.filter((i) => i.required).length} wanted from everyone, ${wanted.filter((i) => !i.required).length} asked about`,
-    costs: costs.length ? `${costs.length} cost${costs.length === 1 ? '' : 's'} · ${money(gotIn)} in, ${money(owed)} owed` : 'Nothing — you are not charging for anything',
+    wanted: `${items.filter((i) => i.required).length} mandatory, ${items.filter((i) => !i.required).length} optional${costs.length ? ` · ${costs.length} priced` : ''}`,
     chasing: !reminders.on ? 'Off — you are chasing them yourself'
       : reminders.next ? `${reminders.cadence} — next on ${day(reminders.next.date)}`
       : group.wantedBy ? 'Every reminder has been sent' : 'Set a date and Roam will chase',
@@ -326,11 +331,22 @@ export function GroupPanel({ d, onChanged }: { d: TripDetail; onChanged?: () => 
             onPreview={(body) => { setDraft(body); setPage('preview'); }}
             onSave={async (body) => { await run(() => api.updateGroup(group.id, body)); setDraft(null); setPage(null); }}
           />
+        ) : page === 'journey' ? (
+          /* The rest of what the link opens: the account, the household and
+             Book your itinerary, exactly as a guest gets them and with nothing
+             written down (owner, 7 Sep 2026). */
+          <JoinScreen token={group.inviteToken} preview onExit={() => setPage('preview')} />
         ) : (
           /* The whole page, CTA and all, because "exactly as the link will show
-             it" includes the button they will press. Pressing it here closes
-             the preview rather than pretending to join the organiser's own group. */
-          <InviteLanding data={shown} narrow={!wide} onBack={() => setPage(draft ? 'edit' : null)} onNext={() => setPage(draft ? 'edit' : null)} />
+             it" includes the button they will press — and pressing it walks the
+             journey rather than stopping at the picture of it. */
+          <InviteLanding
+            data={shown}
+            narrow={!wide}
+            backLabel={draft ? 'Back to edit' : 'Back to the group'}
+            onBack={() => setPage(draft ? 'edit' : null)}
+            onNext={() => setPage('journey')}
+          />
         )}
       </View>
     );
@@ -344,7 +360,9 @@ export function GroupPanel({ d, onChanged }: { d: TripDetail; onChanged?: () => 
         <Wizard
           content={content}
           summaries={summaries}
-          bare={adding}
+          at={step}
+          onAt={setStep}
+          bare={editing !== null}
           onDone={() => run(() => api.updateGroup(group.id, { setupDone: true }))}
           onSkip={(key) => { if (key === 'chasing' && group.remindersOn) void run(() => api.updateGroup(group.id, { remindersOn: false })); }}
         />
@@ -487,13 +505,16 @@ function costLine(i: GroupItem) {
  * it, and a way past anything that does not apply. Nothing here is compulsory —
  * every step can be skipped and changed later from the same five blocks.
  */
-function Wizard({ content, summaries, onDone, onSkip, bare }: {
+function Wizard({ content, summaries, onDone, onSkip, bare, at, onAt }: {
   content: Record<StepKey, React.ReactNode>; summaries: Record<StepKey, string>; onDone: () => void;
   onSkip?: (key: StepKey) => void;
   /** A step that has handed the panel to a form of its own: its title and its footer would be two conversations at once. */
   bare?: boolean;
+  /** Which step, held by the panel so a trip to the invite page comes back to it. */
+  at: number;
+  onAt: (n: number) => void;
 }) {
-  const [at, setAt] = useState(0);
+  const setAt = onAt;
   const step = STEPS[at];
   const last = at === STEPS.length - 1;
   return (
@@ -507,7 +528,7 @@ function Wizard({ content, summaries, onDone, onSkip, bare }: {
       {bare ? null : (
         <>
           <Text style={type.h2}>{step.title}</Text>
-          <Text style={type.small}>{step.blurb}</Text>
+          {step.blurb ? <Text style={type.small}>{step.blurb}</Text> : null}
         </>
       )}
       <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>{content[step.key]}</View>
@@ -550,30 +571,41 @@ function WhatThisIs({ group: g, onChange }: { group: TripGroup; onChange: (body:
     maximumCount: numberOrNull(maximum),
   });
   return (
-    <View style={{ gap: spacing.md }}>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        onBlur={save}
-        placeholder="What to call it"
-        placeholderTextColor={colors.inkFaint}
-        style={styles.input}
-      />
-      <Row style={{ gap: spacing.lg }}>
-        <View>
-          <Text style={type.label}>Minimum</Text>
-          <NumberBox value={minimum} onChange={setMinimum} onCommit={save} onFocus={() => setAt('minimum')} />
-        </View>
-        <View>
-          <Text style={type.label}>Expecting</Text>
-          <NumberBox value={expected} onChange={setExpected} onCommit={save} onFocus={() => setAt('expecting')} placeholder="24" />
-        </View>
-        <View>
-          <Text style={type.label}>Maximum</Text>
-          <NumberBox value={maximum} onChange={setMaximum} onCommit={save} onFocus={() => setAt('maximum')} />
-        </View>
-      </Row>
-      <SizePanel group={g} minimum={minimum} expected={expected} maximum={maximum} at={at} />
+    <View style={{ gap: spacing.lg }}>
+      {/* Headers, not a step title and a sentence about it (owner, 7 Sep 2026:
+          "what I'd like is a header above the name, like 'Trip Name'… Don't
+          want any capitals"). */}
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>Trip name</Text>
+        <TextInput
+          value={name}
+          onChangeText={setName}
+          onBlur={save}
+          placeholder="What to call it"
+          placeholderTextColor={colors.inkFaint}
+          style={styles.input}
+        />
+      </View>
+
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>Trip numbers</Text>
+        <Text style={type.small}>Trip numbers can affect the price, and whether the trip or an activity goes ahead.</Text>
+        <Row style={{ gap: spacing.lg }}>
+          <View>
+            <Text style={styles.fieldLabel}>Minimum</Text>
+            <NumberBox value={minimum} onChange={setMinimum} onCommit={save} onFocus={() => setAt('minimum')} />
+          </View>
+          <View>
+            <Text style={styles.fieldLabel}>Expecting</Text>
+            <NumberBox value={expected} onChange={setExpected} onCommit={save} onFocus={() => setAt('expecting')} placeholder="24" />
+          </View>
+          <View>
+            <Text style={styles.fieldLabel}>Maximum</Text>
+            <NumberBox value={maximum} onChange={setMaximum} onCommit={save} onFocus={() => setAt('maximum')} />
+          </View>
+        </Row>
+        <SizePanel group={g} minimum={minimum} expected={expected} maximum={maximum} at={at} />
+      </View>
     </View>
   );
 }
@@ -598,22 +630,24 @@ function SizePanel({ group: g, minimum, expected, maximum, at }: {
       icon: 'household', on: at === 'minimum',
       text: min
         ? <><Text style={styles.panelStrong}>Under {min}</Text> and the trip is called off — everybody is told and nothing is taken.</>
-        : <>No minimum: the trip goes ahead with whoever comes.</>,
+        : <>No minimum: the trip goes ahead regardless.</>,
     },
     {
       icon: 'locked', on: at === 'maximum',
       text: max
         ? <><Text style={styles.panelStrong}>At {max}</Text> it's full: the link stops taking people.</>
-        : <>No maximum: the link keeps taking people until you close it.</>,
+        : <>No cap on group numbers.</>,
     },
-    {
-      icon: 'money', on: at === 'expecting',
-      text: exp
-        ? <>Shared costs divide by <Text style={styles.panelStrong}>{exp}</Text> until people actually join{variable && at_(exp) && at_(min)
-            ? <> — {variable.label} at {money(variable.totalPence)} reads as <Text style={styles.panelStrong}>{money(at_(exp))}–{money(at_(min))} each</Text>, never more than the minimum's share</>
-            : ''}.</>
-        : <>Say roughly how many are coming and a shared cost can show a price.</>,
-    },
+    // Only worth a line once there is an expectation to divide by: an empty
+    // box does not need explaining, it needs a number (owner, 7 Sep 2026).
+    ...(exp ? [{
+      icon: 'money' as IconName, on: at === 'expecting',
+      text: (
+        <>Shared costs divide by <Text style={styles.panelStrong}>{exp}</Text> until people actually join{variable && at_(exp) && at_(min)
+          ? <> — {variable.label} at {money(variable.totalPence)} reads as <Text style={styles.panelStrong}>{money(at_(exp))}–{money(at_(min))} each</Text></>
+          : ''}.</>
+      ),
+    }] : []),
   ];
   return (
     <View style={styles.panel}>
@@ -757,25 +791,43 @@ function MustAsk({ value, onChange }: { value: boolean; onChange: (must: boolean
   return (
     <View style={styles.mustAsk}>
       <Pressable onPress={() => onChange(true)} style={[styles.mustAskHalf, value && styles.mustAskOn]} accessibilityRole="button">
-        <Text style={[styles.mustAskText, value && styles.mustAskTextOn]}>Must</Text>
+        <Text style={[styles.mustAskText, value && styles.mustAskTextOn]} numberOfLines={1}>Mandatory</Text>
       </Pressable>
       <Pressable onPress={() => onChange(false)} style={[styles.mustAskHalf, !value && styles.mustAskOn]} accessibilityRole="button">
-        <Text style={[styles.mustAskText, !value && styles.mustAskTextOn]}>Ask</Text>
+        <Text style={[styles.mustAskText, !value && styles.mustAskTextOn]} numberOfLines={1}>Optional</Text>
       </Pressable>
     </View>
   );
 }
 
 /** A row's second line: when it is, what it costs, and where it is booked. */
-function itemMeta(i: GroupItem) {
+/**
+ * The one line under an event's name: when it is, what it costs, and where the
+ * money goes. Everything about one event is in one place now — there is no
+ * second step it is "priced in" (owner, 7 Sep 2026: "I don't understand what
+ * step 3 is when I've already created my event in step 2").
+ */
+function itemMeta(i: GroupItem, mode: 'direct' | 'roam') {
   const bits: string[] = [];
   if (i.startsOn) bits.push(`${day(i.startsOn)}${i.startsAt ? ` ${i.startsAt}` : ''}`);
   else if (i.detail) bits.push(i.detail);
   if (i.pricing === 'fixed' && i.amountPence) bits.push(`${money(i.amountPence)} each`);
-  if (i.pricing === 'variable' && i.totalPence) bits.push(`${money(i.totalPence)} shared · priced in step 3`);
+  if (i.pricing === 'variable' && i.totalPence) bits.push(`${money(i.totalPence)} split by numbers`);
+  if (i.pricing) bits.push((i.paymentMode ?? mode) === 'roam' ? 'Roam collects' : 'paid to you');
   if (i.bookWhere === 'yourself') bits.push('book your own');
   if (i.bookWhere === 'there') bits.push('pay there');
   return bits.join(' · ');
+}
+
+/** What a running shared cost is doing, in one line rather than four. */
+function costNow(i: GroupItem) {
+  const m = i.money;
+  if (!m) return null;
+  if (i.state === 'cancelled') return `Called off — ${i.cancelledNote ?? 'it did not reach its minimum'}`;
+  if (i.state === 'closed') return `Settled at ${money(i.settledPence)} each · payment due ${day(i.dueOn)}`;
+  if (i.pricing !== 'variable') return null;
+  const each = m.likelyPence ?? m.perSharePence;
+  return `${each ? `About ${money(each)} each · ` : ''}nothing is taken until the deadline, ${day(m.closesOn)}`;
 }
 
 /** Adding an event of the organiser's own: its own screen, from the v2 handover. */
@@ -785,89 +837,179 @@ function itemMeta(i: GroupItem) {
  * takes you into a part where you can't see anything"). On a phone that is the
  * difference between a form and a form you have to scroll six rows to find.
  */
-function AddEvent({ group: g, onAdd, onClose }: { group: TripGroup; onAdd: (body: GroupItemInput) => void; onClose: () => void }) {
-  const [label, setLabel] = useState('');
-  const [on, setOn] = useState(g.trip.startDate ?? '');
-  const [at, setAt] = useState('');
-  const [must, setMust] = useState(false);
-  const [price, setPrice] = useState<'free' | 'fixed' | 'variable'>('free');
-  const [amount, setAmount] = useState('');
-  const [total, setTotal] = useState('');
-  const [perHead, setPerHead] = useState(true);
-  const [note, setNote] = useState('');
+/**
+ * One event, everything about it, in one place.
+ *
+ * It is the same screen whether the event is being made or changed (owner,
+ * 7 Sep 2026: "If I go back and I want to edit my event, I can't click on it"),
+ * and it carries the price and who takes the money, because those are facts
+ * about the event and not about the group — which is what made a separate
+ * costs step impossible to explain.
+ *
+ * A price is per person. A household pays for the heads it brings, which is the
+ * same arithmetic said once instead of twice (owner, 7 Sep 2026: "it's always
+ * split by person… I think you can remove the household").
+ */
+function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }: {
+  group: TripGroup;
+  item: GroupItem | null;
+  busy: boolean;
+  onSave: (body: GroupItemInput) => void;
+  onClose: () => void;
+  onRemove?: () => void;
+  onSettle?: (body: { action: 'close' | 'extend' | 'cancel' | 'reopen'; closesOn?: string }) => void;
+}) {
+  // A trip of one day has a date already; a coach the night before is the
+  // exception, and it asks for the date only when it is said to be one.
+  const oneDay = !g.trip.startDate || g.trip.startDate === g.trip.endDate;
+  const [label, setLabel] = useState(item?.label ?? '');
+  const [on, setOn] = useState(item?.startsOn ?? g.trip.startDate ?? '');
+  const [at, setAt] = useState(item?.startsAt ?? '');
+  const [otherDay, setOtherDay] = useState(Boolean(item?.startsOn && item.startsOn !== g.trip.startDate));
+  const [must, setMust] = useState(item?.required ?? false);
+  const [price, setPrice] = useState<'free' | 'fixed' | 'variable'>(item?.pricing ?? 'free');
+  const [amount, setAmount] = useState(item?.amountPence != null ? String(item.amountPence / 100) : '');
+  const [total, setTotal] = useState(item?.totalPence != null ? String(item.totalPence / 100) : '');
+  const [mode, setMode] = useState<'direct' | 'roam'>(item?.paymentMode ?? g.group.paymentMode);
+  const [deadline, setDeadline] = useState(item?.closesOn ?? g.group.wantedBy ?? '');
+  const [note, setNote] = useState(item?.guestNote ?? '');
+  const [said, setSaid] = useState<string | null>(null);
 
+  const save = () => {
+    if (!label.trim()) { setSaid('Give it a name.'); return; }
+    if (price === 'fixed' && !pence(amount)) { setSaid('Say what it costs each, or make it free.'); return; }
+    if (price === 'variable' && !pence(total)) { setSaid('Say what the whole thing costs.'); return; }
+    onSave({
+      kind: item?.kind ?? 'activity', label: label.trim(), required: must, perHead: true,
+      pricing: price === 'free' ? null : price,
+      amountPence: price === 'fixed' ? pence(amount) : null,
+      totalPence: price === 'variable' ? pence(total) : null,
+      paymentMode: price === 'free' ? null : mode,
+      startsOn: oneDay && !otherDay ? (g.trip.startDate ?? null) : (on || null),
+      startsAt: at || null,
+      guestNote: note.trim() || null,
+      bookWhere: item?.bookWhere ?? (price === 'free' ? null : 'roam'),
+      closesOn: price === 'variable' ? (deadline || null) : null,
+    });
+  };
+
+  const m = item?.money;
   return (
-    <View style={{ gap: spacing.sm }}>
+    <View style={{ gap: spacing.lg }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Text style={type.h2}>Add your own event</Text>
+        <Text style={type.h2}>{item ? 'Edit event' : 'Add your own event'}</Text>
         <Pressable onPress={onClose} accessibilityRole="button" hitSlop={10}><Icon name="close" size={18} /></Pressable>
       </Row>
-      <TextInput value={label} onChangeText={setLabel} placeholder="Live band · Saturday night" placeholderTextColor={colors.inkFaint} style={styles.input} autoFocus />
-      <Row style={{ gap: spacing.sm }}>
-        <View style={{ flex: 1 }}><DayPick value={on} onChange={setOn} /></View>
-        <TextInput value={at} onChangeText={setAt} placeholder="21:00" placeholderTextColor={colors.inkFaint} style={[styles.input, { width: 96, textAlign: 'center' }]} />
-      </Row>
-      <Text style={type.label}>Everyone, or ask?</Text>
-      <Segmented
-        value={must ? 'must' : 'ask'}
-        options={[{ value: 'must', label: "Must · everyone's in" }, { value: 'ask', label: "Ask · who's coming" }]}
-        onChange={(v) => setMust(v === 'must')}
-      />
-      <Text style={type.label}>Price</Text>
-      <Segmented
-        value={price}
-        // "Depends on numbers" is the sentence, but three of them do not fit a
-        // 390px row and a truncated option is not an option (owner, 6 Sep 2026).
-        // The line under the box says the whole of it once it is chosen.
-        options={[{ value: 'free' as const, label: 'Free' }, { value: 'fixed' as const, label: 'Same each' }, { value: 'variable' as const, label: 'By numbers' }]}
-        onChange={setPrice}
-      />
-      {price !== 'free' ? (
-        <Row style={{ gap: spacing.md, alignItems: 'center' }}>
-          <NumberBox
-            value={price === 'fixed' ? amount : total}
-            onChange={price === 'fixed' ? setAmount : setTotal}
-            placeholder={price === 'fixed' ? '12' : '1000'}
-            prefix="£"
-            width={116}
-          />
-          <Text style={[type.small, { flex: 1 }]}>{price === 'fixed' ? 'each' : 'in total, split by how many come'}</Text>
-          <Wrap>
-            <Chip label="Person" selected={perHead} onPress={() => setPerHead(true)} />
-            <Chip label="Household" selected={!perHead} onPress={() => setPerHead(false)} />
-          </Wrap>
+
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>What it is</Text>
+        <TextInput value={label} onChangeText={setLabel} placeholder="Coach from Reading" placeholderTextColor={colors.inkFaint} style={styles.input} autoFocus={!item} />
+        <Row style={{ gap: spacing.sm }}>
+          {oneDay && !otherDay ? (
+            <Pressable onPress={() => setOtherDay(true)} style={{ flex: 1, justifyContent: 'center', minHeight: TARGET }} accessibilityRole="button">
+              <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Not on the day itself? Pick a date</Text>
+            </Pressable>
+          ) : (
+            <View style={{ flex: 1 }}><DayPick value={on} onChange={setOn} /></View>
+          )}
+          <TextInput value={at} onChangeText={setAt} placeholder="Time" placeholderTextColor={colors.inkFaint} style={[styles.input, { width: 104, textAlign: 'center' }]} />
         </Row>
+      </View>
+
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>Mandatory or optional</Text>
+        <Segmented
+          value={must ? 'must' : 'ask'}
+          options={[{ value: 'must', label: 'Mandatory' }, { value: 'ask', label: 'Optional' }]}
+          onChange={(v) => setMust(v === 'must')}
+        />
+        <Text style={type.small}>
+          {must
+            ? 'Everyone is expected on it, and is chased until they have booked.'
+            : 'People say yes or no, and only those who say yes are counted or charged.'}
+        </Text>
+      </View>
+
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>Price</Text>
+        <Segmented
+          value={price}
+          options={[{ value: 'free' as const, label: 'Free' }, { value: 'fixed' as const, label: 'Same each' }, { value: 'variable' as const, label: 'By numbers' }]}
+          onChange={setPrice}
+        />
+
+        {price === 'fixed' ? (
+          <View style={{ gap: 4 }}>
+            <Text style={styles.fieldLabel}>Cost each</Text>
+            <NumberBox value={amount} onChange={setAmount} placeholder="12" prefix="£" width={132} />
+          </View>
+        ) : null}
+
+        {price === 'variable' ? (
+          <View style={{ gap: spacing.sm }}>
+            <View style={{ gap: 4 }}>
+              <Text style={styles.fieldLabel}>Total event cost</Text>
+              <NumberBox value={total} onChange={setTotal} placeholder="1000" prefix="£" width={160} />
+              <Text style={type.small}>Split by the number of people who come. Nobody is charged until the deadline below.</Text>
+            </View>
+            <View style={{ gap: 4 }}>
+              <Text style={styles.fieldLabel}>Payment deadline</Text>
+              <DayPick value={deadline} onChange={setDeadline} />
+              <Text style={type.small}>On this day the headcount is fixed, the price is worked out and the bill goes out.</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {price !== 'free' ? (
+          <View style={{ gap: 4 }}>
+            <Text style={styles.fieldLabel}>Who takes the money</Text>
+            <Segmented
+              value={mode}
+              options={[{ value: 'direct' as const, label: 'Straight to you' }, { value: 'roam' as const, label: 'Roam collects' }]}
+              onChange={setMode}
+            />
+            <Text style={type.small}>
+              {mode === 'roam'
+                ? 'Roam takes it with their booking and pays it out to you.'
+                : 'They pay you however you normally do it, and you tick it off here.'}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>A line for them</Text>
+        <TextInput value={note} onChangeText={setNote} placeholder="Where to meet, what to bring…" placeholderTextColor={colors.inkFaint} style={styles.input} />
+      </View>
+
+      {/* A cost that is already running: the two things that can happen to it
+          early, in the words for what they do. */}
+      {item && onSettle && item.pricing === 'variable' && item.state === 'open' && m ? (
+        <View style={{ gap: spacing.sm }}>
+          <Text style={styles.section}>This one is running</Text>
+          <Text style={type.small}>{m.shares} on it so far. Roam settles it on the deadline by itself — these are for when it changes.</Text>
+          <Wrap>
+            <Chip label="Settle it now" icon="check" onPress={() => onSettle({ action: 'close' })} />
+            <Chip label="Give it a week" icon="hours" onPress={() => onSettle({ action: 'extend', closesOn: plusWeek(m.closesOn) })} />
+            <Chip label="Call it off" icon="close" onPress={() => onSettle({ action: 'cancel' })} />
+          </Wrap>
+        </View>
       ) : null}
-      <TextInput value={note} onChangeText={setNote} placeholder="A line for them — where, what to bring…" placeholderTextColor={colors.inkFaint} style={styles.input} />
-      <Button
-        label="Add it"
-        icon="forward"
-        onPress={() => {
-          if (!label.trim()) return;
-          onAdd({
-            kind: 'activity', label: label.trim(), required: must, perHead,
-            pricing: price === 'free' ? null : price,
-            amountPence: price === 'fixed' ? pence(amount) : null,
-            totalPence: price === 'variable' ? pence(total) : null,
-            startsOn: on || null, startsAt: at || null,
-            guestNote: note.trim() || null,
-            bookWhere: price === 'free' ? null : 'roam',
-            closesOn: price === 'variable' ? (g.group.wantedBy ?? null) : null,
-          });
-          setLabel(''); setAmount(''); setTotal(''); setNote(''); onClose();
-        }}
-      />
-      <Button label="Cancel" kind="ghost" onPress={onClose} />
+      {item && onSettle && item.state !== 'open' ? (
+        <Wrap><Chip label="Put it back" icon="refresh" onPress={() => onSettle({ action: 'reopen' })} /></Wrap>
+      ) : null}
+
+      {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
+      <Button label={item ? 'Save' : 'Add it'} icon={item ? 'check' : 'forward'} loading={busy} onPress={save} />
+      <Row>
+        <Button label="Cancel" kind="ghost" onPress={onClose} />
+        <View style={{ flex: 1 }} />
+        {/* Nothing is deleted out from under somebody who has paid for it. */}
+        {onRemove && !item?.money?.paidPence ? <Button label="Delete" kind="danger" icon="delete" onPress={onRemove} /> : null}
+      </Row>
     </View>
   );
 }
-
-/**
- * Block 2. The code comes first, because the fastest way to get twenty-four
- * people into a group is to hold up a phone in a clubhouse. Then the link, then
- * a WhatsApp group — which needs no integration at all, it is a wa.me link —
- * then the names the organiser already knows.
- */
 function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
   group: TripGroup; settingUp: boolean; onChange: (body: any) => void; onAdd: (body: any) => void;
   onEdit: () => void; onPreview: () => void;
@@ -892,13 +1034,19 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={type.h3}>Point a phone at this</Text>
           <Text style={type.small}>It opens their own list. No account, no password.</Text>
-          <Text style={type.small} selectable numberOfLines={2}>{link}</Text>
+          <Text style={[type.small, { color: colors.accent }]} selectable numberOfLines={2}>{link}</Text>
+          <Pressable onPress={() => onChange({ newLink: true })} accessibilityRole="button" hitSlop={6}>
+            <Text style={type.small}>Replace this link</Text>
+          </Pressable>
         </View>
       </Row>
+      {/* Three chips on one line, as the handover draws them: a long label
+          wraps the row onto three and the step stops fitting a phone (owner,
+          7 Sep 2026: "It was more compact, so you could fit everything on"). */}
       <Wrap>
         <Chip
-          label={copied ? 'Copied' : 'Copy the link'}
-          icon={copied ? 'check' : 'external'}
+          label={copied ? 'Copied' : 'Copy link'}
+          icon={copied ? 'check' : 'copy'}
           onPress={async () => {
             if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
               await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000);
@@ -906,19 +1054,18 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
           }}
         />
         <Chip
-          label="Send to a WhatsApp group"
+          label="WhatsApp"
           icon="message"
           onPress={() => { if (Platform.OS === 'web' && typeof window !== 'undefined') window.open(`https://wa.me/?text=${encodeURIComponent(message)}`); }}
         />
-        <Chip label={g.group.closed ? 'Closed to new people' : 'Open'} icon={g.group.closed ? 'locked' : 'check'} selected={!g.group.closed} onPress={() => onChange({ closed: !g.group.closed })} />
-        <Chip label="New link" icon="refresh" onPress={() => onChange({ newLink: true })} />
+        <Chip label={g.group.closed ? 'Closed' : 'Open'} icon={g.group.closed ? 'locked' : 'check'} selected={!g.group.closed} onPress={() => onChange({ closed: !g.group.closed })} />
       </Wrap>
 
       {/* Names are the exception, not the way in: the link is. So this is a
           line you open when you have some, not a form in everybody's way. */}
       {adding ? (
         <View style={{ gap: spacing.sm }}>
-          <Text style={type.label}>ADD THE ONES YOU KNOW</Text>
+          <Text style={styles.section}>Add the ones you know</Text>
           <TextInput value={name} onChangeText={setName} placeholder="Their name" placeholderTextColor={colors.inkFaint} style={styles.input} />
           <TextInput value={contact} onChangeText={setContact} placeholder="Mobile or email, so Roam can remind them" placeholderTextColor={colors.inkFaint} style={styles.input} autoCapitalize="none" />
           <Row>
@@ -964,102 +1111,6 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
   );
 }
 
-/**
- * A cost, with its life on it: open while people are joining and nobody pays,
- * closed on the day the headcount fixes the price and the bill goes out, or
- * cancelled because it never reached its minimum.
- */
-function CostCard({ item, group: g, busy, onEdit, onClose, onRemove }: {
-  item: GroupItem; group: TripGroup; busy: boolean;
-  onEdit: (body: Partial<GroupItemInput>) => void;
-  onClose: (body: { action: 'close' | 'extend' | 'cancel' | 'reopen'; closesOn?: string; anyway?: boolean }) => void;
-  onRemove: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const m = item.money;
-  const short = Boolean(m?.minimum && m.shares < m.minimum);
-  const closesIn = daysUntil(m?.closesOn);
-
-  return (
-    <Card style={item.state === 'cancelled' ? { borderStyle: 'dashed' } : undefined}>
-      <Row style={{ alignItems: 'flex-start' }}>
-        <View style={styles.itemIcon}><Icon name={item.kind === 'fee' ? 'money' : ICON[item.kind]} size={16} /></View>
-        <Pressable onPress={() => setOpen(!open)} style={{ flex: 1, gap: 3 }} accessibilityRole="button">
-          <Row>
-            <Text style={[type.h3, { flex: 1 }]}>{item.label}</Text>
-            {item.state === 'closed' ? <Chip label="Settled" icon="check" selected /> : null}
-            {item.state === 'cancelled' ? <Chip label="Off" icon="close" /> : null}
-          </Row>
-          <Text style={type.small}>{costHead(item)}</Text>
-          {costRange(item) ? <Text style={[type.h3, { color: colors.ink }]}>{costRange(item)}</Text> : null}
-          <Wrap>
-            <Tag>{item.required ? 'Everyone' : 'Only those who opt in'}</Tag>
-            <Tag>{item.perHead ? 'Per person' : 'Per household'}</Tag>
-            {item.pricing === 'variable' && item.money?.closesOn ? <Tag>Settles {day(item.money.closesOn)}</Tag> : null}
-          </Wrap>
-        </Pressable>
-        {/* Only while nobody has paid: a cost somebody has settled is not the
-            organiser's to delete out from under them (v2 Epic 2, AC5). */}
-        {!busy && !item.money?.paidPence ? (
-          <Pressable onPress={onRemove} accessibilityLabel={`Remove ${item.label}`} style={{ padding: 4 }}>
-            <Icon name="delete" size={16} />
-          </Pressable>
-        ) : null}
-      </Row>
-
-      {item.pricing === 'variable' && item.state === 'open' && m ? (
-        <View style={{ gap: 4 }}>
-          <Meter used={m.shares} limit={Math.max(1, m.minimum ?? m.expected ?? m.shares)} />
-          <Text style={type.small}>
-            {m.shares} on it now — {money(m.perSharePence)} each at that number.
-            {m.minimum && short ? ` ${m.minimum - m.shares} more and it runs.` : ''}
-            {m.likelyPence ? ` Probably ${money(m.likelyPence)}.` : ''}
-          </Text>
-          <Text style={type.small}>Nobody pays anything until it closes on {day(m.closesOn)}{closesIn != null && closesIn >= 0 ? ` — ${closesIn} day${closesIn === 1 ? '' : 's'}` : ''}.</Text>
-        </View>
-      ) : null}
-
-      {open ? (
-        <View style={{ gap: spacing.sm }}>
-          {item.state === 'open' && item.pricing === 'variable' ? (
-            <>
-              {short ? (
-                <View style={styles.warnBox}>
-                  <Icon name="allergen" size={15} color={colors.overrun} />
-                  <Text style={[type.small, { flex: 1 }]}>
-                    {m?.shares} of the {m?.minimum} it needs. Closing it now would be {money(m?.perSharePence)} each, and you told them no more than {money(m?.ceilingPence)}.
-                  </Text>
-                </View>
-              ) : null}
-              <Wrap>
-                <Chip label="Close it and send the bill" icon="check" selected onPress={() => onClose({ action: 'close' })} />
-                <Chip label="Give it a week" icon="hours" onPress={() => onClose({ action: 'extend', closesOn: plusWeek(m?.closesOn) })} />
-                <Chip label="Call it off" icon="close" onPress={() => onClose({ action: 'cancel' })} />
-              </Wrap>
-              <Text style={type.small}>Roam does this by itself on {day(m?.closesOn)}. This is for the week everything changes.</Text>
-            </>
-          ) : null}
-          {item.state === 'closed' ? (
-            <>
-              <Text style={type.small}>
-                {money(item.settledPence)} each × {item.settledHeads} = {money((item.settledPence ?? 0) * (item.settledHeads ?? 0))}, due {day(item.dueOn)}.
-                Everyone on it has been told. It is not refundable now.
-              </Text>
-              <Wrap><Chip label="Open it again" icon="refresh" onPress={() => onClose({ action: 'reopen' })} /></Wrap>
-            </>
-          ) : null}
-          {item.state === 'cancelled' ? <Wrap><Chip label="Put it back" icon="refresh" onPress={() => onClose({ action: 'reopen' })} /></Wrap> : null}
-          <Wrap>
-            <Chip label={item.perHead ? 'Per person' : 'Per household'} icon="household" onPress={() => onEdit({ perHead: !item.perHead })} />
-            <Chip label={item.required ? 'Everyone pays it' : 'An extra'} icon={item.required ? 'check' : 'info'} onPress={() => onEdit({ required: !item.required })} />
-            {!busy && item.money?.paidPence === 0 ? <Chip label="Remove" icon="close" onPress={onRemove} /> : null}
-          </Wrap>
-        </View>
-      ) : null}
-    </Card>
-  );
-}
-
 const plusWeek = (iso?: string | null) => {
   const d = iso ? new Date(`${iso.slice(0, 10)}T12:00:00Z`) : new Date();
   d.setUTCDate(d.getUTCDate() + 7);
@@ -1094,115 +1145,6 @@ function DayPick({ value, onChange }: { value: string; onChange: (iso: string) =
 }
 
 /**
- * Adding a cost: one form, not a wizard inside a wizard (owner, 4 Sep 2026 —
- * "we've got 2 Next buttons on this screen"). Every control is one row of two
- * choices, and nothing has a sentence under it explaining what it meant.
- */
-function AddCost({ group: g, onAdd }: { group: TripGroup; onAdd: (body: GroupItemInput) => void }) {
-  const [open, setOpen] = useState(false);
-  const [label, setLabel] = useState('');
-  const [everyone, setEveryone] = useState(false);
-  const [perHead, setPerHead] = useState(true);
-  const [pricing, setPricing] = useState<'fixed' | 'variable'>('variable');
-  const [amount, setAmount] = useState('');
-  const [total, setTotal] = useState('');
-  const [expected, setExpected] = useState('');
-  const [minimum, setMinimum] = useState('');
-  const [closesOn, setClosesOn] = useState(g.group.wantedBy ?? '');
-
-  const totalP = pence(total);
-  const exp = numberOrNull(expected) ?? (everyone ? g.group.expectedCount : null);
-  const min = numberOrNull(minimum) ?? (everyone ? g.group.minimumCount : null);
-  const per = (n: number | null) => (totalP && n ? Math.ceil(totalP / n) : null);
-
-  if (!open) return <Button label="Something you are paying for" icon="add" kind="ghost" onPress={() => setOpen(true)} />;
-
-  return (
-    <Card>
-      <TextInput
-        value={label}
-        onChangeText={setLabel}
-        placeholder="What is it? A coach, tickets, a kitty"
-        placeholderTextColor={colors.inkFaint}
-        style={styles.input}
-        autoFocus
-      />
-      <Text style={type.label}>Who pays</Text>
-      <Wrap>
-        <Chip label="Everyone" selected={everyone} onPress={() => setEveryone(true)} />
-        <Chip label="Only those who opt in" selected={!everyone} onPress={() => setEveryone(false)} />
-      </Wrap>
-      <Text style={type.label}>A share each</Text>
-      <Wrap>
-        <Chip label="Per person" selected={perHead} onPress={() => setPerHead(true)} />
-        <Chip label="Per household" selected={!perHead} onPress={() => setPerHead(false)} />
-      </Wrap>
-      <Text style={type.label}>Price</Text>
-      <Segmented
-        value={pricing}
-        options={[{ value: 'fixed' as const, label: 'Same for everyone' }, { value: 'variable' as const, label: 'Depends on numbers' }]}
-        onChange={setPricing}
-      />
-
-      {pricing === 'fixed' ? (
-        <Row>
-          <NumberBox value={amount} onChange={setAmount} placeholder="32" prefix="£" width={120} />
-          <Text style={type.small}>each</Text>
-        </Row>
-      ) : (
-        <View style={{ gap: spacing.md }}>
-          <Row>
-            <NumberBox value={total} onChange={setTotal} placeholder="360" prefix="£" width={130} />
-            <Text style={type.small}>to get back in total</Text>
-          </Row>
-          <Row style={{ gap: spacing.lg, alignItems: 'flex-start' }}>
-            <View>
-              <Text style={type.label}>Expecting</Text>
-              <NumberBox value={everyone ? String(g.group.expectedCount ?? '') : expected} onChange={setExpected} placeholder="24" />
-              <Text style={[type.h2, { marginTop: 6 }]}>{per(exp) ? `${money(per(exp))} each` : ' '}</Text>
-            </View>
-            <View>
-              <Text style={type.label}>Minimum</Text>
-              <NumberBox value={everyone ? String(g.group.minimumCount ?? '') : minimum} onChange={setMinimum} placeholder="12" />
-              <Text style={[type.h2, { marginTop: 6 }]}>{per(min) ? `${money(per(min))} each` : ' '}</Text>
-            </View>
-          </Row>
-        </View>
-      )}
-
-      <Text style={type.label}>Settles on</Text>
-      <DayPick value={closesOn} onChange={setClosesOn} />
-      <Text style={type.small}>
-        {pricing === 'variable'
-          ? `Nobody pays until then. ${min ? `Under ${min} and it does not run.` : ''}`
-          : 'Owed from the moment they join.'}
-      </Text>
-
-      <Row>
-        <Button
-          label="Add it"
-          icon="check"
-          onPress={() => {
-            if (!label.trim()) return;
-            onAdd({
-              kind: 'fee', label: label.trim(), required: everyone, perHead, pricing,
-              amountPence: pricing === 'fixed' ? pence(amount) : null,
-              totalPence: pricing === 'variable' ? totalP : null,
-              expectedCount: everyone ? null : numberOrNull(expected),
-              minimumCount: everyone ? null : numberOrNull(minimum),
-              closesOn: closesOn || null,
-              refundRule: 'until', refundUntil: closesOn || null,
-            });
-            setOpen(false); setLabel(''); setTotal(''); setAmount(''); setExpected(''); setMinimum('');
-          }}
-        />
-        <Button label="Cancel" kind="ghost" onPress={() => setOpen(false)} />
-      </Row>
-    </Card>
-  );
-}
-
-/**
  * Step 4, and the settings block it becomes: one date, one tone, the dates that
  * fall out of them, and the actual message. Nothing about delivery here — that
  * belongs on the chase screen, not on the screen where it is being set up.
@@ -1215,46 +1157,49 @@ function Chasing({ group: g, settingUp, onChange }: {
   const sent = r.schedule.filter((x) => x.done).length;
   const daysBefore = g.trip.startDate && g.group.wantedBy ? daysUntilFrom(g.group.wantedBy, g.trip.startDate) : null;
 
-  if (!r.on) {
-    return (
-      <View style={{ gap: spacing.md }}>
-        <Text style={type.h3}>Nobody is being chased. You are doing it yourself.</Text>
-        <Button label="Let Roam chase them" icon="check" kind="secondary" onPress={() => onChange({ remindersOn: true })} />
-      </View>
-    );
-  }
-
   return (
     <View style={{ gap: spacing.md }}>
       <View style={styles.dateCard}>
-        <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={type.label}>Everything booked by</Text>
-            <Text style={type.h2}>{longDay(g.group.wantedBy) || 'Pick a date'}</Text>
-            {daysBefore != null && daysBefore > 0 ? <Text style={type.small}>{daysBefore} days before you go</Text> : null}
-          </View>
-          <Pressable onPress={() => setPick(!pick)} accessibilityLabel="Change the date"><Icon name="edit" size={16} /></Pressable>
-        </Row>
+        {/* The date is the control, not the pencil beside it. */}
+        <Pressable onPress={() => setPick(!pick)} accessibilityRole="button" accessibilityLabel="Change the date">
+          <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.fieldLabel}>Everything booked by</Text>
+              <Text style={type.h2}>{longDay(g.group.wantedBy) || 'Pick a date'}</Text>
+              {daysBefore != null && daysBefore > 0 ? <Text style={type.small}>{daysBefore} days before you go</Text> : null}
+            </View>
+            <Icon name="edit" size={16} />
+          </Row>
+        </Pressable>
         {pick ? (
           <DateRangePicker
             single
+            inline
             start={g.group.wantedBy}
             end={g.group.wantedBy}
             onApply={(start) => { onChange({ wantedBy: start }); setPick(false); }}
+            onCancel={() => setPick(false)}
           />
         ) : null}
       </View>
 
-      <View>
-        <Text style={type.label}>How firmly</Text>
+      <View style={{ gap: spacing.sm }}>
+        <Text style={styles.section}>Reminder frequency</Text>
+        {/* None is a frequency, not a way out of the step (owner, 7 Sep 2026:
+            "the 'I'll chase them myself' option should be on the reminder
+            frequency, not how firm… we should also have an option for None"). */}
         <Segmented
-          value={g.group.cadence}
-          options={r.cadences.map((c) => ({ value: c.key, label: `${c.label} · ${c.runs}` }))}
-          onChange={(c) => onChange({ cadence: c })}
+          value={r.on ? g.group.cadence : 'none'}
+          options={[
+            ...r.cadences.map((c) => ({ value: c.key, label: `${c.label} · ${c.runs}` })),
+            { value: 'none', label: 'None' },
+          ]}
+          onChange={(c) => onChange(c === 'none' ? { remindersOn: false } : { remindersOn: true, cadence: c })}
         />
+        {!r.on ? <Text style={type.small}>Nobody is chased. You are doing it yourself.</Text> : null}
       </View>
 
-      {r.schedule.length ? (
+      {r.on && r.schedule.length ? (
         <View style={styles.timeline}>
           {r.schedule.map((x) => (
             <View key={x.date} style={{ flex: 1, gap: 6 }}>
@@ -1265,7 +1210,7 @@ function Chasing({ group: g, settingUp, onChange }: {
         </View>
       ) : null}
 
-      {r.preview ? (
+      {r.on && r.preview ? (
         <View style={styles.previewBox}>
           <Text style={[type.small, { color: colors.headerSub }]}>
             <Text style={{ fontWeight: '700' }}>What they'll get{r.next ? `, ${day(r.next.date)}` : ''}: </Text>
@@ -1274,7 +1219,7 @@ function Chasing({ group: g, settingUp, onChange }: {
         </View>
       ) : null}
 
-      {settingUp ? null : <Text style={type.small}>{sent} of {r.schedule.length} sent.</Text>}
+      {settingUp || !r.on ? null : <Text style={type.small}>{sent} of {r.schedule.length} sent.</Text>}
     </View>
   );
 }
@@ -1368,6 +1313,10 @@ function PersonRow({ p, items, open, busy, onOpen, onMark, onChange, onRemind }:
 }
 
 const styles = StyleSheet.create({
+  // Headers inside a step, in the words a person would say them, not shouted
+  // in capitals (owner, 7 Sep 2026).
+  section: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, marginBottom: 4 },
   pagePreview: { width: 76, height: 92, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.mint, borderWidth: 1, borderColor: colors.line },
   pagePreviewImg: { width: '100%', height: '100%' },
   pagePreviewBlank: { flex: 1, backgroundColor: colors.surface, margin: 8, padding: 6, gap: 5, justifyContent: 'flex-end' },

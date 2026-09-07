@@ -79,6 +79,7 @@ const publicItem = (i) => ({
   // v2: when it happens, where it is booked, and the organiser's line for the guest.
   startsOn: ymd(i.starts_on), startsAt: i.starts_at?.slice(0, 5) ?? null, endsAt: i.ends_at?.slice(0, 5) ?? null,
   bookWhere: i.book_where, externalUrl: i.external_url, guestNote: i.guest_note,
+  paymentMode: i.payment_mode,
 });
 
 /**
@@ -373,7 +374,11 @@ router.post('/trips/:id/group', async (req, res, next) => {
 
     const group = await withTransaction(async (client) => {
       const created = await groupsRepo.insertGroup(trip.id, household.id, {
-        name: b.name?.trim() || trip.title || trip.place_label || 'The group',
+        // A group is named for where it is going, not for the route the
+        // household's own trip took to get there (owner, 7 Sep 2026: "a group
+        // event is never going to be called 'home to Thorpe Park'… just call it
+        // the destination name").
+        name: b.name?.trim() || trip.place_label || trip.title || 'The group',
         expectedCount: num(b.expectedCount), minimumCount: num(b.minimumCount), maximumCount: num(b.maximumCount),
         wantedBy, inviteToken: token(),
         remindersOn: b.remindersOn !== false,
@@ -504,6 +509,8 @@ router.post('/groups/:id/items', async (req, res, next) => {
       startsOn: ymd(b.startsOn), startsAt: b.startsAt || null, endsAt: b.endsAt || null,
       bookWhere: ['roam', 'yourself', 'there'].includes(b.bookWhere) ? b.bookWhere : null,
       externalUrl: b.externalUrl?.trim() || null, guestNote: b.guestNote?.trim() || null,
+      // Who takes the money for this one; null follows the group's setting.
+      paymentMode: ['roam', 'direct'].includes(b.paymentMode) ? b.paymentMode : null,
     });
     res.status(201).json(await groupPayload(group.id));
   } catch (err) { next(err); }
@@ -536,6 +543,7 @@ router.patch('/groups/:id/items/:itemId', async (req, res, next) => {
     if (b.bookWhere !== undefined) put('book_where', ['roam', 'yourself', 'there'].includes(b.bookWhere) ? b.bookWhere : null);
     if (b.externalUrl !== undefined) put('external_url', b.externalUrl?.trim() || null);
     if (b.guestNote !== undefined) put('guest_note', b.guestNote?.trim() || null);
+    if (b.paymentMode !== undefined) put('payment_mode', ['roam', 'direct'].includes(b.paymentMode) ? b.paymentMode : null);
     if (b.state !== undefined && ['open', 'closed', 'cancelled'].includes(b.state)) put('state', b.state);
     if (!sets.length) return res.json(await groupPayload(group.id));
     const before = await groupsRepo.itemOfGroup(req.params.itemId, group.id);
@@ -1176,7 +1184,7 @@ router.post('/join/:token/book', async (req, res, next) => {
       if (i.pricing === 'variable' && i.state !== 'closed') {
         later += (cost.ceilingPence ?? 0) * shares;
         lines.push({ itemId: i.id, label: i.label, when: 'settles', pence: (cost.likelyPence ?? 0) * shares, ceilingPence: (cost.ceilingPence ?? 0) * shares, on: cost.closesOn });
-      } else if (group.payment_mode === 'roam') {
+      } else if ((i.payment_mode ?? group.payment_mode) === 'roam') {
         paid += amount;
         lines.push({ itemId: i.id, label: i.label, when: 'now', pence: amount });
       } else {

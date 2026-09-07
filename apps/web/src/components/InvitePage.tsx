@@ -145,8 +145,8 @@ export function totals(items: InviteItem[]) {
 
 // --- the landing ------------------------------------------------------------
 
-export function InviteLanding({ data, cta, onNext, onBack, busy, narrow }: {
-  data: InvitePageData; cta?: string; onNext?: () => void; onBack?: () => void; busy?: boolean; narrow?: boolean;
+export function InviteLanding({ data, cta, onNext, onBack, backLabel, busy, narrow }: {
+  data: InvitePageData; cta?: string; onNext?: () => void; onBack?: () => void; backLabel?: string; busy?: boolean; narrow?: boolean;
 }) {
   const { invite } = data;
   const t = useMemo(() => totals(data.items), [data.items]);
@@ -166,8 +166,15 @@ export function InviteLanding({ data, cta, onNext, onBack, busy, narrow }: {
 
   return (
     <View style={{ gap: spacing.md }}>
-      <Row style={{ justifyContent: 'space-between' }}>
-        {onBack ? <Pressable onPress={onBack} accessibilityRole="button" style={{ padding: 4 }}><Icon name="back" size={20} /></Pressable> : <Wordmark height={28} />}
+      {/* One way back, on the line that already exists, saying where it goes
+          (owner, 7 Sep 2026: "We just need 1 back arrow that's parallel with
+          'Invited by Roger'… it can just say 'Back to Edit'"). */}
+      <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        {onBack ? (
+          <Pressable onPress={onBack} accessibilityRole="button" hitSlop={8}>
+            <Row><Icon name="back" size={18} /><Text style={type.h3}>{backLabel ?? 'Back'}</Text></Row>
+          </Pressable>
+        ) : <Wordmark height={28} />}
         {data.organiser ? <Text style={type.label}>INVITED BY {data.organiser.toUpperCase()}</Text> : null}
       </Row>
 
@@ -259,7 +266,7 @@ function Total({ label, value, strong }: { label: string; value: string; strong?
 /** A count that turns red as it runs out (within a tenth of the limit). */
 function Counter({ n, max }: { n: number; max: number }) {
   const tight = n > max - Math.ceil(max / 10);
-  return <Text style={[type.small, tight && { color: colors.overrun, fontWeight: '700' }]}>{n}/{max}</Text>;
+  return <Text style={[type.small, { marginBottom: 2 }, tight && { color: colors.overrun, fontWeight: '700' }]}>{n}/{max}</Text>;
 }
 
 export type InviteEdit = {
@@ -282,6 +289,9 @@ export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPrev
   const [title, setTitle] = useState(data.invite.title ?? '');
   const [summary, setSummary] = useState(data.invite.summary ?? '');
   const [points, setPoints] = useState<string[]>(data.invite.howItWorks.length ? data.invite.howItWorks : ['']);
+  // The point just added, so the cursor lands in it rather than nowhere (owner,
+  // 7 Sep 2026: "when I click Add Point… it doesn't have the cursor in point 2").
+  const [fresh, setFresh] = useState<number | null>(null);
   const draft = (): InviteEdit => ({
     coverKind, coverUrl, coverSource: source,
     inviteTitle: title.trim(), inviteSummary: summary.trim(),
@@ -384,11 +394,12 @@ export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPrev
             <View style={{ flex: 1 }}>
               <TextInput
                 value={p} multiline
+                autoFocus={fresh === n}
                 onChangeText={(t) => setPoints(points.map((x, j) => (j === n ? t.slice(0, POINT_MAX) : x)))}
                 placeholder="One thing they have to do, in a line"
                 placeholderTextColor={colors.inkFaint} style={[styles.input, { minHeight: 56, paddingTop: spacing.sm }]}
               />
-              <View style={{ alignItems: 'flex-end' }}><Counter n={p.length} max={POINT_MAX} /></View>
+              <View style={{ alignItems: 'flex-end', marginTop: 4 }}><Counter n={p.length} max={POINT_MAX} /></View>
             </View>
             <Pressable onPress={() => setPoints(points.filter((_, j) => j !== n))} accessibilityRole="button" style={{ padding: 6 }}>
               <Icon name="close" size={16} color={colors.inkMuted} />
@@ -396,7 +407,7 @@ export function InviteEditor({ data, tripPhotos, saving, onSave, onClose, onPrev
           </Row>
         ))}
         {points.length < POINTS_MAX ? (
-          <Pressable onPress={() => setPoints([...points, ''])} accessibilityRole="button">
+          <Pressable onPress={() => { setPoints([...points, '']); setFresh(points.length); }} accessibilityRole="button">
             <Row><Icon name="add" size={16} color={colors.accent} /><Text style={[type.h3, { color: colors.accent }]}>Add a point</Text></Row>
           </Pressable>
         ) : null}

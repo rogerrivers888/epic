@@ -150,6 +150,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const maxDetourMin = Number(detour) || 15;
 
   const [detent, setDetent] = useState<Detent>('half');
+  /** The group has handed the screen to a page of its own, which draws its own way back. */
+  const [groupPage, setGroupPage] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState<TripAlongPlace | null>(null);
   /**
@@ -584,7 +586,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   // ---- the sheet ----------------------------------------------------------
 
   const party = attendees.length;
-  const header = (
+  const header = groupPage ? <View style={{ height: spacing.sm }} /> : (
     <View style={styles.header}>
       <Pressable
         onPress={() => (pill ? setPill(null) : section === 'group' ? onSection('itinerary') : onBack())}
@@ -707,13 +709,20 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   ) : (
     section === 'group' ? (
       /* The group is reached from Who's coming, not from a tab, so it carries
-         its own way back rather than a row of tabs none of which is lit. */
+         its own way back rather than a row of tabs none of which is lit — and
+         when the group hands the screen to a page of its own (the invite page,
+         its preview, the guest's journey through it) that page carries the only
+         way back there is, so this row stands down rather than making a third
+         arrow (owner, 7 Sep 2026: "There are 3 back arrows… which is a
+         nonsense"). */
       <View style={{ padding: spacing.lg, gap: 12 }}>
-        <Pressable onPress={() => onSection('itinerary')} style={styles.backRow} accessibilityRole="button">
-          <Icon name="back" size={16} color={colors.ink} />
-          <Text style={styles.linkText}>Back to the day</Text>
-        </Pressable>
-        <GroupPanel d={d} onChanged={onChanged} />
+        {groupPage ? null : (
+          <Pressable onPress={() => onSection('itinerary')} style={styles.backRow} accessibilityRole="button">
+            <Icon name="back" size={16} color={colors.ink} />
+            <Text style={styles.linkText}>Back to the day</Text>
+          </Pressable>
+        )}
+        <GroupPanel d={d} onChanged={onChanged} onPage={setGroupPage} />
       </View>
     ) : (
     <SheetTabs section={section} counts={places?.counts.all ?? 0} onSection={onSection}>
