@@ -8,7 +8,10 @@ import { useHere } from '../hooks/useHere';
 import { useViewport } from '../hooks/useViewport';
 
 /**
- * "Where should we go?" — the screen behind the search bar on Inspire.
+ * The where-search: the screen behind the search bar on Inspire, and behind the
+ * one at the top of Trips (owner, 7 Sep 2026 — a trip should begin here "in the
+ * same way that I can when I click on the search box on the Inspire tab"). Same
+ * screen, same answers, and only the heading changes with the question.
  *
  * It is a whole screen rather than a sheet, and it is drawn *in the tab* rather
  * than portalled out of it: a Modal would have to be pinned to the shell's
@@ -57,13 +60,19 @@ export function forgetPlaces(): void {
   try { store()?.removeItem(RECENT_KEY); } catch { /* nothing to forget */ }
 }
 
-export function WhereSearch({ home, onPick, onClose, onPlanner }: {
+export function WhereSearch({ home, onPick, onClose, onPlanner, title = 'Where should we go?' }: {
   /** The household's home, offered as the first answer and as the way back to the default. */
   home: Place | null;
   onPick: (place: Place) => void;
   onClose: () => void;
   /** The other way to answer this question: say what you're after and let Epic think. */
   onPlanner?: () => void;
+  /**
+   * The same screen asks a slightly different question depending on where it
+   * was opened from: Inspire is looking for somewhere to go today, Trips is
+   * starting a trip. One screen, and the heading matches the box that opened it.
+   */
+  title?: string;
 }) {
   const { width } = useViewport();
   const wide = width >= 900;
@@ -106,7 +115,7 @@ export function WhereSearch({ home, onPick, onClose, onPlanner }: {
         <Pressable onPress={onClose} hitSlop={10} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
           <Icon name="back" size={20} color={colors.ink} />
         </Pressable>
-        <Text style={[type.h2, { flex: 1 }]}>Where should we go?</Text>
+        <Text style={[type.h2, { flex: 1 }]}>{title}</Text>
       </View>
       <ScrollView style={styles.fill} contentContainerStyle={[styles.body, wide && styles.bodyWide]} keyboardShouldPersistTaps="handled">
         <PlacePicker

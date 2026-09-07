@@ -29,7 +29,7 @@ import { useSession } from './src/hooks/useSession';
 import { Icon, IconName } from './src/components/Icon';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { isFullBleed, isImmersive, legacyHref, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
+import { isFullBleed, isImmersive, isTabHome, legacyHref, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
 
 // Epic opens on Inspire (owner, 5 Sep 2026, "Supporting docs/Roam Inspire"):
 // what there is to do, with one search bar above it. The conversational planner
@@ -303,6 +303,12 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
    * Two things are left out of what is remembered: the magic-link token, which
    * must never be written down anywhere, and an open drawer, which is something
    * you were reading rather than somewhere you were.
+   *
+   * And a record is not a place either. `isTabHome` says which addresses a tab
+   * may be left pointing at; standing on one that is not — inside a trip, on
+   * the new-trip form — writes nothing down, so the tab keeps the last *list*
+   * it saw, filters and all, and tapping Trips arrives at the trips (owner,
+   * 7 Sep 2026).
    */
   const here = useMemo(() => {
     const { path, query } = splitHref(href);
@@ -311,7 +317,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
     const q = query.toString();
     return q ? `${path}?${q}` : path;
   }, [href]);
-  useRememberedAddress(tab ?? 'nowhere', here);
+  useRememberedAddress(tab ?? 'nowhere', isTabHome(route) ? here : null);
   // The admin module is the owner's. Everybody else's app is exactly what it
   // was before accounts existed.
   const tabs = useMemo(

@@ -18,6 +18,7 @@
  *   /places/GB/London                     …one area
  *   /places/GB/London?place=<ref>         …a place's drawer
  *   /trips                             the trips
+ *   /trips/search                         …where are you going? (a trip begins here)
  *   /trips/new                            …the new-trip form
  *   /trips/<id>                           …one trip
  *   /trips/<id>/places                    …on one of its tabs
@@ -134,7 +135,7 @@ export type Route =
   | { name: 'inspire'; searching: boolean; shelf: MoodKey | null }
   | { name: 'plan' }
   | { name: 'places'; scope: PlacesScope }
-  | { name: 'trips'; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null }
+  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null }
   | { name: 'household'; memberId: string | null }
   | { name: 'settings'; section: SettingsSection }
   | { name: 'prototypes'; section: PrototypeSection | null }
@@ -186,11 +187,20 @@ export function parseRoute(path: string): Route {
     }
 
     case 'trips': {
-      if (!a) return { name: 'trips', creating: false, tripId: null, section: null, dayId: null };
-      if (a === 'new') return { name: 'trips', creating: true, tripId: null, section: null, dayId: null };
+      const list = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null } as const;
+      if (!a) return { ...list };
+      /**
+       * "Where are you going?" — the same question Inspire's search bar asks,
+       * asked here because this is the tab somebody opens when they want a
+       * trip (owner, 7 Sep 2026: "when I go to trips, I should be able to just
+       * create a new trip from here, in the same way that I can when I click
+       * on the search box on the Inspire tab").
+       */
+      if (a === 'search') return { ...list, searching: true };
+      if (a === 'new') return { ...list, creating: true };
       const section = oneOf(TRIP_SECTIONS, b);
       if (b && !section) return { name: 'unknown', path };
-      return { name: 'trips', creating: false, tripId: a, section, dayId: section === 'day' ? c ?? null : null };
+      return { ...list, tripId: a, section, dayId: section === 'day' ? c ?? null : null };
     }
 
     case 'household':
@@ -235,9 +245,10 @@ export function hrefOf(route: Route): string {
         : 'home' in route.scope ? '/places/home'
           : buildHref(['places', route.scope.country, route.scope.city]);
     case 'trips':
-      return route.creating ? '/trips/new'
-        : route.tripId == null ? '/trips'
-          : buildHref(['trips', route.tripId, route.section, route.section === 'day' ? route.dayId : null]);
+      return route.searching ? '/trips/search'
+        : route.creating ? '/trips/new'
+          : route.tripId == null ? '/trips'
+            : buildHref(['trips', route.tripId, route.section, route.section === 'day' ? route.dayId : null]);
     case 'household': return buildHref(['household', route.memberId]);
     case 'settings': return route.section === 'preferences' ? '/settings' : buildHref(['settings', route.section]);
     case 'prototypes': return buildHref(['prototypes', route.section]);
@@ -259,6 +270,7 @@ export const paths = {
   placesCountry: (country: string) => buildHref(['places', country]),
   placesCity: (country: string, city: string) => buildHref(['places', country, city]),
   trips: () => '/trips',
+  tripsSearch: () => '/trips/search',
   newTrip: () => '/trips/new',
   trip: (id: string, section?: TripSection | null, dayId?: string | null) =>
     buildHref(['trips', id, section, section === 'day' ? dayId : null]),
@@ -319,6 +331,27 @@ export function tabOf(route: Route): Tab | null {
   }
 }
 
+/**
+ * Whether a tab may be left pointing at this address.
+ *
+ * A tab remembers how a *list* was set — which filters, which city — and never
+ * which record was open inside it. Tapping Trips has to be arriving at the
+ * trips (owner, 7 Sep 2026: "when I go to trips, I should be able to just
+ * create a new trip from here… Currently, it takes me into the last trip"),
+ * with the trip one tap away in the list where it has always been.
+ *
+ * This does not undo what the memory is for (owner, 4 Sep 2026: "I come back
+ * 10 minutes later after navigating off that tab, everything's disappeared").
+ * The Holidays / Past / who filter he set is still waiting for him; it is the
+ * one trip he happened to have open that no longer swallows the tab. It is the
+ * same rule the shell already applies to an open drawer — something you were
+ * reading rather than somewhere you were.
+ */
+export function isTabHome(route: Route): boolean {
+  if (route.name === 'trips') return !route.tripId && !route.creating && !route.searching;
+  return true;
+}
+
 /** One layer up, for a Back that has no history behind it (a link somebody was sent). */
 export function parentOf(route: Route): string {
   switch (route.name) {
@@ -330,7 +363,7 @@ export function parentOf(route: Route): string {
     case 'trips':
       if (route.dayId) return paths.trip(route.tripId!, 'day');
       if (route.section) return paths.trip(route.tripId!);
-      if (route.tripId || route.creating) return '/trips';
+      if (route.tripId || route.creating || route.searching) return '/trips';
       return '/inspire';
     case 'household': return route.memberId ? '/household' : '/inspire';
     case 'admin': return route.screen === 'overview' ? '/inspire' : '/admin/overview';
@@ -350,7 +383,7 @@ export function titleOf(route: Route): string {
     case 'plan': return epic('Plan');
     case 'places':
       return epic(route.scope == null ? 'Places' : 'home' in route.scope ? 'Close to home' : route.scope.city ?? route.scope.country);
-    case 'trips': return epic(route.creating ? 'A new trip' : route.tripId ? 'Trip' : 'Trips');
+    case 'trips': return epic(route.searching ? 'Where are you going?' : route.creating ? 'A new trip' : route.tripId ? 'Trip' : 'Trips');
     case 'household': return epic('Household');
     case 'settings': return epic('Settings');
     case 'prototypes': return epic('Prototypes');

@@ -16,6 +16,7 @@ import { MapView, MapPin } from '../components/MapView';
 import { VenueRow, VisitForm, VisitSummary } from './PlacesScreen';
 import { VenueThumb } from '../components/VenueThumb';
 import { PickPanel } from '../components/PickPanel';
+import { WhereSearch } from '../components/WhereSearch';
 import { TripCard } from '../components/TripCard';
 import { TripMapScreen } from './TripMapScreen';
 import { speak as speakRaw, useSpeech } from '../hooks/useSpeech';
@@ -118,6 +119,43 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     } catch (e: any) { setError(e.message); }
   }, [navigate]);
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * Where the trip being made is going, when it was answered on the search
+   * screen a moment ago.
+   *
+   * The address carries the question — `/trips/new?place=Bath&country=GB`, so
+   * the form opens right for somebody who was sent the link — and this carries
+   * the answer's coordinates, which a town's name alone cannot. Same rule as
+   * `seed`: the question is in the address, the working detail is not.
+   */
+  const [picked, setPicked] = useState<TripSeed | null>(null);
+
+  /**
+   * "Where are you going?" — the same screen Inspire's search bar opens, on
+   * the tab where trips are made (owner, 7 Sep 2026: "when I go to trips, I
+   * should be able to just create a new trip from here, in the same way that I
+   * can when I click on the search box on the Inspire tab").
+   *
+   * Picking a town replaces this screen with the form rather than pushing on
+   * top of it: Back from a half-filled form belongs on the trips, not on the
+   * search you have already answered.
+   */
+  if (route.searching) {
+    return (
+      <WhereSearch
+        title="Where are you going?"
+        home={household?.household.home ?? null}
+        onClose={() => back(paths.trips())}
+        onPick={(p) => {
+          const q = new URLSearchParams({ place: p.locality ?? p.label });
+          if (p.countryCode) q.set('country', p.countryCode);
+          setPicked({ place: p, placeText: p.locality ?? p.label, countryCode: p.countryCode ?? undefined });
+          navigate(`${paths.newTrip()}?${q}`, { replace: true });
+        }}
+      />
+    );
+  }
 
   if (openId) {
     return (
@@ -222,7 +260,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
           {creating ? <Text style={type.small}>Where, when, and who — everything else can wait until it exists.</Text> : null}
         </View>
         <Pressable
-          onPress={() => { onSeedUsed?.(); navigate(creating ? paths.trips() : paths.newTrip()); }}
+          onPress={() => { onSeedUsed?.(); setPicked(null); navigate(creating ? paths.trips() : paths.newTrip()); }}
           style={[styles.roundBtn, !creating && styles.roundBtnInk]}
           accessibilityRole="button"
           accessibilityLabel={creating ? 'Close' : 'New trip'}
@@ -237,7 +275,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
         <>
           <NewTripForm
             household={household}
-            startFrom={seed ?? null}
+            startFrom={seed ?? picked}
             onCreated={async (t, group) => {
               // A trip made from a place opens with that place already on it.
               // Failing to seed is not a reason to lose the trip they just
@@ -261,6 +299,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
                 } catch { /* the trip is made; the shortlist can be added to by hand */ }
               }
               onSeedUsed?.();
+              setPicked(null);
               // Who's coming was answered "a group": make it, then open the
               // front door on it rather than the trip's own day.
               if (group) {
@@ -275,6 +314,20 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
         </>
       ) : (
         <>
+          {/* A trip starts with where, and this is the tab you open to start one
+              (owner, 7 Sep 2026). Deliberately the same control as Inspire's
+              search bar — same shape, same screen behind it — because it is the
+              same question, and the + beside the title is still there for
+              somebody who would rather fill the form in from the top. */}
+          <Pressable
+            onPress={() => navigate(paths.tripsSearch())}
+            style={[styles.where, wide && styles.whereWide]}
+            accessibilityRole="search"
+            accessibilityLabel="Where are you going?"
+          >
+            <Icon name="search" size={18} color={colors.ink} strokeWidth={2.2} />
+            <Text style={styles.whereText} numberOfLines={1}>Where are you going?</Text>
+          </Pressable>
           <Segmented
             value={span}
             options={[{ value: 'day' as const, label: 'Day trips' }, { value: 'holiday' as const, label: 'Holidays' }]}
@@ -306,7 +359,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
 
           {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
           {!data ? <Text style={type.small}>Loading…</Text> : null}
-          {data && !all.length ? <Card><Text style={type.small}>No trips yet. Tap + above, or open an area in Places and tap "Plan a trip here".</Text></Card> : null}
+          {data && !all.length ? <Card><Text style={type.small}>No trips yet. Say where you're going above, or open an area in Places and tap "Plan a trip here".</Text></Card> : null}
           {data && all.length && !shown.length ? (
             <Card><Text style={type.small}>Nothing {when === 'past' ? 'behind you' : 'coming up'} that matches. Change a filter, or look at {span === 'day' ? 'Holidays' : 'Day trips'}.</Text></Card>
           ) : null}
@@ -1716,6 +1769,15 @@ const styles = StyleSheet.create({
   groupSummary: { alignItems: 'flex-start', paddingVertical: spacing.sm },
   page: { padding: spacing.lg, gap: spacing.md, width: '100%', maxWidth: 1180, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  // The same box as Inspire's search bar, so the two read as one control in
+  // two places rather than two controls that happen to look alike.
+  where: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    minHeight: 52, paddingHorizontal: spacing.lg, borderRadius: radius.pill,
+    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
+  },
+  whereWide: { maxWidth: 560, width: '100%', alignSelf: 'center' },
+  whereText: { fontSize: 15, fontWeight: '700', color: colors.ink },
   // The header's round controls: an ink + for a new trip, an outlined circle for the rest.
   roundBtn: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   roundBtnInk: { backgroundColor: colors.primary, borderColor: colors.primary },

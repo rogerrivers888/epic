@@ -224,9 +224,15 @@ export const asFlag = {
 
 const ADDRESS = (tab: string) => `at.${tab}`;
 
-/** Remember where this tab was left. */
-export function useRememberedAddress(tab: string, href: string): void {
-  useEffect(() => { rememberScreen(ADDRESS(tab), href); }, [tab, href]);
+/**
+ * Remember where this tab was left.
+ *
+ * `null` means "this is not somewhere to come back to" — a record, a form —
+ * and nothing is written down, so the tab keeps the last list it saw rather
+ * than being left pointing inside something (`isTabHome`, routes.ts).
+ */
+export function useRememberedAddress(tab: string, href: string | null): void {
+  useEffect(() => { if (href != null) rememberScreen(ADDRESS(tab), href); }, [tab, href]);
 }
 
 /** Where this tab was left, or the bare address if it has never been opened. */

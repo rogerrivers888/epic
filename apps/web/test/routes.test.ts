@@ -12,7 +12,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hrefOf, isFullBleed, isImmersive, legacyHref, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery } from '../src/routes.ts';
+import { hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery } from '../src/routes.ts';
 
 /** Read it, write it back, and get the same address. */
 const roundTrip = (href: string, expected?: string) => {
@@ -60,15 +60,36 @@ test('a country is a page of its own: its areas and its trips (handover, 5 Sep 2
   assert.deepEqual(parseRoute('/places/it'), { name: 'places', scope: { country: 'IT', city: null } });
 });
 
-test('Trips: the list, the form, a trip, a trip’s tab, and one day of it', () => {
-  assert.deepEqual(roundTrip('/trips'), { name: 'trips', creating: false, tripId: null, section: null, dayId: null });
-  assert.deepEqual(roundTrip('/trips/new'), { name: 'trips', creating: true, tripId: null, section: null, dayId: null });
-  assert.deepEqual(roundTrip('/trips/abc'), { name: 'trips', creating: false, tripId: 'abc', section: null, dayId: null });
-  assert.deepEqual(roundTrip('/trips/abc/shortlist'), { name: 'trips', creating: false, tripId: 'abc', section: 'shortlist', dayId: null });
-  assert.deepEqual(roundTrip('/trips/abc/itinerary'), { name: 'trips', creating: false, tripId: 'abc', section: 'itinerary', dayId: null });
-  assert.deepEqual(roundTrip('/trips/abc/places'), { name: 'trips', creating: false, tripId: 'abc', section: 'places', dayId: null });
-  assert.deepEqual(roundTrip('/trips/abc/map'), { name: 'trips', creating: false, tripId: 'abc', section: 'map', dayId: null });
-  assert.deepEqual(roundTrip('/trips/abc/day/d1'), { name: 'trips', creating: false, tripId: 'abc', section: 'day', dayId: 'd1' });
+test('Trips: the list, where-to, the form, a trip, a trip’s tab, and one day of it', () => {
+  const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null };
+  assert.deepEqual(roundTrip('/trips'), trips);
+  assert.deepEqual(roundTrip('/trips/search'), { ...trips, searching: true });
+  assert.deepEqual(roundTrip('/trips/new'), { ...trips, creating: true });
+  assert.deepEqual(roundTrip('/trips/abc'), { ...trips, tripId: 'abc' });
+  assert.deepEqual(roundTrip('/trips/abc/shortlist'), { ...trips, tripId: 'abc', section: 'shortlist' });
+  assert.deepEqual(roundTrip('/trips/abc/itinerary'), { ...trips, tripId: 'abc', section: 'itinerary' });
+  assert.deepEqual(roundTrip('/trips/abc/places'), { ...trips, tripId: 'abc', section: 'places' });
+  assert.deepEqual(roundTrip('/trips/abc/map'), { ...trips, tripId: 'abc', section: 'map' });
+  assert.deepEqual(roundTrip('/trips/abc/day/d1'), { ...trips, tripId: 'abc', section: 'day', dayId: 'd1' });
+  assert.equal(paths.tripsSearch(), '/trips/search');
+});
+
+test('where-to is a layer of Trips: it is on the tab, and Back is the trips', () => {
+  assert.equal(tabOf(parseRoute('/trips/search')), 'trips');
+  assert.equal(parentOf(parseRoute('/trips/search')), '/trips');
+  // Not a map: the chrome stays, because this is a form and not the trip.
+  assert.equal(isFullBleed(parseRoute('/trips/search')), false);
+});
+
+test('a tab is left pointing at a list, never at a record (owner, 7 Sep 2026)', () => {
+  // "when I go to trips… Currently, it takes me into the last trip."
+  assert.equal(isTabHome(parseRoute('/trips/abc/itinerary')), false);
+  assert.equal(isTabHome(parseRoute('/trips/new')), false);
+  assert.equal(isTabHome(parseRoute('/trips/search')), false);
+  // How the list was set is still worth coming back to (owner, 4 Sep 2026).
+  assert.equal(isTabHome(parseRoute('/trips')), true);
+  assert.equal(isTabHome(parseRoute('/places/GB/London')), true);
+  assert.equal(isTabHome(parseRoute('/inspire')), true);
 });
 
 test('a day identifier only means anything under the day tab', () => {
