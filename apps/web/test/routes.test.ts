@@ -204,6 +204,24 @@ test('the status a Places list opens on is the one it does not write down', () =
 });
 
 /**
+ * Food & drink asks two questions and the second only exists once the first is
+ * answered (owner, 7 Sep 2026). Both are in the address, and choosing a
+ * different kind of place clears the food — two calls in one tap, which is the
+ * shape that has broken before.
+ */
+test('the kind of place and what it serves are two keys, and the second follows the first', () => {
+  assert.equal(withQuery('/places/home?kind=eat', { type: 'Restaurants' }), '/places/home?kind=eat&type=Restaurants');
+  assert.equal(
+    withQuery('/places/home?kind=eat&type=Restaurants', { cuisine: 'Italian' }),
+    '/places/home?kind=eat&type=Restaurants&cuisine=Italian',
+  );
+  // Tapping Cafés clears the cuisine in the same handler, so the second call
+  // has to start from what the first wrote.
+  const kindChosen = withQuery('/places/home?kind=eat&type=Restaurants&cuisine=Italian', { type: 'Cafés' });
+  assert.equal(withQuery(kindChosen, { cuisine: null }), '/places/home?kind=eat&type=Caf%C3%A9s');
+});
+
+/**
  * The one that mattered: tapping Food & drink also clears the Type filter, and
  * those are two calls in the same handler. Each has to start from what the last
  * one wrote, or the second undoes the first and the tab looks dead (owner,

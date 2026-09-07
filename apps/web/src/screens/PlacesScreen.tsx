@@ -104,6 +104,9 @@ function kindsOf(p: AtlasPlace): Kind[] {
   return ['do'];
 }
 
+/** What Food & drink's Type dropdown offers: what the place *is*, before what it serves. */
+const EAT_KIND: Record<string, string> = { restaurant: 'Restaurants', cafe: 'Cafés', pub: 'Pubs', bar: 'Bars' };
+
 /** The kind of thing it is, in the words the Type dropdown uses, for the segment being looked at. */
 function typeOf(p: AtlasPlace, kind: Kind): string {
   const c = p.category ?? '';
@@ -113,12 +116,12 @@ function typeOf(p: AtlasPlace, kind: Kind): string {
     if (experiences.length) return cap(experiences[0]);
     return c === 'lodging' ? 'Places to stay' : 'Hotels';
   }
-  if (k === 'eat') {
-    const cuisines = cuisinesOf(p);
-    if (cuisines.length) return cap(cuisines[0]);
-    if (c === 'pub' || c === 'bar') return 'Pubs & bars';
-    return c === 'cafe' ? 'Cafés' : 'Restaurants';
-  }
+  // Under Food & drink the first question is what kind of place it is — a
+  // restaurant, a café, a pub — and the food it serves is the second one
+  // (owner, 7 Sep 2026: "I want an extra dropdown to appear once I select
+  // Restaurant to select the type of restaurant"). Type answers the first;
+  // Cuisine, which only appears once this one is set, answers the second.
+  if (k === 'eat') return EAT_KIND[c] ?? 'Restaurants';
   if (c === 'pub' || c === 'bar') return 'Pubs & bars';
   if (c === 'event') return 'Events';
   // What kind of thing it is, in the words the Shelves page keeps: the drawer
@@ -229,7 +232,7 @@ function atlasToBrowseItem(p: AtlasPlace): BrowseItem {
 }
 
 /** Inside a city: how the list is filtered and sorted, and whether it is a map. All of it is in the address. */
-const CITY_KEYS = ['kind', 'status', 'type', 'mood', 'trip', 'year', 'sort', 'view'];
+const CITY_KEYS = ['kind', 'status', 'type', 'cuisine', 'mood', 'trip', 'year', 'sort', 'view'];
 
 // ---------------------------------------------------------------------------
 // The screen
@@ -648,12 +651,19 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
    */
   const [status, setStatus] = useQueryState<Status>('status', 'loved', asOneOf(['any', 'been', 'saved', 'loved'] as const, 'loved'));
   const [typeF, setTypeF] = useQueryState<string | null>('type', null, asText);
+  /**
+   * The second question in Food & drink, and only ever the second: what the
+   * food is. It cannot be asked before Type, because "Italian" is an answer
+   * about a restaurant and the dropdown that offers it does not exist until
+   * there is a restaurant to be asked about.
+   */
+  const [cuisineF, setCuisineF] = useQueryState<string | null>('cuisine', null, asText);
   const [moodF, setMoodF] = useQueryState<string | null>('mood', null, asText);
   const [tripF, setTripF] = useQueryState<string | null>('trip', null, asText);
   const [yearF, setYearF] = useQueryState<string | null>('year', null, asText);
   const [sort, setSort] = useQueryState<Sort>('sort', 'name', asOneOf(['name', 'mine', 'recent'] as const, 'name'));
   const [view, setView] = useQueryState<'list' | 'map'>('view', 'list', asOneOf(['list', 'map'] as const, 'list'));
-  const [sheet, setSheet] = useState<'status' | 'type' | 'mood' | 'trip' | 'year' | 'sort' | null>(null);
+  const [sheet, setSheet] = useState<'status' | 'type' | 'cuisine' | 'mood' | 'trip' | 'year' | 'sort' | null>(null);
   /**
    * Whether the household has picked a status themselves on this screen.
    *
@@ -677,7 +687,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   // the row is marked so the eye finds it.
   useEffect(() => {
     if (!landed) return;
-    setAdding(false); setKind(landed.kind); setStatus('any'); setChose(true); setTypeF(null); setMoodF(null); setTripF(null); setYearF(null); setView('list');
+    setAdding(false); setKind(landed.kind); setStatus('any'); setChose(true); setTypeF(null); setCuisineF(null); setMoodF(null); setTripF(null); setYearF(null); setView('list');
   }, [landed?.venueRef]);
 
   const counts = useMemo(() => ({
@@ -710,11 +720,14 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   const nothingOnTab = !inList.length;
   const noneYet = `No ${thingsHere} saved in ${title} yet.`;
   const inKindAndType = places.filter((p) => inKind(p) && (!typeF || typeOf(p, shown) === typeF));
+  // All leads, however the list opens (owner, 7 Sep 2026: "the All option is the
+  // last one. That should definitely be the first"). Widest first, then the
+  // three narrowings in the order of how much they say about a place.
   const statusOptions = [
+    { value: 'any', label: STATUS_LABEL.any, count: inKindAndType.length },
     { value: 'loved', label: STATUS_LABEL.loved, count: inKindAndType.filter((p) => p.special).length },
     { value: 'been', label: STATUS_LABEL.been, count: inKindAndType.filter((p) => p.visits > 0).length },
     { value: 'saved', label: STATUS_LABEL.saved, count: inKindAndType.filter((p) => p.visits === 0).length },
-    { value: 'any', label: STATUS_LABEL.any, count: inKindAndType.length },
   ];
   /**
    * What the screen is actually showing.
@@ -739,6 +752,18 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   // hide half of Food & drink.
   const moodShown = shown === 'do';
   const matchesMood = (p: AtlasPlace) => !moodShown || !moodF || (p.moods ?? []).includes(moodF as any);
+  /**
+   * The second dropdown, and it is not drawn until the first has been answered
+   * — a list of cuisines beside a list of kinds of place is two ways of saying
+   * "type" and was the thing that made Restaurant, Café and Pub disappear.
+   *
+   * It is offered for whichever kind was chosen, not for restaurants alone:
+   * where the pubs here have said what they cook, the same question applies to
+   * them, and where nothing on the chosen kind has, the chip stays away rather
+   * than opening empty.
+   */
+  const cuisineShown = shown === 'eat' && !!typeF;
+  const matchesCuisine = (p: AtlasPlace) => !cuisineShown || !cuisineF || cuisinesOf(p).some((c) => cap(c) === cuisineF);
   // Which trip put it here is a question about somewhere you travelled to, and
   // nobody travels to their own front door (owner, 7 Sep 2026: "I don't think I
   // need a trip dropdown either… if I'm looking at something in Italy, then
@@ -752,7 +777,18 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
 
   const typeCounts = new Map<string, number>();
   places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p)).forEach((p) => { const t = typeOf(p, shown); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); });
-  const typeOptions = [{ value: '', label: shown === 'eat' ? 'Any cuisine' : shown === 'stay' ? 'Any kind of stay' : 'Any kind', count: [...typeCounts.values()].reduce((a, b) => a + b, 0) }, ...[...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ value: t, label: t, count: n }))];
+  // The cuisines of whatever kind of place is being looked at, and only those:
+  // asking "Italian" of the cafés must not offer the restaurants' answers.
+  const cuisineCounts = new Map<string, number>();
+  if (cuisineShown) {
+    places.filter((p) => inKind(p) && typeOf(p, shown) === typeF && matchesStatus(p, showing))
+      .forEach((p) => cuisinesOf(p).forEach((c) => cuisineCounts.set(cap(c), (cuisineCounts.get(cap(c)) ?? 0) + 1)));
+  }
+  const cuisineOptions = cuisineCounts.size
+    ? [{ value: '', label: 'Any food', count: places.filter((p) => inKind(p) && typeOf(p, shown) === typeF).length },
+      ...[...cuisineCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c, n]) => ({ value: c, label: c, count: n }))]
+    : [];
+  const typeOptions = [{ value: '', label: shown === 'eat' ? 'Any kind of place' : shown === 'stay' ? 'Any kind of stay' : 'Any kind', count: [...typeCounts.values()].reduce((a, b) => a + b, 0) }, ...[...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ value: t, label: t, count: n }))];
 
   // Mood is the same closed set of six the home screen's shelves are (the API
   // works it out per place); only the ones that are actually here are offered.
@@ -787,14 +823,14 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
   }, [places, shown]);
 
   const rows = useMemo(() => {
-    const list = places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p) && (!typeF || typeOf(p, shown) === typeF));
+    const list = places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p) && matchesCuisine(p) && (!typeF || typeOf(p, shown) === typeF));
     const by: Record<Sort, (a: AtlasPlace, b: AtlasPlace) => number> = {
       name: (a, b) => a.name.localeCompare(b.name),
       mine: (a, b) => (myScore(b, viewer) ?? -1) - (myScore(a, viewer) ?? -1) || a.name.localeCompare(b.name),
       recent: (a, b) => (b.lastOn ?? '').localeCompare(a.lastOn ?? '') || a.name.localeCompare(b.name),
     };
     return [...list].sort(by[sort]);
-  }, [places, shown, showing, typeF, moodF, tripF, yearF, home, sort, viewer]);
+  }, [places, shown, showing, typeF, cuisineF, moodF, tripF, yearF, home, sort, viewer]);
 
   const pins: MapPin[] = rows.filter((p) => p.lat != null && p.lng != null).map((p) => ({
     id: p.venueRef, lat: p.lat as number, lng: p.lng as number, label: p.name, number: '', heart: p.special,
@@ -832,7 +868,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
         </Row>
       </View>
       <View style={[styles.body, wide && styles.bodyCentred]}>
-        <Segmented value={shown} options={segments} onChange={(k) => { setKind(k); setTypeF(null); if (k !== 'do') setMoodF(null); setSelPin(null); onLandedShown(); }} />
+        <Segmented value={shown} options={segments} onChange={(k) => { setKind(k); setTypeF(null); setCuisineF(null); if (k !== 'do') setMoodF(null); setSelPin(null); onLandedShown(); }} />
         {adding ? (
           <AddPlace household={household} kind={shown} centre={centre} radiusKm={searchRadiusKm} ctx={ctx} wide={wide} onAdded={onChanged} onOpen={onOpenVenue} />
         ) : (
@@ -843,6 +879,7 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
               as though it were showing everything. */}
           <FilterChip label={STATUS_LABEL[showing]} on={showing !== 'any'} open={sheet === 'status'} onPress={() => setSheet(sheet === 'status' ? null : 'status')} />
           <FilterChip label={typeF ?? 'Type'} on={!!typeF} open={sheet === 'type'} onPress={() => setSheet(sheet === 'type' ? null : 'type')} />
+          {cuisineShown && cuisineOptions.length ? <FilterChip label={cuisineF ?? 'Cuisine'} on={!!cuisineF} open={sheet === 'cuisine'} onPress={() => setSheet(sheet === 'cuisine' ? null : 'cuisine')} /> : null}
           {moodShown ? <FilterChip label={moodF ? cap(moodF) : 'Mood'} on={!!moodF} open={sheet === 'mood'} onPress={() => setSheet(sheet === 'mood' ? null : 'mood')} /> : null}
           {tripShown && tripOptions.length > 1 ? <FilterChip label={tripF ? tripOptions.find((o) => o.value === tripF)?.label ?? 'Trip' : 'Trip'} on={!!tripF} open={sheet === 'trip'} onPress={() => setSheet(sheet === 'trip' ? null : 'trip')} /> : null}
           {!tripShown && yearOptions.length ? <FilterChip label={yearF ?? 'Year'} on={!!yearF} open={sheet === 'year'} onPress={() => setSheet(sheet === 'year' ? null : 'year')} /> : null}
@@ -858,10 +895,15 @@ function CityPanel({ country, city, home, places, household, viewer, wide, viewp
             filter with nothing to offer says why rather than opening empty. */}
         <PickPanel open={sheet === 'status'} title="What are we looking at?" options={statusOptions} value={showing}
           onPick={(v) => { setStatus(v as Status); setChose(true); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'type'} title={shown === 'eat' ? 'Cuisine' : shown === 'stay' ? 'Kind of stay' : 'Kind of thing'}
+        <PickPanel open={sheet === 'type'} title={shown === 'eat' ? 'What kind of place' : shown === 'stay' ? 'Kind of stay' : 'Kind of thing'}
           options={typeOptions} value={typeF ?? ''}
-          empty={nothingOnTab ? 'Nothing on this tab yet, so there is nothing to narrow.' : shown === 'eat' ? 'Nothing here has said what food it serves yet.' : 'Nothing here has said what kind of thing it is yet.'}
-          onPick={(v) => { setTypeF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
+          empty={nothingOnTab ? 'Nothing on this tab yet, so there is nothing to narrow.' : 'Nothing here has said what kind of thing it is yet.'}
+          onPick={(v) => { setTypeF(v || null); setCuisineF(null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
+        {/* The second question, under the first. Changing the kind of place
+            clears it, because "Italian cafés" is not what somebody who has just
+            tapped Cafés is asking for. */}
+        <PickPanel open={sheet === 'cuisine' && cuisineShown} title={`What ${(typeF ?? '').toLowerCase() || 'they'} serve`} options={cuisineOptions} value={cuisineF ?? ''}
+          onPick={(v) => { setCuisineF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
         <PickPanel open={sheet === 'mood' && moodShown} title="What's the day for?" options={moodOptions} value={moodF ?? ''}
           empty={nothingOnTab ? 'Nothing on this tab yet, so there is no mood to pick.' : 'Nothing here has been given a mood yet.'}
           onPick={(v) => { setMoodF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
