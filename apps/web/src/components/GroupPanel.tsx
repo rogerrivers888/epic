@@ -832,7 +832,11 @@ function costNow(i: GroupItem) {
   const m = i.money;
   if (!m) return null;
   if (i.state === 'cancelled') return `Called off — ${i.cancelledNote ?? 'it did not reach its minimum'}`;
-  if (i.state === 'closed') return `Settled at ${money(i.settledPence)} each · payment due ${day(i.dueOn)}`;
+  if (i.state === 'closed') {
+    return i.settledPence == null
+      ? 'Closed with nobody on it — nothing to pay'
+      : `Settled at ${money(i.settledPence)} each · payment due ${day(i.dueOn)}`;
+  }
   if (i.pricing !== 'variable') return null;
   const each = m.likelyPence ?? m.perSharePence;
   return `${each ? `About ${money(each)} each · ` : ''}nothing is taken until the deadline, ${day(m.closesOn)}`;

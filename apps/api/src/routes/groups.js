@@ -751,6 +751,9 @@ router.post('/groups/:id/items/:itemId/close', async (req, res, next) => {
     const stateFor = new Map(states.map((st) => [`${st.item_id}:${st.participant_id}`, st]));
     const onIt = people.filter((p) => (item.required ? true : ['in', 'paid'].includes(stateFor.get(`${item.id}:${p.id}`)?.status)));
     const shares = onIt.reduce((n, p) => n + (item.per_head ? p.heads : 1), 0);
+    if (shares === 0) {
+      return res.status(409).json({ error: 'nobody_on_it', message: 'Nobody is on it yet, so there is nothing to divide. Give it longer, or call it off.' });
+    }
     const cost = costOf(item, group, shares);
     if (cost.minimum && shares < cost.minimum && !req.body?.anyway) {
       return res.status(409).json({ error: 'below_minimum', message: `${shares} of the ${cost.minimum} it needs. Call it off, give it longer, or run it anyway.`, shares, minimum: cost.minimum, perSharePence: cost.perSharePence });
@@ -913,7 +916,13 @@ export async function runDueClosings(now = new Date()) {
       const shares = onIt.reduce((n, p) => n + (item.per_head ? p.heads : 1), 0);
       const cost = costOf(item, group, shares);
 
-      if (cost.minimum && shares < cost.minimum) {
+      // Nobody on it is not a price of nothing each: it is a thing that did not
+      // happen. Settling it would leave "settled at — each" on the organiser's
+      // list and a bill for nobody.
+      if (shares === 0) {
+        const note = 'Nobody said yes by the deadline.';
+        await groupsRepo.setItemState(item.id, { state: 'cancelled', cancelledNote: note });
+      } else if (cost.minimum && shares < cost.minimum) {
         const note = `${shares} of the ${cost.minimum} it needed.`;
         await groupsRepo.setItemState(item.id, { state: 'cancelled', cancelledNote: note });
         await tellEveryone(group, onIt, `${item.label} is off — ${note} Nothing to pay.`, 'cancelled', item.id);
