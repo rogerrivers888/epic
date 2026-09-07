@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { api, HouseholdResponse, Place } from '../api';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, fonts, radius, resolveTheme, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
 import { useRouter } from '../router';
 import { paths, type Route, type SettingsSection } from '../routes';
@@ -104,8 +104,40 @@ function Preferences({ data, refresh }: { data: HouseholdResponse; refresh: () =
     try { await api.updateHousehold({ home: p }); await refresh(); setHomeMsg(`Home saved: ${p.formatted ?? p.label}`); } catch (e: any) { setHomeMsg(e.message); }
   };
 
+  const initials = (household.name ?? 'Epic').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('');
+
   return (
     <>
+      {/* Who this is, before anything that can be changed (Settings 10a/10b):
+          a lime tile with the household's initials in ink, the name, and what
+          it is made of — closed with the one 2px rule on the screen. */}
+      <View style={styles.identity}>
+        <View style={styles.identityTile}><Text style={styles.identityInitials}>{initials}</Text></View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.identityName} numberOfLines={1}>{household.name}</Text>
+          <Text style={type.small} numberOfLines={1}>
+            {data.members.length} {data.members.length === 1 ? 'person' : 'people'} in the household
+          </Text>
+        </View>
+      </View>
+
+      {/*
+        Appearance leads, because it is the one setting that changes the screen
+        you are reading it on.
+
+        Two cells, not three. The handoff is explicit — "do not add a third cell
+        for it" — so following the phone is the *state before a choice is made*
+        rather than a choice of its own: until the first tap the app follows
+        `prefers-color-scheme` and the control highlights whichever cell the
+        phone is currently showing. The tap is what pins it.
+      */}
+      <Text style={styles.kicker}>Appearance</Text>
+      <Segmented
+        value={themePref === 'system' ? resolveTheme('system') : themePref}
+        options={[{ value: 'light' as const, label: 'Light' }, { value: 'dark' as const, label: 'Dark' }]}
+        onChange={setThemePref}
+      />
+
       <SectionTitle hint="Used whenever you say 'from home' or search near home. Places · Close to home holds everything within the radius.">Home</SectionTitle>
       <Card>
         <PlacePicker value={household.home} onPick={setHome} placeholder="House name or number, street, town, postcode" />
@@ -146,11 +178,6 @@ function Preferences({ data, refresh }: { data: HouseholdResponse; refresh: () =
         <Segmented value={household.defaultIntensity}
           options={[{ value: 'relaxed', label: 'Relaxed' }, { value: 'balanced', label: 'Balanced' }, { value: 'packed', label: 'Packed' }]}
           onChange={async (v) => { await api.updateHousehold({ defaultIntensity: v }); await refresh(); }} />
-      </Card>
-
-      <SectionTitle hint="Follow the device, or pick one. Kept on this device.">Appearance</SectionTitle>
-      <Card>
-        <Segmented value={themePref} options={[{ value: 'system', label: 'Device' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onChange={setThemePref} />
       </Card>
 
       <SectionTitle hint="A place's row in Places shows one score: this person's. Everyone's are in the drawer. Kept on this device.">Ratings shown as</SectionTitle>
@@ -226,6 +253,14 @@ function Providers() {
 }
 
 const styles = StyleSheet.create({
+  // Settings is flush-left groups on rules — no cards, no radius (10a/10b).
+  identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingBottom: spacing.lg, borderBottomWidth: BORDER, borderBottomColor: colors.line, marginBottom: spacing.lg },
+  identityTile: { width: 52, height: 52, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
+  identityInitials: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', color: colors.selectedFg },
+  identityName: { fontFamily: fonts.body, fontSize: 17, fontWeight: '600', color: colors.ink },
+  // A group's kicker carries no rule of its own.
+  kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: colors.inkMuted, marginBottom: spacing.sm },
+
   page: { padding: spacing.lg, gap: spacing.sm, width: '100%', maxWidth: 760, alignSelf: 'center' },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,

@@ -56,7 +56,11 @@ export function ModeSwitch({ mode, onMode }: { mode: 'activities' | 'food'; onMo
             accessibilityState={{ selected: on }}
             style={[styles.switchCell, on ? styles.switchOn : styles.switchOff]}
           >
-            <Text style={[styles.switchText, { color: on ? colors.ink : colors.inkMuted }]}>
+            {/* Ink on lime, in both modes: `colors.ink` is the *type* colour
+                and turns cream in the dark, which is white-on-lime at 1.25:1
+                (owner, 7 Sep 2026: "the text and icons inside the green squares
+                are white, not black"). */}
+            <Text style={[styles.switchText, { color: on ? colors.selectedFg : colors.inkMuted }]}>
               {m === 'activities' ? 'Activities' : 'Food'}
             </Text>
           </Pressable>
@@ -162,12 +166,15 @@ export const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     gap: spacing.md, paddingHorizontal: GUTTER,
     /**
-     * The design's 60 from the top of the screen — which has to *include* the
-     * status bar, not sit under it. On a phone with a notch the inset is around
-     * 59, so adding 60 to it put the wordmark 119px down; `max` takes whichever
-     * is the larger and adds a little breathing room over the clock.
+     * Just clear of the status bar, and no further.
+     *
+     * The handoff's 60 is measured on a drawing whose status bar is part of the
+     * picture; taken as padding *under* a real one it left the better part of a
+     * centimetre of nothing above the wordmark (owner, 7 Sep 2026). The clock
+     * needs clearing and nothing else does, so this is the inset plus a gap,
+     * with a floor for a phone that reports no inset at all.
      */
-    paddingTop: (Platform.OS === 'web' ? `max(${HEADER_TOP}px, calc(env(safe-area-inset-top) + 12px))` : HEADER_TOP) as any,
+    paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(env(safe-area-inset-top) + 10px))' : 16) as any,
   },
   where: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingHorizontal: 12,

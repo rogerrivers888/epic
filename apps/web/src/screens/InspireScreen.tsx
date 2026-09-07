@@ -635,7 +635,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
           </FilterRow>
         </View>
 
-        <View style={[styles.column, wide && styles.columnWide]}>
+        {/* Half a centimetre of air between the controls and the first thing
+            they control (owner, 7 Sep 2026: "the distance between the 'Up to
+            1-hour drive' and the 'Fun' is too close"). */}
+        <View style={[styles.column, wide && styles.columnWide, { paddingTop: 30 }]}>
           {loading && !pool ? (
             <View style={styles.waiting}>
               <ActivityIndicator color={colors.icon} />
