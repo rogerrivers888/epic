@@ -132,10 +132,24 @@ type Panel = null | 'travel' | 'kind' | 'who' | 'outing' | 'budget';
  * which page it is — and only what differs from the default is written down, so
  * a screen nobody has touched stays at `/inspire`.
  */
-// What this tab remembers between visits when the address itself is silent.
-// `place` and `within` are deliberately absent: a drawer and a sub-category are
-// not a way of being set, they are something open on one page.
-const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'by', 'outing', 'budget', 'open', 'kinds', 'who'];
+/**
+ * What this tab remembers between visits when the address itself is silent.
+ *
+ * `place` and `within` are absent because a drawer and a sub-category are not a
+ * way of being set, they are something open on one page.
+ *
+ * `by` — how you are travelling — is absent for a harder-won reason. It is the
+ * one setting that can empty the screen on its own: an hour's walk holds four
+ * places around Sunningdale where an hour's drive holds a hundred and seventy
+ * two, and Thorpe Park is twenty minutes away by car and nearly two hours on
+ * foot. Remembering a tap somebody made once, forever, meant opening the app
+ * days later to a screen with almost nothing on it and no clue why (owner,
+ * 7 Sep 2026: "where have all these activities gone?"). It still follows you
+ * around while you are here — it is in the address — it just does not outlive
+ * the visit. When Settings grows the handoff's "Default travel mode" that is
+ * where a standing choice belongs, and this can read it.
+ */
+const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'outing', 'budget', 'open', 'kinds', 'who'];
 
 /** "51.48160,-0.61130" — enough to look around the same town, and no more. */
 const placeFromQuery = (q: URLSearchParams): Place | null => {
@@ -664,8 +678,16 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
             />
           ) : null}
           <FilterRow count={pick ? `${listed.length} place${listed.length === 1 ? '' : 's'}` : null}>
-            <FilterButton icon="driving" strong label={travelLabel(travelBy, cap as TravelMinutes)} onPress={() => setPanel(panel === 'travel' ? null : 'travel')} />
-            <FilterButton label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'} onPress={() => setPanel(panel === 'budget' ? null : 'budget')} />
+            {/* Lit when it is doing something out of the ordinary, so the
+                reason a list is short is visible before the list is empty. */}
+            <FilterButton
+              icon={travelBy === 'walk' ? 'walking' : travelBy === 'transit' ? 'transit' : 'driving'}
+              strong
+              narrowed={travelBy !== 'drive'}
+              label={travelLabel(travelBy, cap as TravelMinutes)}
+              onPress={() => setPanel(panel === 'travel' ? null : 'travel')}
+            />
+            <FilterButton narrowed={budget !== 'all'} label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'} onPress={() => setPanel(panel === 'budget' ? null : 'budget')} />
             {mode === 'food' ? <FilterButton toggle on={openNow} label="Open now" onPress={() => setOpenNow(!openNow)} /> : null}
           </FilterRow>
         </View>
