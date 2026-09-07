@@ -54,7 +54,7 @@ import { Router } from 'express';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
-import { estimateTravelMinutes, kmBetween, TRAVEL_MODES } from '../domain/travel.js';
+import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.js';
 import { dwellFor } from '../domain/options.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
@@ -173,7 +173,9 @@ inspire.get('/near', async (req, res, next) => {
       : home
         ? { ...home, how: 'home' }
         : { ...centre, label: null, how: 'centre' };
-    const mode = TRAVEL_MODES.includes(req.query.mode) ? req.query.mode : 'driving';
+    // Normalised, not tested against the canonical spellings: the screens say
+    // `drive` and `walk`, and an includes-check turned `walk` into a car.
+    const mode = travelMode(req.query.mode);
     const label = String(req.query.label || '').trim() || household.home_label || null;
     const locality = req.query.locality ? String(req.query.locality) : null;
 

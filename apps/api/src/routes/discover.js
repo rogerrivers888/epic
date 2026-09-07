@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import * as impressions from '../repositories/impressions.js';
 import * as visitsRepo from '../repositories/visits.js';
 import { searchAllSources } from '../sources/index.js';
-import { deriveCatchment, detourMinutes, reachRadiusKm, TRAVEL_MODES } from '../domain/travel.js';
+import { deriveCatchment, detourMinutes, isTravelMode, reachRadiusKm, TRAVEL_MODES } from '../domain/travel.js';
 import { applyConstraints } from '../domain/ranking.js';
 import { paceOf, travelLimitFor } from '../domain/pace.js';
 import { currentHousehold, loadMembers, toAttendees, loadLearnedPreferences } from './household.js';
@@ -39,7 +39,7 @@ router.post('/', async (req, res, next) => {
     if (!origin || typeof origin.lat !== 'number' || typeof origin.lng !== 'number') {
       return res.status(400).json({ error: 'origin_required', message: 'origin must carry lat and lng' });
     }
-    if (!TRAVEL_MODES.includes(mode)) {
+    if (!isTravelMode(mode)) {
       return res.status(400).json({ error: 'invalid_mode', message: `mode must be one of ${TRAVEL_MODES.join(', ')}` });
     }
 

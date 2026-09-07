@@ -80,6 +80,18 @@ const MODE_ALIAS = {
 /** A caller's word for a mode, as one of the four this file models. */
 export const travelMode = (m) => MODE_ALIAS[String(m || '').toLowerCase()] ?? 'driving';
 
+/**
+ * Is this a way of getting about at all?
+ *
+ * Separate from `travelMode` because the two questions are different and
+ * conflating them is what caused the bug: a route that asks "is this one of
+ * mine?" against the canonical names alone answers no to `walk` and then
+ * quietly substitutes a car. Somewhere that stores a mode should reject a word
+ * it does not know; somewhere that reads one should normalise it. Neither
+ * should silently change the answer.
+ */
+export const isTravelMode = (m) => Object.prototype.hasOwnProperty.call(MODE_ALIAS, String(m || '').toLowerCase());
+
 export function estimateTravelMinutes(from, to, mode = 'driving') {
   const kind = travelMode(mode);
   const profile = MODE_PROFILE[kind];

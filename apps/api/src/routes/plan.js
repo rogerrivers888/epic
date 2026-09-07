@@ -24,7 +24,7 @@ const PREVIEW_MODEL = process.env.EPIC_PREVIEW_MODEL || 'claude-sonnet-5';
 import { searchAllSources, searchCorridor, eventSources, optInFrom, defaultSourceKeys, enabledSources, sourceHasKey, sourceOff, SCREEN_DEADLINE_MS } from '../sources/index.js';
 import { resolvePlace, KNOWN_PLACES } from '../sources/fixtures.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
-import { deriveCatchment, reachRadiusKm, estimateTravelMinutes, detourMinutes as estimateDetour, TRAVEL_MODES, kmBetween } from '../domain/travel.js';
+import { deriveCatchment, reachRadiusKm, estimateTravelMinutes, detourMinutes as estimateDetour, isTravelMode, travelMode as asTravelMode, kmBetween } from '../domain/travel.js';
 import { applyConstraints } from '../domain/ranking.js';
 import { composeOptions, dwellFor, richFields, PRICE_POINTS, eventInsideWindow } from '../domain/options.js';
 import { lineByKey } from '../sources/pricing.js';
@@ -475,7 +475,7 @@ export async function createTripFromIntent({ household, members, intent, origin,
     returnAt = new Date(depart.getTime() + duration * 60_000);
   }
   const wc = (d) => wallClock(d, tz).hhmm;
-  const mode = intent.travel_mode && TRAVEL_MODES.includes(intent.travel_mode) ? intent.travel_mode : 'transit';
+  const mode = isTravelMode(intent.travel_mode) ? travelMode(intent.travel_mode) : 'transit';
   const intensity = intent.intensity && INTENSITY_TARGETS[intent.intensity] ? intent.intensity : household.default_intensity;
   // Where the day happens: the anchor's venue, else the destination, else the origin.
   const base = anchorPlace ?? destination ?? origin;
@@ -530,7 +530,7 @@ async function createStayFromIntent({ household, members, intent, destination })
     intent.wants?.length ? `Wants: ${intent.wants.join(', ')}` : null,
     intent.avoids?.length ? `Avoid: ${intent.avoids.join(', ')}` : null,
   ].filter(Boolean).join('\n') || null;
-  const travelMode = intent.travel_mode && TRAVEL_MODES.includes(intent.travel_mode) ? intent.travel_mode : 'driving';
+  const travelMode = isTravelMode(intent.travel_mode) ? asTravelMode(intent.travel_mode) : 'driving';
   const intensity = intent.intensity && INTENSITY_TARGETS[intent.intensity] ? intent.intensity : household.default_intensity;
   const base = { label: `${city} (centre)`, lat: destination.lat, lng: destination.lng };
   const attendingNames = new Set((intent.attending || []).map((n) => n.toLowerCase()));
@@ -2082,7 +2082,7 @@ async function recomposeFromIntent(session, household) {
   else if (intent.special) state.pricePoint = 'upmarket';
   if (intent.avoid_chains != null) state.includeChains = intent.avoid_chains === false;
   const duration = intent.duration_minutes != null ? Math.min(720, Math.max(60, Number(intent.duration_minutes))) : null;
-  const mode = intent.travel_mode && TRAVEL_MODES.includes(intent.travel_mode) ? intent.travel_mode : null;
+  const mode = isTravelMode(intent.travel_mode) ? asTravelMode(intent.travel_mode) : null;
   const intensity = intent.intensity && INTENSITY_TARGETS[intent.intensity] ? intent.intensity : null;
   if (mode || intensity) await applyTripChanges(session, { durationMinutes: null, intensity, travelMode: mode });
   // The hours the household asked for are the hours of the day itself, before
@@ -2289,7 +2289,7 @@ router.post('/act', async (req, res, next) => {
         await applyTripChanges(session, {
           intensity: action.intensity && INTENSITY_TARGETS[action.intensity] ? action.intensity : null,
           durationMinutes: action.durationMinutes != null ? Number(action.durationMinutes) : null,
-          travelMode: action.travelMode && TRAVEL_MODES.includes(action.travelMode) ? action.travelMode : null,
+          travelMode: isTravelMode(action.travelMode) ? asTravelMode(action.travelMode) : null,
         });
         // A day the household has just lengthened or shortened is the new day
         // the stops on the way are measured against.
