@@ -13,7 +13,7 @@ import { asFlag, asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQ
 import { paths, withQuery, MOODS, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
 import { CategoryStrip, FilterButton, FilterRow, InspireTop, ModeSwitch, SubStrip, blockRule } from '../components/InspireHeader';
 import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow } from '../components/InspireBody';
-import { TravelSheet, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
+import { ChoiceSheet, TravelSheet, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
 import type { OpenTripOptions } from './PlanScreen';
 
 /**
@@ -356,6 +356,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
       const r = await api.inspireNear({
         lat: centre.lat, lng: centre.lng,
         label: centre.label, locality: centre.locality ?? null,
+        // How you are getting there is what the travel times are *of*. Without
+        // it every mode gave the same minutes, so the sheet's counts sat still
+        // however the mode was changed (owner, 7 Sep 2026).
+        mode: travelBy,
       });
       setPool(r);
     } catch (e: any) {
@@ -364,7 +368,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
     } finally {
       setLoading(false);
     }
-  }, [centre?.lat, centre?.lng, centre?.label]);
+  }, [centre?.lat, centre?.lng, centre?.label, travelBy]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -451,7 +455,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    * against today's emptiness.
    */
   const FOOD_KINDS: Record<string, string> = { restaurant: 'restaurants', cafe: 'cafes', pub: 'pubs', bar: 'pubs', takeaway: 'takeaway' };
-  const isFood = useCallback((i: InspireItem) => Boolean(FOOD_KINDS[i.category]) || i.moods.includes('food'), []);
+  /**
+   * Somewhere to eat is a *kind of place*, not a place that happens to serve
+   * food. Asking whether the taxonomy had taught it the word "food" put
+   * Cumberland Lodge — a house with a dining room — at the top of the
+   * restaurants (owner, 7 Sep 2026, twice). The sweep's own places and the four
+   * food categories are the answer; an attraction with a café is an attraction.
+   */
+  const isFood = useCallback((i: InspireItem) => i.source === 'scout' || Boolean(FOOD_KINDS[i.category]), []);
   const inMode = useMemo(() => shown.filter((i) => (mode === 'food' ? isFood(i) : !isFood(i))), [shown, mode, isFood]);
 
   /** The cuisines actually near, biggest first — the body of Food's home (8d). */
@@ -728,6 +739,26 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
       </ScrollView>
       {/* 8c: how far, as a sheet over the screen rather than a panel inside it.
           The counts are what make it a decision instead of a guess. */}
+      {/* Budget, on the same pattern as the travel sheet (8c). It was a button
+          that opened nothing at all. The counts matter more here than they do
+          for travel: almost nothing in the atlas carries a price, so a band
+          without them would empty the screen with no explanation. */}
+      {panel === 'budget' ? (
+        <ChoiceSheet
+          title="What are we spending?"
+          sub={pricesKnown ? `Where a price is known near ${placeName}.` : `Nothing around ${placeName} has been priced yet, so only Any has anything in it.`}
+          options={BUDGETS.map((b) => ({
+            key: b.key,
+            label: b.label,
+            count: b.max == null
+              ? inMode.length
+              : inMode.filter((i) => i.priceLevel != null && i.priceLevel <= (b.max as number)).length,
+          }))}
+          value={budget}
+          onPick={(k) => { setBudget(k); setPanel(null); }}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
       {panel === 'travel' ? (
         <TravelSheet
           from={placeName}

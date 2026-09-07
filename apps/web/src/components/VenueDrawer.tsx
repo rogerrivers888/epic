@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
 import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
@@ -312,16 +312,23 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     // come back empty — and an empty answer is what the screen was reading as
     // "no signal".
     /**
-     * An atlas place: ours, and with no reviews in it.
+     * A place of ours, with no reviews in it.
      *
-     * The atlas identifies a place by Wikidata or OpenStreetMap, so it is the
-     * *source* that decides this and not the prefix — plenty of attractions
-     * carry an `osm:` ref and they need the reviews just as much. Google is
-     * asked once by name and coordinates, and the answer arrives beside the
-     * drawer rather than in front of it: the screen is already up, and it gains
-     * its stars a moment later (owner, 7 Sep 2026: "I want it to be snappy").
+     * Two pools are like this and both need the same thing. The atlas
+     * identifies a place by Wikidata or OpenStreetMap; the postcode sweep
+     * identifies a restaurant by OpenStreetMap and keeps a *band* rather than a
+     * rating, because a rating is not ours to store. Neither can answer "what
+     * did people say", and both were opening with nothing on them (owner,
+     * 7 Sep 2026: "when I click into Indian… there are no reviews. There are
+     * names, but there are no reviews").
+     *
+     * So it is the source that decides, not the ref's prefix. Google is asked
+     * once by name and coordinates, and the answer arrives beside the drawer
+     * rather than in front of it: the screen is already up and gains its stars
+     * a moment later ("I want it to be snappy"). The list keeps the sweep's own
+     * band — that part is ours and does not need buying.
      */
-    if (item.source === 'atlas' && item.lat != null && item.lng != null) {
+    if ((item.source === 'atlas' || item.source === 'scout') && item.lat != null && item.lng != null) {
       api.placeReviews({ ref: item.venueRef, name: item.name, lat: item.lat, lng: item.lng })
         .then((d) => { if (live && d.matched) setCrowd({ rating: d.rating, ratingCount: d.ratingCount, reviews: d.reviews, attribution: d.attribution }); })
         .catch(() => { /* no reviews is not an error worth a message */ });
@@ -657,7 +664,17 @@ const styles = StyleSheet.create({
   // closes the head, and two would read as a boxed-in title.
   head: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: 0, gap: spacing.sm },
   panelSide: { width: 460, maxWidth: '100%', height: '100%', borderLeftWidth: BORDER, borderLeftColor: colors.line },
-  panelSheet: { width: '100%', height: '100%' },
+  /**
+   * A full-height sheet starts at the very top of the screen, and the app draws
+   * under the status bar — so without this the title ran through the clock and
+   * the close button sat on the battery (owner, 7 Sep 2026, and quite right:
+   * it is the rule the rest of the app keeps). A Modal portals out of the tree,
+   * so it cannot inherit the frame's inset and has to take its own.
+   */
+  panelSheet: {
+    width: '100%', height: '100%',
+    paddingTop: (Platform.OS === 'web' ? 'var(--epic-sat)' : 0) as any,
+  },
   tabStripWrap: { borderBottomWidth: BORDER, borderBottomColor: colors.ink, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg },
   tabStrip: { gap: 18, paddingTop: 4 },
   tabItem: { paddingVertical: 6, borderBottomWidth: BORDER, borderBottomColor: 'transparent', marginBottom: -BORDER },

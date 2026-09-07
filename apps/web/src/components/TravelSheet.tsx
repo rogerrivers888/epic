@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts, spacing, BORDER, TARGET } from '../theme';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName } from './Icon';
@@ -135,14 +135,19 @@ const styles = StyleSheet.create({
   // on, the same way every other colour here does.
   scrim: { ...(StyleSheet.absoluteFill as object), backgroundColor: colors.scrim },
   // No top border: the design is explicit, and the scrim is what separates it.
-  sheet: { backgroundColor: colors.surface, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 44, gap: 18, maxHeight: '88%' },
+  // A Modal portals out of the tree, so the sheet takes the home indicator's
+  // clearance itself; 24 above it is the handoff's own bottom padding.
+  sheet: {
+    backgroundColor: colors.surface, paddingHorizontal: 20, paddingTop: 20, gap: 18, maxHeight: '88%',
+    paddingBottom: (Platform.OS === 'web' ? 'calc(24px + var(--epic-sab))' : 44) as any,
+  },
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
   title: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink },
   sub: { fontFamily: fonts.body, fontSize: 14, color: colors.inkMuted, marginTop: 4 },
   close: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
   modes: { flexDirection: 'row', borderWidth: 1, borderColor: colors.lineSoft },
-  mode: { flex: 1, alignItems: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 8, minHeight: 72 },
+  mode: { flex: 1, alignItems: 'center', gap: 8, paddingVertical: 16, paddingHorizontal: 12, minHeight: 76 },
   modeDivider: { borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
   modeOn: { backgroundColor: colors.selected },
   modeText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, textAlign: 'center' },
@@ -153,9 +158,16 @@ const styles = StyleSheet.create({
    * same width as the rules above and below it; inset, it would read as a
    * button that had been dropped into a list.
    */
+  /**
+   * The fill runs the full width of the sheet and the text sits a clear 20px
+   * inside it. At the handoff's 12 the words were almost touching the edge of
+   * the lime (owner, 7 Sep 2026: "the text is too close to the edge of the
+   * green bars"), and widening the bar rather than insetting the text keeps the
+   * label in line with the title above it.
+   */
   option: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md,
-    minHeight: TARGET, paddingVertical: 14, paddingHorizontal: 12, marginHorizontal: -12,
+    minHeight: TARGET, paddingVertical: 16, paddingHorizontal: 20, marginHorizontal: -20,
     borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
   },
   optionOn: { backgroundColor: colors.selected, borderBottomColor: colors.selected },
@@ -165,9 +177,68 @@ const styles = StyleSheet.create({
 
   go: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: colors.primary, paddingVertical: 16, paddingHorizontal: 18, minHeight: TARGET,
+    backgroundColor: colors.primary, paddingVertical: 18, paddingHorizontal: 20, minHeight: TARGET,
   },
   goText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.primaryFg },
 });
 
 export { OPTIONS as TRAVEL_OPTIONS, MODES as TRAVEL_MODES };
+
+/**
+ * One list of choices, on the travel sheet's pattern (8c).
+ *
+ * The handoff asks for the budget filter to open "a bottom sheet (8c pattern)",
+ * and the only thing that differs is what is in the list — so this is that
+ * sheet with the mode control left out, rather than a second sheet that would
+ * drift away from the first.
+ */
+export function ChoiceSheet({ title, sub, options, value, onPick, onClose }: {
+  title: string;
+  sub?: string | null;
+  options: { key: string; label: string; count?: number | null }[];
+  value: string;
+  onPick: (key: string) => void;
+  onClose: () => void;
+}) {
+  const { width, height, framed, origin } = useViewport();
+  const frameBox = framed && origin
+    ? { position: 'absolute' as const, left: origin.x, top: origin.y, width, height }
+    : null;
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={[styles.fill, frameBox]}>
+        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" accessibilityRole="button" />
+        <View style={styles.sheet}>
+          <View style={styles.head}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>{title}</Text>
+              {sub ? <Text style={styles.sub}>{sub}</Text> : null}
+            </View>
+            <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+              <Icon name="close" size={20} color={colors.ink} />
+            </Pressable>
+          </View>
+          <ScrollView style={styles.options} contentContainerStyle={{ paddingBottom: spacing.sm }}>
+            {options.map((o) => {
+              const on = o.key === value;
+              return (
+                <Pressable
+                  key={o.key}
+                  onPress={() => onPick(o.key)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={[styles.option, on && styles.optionOn]}
+                >
+                  <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
+                  <Text style={[styles.optionCount, on && styles.optionTextOn]}>
+                    {o.count == null ? '' : `${o.count.toLocaleString()} place${o.count === 1 ? '' : 's'}`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
