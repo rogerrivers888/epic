@@ -94,6 +94,19 @@ function wordmark({ height = 120, ink = INK, ground = CREAM, word = 'Epic', bg =
     + `</g></svg>\n`;
 }
 
+/**
+ * The tab icon and the app icon are supplied art, not drawn here.
+ *
+ * The handoff ships them (`Logo - Chrome icons/assets`) and is specific about
+ * why: the tab icon is a full-bleed lime tile with the ink pin and **no hole**,
+ * because at 16px the hole closes up and the mark reads as a blob — and the
+ * bare pin on a transparent ground "renders as the browser's default-looking
+ * black location marker", which is exactly what it was doing. So these are
+ * copied in and rasterised rather than generated, and the pin inside them is
+ * the handoff's own, at its own inset.
+ */
+const SUPPLIED = ['epic-favicon-lime.svg', 'epic-favicon-ink.svg', 'epic-app-icon.svg'];
+
 const SVGS = {
   'epic-icon-lime.svg': icon({}),
   'epic-icon-ink.svg': icon({ ground: INK, ink: LIME }),
@@ -114,7 +127,18 @@ const SVGS = {
 function raster(svg, out, w, h, alpha = false) {
   const page = join(ROOT, 'node_modules', '.cache-epic-brand.html');
   mkdirSync(dirname(page), { recursive: true });
-  const sized = svg.replace(/width="[^"]*"/, `width="${w}"`).replace(/height="[^"]*"/, `height="${h}"`);
+  /**
+   * Size the *svg element*, not whatever carries the first `width=` in the file.
+   *
+   * The supplied icons open `<svg viewBox="0 0 100 100">` with no size of their
+   * own and a full-bleed `<rect width="100" height="100">` inside; replacing the
+   * first match resized the rect and left the canvas alone, which drew the tile
+   * at 16px with the pin still 100 units across. Setting them on the opening tag
+   * is unambiguous whether or not the file already has them.
+   */
+  const sized = svg
+    .replace(/\s(width|height)="[^"]*"(?=[^>]*>)/g, (m, a, o, str) => (str.slice(0, o).lastIndexOf('<svg') > str.slice(0, o).lastIndexOf('>') ? '' : m))
+    .replace('<svg', `<svg width="${w}" height="${h}"`);
   writeFileSync(page, '<!doctype html><meta charset="utf-8">'
     + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@800&display=swap">'
     + `<style>html,body{margin:0;line-height:0;background:${alpha ? 'transparent' : '#fff'}}</style>${sized}`);
@@ -127,19 +151,22 @@ function raster(svg, out, w, h, alpha = false) {
 const svgPath = (n) => join(ROOT, 'docs/brand/svg', n);
 mkdirSync(join(ROOT, 'docs/brand/svg'), { recursive: true });
 for (const [name, body] of Object.entries(SVGS)) writeFileSync(svgPath(name), body);
-console.log(`${Object.keys(SVGS).length} SVGs written to docs/brand/svg`);
+console.log(`${Object.keys(SVGS).length} SVGs written to docs/brand/svg (${SUPPLIED.length} more are the handoff's own, left as supplied)`);
 
 const S = (n) => readFileSync(svgPath(n), 'utf8');
 const square = (n) => (out, size) => raster(S(n), join(ROOT, out), size, size);
 const limeTile = square('epic-icon-lime.svg');
 
-// At 16px the hole closes to a smudge, so it goes; the lime tile stays, because
-// an ink pin on nothing disappears into Chrome's dark tab strip.
-square('epic-icon-lime-solid.svg')('apps/web/public/favicon-16.png', 16);
-for (const [out, size] of [['apps/web/public/favicon-32.png', 32], ['apps/web/public/favicon-48.png', 48],
-  ['apps/web/public/favicon-192.png', 192], ['apps/web/public/favicon-512.png', 512],
-  ['apps/web/public/apple-touch-icon.png', 180], ['apps/web/assets/icon.png', 1024],
-  ['apps/web/assets/favicon.png', 48]]) limeTile(out, size);
+// The tab icon, at every size a browser asks for, from the supplied tile.
+const favicon = square('epic-favicon-lime.svg');
+for (const [out, size] of [['apps/web/public/favicon-16.png', 16], ['apps/web/public/favicon-32.png', 32],
+  ['apps/web/public/favicon-48.png', 48], ['apps/web/public/favicon-192.png', 192],
+  ['apps/web/public/favicon-512.png', 512], ['apps/web/assets/favicon.png', 48]]) favicon(out, size);
+// The dark-tab alternative, offered to Chrome by `media` in index.html.
+square('epic-favicon-ink.svg')('apps/web/public/favicon-dark-32.png', 32);
+// The home-screen icon keeps its hole: it is never seen at 16px.
+square('epic-app-icon.svg')('apps/web/public/apple-touch-icon.png', 180);
+square('epic-app-icon.svg')('apps/web/assets/icon.png', 1024);
 square('epic-icon-maskable.svg')('apps/web/public/favicon-maskable-512.png', 512);
 raster(S('epic-symbol-ink.svg'), join(ROOT, 'apps/web/assets/splash-icon.png'), Math.round(512 * ASPECT), 512, true);
 raster(S('epic-symbol-ink.svg'), join(ROOT, 'apps/web/assets/brand/epic-symbol-light.png'), Math.round(512 * ASPECT), 512, true);
@@ -148,8 +175,8 @@ raster(S('epic-android-foreground.svg'), join(ROOT, 'apps/web/assets/android-ico
 const wm = S('epic-wordmark-transparent.svg');
 const box = wm.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
 raster(wm, join(ROOT, 'apps/web/public/brand/epic-wordmark-ink.png'), 300, Math.round(300 * (+box[2] / +box[1])), true);
-writeFileSync(svgPath('epic-icon-lime.svg'), S('epic-icon-lime.svg'));
-writeFileSync(join(ROOT, 'apps/web/public/favicon.svg'), S('epic-icon-lime.svg'));
+writeFileSync(join(ROOT, 'apps/web/public/favicon.svg'), S('epic-favicon-lime.svg'));
+writeFileSync(join(ROOT, 'apps/web/public/favicon-dark.svg'), S('epic-favicon-ink.svg'));
 
 // favicon.ico: 16/32/48 as PNGs in an ICO container, which every current browser reads.
 const imgs = [16, 32, 48].map((s) => ({ s, buf: readFileSync(join(ROOT, `apps/web/public/favicon-${s}.png`)) }));
