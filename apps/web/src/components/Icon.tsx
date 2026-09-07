@@ -5,7 +5,7 @@ import {
   Bird, Fish,
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
-  Copy, Mail, Send, UserCog, Ellipsis,
+  Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode,
   Eye, Upload, Image as ImageIcon, Gift, CreditCard,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
@@ -44,6 +44,9 @@ const ICONS = {
   here: LocateFixed,
   // who has Roam, and getting a link to them: the admin module
   accounts: UserCog, mail: Mail, send: Send, copy: Copy,
+  // Somebody joining a table for one meal, what the order goes into while it is
+  // being chosen, and the code a waiter points a camera at (owner, 7 Sep 2026).
+  addPerson: UserPlus, basket: ShoppingBasket, qr: QrCode,
   booked: CircleCheck, full: Ban, locked: Lock, money: PoundSterling, grip: GripVertical, list: List, map: Map, info: Info, search: Search, edit: Pencil,
   // the invite page: what it looks like, and where its picture comes from
   preview: Eye, upload: Upload, picture: ImageIcon, gift: Gift, card: CreditCard,

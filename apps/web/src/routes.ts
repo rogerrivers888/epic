@@ -140,6 +140,12 @@ export type Route =
   | { name: 'prototypes'; section: PrototypeSection | null }
   | { name: 'admin'; screen: AdminScreen }
   | { name: 'join'; token: string }
+  /**
+   * What the waiter's camera opens (owner, 7 Sep 2026: "maybe there could be a
+   * QR code that the waiter could scan to then see what I've ordered"). Its own
+   * address, outside the app: no tab, no chrome, no sign-in.
+   */
+  | { name: 'order'; token: string }
   | { name: 'unknown'; path: string };
 
 const oneOf = <T extends string>(all: readonly T[], v: string | undefined): T | null =>
@@ -210,6 +216,9 @@ export function parseRoute(path: string): Route {
     case 'join':
       return a ? { name: 'join', token: a } : { name: 'unknown', path };
 
+    case 'order':
+      return a ? { name: 'order', token: a } : { name: 'unknown', path };
+
     default:
       return { name: 'unknown', path };
   }
@@ -234,6 +243,7 @@ export function hrefOf(route: Route): string {
     case 'prototypes': return buildHref(['prototypes', route.section]);
     case 'admin': return buildHref(['admin', route.screen]);
     case 'join': return buildHref(['join', route.token]);
+    case 'order': return buildHref(['order', route.token]);
     case 'unknown': return route.path;
   }
 }
@@ -257,6 +267,7 @@ export const paths = {
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
   join: (token: string) => buildHref(['join', token]),
+  order: (token: string) => buildHref(['order', token]),
 };
 
 /**
@@ -345,6 +356,7 @@ export function titleOf(route: Route): string {
     case 'prototypes': return roam('Prototypes');
     case 'admin': return roam(`Back office — ${route.screen}`);
     case 'join': return roam('Your trip');
+    case 'order': return roam('The order');
     case 'unknown': return roam('Not a page');
   }
 }

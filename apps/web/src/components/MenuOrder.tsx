@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, DishNote, HouseholdResponse, Member, MenuItem, MenuLink, Order, OrderItem, ReadMenu } from '../api';
 import { colors, radius, spacing, TARGET, type } from '../theme';
 import { useViewport } from '../hooks/useViewport';
 import { Icon } from './Icon';
 import { Button, Card, Chip, Row, Segmented, Wrap } from './ui';
+import { QrCode } from './QrCode';
+import { paths } from '../routes';
 
 /**
  * The table half of an evening (owner, 4 Sep 2026): "surface the functionality
@@ -28,7 +30,41 @@ import { Button, Card, Chip, Row, Segmented, Wrap } from './ui';
  * declare — can never be a clearance, so it asks.
  */
 
-type Picks = Record<string, { members: Record<string, boolean>; table: boolean; note: string }>;
+/**
+ * Who a plate belongs to: somebody in the household, a guest at tonight's
+ * table, or nobody, which is the plate everyone shares.
+ *
+ * A guest is the owner's, 7 Sep 2026 — "there could be other guests with me…
+ * I'd like to be able to say, when I go into the menu, 'Add other guests'" —
+ * and they belong to the sitting, not to the family: no allergens Roam knows,
+ * no place in Who's coming, and nothing they say goes into the household's
+ * tastes. `ref` is this phone's own id for them, which is what keeps their
+ * dinner attached to them when the order is written again.
+ */
+type Diner = { key: string; name: string; kind: 'member' | 'guest' | 'table'; memberId: string | null; guestRef: string | null };
+type Guest = { ref: string; name: string };
+
+const memberDiner = (m: Member): Diner => ({ key: `m:${m.id}`, name: m.name.split(' ')[0], kind: 'member', memberId: m.id, guestRef: null });
+const guestDiner = (g: Guest): Diner => ({ key: `g:${g.ref}`, name: g.name, kind: 'guest', memberId: null, guestRef: g.ref });
+const TABLE: Diner = { key: 'table', name: 'For the table', kind: 'table', memberId: null, guestRef: null };
+const keyOf = (memberId: string | null | undefined, guestRef: string | null | undefined) =>
+  (memberId ? `m:${memberId}` : guestRef ? `g:${guestRef}` : 'table');
+
+/**
+ * What the table is having, keyed by dish and then by person.
+ *
+ * The note hangs off the pair, not off the dish (owner, 7 Sep 2026: "if 2
+ * people are having the same menu item, they each might have different special
+ * instructions"). Two people ordering the linguine is two rows, two words for
+ * the waiter, and one of them can have no chilli without the other losing it.
+ */
+type Pick = { on: boolean; note: string };
+type Picks = Record<string, Record<string, Pick>>;
+/** One person, one dish: what goes to the kitchen and what shows in the basket. */
+type Line = {
+  itemId: string; key: string; who: string; kind: Diner['kind']; memberId: string | null; guestRef: string | null;
+  name: string; price: number | null; priceText: string | null; note: string;
+};
 type Marks = Record<string, { stars: number; notGreat: boolean; comment: string; concept: boolean }>;
 
 /** Ingredients that carry an allergen without naming it. A prompt, never a clearance. */
@@ -102,22 +138,30 @@ function FlagChip({ flag }: { flag: Flag }) {
   );
 }
 
-/** A face is one person wanting one dish; "Table" is a plate to share. */
-function Face({ label, on, onPress, size = 30 }: { label: string; on: boolean; onPress: () => void; size?: number }) {
+/**
+ * A face is one person wanting one dish; "Table" is a plate to share.
+ *
+ * A guest wears the same face with a dashed edge: they are at the table tonight
+ * and gone tomorrow, and nothing they order teaches Roam anything about the
+ * family's taste.
+ */
+function Face({ label, on, onPress, size = 30, guest = false }: { label: string; on: boolean; onPress: () => void; size?: number; guest?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="checkbox"
       accessibilityState={{ checked: on }}
-      accessibilityLabel={label}
-      style={[styles.face, { width: size, height: size, borderRadius: size / 2 }, on && styles.faceOn]}
+      accessibilityLabel={guest ? `${label}, a guest` : label}
+      style={[styles.face, { width: size, height: size, borderRadius: size / 2 }, guest && styles.faceGuest, on && styles.faceOn]}
     >
-      <Text style={[styles.faceText, on && styles.faceTextOn]}>{label[0]}</Text>
+      <Text style={[styles.faceText, on && styles.faceTextOn]}>{(label[0] ?? '?').toUpperCase()}</Text>
     </Pressable>
   );
 }
 
 const money = (n: number) => `£${n.toFixed(2).replace(/\.00$/, '')}`;
+/** Whose plate this was, in one word: a first name, a guest's name, or the table. */
+const whoHad = (i: OrderItem) => i.member?.split(' ')[0] ?? i.guest ?? 'the table';
 
 /* --------------------------------------------------------------- the state */
 
@@ -138,6 +182,14 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
   const [household, setHousehold] = useState<HouseholdResponse | null>(null);
   const [section, setSection] = useState<string | null>(null);
   const [picks, setPicks] = useState<Picks>({});
+  // Who else is at the table tonight, and the field that asks their names.
+  const [guests, setGuests] = useState<Guest[]>([]);
+  const [seating, setSeating] = useState(false);
+  // The basket, so a tap is visibly a thing that happened (owner, 7 Sep 2026:
+  // "maybe I could see it going into a basket or something, so I know it's
+  // actually worked"). `added` is the line just put in, said once and faded.
+  const [peek, setPeek] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [marks, setMarks] = useState<Marks>({});
   const [busy, setBusy] = useState(false);
@@ -174,14 +226,10 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
       setResumed(true);
       // The picks are what the menu draws and what saving writes, so an order
       // that came back from the server has to become picks again or editing it
-      // would quietly wipe it.
-      setPicks(Object.fromEntries(d.order.items.reduce((map, i) => {
-        if (!i.menuItemId) return map;
-        const at = map.get(i.menuItemId) ?? { members: {} as Record<string, boolean>, table: false, note: '' };
-        if (i.memberId) at.members[i.memberId] = true; else at.table = true;
-        if (i.note) at.note = i.note;
-        return map.set(i.menuItemId, at);
-      }, new Map<string, Picks[string]>())));
+      // would quietly wipe it — and the people it was for have to come back
+      // with it, or a guest's dinner would have nobody to belong to.
+      setGuests(d.order.guests.map((g) => ({ ref: g.ref, name: g.name })));
+      setPicks(picksOf(d.order));
     }).catch(() => {});
     return () => { live = false; };
   }, [venueRef, enabled]);
@@ -220,21 +268,97 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     return map;
   }, [menu]);
 
-  const pickOf = (id: string) => picks[id] ?? { members: {}, table: false, note: '' };
-  const setPick = (id: string, next: Partial<Picks[string]>) =>
-    setPicks((p) => ({ ...p, [id]: { ...pickOf(id), ...next } }));
+  /** Everybody a dish can be ticked for, in the order the faces are drawn. */
+  const diners = useMemo<Diner[]>(
+    () => [...members.map(memberDiner), ...guests.map(guestDiner), TABLE],
+    [members, guests],
+  );
+  const dinerOf = (key: string) => diners.find((d) => d.key === key) ?? TABLE;
 
-  const rowsFrom = (from: Picks) => {
-    const rows: { itemId: string; memberId: string | null; note: string }[] = [];
-    for (const [itemId, p] of Object.entries(from)) {
-      if (!itemsById.has(itemId)) continue;
-      if (p.table) rows.push({ itemId, memberId: null, note: p.note });
-      for (const m of members) if (p.members[m.id]) rows.push({ itemId, memberId: m.id, note: p.note });
+  const pickOf = (itemId: string, key: string): Pick => picks[itemId]?.[key] ?? { on: false, note: '' };
+  const setPick = (itemId: string, key: string, next: Partial<Pick>) =>
+    setPicks((p) => ({ ...p, [itemId]: { ...(p[itemId] ?? {}), [key]: { ...pickOf(itemId, key), ...next } } }));
+
+  /** Who has this dish, so the row can give each of them their own note. */
+  const onThis = (itemId: string) => diners.filter((d) => pickOf(itemId, d.key).on);
+
+  /**
+   * One person, one dish — the shape the basket draws and the kitchen is sent.
+   * Walked in menu order rather than in the order things were tapped, so the
+   * basket reads like the menu and does not reshuffle itself as it fills.
+   */
+  const linesFrom = (from: Picks, who: Diner[] = diners): Line[] => {
+    const lines: Line[] = [];
+    for (const [itemId, item] of itemsById) {
+      const at = from[itemId];
+      if (!at) continue;
+      for (const d of who) {
+        const p = at[d.key];
+        if (!p?.on) continue;
+        lines.push({
+          itemId, key: d.key, who: d.name, kind: d.kind, memberId: d.memberId, guestRef: d.guestRef,
+          name: item.name, price: item.price ?? null, priceText: item.priceText ?? null, note: p.note ?? '',
+        });
+      }
     }
-    return rows;
+    return lines;
   };
-  const chosen = useMemo(() => rowsFrom(picks), [picks, itemsById, members]);
-  const total = chosen.reduce((n, r) => n + (itemsById.get(r.itemId)?.price ?? 0), 0);
+  const chosen = useMemo(() => linesFrom(picks), [picks, itemsById, diners]);
+  const total = chosen.reduce((n, r) => n + (r.price ?? 0), 0);
+
+  /** An order from the server, read back into picks: the inverse of `linesFrom`. */
+  function picksOf(from: Order): Picks {
+    const next: Picks = {};
+    for (const i of from.items) {
+      if (!i.menuItemId) continue;
+      const key = keyOf(i.memberId, i.guestRef);
+      next[i.menuItemId] = { ...(next[i.menuItemId] ?? {}), [key]: { on: true, note: i.note ?? '' } };
+    }
+    return next;
+  }
+
+  /**
+   * Somebody else at the table. Written straight away, because a guest added
+   * before anything is ordered is still a guest, and a name typed into a phone
+   * that forgets it on the next screen was never worth typing.
+   */
+  async function addGuest(name: string) {
+    const first = name.trim().slice(0, 40);
+    if (!first) return;
+    const guest = { ref: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name: first };
+    const next = [...guests, guest];
+    setGuests(next);
+    setBusy(true);
+    try { await writeOrder(picks, next); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  /** They have gone home, or were a typo. Their dishes go with them. */
+  async function removeGuest(ref: string) {
+    const next = guests.filter((g) => g.ref !== ref);
+    const key = `g:${ref}`;
+    const clean: Picks = Object.fromEntries(
+      Object.entries(picks).map(([itemId, at]) => [itemId, Object.fromEntries(Object.entries(at).filter(([k]) => k !== key))]),
+    );
+    setGuests(next);
+    setPicks(clean);
+    setBusy(true);
+    try { await writeOrder(clean, next); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  /**
+   * A dish ticked for one person, and said out loud.
+   *
+   * The basket line is announced rather than the count changing quietly: the
+   * owner asked to be able to see that a tap worked, and a number going from 3
+   * to 4 in the corner is not that.
+   */
+  function togglePick(itemId: string, key: string) {
+    const now = pickOf(itemId, key);
+    setPick(itemId, key, { on: !now.on });
+    const d = dinerOf(key);
+    const item = itemsById.get(itemId);
+    setAdded(!now.on && item ? `${d.kind === 'table' ? 'For the table' : d.name} · ${item.name}` : null);
+  }
 
   async function readTheMenu() {
     setReading(true); setError(null); setHeld(false); setHow([]);
@@ -250,16 +374,18 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     }
   }
 
-  async function writeOrder(from: Picks = picks) {
+  async function writeOrder(from: Picks = picks, who: Guest[] = guests) {
+    const seated = [...members.map(memberDiner), ...who.map(guestDiner), TABLE];
     const d = await api.saveOrder({
       clientId: order?.clientId ?? undefined,
       ref: venueRef,
       label: venueLabel,
       menuId: menu?.id ?? null,
-      items: rowsFrom(from).map((r) => {
-        const item = itemsById.get(r.itemId)!;
-        return { menuItemId: item.id, memberId: r.memberId, name: item.name, priceText: item.priceText, note: r.note || null };
-      }),
+      guests: who,
+      items: linesFrom(from, seated).map((l) => ({
+        menuItemId: l.itemId, memberId: l.memberId, guestRef: l.guestRef,
+        name: l.name, priceText: l.priceText, note: l.note || null,
+      })),
     });
     setOrder(d.order);
     return d.order;
@@ -271,25 +397,32 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  /** Take one thing off the order, from the order itself. */
-  async function removeFromOrder(item: OrderItem) {
-    if (!item.menuItemId) return;
-    const p = pickOf(item.menuItemId);
-    const next: Picks = {
-      ...picks,
-      [item.menuItemId]: item.memberId
-        ? { ...p, members: { ...p.members, [item.memberId]: false } }
-        : { ...p, table: false },
-    };
+  /** Take one plate off the order — one person's, not everybody's. */
+  async function dropLine(itemId: string, key: string) {
+    const next: Picks = { ...picks, [itemId]: { ...(picks[itemId] ?? {}), [key]: { ...pickOf(itemId, key), on: false } } };
     setPicks(next);
+    setAdded(null);
     setBusy(true);
     try { await writeOrder(next); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  /** A word for the waiter, changed on the order rather than back on the menu. */
+  /** The same, from the order itself, where a row already knows whose it is. */
+  async function removeFromOrder(item: OrderItem) {
+    if (!item.menuItemId) return;
+    await dropLine(item.menuItemId, keyOf(item.memberId, item.guestRef));
+  }
+
+  /**
+   * A word for the waiter, changed on the order rather than back on the menu.
+   * It belongs to this person's plate, so changing Gina's leaves Roger's alone.
+   */
   async function noteOnOrder(item: OrderItem, note: string) {
     if (!item.menuItemId) return;
-    const next: Picks = { ...picks, [item.menuItemId]: { ...pickOf(item.menuItemId), note } };
+    const key = keyOf(item.memberId, item.guestRef);
+    const next: Picks = {
+      ...picks,
+      [item.menuItemId]: { ...(picks[item.menuItemId] ?? {}), [key]: { ...pickOf(item.menuItemId, key), note } },
+    };
     setPicks(next);
     try { await writeOrder(next); } catch (e: any) { setError(e.message); }
   }
@@ -299,7 +432,7 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     setBusy(true);
     try {
       if (order && !order.visitId) await api.clearOrder(order.id);
-      setOrder(null); setPicks({}); setMarks({}); setResumed(false); setPhase('order');
+      setOrder(null); setPicks({}); setGuests([]); setMarks({}); setResumed(false); setPhase('order'); setAdded(null); setPeek(false);
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -333,24 +466,31 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  /** The same again: last time's order becomes this one, minus anything unticked. */
+  /**
+   * The same again: last time's order becomes this one, minus anything unticked.
+   *
+   * Anybody who was a guest that night comes back with the dishes that are still
+   * ticked and nobody else — a table of six last time should not seat four
+   * strangers tonight because their name was on an old order.
+   */
   async function orderAgain(from: Order) {
     const byName = (name: string) => [...itemsById.values()].find((i) => i.name.toLowerCase() === name.toLowerCase());
     const next: Picks = {};
+    const seatedRefs = new Set<string>();
     let lost = 0;
     for (const i of from.items) {
       if (!again[i.id]) continue;
       const id = i.menuItemId && itemsById.has(i.menuItemId) ? i.menuItemId : byName(i.name)?.id;
       if (!id) { lost += 1; continue; }   // the menu has changed since
-      const at = next[id] ?? { members: {}, table: false, note: '' };
-      if (i.memberId) at.members[i.memberId] = true; else at.table = true;
-      if (i.note) at.note = i.note;
-      next[id] = at;
+      if (i.guestRef) seatedRefs.add(i.guestRef);
+      next[id] = { ...(next[id] ?? {}), [keyOf(i.memberId, i.guestRef)]: { on: true, note: i.note ?? '' } };
     }
+    const who = from.guests.filter((g) => seatedRefs.has(g.ref)).map((g) => ({ ref: g.ref, name: g.name }));
     setPicks(next);
+    setGuests(who);
     setBusy(true);
     try {
-      await writeOrder(next);
+      await writeOrder(next, who);
       setResumed(false);
       setPhase('order');
       if (lost) setError(`${lost} thing${lost === 1 ? ' is' : 's are'} not on the menu any more.`);
@@ -368,19 +508,26 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
     }
   }
 
+  /**
+   * The order, by whose plate it is: the family, then tonight's guests, then
+   * what everybody shares. A person with nothing on the order still gets a
+   * heading, so an empty one reads as "nothing for Gina yet" rather than as
+   * Gina not being here; the table only appears when there is something on it.
+   */
   const groups = useMemo(() => {
     const list = order?.items ?? [];
-    return [{ id: null as string | null, name: 'For the table' }, ...members.map((m) => ({ id: m.id as string | null, name: m.name.split(' ')[0] }))]
-      .map((g) => ({ ...g, items: list.filter((i) => i.memberId === g.id) }))
-      .filter((g) => g.items.length || g.id !== null);
-  }, [order, members]);
+    return [TABLE, ...members.map(memberDiner), ...guests.map(guestDiner)]
+      .map((d) => ({ ...d, items: list.filter((i) => keyOf(i.memberId, i.guestRef) === d.key) }))
+      .filter((g) => g.items.length || g.kind !== 'table');
+  }, [order, members, guests]);
 
   const allergenLines = members.flatMap((m) => (m.allergens ?? []).map((a) => `${m.name.split(' ')[0]} is allergic to ${a.value.toLowerCase()}.`));
   const dietLines = members.flatMap((m) => (m.diets ?? []).map((d) => `${m.name.split(' ')[0]} is ${d.value.toLowerCase()}.`));
 
   return {
     venueRef, venueLabel, menu, link, reading, error, held, how, members, sections, shown, section, setSection, itemsById,
-    picks, pickOf, setPick, chosen, total, order, resumed, marks, setMarks, busy, staff, setStaff, phase, setPhase,
+    picks, pickOf, setPick, togglePick, onThis, diners, guests, seating, setSeating, addGuest, removeGuest,
+    peek, setPeek, added, chosen, total, dropLine, order, resumed, marks, setMarks, busy, staff, setStaff, phase, setPhase,
     noting, setNoting, asked, groups, allergenLines, dietLines, history, again, setAgain,
     readTheMenu, toTheOrder, removeFromOrder, noteOnOrder, startAgain, weAteIt, saveStars, whatIsThis, orderAgain,
   };
@@ -388,8 +535,103 @@ export function useMenuOrder({ venueRef, venueLabel, website, enabled = true }: 
 
 /* ---------------------------------------------------------------- the menu */
 
+/**
+ * Who is at this table tonight (owner, 7 Sep 2026).
+ *
+ * The household is a line of names, because Roam already knows them. A guest is
+ * a name somebody types, one at a time, and stays only for this meal — so the
+ * control says what that means rather than leaving somebody to wonder whether
+ * they have just added a person to the family.
+ */
+function WhoIsHere({ ctl }: { ctl: MenuOrderCtl }) {
+  const [name, setName] = useState('');
+  const add = async () => {
+    const first = name.trim();
+    if (!first) return;
+    setName('');
+    await ctl.addGuest(first);
+  };
+  return (
+    <View style={styles.who}>
+      <Row style={{ flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+        <Icon name="household" size={15} color={colors.inkMuted} />
+        <Text style={[type.tiny, { flexShrink: 1 }]}>{ctl.members.map((m) => m.name.split(' ')[0]).join(', ') || 'Just you'}</Text>
+        {ctl.guests.map((g) => (
+          <Chip key={g.ref} label={g.name} icon="person" onRemove={() => ctl.removeGuest(g.ref)} />
+        ))}
+        <Chip
+          label={ctl.seating ? 'Done' : ctl.guests.length ? 'Add another' : 'Add other guests'}
+          icon={ctl.seating ? 'check' : 'addPerson'}
+          selected={ctl.seating}
+          onPress={() => ctl.setSeating(!ctl.seating)}
+        />
+      </Row>
+      {ctl.seating ? (
+        <View style={{ gap: 6 }}>
+          <Row>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              autoFocus
+              placeholder="their first name"
+              placeholderTextColor={colors.inkFaint}
+              onSubmitEditing={add}
+              returnKeyType="done"
+              style={[styles.noteInput, { flex: 1 }]}
+              accessibilityLabel="A guest's first name"
+            />
+            <Button label="Add" icon="add" onPress={add} disabled={!name.trim() || ctl.busy} />
+          </Row>
+          <Text style={type.tiny}>
+            A first name is enough. They get a face on every dish and their own word for the waiter; they are here for this
+            meal only, and nothing they order changes what Roam knows about your family's taste.
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The basket, opened out (owner, 7 Sep 2026: "maybe I could see it going into a
+ * basket or something, so I know it's actually worked").
+ *
+ * One row per person per dish, with what they asked for underneath, and each
+ * one removable on its own — so two of the same dish are visibly two things and
+ * taking one back does not take the other with it.
+ */
+function BasketPeek({ ctl }: { ctl: MenuOrderCtl }) {
+  return (
+    <View style={styles.peek}>
+      <ScrollView style={{ maxHeight: 190 }} contentContainerStyle={{ padding: spacing.sm, gap: 2 }}>
+        {ctl.chosen.map((l) => (
+          <Row key={`${l.itemId}:${l.key}`} style={{ alignItems: 'center' }}>
+            {l.kind === 'table'
+              ? <Icon name="household" size={15} color={colors.inkMuted} />
+              : <Face label={l.who} on size={22} guest={l.kind === 'guest'} onPress={() => {}} />}
+            <View style={{ flex: 1 }}>
+              <Text style={type.small}>{l.name}</Text>
+              {l.note ? <Text style={type.tiny}>{l.note}</Text> : null}
+            </View>
+            <Text style={type.tiny}>{l.priceText ?? ''}</Text>
+            <Pressable
+              onPress={() => ctl.dropLine(l.itemId, l.key)}
+              disabled={ctl.busy}
+              accessibilityRole="button"
+              accessibilityLabel={`Take ${l.who === 'For the table' ? 'the table' : l.who}'s ${l.name} out of the basket`}
+              style={styles.rowBtn}
+            >
+              <Icon name="close" size={14} color={colors.inkMuted} />
+            </Pressable>
+          </Row>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => void }) {
-  const { menu, link, reading, error, held, how, members, sections, shown, chosen, total, asked } = ctl;
+  const { menu, link, reading, error, held, members, how, sections, shown, chosen, total, asked } = ctl;
   // Opening the Menu tab is the household asking for the menu: read it, rather
   // than offering a button that says so (owner, 4 Sep 2026 — "I shouldn't even
   // have to click Read the menu because I'm clicking on the menu tab"). Once
@@ -455,6 +697,7 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
                 onPress={() => Linking.openURL(link?.url ?? menu.sourceUrl)}
               />
             </View>
+            <WhoIsHere ctl={ctl} />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 2 }}>
               {sections.map((s) => (
                 <Chip key={s.title} label={s.title} selected={s.title === shown?.title} onPress={() => ctl.setSection(s.title)} />
@@ -463,12 +706,11 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
             {shown?.note ? <Text style={type.tiny}>{shown.note}</Text> : null}
             <Text style={type.tiny}>(V) is vegetarian.{ctl.dietLines.length ? ` ${ctl.dietLines.join(' ')}` : ''}</Text>
             {shown?.items.map((item) => {
-              const p = ctl.pickOf(item.id);
               const flags = flagsFor(item, members);
-              const picked = p.table || members.some((m) => p.members[m.id]);
+              const having = ctl.onThis(item.id);
               const note = asked[item.id];
               return (
-                <View key={item.id} style={[styles.row, picked && styles.rowPicked]}>
+                <View key={item.id} style={[styles.row, having.length > 0 && styles.rowPicked]}>
                   <Row style={{ alignItems: 'center' }}>
                     <Text style={[type.body, styles.itemName]}>
                       {item.name}
@@ -505,22 +747,43 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
                   ) : null}
                   {flags.length ? <Wrap>{flags.map((f, i) => <FlagChip key={i} flag={f} />)}</Wrap> : null}
                   <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-                    {members.map((m) => (
-                      <Face key={m.id} label={m.name} on={!!p.members[m.id]}
-                        onPress={() => ctl.setPick(item.id, { members: { ...p.members, [m.id]: !p.members[m.id] } })} />
-                    ))}
-                    <Chip label="Table" icon="household" selected={p.table} onPress={() => ctl.setPick(item.id, { table: !p.table })} />
-                    {picked ? (
-                      <TextInput
-                        value={p.note}
-                        onChangeText={(t) => ctl.setPick(item.id, { note: t })}
-                        placeholder="no chilli"
-                        placeholderTextColor={colors.inkFaint}
-                        style={styles.noteInput}
-                        accessibilityLabel={`A word about ${item.name}`}
+                    {ctl.diners.filter((d) => d.kind !== 'table').map((d) => (
+                      <Face
+                        key={d.key}
+                        label={d.name}
+                        guest={d.kind === 'guest'}
+                        on={ctl.pickOf(item.id, d.key).on}
+                        onPress={() => ctl.togglePick(item.id, d.key)}
                       />
-                    ) : null}
+                    ))}
+                    <Chip
+                      label="Table"
+                      icon="household"
+                      selected={ctl.pickOf(item.id, TABLE.key).on}
+                      onPress={() => ctl.togglePick(item.id, TABLE.key)}
+                    />
                   </Row>
+                  {/*
+                    A word for the waiter, one per person (owner, 7 Sep 2026).
+                    Two people having the same dish get two boxes, so "no
+                    chilli" belongs to whoever said it and does not follow the
+                    dish onto somebody else's plate.
+                  */}
+                  {having.map((d) => (
+                    <Row key={d.key} style={{ alignItems: 'center' }}>
+                      {d.kind === 'table'
+                        ? <Icon name="household" size={16} color={colors.inkMuted} />
+                        : <Face label={d.name} on size={22} guest={d.kind === 'guest'} onPress={() => ctl.togglePick(item.id, d.key)} />}
+                      <TextInput
+                        value={ctl.pickOf(item.id, d.key).note}
+                        onChangeText={(t) => ctl.setPick(item.id, d.key, { note: t })}
+                        placeholder={having.length > 1 ? `${d.name}: no chilli` : 'no chilli'}
+                        placeholderTextColor={colors.inkFaint}
+                        style={[styles.noteInput, { flex: 1 }]}
+                        accessibilityLabel={`What ${d.kind === 'table' ? 'the table' : d.name} wants said about ${item.name}`}
+                      />
+                    </Row>
+                  ))}
                 </View>
               );
             })}
@@ -531,18 +794,41 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
           </>
         ) : null}
       </ScrollView>
+      {/*
+        The basket. It says what just went in and opens to show everything in
+        it, because a count that ticks up in the corner is not the same as
+        seeing your dinner land somewhere (owner, 7 Sep 2026).
+      */}
       {menu ? (
-        <View style={styles.bar}>
-          <View style={{ flex: 1 }}>
-            <Text style={type.body}>
-              {chosen.length ? `${chosen.length} ${chosen.length === 1 ? 'thing' : 'things'}${total ? ` · ${money(total)}` : ''}` : 'Nothing chosen yet'}
-            </Text>
-            <Text style={type.tiny}>
-              {!chosen.length ? 'Tap a face on a dish' : total ? 'Tap to check it over' : 'Priced by the set menu — tap to check it over'}
-            </Text>
+        <>
+          {ctl.peek && chosen.length ? <BasketPeek ctl={ctl} /> : null}
+          <View style={styles.bar}>
+            <Pressable
+              onPress={() => ctl.setPeek(!ctl.peek)}
+              disabled={!chosen.length}
+              accessibilityRole="button"
+              accessibilityLabel={ctl.peek ? 'Close the basket' : 'See what is in the basket'}
+              style={{ flex: 1 }}
+            >
+              <Row style={{ alignItems: 'center' }}>
+                <Icon name="basket" size={18} color={chosen.length ? colors.icon : colors.inkFaint} />
+                <View style={{ flex: 1 }}>
+                  <Text style={type.body}>
+                    {chosen.length ? `${chosen.length} ${chosen.length === 1 ? 'thing' : 'things'}${total ? ` · ${money(total)}` : ''}` : 'Nothing chosen yet'}
+                  </Text>
+                  <Text style={type.tiny} numberOfLines={1}>
+                    {ctl.added ? `Added · ${ctl.added}`
+                      : !chosen.length ? 'Tap a face on a dish'
+                        : ctl.peek ? 'Tap to close the basket'
+                          : total ? 'Tap to see what is in it' : 'Priced by the set menu — tap to see what is in it'}
+                  </Text>
+                </View>
+                {chosen.length ? <Icon name={ctl.peek ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} /> : null}
+              </Row>
+            </Pressable>
+            <Button label="The order" icon="forward" style={styles.barBtn} onPress={async () => { await ctl.toTheOrder(); onOrder(); }} disabled={!chosen.length || ctl.busy} />
           </View>
-          <Button label="The order" icon="forward" style={styles.barBtn} onPress={async () => { await ctl.toTheOrder(); onOrder(); }} disabled={!chosen.length || ctl.busy} />
-        </View>
+        </>
       ) : null}
     </>
   );
@@ -565,14 +851,18 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
               What you had here{last.visitedOn ? ` on ${last.visitedOn}` : ' last time'}. Untick anything nobody wants twice, order the rest,
               and add to it from the menu.
             </Text>
-            {[{ id: null as string | null, name: 'For the table' }, ...ctl.members.map((m) => ({ id: m.id as string | null, name: m.name.split(' ')[0] }))]
-              .map((g) => ({ ...g, items: last.items.filter((i) => i.memberId === g.id) }))
+            {[{ key: 'table', name: 'For the table', kind: 'table' as const },
+              ...ctl.members.map((m) => ({ key: `m:${m.id}`, name: m.name.split(' ')[0], kind: 'member' as const })),
+              // Whoever was eating with you that night, named as a guest again.
+              ...last.guests.map((g) => ({ key: `g:${g.ref}`, name: g.name, kind: 'guest' as const }))]
+              .map((g) => ({ ...g, items: last.items.filter((i) => keyOf(i.memberId, i.guestRef) === g.key) }))
               .filter((g) => g.items.length)
               .map((g) => (
-                <View key={g.id ?? 'table'} style={{ gap: 4 }}>
+                <View key={g.key} style={{ gap: 4 }}>
                   <Row>
-                    {g.id ? <Face label={g.name} on onPress={() => {}} size={26} /> : <Icon name="household" size={18} />}
+                    {g.kind === 'table' ? <Icon name="household" size={18} /> : <Face label={g.name} on guest={g.kind === 'guest'} onPress={() => {}} size={26} />}
                     <Text style={type.h3}>{g.name}</Text>
+                    {g.kind === 'guest' ? <Text style={type.tiny}>a guest that night</Text> : null}
                   </Row>
                   {g.items.map((i) => {
                     const on = !!ctl.again[i.id];
@@ -636,6 +926,20 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
           {order.items.map((i) => {
             const m = marks[i.id] ?? { stars: 0, notGreat: false, comment: '', concept: false };
             const set = (next: Partial<typeof m>) => setMarks((s) => ({ ...s, [i.id]: { ...m, ...next } }));
+            // A guest's plate is listed, so the meal reads whole, and carries no
+            // stars: what somebody who came once thought of a dish is not a fact
+            // about this family's taste, and Roam plans from the family's.
+            if (i.guestId) {
+              return (
+                <View key={i.id} style={styles.row}>
+                  <Row>
+                    <Face label={i.guest ?? '?'} on guest onPress={() => {}} size={26} />
+                    <Text style={[type.body, { flex: 1 }]}>{i.name}</Text>
+                  </Row>
+                  <Text style={type.tiny}>{i.guest}'s, and a guest's plate is not scored into your family's taste.</Text>
+                </View>
+              );
+            }
             return (
               <View key={i.id} style={styles.row}>
                 <Row>
@@ -683,7 +987,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
         <View style={styles.bar}>
           <View style={{ flex: 1 }}>
             <Text style={type.body}>{starred} starred · {bad} not great</Text>
-            <Text style={type.tiny}>{order.items.length - starred - bad} left as fine</Text>
+            <Text style={type.tiny}>{order.items.filter((i) => !i.guestId).length - starred - bad} left as fine</Text>
           </View>
           <Button label="Save" icon="check" style={styles.barBtn} onPress={ctl.saveStars} disabled={busy} />
         </View>
@@ -698,13 +1002,14 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
         <Text style={type.small}>The visit is in Places, with the order and what everyone thought under it.</Text>
         {order.items.map((i) => {
           const r = i.ratings[0];
-          const who = i.member?.split(' ')[0] ?? 'the table';
+          const who = whoHad(i);
           return (
             <Row key={i.id} style={styles.orderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={type.body}>{i.name}</Text>
                 <Text style={type.tiny}>
-                  {r?.score ? `liked by ${who}` : r?.take === 'not_for_me' ? `${who} would not have it again` : 'nothing said, so it counts as fine'}
+                  {i.guestId ? `${who}'s, a guest`
+                    : r?.score ? `liked by ${who}` : r?.take === 'not_for_me' ? `${who} would not have it again` : 'nothing said, so it counts as fine'}
                   {r?.comment ? ` — “${r.comment}”` : ''}
                 </Text>
               </View>
@@ -728,11 +1033,13 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
   return (
     <>
       <ScrollView contentContainerStyle={styles.body}>
+        <WhoIsHere ctl={ctl} />
         {groups.map((g) => (
-          <View key={g.id ?? 'table'} style={{ gap: 4 }}>
+          <View key={g.key} style={{ gap: 4 }}>
             <Row>
-              {g.id ? <Face label={g.name} on onPress={() => {}} size={26} /> : <Icon name="household" size={18} />}
+              {g.kind === 'table' ? <Icon name="household" size={18} /> : <Face label={g.name} on guest={g.kind === 'guest'} onPress={() => {}} size={26} />}
               <Text style={type.h3}>{g.name}</Text>
+              {g.kind === 'guest' ? <Text style={type.tiny}>a guest tonight</Text> : null}
             </Row>
             {g.items.length ? g.items.map((i) => (
               <View key={i.id} style={styles.orderRow}>
@@ -826,7 +1133,7 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
             <Text style={styles.mealWhen}>{meal.visitedOn ?? 'A visit'}{loved.length ? ` · ${loved.length} starred` : ''}</Text>
             {meal.items.map((i) => {
               const r = i.ratings[0];
-              const who = i.member?.split(' ')[0] ?? 'the table';
+              const who = whoHad(i);
               return (
                 <Row key={i.id} style={styles.orderRow}>
                   <View style={{ flex: 1 }}>
@@ -857,8 +1164,19 @@ export function PastMeals({ ctl }: { ctl: MenuOrderCtl }) {
 
 export function StaffSheet({ ctl }: { ctl: MenuOrderCtl }) {
   const { width, height, framed, origin } = useViewport();
-  const [by, setBy] = useState<'person' | 'course'>('person');
   const { order, groups, itemsById, allergenLines, dietLines } = ctl;
+  /**
+   * The code first, when there is one (owner, 7 Sep 2026): "standing there
+   * holding the phone while they take a note of what I want to order was quite
+   * awkward". A waiter with a camera reads it off the table and walks away with
+   * it; the two written-out views are still there for one who would rather look.
+   */
+  const link = useMemo(() => {
+    if (!order?.shareToken) return null;
+    const base = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : 'https://roam.app';
+    return `${base}${paths.order(order.shareToken)}`;
+  }, [order?.shareToken]);
+  const [by, setBy] = useState<'code' | 'person' | 'course'>(link ? 'code' : 'person');
   const frameBox = framed && origin
     ? { position: 'absolute' as const, left: origin.x, top: origin.y, width, height }
     : null;
@@ -878,15 +1196,39 @@ export function StaffSheet({ ctl }: { ctl: MenuOrderCtl }) {
         <ScrollView contentContainerStyle={[styles.body, { gap: spacing.sm }]}>
           <Row style={{ alignItems: 'flex-start' }}>
             <View style={{ flex: 1 }}>
-              <Segmented value={by} onChange={setBy} options={[{ value: 'person', label: 'By person' }, { value: 'course', label: 'By course' }]} />
+              <Segmented
+                value={by}
+                onChange={setBy}
+                options={[
+                  ...(link ? [{ value: 'code' as const, label: 'Scan it', icon: 'qr' as const }] : []),
+                  { value: 'person', label: 'By person' },
+                  { value: 'course', label: 'By course' },
+                ]}
+              />
             </View>
             <Pressable onPress={() => ctl.setStaff(false)} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
               <Icon name="close" size={22} color={colors.ink} />
             </Pressable>
           </Row>
-          {by === 'person'
+          {by === 'code' && link ? (
+            <View style={{ alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md }}>
+              <QrCode value={link} size={Math.min(260, width - spacing.lg * 4)} />
+              <Text style={styles.staffDish}>Point your camera at this</Text>
+              <Text style={[type.small, { textAlign: 'center' }]}>
+                It opens the whole order — every dish, who it is for, what each of them asked for, and what we cannot eat.
+                Nothing else, and no account needed.
+              </Text>
+              <Text style={type.tiny} selectable numberOfLines={2}>{link}</Text>
+              {allergenLines.length ? (
+                <View style={styles.staffAlert}>
+                  <Text style={styles.staffAlertText}>{allergenLines.join(' ')}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+          {by === 'code' ? null : by === 'person'
             ? groups.filter((g) => g.items.length).map((g) => (
-                <View key={g.id ?? 'table'} style={{ gap: 2 }}>
+                <View key={g.key} style={{ gap: 2 }}>
                   <Text style={styles.staffWho}>{g.name}</Text>
                   {g.items.map((i) => (
                     <View key={i.id}>
@@ -904,18 +1246,22 @@ export function StaffSheet({ ctl }: { ctl: MenuOrderCtl }) {
                     .map((i) => (
                       <View key={i.id}>
                         <Text style={styles.staffDish}>{i.name}</Text>
-                        <Text style={type.small}>{i.member ? `for ${i.member.split(' ')[0]}` : 'for the table'}{i.note ? ` · ${i.note}` : ''}</Text>
+                        <Text style={type.small}>{whoHad(i) === 'the table' ? 'for the table' : `for ${whoHad(i)}`}{i.note ? ` · ${i.note}` : ''}</Text>
                       </View>
                     ))}
                 </View>
               ))}
-          {allergenLines.length ? (
+          {by !== 'code' && allergenLines.length ? (
             <View style={styles.staffAlert}>
               <Text style={styles.staffAlertText}>{allergenLines.join(' ')} Please check anything cooked in a stock or a soffritto.</Text>
             </View>
           ) : null}
-          {dietLines.length ? <Text style={styles.staffDiet}>{dietLines.join(' ')}</Text> : null}
-          <Text style={type.tiny}>Big type, no chrome, the screen stays awake. Works with no signal.</Text>
+          {by !== 'code' && dietLines.length ? <Text style={styles.staffDiet}>{dietLines.join(' ')}</Text> : null}
+          <Text style={type.tiny}>
+            {by === 'code'
+              ? 'The code is on the order, so it works with no signal on this phone — the waiter needs their own.'
+              : 'Big type, no chrome, the screen stays awake. Works with no signal.'}
+          </Text>
         </ScrollView>
       </View>
     </Modal>
@@ -933,6 +1279,8 @@ const styles = StyleSheet.create({
   flag: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   flagText: { fontSize: 11, fontWeight: '700' },
   face: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  // A guest is here for one meal: the same face, drawn with a dashed edge.
+  faceGuest: { borderStyle: 'dashed', borderColor: colors.inkMuted },
   faceOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   faceText: { fontSize: 12, fontWeight: '800', color: colors.inkMuted },
   faceTextOn: { color: colors.primaryFg },
@@ -949,10 +1297,18 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
   },
+  // Who is at the table, above the menu: the family in a line, tonight's guests
+  // as chips, and the one control that adds another.
+  who: {
+    gap: 6, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
+  },
   bar: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surface,
   },
+  // The basket opened out, sitting on the bar it belongs to.
+  peek: { borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.surfaceMuted },
   // Three labelled buttons on one row inside 390px: tighter padding than the
   // standard button, and the bar's own gap trimmed to match (owner, 4 Sep 2026).
   barBtn: { paddingHorizontal: 10 },

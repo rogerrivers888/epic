@@ -31,6 +31,10 @@ import { upsertHouseholdPlace } from './atlas.js';
 
 export const menu = Router();
 export const orders = Router();
+// The code on the table (owner, 7 Sep 2026). Mounted outside the door in
+// server.js: whoever scans it is a waiter holding an unguessable link, not
+// somebody with a Roam account.
+export const ticket = Router();
 
 // A menu older than this is still shown, with its date, and its prices marked
 // as printed then rather than now (Epic 6 C8; the threshold was the owner's to
@@ -92,12 +96,19 @@ function conceptOf(name) {
 async function orderPayload(orderId) {
   const o = await menusRepo.orderById(orderId);
   if (!o) return null;
-  const items = await menusRepo.orderItems(orderId);
+  const [items, guests] = await Promise.all([menusRepo.orderItems(orderId), menusRepo.orderGuests(orderId)]);
   return {
     id: o.id, clientId: o.client_id, venueRef: o.venue_ref, venueLabel: o.venue_label, menuId: o.menu_id,
     visitId: o.visit_id, createdAt: o.created_at, updatedAt: o.updated_at,
+    // The code the waiter scans. It travels with the order so the phone can
+    // draw it with no signal (repositories/menus.js).
+    shareToken: o.share_token,
+    // Who else is at the table tonight. Guests belong to this order and are
+    // never members of the household (migration 060).
+    guests: guests.map((g) => ({ id: g.id, ref: g.ref, name: g.name })),
     items: items.map((i) => ({
       id: i.id, menuItemId: i.menu_item_id, memberId: i.member_id, member: i.member_name,
+      guestId: i.guest_id, guestRef: i.guest_ref, guest: i.guest_name, section: i.section ?? null,
       name: i.name, price: i.price == null ? null : Number(i.price), priceText: i.price_text, note: i.note,
       ratings: (i.ratings ?? []).map((r) => ({ ...r, score: r.score == null ? null : Number(r.score) })),
       // What this dish is, in the household's own vocabulary. A menu writes
@@ -372,11 +383,23 @@ orders.get('/history', async (req, res, next) => {
 });
 
 /**
- * POST /api/orders { clientId?, ref, label?, menuId?, items: [{ menuItemId?, memberId|null, name, priceText, note }] }
+ * POST /api/orders
+ *   { clientId?, ref, label?, menuId?,
+ *     guests: [{ ref, name }],
+ *     items: [{ menuItemId?, memberId|null, guestRef|null, name, priceText, note }] }
  *
  * The whole order every time: the phone holds the truth while the table is
  * choosing, and the same client id twice updates rather than duplicates, so a
  * retry after a basement dead spot cannot order two dinners (Epic 6 C5).
+ *
+ * Guests come with the order for the same reason (owner, 7 Sep 2026: "I'd like
+ * to be able to say, when I go into the menu, 'Add other guests'"). They are
+ * matched on the phone's own `ref`, so saving twice does not seat Gina twice,
+ * and a guest who is taken off the table takes their dishes with them rather
+ * than leaving them behind as plates for everyone.
+ *
+ * A note belongs to the row, which is one person and one dish: two people
+ * having the same thing hold two rows and two different words for the waiter.
  */
 orders.post('/', async (req, res, next) => {
   try {
@@ -386,6 +409,9 @@ orders.post('/', async (req, res, next) => {
     if (!ref) return res.status(400).json({ error: 'ref_required' });
     const members = await loadMembers(household.id);
     const items = (Array.isArray(b.items) ? b.items : []).filter((i) => String(i?.name || '').trim());
+    const guests = (Array.isArray(b.guests) ? b.guests : [])
+      .map((g, n) => ({ ref: String(g?.ref || '').trim(), name: String(g?.name || '').trim().slice(0, 40), position: n + 1 }))
+      .filter((g) => g.ref && g.name);
 
     const orderId = await withTransaction(async (client) => {
       let id = b.clientId ? await menusRepo.orderByClientId(b.clientId, household.id, client) : null;
@@ -395,11 +421,23 @@ orders.post('/', async (req, res, next) => {
       } else {
         id = await menusRepo.insertOrder(household.id, { clientId: b.clientId, menuId: b.menuId, venueRef: ref, venueLabel: b.label }, client);
       }
+      const seated = new Map();
+      for (const g of guests) {
+        const row = await menusRepo.upsertOrderGuest(id, g, client);
+        seated.set(row.ref, row.id);
+      }
+      await menusRepo.dropOtherGuests(id, [...seated.keys()], client);
       let position = 0;
       for (const item of items) {
+        const guestRef = item.guestRef ? String(item.guestRef) : null;
+        // A dish for somebody who is no longer at the table is dropped, not
+        // quietly turned into a plate for everyone to share.
+        if (guestRef && !seated.has(guestRef)) continue;
+        const guestId = guestRef ? seated.get(guestRef) : null;
         await menusRepo.insertOrderItem(id, {
           menuItemId: item.menuItemId ?? null,
-          memberId: members.some((m) => m.id === item.memberId) ? item.memberId : null,
+          memberId: guestId ? null : (members.some((m) => m.id === item.memberId) ? item.memberId : null),
+          guestId,
           name: String(item.name).trim(),
           price: money(item.priceText ?? item.price),
           priceText: item.priceText ?? null,
@@ -518,5 +556,69 @@ orders.post('/:id/ratings', async (req, res, next) => {
     });
 
     res.json({ order: await orderPayload(order.id) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/order/:token — what this table is having, for whoever scans the code.
+ *
+ * The owner, 7 Sep 2026: "maybe there could be a QR code that the waiter could
+ * scan to then see what I've ordered, because standing there holding the phone
+ * while they take a note of what I want to order was quite awkward."
+ *
+ * So it is answered without a session, exactly like a group's invite link: the
+ * unguessable token is the whole credential, and what it opens is one table's
+ * dinner — the dishes, the words for the waiter, first names, and the allergens
+ * of the people who are eating. No account, no household, no history, nothing
+ * about anywhere else this family has ever been.
+ *
+ * The allergens are the reason this page is worth more than a photograph of a
+ * notepad: they are the household's own and they must reach the kitchen. Roam
+ * can never clear a dish it did not see declared, so the page says to ask.
+ */
+ticket.get('/:token', async (req, res, next) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    const order = token ? await menusRepo.orderByShareToken(token) : null;
+    if (!order) {
+      return res.status(404).json({ error: 'order_not_found', message: 'That code does not open an order.' });
+    }
+    const [items, guests, members] = await Promise.all([
+      menusRepo.orderItems(order.id),
+      menusRepo.orderGuests(order.id),
+      loadMembers(order.household_id),
+    ]);
+    const first = (n) => String(n || '').trim().split(/\s+/)[0] ?? '';
+    /**
+     * Whose allergens go to the kitchen.
+     *
+     * Only the people who are actually eating: a household of five at a table
+     * of two must not put three absent people's allergens in front of a chef,
+     * because a warning that is usually irrelevant is a warning that stops
+     * being read. The exception is a plate for the table — everybody there
+     * eats off that one, so it puts the whole household's back on.
+     */
+    const shared = items.some((i) => !i.member_id && !i.guest_id);
+    const eating = new Set(items.map((i) => i.member_id).filter(Boolean));
+    const lines = (kind, word) => members
+      .filter((m) => shared || eating.has(m.id))
+      .flatMap((m) => (m[kind] ?? []).map((c) => `${first(m.name)} ${word(c.value.toLowerCase())}`));
+
+    res.json({
+      venue: order.venue_label,
+      placedAt: order.updated_at ?? order.created_at,
+      guests: guests.map((g) => first(g.name)),
+      items: items.map((i) => ({
+        name: i.name,
+        note: i.note,
+        priceText: i.price_text,
+        section: i.section ?? null,
+        who: i.member_name ? first(i.member_name) : i.guest_name ? first(i.guest_name) : null,
+        kind: i.member_id ? 'member' : i.guest_id ? 'guest' : 'table',
+      })),
+      total: items.reduce((n, i) => n + (i.price == null ? 0 : Number(i.price)), 0),
+      allergens: lines('allergens', (v) => `is allergic to ${v}.`),
+      diets: lines('diets', (v) => `is ${v}.`),
+    });
   } catch (err) { next(err); }
 });

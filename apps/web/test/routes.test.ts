@@ -107,8 +107,16 @@ test('an invite link is its own page and never a query on somebody else’s', ()
   assert.deepEqual(parseRoute('/join/a%2Fb'), { name: 'join', token: 'a/b' });
 });
 
+test('the code on a restaurant table has an address of its own', () => {
+  assert.deepEqual(roundTrip('/order/tok123'), { name: 'order', token: 'tok123' });
+  assert.equal(paths.order('a/b'), '/order/a%2Fb');
+  assert.deepEqual(parseRoute('/order/a%2Fb'), { name: 'order', token: 'a/b' });
+  // It is not a page of the app: no tab lights up behind it.
+  assert.equal(tabOf(parseRoute('/order/tok123')), null);
+});
+
 test('an address with no page behind it says so rather than pretending', () => {
-  for (const path of ['/nowhere', '/settings/money', '/plan/extra', '/prototypes/nothing']) {
+  for (const path of ['/nowhere', '/settings/money', '/plan/extra', '/prototypes/nothing', '/order']) {
     assert.equal(parseRoute(path).name, 'unknown', `${path} should not resolve to a page`);
   }
 });

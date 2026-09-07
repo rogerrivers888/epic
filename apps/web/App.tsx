@@ -14,6 +14,7 @@ import { HouseholdScreen } from './src/screens/HouseholdScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
 import { JoinScreen } from './src/screens/JoinScreen';
+import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
 import { AdminApp } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
 import { LockScreen } from './src/screens/LockScreen';
@@ -145,6 +146,10 @@ function Frame() {
  * The address, read — and the two kinds of address that are answered before
  * anything else is drawn.
  *
+ * A scanned code (`/order/<token>`) is the same shape: a waiter's door into one
+ * table's dinner, answered without a session and drawn without any of Roam's
+ * chrome, because the person reading it is at work.
+ *
  * An invite link (`/join/<token>`) is somebody else's door into one trip: the
  * checklist a group organiser asked them for, and none of the household's app.
  * It is never behind the passcode, because the API treats it as public too
@@ -179,6 +184,10 @@ function Routed() {
 
   if (redirect) return <View style={styles.waiting} />;
   if (route.name === 'join') return <JoinScreen token={route.token} />;
+  // The code on a restaurant table (owner, 7 Sep 2026). Whoever scans it is a
+  // waiter holding one link, so it is answered before the passcode, exactly as
+  // an invite is, and it opens one sitting's dishes and nothing else of ours.
+  if (route.name === 'order') return <OrderTicketScreen token={route.token} />;
   return <Gate route={route} />;
 }
 

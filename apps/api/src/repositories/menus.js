@@ -11,6 +11,8 @@
  * anything in this file except the stars.
  */
 
+import { randomBytes } from 'node:crypto';
+
 import { query } from '../db.js';
 
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
@@ -100,17 +102,57 @@ export async function orderOfHousehold(orderId, householdId) {
   return rows[0] ?? null;
 }
 
-/** The items on an order, with who had each and what anybody said about it. */
+/**
+ * The items on an order, with who had each and what anybody said about it.
+ *
+ * "Who" is a member of the household or a guest at this table (migration 060);
+ * neither is the plate everyone shares.
+ */
 export async function orderItems(orderId) {
   const { rows } = await query(
-    `select oi.*, m.name as member_name,
+    `select oi.*, m.name as member_name, g.name as guest_name, g.ref as guest_ref, mi.section as section,
             (select json_agg(json_build_object('memberId', r.member_id, 'score', r.score, 'take', r.take, 'comment', r.comment))
                from ratings r where r.order_item_id = oi.id) as ratings
-       from order_items oi left join members m on m.id = oi.member_id
+       from order_items oi
+       left join members m on m.id = oi.member_id
+       left join order_guests g on g.id = oi.guest_id
+       left join menu_items mi on mi.id = oi.menu_item_id
       where oi.order_id = $1 order by oi.position`,
     [orderId],
   );
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// the other people at the table
+// ---------------------------------------------------------------------------
+
+/** Who else is eating with the household tonight. They belong to this order. */
+export async function orderGuests(orderId, client) {
+  const { rows } = await on(client)('select * from order_guests where order_id = $1 order by position, name', [orderId]);
+  return rows;
+}
+
+/**
+ * A guest, kept by the id the phone gave them.
+ *
+ * The order is rewritten whole on every save, so matching on the device's own
+ * `ref` is what stops a second save from minting a second Gina and leaving her
+ * dinner attached to the first one.
+ */
+export async function upsertOrderGuest(orderId, guest, client) {
+  const { rows } = await on(client)(
+    `insert into order_guests (order_id, ref, name, position) values ($1,$2,$3,$4)
+     on conflict (order_id, ref) do update set name = excluded.name, position = excluded.position
+     returning id, ref, name`,
+    [orderId, guest.ref, guest.name, guest.position ?? 0],
+  );
+  return rows[0];
+}
+
+/** Anybody the phone no longer lists has left the table; their dishes go with them. */
+export async function dropOtherGuests(orderId, refs, client) {
+  await on(client)('delete from order_guests where order_id = $1 and not (ref = any($2))', [orderId, refs]);
 }
 
 export async function orderItemsPlain(orderId) {
@@ -145,12 +187,28 @@ export async function orderByClientId(clientId, householdId, client) {
   return rows[0]?.id ?? null;
 }
 
+/**
+ * The code the waiter scans, minted with the order rather than on request
+ * (owner, 7 Sep 2026).
+ *
+ * A restaurant basement is where the signal goes, and a token asked for at the
+ * table is a token that cannot be got. This one is in the order the phone is
+ * already holding, so the code draws itself with nothing to fetch.
+ */
+const shareToken = () => randomBytes(9).toString('base64url');
+
 export async function insertOrder(householdId, o, client) {
   const { rows } = await on(client)(
-    'insert into orders (client_id, household_id, menu_id, venue_ref, venue_label) values ($1,$2,$3,$4,$5) returning id',
-    [o.clientId ?? null, householdId, o.menuId ?? null, o.venueRef, o.venueLabel ?? null],
+    'insert into orders (client_id, household_id, menu_id, venue_ref, venue_label, share_token) values ($1,$2,$3,$4,$5,$6) returning id',
+    [o.clientId ?? null, householdId, o.menuId ?? null, o.venueRef, o.venueLabel ?? null, shareToken()],
   );
   return rows[0].id;
+}
+
+/** The order behind a scanned code. The link is the whole credential. */
+export async function orderByShareToken(token) {
+  const { rows } = await query('select * from orders where share_token = $1', [token]);
+  return rows[0] ?? null;
 }
 
 export async function updateOrder(id, o, client) {
@@ -167,9 +225,9 @@ export async function clearOrderItems(orderId, client) {
 
 export async function insertOrderItem(orderId, item, client) {
   await on(client)(
-    `insert into order_items (order_id, menu_item_id, member_id, name, price, price_text, note, position)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [orderId, item.menuItemId ?? null, item.memberId ?? null, item.name, item.price ?? null,
+    `insert into order_items (order_id, menu_item_id, member_id, guest_id, name, price, price_text, note, position)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [orderId, item.menuItemId ?? null, item.memberId ?? null, item.guestId ?? null, item.name, item.price ?? null,
       item.priceText ?? null, item.note ?? null, item.position],
   );
 }

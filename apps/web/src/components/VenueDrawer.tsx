@@ -364,6 +364,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const photoUri = (p: { ref?: string; url?: string }, w: number) => p.url ?? (p.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(p.ref)}&w=${w}` : null);
 
   const eating = EATING.has(item.category);
+  const basket = ctl.menu ? ctl.chosen.length : ctl.order?.items.length ?? 0;
   const experiences = v?.experiences ?? item.experiences ?? [];
   const insideCount = (inside ?? []).filter((i) => !['eat', 'shop', 'facility'].includes(i.kind)).length;
   const insideLabel = experiences.includes('zoo') || experiences.includes('aquarium') ? 'Animals' : 'Rides';
@@ -373,7 +374,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     { value: 'overview', label: 'Overview' },
     ...(eating ? [
       { value: 'menu' as Tab, label: 'Menu' },
-      { value: 'order' as Tab, label: `Order${ctl.order?.items.length ? ` (${ctl.order.items.length})` : ''}` },
+      // What is actually in the basket, which is the picks while the menu is
+      // open and the saved order before it has been read (owner, 7 Sep 2026).
+      { value: 'order' as Tab, label: `Order${basket ? ` (${basket})` : ''}` },
     ] : []),
     // A park's rides are not an aside in the overview, they are why you are
     // reading it (owner, 4 Sep 2026: "put that in a separate tab please").

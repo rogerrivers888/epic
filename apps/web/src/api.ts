@@ -385,8 +385,15 @@ export type ReadMenu = {
 /** Roam's own line about a dish, for a menu that gives only a name. */
 export type DishNote = { name: string; known: boolean; what: string; origin: string | null };
 export type MenuOpeners = { html: boolean; pdf: boolean; rendered: boolean; browser: string | null; claude: boolean; staleAfterDays: number };
+/**
+ * Somebody else at the table tonight (owner, 7 Sep 2026). A guest belongs to
+ * the order, not to the household: `ref` is this phone's own id for them, which
+ * is what keeps their dishes attached when the order is saved again.
+ */
+export type OrderGuest = { id: string; ref: string; name: string };
 export type OrderItem = {
   id: string; menuItemId: string | null; memberId: string | null; member: string | null;
+  guestId: string | null; guestRef: string | null; guest: string | null; section: string | null;
   name: string; price: number | null; priceText: string | null; note: string | null;
   ratings: { memberId: string; score: number | null; take: Take; comment: string | null }[];
   concept: { key: string; label: string } | null;
@@ -395,6 +402,16 @@ export type OrderItem = {
 export type Order = {
   id: string; clientId: string | null; venueRef: string; venueLabel: string | null; menuId: string | null;
   visitId: string | null; createdAt: string; updatedAt: string; items: OrderItem[]; total: number;
+  /** The code the waiter scans. It comes with the order, so it draws with no signal. */
+  shareToken: string | null;
+  guests: OrderGuest[];
+};
+
+/** What the code on the table opens, for whoever scans it (public: no session). */
+export type OrderTicket = {
+  venue: string | null; placedAt: string; guests: string[];
+  items: { name: string; note: string | null; priceText: string | null; section: string | null; who: string | null; kind: 'member' | 'guest' | 'table' }[];
+  total: number; allergens: string[]; diets: string[];
 };
 
 export type Take = 'loved' | 'fine' | 'not_for_me';
@@ -1124,8 +1141,13 @@ export const api = {
   /** What we ate here before: the orders that became visits, with their stars. */
   orderHistory: (venueRef: string) => request<{ orders: (Order & { visitedOn: string | null })[] }>(`/api/orders/history${qs({ ref: venueRef })}`),
   order: (venueRef: string) => request<{ order: Order | null }>(`/api/orders${qs({ ref: venueRef })}`),
-  saveOrder: (body: { clientId?: string; ref: string; label?: string; menuId?: string | null; items: { menuItemId?: string | null; memberId: string | null; name: string; priceText?: string | null; note?: string | null }[] }) =>
-    post<{ order: Order }>('/api/orders', body),
+  saveOrder: (body: {
+    clientId?: string; ref: string; label?: string; menuId?: string | null;
+    guests?: { ref: string; name: string }[];
+    items: { menuItemId?: string | null; memberId: string | null; guestRef?: string | null; name: string; priceText?: string | null; note?: string | null }[];
+  }) => post<{ order: Order }>('/api/orders', body),
+  /** The order behind a scanned code. Answered without a session, on purpose. */
+  orderTicket: (token: string) => request<OrderTicket>(`/api/order/${encodeURIComponent(token)}`),
   /** Throw away an order in progress (one that has not become a visit). */
   clearOrder: (id: string) => del<{ deleted: boolean }>(`/api/orders/${id}`),
   orderEaten: (id: string, body: { visitedOn?: string; attendeeIds?: string[] } = {}) => post<{ order: Order; visitId: string }>(`/api/orders/${id}/eaten`, body),

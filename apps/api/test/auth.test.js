@@ -52,7 +52,7 @@ test('with no passcode set, nothing matches at all', async () => {
   });
 });
 
-test('exactly four kinds of path answer without a session', () => {
+test('exactly five kinds of path answer without a session', () => {
   const open = (method, path) => isPublicPath({ method, path });
 
   assert.equal(open('GET', '/health'), true);
@@ -60,11 +60,15 @@ test('exactly four kinds of path answer without a session', () => {
   assert.equal(open('POST', '/api/session'), true);
   assert.equal(open('GET', '/api/join/abc123'), true);
   assert.equal(open('POST', '/api/join/abc123/items/xyz'), true);
+  // The code on a restaurant table: one sitting's dishes, for the waiter.
+  assert.equal(open('GET', '/api/order/abc123'), true);
 
   // Everything the household owns is behind the door.
   for (const path of [
     '/api/household', '/api/household/export', '/api/trips', '/api/atlas/places',
     '/api/visits', '/api/plan', '/api/sessions', '/api/photos/google', '/api/orders',
+    // The ticket is one order behind one token, and nothing above or below it.
+    '/api/order', '/api/order/abc123/anything', '/api/orders/abc123',
   ]) assert.equal(open('GET', path), false, `${path} must need a session`);
 });
 

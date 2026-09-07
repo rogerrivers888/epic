@@ -183,6 +183,10 @@ export function clearSessionCookie(res) {
  *  - `/api/join/:token` and below — somebody else's door into one trip. The
  *    unguessable link *is* the credential (routes/groups.js), and it shows a
  *    checklist and never the roster.
+ *  - `/api/order/:token` — the code on a restaurant table (owner, 7 Sep 2026).
+ *    The waiter scanning it has no account and is standing in front of the
+ *    household; the token is the credential, and it opens one sitting's dishes
+ *    and the allergens of the people eating them — no history, no roster.
  */
 const PUBLIC = [
   (req) => req.path === '/health',
@@ -191,6 +195,7 @@ const PUBLIC = [
   (req) => req.path === '/api/session/link',
   (req) => req.path === '/api/session/request-link',
   (req) => req.path === '/api/join' || req.path.startsWith('/api/join/'),
+  (req) => /^\/api\/order\/[^/]+$/.test(req.path),
 ];
 
 export const isPublicPath = (req) => PUBLIC.some((test) => test(req));

@@ -24,7 +24,7 @@ import activityRoutes from './routes/activity.js';
 import { places as placeRoutes, visits as visitRoutes } from './routes/places.js';
 import { atlas as atlasRoutes } from './routes/atlas.js';
 import { inspire as inspireRoutes } from './routes/inspire.js';
-import { menu as menuRoutes, orders as orderRoutes } from './routes/menus.js';
+import { menu as menuRoutes, orders as orderRoutes, ticket as orderTicketRoutes } from './routes/menus.js';
 import { offline as offlineRoutes } from './routes/offline.js';
 import { startOwnLoop } from './sources/own.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
@@ -89,6 +89,12 @@ app.use('/api', sessionRoutes);
 // open-licence photographs we hold and are entitled to redistribute, answered
 // with a year of immutable caching so a card's second view never gets here.
 app.use('/api/images', libraryImageRoutes);
+
+// The code on a restaurant table (routes/menus.js). Outside the door, like the
+// group invite link: the waiter scanning it has no Roam account, and the
+// unguessable token is the whole credential. Mounted before `requireSession`
+// so it is answered rather than turned away.
+app.use('/api/order', orderTicketRoutes);
 
 app.use(requireSession);
 // Which devices are signed in is the household's business, so it is mounted on
