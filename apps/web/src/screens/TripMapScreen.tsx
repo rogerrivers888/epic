@@ -106,7 +106,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    *
    * In the address, so the three are three links he can put side by side.
    */
-  const [pins, setPins] = useQueryState<'list' | 'only' | 'card'>('pins', 'list', asOneOf(['list', 'only', 'card'] as const, 'list'));
+  const [pins, setPins] = useQueryState<'list' | 'only' | 'card'>('pins', 'only', asOneOf(['list', 'only', 'card'] as const, 'only'));
   /**
    * The household's standing answer to "what are you looking for" (owner,
    * 6 Sep 2026: "I never search for pubs or bakeries. I just want to find
@@ -421,6 +421,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           // their detour, as the handoff draws.
           label: selected === p.venueRef ? `${p.name}${p.detourMinutes != null ? ` · +${p.detourMinutes} min` : ''}` : null,
           selected: selected === p.venueRef,
+          // Once one is chosen the rest are context, not competition.
+          dim: pins === 'only' && !!selected && selected !== p.venueRef,
           /*
             A pin and its row mean the same thing, and neither of them opens
             anything on the first tap: one tap picks the place and names it on
@@ -433,8 +435,23 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             `list` the sheet comes up to half at the same time, because a list
             you cannot scroll is not somewhere a pin can take you.
           */
-          onPress: () => { setSelected(p.venueRef); if (pins === 'list' && detent === 'peek') setDetent('half'); },
-          onExpand: () => openPlace(p),
+          /*
+            The pin toggles: tapping it again puts the list back, which is one
+            of the two ways out the owner asked for (7 Sep 2026: "there should
+            just be a way I can either click the icon again to go back to the
+            full list, or click 'Take me back to the list'"). The other is the
+            button under the selection.
+          */
+          onPress: () => {
+            setSelected(selected === p.venueRef ? null : p.venueRef);
+            if (detent === 'peek') setDetent('half');
+          },
+          /*
+            No chevron on the pin when the sheet is already showing the place
+            whole: it was a second small target for a thing already one tap
+            away, and small targets are what he objected to.
+          */
+          onExpand: pins === 'only' ? undefined : () => openPlace(p),
         });
       }
     } else {
@@ -1257,6 +1274,12 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
    * provider call, no wait, and it tests what a place *is* — so Walk means the
    * places somebody has tagged as a walk, not the ones with "walk" in the name.
    */
+  /** The one place being looked at, when the sheet has given it the whole room. */
+  const chosen = useMemo(
+    () => (selected ? shown.find((p) => p.venueRef === selected) ?? null : null),
+    [selected, shown],
+  );
+
   /** Which kinds are actually along here, commonest first. */
   const kinds = useMemo(() => {
     const menu = pill === 'food' ? FOOD_KINDS : THING_KINDS;
@@ -1479,8 +1502,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
       {!along.loading && shown.length && !selected ? (
         <Text style={[type.tiny, { paddingHorizontal: 16, paddingTop: 10 }]}>
           {pins === 'card' ? 'Tap a place to see its card · the card opens it'
-            : pins === 'only' ? 'Tap a place to see just that one · tap it again for the rest'
-              : 'Tap a place to find it on the map · the arrow opens it'}
+            : pins === 'only' ? 'Tap a place — on the map or here — for a closer look'
+              : 'Tap a place to find it on the map · tap it again to open it'}
         </Text>
       ) : null}
 
@@ -1528,7 +1551,63 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
       ) : null}
 
       <View style={{ paddingHorizontal: 16 }}>
-        {(pins === 'only' && selected ? shown.filter((p) => p.venueRef === selected) : shown).map((p) => (
+        {pins === 'only' && chosen ? (
+          /*
+            One place, and it takes the room (owner, 7 Sep 2026: "it could just
+            get rid of everything and show the selection that I've just clicked
+            on… I feel like it needs to be in a bigger block colour").
+            The highlight was a tint on a row among rows and he could not see
+            it — so it stops being a highlight and becomes the page.
+
+            Tapping it opens the drawer, which is the other half of what he
+            asked for: "clicking on that selection when I'm in that view should
+            automatically open the side drawer". No little arrow to hit — he
+            called that fiddly and he is right at 28 pixels.
+          */
+          <View style={{ gap: 12, paddingVertical: 12 }}>
+            <Pressable
+              onPress={() => onOpen(chosen)}
+              style={styles.chosen}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${chosen.name}`}
+            >
+              <VenueThumb name={chosen.name} photos={chosen.photos} category={chosen.category} experiences={chosen.experiences} width={84} height={84} rounded={10} credit={false} />
+              <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+                <Text style={styles.chosenName} numberOfLines={2}>{chosen.name}</Text>
+                <View style={styles.rowMeta}>
+                  {kitchen(chosen) ? <Text style={styles.tagPill} numberOfLines={1}>{kitchen(chosen)}</Text> : null}
+                  {chosen.rating != null ? (
+                    <Stars value={chosen.rating} size={13}>
+                      <Text style={styles.ratingText}>{chosen.rating.toFixed(1)}{chosen.ratingCount ? ` (${chosen.ratingCount >= 1000 ? `${(chosen.ratingCount / 1000).toFixed(1)}k` : chosen.ratingCount})` : ''}</Text>
+                    </Stars>
+                  ) : null}
+                </View>
+                <Text style={styles.detour} numberOfLines={1}>
+                  {chosen.detourMinutes != null ? `+${chosen.detourMinutes} min` : 'nearby'}
+                  <Text style={{ color: colors.inkMuted, fontWeight: '400' }}>{` · ${chosen.detourMiles} mi${money(chosen.priceLevel) ? ` · ${money(chosen.priceLevel)}` : ''}`}</Text>
+                </Text>
+                <Text style={type.tiny}>Tap for the menu, the hours and what the family thought</Text>
+              </View>
+            </Pressable>
+
+            <Row style={{ gap: 8 }}>
+              <Pressable onPress={() => onShortlist(chosen)} style={[styles.add, { height: 38, paddingHorizontal: 14 }]} accessibilityRole="button">
+                <Icon name={chosen.onShortlist ? 'shortlisted' : 'shortlist'} size={15} color={colors.ink} fill={chosen.onShortlist} />
+                <Text style={styles.addText}>{chosen.onShortlist ? 'Saved' : 'Save'}</Text>
+              </Pressable>
+              <Pressable onPress={() => onAdd(chosen)} style={[styles.add, styles.addStrong]} accessibilityRole="button">
+                <Icon name={chosen.onDay ? 'check' : 'add'} size={15} color={colors.primaryFg} />
+                <Text style={[styles.addText, { color: colors.primaryFg }]}>{chosen.onDay ? 'On the day' : 'Add to the day'}</Text>
+              </Pressable>
+            </Row>
+
+            {/* The way back, said in words and put where the thumb already is. */}
+            <Pressable onPress={() => onSelect(null)} style={styles.backToList} accessibilityRole="button">
+              <Icon name="back" size={15} color={colors.ink} />
+              <Text style={styles.backToListText}>{`Back to all ${shown.length} place${shown.length === 1 ? '' : 's'}`}</Text>
+            </Pressable>
+          </View>
+        ) : shown.map((p) => (
           /*
             Tapping a row shows it on the map, it does not open it (owner,
             6 Sep 2026: "I can see lots of icons on a map, but I don't know
@@ -1610,10 +1689,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 <Icon name={p.onDay ? 'check' : 'add'} size={13} color={colors.ink} />
                 <Text style={styles.addText}>{p.onDay ? 'Added' : 'Add'}</Text>
               </Pressable>
-              {/* The way in, drawn. This is the button the second tap used to be. */}
-              <Pressable onPress={() => onOpen(p)} hitSlop={6} style={styles.openBtn} accessibilityRole="button" accessibilityLabel={`Open ${p.name}`}>
-                <Icon name="more" size={16} color={colors.ink} />
-              </Pressable>
             </View>
           </Pressable>
         ))}
@@ -1621,7 +1696,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         {/* What the corridor left out, and the one tap that brings it back. A
             tight corridor is right and a silently short list is not: 17 places
             a little further off should be an offer, not a disappearance. */}
-        {!along.loading && along.beyond && maxDetourMin < 30 ? (
+        {!along.loading && along.beyond && maxDetourMin < 30 && !(pins === 'only' && chosen) ? (
           <Pressable
             onPress={() => onDetour(DETOURS[Math.min(DETOURS.length - 1, DETOURS.indexOf(maxDetourMin) + 1)] ?? 30)}
             style={{ paddingVertical: spacing.md }}
@@ -2751,7 +2826,13 @@ const styles = StyleSheet.create({
   cardWrap: { position: 'absolute', left: 12, right: 12, zIndex: 3 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, shadowColor: '#201E1D', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 6 },
   cardShut: { position: 'absolute', top: -8, right: -6, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  openBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceMuted },
+  // The chosen place, given the room. A block of colour rather than a tint on
+  // one row of many — the tint was there and he could not see it.
+  chosen: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: 16, backgroundColor: colors.surfaceMuted, borderWidth: 1.5, borderColor: colors.ink },
+  chosenName: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, lineHeight: 23 },
+  addStrong: { backgroundColor: colors.primary, borderColor: colors.primary, height: 38, paddingHorizontal: 14, flex: 1, justifyContent: 'center' },
+  backToList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: TARGET, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
+  backToListText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
   // What it serves, said once, in the row's own words.
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },

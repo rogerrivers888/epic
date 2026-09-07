@@ -45,6 +45,11 @@ export type MapMarker = {
   /** A Lucide name from the app's own set, drawn inside the marker. */
   icon?: string | null;
   selected?: boolean;
+  /**
+   * Faded back, so the one that matters does not have to compete. Used when a
+   * place has been chosen and everything else is context.
+   */
+  dim?: boolean;
   onPress?: () => void;
   /**
    * Opening what is already chosen. Drawn on the selected pin as a small

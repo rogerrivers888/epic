@@ -155,7 +155,7 @@ function markerEl(m: MapMarker): HTMLElement {
    * label hangs off.
    */
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'cursor:pointer';
+  wrap.style.cssText = `cursor:pointer${m.dim ? ';opacity:0.32' : ''}`;
   const inner = document.createElement('div');
   inner.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center';
   wrap.appendChild(inner);
