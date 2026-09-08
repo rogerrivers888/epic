@@ -1,7 +1,7 @@
 // First, and deliberately: it moves this device's stored keys from `roam.` to
 // `epic.` before any module below reads one. See src/rename.ts.
 import './src/rename';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { api, API_URL, HouseholdResponse } from './src/api';
@@ -15,6 +15,13 @@ import { PlacesScreen } from './src/screens/PlacesScreen';
 import { TripsScreen, TripSeed } from './src/screens/TripsScreen';
 import { SharedTripScreen } from './src/screens/SharedTripScreen';
 import { HouseholdScreen } from './src/screens/HouseholdScreen';
+import { SayScreen } from './src/screens/voice/SayScreen';
+import { StepsScreen } from './src/screens/voice/StepsScreen';
+import { HeardScreen } from './src/screens/voice/HeardScreen';
+import { AskScreen } from './src/screens/voice/AskScreen';
+import { WelcomeScreen, wasWelcomed } from './src/screens/voice/WelcomeScreen';
+import { SetupScreen } from './src/screens/voice/SetupScreen';
+import { TellScreen } from './src/screens/voice/TellScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
 import { JoinScreen } from './src/screens/JoinScreen';
@@ -406,6 +413,16 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
     refreshHousehold();
   }, [refreshHousehold]);
 
+  // First run (C0): a household with no home and nobody in it yet is shown the
+  // two doors, once. Anyone who has already set anything up has been here.
+  const welcomedOnce = useRef(false);
+  useEffect(() => {
+    if (welcomedOnce.current || !household || route.name !== 'inspire' || wasWelcomed()) return;
+    if (household.household.home || household.members.length) return;
+    welcomedOnce.current = true;
+    navigate(paths.welcome(), { replace: true });
+  }, [household, route.name, navigate]);
+
   // Keep the device's copy fresh without being asked (owner, 4 Sep 2026: they
   // should not have to research every time they come back). Once a day, a few
   // seconds after the app settles so it never competes with the first screen,
@@ -471,7 +488,15 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
           onSeedUsed={() => setTripSeed(null)}
         />
       ) : null}
-      {route.name === 'household' ? <HouseholdScreen data={household} refresh={refreshHousehold} route={route} /> : null}
+      {route.name === 'household' && !route.voice ? <HouseholdScreen data={household} refresh={refreshHousehold} route={route} /> : null}
+      {route.name === 'household' && route.voice && route.memberId ? <TellScreen memberId={route.memberId} mode={route.voice} household={household} refresh={refreshHousehold} /> : null}
+      {/* Voice intake (handoff, 8 Sep 2026): the mic, the wizard, the card, its questions; first run and the two-minute set-up. */}
+      {route.name === 'say' && !route.intakeId && !route.steps ? <SayScreen household={household} /> : null}
+      {route.name === 'say' && route.steps ? <StepsScreen household={household} /> : null}
+      {route.name === 'say' && route.intakeId && !route.ask ? <HeardScreen intakeId={route.intakeId} household={household} onOpenTrip={(id) => openTrip(id)} /> : null}
+      {route.name === 'say' && route.intakeId && route.ask ? <AskScreen intakeId={route.intakeId} household={household} /> : null}
+      {route.name === 'welcome' ? <WelcomeScreen /> : null}
+      {route.name === 'setup' ? <SetupScreen household={household} refresh={refreshHousehold} /> : null}
       {route.name === 'settings' ? <SettingsScreen data={household} refresh={refreshHousehold} route={route} /> : null}
       {route.name === 'prototypes' ? <PrototypesScreen route={route} /> : null}
       {route.name === 'unknown' ? (

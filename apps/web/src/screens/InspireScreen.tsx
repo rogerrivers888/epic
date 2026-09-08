@@ -4,6 +4,7 @@ import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, 
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { Icon } from '../components/Icon';
+import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
@@ -84,7 +85,7 @@ type Menu = null | 'where' | 'filters' | 'sort';
  * the visit. When Settings grows the handoff's "Default travel mode" that is
  * where a standing choice belongs, and this can read it.
  */
-const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'sort', 'who'];
+const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'sort', 'who', 'intake'];
 
 /**
  * What travels with you when you move around this tab, and what does not.
@@ -96,7 +97,7 @@ const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 's
  * open *over* a page, and `within`, a drawer inside one category — Museums
  * means nothing in Sport.
  */
-const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'rating', 'price', 'sort', 'who'];
+const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'rating', 'price', 'sort', 'who', 'intake'];
 
 /**
  * "Nowhere, deliberately." The address says `at=unset` when somebody chose
@@ -246,6 +247,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * drawer holds). Written as it is — `all` is a page here, not a default.
    */
   const [within, setWithin] = useQueryState<string | null>('within', null, { read: (raw) => raw || null, write: (v) => v || null });
+  /** The spoken request these results answer, if any (voice intake, C5 / R5b). */
+  const intakeId = query.get('intake');
   const [menu, setMenu] = useState<Menu>(null);
   const toggle = (m: Exclude<Menu, null>) => () => setMenu((cur) => (cur === m ? null : m));
   const close = () => setMenu(null);
@@ -652,6 +655,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         </View>
 
         <View style={[styles.column, wide && styles.columnWide]}>
+          {/* Voice (handoff, 8 Sep 2026). With a reading open (?intake=), its
+              question is the title and its facts the chip row (C5, R5b);
+              otherwise one grey row under the band: "Or just ask" (R5). */}
+          {intakeId ? (
+            <IntakeStrip intakeId={intakeId} household={household} onReask={() => navigate(paths.say({ for: 'inspire' }))} />
+          ) : (
+            <AskRow onPress={() => navigate(paths.say({ for: 'inspire' }))} />
+          )}
           {loading && !pool ? (
             <View style={styles.waiting}>
               <ActivityIndicator color={colors.icon} />

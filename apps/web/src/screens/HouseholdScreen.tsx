@@ -76,13 +76,22 @@ export function HouseholdScreen({ data, refresh, route }: {
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <HomeCard household={household} refresh={refresh} wide={sideBySide} />
+      {/* The soft offer (voice intake, D2): two minutes by voice, and Epic
+          stops asking. Shown while anybody here has nothing set. */}
+      {members.some((m) => summarise(m) === 'Nothing set yet') || !household.home ? (
+        <Pressable onPress={() => navigate(paths.setup())} accessibilityRole="button" style={styles.tellBanner}>
+          <View style={styles.tellTile}><Icon name="mic" size={18} color={colors.selectedFg} strokeWidth={2.2} /></View>
+          <Text style={[type.body, { flex: 1 }]}><Text style={{ fontWeight: '600' }}>Tell Epic about your family</Text> — two minutes, and we’ll stop asking.</Text>
+          <Icon name="more" size={16} color={colors.inkMuted} />
+        </Pressable>
+      ) : null}
       <Text style={type.small}>Allergens exclude places; diets, likes and dislikes only rank them. Everything saves as you go.</Text>
 
       {sideBySide ? (
         <View style={{ flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' }}>
           <View style={styles.sidebar}>
             {members.map((m, i) => (
-              <PersonRow key={m.id} member={m} index={i} selected={!adding && selected?.id === m.id} onPress={() => { setAdding(false); setSelectedId(m.id); }} />
+              <PersonRow key={m.id} member={m} index={i} selected={!adding && selected?.id === m.id} onPress={() => { setAdding(false); setSelectedId(m.id); }} onTell={() => navigate(paths.householdTell(m.id))} />
             ))}
             <Button label="+ Add someone" kind={adding ? 'secondary' : 'ghost'} onPress={() => setAdding(true)} style={{ alignSelf: 'stretch' }} />
           </View>
@@ -94,7 +103,7 @@ export function HouseholdScreen({ data, refresh, route }: {
         <View style={{ gap: spacing.sm }}>
           {members.map((m, i) => (
             <View key={m.id} style={{ gap: spacing.sm }}>
-              <PersonRow member={m} index={i} selected={selectedId === m.id} onPress={() => setSelectedId(selectedId === m.id ? null : m.id)} />
+              <PersonRow member={m} index={i} selected={selectedId === m.id} onPress={() => setSelectedId(selectedId === m.id ? null : m.id)} onTell={() => navigate(paths.householdTell(m.id))} />
               {selectedId === m.id ? detail(m, i) : null}
             </View>
           ))}
@@ -222,7 +231,7 @@ function HomeCard({ household, refresh, wide }: { household: Household; refresh:
   );
 }
 
-function PersonRow({ member, index, selected, onPress }: { member: Member; index: number; selected: boolean; onPress: () => void }) {
+function PersonRow({ member, index, selected, onPress, onTell }: { member: Member; index: number; selected: boolean; onPress: () => void; onTell?: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`Show ${member.name}`} style={[styles.personRow, selected && styles.personRowSelected]}>
       <Avatar name={member.name} index={index} size={44} url={member.avatarUrl} />
@@ -241,6 +250,12 @@ function PersonRow({ member, index, selected, onPress }: { member: Member; index
           ) : null}
         </Row>
         <Text style={type.tiny} numberOfLines={2}>{summarise(member)}</Text>
+        {summarise(member) === 'Nothing set yet' && onTell ? (
+          <Pressable onPress={onTell} accessibilityRole="button" accessibilityLabel={`Tell Epic about ${member.name}`} style={styles.tellLink} hitSlop={6}>
+            <Icon name="mic" size={14} color={colors.accent} strokeWidth={2.2} />
+            <Text style={styles.tellLinkText}>Tell Epic</Text>
+          </Pressable>
+        ) : null}
         {prettyMobile(member.access?.mobile) ? (
           <Text style={type.tiny} numberOfLines={1}>{prettyMobile(member.access?.mobile)}</Text>
         ) : null}
@@ -823,6 +838,10 @@ function LearnedList({ items }: { items: Learned[] }) {
 }
 
 const styles = StyleSheet.create({
+  tellBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.accentSoft, paddingVertical: 14, paddingHorizontal: 16 },
+  tellTile: { width: 40, height: 40, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
+  tellLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  tellLinkText: { fontSize: 13, fontWeight: '600', color: colors.accent },
   page: { padding: spacing.lg, gap: spacing.md, width: '100%', maxWidth: 1100, alignSelf: 'center' },
   sidebar: { width: 300, gap: spacing.sm },
   personRow: {

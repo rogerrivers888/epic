@@ -97,6 +97,14 @@ const LIGHT = {
   // The one exception: a track or a groove is a shape, not a rule, and an ink
   // one reads as already filled.
   lineSoft: '#DCD7CF',
+  /**
+   * The voice intake's greys (handoff, 8 Sep 2026): a profile chip's warm-grey
+   * fill, the 1px light rule between rows, and the dashed border of a gap.
+   * The dashed grey is decorative and never text.
+   */
+  warm: '#F3F1EC',
+  ruleSoft: '#D7D3D3',
+  ghost: '#9B9797',
   // Links and the small text that has to read "green" on cream
   accent: MOSS,
   accentSoft: LIME_TINT,
@@ -191,6 +199,9 @@ const DARK: typeof LIGHT = {
   ink: D.ink,              // "ink" is the type colour, whatever the ground
   inkMuted: D.grey700,
   inkFaint: D.grey700,     // grey 500 is never text, in either mode
+  warm: D.panelWarm,
+  ruleSoft: D.ruleSoft,
+  ghost: D.grey500,
   decor: D.grey500,
   // The strong rule is the type colour, as the table says. It only reads as
   // loud on a ground that is not dark enough — which the old one was not.

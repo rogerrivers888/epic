@@ -6,7 +6,7 @@ import {
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, Hourglass, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
   Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode, Maximize2, SlidersHorizontal,
-  Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet,
+  Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet, Pause, Play, Keyboard,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
 } from 'lucide-react-native';
@@ -26,6 +26,9 @@ const ICONS = {
   light: Sun, dark: Moon,
   // actions and states
   mic: Mic, stop: Square, check: Check, close: X, add: Plus, minus: Minus,
+  // The voice intake's controls (handoff, 8 Sep 2026): Pause / Resume beside
+  // Done, and the keyboard glyph on every "Type instead".
+  pause: Pause, resume: Play, keyboard: Keyboard, cycle: Bike,
   back: ArrowLeft, forward: ArrowRight, external: ExternalLink,
   expand: ChevronDown, collapse: ChevronUp, more: ChevronRight,
   /**

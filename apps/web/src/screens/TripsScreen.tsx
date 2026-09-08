@@ -224,7 +224,11 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
       /* Holding a row opens the trip with its menu up — the ⋯ is gone from the
          header (5h), and this is where its list went. */
       onHold={(t) => navigate(`${paths.trip(t.id)}?menu=1`)}
-      onNew={() => { onSeedUsed?.(); setPicked(null); navigate(paths.tripsSearch()); }}
+      // New trip is spoken now (voice intake handoff, R1): the profile does
+      // the talking, the household says where to and what for. "Type instead"
+      // on that screen takes a place or a sentence; the older town search is
+      // still at /trips/search for anyone who has the address.
+      onNew={() => { onSeedUsed?.(); setPicked(null); navigate(paths.say({ for: 'trip' })); }}
       wide={wide}
     />
   );

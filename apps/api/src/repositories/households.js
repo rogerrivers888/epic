@@ -57,12 +57,14 @@ export async function updateHousehold(id, f) {
             home_photo_url        = case when $14::text is null then home_photo_url
                                          when $14 = '' then null else $14 end,
             -- What the household always wants when it goes looking (domain/browse.js).
-            browse_defaults       = coalesce($15::jsonb, browse_defaults)
+            browse_defaults       = coalesce($15::jsonb, browse_defaults),
+            -- How the household usually travels on a day out (set-up step 2).
+            travel_mode           = coalesce($16, travel_mode)
       where id = $1 returning *`,
     [id, f.name ?? null, f.defaultVisitMinutes ?? null, f.maxTravelMinutes ?? null, f.defaultIntensity ?? null,
       f.homeLabel ?? null, f.homeLat ?? null, f.homeLng ?? null, f.pace ? JSON.stringify(f.pace) : null,
       f.timezone ?? null, f.homeRadiusMiles ?? null, f.homeCountryCode ?? null, f.homeCountry ?? null,
-      f.homePhotoUrl ?? null, f.browseDefaults ? JSON.stringify(f.browseDefaults) : null],
+      f.homePhotoUrl ?? null, f.browseDefaults ? JSON.stringify(f.browseDefaults) : null, f.travelMode ?? null],
   );
   return rows[0] ?? null;
 }

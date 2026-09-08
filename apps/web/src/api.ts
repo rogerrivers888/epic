@@ -288,6 +288,8 @@ export type Household = {
   name: string;
   defaultVisitMinutes: number;
   maxTravelMinutes: number;
+  /** How they usually travel on a day out (set-up step 2); null until said. */
+  travelMode?: 'driving' | 'transit' | 'walking' | 'cycling' | null;
   defaultIntensity: 'relaxed' | 'balanced' | 'packed';
   home: Place | null;
   /** How far "close to home" reaches, in miles (Settings › Home). */
@@ -1225,7 +1227,7 @@ export const api = {
 
   // household
   household: () => request<HouseholdResponse>('/api/household'),
-  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch }) =>
+  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity' | 'travelMode'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch }) =>
     patch<{ household: Household }>('/api/household', body),
   addMember: (body: { name: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; email?: string | null; mobile?: string | null }) => post<{ member: any }>('/api/household/members', body),
 
@@ -1749,6 +1751,20 @@ export const api = {
   voiceLiveToken: (body: { language?: string | null; sessionId?: string | null }) => post<VoiceLiveToken>('/api/voice/live-token', body),
   voiceLiveUsed: (body: { seconds: number; sessionId?: string | null; model?: string | null }) => post<{ recorded: boolean }>('/api/voice/live-used', body),
   voicePlan: (body: { transcript: string; language?: string | null; sessionId?: string | null; context?: Record<string, unknown> | null }) => post<VoicePlanResponse>('/api/voice/plan', body),
+  // The intake: words → facts → chips (voice intake handoff, 8 Sep 2026).
+  voiceIntake: (body: { transcript: string; flow?: IntakeFlow; mode?: IntakeMode; page?: number | null; intakeId?: string | null; language?: string | null; sessionId?: string | null }) =>
+    post<{ intake: Intake }>('/api/voice/intake', body),
+  voiceIntakeGet: (id: string) => request<{ intake: Intake }>(`/api/voice/intake/${id}`),
+  voiceIntakeForTrip: (tripId: string) => request<{ intake: Intake | null }>(`/api/voice/intake/for-trip/${tripId}`),
+  voiceIntakePatch: (id: string, body: { set?: Record<string, unknown>; answer?: Record<string, unknown>; tripId?: string | null; harvested?: boolean }) =>
+    patch<{ intake: Intake }>(`/api/voice/intake/${id}`, body),
+  voiceIntakeRemember: (id: string) => post<{ written: { memberId: string; kind: string; value: unknown }[]; intake: Intake }>(`/api/voice/intake/${id}/remember`, {}),
+  // The household, spoken (set-up row O; Option D).
+  voiceHouseholdWho: (body: { transcript: string; sessionId?: string | null }) => post<{ people: SpokenPerson[] }>('/api/voice/household/who', body),
+  voiceHouseholdWhoApply: (body: { people: SpokenPerson[] }) => post<{ members: Member[]; written: { id: string; name: string; updated: boolean }[] }>('/api/voice/household/who/apply', body),
+  voiceHouseholdFood: (body: { transcript: string; memberId?: string | null; sessionId?: string | null }) => post<{ items: SpokenFood[] }>('/api/voice/household/food', body),
+  voiceHouseholdLikes: (body: { transcript: string; memberId?: string | null; sessionId?: string | null }) => post<{ items: SpokenLike[]; mobility: string | null }>('/api/voice/household/likes', body),
+  voiceHouseholdApply: (body: { memberId?: string | null; food?: SpokenFood[]; likes?: SpokenLike[] }) => post<{ written: unknown[]; members: Member[] }>('/api/voice/household/apply', body),
   // The lab (back office): the sentences to read, the runs, the tally.
   voiceLab: () => request<VoiceLabInfo>('/api/admin/voice/utterances'),
   voiceProbe: () => request<VoiceProbe>('/api/admin/voice/probe'),
@@ -2699,3 +2715,44 @@ export type VoiceRuns = {
   tally: Record<VoiceCaptureMode, { runs: number; errors: number; meanWer: number | null; medianMs: number | null; planRight: number | null }>;
   agreement: { compared: number; disagreed: number; disagreementRate: number | null; meanLiveVsBatch: number | null; planJudged: number; planChanged: number; planChangedRate: number | null };
 };
+
+// --- the voice intake ---------------------------------------------------------
+
+export type IntakeFlow = 'first' | 'returning' | 'inspire';
+export type IntakeMode = 'said' | 'steps' | 'typed';
+export type ChipSource = 'said' | 'profile' | 'default' | 'gap';
+/** One chip: what it says, where it came from, and the value behind it. */
+export type IntakeSlot = { key: string; label: string; icon: string | null; value: unknown; source: ChipSource; count?: number };
+export type IntakeQuestion = {
+  slot: string; title: string; why: string; skip: string; remember?: string;
+  options?: { value: string | number; label: string }[];
+  children?: { index: number; name: string | null }[]; bands?: string[];
+};
+export type TripFacts = {
+  language: string | null; trip_type: string | null;
+  when: { start: string | null; end: string | null; as_said: string | null };
+  time_of_day: string | null; destination: string | null;
+  origin: { kind: 'home' | 'current' | 'named' | null; name: string | null };
+  travel_mode: string | null; max_minutes: number | null;
+  who: { kind: string | null; names: string[]; adults: number | null; children: number | null; kids_mentioned: boolean };
+  kids_ages: { name: string | null; age: number | null; band: string | null }[];
+  vibe: string | null; vibe_no_preference: boolean; several_things: boolean | null; indoors: boolean | null;
+  food: { diets: string[]; cuisines: string[]; must_haves: string[]; avoids: string[]; place: string | null; no_preference: boolean };
+  ambiguities: { slot: string; question: string; options: string[] }[];
+  corrections: { slot: string; from: string; to: string }[];
+};
+export type Intake = {
+  id: string; flow: IntakeFlow; mode: IntakeMode; language: string | null; asked: string | null; tripId: string | null;
+  facts: TripFacts; slots: IntakeSlot[]; questions: IntakeQuestion[]; ambiguities: TripFacts['ambiguities'];
+  resolved: { tripType: string | null; start: string | null; end: string | null; timeOfDay: string | null; destination: string | null; origin: any; travelMode: string; maxMinutes: number; who: any; vibe: string | null; kidsAges: any; indoors: boolean | null; food: TripFacts['food'] };
+  tripType: string | null;
+  resultsHref: string;
+  tripDraft: Parameters<typeof api.createTripV3>[0];
+  destinationPoint: (Place & { locality?: string | null }) | null;
+  harvest: { text: string; items: { kind: 'diet'; values: string[] }[] | { kind: 'kids'; ages: { name: string | null; age: number }[] }[] | any[] } | null;
+  profileComplete: boolean;
+  createdAt: string; updatedAt: string;
+};
+export type SpokenPerson = { name: string; role: 'adult' | 'child' | null; age: number | null; band?: string | null; relationship: string | null; isSpeaker: boolean; existingId?: string | null };
+export type SpokenFood = { kind: 'diet' | 'allergy' | 'dislike' | 'favourite'; value: string; who?: string | null; memberId: string | null; memberName?: string | null };
+export type SpokenLike = { kind: 'love' | 'avoid'; phrase: string; label?: string | null; category: string | null; subcategory: string | null; who?: string | null; memberId: string | null; memberName?: string | null };

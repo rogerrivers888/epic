@@ -34,6 +34,8 @@ import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
 import { Icon, IconName, Rating, Stars } from '../components/Icon';
+import { IdeasCard } from '../components/voice/IdeasCard';
+import type { Intake } from '../api';
 import { VenueThumb } from '../components/VenueThumb';
 import { Avatar } from '../components/Faces';
 import { BottomSheet, Detent, detentHeights } from '../components/BottomSheet';
@@ -267,6 +269,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   // Every place this trip has touched, for the Places view and for the pins.
   const [places, setPlaces] = useState<{ places: TripPlace[]; counts: { all: number; do: number; eat: number; stay: number } } | null>(null);
+  // The spoken request this trip was made from, if it was (voice intake, R4).
+  const [voiceIntake, setVoiceIntake] = useState<Intake | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.voiceIntakeForTrip(d.trip.id).then((r) => { if (live) setVoiceIntake(r.intake); }).catch(() => { if (live) setVoiceIntake(null); });
+    return () => { live = false; };
+  }, [d.trip.id]);
   useEffect(() => { api.tripPlaces(trip.id).then(setPlaces).catch(() => null); }, [trip.id, shortlist.length, days.length]);
 
   // Browse: what is along the way. One fetch per (pill, scope, detour).
@@ -1085,6 +1094,19 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             ink banner used to be: a thing to do, not an advertisement. */}
         {wantsStay && !stayChosen ? (
           <FindYourStay onPress={() => { setCriteriaStep(1); setCriteria(true); }} />
+        ) : null}
+        {/* A trip made by voice carries its reading: three ideas from what was
+            said, each a tap to add, and a mic to say what you'd rather (R4). */}
+        {voiceIntake && d.trip.destination ? (
+          <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.sm }}>
+            <IdeasCard
+              intake={voiceIntake}
+              place={{ lat: d.trip.destination.lat, lng: d.trip.destination.lng, label: d.trip.destination.label }}
+              added={new Set((places?.places ?? []).map((x) => x.venueRef))}
+              onAdd={(item) => { void api.addStop(d.trip.id, { venueRef: item.venueRef, name: item.name, lat: item.lat, lng: item.lng }).then(() => onChanged()).catch(() => {}); }}
+              onRefine={() => onSection('chat')}
+            />
+          </View>
         ) : null}
         <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} />
       </>

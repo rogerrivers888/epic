@@ -71,6 +71,7 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState<LiveState | null>(null);
+  const [paused, setPaused] = useState(false);
 
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
@@ -146,11 +147,18 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
   }, [lang, mode]);
 
   // --- the clock ------------------------------------------------------------------
+  const pausedForRef = useRef(0);
+  const pausedAtRef = useRef(0);
   const startClock = () => {
     startedAtRef.current = Date.now();
+    pausedForRef.current = 0;
+    pausedAtRef.current = 0;
     setSeconds(0);
     clearInterval(tickRef.current);
-    tickRef.current = setInterval(() => setSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000)), 500);
+    tickRef.current = setInterval(() => {
+      const held = pausedForRef.current + (pausedAtRef.current ? Date.now() - pausedAtRef.current : 0);
+      setSeconds(Math.floor((Date.now() - startedAtRef.current - held) / 1000));
+    }, 500);
   };
   const stopClock = () => { clearInterval(tickRef.current); tickRef.current = null; };
   useEffect(() => () => { stopClock(); teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -176,6 +184,7 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
     if (phaseRef.current !== 'idle') return;
     setError(null);
     reset();
+    setPaused(false);
     const m = usable(getVoiceMode());
     setMode(m);
 
@@ -243,6 +252,7 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
     }
 
     setPhaseBoth('transcribing');
+    setPaused(false);
     const recorder = recorderRef.current;
     const lt = liveRef.current;
     recorderRef.current = null;
@@ -281,6 +291,22 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
     }
   }, [mode]);
 
+  /** Pause: hold the recording and the captions; Resume picks up the same recording (C2b). */
+  const pause = useCallback(() => {
+    if (phaseRef.current !== 'listening' || mode === 'browser') return;
+    recorderRef.current?.pause();
+    liveRef.current?.pause();
+    pausedAtRef.current = Date.now();
+    setPaused(true);
+  }, [mode]);
+  const resume = useCallback(() => {
+    if (phaseRef.current !== 'listening') return;
+    recorderRef.current?.resume();
+    liveRef.current?.resume();
+    if (pausedAtRef.current) { pausedForRef.current += Date.now() - pausedAtRef.current; pausedAtRef.current = 0; }
+    setPaused(false);
+  }, []);
+
   /** Cancel: stop everything and keep nothing. */
   const cancel = useCallback(() => {
     wantRef.current = false;
@@ -289,6 +315,7 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
     stopClock();
     reset();
     setError(null);
+    setPaused(false);
     setPhaseBoth('idle');
   }, []);
 
@@ -326,6 +353,8 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
   return {
     supported, listening, interim, transcript, error, start, stop, cancel, toggle,
     phase, mode, seconds, draft, setDraft, accept, retry,
+    /** Pause / Resume, in the same recording (C2b). Not for the browser recogniser. */
+    paused, pause, resume, canPause: mode !== 'browser',
     /** The captions' two parts and the connection's state, for the screen that draws them. */
     live,
   };

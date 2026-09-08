@@ -39,6 +39,18 @@ import {
 import { VOICE_INTENT_SCHEMA, VOICE_INTENT_SYSTEM, normaliseVoiceIntent, voiceIntentInput } from '../domain/voiceIntent.js';
 import { UTTERANCES, meetsExpectation } from '../domain/voiceUtterances.js';
 import { planDiff, wer } from '../domain/wer.js';
+import {
+  TRIP_FACTS_SCHEMA, TRIP_FACTS_SYSTEM, TRIP_TO_MODE, harvestOffer, mergeTripFacts, normaliseTripFacts,
+  resolveIntake, resultsHref, tripDraft, tripFactsInput,
+} from '../domain/voiceFacts.js';
+import {
+  FOOD_SCHEMA, FOOD_SYSTEM, LIKES_SCHEMA, LIKES_SYSTEM, WHO_SCHEMA, WHO_SYSTEM,
+  applyFood, applyLikes, likesVocabularyText, normaliseFood, normaliseLikes, normaliseWho,
+} from '../domain/voiceHousehold.js';
+import { searchAreas } from '../sources/areas.js';
+import { geocode } from '../sources/geocode.js';
+import { taxonomy } from '../repositories/shelfTaxonomy.js';
+import * as households from '../repositories/households.js';
 
 export const router = express.Router();
 export const adminRouter = express.Router();
@@ -464,5 +476,324 @@ adminRouter.delete('/runs/:id', requires('manage_settings'), async (req, res, ne
 
 const round = (n) => Math.round(n * 1000) / 1000;
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const mid = Math.floor(s.length / 2); return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2); };
+
+// ---------------------------------------------------------------------------
+// the intake: a spoken request read into facts (handoff, 8 Sep 2026)
+// ---------------------------------------------------------------------------
+
+const FLOWS = ['first', 'returning', 'inspire'];
+const MODES = ['said', 'steps', 'typed'];
+const WIZARD = {
+  1: 'Where from, and how far?', 2: 'Who’s going, and what’s the mood?', 3: 'Anything on food?',
+};
+
+/** The household's standing answers, for the slots that were not said. */
+async function profileFor(household, members) {
+  // `loadMembers` already gathers each person's rows as allergens / diets / dislikes / likes.
+  const diets = [...new Set(members.flatMap((m) => (m.diets ?? []).map((c) => c.value)))];
+  const allergens = [...new Set(members.flatMap((m) => (m.allergens ?? []).map((c) => c.value)))];
+  let travelMode = household.travel_mode ? TRIP_TO_MODE[household.travel_mode] ?? null : null;
+  if (!travelMode) {
+    const last = await query('select travel_mode from trips where household_id = $1 order by created_at desc limit 1', [household.id]).then((r) => r.rows[0]?.travel_mode).catch(() => null);
+    if (last) travelMode = TRIP_TO_MODE[last] ?? null;
+  }
+  return { diets, allergens, travelMode, maxMinutes: household.max_travel_minutes ?? null };
+}
+
+/** The profile is complete enough to do the talking: home, people, a range. */
+const profileComplete = (household, members) => Boolean(household.home_lat != null && members.length && (household.travel_mode || household.max_travel_minutes));
+
+/** A named place → a point, through the area search (a town, never a street). */
+async function pointFor(text, home) {
+  if (!text) return null;
+  const [area] = await searchAreas(text, { limit: 1, near: home }).catch(() => []);
+  if (area?.lat != null) return { lat: area.lat, lng: area.lng, label: area.label ?? text, locality: area.locality ?? null, countryCode: area.countryCode ?? null };
+  const [geo] = await geocode(text, { limit: 1, near: home }).catch(() => []);
+  return geo?.lat != null ? { lat: geo.lat, lng: geo.lng, label: geo.label ?? text, locality: geo.locality ?? null, countryCode: geo.countryCode ?? null } : null;
+}
+
+/** Everything a screen draws for one intake row. */
+async function intakePayload(row, household, members) {
+  const timezone = household.timezone || 'Europe/London';
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+  const profile = await profileFor(household, members);
+  const home = household.home_lat != null ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng } : null;
+  const facts = row.facts;
+  const first = resolveIntake({ facts, overrides: row.overrides, answers: row.answers, flow: row.flow, household, members, profile, today, timezone });
+  // The destination as a point, once, so the journey and the results can use it.
+  const destinationPoint = first.resolved.destination ? await pointFor(first.resolved.destination, home) : null;
+  const originPoint = first.resolved.origin?.kind === 'named' ? await pointFor(first.resolved.origin.name, home) : null;
+  const out = destinationPoint ? resolveIntake({ facts, overrides: row.overrides, answers: row.answers, flow: row.flow, household, members, profile: { ...profile, destinationPoint }, today, timezone }) : first;
+  const draft = tripDraft({ resolved: out.resolved, destinationPoint, members });
+  return {
+    id: row.id, flow: row.flow, mode: row.mode, language: row.language, asked: row.asked, tripId: row.trip_id,
+    facts: out.facts, slots: out.slots, questions: out.questions, ambiguities: out.ambiguities,
+    resolved: out.resolved, tripType: out.tripType,
+    resultsHref: resultsHref({ resolved: out.resolved, intakeId: row.id, originPoint, destinationPoint }),
+    tripDraft: draft, destinationPoint,
+    harvest: row.harvested_at ? null : harvestOffer({ facts: out.facts, members, profile }),
+    profileComplete: profileComplete(household, members),
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
+
+async function readTripFacts({ household, members, transcript, language, sessionId, page = null, previous = null, purpose = 'speech.intake' }) {
+  const timezone = household.timezone || 'Europe/London';
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+  const input = tripFactsInput({ transcript, today, timezone, home: household.home_label, members, page, previous });
+  const out = await extract({ system: TRIP_FACTS_SYSTEM, input, schema: TRIP_FACTS_SCHEMA, name: 'trip_facts', model: PLAN_MODEL });
+  await providerCalls.recordTokens({
+    householdId: household.id, sessionId, provider: PROVIDER, purpose,
+    inputTokens: out.usage?.input_tokens ?? null, outputTokens: out.usage?.output_tokens ?? null, costUsd: tokenCost(PLAN_MODEL, out.usage),
+  });
+  return { facts: normaliseTripFacts(out.parsed), language: language ?? out.parsed?.language ?? null };
+}
+
+async function loadIntake(id, household) {
+  const { rows } = await query('select * from voice_intakes where id = $1 and household_id = $2', [id, household.id]);
+  return rows[0] ?? null;
+}
+
+/**
+ * POST /intake — words in, an intake out.
+ *
+ *   { transcript, flow, mode, page?, intakeId?, language?, sessionId? }
+ *
+ * `flow` is the door (first / returning / inspire); `mode` how the words came
+ * (said / steps / typed). With `intakeId` the reading is laid over an existing
+ * intake — the wizard's next page, or "tap the mic to add more".
+ */
+router.post('/intake', async (req, res, next) => {
+  try {
+    assertVoiceOn();
+    const household = await currentHousehold();
+    const body = z.object({
+      transcript: z.string().min(1).max(8000),
+      flow: z.enum(FLOWS).default('first'),
+      mode: z.enum(MODES).default('said'),
+      page: z.number().int().min(1).max(3).nullish(),
+      intakeId: z.string().uuid().nullish(),
+      language: z.string().max(8).nullish(),
+      sessionId: z.string().max(80).nullish(),
+    }).parse(req.body ?? {});
+    const sessionId = sessionOf(req, body.sessionId);
+    await assertWithinBounds({ householdId: household.id, sessionId });
+    const members = await loadMembers(household.id).catch(() => []);
+    const existing = body.intakeId ? await loadIntake(body.intakeId, household) : null;
+    const page = body.page ? { n: body.page, question: WIZARD[body.page] } : null;
+    const { facts, language } = await readTripFacts({ household, members, transcript: body.transcript, language: languageParam(body.language), sessionId, page, previous: existing?.facts ?? null });
+    const merged = existing ? mergeTripFacts(existing.facts, facts) : facts;
+    const asked = body.flow === 'inspire' ? body.transcript.trim().replace(/\s+/g, ' ').slice(0, 140) : (existing?.asked ?? null);
+    const row = existing
+      ? (await query('update voice_intakes set facts = $2, language = coalesce($3, language), mode = $4, asked = coalesce($5, asked), updated_at = now() where id = $1 returning *', [existing.id, JSON.stringify(merged), language, body.mode, asked])).rows[0]
+      : (await query('insert into voice_intakes (household_id, session_id, flow, mode, language, facts, asked) values ($1,$2,$3,$4,$5,$6,$7) returning *', [household.id, sessionId, body.flow, body.mode, language, JSON.stringify(merged), asked])).rows[0];
+    res.status(existing ? 200 : 201).json({ intake: await intakePayload(row, household, members) });
+  } catch (err) { next(err); }
+});
+
+/** GET /intake/for-trip/:tripId — the reading a trip was made from, for its ideas card (R4). */
+router.get('/intake/for-trip/:tripId', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const { rows } = await query('select * from voice_intakes where trip_id = $1 and household_id = $2 order by created_at desc limit 1', [req.params.tripId, household.id]);
+    if (!rows[0]) return res.json({ intake: null });
+    res.json({ intake: await intakePayload(rows[0], household, await loadMembers(household.id).catch(() => [])) });
+  } catch (err) { next(err); }
+});
+
+router.get('/intake/:id', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const row = await loadIntake(req.params.id, household);
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'That request is not here any more.' });
+    res.json({ intake: await intakePayload(row, household, await loadMembers(household.id).catch(() => [])) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PATCH /intake/:id — a tap: `{ set: { slot: value } }` writes a chip's new value
+ * over the facts; `{ answer: { slot: value|null } }` answers (or skips, with
+ * null) a gap question; `{ tripId }` records the trip the card created.
+ */
+router.patch('/intake/:id', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const row = await loadIntake(req.params.id, household);
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    const body = z.object({
+      set: z.record(z.string(), z.unknown()).nullish(),
+      answer: z.record(z.string(), z.unknown()).nullish(),
+      tripId: z.string().uuid().nullish(),
+      harvested: z.boolean().nullish(),
+    }).parse(req.body ?? {});
+    const overrides = { ...row.overrides, ...(body.set ?? {}) };
+    const answers = { ...row.answers, ...(body.answer ?? {}) };
+    const { rows } = await query(
+      `update voice_intakes set overrides = $2, answers = $3, trip_id = coalesce($4, trip_id), harvested_at = case when $5 then now() else harvested_at end, updated_at = now() where id = $1 returning *`,
+      [row.id, JSON.stringify(overrides), JSON.stringify(answers), body.tripId ?? null, Boolean(body.harvested)],
+    );
+    res.json({ intake: await intakePayload(rows[0], household, await loadMembers(household.id).catch(() => [])) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /intake/:id/remember — the D1 card's "Yes, remember" and C4's "Remember
+ * them": what a request taught us, written to the profile. Diets go on every
+ * adult (they were said of "us"); children's ages go on children who lack one,
+ * and children who do not exist yet are made, to be named on the Household tab.
+ */
+router.post('/intake/:id/remember', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const row = await loadIntake(req.params.id, household);
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    const members = await loadMembers(household.id).catch(() => []);
+    const payload = await intakePayload(row, household, members);
+    const offer = payload.harvest;
+    const written = [];
+    const adults = members.filter((m) => !m.isMinor);
+    const children = members.filter((m) => m.isMinor);
+    const year = new Date().getFullYear();
+    for (const item of offer?.items ?? []) {
+      if (item.kind === 'diet') {
+        for (const d of item.values) for (const m of (adults.length ? adults : members)) {
+          await households.upsertConstraint(m.id, { kind: 'diet', value: d.toLowerCase(), conceptKey: null, conceptKind: 'diet', favourite: false });
+          written.push({ memberId: m.id, kind: 'diet', value: d });
+        }
+      }
+      if (item.kind === 'kids') {
+        const unaged = children.filter((c) => c.age == null);
+        for (const k of item.ages) {
+          const target = unaged.shift();
+          if (target) { await households.updateMember(target.id, { birthYear: year - k.age }, household.id); written.push({ memberId: target.id, kind: 'age', value: k.age }); }
+          else {
+            const made = await households.insertMember(household.id, { name: k.name ?? `Child · ${k.age}`, isMinor: k.age < 13, relationship: 'child', birthYear: year - k.age });
+            written.push({ memberId: made.id, kind: 'member', value: made.name });
+          }
+        }
+      }
+    }
+    await query('update voice_intakes set harvested_at = now(), updated_at = now() where id = $1', [row.id]);
+    res.json({ written, intake: await intakePayload({ ...row, harvested_at: new Date() }, household, await loadMembers(household.id).catch(() => [])) });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// the household, spoken (set-up row O; Option D)
+// ---------------------------------------------------------------------------
+
+async function readStructured({ household, sessionId, system, input, schema, name, purpose }) {
+  const out = await extract({ system, input, schema, name, model: PLAN_MODEL });
+  await providerCalls.recordTokens({
+    householdId: household.id, sessionId, provider: PROVIDER, purpose,
+    inputTokens: out.usage?.input_tokens ?? null, outputTokens: out.usage?.output_tokens ?? null, costUsd: tokenCost(PLAN_MODEL, out.usage),
+  });
+  return out.parsed;
+}
+
+/** POST /household/who — O3: "say everyone in one go" → people, not yet saved. */
+router.post('/household/who', async (req, res, next) => {
+  try {
+    assertVoiceOn();
+    const household = await currentHousehold();
+    const body = z.object({ transcript: z.string().min(1).max(4000), sessionId: z.string().max(80).nullish() }).parse(req.body ?? {});
+    const sessionId = sessionOf(req, body.sessionId);
+    await assertWithinBounds({ householdId: household.id, sessionId });
+    const members = await loadMembers(household.id).catch(() => []);
+    const parsed = await readStructured({ household, sessionId, system: WHO_SYSTEM, input: `${members.length ? `Already in the household: ${members.map((m) => m.name).join(', ')}.\n` : ''}Transcript:\n${body.transcript}`, schema: WHO_SCHEMA, name: 'household_people', purpose: 'speech.household.who' });
+    const people = normaliseWho(parsed).map((p) => ({ ...p, existingId: members.find((m) => m.name.toLowerCase() === p.name.toLowerCase())?.id ?? null }));
+    res.json({ people });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /household/who/apply — O3b's "Next": the reviewed people become members.
+ * `{ people: [{ name, role, age?, band?, relationship?, isSpeaker, existingId? }] }`.
+ */
+router.post('/household/who/apply', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const body = z.object({ people: z.array(z.object({
+      name: z.string().min(1).max(60), role: z.enum(['adult', 'child']).nullish(), age: z.number().int().min(0).max(120).nullish(),
+      band: z.enum(['0-4', '5-8', '9-12', '13+']).nullish(), relationship: z.string().max(40).nullish(), isSpeaker: z.boolean().nullish(), existingId: z.string().uuid().nullish(),
+    })).max(20) }).parse(req.body ?? {});
+    const year = new Date().getFullYear();
+    const bandAge = { '0-4': 3, '5-8': 6, '9-12': 10, '13+': 15 };
+    const written = [];
+    for (const p of body.people) {
+      const age = p.age ?? (p.band ? bandAge[p.band] : null);
+      const isChild = p.role === 'child' || (age != null && age < 18);
+      const relationship = p.relationship && ['partner', 'child', 'parent', 'friend', 'other', 'self'].includes(p.relationship) ? p.relationship : isChild ? 'child' : p.isSpeaker ? 'self' : null;
+      if (p.existingId) {
+        const m = await households.updateMember(p.existingId, { name: p.name, birthYear: age != null ? year - age : null, relationship }, household.id);
+        if (m) written.push({ id: m.id, name: m.name, updated: true });
+      } else {
+        const m = await households.insertMember(household.id, { name: p.name, isMinor: isChild && (age == null || age < 13), relationship, birthYear: age != null ? year - age : null });
+        written.push({ id: m.id, name: m.name, updated: false });
+      }
+    }
+    res.json({ members: await loadMembers(household.id), written });
+  } catch (err) { next(err); }
+});
+
+/** POST /household/food — O4: diets, allergies, dislikes, favourites, scoped. Not yet saved. */
+router.post('/household/food', async (req, res, next) => {
+  try {
+    assertVoiceOn();
+    const household = await currentHousehold();
+    const body = z.object({ transcript: z.string().min(1).max(4000), memberId: z.string().uuid().nullish(), sessionId: z.string().max(80).nullish() }).parse(req.body ?? {});
+    const sessionId = sessionOf(req, body.sessionId);
+    await assertWithinBounds({ householdId: household.id, sessionId });
+    const members = await loadMembers(household.id).catch(() => []);
+    const about = body.memberId ? members.find((m) => m.id === body.memberId) : null;
+    const parsed = await readStructured({ household, sessionId, system: FOOD_SYSTEM, input: `The household: ${members.map((m) => m.name).join(', ') || 'unnamed'}.${about ? ` This is about ${about.name} unless somebody else is named.` : ''}\nTranscript:\n${body.transcript}`, schema: FOOD_SCHEMA, name: 'household_food', purpose: 'speech.household.food' });
+    const items = normaliseFood(parsed, members).map((i) => (about && !i.memberId ? { ...i, memberId: about.id, memberName: about.name } : i));
+    res.json({ items });
+  } catch (err) { next(err); }
+});
+
+/** POST /household/likes — O4b / D3: what people love doing and avoid, on our shelves. Not yet saved. */
+router.post('/household/likes', async (req, res, next) => {
+  try {
+    assertVoiceOn();
+    const household = await currentHousehold();
+    const body = z.object({ transcript: z.string().min(1).max(4000), memberId: z.string().uuid().nullish(), sessionId: z.string().max(80).nullish() }).parse(req.body ?? {});
+    const sessionId = sessionOf(req, body.sessionId);
+    await assertWithinBounds({ householdId: household.id, sessionId });
+    const members = await loadMembers(household.id).catch(() => []);
+    const about = body.memberId ? members.find((m) => m.id === body.memberId) : null;
+    const tax = await taxonomy();
+    const vocab = { categories: tax.active.categories.filter((c) => c.key !== 'food'), subcategories: tax.active.subcategories.filter((x) => x.category_key !== 'food') };
+    const parsed = await readStructured({
+      household, sessionId, system: LIKES_SYSTEM, schema: LIKES_SCHEMA, name: 'household_likes', purpose: 'speech.household.likes',
+      input: `Categories and subcategories (key=label):\n${likesVocabularyText(vocab)}\n\nThe household: ${members.map((m) => `${m.name}${m.isMinor ? ' (child)' : ''}`).join(', ') || 'unnamed'}.${about ? ` This is about ${about.name} unless somebody else is named.` : ''}\nTranscript:\n${body.transcript}`,
+    });
+    const out = normaliseLikes(parsed, members, vocab);
+    const items = out.items.map((i) => (about && !i.memberId ? { ...i, memberId: about.id, memberName: about.name } : i));
+    res.json({ items, mobility: out.mobility });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /household/apply — the confirmed chips, written. `{ food: [...], likes: [...], memberId? }`.
+ * "Everyone" is every member, or the one person when `memberId` is given (D4).
+ */
+router.post('/household/apply', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const body = z.object({
+      memberId: z.string().uuid().nullish(),
+      food: z.array(z.object({ kind: z.enum(['diet', 'allergy', 'dislike', 'favourite']), value: z.string().min(1).max(60), memberId: z.string().uuid().nullish() })).max(60).default([]),
+      likes: z.array(z.object({ kind: z.enum(['love', 'avoid']), phrase: z.string().min(1).max(80), label: z.string().max(80).nullish(), category: z.string().max(40).nullish(), subcategory: z.string().max(60).nullish(), memberId: z.string().uuid().nullish() })).max(60).default([]),
+    }).parse(req.body ?? {});
+    const members = await loadMembers(household.id).catch(() => []);
+    const everyone = body.memberId ? members.filter((m) => m.id === body.memberId) : members;
+    const written = [
+      ...await applyFood(body.food, { members, households, everyone }),
+      ...await applyLikes(body.likes, { members, households, everyone }),
+    ];
+    res.json({ written, members: await loadMembers(household.id) });
+  } catch (err) { next(err); }
+});
 
 export default router;

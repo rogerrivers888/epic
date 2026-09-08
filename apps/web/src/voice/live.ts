@@ -131,7 +131,7 @@ export class LiveTranscriber {
   }
 
   private push(f32: Float32Array) {
-    if (!this.active || this.stopping && this.status === 'closed') return;
+    if (!this.active || this.pausedLive || this.stopping && this.status === 'closed') return;
     for (let i = 0; i < f32.length; i += 1) {
       const s = Math.max(-1, Math.min(1, f32[i]));
       this.pending.push(s < 0 ? s * 0x8000 : s * 0x7fff);
@@ -280,6 +280,22 @@ export class LiveTranscriber {
         break;
     }
   }
+
+  // --- pausing -------------------------------------------------------------
+
+  private pausedLive = false;
+  /** Stop feeding the provider; the words so far stay on screen (C2b). */
+  pause() {
+    this.pausedLive = true;
+    void this.ctx?.suspend().catch(() => {});
+    this.pending = [];
+    this.emit();
+  }
+  resume() {
+    this.pausedLive = false;
+    void this.ctx?.resume().catch(() => {});
+  }
+  get isPaused() { return this.pausedLive; }
 
   // --- ending --------------------------------------------------------------
 

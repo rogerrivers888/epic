@@ -205,6 +205,8 @@ router.get('/', async (_req, res, next) => {
         name: household.name,
         defaultVisitMinutes: household.default_visit_minutes,
         maxTravelMinutes: household.max_travel_minutes,
+        /** How they usually travel on a day out: driving, transit, walking, cycling (set-up step 2). */
+        travelMode: household.travel_mode ?? null,
         defaultIntensity: household.default_intensity,
         home: household.home_lat != null ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng } : null,
         homeRadiusMiles: household.home_radius_miles ?? 10,
@@ -230,7 +232,7 @@ router.get('/', async (_req, res, next) => {
 router.patch('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const { name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, home, homeText, pace, timezone, homeRadiusMiles, homePhotoUrl, browse } = req.body;
+    const { name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, home, homeText, pace, timezone, homeRadiusMiles, homePhotoUrl, browse, travelMode} = req.body;
     // How far "close to home" reaches, in miles (owner, 4 Sep 2026).
     const radius = homeRadiusMiles == null ? null : Math.min(200, Math.max(1, Math.round(Number(homeRadiusMiles))));
     if (homeRadiusMiles != null && !Number.isFinite(radius)) return res.status(400).json({ error: 'invalid_radius' });
@@ -249,14 +251,15 @@ router.patch('/', async (req, res, next) => {
     if (homeText?.trim() && !homePlace) return res.status(404).json({ error: 'home_not_found', message: `Couldn't find "${homeText}". Try a fuller address or a town name.` });
     // Home moving country is what makes a city search change which country it
     // puts first, so the country follows the coordinates rather than merging.
+    if (travelMode != null && !['driving', 'transit', 'walking', 'cycling'].includes(travelMode)) return res.status(400).json({ error: 'invalid_mode' });
     const h = await households.updateHousehold(household.id, {
-      name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity,
+      name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, travelMode,
       homeLabel: homePlace?.label, homeLat: homePlace?.lat, homeLng: homePlace?.lng,
       homeCountryCode: homePlace?.countryCode, homeCountry: homePlace?.country,
       pace: mergedPace, timezone, homeRadiusMiles: radius, homePhotoUrl: photo,
       browseDefaults: browse ? mergeBrowse(household, browse) : null,
     });
-    res.json({ household: { id: h.id, name: h.name, defaultVisitMinutes: h.default_visit_minutes, maxTravelMinutes: h.max_travel_minutes, defaultIntensity: h.default_intensity,
+    res.json({ household: { id: h.id, name: h.name, defaultVisitMinutes: h.default_visit_minutes, maxTravelMinutes: h.max_travel_minutes, travelMode: h.travel_mode ?? null, defaultIntensity: h.default_intensity,
       home: h.home_lat != null ? { label: h.home_label, lat: h.home_lat, lng: h.home_lng } : null, homeRadiusMiles: h.home_radius_miles ?? 10,
       homePhotoUrl: h.home_photo_url ?? null, pace: paceOf(h), timezone: h.timezone, browse: browseOf(h) } });
   } catch (err) {

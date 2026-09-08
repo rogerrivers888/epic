@@ -32,6 +32,14 @@
  *   /trips/<id>/day/<dayId>               …on one day of it
  *   /household                         the family
  *   /household/<memberId>                 …one person
+ *   /household/<memberId>/tell               …telling Epic about them, by voice (D3)
+ *   /household/<memberId>/review             …the card of what was heard (D4)
+ *   /say                               just say it — the mic (C1; ?for=trip is Trips' New trip, R1; ?for=inspire the ask row, R5)
+ *   /say/steps                            …one question at a time, three pages (B1–B3; ?page=)
+ *   /say/<intakeId>                       …here's what we heard, the fact card (C3 / B4 / R3)
+ *   /say/<intakeId>/ask                   …a gap question (C4; ?n=)
+ *   /welcome                           first run, two doors (C0)
+ *   /setup                             set up my family first, five steps (O1–O5; ?step=)
  *   /settings, /settings/providers     settings, and its two halves
  *   /prototypes, /prototypes/trips     the mock-ups, filed by part of the app
  *   /admin/<screen>                    the back office
@@ -205,10 +213,26 @@ export type Route =
    * open — one more layer inside a trip, and one more address (3d).
    */
   | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null; stopRef: string | null }
-  | { name: 'household'; memberId: string | null }
+  /**
+   * `voice` is the spoken layer over one person (voice intake handoff, Option
+   * D): `tell` is the recording, `review` the card of what was heard.
+   */
+  | { name: 'household'; memberId: string | null; voice: 'tell' | 'review' | null }
   | { name: 'settings'; section: SettingsSection }
   | { name: 'prototypes'; section: PrototypeSection | null }
   | { name: 'admin'; screen: AdminScreen }
+  /**
+   * Voice intake (handoff, 8 Sep 2026). `/say` is the mic; `/say/steps` the
+   * three-page wizard; `/say/<id>` the fact card for one reading; `/say/<id>/ask`
+   * its gap questions. How the page is set travels in the query: `?for=trip`
+   * (Trips' New trip, Option R) or `?for=inspire` (the ask row); `?type=1` the
+   * keyboard; `?page=2` the wizard's page; `?n=2` the second question.
+   */
+  | { name: 'say'; intakeId: string | null; steps: boolean; ask: boolean }
+  /** First run: two doors (C0). */
+  | { name: 'welcome' }
+  /** "Set up my family first" — five steps, `?step=1..5` (row O). */
+  | { name: 'setup' }
   | { name: 'join'; token: string }
   /**
    * A trip somebody was sent (trip rebuild, 3b): "anyone with the link sees the
@@ -290,8 +314,26 @@ export function parseRoute(path: string): Route {
       };
     }
 
-    case 'household':
-      return { name: 'household', memberId: a ?? null };
+    case 'household': {
+      if (a && b === 'tell') return { name: 'household', memberId: a, voice: 'tell' };
+      if (a && b === 'review') return { name: 'household', memberId: a, voice: 'review' };
+      if (b) return { name: 'unknown', path };
+      return { name: 'household', memberId: a ?? null, voice: null };
+    }
+
+    case 'say': {
+      if (!a) return { name: 'say', intakeId: null, steps: false, ask: false };
+      if (a === 'steps') return b ? { name: 'unknown', path } : { name: 'say', intakeId: null, steps: true, ask: false };
+      if (b === 'ask') return { name: 'say', intakeId: a, steps: false, ask: true };
+      if (b) return { name: 'unknown', path };
+      return { name: 'say', intakeId: a, steps: false, ask: false };
+    }
+
+    case 'welcome':
+      return a ? { name: 'unknown', path } : { name: 'welcome' };
+
+    case 'setup':
+      return a ? { name: 'unknown', path } : { name: 'setup' };
 
     case 'settings': {
       if (!a) return { name: 'settings', section: 'preferences' };
@@ -344,7 +386,13 @@ export function hrefOf(route: Route): string {
           : route.tripId == null ? '/trips'
             : buildHref(['trips', route.tripId, route.section,
               route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : null]);
-    case 'household': return buildHref(['household', route.memberId]);
+    case 'household': return buildHref(['household', route.memberId, route.memberId ? route.voice : null]);
+    case 'say':
+      return route.steps ? '/say/steps'
+        : route.intakeId ? buildHref(['say', route.intakeId, route.ask ? 'ask' : null])
+          : '/say';
+    case 'welcome': return '/welcome';
+    case 'setup': return '/setup';
     case 'settings': return route.section === 'preferences' ? '/settings' : buildHref(['settings', route.section]);
     case 'prototypes': return buildHref(['prototypes', route.section]);
     case 'admin': return buildHref(['admin', route.screen]);
@@ -381,6 +429,22 @@ export const paths = {
   tripShare: (id: string) => buildHref(['trips', id, 'share']),
   tripStop: (id: string, venueRef: string) => buildHref(['trips', id, 'stop', venueRef]),
   household: (memberId?: string | null) => buildHref(['household', memberId]),
+  /** The spoken layer over one person: the recording, then the card of what was heard (D3, D4). */
+  householdTell: (memberId: string) => buildHref(['household', memberId, 'tell']),
+  householdReview: (memberId: string) => buildHref(['household', memberId, 'review']),
+  /** Voice intake: the mic, set for a door (`trip`, `inspire`) or not. */
+  say: (opts?: { for?: 'trip' | 'inspire' | null; type?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.for) q.set('for', opts.for);
+    if (opts?.type) q.set('type', '1');
+    const qs = q.toString();
+    return qs ? `/say?${qs}` : '/say';
+  },
+  saySteps: (page?: number) => (page && page > 1 ? `/say/steps?page=${page}` : '/say/steps'),
+  heard: (intakeId: string) => buildHref(['say', intakeId]),
+  ask: (intakeId: string, n?: number) => `${buildHref(['say', intakeId, 'ask'])}${n && n > 1 ? `?n=${n}` : ''}`,
+  welcome: () => '/welcome',
+  setup: (step?: number) => (step && step > 1 ? `/setup?step=${step}` : '/setup'),
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
@@ -471,6 +535,10 @@ export function ownsHeader(route: Route): boolean {
  * path — the page is still the trip's map — so the query is what answers it.
  */
 export function isImmersive(route: Route, query?: URLSearchParams): boolean {
+  // The voice intake's screens are one thing each — a mic, a card, a question —
+  // drawn to the handoff's boards, which have no tab bar (8 Sep 2026).
+  if (route.name === 'say' || route.name === 'welcome' || route.name === 'setup') return true;
+  if (route.name === 'household' && route.voice) return true;
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
   if (route.section === 'group') return true;
   // The bare `/trips/<id>` is the map, and parses with no section at all.
@@ -513,6 +581,7 @@ export function tabOf(route: Route): Tab | null {
  */
 export function isTabHome(route: Route): boolean {
   if (route.name === 'trips') return !route.tripId && !route.creating && !route.searching;
+  if (route.name === 'household') return !route.voice;
   return true;
 }
 
@@ -532,7 +601,11 @@ export function parentOf(route: Route): string {
       if (route.section) return paths.trip(route.tripId!);
       if (route.tripId || route.creating || route.searching) return '/trips';
       return '/inspire';
-    case 'household': return route.memberId ? '/household' : '/inspire';
+    case 'household': return route.voice ? paths.household(route.memberId) : route.memberId ? '/household' : '/inspire';
+    // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
+    case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
+    case 'welcome': return '/inspire';
+    case 'setup': return '/welcome';
     case 'admin': return route.screen === 'overview' ? '/inspire' : '/admin/overview';
     default: return '/inspire';
   }
@@ -564,7 +637,10 @@ export function titleOf(route: Route): string {
             : route.section === 'stop' ? 'A stop' : null;
       return epic(layer ? `Trip — ${layer}` : 'Trip');
     }
-    case 'household': return epic('Household');
+    case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'Household');
+    case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
+    case 'welcome': return epic('Plan less. Live more.');
+    case 'setup': return epic('Set up your family');
     case 'settings': return epic('Settings');
     case 'prototypes': return epic('Prototypes');
     case 'admin': return epic(`Back office — ${route.screen}`);

@@ -185,13 +185,13 @@ test('a trip tab nobody has heard of is not a page', () => {
 });
 
 test('Household, Settings, Prototypes and the back office', () => {
-  assert.deepEqual(roundTrip('/household'), { name: 'household', memberId: null });
-  assert.deepEqual(roundTrip('/household/m1'), { name: 'household', memberId: 'm1' });
+  assert.deepEqual(roundTrip('/household'), { name: 'household', memberId: null, voice: null });
+  assert.deepEqual(roundTrip('/household/m1'), { name: 'household', memberId: 'm1', voice: null });
   // Inviting somebody is a layer over their page, not a page of its own: the
   // person is the address, and `?invite=1` is how that page is set. So the
   // route it parses to is Gina — the flag is carried in the query and read by
   // the screen, which is what keeps one page from having two spellings.
-  assert.deepEqual(parseRoute('/household/m1?invite=1'), { name: 'household', memberId: 'm1' });
+  assert.deepEqual(parseRoute('/household/m1?invite=1'), { name: 'household', memberId: 'm1', voice: null });
   assert.equal(splitHref('/household/m1?invite=1').query.get('invite'), '1');
   assert.equal(hrefOf(parseRoute('/household/m1?invite=1')), '/household/m1');
   assert.deepEqual(roundTrip('/settings'), { name: 'settings', section: 'preferences' });
@@ -401,4 +401,33 @@ test('the trip is full-bleed; configuring its group is immersive', () => {
   const placeOpen = new URLSearchParams('place=google%3Aabc');
   assert.ok(isImmersive(trip, placeOpen), 'a place view hides the tab bar');
   assert.ok(!isImmersive(parseRoute('/places/home'), placeOpen), 'but only on the trip map');
+});
+
+test('the voice intake: the mic, the wizard, the card and its questions', () => {
+  assert.deepEqual(roundTrip('/say'), { name: 'say', intakeId: null, steps: false, ask: false });
+  assert.deepEqual(roundTrip('/say/steps'), { name: 'say', intakeId: null, steps: true, ask: false });
+  assert.deepEqual(roundTrip('/say/abc-123'), { name: 'say', intakeId: 'abc-123', steps: false, ask: false });
+  assert.deepEqual(roundTrip('/say/abc-123/ask'), { name: 'say', intakeId: 'abc-123', steps: false, ask: true });
+  assert.equal(parseRoute('/say/abc-123/other').name, 'unknown');
+  assert.equal(paths.say({ for: 'trip' }), '/say?for=trip');
+  assert.equal(paths.say({ for: 'inspire', type: true }), '/say?for=inspire&type=1');
+  assert.equal(paths.ask('abc', 2), '/say/abc/ask?n=2');
+  assert.equal(parentOf(parseRoute('/say/abc/ask')), '/say/abc');
+  assert.equal(parentOf(parseRoute('/say/abc')), '/say');
+  assert.equal(isImmersive(parseRoute('/say'), new URLSearchParams()), true, 'no tab bar on the mic');
+});
+
+test('first run and the two-minute set-up', () => {
+  assert.deepEqual(roundTrip('/welcome'), { name: 'welcome' });
+  assert.deepEqual(roundTrip('/setup'), { name: 'setup' });
+  assert.equal(paths.setup(3), '/setup?step=3');
+  assert.equal(parentOf(parseRoute('/setup')), '/welcome');
+});
+
+test('telling Epic about one person, and reviewing what it heard', () => {
+  assert.deepEqual(roundTrip('/household/m1/tell'), { name: 'household', memberId: 'm1', voice: 'tell' });
+  assert.deepEqual(roundTrip('/household/m1/review'), { name: 'household', memberId: 'm1', voice: 'review' });
+  assert.deepEqual(roundTrip('/household/m1'), { name: 'household', memberId: 'm1', voice: null });
+  assert.equal(parentOf(parseRoute('/household/m1/tell')), '/household/m1');
+  assert.equal(isTabHome(parseRoute('/household/m1/tell')), false, 'a recording is not where the tab is left');
 });

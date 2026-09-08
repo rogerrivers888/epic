@@ -68,7 +68,17 @@ export class Recorder {
     this.rec.start(1000);
   }
 
-  get seconds() { return this.startedAt ? (Date.now() - this.startedAt) / 1000 : 0; }
+  private pausedAt = 0;
+  private pausedFor = 0;
+  get seconds() { return this.startedAt ? (Date.now() - this.startedAt - this.pausedFor - (this.pausedAt ? Date.now() - this.pausedAt : 0)) / 1000 : 0; }
+
+  /** Hold the recording; Resume carries on in the same file (C2b). */
+  pause() {
+    try { if (this.rec?.state === 'recording') { this.rec.pause(); this.pausedAt = Date.now(); } } catch { /* noop */ }
+  }
+  resume() {
+    try { if (this.rec?.state === 'paused') { this.rec.resume(); if (this.pausedAt) { this.pausedFor += Date.now() - this.pausedAt; this.pausedAt = 0; } } } catch { /* noop */ }
+  }
 
   stop(): Promise<Recording> {
     const rec = this.rec;
