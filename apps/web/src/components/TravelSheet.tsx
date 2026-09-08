@@ -46,14 +46,24 @@ const OPTIONS: { minutes: TravelMinutes; label: string }[] = [
  * not a fact until you say twenty minutes from what, and the town used to sit
  * in the opposite corner of the screen from the hour it belonged to.
  */
-export function travelChipLabel(mode: TravelMode, minutes: TravelMinutes, from: string | null): string {
-  // "Within an hour of Sunningdale" rather than "Up to 1 hr from near
-  // Sunningdale" (owner, 8 Sep 2026: "it\'s a bit shorter"). The way of
-  // travelling is the icon in front of it, not a third clause.
-  if (minutes == null) return from ? `Anywhere near ${from}` : 'Anywhere';
-  const time = minutes >= 60 ? `${minutes / 60} hour${minutes >= 120 ? 's' : ''}` : `${minutes} min`;
-  const how = mode === 'transit' ? ' by transport' : mode === 'walk' ? ' on foot' : '';
-  return from ? `Within ${time} of ${from}${how}` : `Within ${time}${how}`;
+export function travelChipLabel(minutes: TravelMinutes, from: string | null): string {
+  /*
+    "Within 30 minutes of Sunningdale" — the town, the range, and nothing else
+    (owner, 8 Sep 2026).
+
+    Two things it used to say and no longer does. The way of travelling was
+    spelled out as well as drawn: "by transport" sat next to the tram icon that
+    already meant it, and it was the clause that pushed the town off the end of
+    the chip. And the town was prefixed with "near" whenever the fix came from
+    the browser rather than a search — "Within 30 min of near Sunningdale by
+    transport" — which he ruled out outright: "I don't want to see 'near' ever.
+    I just want to see 'Sunningdale', even if it is near."
+
+    So the icon carries the mode, the words carry the where.
+  */
+  if (minutes == null) return from ? `Any distance from ${from}` : 'Any distance';
+  const time = minutes >= 60 ? `${minutes / 60} hour${minutes >= 120 ? 's' : ''}` : `${minutes} minutes`;
+  return from ? `Within ${time} of ${from}` : `Within ${time}`;
 }
 
 /** How this filter reads where there is no room for the town: "Up to 1 hr drive". */

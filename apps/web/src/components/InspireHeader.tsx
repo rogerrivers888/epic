@@ -254,11 +254,10 @@ export function MenuBar({ children }: { children: React.ReactNode }) {
  * How far, how much, and — in Food — whether it is open. The first is ink
  * because it is the one that is always set; the rest are grey until they are.
  */
-export function FilterRow({ children, count }: { children: React.ReactNode; count?: string | null }) {
+export function FilterRow({ children }: { children: React.ReactNode }) {
   return (
     <View style={styles.filters}>
       <View style={styles.filterItems}>{children}</View>
-      {count ? <Text style={styles.count}>{count}</Text> : null}
     </View>
   );
 }
@@ -391,9 +390,10 @@ export const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     gap: spacing.md, paddingHorizontal: GUTTER, paddingTop: 12, minHeight: TARGET,
   },
-  // The filters wrap rather than run under the count: three of them plus
-  // "14 places" does not fit 390px on one line, and the count is the thing you
-  // read to decide whether to change them.
+  // The filters wrap rather than run off the edge: three of them do not fit
+  // 390px on one line. There is no count beside them any more — it said
+  // "2 places" next to the chips that had just cut the list to two, which is
+  // the one place nobody needed telling (owner, 8 Sep 2026).
   filterItems: { flexDirection: 'row', alignItems: 'center', gap: 16, rowGap: 8, flexShrink: 1, flexWrap: 'wrap' },
   /**
    * The chip's fill bleeds back out of its own padding (the handoff's
@@ -419,7 +419,6 @@ export const styles = StyleSheet.create({
     fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88,
     textTransform: 'uppercase', color: colors.inkMuted,
   },
-  count: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, flexShrink: 0 },
 });
 
 export const HEADER = { top: HEADER_TOP, gutter: GUTTER };

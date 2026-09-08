@@ -106,6 +106,37 @@ export function PlaceThumb({ item, width, height }: { item: InspireItem; width: 
   );
 }
 
+/**
+ * A shelf's title, with how many are in it opposite.
+ *
+ * One component so the browse view and an opened category cannot drift apart.
+ * The count belongs on this line and nowhere else (owner, 8 Sep 2026): it sat
+ * on the filter row for a while, beside Any budget, which put "2 places" next
+ * to the controls that had just cut the list to two and read as part of the
+ * filtering rather than as the answer to it.
+ *
+ * `onAll` is what makes it a door. Closed, the shelf is a glance and the title
+ * opens the whole category; opened, there is nowhere further to go, so the
+ * count is a plain statement with no chevron to promise otherwise.
+ */
+export function SectionHead({ title, count, onAll }: { title: string; count: number; onAll?: () => void }) {
+  const right = (
+    <View style={styles.allLink}>
+      <Text style={styles.meta}>All {count}</Text>
+      {onAll ? <Icon name="more" size={16} color={colors.inkMuted} /> : null}
+    </View>
+  );
+  if (!onAll) {
+    return <View style={styles.sectionHead}><Text style={styles.sectionTitle}>{title}</Text>{right}</View>;
+  }
+  return (
+    <Pressable onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`${title}, all ${count}`}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {right}
+    </Pressable>
+  );
+}
+
 /** 8a: one category's worth, across. The title is a door into the whole of it. */
 export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travelWord }: {
   title: string; count: number; items: InspireItem[];
@@ -117,13 +148,7 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travelWo
   if (!items.length) return null;
   return (
     <View style={styles.section}>
-      <Pressable onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`${title}, all ${count}`}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <View style={styles.allLink}>
-          <Text style={styles.meta}>All {count}</Text>
-          <Icon name="more" size={16} color={colors.inkMuted} />
-        </View>
-      </Pressable>
+      <SectionHead title={title} count={count} onAll={onAll} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
         {items.map((i) => (
           <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travelWord={travelWord} onOpen={() => onOpen(i)} />

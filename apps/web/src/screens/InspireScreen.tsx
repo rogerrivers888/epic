@@ -12,7 +12,7 @@ import { firstName } from '../components/Faces';
 import { asFlag, asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
 import { paths, withQuery, MOODS, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
 import { CategoryStrip, FilterButton, FilterPanel, FilterRow, InspireTop, MenuBar, ModeSwitch, SubStrip } from '../components/InspireHeader';
-import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow } from '../components/InspireBody';
+import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow, SectionHead } from '../components/InspireBody';
 import { ChoicePanel, TravelPanel, travelChipLabel, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
 import type { OpenTripOptions } from './PlanScreen';
 import { PHOTO_W } from '../components/VenueThumb';
@@ -274,7 +274,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   const mode = route.mode;
   const pick = route.pick;
   const chosen = placeFromQuery(query);
-  const fromHere = query.get('from') === 'here';
+  // `from=here` stays in the address — it records that the browser found this
+  // place rather than somebody searching for it — but nothing draws it now
+  // that the chip has stopped saying "near" (owner, 8 Sep 2026).
   const setWhere = (p: Place | null, from: 'here' | 'search' | null) => setQuery(placeToQuery(p, from), { replace: false });
 
   const [mood, setMood] = useQueryState<MoodKey>('mood', 'fun', asOneOf(SHELVES, 'fun'));
@@ -407,14 +409,20 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
 
   const placeName = shortPlace(pool?.place.locality ?? centre?.locality ?? centre?.label);
   /**
-   * What the first chip and the panel's field call where we are looking.
+   * What the first chip and the panel's field call where we are looking: the
+   * town, and only the town.
    *
-   * `fromHere` is the browser's fix rather than a town somebody typed, so it
-   * says so: "Up to 1 hr from near Egham" is honest about a location that is
-   * accurate to a few streets. Empty when nowhere is set at all, and the chip
-   * then falls back to "Up to 1 hr drive" with no origin claimed.
+   * It used to say "near Sunningdale" when the fix came from the browser
+   * rather than from a search — honest about a location accurate to a few
+   * streets, but the owner would rather have the room (8 Sep 2026: "I don't
+   * want to see 'near' ever. I just want to see 'Sunningdale', even if it is
+   * near"). How the place was chosen is still recorded in the address as
+   * `from=here`; it is simply not read out on the chip.
+   *
+   * Empty when nowhere is set at all, and the chip then falls back to
+   * "Within 30 minutes" with no origin claimed.
    */
-  const whereName = centre ? `${fromHere ? 'near ' : ''}${placeName}` : '';
+  const whereName = centre ? placeName : '';
 
   // Everything the sources called a kind of place here, for the kinds panel:
   // the list is what is actually in this pool, so it is never a menu of
@@ -786,7 +794,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               />
             ) : null}
           </MenuBar>
-          <FilterRow count={pick ? `${listed.length} place${listed.length === 1 ? '' : 's'}` : null}>
+          <FilterRow>
             {/* The first chip carries both the town and the range (v2): the
                 where-box has left the top row, and "20 minutes" is not a fact
                 until it says twenty minutes from what. */}
@@ -794,7 +802,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               icon={travelBy === 'walk' ? 'walking' : travelBy === 'transit' ? 'transit' : 'driving'}
               narrowed={travelBy !== 'drive'}
               open={panel === 'travel'}
-              label={travelChipLabel(travelBy, cap as TravelMinutes, whereName)}
+              label={travelChipLabel(cap as TravelMinutes, whereName)}
               onPress={() => setPanel(panel === 'travel' ? null : 'travel')}
             />
             <FilterButton
@@ -899,6 +907,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                 </View>
               ) : null}
 
+              {/* The heading the count belongs opposite (owner's mock-up, 8 Sep
+                  2026): the category on the left, how many are in it on the
+                  right, in the same line the browse view's shelves use. No
+                  chevron here — you are already inside it. */}
+              {pick && listed.length ? (
+                <SectionHead title={mode === 'food' ? cap1(pick) : label(pick as MoodKey)} count={listed.length} />
+              ) : null}
+
               {pick ? (
                 listed.length ? listed.map((i) => (
                   mode === 'food'
@@ -920,21 +936,21 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
                 </Pressable>
               ) : null}
-              <View style={[styles.gutter, styles.foot]}>
-                <Text style={type.tiny}>
-                  {pool.items.length} place{pool.items.length === 1 ? '' : 's'} within {pool.radiusKm} km of {placeName}
-                  {pool.from.how === 'home' ? ' · times are from home' : ' · times are from where you are'}, estimated.
-                </Text>
-                {/* No credits here. A licence is satisfied where the picture is
-                    actually looked at — which is the place, opened — and the
-                    handoff puts them there, one line at the end of the scroll
-                    (8f). Forty of them under the home screen was noise nobody
-                    reads and nobody asked for (owner, 7 Sep 2026: "all of these
-                    image contributions should not be on the Inspire page"). */}
-                <Pressable onPress={load} hitSlop={8} accessibilityRole="button">
-                  <Text style={[type.small, { fontWeight: '700' }]}>Look again</Text>
-                </Pressable>
-              </View>
+              {/*
+                Nothing closes the scroll.
+
+                There was a line here reporting the size and radius of the pool
+                — "400 places within 60 km of Sunningdale · times are from
+                home, estimated" — with a "Look again" under it. Both are gone
+                (owner, 8 Sep 2026): the pool is how the screen was built, not
+                what he asked for, and saying "400 places" under a list of two
+                describes our fetch rather than his search.
+
+                No credits here either. A licence is satisfied where the picture
+                is actually looked at — which is the place, opened — and the
+                drawer carries them there (owner, 7 Sep 2026: "all of these
+                image contributions should not be on the Inspire page").
+              */}
             </>
           ) : null}
         </View>
@@ -1276,6 +1292,5 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 14, fontWeight: '700', lineHeight: 18, color: colors.ink },
   waiting: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
   empty: { gap: 6, paddingVertical: spacing.lg },
-  foot: { gap: 6, paddingTop: spacing.lg },
   notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
 });
