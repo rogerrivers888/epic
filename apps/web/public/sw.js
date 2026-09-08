@@ -14,13 +14,14 @@
  *     stored, here or anywhere.
  */
 
-const VERSION = 'epic-shell-v1';
+const VERSION = 'epic-shell-v2';
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 
 // The document itself, so a cold start with no signal still has something to
-// open. Everything else is cached as it is first used.
-const PRECACHE = ['/', '/manifest.json', '/favicon.svg'];
+// open. Everything else is cached as it is first used. The icons are *not* here:
+// they are network-first now, and a SHELL copy would shadow the live one again.
+const PRECACHE = ['/'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -42,6 +43,23 @@ const isAsset = (url) =>
   /\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|svg|webp|ico)$/i.test(url.pathname)
   || url.hostname === 'fonts.googleapis.com'
   || url.hostname === 'fonts.gstatic.com';
+
+/*
+ * The handful of assets whose names never change but whose contents do.
+ *
+ * Everything Expo emits carries a hash in its name, so serving a cached copy of
+ * it can never be wrong. These do not: the icon set and the manifest keep the
+ * names the browser and the platform look them up by, and a redraw replaces the
+ * bytes underneath. Cached-first, they are frozen at whatever the device saw the
+ * first time — which is exactly what happened to the tab icon on 8 Sep 2026,
+ * with `/favicon.svg` precached into SHELL *and* matched here, so `caches.match`
+ * kept answering out of SHELL while the refresh quietly wrote to ASSETS.
+ *
+ * So they go to the network first and only fall back to the copy, which costs
+ * one small request on a cold start and nothing at all offline.
+ */
+const isMutable = (url) => url.origin === self.location.origin
+  && (/^\/(favicon|apple-touch-icon)/.test(url.pathname) || url.pathname === '/manifest.json');
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -68,7 +86,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // The bundle, the fonts, the icons: serve what we have and quietly refresh it,
+  // The icons and the manifest: the network decides, because a redraw changes
+  // the bytes without changing the name. The copy is only the offline floor.
+  if (isMutable(url)) {
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(ASSETS).then((c) => c.put(request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(request).then((hit) => hit || Response.error())),
+    );
+    return;
+  }
+
+  // The bundle and the fonts: serve what we have and quietly refresh it,
   // because the file names carry their own hash and never change underneath us.
   if (isAsset(url)) {
     event.respondWith(
