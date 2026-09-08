@@ -286,7 +286,9 @@ export async function readTranscriptStream(res, onDelta) {
   for (;;) {
     const { value, done: end } = await reader.read();
     if (end) break;
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    // Normalised over the whole buffer, not the chunk: a \r\n split across two
+    // reads would otherwise hide the blank line between events (Codex review).
+    buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
     let at;
     while ((at = buffer.indexOf('\n\n')) >= 0) { handle(buffer.slice(0, at)); buffer = buffer.slice(at + 2); }
   }

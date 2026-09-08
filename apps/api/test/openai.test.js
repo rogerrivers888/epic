@@ -191,3 +191,14 @@ test('a stream with Windows line ends and one object per line is still read', as
   assert.equal(out.text, 'Four nights.');
   assert.deepEqual(out.events.sort(), ['transcript.text.delta', 'transcript.text.done']);
 });
+
+test('a \\r\\n split across two network chunks still separates the events', async () => {
+  const enc = new TextEncoder();
+  const a = 'data: {"type":"transcript.text.delta","delta":"Four "}\r';
+  const b = '\n\r\ndata: {"type":"transcript.text.done","text":"Four nights."}\r\n\r\n';
+  const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(a)); c.enqueue(enc.encode(b)); c.close(); } });
+  const pieces = [];
+  const out = await readTranscriptStream(new Response(body), (d) => pieces.push(d));
+  assert.deepEqual(pieces, ['Four ']);
+  assert.equal(out.text, 'Four nights.');
+});
