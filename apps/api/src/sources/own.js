@@ -796,7 +796,7 @@ export async function sweepExpired() {
  * else's server being generous.
  */
 export async function identifyKinds({ limit = 25, householdId = null } = {}) {
-  const rows = await owned.needingKind(limit);
+  const rows = await owned.needingKind(limit, MAX_ATTEMPTS);
   let found = 0;
   const kinds = {};
   for (const { ref, ...seed } of rows) {
@@ -808,7 +808,9 @@ export async function identifyKinds({ limit = 25, householdId = null } = {}) {
     const rec = await ownedRecord(ref).catch(() => null);
     if (rec?.category) { found += 1; kinds[rec.category] = (kinds[rec.category] ?? 0) + 1; }
   }
-  return { asked: rows.length, identified: found, kinds };
+  // What is left, and what is holding it up: a pass that asked nothing should
+  // say which of the three reasons that was.
+  return { asked: rows.length, identified: found, kinds, backlog: await owned.kindBacklog(MAX_ATTEMPTS) };
 }
 
 /** Places claimed but never researched, or due to be tried again. */

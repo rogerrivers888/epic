@@ -184,7 +184,7 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
  * the open map. Ordered by how prominent the sweep thought it was, so the ones
  * a household would actually see are identified first.
  */
-export async function needingKind(limit = 25) {
+export async function needingKind(limit = 25, maxAttempts = 6) {
   // `distinct on` has to be ordered by its own key first, so the ranking has to
   // happen outside it — ordered inside, the limit took an arbitrary slice in
   // venue_ref order and the batch was whichever places sorted early by id.
@@ -196,18 +196,40 @@ export async function needingKind(limit = 25) {
          join scout_places p on p.venue_ref = r.venue_ref
         where r.category is null
           and r.osm_ref is null
-          and r.enrich_attempts < 4
+          and r.enrich_attempts < $2
           and p.name is not null and p.lat is not null and p.lng is not null
         order by r.venue_ref, p.epic_score desc nulls last
      ) best
       order by epic_score desc nulls last
       limit $1`,
-    [limit],
+    [limit, maxAttempts],
   );
   // The sweep's own row, not the record's: the record is empty — that is the
   // whole reason these are on this list — and the open map cannot be asked
   // about a place with no name and no point.
   return rows.map((r) => ({ ref: r.venue_ref, name: r.name, lat: r.lat, lng: r.lng, website: r.website }));
+}
+
+/**
+ * The backlog behind `needingKind`, broken down by what is holding each one up.
+ *
+ * "Asked 0" with no reason is the empty tab this codebase keeps refusing to
+ * ship. A place can be unidentified for three different reasons and only one of
+ * them is worth another try, so the back office is told which.
+ */
+export async function kindBacklog(maxAttempts = 6) {
+  const { rows } = await query(
+    `select count(*)::int as unidentified,
+            count(*) filter (where p.name is null or p.lat is null or p.lng is null)::int as nothing_to_ask_with,
+            count(*) filter (where r.enrich_attempts >= $1)::int as tried_enough,
+            count(*) filter (where p.name is not null and p.lat is not null and p.lng is not null
+                               and r.enrich_attempts < $1)::int as ready
+       from place_records r
+       join scout_places p on p.venue_ref = r.venue_ref
+      where r.category is null and r.osm_ref is null`,
+    [maxAttempts],
+  );
+  return rows[0] ?? { unidentified: 0, nothing_to_ask_with: 0, tried_enough: 0, ready: 0 };
 }
 
 /** How much of the household's research is owned, for Settings and the offline card. */
