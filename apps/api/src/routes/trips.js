@@ -1062,6 +1062,8 @@ router.get('/:id/along', async (req, res, next) => {
         openNow: v.openNow ?? null,
         closesAt: v.closesAt ?? null,
         opensAt: v.opensAt ?? null,
+        /** For the half view's bullets: it was in the full view and nowhere else. */
+        goodForChildren: v.goodForChildren ?? null,
         photos: (v.photos ?? []).slice(0, 1),
         attribution: v.attribution ?? null,
         detourMinutes: detour,

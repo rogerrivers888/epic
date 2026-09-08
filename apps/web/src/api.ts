@@ -666,6 +666,7 @@ export type TripAlongPlace = {
   openingHours: string | null; phone: string | null; website: string | null; address: string | null;
   /** A sentence about the place, and whether it is open — the browse card's two other lines. */
   summary: string | null; openNow: boolean | null; closesAt: string | null; opensAt: string | null;
+  goodForChildren: boolean | null;
   photos: VenuePhotoRef[]; attribution: string | null;
   detourMinutes: number | null; detourMiles: number;
   estimated: boolean; onShortlist: boolean; onDay: boolean;

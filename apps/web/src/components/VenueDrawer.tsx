@@ -703,7 +703,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
                   {v?.summary ?? item.summary ? <Text style={type.body}>{v?.summary ?? item.summary}</Text> : null}
                   {item.reasons.length ? <Wrap>{item.reasons.filter((r) => r.kind !== 'chain').map((r, i) => <Chip key={i} label={r.text} tone={r.kind === 'dislike' || r.kind === 'diet' ? 'dislike' : r.kind === 'note' ? 'neutral' : 'like'} />)}</Wrap> : null}
-                  {v?.address ?? item.address ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}
+                  {(v?.address ?? item.address) && !highlights.some((h) => h.title === 'Where it is')
+                    ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}
                   {venue === null && !error ? (
                     ours0wn ? (
                       // An atlas place has no provider record to be missing. It
@@ -721,15 +722,22 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   {/* Good for children carries the children's menu with it, and a
                       restaurant serving some vegetarian food is every restaurant:
                       only a genuinely vegetarian place is worth a word (owner,
-                      4 Sep 2026). */}
+                      4 Sep 2026).
+
+                      Only what the rows above have not already said. Children
+                      and bookings are highlights now, and saying them here as
+                      well put the same sentence twice on one screen. */}
                   {(() => {
+                    const said = new Set(highlights.map((h) => h.title));
                     const cuisines = (v?.cuisines ?? item.cuisines ?? []).map((c) => c.toLowerCase());
                     const veggie = cuisines.some((c) => /vegetarian|vegan/.test(c));
-                    const good = [(v?.goodForChildren ?? item.goodForChildren) ? 'children' : null, veggie ? 'vegetarians' : null].filter(Boolean);
+                    const kids = (v?.goodForChildren ?? item.goodForChildren) && !said.has('Good for children');
+                    const good = [kids ? 'children' : null, veggie ? 'vegetarians' : null].filter(Boolean);
                     if (good.length) return <IconText name="children">Good for {good.join(' and ')}</IconText>;
                     return (v?.goodForChildren ?? item.goodForChildren) === false ? <IconText name="children" color={colors.inkMuted}>Not noted as good for children</IconText> : null;
                   })()}
-                  {item.reservable != null ? <IconText name="phone">{item.reservable ? 'Takes bookings' : 'Walk-in only'}</IconText> : null}
+                  {item.reservable != null && !highlights.some((h) => h.title === 'Takes bookings')
+                    ? <IconText name="phone">{item.reservable ? 'Takes bookings' : 'Walk-in only'}</IconText> : null}
                   {item.justification ? <Text style={type.small}>"{item.justification}"</Text> : null}
                   <Wrap>
                     {website ? <Button label="Website" icon="external" kind="ghost" onPress={() => Linking.openURL(website)} /> : null}
@@ -797,7 +805,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
               {shown === 'travel' ? (
                 <View style={{ gap: spacing.sm }}>
-                  {v?.address ?? item.address ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}
+                  {(v?.address ?? item.address) && !highlights.some((h) => h.title === 'Where it is')
+                    ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}
                   {travelBits.length ? <Text style={type.small}>{travelBits.join(' · ')}</Text> : null}
                   {gettingThere}
                   <Wrap>

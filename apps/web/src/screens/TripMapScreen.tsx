@@ -371,16 +371,22 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * seconds, and the retry is the researcher's job rather than this screen's.
    */
   const menusStarted = useRef(new Set<string>());
+  /**
+   * Once per place, whatever asked for it.
+   *
+   * The ref is remembered whether the read worked or not: a menu that could not
+   * be read this afternoon will not read any better in ten seconds, and the
+   * retry is the researcher's job rather than this screen's.
+   */
+  const startMenu = useCallback((p: TripAlongPlace) => {
+    if (placeKind(p) !== 'food' || !p.website || menusStarted.current.has(p.venueRef)) return;
+    menusStarted.current.add(p.venueRef);
+    void api.readMenu({ ref: p.venueRef, label: p.name, website: p.website }).catch(() => null);
+  }, []);
   useEffect(() => {
     if (pill !== 'food' || along.loading) return;
-    for (const p of shownAlong.slice(0, 3)) {
-      if (!p.website || menusStarted.current.has(p.venueRef)) continue;
-      menusStarted.current.add(p.venueRef);
-      // Nothing waits on this and nothing on screen changes if it fails: the
-      // drawer asks again when it opens, and by then the answer may be there.
-      void api.readMenu({ ref: p.venueRef, label: p.name, website: p.website }).catch(() => null);
-    }
-  }, [pill, along.loading, shownAlong, kindNow, cuisineNow]);
+    for (const p of shownAlong.slice(0, 3)) startMenu(p);
+  }, [pill, along.loading, shownAlong, kindNow, cuisineNow, startMenu]);
 
   // Somewhere to sleep, ranked the way the criteria asked. Only fetched when
   // the Stay pill is lit — it is an Overpass call and sometimes a price call.
@@ -747,7 +753,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     lat: p.lat ?? 0, lng: p.lng ?? 0, cuisines: [], experiences: [],
     rating: null, ratingCount: null, priceLevel: null,
     openingHours: null, phone: null, website: null, address: null,
-    summary: null, openNow: null, closesAt: null, opensAt: null,
+    summary: null, openNow: null, closesAt: null, opensAt: null, goodForChildren: null,
     photos: [], attribution: null,
     detourMinutes: null, detourMiles: 0, estimated: true,
     onShortlist: p.shortlisted, onDay: p.scheduled,
@@ -761,6 +767,17 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   }, [shortlist, trip.id, onChanged]);
 
   const shortlistIt = useCallback(async (p: TripAlongPlace) => {
+    /*
+      Start the menu (owner, 8 Sep 2026: "that's exactly the time to crawl the
+      menu when someone favourites something. Whenever we think it is likely
+      that someone's going to go into a restaurant, we should be pulling the
+      menu"). Keeping a restaurant is the strongest signal there is that you
+      will open it, and a menu takes the better part of a minute — so the whole
+      value is in having started before you ask.
+
+      Nothing waits on it and nothing on screen changes if it fails.
+    */
+    startMenu(p);
     try {
       await api.addToShortlist(trip.id, { venueRef: p.venueRef, venueLabel: p.name, category: p.category, lat: p.lat, lng: p.lng });
       setAlong((a) => ({ ...a, places: a.places.map((x) => (x.venueRef === p.venueRef ? { ...x, onShortlist: !x.onShortlist } : x)) }));
@@ -1731,6 +1748,7 @@ const bulletsFor = (p: TripAlongPlace): { text: string; strong?: boolean }[] => 
   // every attraction, and "Free" said of a place nobody has priced is a claim.
   if (p.priceLevel != null) out.push({ text: money(p.priceLevel) as string });
   if (!open && p.openingHours) out.push({ text: p.openingHours.split(' · ')[0] });
+  if (p.goodForChildren) out.push({ text: 'Good for children' });
   if (p.detourMiles) out.push({ text: `${p.detourMiles} miles off the route` });
   if (p.ratingCount) out.push({ text: `Rated by ${p.ratingCount.toLocaleString()} people` });
   if (p.website) out.push({ text: hostOf(p.website) });
@@ -2730,7 +2748,7 @@ function alongToItem(p: TripAlongPlace): BrowseItem {
      */
     photos: p.photos ?? [], attribution: p.attribution ?? null,
     rating: p.rating, ratingCount: p.ratingCount, priceLevel: p.priceLevel,
-    summary: p.summary,
+    summary: p.summary, goodForChildren: p.goodForChildren,
     /** What stopping here costs the day — the full view's meta line had no number. */
     travelFromBaseMinutes: p.detourMinutes,
   };
