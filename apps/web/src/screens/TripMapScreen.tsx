@@ -50,7 +50,18 @@ import { fromName, shortPlaceName, tripName } from './tripName';
 const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
 const clock = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const mins = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ''}`.trim());
-const money = (level?: number | null) => (level == null ? null : '£'.repeat(Math.max(1, Math.min(4, level))));
+/**
+ * What it costs, in the only words we actually have (owner, 8 Sep 2026: "we
+ * replace the monetary values with the free and expensive moderate for Google
+ * Places").
+ *
+ * Google gives a five-band scale and no amounts, so these are its bands said
+ * plainly. The pound signs were worse than imprecise — `'£'.repeat(max(1, 0))`
+ * drew a *free* place as "£", which is not a rounding error but the opposite
+ * of the truth.
+ */
+const PRICE_WORDS = ['Free', 'Inexpensive', 'Moderate', 'Expensive', 'Very expensive'];
+const money = (level?: number | null) => (level == null ? null : PRICE_WORDS[Math.max(0, Math.min(4, level))]);
 
 /** Which pill is lit. Null is Trip home. */
 type Pill = 'activities' | 'food' | 'stay' | 'shortlist';
@@ -67,7 +78,7 @@ const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string;
   // fill up, and without a number nothing on the map says it is (owner,
   // 6 Sep 2026: "I need a bracketed number of items that are in the shortlist,
   // just so I know it's building").
-  { key: 'shortlist', label: saved ? `Shortlist (${saved})` : 'Shortlist', icon: 'shortlist' },
+  { key: 'shortlist', label: saved ? `Shortlist · ${saved}` : 'Shortlist', icon: 'shortlist' },
 ];
 
 /**
@@ -341,6 +352,35 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     }[sort] ?? null;
     return by ? [...kept].sort(by) : kept;
   }, [along.places, kindNow, cuisineNow, minRating, priceBand, sort]);
+
+  /**
+   * Start reading the menus of the first few restaurants, before anybody asks.
+   *
+   * Owner, 8 Sep 2026: "if I click into restaurants, I think you should fetch
+   * the menus for the first 3. If I go into a category of restaurants, you
+   * should again fetch the menus for the first 3 in the background. When I
+   * click into a restaurant, by that time, at least you've already made a
+   * start." Reading a menu takes the better part of a minute, so the whole
+   * value is in having started.
+   *
+   * Three, and only somewhere you eat, and only where we know a website to
+   * read — each one is a Claude call against the household's monthly bound,
+   * and a browse of forty restaurants must not spend forty of them. Fired once
+   * per list: the ref is remembered whether it worked or not, because a menu
+   * that could not be read this afternoon will not read any better in ten
+   * seconds, and the retry is the researcher's job rather than this screen's.
+   */
+  const menusStarted = useRef(new Set<string>());
+  useEffect(() => {
+    if (pill !== 'food' || along.loading) return;
+    for (const p of shownAlong.slice(0, 3)) {
+      if (!p.website || menusStarted.current.has(p.venueRef)) continue;
+      menusStarted.current.add(p.venueRef);
+      // Nothing waits on this and nothing on screen changes if it fails: the
+      // drawer asks again when it opens, and by then the answer may be there.
+      void api.readMenu({ ref: p.venueRef, label: p.name, website: p.website }).catch(() => null);
+    }
+  }, [pill, along.loading, shownAlong, kindNow, cuisineNow]);
 
   // Somewhere to sleep, ranked the way the criteria asked. Only fetched when
   // the Stay pill is lit — it is an Overpass call and sometimes a price call.
@@ -860,15 +900,19 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         )}
       </View>
 
-      {/* Bare icons: the people who are coming, and the conversation. */}
+      {/*
+        Bare icons: the people who are coming, and the conversation. On the trip
+        only — inside a browse you are looking at what is nearby, and who is in
+        the car is not the question (owner, 8 Sep 2026; the drawing has neither).
+      */}
       <View style={styles.headEnd}>
-        {onPeople ? (
+        {onPeople && !pill ? (
           <Pressable onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
             <Icon name="household" size={20} color={colors.ink} strokeWidth={2} />
             <Text style={styles.peopleCount}>{party || 1}</Text>
           </Pressable>
         ) : null}
-        {onChat ? (
+        {onChat && !pill ? (
           <Pressable onPress={onChat} style={styles.chatBare} accessibilityRole="button" accessibilityLabel={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'}>
             {/* Unread turns the icon Moss. No dot — a badge on a bare icon is a
                 box by another name (5h). */}
@@ -1569,11 +1613,13 @@ type SavedFilter = 'all' | 'activities' | 'food' | 'stay';
 
 /** How the browse is ordered. Best first is the default, as the handoff asks. */
 type SortKey = 'rating' | 'detour' | 'price' | 'type';
-const SORTS: { key: SortKey; label: string }[] = [
+const sortsFor = (pill: Pill | null): { key: SortKey; label: string }[] => [
   { key: 'rating', label: 'Rating' },
   { key: 'detour', label: 'Detour' },
-  { key: 'price', label: 'Price' },
-  { key: 'type', label: 'Type' },
+  // Named for the thing itself, as the handoff draws it: "Entry price" over a
+  // list of days out, "Price" over a list of restaurants.
+  { key: 'price', label: pill === 'food' ? 'Price' : pill === 'stay' ? 'Price per night' : 'Entry price' },
+  { key: 'type', label: pill === 'food' ? 'Cuisine' : pill === 'stay' ? 'Type of stay' : 'Activity type' },
 ];
 
 /** The floors the rating filter offers. `0` is "any", and keeps the unrated. */
@@ -1589,9 +1635,10 @@ const RATINGS = [0, 3.5, 4, 4.5];
  */
 const PRICE_BANDS: { key: string; label: string; holds: ((p: TripAlongPlace) => boolean) | null }[] = [
   { key: 'any', label: 'Any', holds: null },
-  { key: 'cheap', label: '£', holds: (p) => p.priceLevel != null && p.priceLevel <= 1 },
-  { key: 'mid', label: '££', holds: (p) => p.priceLevel === 2 },
-  { key: 'dear', label: '£££+', holds: (p) => p.priceLevel != null && p.priceLevel >= 3 },
+  { key: 'free', label: 'Free', holds: (p) => p.priceLevel === 0 },
+  { key: 'cheap', label: 'Inexpensive', holds: (p) => p.priceLevel === 1 },
+  { key: 'mid', label: 'Moderate', holds: (p) => p.priceLevel === 2 },
+  { key: 'dear', label: 'Expensive', holds: (p) => p.priceLevel != null && p.priceLevel >= 3 },
 ];
 
 
@@ -2102,15 +2149,13 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         </View>
 
         {/*
-          Only where anything is actually priced. Attractions carry no price
-          level at all, so the group read Any 60 · £ 0 · ££ 0 · £££ 0 — which
-          is the same failure as offering Castle where there is no castle: you
-          press it, nothing happens, and you cannot tell whether the control is
-          broken or the world is.
+          Always drawn, and named for the thing being priced (owner, 8 Sep
+          2026). Google gives a five-band scale and no amounts, so these are
+          its bands in its own words — and where a pool carries no price at all
+          the counts say so plainly, which is a truer answer than hiding the
+          question.
         */}
-        {along.places.some((p) => p.priceLevel != null) ? (
-        <>
-        <Text style={styles.kicker}>Price</Text>
+        <Text style={styles.kicker}>{pill === 'food' ? 'Price' : pill === 'stay' ? 'Price per night' : 'Entry price'}</Text>
         <View style={styles.segRow}>
           {PRICE_BANDS.map((b) => {
             const on = b.key === priceBand;
@@ -2128,8 +2173,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             );
           })}
         </View>
-        </>
-        ) : null}
 
         <Text style={styles.kicker}>{pill === 'food' ? 'Kind of place' : 'Type of thing'}</Text>
         <View>
@@ -2214,7 +2257,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           </Text>
         </Pressable>
         <Pressable onPress={() => { setOpenDetour(false); setOpenSort((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openSort }}>
-          <Text style={styles.controlText} numberOfLines={1}>{`Sort: ${SORTS.find((x) => x.key === sort)?.label ?? 'Rating'}`}</Text>
+          <Text style={styles.controlText} numberOfLines={1}>{`Sort: ${sortsFor(pill).find((x) => x.key === sort)?.label ?? 'Rating'}`}</Text>
           <Icon name={openSort ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
         </Pressable>
       </View>
@@ -2241,9 +2284,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             {anchorLabel ? `How far from ${anchorLabel}?` : along.hasRoute ? 'How far off the route?' : 'How far are you prepared to travel?'}
           </Text>
           {DETOURS.map((n) => (
-            <Pressable key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
+            <Pressable key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={[styles.optRow, n === maxDetourMin && styles.optRowOn]} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
               <Text style={[type.body, { flex: 1 }, n === maxDetourMin && styles.optOn]}>Up to {n} minutes</Text>
-              {n === maxDetourMin ? <Icon name="check" size={16} color={colors.accent} /> : null}
             </Pressable>
           ))}
         </View>
@@ -2252,19 +2294,22 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
       {openSort ? (
         // Anchored under the control that opened it, right-aligned to it.
         <View style={[styles.dropdown, styles.sortMenu]}>
-          {SORTS.map((o) => (
+          {sortsFor(pill).map((o) => (
             <Pressable
               key={o.key}
               onPress={() => { onSort(o.key); setOpenSort(false); }}
-              style={styles.optRow}
+              style={[styles.optRow, o.key === sort && styles.optRowOn]}
               accessibilityRole="radio"
               accessibilityState={{ checked: o.key === sort }}
             >
-              {/* The one in force is said in colour as well as by a tick: a
-                  grey list with a small mark in it does not read as a choice
-                  that has been made (owner, 8 Sep 2026). */}
+              {/*
+                A light green bar across the whole row, and no tick (owner,
+                8 Sep 2026: "they should have a light green bar, no tick box").
+                The fill is the answer; a tick beside it is the same thing said
+                twice, and it was the thing that made this look unlike the
+                drawing.
+              */}
               <Text style={[type.body, { flex: 1 }, o.key === sort && styles.optOn]}>{o.label}</Text>
-              {o.key === sort ? <Icon name="check" size={16} color={colors.accent} /> : null}
             </Pressable>
           ))}
         </View>
@@ -3649,7 +3694,10 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.ink, flexShrink: 1 },
   dropdown: {
     zIndex: 2, marginHorizontal: 16, marginTop: 8, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 6 },
-  optRow: { flexDirection: 'row', alignItems: 'center', minHeight: TARGET },
+  // The rows run the full width of the menu so a chosen one fills it, which is
+  // what makes the bar read as the answer rather than as a highlight.
+  optRow: { flexDirection: 'row', alignItems: 'center', minHeight: TARGET, paddingHorizontal: 12, marginHorizontal: -12 },
+  optRowOn: { backgroundColor: colors.bandSub },
 
   /**
    * A hairline, not a rule (owner, 8 Sep 2026: "change these black lines to the
@@ -3746,10 +3794,10 @@ const styles = StyleSheet.create({
   filterTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6, color: colors.ink },
   // Equal cells in one outline, divided by the same rule — the pack's segmented
   // control, with the count under each so a choice is made knowing its cost.
-  segRow: { flexDirection: 'row', borderWidth: 1, borderColor: colors.lineSoft, marginBottom: 6 },
-  seg: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 10, minHeight: 54, borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
+  segRow: { flexDirection: 'row', flexWrap: 'wrap', borderWidth: 1, borderColor: colors.lineSoft, marginBottom: 6 },
+  seg: { flexGrow: 1, flexBasis: 72, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 10, paddingHorizontal: 4, minHeight: 54, borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
   segOn: { backgroundColor: colors.selected },
-  segText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
+  segText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, textAlign: 'center' },
   segCount: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: TARGET, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   // The remainder is a fact, not a filter: it is counted but cannot be picked.
