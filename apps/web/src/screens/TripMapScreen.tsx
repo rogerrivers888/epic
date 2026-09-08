@@ -72,6 +72,8 @@ const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string;
 
 /** The height of the tab bar the shell draws under this screen. */
 const TABBAR = 70;
+/** The picture on a browse row: a third bigger than it was (owner, 8 Sep 2026). */
+const THUMB = 117;
 
 export function TripMapScreen({ d, section, household, onBack, onChanged, onSection, onDelete, onMenu, onChat, onPeople, onOpenStop, chatUnread = 0 }: {
   d: TripDetail;
@@ -1452,7 +1454,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             style={[styles.row, selected === p.venueRef && styles.rowOn]}
             accessibilityRole="button"
           >
-            <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={6} credit={false} />
+            {/* The same picture as a browse row: one list, one size (8 Sep 2026). */}
+            <VenueThumb name={p.name} image={p.image} category={p.category} width={THUMB} height={THUMB} rounded={12} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
               <Text style={type.small} numberOfLines={1}>{p.day ?? 'no time yet'}</Text>
@@ -1610,21 +1613,17 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         </View>
       ) : null}
 
-      {/* Named against the band on the map behind the sheet, so the words and
-          the shading are plainly the same thing. */}
       {/*
-        How this page works, said once, in a line (owner, 7 Sep 2026: "I think
-        we need to be very clear with the user about how to interact on this
-        page"). It goes once a place is chosen, because by then it has been
-        read and the row itself is showing what it meant.
+        Two sentences used to sit here and both are gone (owner, 8 Sep 2026):
+        "Tap a place — on the map or here — for a closer look", which explained
+        a list that explains itself, and "osm did not answer, so some of these
+        have no reviews", which is a provider's failure wearing a sentence — the
+        thing that belongs in the back office and never on a phone.
+        
+        The room they took stays, deliberately: he asked for the space to be
+        left in place, and the chips need air under them either way.
       */}
-      {!along.loading && shown.length && !selected ? (
-        <Text style={[type.tiny, { paddingHorizontal: 16, paddingTop: 10 }]}>
-          {pins === 'card' ? 'Tap a place to see its card · the card opens it'
-            : pins === 'only' ? 'Tap a place — on the map or here — for a closer look'
-              : 'Tap a place to find it on the map · tap it again to open it'}
-        </Text>
-      ) : null}
+      <View style={styles.filterGap} />
 
       {along.loading ? (
         <Text style={[type.small, { padding: spacing.lg }]}>
@@ -1633,11 +1632,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             : along.hasRoute
               ? `Looking over the shaded band — up to ${maxDetourMin} minutes off the route…`
               : `Looking over the shaded ground — up to ${maxDetourMin} minutes away…`}
-        </Text>
-      ) : null}
-      {!along.loading && along.degraded.length && along.places.length ? (
-        <Text style={[type.tiny, { paddingHorizontal: 16, paddingTop: 8 }]}>
-          {along.degraded.map((x) => x.source).join(' and ')} did not answer, so some of these have no reviews.
         </Text>
       ) : null}
       {along.error ? <View style={{ padding: spacing.lg }}><StatusLine tone="warn">{along.error}</StatusLine></View> : null}
@@ -1758,7 +1752,23 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             accessibilityState={{ selected: selected === p.venueRef }}
             accessibilityLabel={selected === p.venueRef ? `${p.name} — hide on the map` : `${p.name} — show on the map`}
           >
-            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={90} height={90} rounded={6} credit={false} />
+            {/*
+              The picture is a third bigger and its corners are curved, and the
+              bookmark sits on it rather than beside the buttons (owner, 8 Sep
+              2026). It is the one thing on the row you tap without reading, so
+              it belongs on the thing you are looking at.
+            */}
+            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={THUMB} height={THUMB} rounded={12} credit={false}>
+              <Pressable
+                onPress={() => onShortlist(p)}
+                hitSlop={8}
+                style={styles.thumbMark}
+                accessibilityRole="button"
+                accessibilityLabel={p.onShortlist ? `Take ${p.name} off the shortlist` : `Save ${p.name} to the shortlist`}
+              >
+                <Icon name={p.onShortlist ? 'shortlisted' : 'shortlist'} size={16} color={colors.ink} fill={p.onShortlist} />
+              </Pressable>
+            </VenueThumb>
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
               {/* Type · price · the stars, on one line and never wrapping the
@@ -1801,9 +1811,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               (owner, 6 Sep 2026).
             */}
             <View style={styles.rowSide}>
-              <Pressable onPress={() => onShortlist(p)} hitSlop={8} style={styles.bookmark} accessibilityRole="button" accessibilityLabel={p.onShortlist ? 'Remove from the shortlist' : 'Save to the shortlist'}>
-                <Icon name={p.onShortlist ? 'shortlisted' : 'shortlist'} size={17} color={colors.ink} fill={p.onShortlist} />
-              </Pressable>
+              {/* The bookmark moved onto the picture; Add keeps this side. */}
               <Pressable onPress={() => onAdd(p)} style={styles.add} accessibilityRole="button">
                 <Icon name={p.onDay ? 'check' : 'add'} size={13} color={colors.ink} />
                 <Text style={styles.addText}>{p.onDay ? 'Added' : 'Add'}</Text>
@@ -2893,7 +2901,24 @@ const styles = StyleSheet.create({
   dropdown: { marginHorizontal: 16, marginTop: 8, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 6 },
   optRow: { flexDirection: 'row', alignItems: 'center', minHeight: TARGET },
 
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: BORDER, borderBottomColor: colors.line },
+  /**
+   * A hairline, not a rule (owner, 8 Sep 2026: "change these black lines to the
+   * very faint grey lines. I'm not even sure we need any lines at all"). At 2px
+   * ink, a list of ten places was ten black bars with pictures between them.
+   */
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  /** The air the two removed sentences were taking up. */
+  filterGap: { height: 18 },
+  /**
+   * The bookmark, on the picture's top-right corner. A pale disc under it so
+   * the glyph reads over a photograph of anything — the one place in Epic where
+   * a rounded shape is right, because it is sitting on a photo rather than in
+   * the layout.
+   */
+  thumbMark: {
+    position: 'absolute', top: 6, right: 6, width: 28, height: 28, borderRadius: 14,
+    backgroundColor: 'rgba(255,253,249,0.92)', alignItems: 'center', justifyContent: 'center',
+  },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   ratingText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.ink },
   rowActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 2 },
