@@ -1199,11 +1199,12 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
           word for word, its chevron went nowhere, and it was the thing pushing
           "Add something along the way" below the fold — which is the one
           control the welcome screen exists for. */}
-      <Text style={styles.kicker}>
-        {days.length > 1 && day
-          ? `${new Date(`${day.date}T12:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric' })} · day ${dayIndex + 1} of ${days.length}${stops.length ? ` · ${stops.length} stop${stops.length === 1 ? '' : 's'}` : ''}`
-          : stops.length ? `The day · ${stops.length} stop${stops.length === 1 ? '' : 's'}` : 'The day'}
-      </Text>
+      {/*
+        No kicker in here at all now. `SheetHead` above owns it — "THE DAY · 1
+        STOP" beside the link to the map on a day out, and nothing at all on a
+        trip with days, where the strip already says which day and how many
+        (5h: "No 'Day 1 of 9' kicker").
+      */}
 
       {/* On a holiday the day starts where you are sleeping, so there is no
           journey to draw — "Legoland Windsor (centre) → Legoland Windsor" is
