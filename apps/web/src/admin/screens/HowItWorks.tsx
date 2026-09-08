@@ -349,6 +349,28 @@ const SECTIONS: Section[] = [
         said: { who: 'Roger', on: '7 Sep 2026', words: 'That definitely needs to be fixed, and you need to put it into our knowledge bank in the admin section also.' },
       },
       {
+        title: 'Four open sources decide it, and a refusal beats them all',
+        rule: 'Wikidata types, the OpenStreetMap tags on the same feature, the categories on its Wikipedia article, and \u2014 only for a place we were already asking about \u2014 what Google calls it. A residential veto runs before any of them are allowed to say yes: access=private, access=no, or a building tagged as a dwelling with nothing public on it. Nothing downstream can undo a veto.',
+        why: 'The complaint being guarded against can only come from a false yes, so one signal has to be able to overrule the rest. The four are complementary rather than redundant: Highclere Castle is "building=yes historic=castle" on the map and invisible as an attraction, but sits in "Historic house museums in Hampshire" on Wikipedia; Virginia Water Lake is the other way round. OpenStreetMap alone lifts the share of places with an answer from 39% to 85%. Note that access=customers is not a refusal \u2014 Kew Gardens is tagged that way and you buy a ticket.',
+        state: 'live',
+        where: 'apps/api/src/domain/visiting.js \u00b7 apps/api/src/sources/visitingEvidence.js',
+      },
+      {
+        title: 'The join is the Wikidata id, not the OSM reference',
+        rule: 'Atlas places are matched to OpenStreetMap by asking Overpass for features tagged wikidata=Q\u2026, in batches of fifty, and the tags that bear on access are stored.',
+        why: 'Only 27 of 500 published attractions carry an OSM reference of their own, but every one carries a Wikidata id, and OSM features tag themselves. Asked that way, 79% of the places the rule could not settle turn out to have an OSM feature. Both sources are free, keyless and licensed for us to keep \u2014 ODbL and CC BY-SA \u2014 so the pass can run over the whole atlas without spending anything, and what comes back is stored so re-judging later costs nothing.',
+        state: 'live',
+        where: 'apps/api/src/sources/visitingEvidence.js \u00b7 back office \u203a Library',
+      },
+      {
+        title: 'Google answers on a call we were already making, and only ever fills a gap',
+        rule: 'The rating fetch that runs once per place on screen also asks for types and primaryType. Google can establish that a place is public; it is never allowed to conclude that one is private, and it never overturns an answer we already have. Only our own one-word conclusion is stored, tagged google.',
+        why: 'Places bills a request once, at the highest tier any of its fields belong to \u2014 a rating is Enterprise and a type is Essentials \u2014 so the types cost nothing on a call that already asks for the rating. That means no bulk sweep, no new spend, and no traffic that needs explaining, because we only ask about a place we are about to show somebody. Google has no type for a house, so its silence is mostly a fact about Google: silence leaves the verdict unestablished rather than refused. None of their content is kept \u2014 no name, rating, hours, or the type list itself \u2014 and the rows it touched can be found and dropped in one statement by that one tag.',
+        state: 'live',
+        where: 'apps/api/src/sources/providerMatch.js \u00b7 noteGoogleVisiting()',
+        said: { who: 'Roger', on: '7 Sep 2026', words: "I don't feel like there's a big deal with just checking the Google data to see whether it's a private residence or not, and then recording same or excluding it if it is a private residence." },
+      },
+      {
         title: 'What settles it is a type, not a sentence',
         rule: 'A place that is a museum, a park, a garden, a nature reserve or a castle is open by definition. A residence of the royal family that is not also a museum is closed \u2014 which separates Bagshot Park, Highgrove and Gatcombe Park from Windsor Castle, Sandringham and Osborne House in one line. Wording is read only where it states the case outright, and the open tests always run first.',
         why: 'Matching prose alone was tried and was dangerously wrong: it marked Osborne House, Bletchley Park, Broughton Castle and the Royal Pavilion as closed, all of them major attractions, because the words private, school and demolished appear in their histories. Wikidata types are stated facts; a Wikipedia sentence is a story. Of 193 published country houses the rule settles six, and each was checked by hand.',
