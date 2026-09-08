@@ -1145,7 +1145,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         item={drawer}
         baseLabel={trip.locality ?? trip.origin.label.split(',')[0]}
         onClose={() => setDrawer(null)}
-        addLabel="Add to the day"
+        addLabel="Add to trip"
         addIcon="add"
         added={drawerCandidate?.onDay ?? false}
         shortlisted={drawerCandidate?.onShortlist ?? false}
@@ -2633,6 +2633,8 @@ function alongToItem(p: TripAlongPlace): BrowseItem {
     photos: p.photos ?? [], attribution: p.attribution ?? null,
     rating: p.rating, ratingCount: p.ratingCount, priceLevel: p.priceLevel,
     summary: p.summary,
+    /** What stopping here costs the day — the full view's meta line had no number. */
+    travelFromBaseMinutes: p.detourMinutes,
   };
 }
 

@@ -44,6 +44,11 @@ type Tab = 'overview' | 'travel' | 'reviews' | 'menu' | 'order' | 'inside';
 // Somewhere you eat, where the menu is worth a row of its own.
 const EATING = new Set(['restaurant', 'cafe', 'bar', 'pub']);
 
+/** Just the domain, which is what a website line is for: "piccolino.co.uk". */
+const hostOf = (url: string): string => {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+};
+
 
 
 /**
@@ -515,6 +520,25 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     const uri = usable ? photoUri(usable) : null;
     return uri ? { uri, lqip: null } : null;
   })();
+  /**
+   * What is worth knowing before you set off, from what we actually hold.
+   *
+   * The handoff draws three rows here and fills them with copy it calls
+   * placeholder — "Kids' menu", "Dog friendly", "Book ahead on weekends".
+   * Those are claims about a business, and a claim we have not read anywhere
+   * is one we must not make. So this is the facts on the record, and a place
+   * with nothing to say gets no rows rather than three empty ones.
+   */
+  const highlights: { icon: IconName; title: string; sub: string | null }[] = [
+    openNow ? { icon: 'hours' as IconName, title: openNow.state, sub: openNow.detail } : null,
+    v?.goodForChildren ?? item.goodForChildren
+      ? { icon: 'children' as IconName, title: 'Good for children', sub: null }
+      : null,
+    item.reservable ? { icon: 'calendar' as IconName, title: 'Takes bookings', sub: null } : null,
+    price ? { icon: 'money' as IconName, title: price, sub: 'Typical spend, as the source bands it' } : null,
+    item.dwellMinutes > 0 ? { icon: 'clock' as IconName, title: `Allow ${minutes(item.dwellMinutes)}`, sub: null } : null,
+  ].filter(Boolean).slice(0, 3) as { icon: IconName; title: string; sub: string | null }[];
+
   const travelBits = [
     item.distanceKm != null ? `${item.distanceKm} km from ${baseLabel ?? 'base'}` : null,
     item.travelFromBaseMinutes != null ? `about ${item.travelFromBaseMinutes} min` : null,
@@ -530,68 +554,77 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.panel, wide ? styles.panelSide : styles.panelSheet, frameBox]}>
 
-          {/* The head is fixed and short, so the tabs — and whichever one you
-              came for — start above the fold (owner, 4 Sep 2026). */}
+          {/*
+            The head is fixed and short, so the tabs — and whichever one you
+            came for — start above the fold (owner, 4 Sep 2026).
+
+            The picture leads it (trips V2): the hero first with the way back
+            and the two things you do to a place on it, then the name and what
+            it is. A title above a photograph reads as a caption for the page;
+            a photograph above a title reads as the place.
+          */}
           <View style={styles.head}>
+            {hero ? (
+              <View style={styles.hero}>
+                {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
+                <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
+                <Pressable onPress={onClose} style={[styles.heroTile, styles.heroBack]} accessibilityRole="button" accessibilityLabel="Back">
+                  <Icon name="back" size={18} color={INK} />
+                </Pressable>
+                {/* Cream tiles rather than bare glyphs: a photograph can be any
+                    colour, and these have to be legible on all of them. */}
+                <View style={styles.heroTiles}>
+                  <Pressable onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
+                    <Icon name={shared ? 'check' : 'upload'} size={18} color={INK} />
+                  </Pressable>
+                  {onShortlist ? (
+                    <Pressable onPress={() => onShortlist(item)} style={[styles.heroTile, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                      <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
+                    </Pressable>
+                  ) : null}
+                </View>
+                {photos.length > 1 ? (
+                  <View style={styles.heroCount}><Text style={styles.heroCountText}>{`1 / ${photos.length}`}</Text></View>
+                ) : null}
+              </View>
+            ) : null}
+
             <Row style={{ alignItems: 'flex-start' }}>
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.name}>{title}</Text>
-                {/* One line, in the handoff's own order: what it is, how far,
-                    and what the crowd made of it (9f). The star is the lifted
-                    green rather than a colour of its own. */}
-                <View style={styles.metaRow}>
-                  <Text style={styles.meta} numberOfLines={2}>
-                    {[typeLine(item), price, item.travelFromBaseMinutes != null ? `${item.travelFromBaseMinutes} min ${travelWord}` : null]
-                      .filter(Boolean).join(' · ')}
-                  </Text>
-                  {rating != null ? (
-                    <View style={styles.ratingBit}>
-                      <Icon name="favourite" size={14} color={colors.accent} fill />
-                      <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
-                      {ratingCount ? <Text style={styles.meta}>({ratingCount.toLocaleString()})</Text> : null}
-                    </View>
-                  ) : null}
-                </View>
+                {/* One line, in the handoff's own order: what it is, where, and
+                    what stopping there costs the day. */}
+                <Text style={styles.meta} numberOfLines={2}>
+                  {[typeLine(item), price, item.travelFromBaseMinutes != null ? `+${item.travelFromBaseMinutes} min detour` : null]
+                    .filter(Boolean).join(' · ')}
+                </Text>
+                {/* Their own page, named by its domain — for anywhere you might
+                    have to ring, book or check before you set off. */}
+                {(v?.website ?? item.website) ? (
+                  <Pressable onPress={() => Linking.openURL((v?.website ?? item.website) as string)} style={styles.siteRow} accessibilityRole="link">
+                    <Icon name="web" size={13} color={colors.accent} />
+                    <Text style={styles.siteText} numberOfLines={1}>{hostOf((v?.website ?? item.website) as string)}</Text>
+                  </Pressable>
+                ) : null}
+                {rating != null ? (
+                  <View style={styles.ratingBit}>
+                    <Icon name="favourite" size={14} color={colors.accent} fill />
+                    <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
+                    {ratingCount ? <Text style={styles.reviewsText}>{`· ${ratingCount.toLocaleString()} reviews`}</Text> : null}
+                  </View>
+                ) : null}
                 {openNow ? (
                   <IconText name={openNow.open === false ? 'full' : 'booked'} color={openNow.open === false ? colors.inkMuted : colors.accent}>
                     <Text style={{ fontWeight: '700', color: colors.ink }}>{openNow.state}</Text>{openNow.detail ? ` · ${openNow.detail}` : ''}
                   </IconText>
                 ) : null}
               </View>
-              {/* 44×44 hit area, no border: the design is explicit, and a
-                  boxed × on a title row reads as a second control. */}
-              <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
+              {/* No × where the hero carries the way back; without a picture
+                  there is nothing else to close on. */}
+              {hero ? null : (
+                <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
+              )}
             </Row>
-            {/* The picture, straight under the title and running to both edges
-                (9f). It was a long way down the scroll before, under whatever
-                the source happened to return first. */}
-            {hero ? (
-              <View style={styles.hero}>
-                {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
-                <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
-                {/*
-                  The two things you do to a place you are looking at, on the
-                  picture where your thumb already is (trips V2). Cream tiles
-                  rather than bare glyphs: a photograph can be any colour, and
-                  these have to be legible on all of them.
-                */}
-                <View style={styles.heroTiles}>
-                  <Pressable onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
-                    <Icon name={shared ? 'check' : 'external'} size={18} color={INK} />
-                  </Pressable>
-                  {onShortlist ? (
-                    <Pressable onPress={() => onShortlist(item)} style={styles.heroTile} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
-                      <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
-                    </Pressable>
-                  ) : null}
-                </View>
-                {/* How many there are, so one photograph does not look like all
-                    there is. Only when there is more than one. */}
-                {photos.length > 1 ? (
-                  <View style={styles.heroCount}><Text style={styles.heroCountText}>{`1 / ${photos.length}`}</Text></View>
-                ) : null}
-              </View>
-            ) : null}
             {/* A strip on the 2px ink rule, not a row of pills (Inspire rework,
                 8f): the selected tab's underline sits *on* that rule, which is
                 what makes the tabs part of the page rather than floating above
@@ -628,6 +661,30 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     Somewhere they have not been keeps the invitation to say so.
                   */}
                   {been ? <FamilyVerdict visits={visits ?? []} members={ctl.members} /> : visits === undefined ? null : capture}
+
+                  {/*
+                    The three things worth knowing before you go (trips V2).
+                    Facts, every one of them, off the record and the provider —
+                    the handoff's own examples ("Kids' menu", "Book ahead on
+                    weekends") are placeholders it admits to, and inventing
+                    them here would be putting words in a business's mouth. A
+                    place we know three things about gets three rows; a place
+                    we know none about gets none, rather than three blanks.
+                  */}
+                  {highlights.length ? (
+                    <View style={styles.highlights}>
+                      {highlights.map((h) => (
+                        <View key={h.title} style={styles.highlight}>
+                          <View style={styles.highlightTile}><Icon name={h.icon} size={18} color={colors.ink} /></View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={styles.highlightTitle}>{h.title}</Text>
+                            {h.sub ? <Text style={styles.highlightSub}>{h.sub}</Text> : null}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+
                   {v?.summary ?? item.summary ? <Text style={type.body}>{v?.summary ?? item.summary}</Text> : null}
                   {item.reasons.length ? <Wrap>{item.reasons.filter((r) => r.kind !== 'chain').map((r, i) => <Chip key={i} label={r.text} tone={r.kind === 'dislike' || r.kind === 'diet' ? 'dislike' : r.kind === 'note' ? 'neutral' : 'like'} />)}</Wrap> : null}
                   {v?.address ?? item.address ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}
@@ -781,6 +838,22 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               from it. Ink on light, lime on dark — `primary` is already both. */}
           {onAdd && shown !== 'menu' && shown !== 'order' ? (
             <View style={styles.footer}>
+              {/*
+                Somewhere you eat gets the other thing you do with it beside
+                the first (trips V2): a table is booked on the restaurant's own
+                page, so this is their site rather than a booking of ours. Only
+                where they have one — a button that cannot do what it says is
+                worse than no button.
+              */}
+              {eating && (v?.website ?? item.website) ? (
+                <Pressable
+                  onPress={() => Linking.openURL((v?.website ?? item.website) as string)}
+                  accessibilityRole="link"
+                  style={styles.footerSecond}
+                >
+                  <Text style={styles.footerSecondText}>Book a table</Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={() => onAdd(item)}
                 disabled={added}
@@ -791,7 +864,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   <Icon name={added ? 'keep' : addIcon ?? 'trips'} size={18} color={colors.primaryFg} fill={added} />
                   <Text style={styles.footerText}>{added ? 'In the plan' : addLabel ?? 'Create trip'}</Text>
                 </View>
-                <Icon name="forward" size={18} color={colors.primaryFg} />
+                {/* No arrow beside a second button: two arrows on one bar is
+                    two things claiming to be the way on. */}
+                {eating && (v?.website ?? item.website) ? null : <Icon name="forward" size={18} color={colors.primaryFg} />}
               </Pressable>
             </View>
           ) : null}
@@ -814,6 +889,26 @@ const styles = StyleSheet.create({
   // view is for, and at 220 it read as a banner over a page of text.
   hero: { height: 300, marginHorizontal: -spacing.lg, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
   heroTiles: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
+  heroBack: { position: 'absolute', top: 12, left: 12 },
+  // Saved says so on the tile itself, not only in the glyph.
+  heroTileOn: { backgroundColor: LIME },
+  highlights: { gap: 2 },
+  highlight: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  // An outline, not a fill: three lime squares down the page would read as
+  // three things that had been chosen.
+  highlightTile: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.lineSoft },
+  highlightTitle: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
+  highlightSub: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, marginTop: 1 },
+  // Equal width beside the primary, outlined rather than filled: it is the
+  // other thing you might do, not the thing we are recommending.
+  footerSecond: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: TARGET,
+    borderWidth: BORDER, borderColor: colors.line, paddingVertical: 14,
+  },
+  footerSecondText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
+  siteRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 24 },
+  siteText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent, flexShrink: 1 },
+  reviewsText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
   // CREAM rather than the palette's surface, on purpose: a photograph is a
   // photograph in either theme, and a tile that turns near-black in the dark
   // disappears into half the pictures it sits on.
@@ -830,12 +925,13 @@ const styles = StyleSheet.create({
   credit: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted, marginTop: spacing.xl },
   // Pinned: the action does not scroll away from the thing it acts on.
   footer: {
+    flexDirection: 'row', alignItems: 'stretch', gap: 10,
     borderTopWidth: 1, borderTopColor: colors.lineSoft, paddingHorizontal: spacing.lg, paddingTop: 12,
     paddingBottom: (Platform.OS === 'web' ? 'calc(16px + var(--epic-sab))' : 24) as any,
     backgroundColor: colors.bg,
   },
   footerBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     backgroundColor: colors.primary, paddingHorizontal: 20, minHeight: 56,
   },
   footerLabel: { flexDirection: 'row', alignItems: 'center', gap: 10 },
