@@ -966,7 +966,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       {pins === 'card' && cardFor && !drawer ? (
         <View style={[styles.cardWrap, { bottom: heights[detent] + TABBAR + 62 }]} pointerEvents="box-none">
           <Pressable onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
-            <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={52} height={52} rounded={6} credit={false} />
+            <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={83} height={83} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
               <Text style={styles.rowName} numberOfLines={1}>{cardFor.name}</Text>
               <View style={styles.rowMeta}>
@@ -1321,7 +1321,7 @@ function TripPlacesList({ data, onSelect, onDelete }: {
     <View style={{ paddingHorizontal: 16 }}>
       {data.places.map((p) => (
         <Pressable key={p.venueRef} onPress={() => onSelect(p.venueRef)} style={styles.row} accessibilityRole="button">
-          <VenueThumb name={p.name} image={p.image} category={p.category} width={56} height={56} rounded={6} credit={false} />
+          <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={6} credit={false} />
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
             <Text style={type.small} numberOfLines={1}>
@@ -1452,7 +1452,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             style={[styles.row, selected === p.venueRef && styles.rowOn]}
             accessibilityRole="button"
           >
-            <VenueThumb name={p.name} image={p.image} category={p.category} width={56} height={56} rounded={6} credit={false} />
+            <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
               <Text style={type.small} numberOfLines={1}>{p.day ?? 'no time yet'}</Text>
@@ -1690,7 +1690,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               accessibilityRole="button"
               accessibilityLabel={`Open ${chosen.name}`}
             >
-              <VenueThumb name={chosen.name} photos={chosen.photos} category={chosen.category} experiences={chosen.experiences} width={84} height={84} rounded={10} credit={false} />
+              <VenueThumb name={chosen.name} photos={chosen.photos} category={chosen.category} experiences={chosen.experiences} width={134} height={134} rounded={10} credit={false} />
               <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
                 <Text style={styles.chosenName} numberOfLines={2}>{chosen.name}</Text>
                 <View style={styles.rowMeta}>
@@ -1758,7 +1758,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             accessibilityState={{ selected: selected === p.venueRef }}
             accessibilityLabel={selected === p.venueRef ? `${p.name} — hide on the map` : `${p.name} — show on the map`}
           >
-            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={56} height={56} rounded={6} credit={false} />
+            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={90} height={90} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
               {/* Type · price · the stars, on one line and never wrapping the
@@ -2608,7 +2608,7 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
         {stays.results.map((st) => (
           <Pressable key={st.venueRef} onPress={() => onOpen(st)} style={[styles.row, selected === st.venueRef && styles.rowOn]} accessibilityRole="button">
             <View>
-              <VenueThumb name={st.name} photos={st.photos} category="hotel" width={64} height={64} rounded={6} credit={false} />
+              <VenueThumb name={st.name} photos={st.photos} category="hotel" width={102} height={102} rounded={6} credit={false} />
               {/* The top pick is the brand moment: a lime fill with ink type
                   (Epic pack §07). Cream on lime is never allowed, so the
                   numeral flips to ink with the fill. */}

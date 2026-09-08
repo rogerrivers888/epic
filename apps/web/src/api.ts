@@ -1361,7 +1361,11 @@ export const api = {
    * rating and the count — so it buys the cheap field mask, not the full detail.
    */
   placeRatings: (rows: { ref: string; name: string; lat: number; lng: number }[]) =>
-    request<{ ratings: Record<string, { rating: number | null; ratingCount: number | null }> }>(
+    request<{
+      ratings: Record<string, { rating: number | null; ratingCount: number | null }>;
+      /** Why the answer is short, in plain words, when the source refused. Never a provider's error text. */
+      sourceError?: string | null;
+    }>(
       `/api/places/ratings${qs({
         refs: rows.map((r) => r.ref).join(','),
         names: rows.map((r) => r.name).join('|'),

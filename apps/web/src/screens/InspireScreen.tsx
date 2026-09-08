@@ -53,6 +53,16 @@ import type { OpenTripOptions } from './PlanScreen';
 // scrolled. Opening a shelf shows a page of them and adds another page on ask.
 const SHELF = 24;
 const PAGE = 36;
+/**
+ * How many of a shelf go across before "All 41" is the way to the rest — and,
+ * because the screen only asks Google about what it is actually drawing, how
+ * many places each shelf costs a lookup for. The two must be the same number:
+ * asking about six and drawing twelve is what left half the squares without a
+ * star (owner, 8 Sep 2026: "I want to see it on every single square").
+ */
+const ACROSS = 12;
+/** What `/api/places/ratings` will answer about at once. */
+const BATCH = 24;
 
 /**
  * The chips, in the order the design draws them — and Food is not one of the
@@ -473,20 +483,56 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    */
   const [crowd, setCrowd] = useState<Record<string, { rating: number | null; ratingCount: number | null }>>({});
   const askedFor = useRef<Set<string>>(new Set());
+  /** Why the stars are missing, when the source could not be asked at all. */
+  const [ratingsOff, setRatingsOff] = useState<string | null>(null);
   const askAbout = useCallback((rows: InspireItem[]) => {
-    const want = rows
-      .filter((i) => i.rating == null && !askedFor.current.has(i.venueRef) && i.lat != null && i.lng != null)
-      .slice(0, 24);
+    const want = rows.filter((i) => i.rating == null && !askedFor.current.has(i.venueRef) && i.lat != null && i.lng != null);
     if (!want.length) return;
     for (const i of want) askedFor.current.add(i.venueRef);
-    api.placeRatings(want.map((i) => ({ ref: i.venueRef, name: i.name, lat: i.lat, lng: i.lng })))
-      .then((d) => setCrowd((c) => ({ ...c, ...d.ratings })))
-      .catch(() => { /* a card without a star is not an error */ });
+    // The endpoint answers about two dozen places at a time, and seven shelves
+    // of twelve is eighty-four, so one request left five shelves blank for
+    // good — the effect below does not run again once the pool has settled.
+    // Batched, one after the next rather than all at once, so the household's
+    // ceiling is spent at a walk and the first shelf fills first.
+    void (async () => {
+      for (let at = 0; at < want.length; at += BATCH) {
+        const batch = want.slice(at, at + BATCH);
+        try {
+          const d = await api.placeRatings(batch.map((i) => ({ ref: i.venueRef, name: i.name, lat: i.lat, lng: i.lng })));
+          // The source refused — out of allowance, most likely. Nothing is
+          // written down: a square must not say "No ratings yet" about a place
+          // nobody managed to ask about. The reason is said once, in words, at
+          // the foot of the shelves, and the batches stop there.
+          if (d.sourceError) {
+            for (const i of batch) askedFor.current.delete(i.venueRef);
+            setRatingsOff(d.sourceError);
+            return;
+          }
+          // Everything asked about is written down, including the ones that
+          // came back with nothing: a card has to be able to tell "no number"
+          // from "not asked yet", or it holds a blank line for ever.
+          setCrowd((c) => {
+            const next = { ...c };
+            for (const i of batch) next[i.venueRef] = d.ratings[i.venueRef] ?? { rating: null, ratingCount: null };
+            return next;
+          });
+        } catch {
+          // A card without a star is not an error — but it is worth trying
+          // again the next time this list is on screen.
+          for (const i of batch) askedFor.current.delete(i.venueRef);
+        }
+      }
+    })();
   }, []);
-  /** A place's own rating, or the one Google gave us for it. */
+  /**
+   * A place's own rating, or the one Google gave us for it — and whether
+   * anybody has answered yet, so a square can say "No ratings yet" rather than
+   * leave a gap that reads the same as still loading.
+   */
   const ratingOf = useCallback((i: InspireItem) => ({
     rating: i.rating ?? crowd[i.venueRef]?.rating ?? null,
     ratingCount: i.ratingCount ?? crowd[i.venueRef]?.ratingCount ?? null,
+    known: i.rating != null || crowd[i.venueRef] !== undefined,
   }), [crowd]);
 
   /** Every drawer the answer named, so a card can print its own word for itself. */
@@ -626,7 +672,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   }, [shown, mood, minorComing]);
 
   // Whichever list is actually on screen is the one worth asking about.
-  useEffect(() => { askAbout(pick ? listed : shelves.flatMap((sh) => sh.items.slice(0, 6))); },
+  useEffect(() => { askAbout(pick ? listed : shelves.flatMap((sh) => sh.items.slice(0, ACROSS))); },
     [pick, listed, shelves, askAbout]);
 
   const whoLabel = !attending || attending.size === members.length
@@ -790,7 +836,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   key={key}
                   title={label(key)}
                   count={items.length}
-                  items={items.slice(0, 12)}
+                  items={items.slice(0, ACROSS)}
                   onAll={() => goTo('activities', key)}
                   onOpen={open}
                   crowdOf={ratingOf}
@@ -858,6 +904,15 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   <Icon name="info" size={14} color={colors.ink} />
                   <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
                 </Pressable>
+              ) : null}
+              {/* Why every square is missing its star, said once and in plain
+                  words rather than eighty times as "No ratings yet" — which
+                  would be a claim about the places instead of about us. */}
+              {ratingsOff ? (
+                <View style={[styles.gutter, styles.notice]}>
+                  <Icon name="info" size={14} color={colors.ink} />
+                  <Text style={[type.small, { flex: 1, color: colors.ink }]}>{ratingsOff}</Text>
+                </View>
               ) : null}
               <View style={[styles.gutter, styles.foot]}>
                 <Text style={type.tiny}>

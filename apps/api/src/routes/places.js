@@ -702,7 +702,9 @@ places.get('/ratings', async (req, res, next) => {
       const [lat, lng] = String(points[i] || '').split(',').map(Number);
       return [ref, { name: names[i] ?? '', lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null }];
     }));
-    res.json({ ratings: await ratingsFor(refs, { householdId: household.id, places }) });
+    // `sourceError` is already a sentence for a screen — the raw 429 stays in
+    // the logs and the back office (why.js).
+    res.json(await ratingsFor(refs, { householdId: household.id, places }));
   } catch (err) { next(err); }
 });
 

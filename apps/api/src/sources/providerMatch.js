@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { googleSource } from './google.js';
 import { googleSaysPublic } from '../domain/visiting.js';
 import * as providerCalls from '../repositories/providerCalls.js';
+import { whySourceFailed } from './why.js';
 
 /**
  * Which place at a provider is the place in our atlas.
@@ -221,18 +222,39 @@ async function noteGoogleVisiting(venueRef, got) {
 
 export async function ratingsFor(refs, { householdId = null, places = new Map() } = {}) {
   const out = {};
+  /**
+   * Why the answer is short, when it is short for a reason.
+   *
+   * Every square now draws a rating slot, and a slot that says "No ratings
+   * yet" under a hundred places when the truth is that today's allowance is
+   * spent has told the household something false about those places. So a
+   * refusal travels back as one plain sentence — never the provider's own text
+   * (why.js) — and the screen holds its lines blank instead of asserting.
+   */
+  let sourceError = null;
   for (const ref of refs) {
     const hit = kept.get(ref);
     if (hit && Date.now() - hit.at < TTL_MS) {
       if (hit.value.rating != null) out[ref] = { rating: hit.value.rating, ratingCount: hit.value.ratingCount };
       continue;
     }
+    // Once the source has refused there is nothing to be had from asking about
+    // the other twenty-three, and — the part that matters — a place must never
+    // be written down as unmatchable on the strength of an exhausted quota.
+    if (sourceError) break;
     const p = places.get(ref);
     if (!p?.name || p.lat == null || p.lng == null) continue;
-    const id = await googleRefFor({ venueRef: ref, name: p.name, lat: p.lat, lng: p.lng, householdId }).catch(() => null);
+    let id = null;
+    try {
+      id = await googleRefFor({ venueRef: ref, name: p.name, lat: p.lat, lng: p.lng, householdId });
+    } catch (err) { sourceError = whySourceFailed('google', err); break; }
     if (!id) continue;
-    const got = await googleSource.rating(id).catch(() => null);
+    let got = null;
+    try {
+      got = await googleSource.rating(id);
+    } catch (err) { sourceError = whySourceFailed('google', err); }
     await providerCalls.record(householdId, 'google', 'atlas.rating', JSON.stringify({ google: 1 })).catch(() => null);
+    if (sourceError) break;
     if (!got) continue;
     // Asked and answered on a call we were making anyway.
     await noteGoogleVisiting(ref, got);
@@ -243,5 +265,5 @@ export async function ratingsFor(refs, { householdId = null, places = new Map() 
     if (got.rating != null) out[ref] = { rating: got.rating, ratingCount: got.ratingCount };
   }
   while (kept.size > MAX) kept.delete(kept.keys().next().value);
-  return out;
+  return { ratings: out, sourceError };
 }

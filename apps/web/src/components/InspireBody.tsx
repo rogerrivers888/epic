@@ -15,6 +15,21 @@ import { Icon, iconFor } from './Icon';
  */
 
 const GUTTER = 20;
+/**
+ * How big a picture is.
+ *
+ * Owner, 8 Sep 2026: "I prefer to have bigger, sexier images… I think they
+ * maybe need to be about 60% bigger", knowing that it costs him a shelf —
+ * "that probably means we only fit 2 rows in view, but that's okay". So the
+ * card is the old 160x110 at 1.6, and a phone shows one and a good look at the
+ * next rather than two small ones. Past 200px wide `PlaceThumb` buys the 960
+ * copy of our own photograph instead of the 500, so the picture is sharper as
+ * well as larger.
+ */
+const CARD_W = 256;
+const CARD_H = 176;
+/** The same 60% on the list's square, so an opened category reads like the shelf. */
+const ROW_THUMB = 134;
 /** "3,241" is four glyphs a card cannot spare; "3.2k" is the handoff's own. */
 const briefly = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
 
@@ -24,13 +39,31 @@ const briefly = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.
  * The lifted green rather than a rating yellow: Epic has no yellow, and the
  * handoff draws this in the same green the selected category uses.
  */
-export function Crowd({ rating, count, size = 13 }: { rating: number | null; count?: number | null; size?: number }) {
-  if (rating == null) return null;
+export function Crowd({ rating, count, size = 13, empty }: {
+  rating: number | null; count?: number | null; size?: number;
+  /**
+   * What to say when there is no number — and, by being passed at all, that
+   * this caller wants the line held whatever the answer.
+   *
+   * The owner asked for the rating and the count "on every single square" (8
+   * Sep 2026), which means a square Google has not answered for yet cannot
+   * simply have a gap where the other squares have a star. `undefined` is the
+   * old behaviour and draws nothing; a string is what to say instead; `null`
+   * holds the line blank while the answer is still on its way, so the card
+   * does not shuffle its own text when it lands.
+   */
+  empty?: string | null;
+}) {
+  const line = { fontSize: size, lineHeight: size + 5 };
+  if (rating == null) {
+    if (empty === undefined) return null;
+    return <Text style={[styles.meta, line]} numberOfLines={1}>{empty ?? ' '}</Text>;
+  }
   return (
     <View style={styles.crowd}>
       <Icon name="favourite" size={size + 1} color={colors.accent} fill />
-      <Text style={[styles.crowdValue, { fontSize: size }]}>{rating.toFixed(1)}</Text>
-      {count ? <Text style={[styles.meta, { fontSize: size }]}>({briefly(count)})</Text> : null}
+      <Text style={[styles.crowdValue, line]}>{rating.toFixed(1)}</Text>
+      {count ? <Text style={[styles.meta, line]}>{briefly(count)} review{count === 1 ? '' : 's'}</Text> : null}
     </View>
   );
 }
@@ -77,7 +110,7 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travelWo
   title: string; count: number; items: InspireItem[];
   onAll: () => void; onOpen: (i: InspireItem) => void;
   /** What the crowd made of it, once Google has answered for this one. */
-  crowdOf?: (i: InspireItem) => { rating: number | null; ratingCount: number | null };
+  crowdOf?: (i: InspireItem) => { rating: number | null; ratingCount: number | null; known?: boolean };
   travelWord?: string;
 }) {
   if (!items.length) return null;
@@ -92,22 +125,36 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travelWo
       </Pressable>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
         {items.map((i) => (
-          <Pressable key={i.venueRef} onPress={() => onOpen(i)} style={styles.card} accessibilityRole="button" accessibilityLabel={i.name}>
-            <PlaceThumb item={i} width={160} height={110} />
-            <Text style={styles.cardName} numberOfLines={2}>{i.name}</Text>
-            {/* "20 min drive · ★ 4.5 (3.2k)" — how far, then what people made
-                of it. The dwell moves to the place itself, where the facts grid
-                has room for it (9a, 9f). */}
-            <View style={styles.cardMeta}>
-              <Text style={styles.meta} numberOfLines={1}>{minutes(i.travelMinutes)} {travelWord ?? 'drive'}</Text>
-              {crowdOf?.(i).rating != null ? (
-                <><Text style={styles.meta}>·</Text><Crowd rating={crowdOf(i).rating} count={crowdOf(i).ratingCount} /></>
-              ) : null}
-            </View>
-          </Pressable>
+          <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travelWord={travelWord} onOpen={() => onOpen(i)} />
         ))}
       </ScrollView>
     </View>
+  );
+}
+
+/**
+ * One place on a shelf.
+ *
+ * The rating has its own line under the name rather than sharing one with the
+ * journey, and it is drawn whether or not there is a number yet: the owner
+ * asked to see the rating and how many people gave it "on every single square"
+ * (8 Sep 2026), and a square that says nothing at all reads as broken rather
+ * than as unknown. A place Google has no number for says so in words.
+ */
+function Card({ item, crowd, travelWord, onOpen }: {
+  item: InspireItem;
+  crowd?: { rating: number | null; ratingCount: number | null; known?: boolean };
+  travelWord?: string; onOpen: () => void;
+}) {
+  return (
+    <Pressable onPress={onOpen} style={styles.card} accessibilityRole="button" accessibilityLabel={item.name}>
+      <PlaceThumb item={item} width={CARD_W} height={CARD_H} />
+      <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+      {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
+      {/* The dwell stays on the place itself, where the facts grid has room
+          for it (9a, 9f); the card says only how far. */}
+      <Text style={styles.meta} numberOfLines={1}>{minutes(item.travelMinutes)} {travelWord ?? 'drive'}</Text>
+    </Pressable>
   );
 }
 
@@ -121,17 +168,17 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travelWo
  */
 export function PlaceRow({ item, kind, status, crowd, onOpen }: {
   item: InspireItem; kind: string | null; status?: { text: string; open: boolean } | null;
-  crowd?: { rating: number | null; ratingCount: number | null };
+  crowd?: { rating: number | null; ratingCount: number | null; known?: boolean };
   onOpen: () => void;
 }) {
   const bits = [kind, minutes(item.travelMinutes), `allow ${minutes(item.dwellMinutes)}`].filter(Boolean);
   return (
     <Pressable onPress={onOpen} style={styles.row} accessibilityRole="button" accessibilityLabel={item.name}>
-      <PlaceThumb item={item} width={84} height={84} />
+      <PlaceThumb item={item} width={ROW_THUMB} height={ROW_THUMB} />
       <View style={styles.rowBody}>
         <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>
         <Text style={styles.meta} numberOfLines={2}>{bits.join(' · ')}</Text>
-        <Crowd rating={crowd?.rating ?? null} count={crowd?.ratingCount} />
+        <Crowd rating={crowd?.rating ?? null} count={crowd?.ratingCount} empty={crowd ? (crowd.known ? 'No ratings yet' : null) : undefined} />
         {status ? <Text style={[styles.status, { color: status.open ? colors.accent : colors.inkMuted }]}>{status.text}</Text> : null}
       </View>
     </Pressable>
@@ -157,7 +204,7 @@ export function CuisineRow({ label, count, onOpen }: { label: string; count: num
  * less than the two numbers on the right.
  */
 export function FoodRow({ item, kind, where, status, standing, crowd, onOpen }: {
-  crowd?: { rating: number | null; ratingCount: number | null };
+  crowd?: { rating: number | null; ratingCount: number | null; known?: boolean };
   item: InspireItem; kind: string | null; where: string | null;
   status?: { text: string; open: boolean } | null;
   /**
@@ -184,7 +231,8 @@ export function FoodRow({ item, kind, where, status, standing, crowd, onOpen }: 
             band is a judgement of ours, and better than nothing at all. */}
         {crowd?.rating != null
           ? <Crowd rating={crowd.rating} count={crowd.ratingCount} />
-          : standing ? <Text style={styles.meta}>{STANDING[standing] ?? standing}</Text> : null}
+          : standing ? <Text style={styles.meta}>{STANDING[standing] ?? standing}</Text>
+          : crowd?.known ? <Text style={styles.meta}>No ratings yet</Text> : null}
       </View>
     </Pressable>
   );
@@ -204,11 +252,10 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink },
   allLink: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   carousel: { gap: 12, paddingHorizontal: GUTTER },
-  card: { width: 160, gap: 6 },
+  card: { width: CARD_W, gap: 6 },
   cardName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
 
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
-  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   crowd: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   crowdValue: { fontFamily: fonts.body, fontWeight: '700', color: colors.accent },
   status: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600' },
