@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { API_URL, VenuePhotoRef } from '../api';
 import { colors, radius, type } from '../theme';
+import { PHOTO_W } from './VenueThumb';
 
 /**
  * A place's photo, fetched through the API so the provider key never reaches
@@ -22,7 +23,7 @@ export function VenuePhoto({ photos, size = 72, credit = true }: { photos?: Venu
     return () => clearTimeout(t);
   }, [ready, failed, photo?.ref, photo?.url]);
   if (!photo || failed) return null;
-  const uri = photo.url ?? (photo.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${size >= 120 ? 480 : 240}` : null);
+  const uri = photo.url ?? (photo.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}` : null);
   if (!uri) return null;
   return (
     <View style={{ width: size, gap: 2 }}>

@@ -3,6 +3,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { API_URL, InspireItem } from '../api';
 import { colors, fonts, spacing, TARGET } from '../theme';
 import { Icon, iconFor } from './Icon';
+import { PHOTO_W } from './VenueThumb';
 
 /**
  * The bodies of the Inspire tab (Inspire rework, screens 8a, 8b, 8d, 8e).
@@ -88,7 +89,7 @@ export function PlaceThumb({ item, width, height }: { item: InspireItem; width: 
   const photo = item.photos?.[0];
   const uri = owned
     ? `${API_URL}/api/images/${owned.id}/${width > 200 ? 960 : 500}`
-    : photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=480` : null);
+    : photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}` : null);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   return (

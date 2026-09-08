@@ -45,7 +45,7 @@ import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor } from './access.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
-import { generalLimit, signInLimit, spendLimit } from './limits.js';
+import { generalLimit, photoLimit, signInLimit, spendLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import * as providerCalls from './repositories/providerCalls.js';
@@ -134,7 +134,10 @@ app.use('/api', deviceRoutes);
 
 // Provider money is spent under these, so they are held to a tighter number
 // than the rest of the API (limits.js).
-for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/photos', '/api/places']) app.use(path, spendLimit);
+for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places']) app.use(path, spendLimit);
+// Photographs get their own, wider budget: a browse is twenty of them at once,
+// and a search is one. See `photoLimit`.
+app.use('/api/photos', photoLimit);
 
 // The back office, behind the admin door (access.js). `requireDoor` answers 404
 // rather than 403, so a household using Epic never learns any of it is there;

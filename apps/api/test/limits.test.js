@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callerOf, limit } from '../src/limits.js';
+import { callerOf, limit, photoLimit, spendLimit } from '../src/limits.js';
 
 /** A request and response pair small enough to see all of. */
 function exchange(ip = '1.2.3.4', method = 'POST') {
@@ -72,4 +72,38 @@ test('the caller is the client, not Railway', () => {
   assert.equal(callerOf({ headers: {}, ip: '198.51.100.9', socket: {} }), '198.51.100.9');
   assert.equal(callerOf({ headers: {}, socket: { remoteAddress: '192.0.2.5' } }), '192.0.2.5');
   assert.equal(callerOf({ headers: {}, socket: {} }), 'unknown');
+});
+
+/**
+ * A browse screen draws twenty to thirty photographs at once, and a search is
+ * one request. Sharing a budget meant six screens and then every tile on the
+ * trip map fell back to its category icon (found 8 Sep 2026).
+ */
+test('a screenful of photographs does not spend a household’s searches', async () => {
+  const screens = 6;
+  const perScreen = 30;
+
+  // What the old arrangement did: photographs counted as searches.
+  let refusedAsSearch = 0;
+  for (let i = 0; i < screens * perScreen; i += 1) {
+    const { passed } = await run(spendLimit, '10.0.9.1');
+    if (!passed) refusedAsSearch += 1;
+  }
+  assert.ok(refusedAsSearch > 0, 'six screens of pictures would exhaust the search budget');
+
+  // What it does now.
+  let refused = 0;
+  for (let i = 0; i < screens * perScreen; i += 1) {
+    const { passed } = await run(photoLimit, '10.0.9.2');
+    if (!passed) refused += 1;
+  }
+  assert.equal(refused, 0, 'six screens of pictures all draw');
+
+  // Still bounded: a photograph can still reach Google and be billed.
+  let everRefused = false;
+  for (let i = 0; i < 700; i += 1) {
+    const { passed } = await run(photoLimit, '10.0.9.3');
+    if (!passed) { everRefused = true; break; }
+  }
+  assert.ok(everRefused, 'and a runaway script is still stopped');
 });

@@ -11,7 +11,7 @@ import { OwnedFacts } from './OwnedFacts';
 import { useOffline } from '../hooks/useOffline';
 import { savedRecord } from '../offline/cache';
 import { SOURCE_LABEL, priceMarks, typeLine } from './StopCard';
-import { VenueThumb } from './VenueThumb';
+import { PHOTO_W, VenueThumb } from './VenueThumb';
 
 /**
  * The click-through on a place (owner, 3 Sep 2026): a side drawer on a wide
@@ -44,17 +44,7 @@ type Tab = 'overview' | 'travel' | 'reviews' | 'menu' | 'order' | 'inside';
 // Somewhere you eat, where the menu is worth a row of its own.
 const EATING = new Set(['restaurant', 'cafe', 'bar', 'pub']);
 
-/**
- * One width for every rented photograph in the app, and the one `VenueThumb`
- * already asks for.
- *
- * A different width is a different fetch: the same picture at 960 is a second
- * trip to Google that the row's 480 has not paid for, and the hero was asking
- * for exactly that. On this household's quota it came back 429 and the hero
- * was a blank green rectangle — the row's thumbnail beside it loading fine
- * from the copy already cached. So: one size, one fetch, one photograph.
- */
-const PHOTO_W = 480;
+
 
 /**
  * Open today, or not. Google decides `openNow` in the place's own timezone, so

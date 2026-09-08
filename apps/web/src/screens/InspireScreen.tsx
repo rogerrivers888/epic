@@ -15,6 +15,7 @@ import { CategoryStrip, FilterButton, FilterPanel, FilterRow, InspireTop, MenuBa
 import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow } from '../components/InspireBody';
 import { ChoicePanel, TravelPanel, travelChipLabel, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
 import type { OpenTripOptions } from './PlanScreen';
+import { PHOTO_W } from '../components/VenueThumb';
 
 /**
  * Inspire — the home screen (owner, 5 Sep 2026; "Supporting docs/Roam Inspire").
@@ -1159,7 +1160,7 @@ function Card({ item, wide, onOpen, onKeep, kept, drawers }: {
   const photo = item.photos?.[0];
   const uri = owned
     ? `${API_URL}/api/images/${owned.id}/${wide ? 960 : 500}`
-    : photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=480` : null);
+    : photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}` : null);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const price = priceMarks(item.priceLevel);

@@ -85,6 +85,28 @@ export const spendLimit = limit({
   message: 'That is a lot of searching at once. Give it a minute.',
 });
 
+/**
+ * Photographs, which are spend but are not searches.
+ *
+ * They were under `spendLimit` — a hundred and twenty in five minutes — and a
+ * single browse screen draws twenty to thirty of them. Six screens and the
+ * pictures stopped: every tile on the trip map fell back to its category icon
+ * and the drawer said "That is a lot of searching at once", which is a
+ * sentence about searching to somebody who has searched once (found 8 Sep
+ * 2026).
+ *
+ * Still bounded, because a photo can still reach Google and be billed. But the
+ * budget is set to what a screen actually costs rather than to what a search
+ * does — and most of these never reach Google at all: the proxy holds a
+ * fetched photo for an hour and only records a provider call on a miss.
+ */
+export const photoLimit = limit({
+  name: 'photos',
+  windowMs: 5 * MINUTE,
+  max: 600,
+  message: 'That is a lot of pictures at once. Give it a minute.',
+});
+
 /** Everything else. Generous: a screen opening can be a dozen requests. */
 export const generalLimit = limit({ name: 'general', windowMs: 5 * MINUTE, max: 900 });
 

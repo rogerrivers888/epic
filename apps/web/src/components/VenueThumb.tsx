@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { API_URL, OwnedImage, VenuePhotoRef } from '../api';
 import { Icon, IconName, iconFor } from './Icon';
@@ -68,6 +68,17 @@ export type VenueThumbProps = {
   children?: React.ReactNode;
 };
 
+/**
+ * One width for every rented photograph in the app.
+ *
+ * A different width is a different fetch: the proxy caches per size, so the
+ * same picture asked for at 240, 480, 800 and 960 is four cold trips to
+ * Google, and on a household's quota the later ones come back 429. Every place
+ * that draws a rented photo asks for this and nothing else, so a picture is
+ * fetched once and every other frame is a cache hit.
+ */
+export const PHOTO_W = 480;
+
 export function VenueThumb({
   name, image, photos, category, experiences, atlasCategory,
   width, height, credit = true, rounded = radius.md, onPress, children,
@@ -87,13 +98,24 @@ export function VenueThumb({
    * route used to rely on never arrives and every tile fell back to its icon.
    */
   const rented = !image && (photo?.url ?? (photo?.ref
-    ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${width > 240 ? 480 : 240}`
+    ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}`
       + (photo.sig && photo.exp ? `&s=${encodeURIComponent(photo.sig)}&e=${photo.exp}` : '')
     : null));
   // A mark is small by nature; asking for 960 of a 180px PNG just serves the
   // same bytes back under a different name.
   const ourWidth = image?.source === 'logo' ? 500 : width > 240 ? 960 : 500;
   const uri = image ? `${API_URL}/api/images/${image.id}/${ourWidth}` : rented || null;
+
+  /**
+   * A new picture gets a fresh chance.
+   *
+   * `failed` was set once and never cleared, so a tile that asked for the
+   * wrong thing on its first render — a card measuring itself, a list
+   * re-ordering — showed its category icon for good, even after the source
+   * changed to one that would have loaded. That is how a browse full of
+   * photographs came to be a browse full of grey glyphs.
+   */
+  useEffect(() => { setFailed(false); setLoaded(false); }, [uri]);
 
   const isMark = image?.source === 'logo';
   const line = image?.creditRequired ? image.credit : photo?.attribution ?? null;

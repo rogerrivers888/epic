@@ -5,6 +5,7 @@ import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Row, Segmented, StatusLine, Wrap } from './ui';
 import { Icon, IconName } from './Icon';
 import { Wordmark } from './Wordmark';
+import { PHOTO_W } from './VenueThumb';
 
 /**
  * What the link opens (Group Trips v2, Epic 3).
@@ -68,7 +69,8 @@ export function itemIcon(label: string, kind: GroupItemKind): IconName {
  */
 export function coverUri(url?: string | null, width = 1200): string | null {
   if (!url) return null;
-  if (url.startsWith('photo:')) return `${API_URL}/api/photos/google?name=${encodeURIComponent(url.slice(6))}&w=${width}`;
+  // One width, whatever this frame happens to be: see PHOTO_W.
+  if (url.startsWith('photo:')) return `${API_URL}/api/photos/google?name=${encodeURIComponent(url.slice(6))}&w=${PHOTO_W}`;
   return url;
 }
 

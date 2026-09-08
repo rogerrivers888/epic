@@ -2400,10 +2400,16 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                   style={styles.cardMedia}
                   onLayout={(e) => { const w = Math.round(e.nativeEvent.layout.width); if (w && w !== cardW) setCardW(w); }}
                 >
-                  {/* Nothing until it has been measured: a frame drawn at a
-                      guessed width and corrected a frame later is a list that
-                      jumps as you open it. */}
-                  <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={cardW || 1} height={cardW ? Math.round(cardW / 1.5) : 1} rounded={12} credit={false}>
+                  {/*
+                    Nothing at all until the frame has been measured.
+
+                    Drawn at a guessed width it asked for a photograph at that
+                    width, which is a different fetch from the one it wanted a
+                    frame later — a cold trip to Google that came back 429 and
+                    left every card showing its category icon.
+                  */}
+                  {cardW ? (
+                  <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={cardW} height={Math.round(cardW / 1.5)} rounded={12} credit={false}>
                     <Pressable
                       onPress={() => onShortlist(p)}
                       hitSlop={8}
@@ -2429,6 +2435,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                       <View style={styles.priceTag}><Text style={styles.priceTagText}>{money(p.priceLevel)}</Text></View>
                     ) : null}
                   </VenueThumb>
+                  ) : null}
                 </View>
                 <View style={styles.rowMeta}>
                   <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
@@ -3613,7 +3620,9 @@ const styles = StyleSheet.create({
   // A card per row, ruled off from the next. No box around it: the picture is
   // the edge, which is what stops a list of cards reading as a list of boxes.
   card2: { gap: 8, paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
-  cardMedia: { alignSelf: 'stretch', minHeight: 4 },
+  // A 3:2 hole, kept open while the frame measures itself: at zero height
+  // it would report zero width and never fill.
+  cardMedia: { alignSelf: 'stretch', aspectRatio: 1.5, backgroundColor: colors.surfaceMuted, borderRadius: 12, overflow: 'hidden' },
   cardBlurb: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, lineHeight: 18 },
   cardSide: { alignItems: 'flex-start', paddingTop: 2 },
   // Bottom left of the picture, where it cannot fight the heart.
