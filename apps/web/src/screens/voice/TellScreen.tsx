@@ -9,7 +9,7 @@
  * them.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { api, HouseholdResponse, Member, SpokenFood, SpokenLike } from '../../api';
 import { paths } from '../../routes';
@@ -67,7 +67,7 @@ export function TellScreen({ memberId, mode, household, refresh }: { memberId: s
 
   // --- D4: the review -----------------------------------------------------------
   if (mode === 'review') {
-    const groups = useMemo(() => split(heard), [heard]);
+    const groups = split(heard);
     return (
       <VoiceScreen footer={<PrimaryCta label={nextMember ? `Looks right · next: ${nextMember.name}` : 'Looks right'} onPress={save} busy={!!busy} disabled={!heard} />}>
         <VoiceHeader onBack={() => back(paths.householdTell(member.id))} right={<TextLink label="Say more" icon="mic" onPress={() => navigate(paths.householdTell(member.id))} />} title={member.name} sub="Tap a label to remove it. Say more to add." />

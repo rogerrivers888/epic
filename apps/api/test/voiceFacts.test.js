@@ -151,3 +151,18 @@ test('likes map onto our shelves per person, and "the kids" is every child', () 
   assert.equal(queue.memberId, null, 'everyone');
   assert.equal(queue.label, 'Queuing');
 });
+
+test('a later breath can turn "a few things" into "one thing", and a flag is never turned off by silence', () => {
+  const later = normaliseTripFacts({ ...heard, several_things: false, indoors: false, food: { ...heard.food, diets: [], no_preference: false } });
+  const merged = mergeTripFacts({ ...heard, several_things: true, indoors: true, food: { ...heard.food, no_preference: true } }, later);
+  assert.equal(merged.several_things, false);
+  assert.equal(merged.indoors, false);
+  assert.equal(merged.food.no_preference, true, 'the flag stays');
+});
+
+test('kids answered by band are offered to remember, as the middle of the band', () => {
+  const f = normaliseTripFacts({ ...heard, kids_ages: [{ name: null, age: null, band: '9-12' }, { name: null, age: null, band: '5-8' }] });
+  const offer = harvestOffer({ facts: f, members: [members[0]], profile: { diets: ['vegetarian'] } });
+  assert.equal(offer.text, 'Remember that the kids are 9-12 & 5-8?');
+  assert.deepEqual(offer.items[0].ages.map((k) => k.age), [10, 6]);
+});

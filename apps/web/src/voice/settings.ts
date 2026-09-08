@@ -84,11 +84,14 @@ export const onVoiceSettingsChange = (fn: () => void) => { listeners.add(fn); re
  */
 export const VOICE_MAX_SECONDS_FALLBACK = 300;
 let maxSeconds = VOICE_MAX_SECONDS_FALLBACK;
+let configured: boolean | null = null;
 let asked: Promise<number> | null = null;
 export const voiceMaxSeconds = () => maxSeconds;
-export function loadVoiceLimits(fetchConfig: () => Promise<{ maxSeconds: number }>): Promise<number> {
+/** Whether the server can hear at all (a key, and the owner's switch on); null until asked. */
+export const voiceConfigured = () => configured;
+export function loadVoiceLimits(fetchConfig: () => Promise<{ maxSeconds: number; configured?: boolean }>): Promise<number> {
   if (!asked) {
-    asked = fetchConfig().then((c) => { if (c?.maxSeconds > 0) maxSeconds = c.maxSeconds; return maxSeconds; }).catch(() => { asked = null; return maxSeconds; });
+    asked = fetchConfig().then((c) => { if (c?.maxSeconds > 0) maxSeconds = c.maxSeconds; if (typeof c?.configured === 'boolean') configured = c.configured; return maxSeconds; }).catch(() => { asked = null; return maxSeconds; });
   }
   return asked;
 }

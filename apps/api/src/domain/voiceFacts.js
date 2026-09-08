@@ -162,6 +162,8 @@ const list = (v) => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x.
 const inSet = (v, set) => (set.includes(v) ? v : null);
 
 export const bandOfAge = (age) => (age == null ? null : age <= 4 ? '0-4' : age <= 8 ? '5-8' : age <= 12 ? '9-12' : '13+');
+/** The middle of a band, when an age was tapped rather than said. */
+export const ageOfBand = (band) => ({ '0-4': 3, '5-8': 6, '9-12': 10, '13+': 15 }[band] ?? null);
 
 export function normaliseTripFacts(raw) {
   const o = raw ?? {};
@@ -203,9 +205,14 @@ export function normaliseTripFacts(raw) {
 export function mergeTripFacts(base, next) {
   if (!base) return next;
   const out = structuredClone(base);
+  // `false` is an answer for the tri-state slots ("one thing", "outdoors") and
+  // silence for the flags (no_preference, kids_mentioned), which only ever
+  // turn on (Codex review, 9 Sep 2026).
+  const TRI_STATE = new Set(['several_things', 'indoors']);
   const take = (path) => {
     const v = path.reduce((o, k) => o?.[k], next);
-    if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length) || v === false) return;
+    if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return;
+    if (v === false && !TRI_STATE.has(path[path.length - 1])) return;
     let o = out;
     for (const k of path.slice(0, -1)) o = o[k];
     const last = path[path.length - 1];
@@ -335,7 +342,9 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   if (f.who.kind === 'just_me') said('who', 'Just me', 'person', { kind: 'just_me' });
   else if (f.who.kind === 'named' && f.who.names.length) {
     const known = f.who.names.filter((nm) => members.some((m) => m.name.toLowerCase().startsWith(nm.toLowerCase())));
-    said('who', joinNames(f.who.names), 'household', { kind: 'named', names: f.who.names, memberIds: members.filter((m) => known.some((nm) => m.name.toLowerCase().startsWith(nm.toLowerCase()))).map((m) => m.id) });
+    // First names on the chip: "Roger, Gina & Phoenix", however the model spelt them out.
+    const first = f.who.names.map((nm) => nm.trim().split(/\s+/)[0]);
+    said('who', joinNames(first), 'household', { kind: 'named', names: f.who.names, memberIds: members.filter((m) => known.some((nm) => m.name.toLowerCase().startsWith(nm.toLowerCase()))).map((m) => m.id) });
   } else if (f.who.kind === 'guests') said('who', count ? `All ${count} of you + guests` : 'With guests', 'household', { kind: 'guests' });
   else if (f.who.kind === 'whole_household' || (f.who.adults != null && f.who.children != null)) {
     const total = f.who.adults != null && f.who.children != null ? f.who.adults + f.who.children : count;
@@ -509,14 +518,16 @@ export function harvestOffer({ facts, members = [], profile = {} }) {
   const items = [];
   const diets = facts.food.diets.filter((d) => !(profile.diets ?? []).some((p) => p.toLowerCase() === d.toLowerCase()));
   if (diets.length) items.push({ kind: 'diet', values: diets });
-  const ages = facts.kids_ages.filter((k) => k.age != null);
+  // A band answered by tap is kept as the middle of the band; the Household
+  // tab can sharpen it to a birthday later (Codex review, 9 Sep 2026).
+  const ages = facts.kids_ages.map((k) => ({ ...k, age: k.age ?? ageOfBand(k.band), approx: k.age == null && !!k.band })).filter((k) => k.age != null);
   const children = members.filter((m) => m.isMinor || (m.age != null && m.age < 18));
-  const unknownAges = ages.filter((k) => !children.some((c) => c.age === k.age));
-  if (unknownAges.length) items.push({ kind: 'kids', ages: unknownAges.map((k) => ({ name: k.name, age: k.age })) });
+  const unknownAges = ages.filter((k) => !children.some((c) => c.age === k.age || (k.approx && c.age != null && bandOfAge(c.age) === k.band)));
+  if (unknownAges.length) items.push({ kind: 'kids', ages: unknownAges.map((k) => ({ name: k.name, age: k.age, band: k.band, approx: k.approx })) });
   if (!items.length) return null;
   const parts = [];
   if (diets.length) parts.push(`you're ${diets.join(' and ')}`);
-  if (unknownAges.length) parts.push(`the kids are ${joinNames(unknownAges.map((k) => String(k.age)))}`);
+  if (unknownAges.length) parts.push(`the kids are ${joinNames(unknownAges.map((k) => (k.approx ? k.band : String(k.age))))}`);
   return { text: `Remember that ${parts.join(' and ')}?`, items };
 }
 

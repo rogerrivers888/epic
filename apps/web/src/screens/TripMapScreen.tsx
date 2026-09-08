@@ -1103,7 +1103,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
               intake={voiceIntake}
               place={{ lat: d.trip.destination.lat, lng: d.trip.destination.lng, label: d.trip.destination.label }}
               added={new Set((places?.places ?? []).map((x) => x.venueRef))}
-              onAdd={(item) => { void api.addStop(d.trip.id, { venueRef: item.venueRef, name: item.name, lat: item.lat, lng: item.lng }).then(() => onChanged()).catch(() => {}); }}
+              onAdd={(item) => { if (!day) return; void api.addStopToDay(d.trip.id, day.id, { venueRef: item.venueRef, name: item.name, lat: item.lat, lng: item.lng, category: item.category }).then(() => onChanged()).catch(() => {}); }}
               onRefine={() => onSection('chat')}
             />
           </View>

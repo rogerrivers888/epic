@@ -124,7 +124,7 @@ function RangeStep({ household, refresh, onNext, onBack, error, setError }: Step
     try { await api.updateHousehold({ travelMode: mode, maxTravelMinutes: range }); await refresh(); onNext(); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   const rangeWords = range < 60 ? `${range} minutes` : range === 60 ? 'an hour' : `${range / 60} hours`;
-  const modeWords = mode === 'driving' ? 'drive' : mode === 'transit' ? 'journey by train or bus' : 'walk';
+  const reach = mode === 'driving' ? `${rangeWords}’${rangeWords.endsWith('s') ? '' : 's'} drive` : mode === 'transit' ? `${rangeWords} by train or bus` : `${rangeWords} on foot`;
   return (
     <VoiceScreen footer={<PrimaryCta label="Next · who’s coming" onPress={next} busy={busy} />}>
       <VoiceHeader onBack={onBack} right={<Progress step={2} of={5} />} title="How far will you go for a day out?" sub="Your default. Change it any time on a trip." big />
@@ -135,7 +135,7 @@ function RangeStep({ household, refresh, onNext, onBack, error, setError }: Step
       <View style={{ gap: 8 }}>
         <Text style={styles.kicker}>Each way, up to</Text>
         <Boxes options={RANGES} value={range} onChange={setRange} grow />
-        {home ? <Text style={type.small}>{count == null ? 'Counting places…' : `About ${count} places within ${rangeWords}’ ${modeWords} of ${town(home.label)}.`}</Text> : <Text style={type.small}>Set home on the step before and Epic will say how many places that reaches.</Text>}
+        {home ? <Text style={type.small}>{count == null ? 'Counting places…' : `About ${count} places within ${reach} of ${town(home.label)}.`}</Text> : <Text style={type.small}>Set home on the step before and Epic will say how many places that reaches.</Text>}
       </View>
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       <View style={{ flex: 1 }} />
@@ -356,18 +356,19 @@ function DoneStep({ household, startedAt, onPlan, onLook, onBack }: { household:
   const MODE_WORDS: Record<string, string> = { driving: 'Car', transit: 'Train & bus', walking: 'On foot', cycling: 'Bike' };
   const modeLabel = h?.travelMode ? MODE_WORDS[h.travelMode] ?? null : null;
   const range = h?.maxTravelMinutes ? (h.maxTravelMinutes < 60 ? `${h.maxTravelMinutes} min` : `${Math.round(h.maxTravelMinutes / 60)} hr`) : null;
-  const diets = uniq(members.flatMap((m) => m.diets.map((d) => `${cap(d.value)} · ${m.name}`)));
-  const allergies = members.flatMap((m) => m.allergens.map((a) => `${m.name} · ${a.value}`));
-  const dislikes = members.flatMap((m) => m.dislikes.filter((d) => d.conceptKind !== 'experience').map((d) => `${m.name} · no ${d.value}`));
-  const loves = uniq(members.flatMap((m) => m.likes.filter((l) => l.conceptKind === 'experience').map((l) => `${m.name} · ${l.value}`)));
-  const avoids = uniq(members.flatMap((m) => m.dislikes.filter((d) => d.conceptKind === 'experience').map((d) => `${m.name} · ${d.value}`)));
+  const first = (m: Member) => m.name.split(/\s+/)[0];
+  const diets = uniq(members.flatMap((m) => m.diets.map((d) => `${cap(d.value)} · ${first(m)}`)));
+  const allergies = members.flatMap((m) => m.allergens.map((a) => `${first(m)} · ${a.value}`));
+  const dislikes = members.flatMap((m) => m.dislikes.filter((d) => d.conceptKind !== 'experience').map((d) => `${first(m)} · no ${d.value}`));
+  const loves = uniq(members.flatMap((m) => m.likes.filter((l) => l.conceptKind === 'experience').map((l) => `${first(m)} · ${l.value}`)));
+  const avoids = uniq(members.flatMap((m) => m.dislikes.filter((d) => d.conceptKind === 'experience').map((d) => `${first(m)} · ${d.value}`)));
   return (
     <VoiceScreen>
       <VoiceHeader onBack={onBack} right={<Text style={styles.timer}>{Math.floor(secs / 60)} min {String(secs % 60).padStart(2, '0')}</Text>} title="That’s it — we’ll stop asking" sub="Every plan starts from this. Change any of it in Household or Settings." />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
         {h?.home ? <FactChip label={town(h.home.label)} icon="home" look="profile" /> : null}
         {modeLabel || range ? <FactChip label={[modeLabel, range ? `up to ${range}` : null].filter(Boolean).join(' · ')} icon="driving" look="profile" /> : null}
-        {members.length ? <FactChip label={members.map((m) => (m.age != null && m.isMinor ? `${m.name} ${m.age}` : m.name)).join(', ')} icon="household" look="profile" /> : null}
+        {members.length ? <FactChip label={members.map((m) => (m.age != null && m.isMinor ? `${first(m)} ${m.age}` : first(m))).join(', ')} icon="household" look="profile" /> : null}
       </View>
       {diets.length || allergies.length || dislikes.length ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>

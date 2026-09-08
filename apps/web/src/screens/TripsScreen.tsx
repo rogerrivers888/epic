@@ -28,6 +28,7 @@ import { tripName } from './tripName';
 import { TripsList, TripsWhen } from './TripsList';
 import { NewTripSearchScreen } from './NewTripSearchScreen';
 import { CreateTripScreen } from './CreateTripScreen';
+import { voiceConfigured } from '../voice/settings';
 import { GettingThereScreen } from './GettingThereScreen';
 import { TripChatScreen } from './TripChatScreen';
 import { StopAskScreen } from './StopAskScreen';
@@ -228,7 +229,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
       // the talking, the household says where to and what for. "Type instead"
       // on that screen takes a place or a sentence; the older town search is
       // still at /trips/search for anyone who has the address.
-      onNew={() => { onSeedUsed?.(); setPicked(null); navigate(paths.say({ for: 'trip' })); }}
+      onNew={() => { onSeedUsed?.(); setPicked(null); navigate(voiceConfigured() === false ? paths.tripsSearch() : paths.say({ for: 'trip' })); }}
       wide={wide}
     />
   );

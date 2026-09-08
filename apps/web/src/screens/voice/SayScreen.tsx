@@ -25,6 +25,7 @@ import { paths } from '../../routes';
 import { asFlag, asOneOf, useQueryState, useRouter } from '../../router';
 import { useSpeech } from '../../hooks/useSpeech';
 import { recordingSupported } from '../../voice/recorder';
+import { loadVoiceLimits, voiceConfigured } from '../../voice/settings';
 import { Captions, ChipGroup, Example, FactChip, ListRow, MicControl, MicTile, PrimaryCta, SentenceField, TextLink, TypeInstead, VoiceHeader, VoiceScreen, clock } from '../../components/voice/kit';
 import { Icon } from '../../components/Icon';
 import { colors, type } from '../../theme';
@@ -56,7 +57,11 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
   const [text, setText] = useState('');
 
   // What the profile already says (R1): home, how they travel, who, diets.
-  const known = useMemo(() => knownChips(household), [household]);
+  // Only on Trips' door — the first-time screen (C1) has no profile to show.
+  const known = useMemo(() => (door === 'trip' ? knownChips(household) : []), [household, door]);
+  // Whether the server can hear at all. Off, the ordinary town search is the way to a trip.
+  const [voiceOn, setVoiceOn] = useState<boolean | null>(voiceConfigured());
+  useEffect(() => { void loadVoiceLimits(api.voiceConfig).then(() => setVoiceOn(voiceConfigured())); }, []);
 
   const submit = useCallback(async (transcript: string, mode: 'said' | 'typed') => {
     setBusy('Reading that…');
@@ -133,6 +138,8 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
         {known.length ? <KnownChips chips={known} /> : null}
         <Example>{copy.example}</Example>
         <SentenceField value={text} onChange={setText} onSubmit={() => text.trim() && submit(text.trim(), 'typed')} placeholder={copy.placeholder} />
+        {voiceOn === false ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
+        {door === 'trip' && voiceOn !== false ? <TextLink label="Or search for a town ›" tone="grey" onPress={() => navigate(paths.tripsSearch())} /> : null}
         {busy ? <StatusLine>{busy}</StatusLine> : null}
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {list.length ? (
@@ -158,6 +165,7 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
       />
       {known.length ? <KnownChips chips={known} /> : null}
       <Example>{copy.example}</Example>
+      {voiceOn === false ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
       <View style={{ flex: 1 }} />
       {supported ? (
         <MicControl state={busy ? 'busy' : 'idle'} onStart={startMic} onDone={() => {}} label="Tap and just say it" />
@@ -171,6 +179,16 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
       {busy ? <StatusLine>{busy}</StatusLine> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
     </VoiceScreen>
+  );
+}
+
+/** Voice is not set up on this server (no key, or switched off): say so, and keep the other door open. */
+function VoiceOff({ door, onSearch }: { door: 'trip' | 'inspire' | null; onSearch: () => void }) {
+  return (
+    <View style={{ gap: 8, backgroundColor: colors.warm, padding: 14 }}>
+      <Text style={type.body}>Voice isn’t set up on this Epic yet, so nothing said or typed here can be read.</Text>
+      {door === 'trip' ? <TextLink label="Search for a town instead ›" onPress={onSearch} /> : <Text style={type.small}>The rest of Epic works as it always has.</Text>}
+    </View>
   );
 }
 

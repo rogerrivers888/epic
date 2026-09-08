@@ -83,7 +83,7 @@ export const LIKES_SCHEMA = {
         type: 'object', additionalProperties: false,
         properties: {
           kind: { type: 'string', enum: ['love', 'avoid'], description: 'love (enjoys, is into, wants) or avoid (hates, won\'t, nobody wants)' },
-          phrase: { type: 'string', description: 'The activity in the speaker\'s own words ("climbing", "a castle", "queuing")' },
+          phrase: { type: 'string', description: 'The activity in two or three of the speaker\'s own words ("climbing", "a castle", "queuing") — never the whole sentence' },
           category: str('The best matching category key from the list given, or null if none fits'),
           subcategory: str('The best matching subcategory key from the list given, or null if none fits'),
           who: str('The named person it applies to; null when said of everyone'),
@@ -98,7 +98,7 @@ export const LIKES_SCHEMA = {
 
 export const LIKES_SYSTEM = `You read a transcript about what a household likes doing on a day out and list each like or avoid once, mapped onto the planner's own categories.
 
-Rules: use only category and subcategory keys from the list given; when nothing fits, leave them null and keep the phrase. "The kids" means every child named in the household. Attach each item to the person named for it, or to nobody when it was said of everyone. "Nobody wants to queue" is an avoid for everyone. Only what was said.`;
+Rules: use only category and subcategory keys from the list given; when nothing fits, leave them null and keep the phrase. The phrase is the activity in two or three words ("queuing", "long walks"), never the sentence it came from. "The kids" means every child named in the household. Attach each item to the person named for it, or to nobody when it was said of everyone. "Nobody wants to queue" is an avoid for everyone. Only what was said.`;
 
 const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -130,7 +130,7 @@ export function normaliseFood(raw, members = []) {
     .filter((i) => ['diet', 'allergy', 'dislike', 'favourite'].includes(i?.kind) && s(i?.value))
     .map((i) => {
       const member = matchMember(s(i.who), members);
-      return { kind: i.kind, value: s(i.value).toLowerCase(), who: s(i.who), memberId: member?.id ?? null, memberName: member?.name ?? s(i.who) };
+      return { kind: i.kind, value: s(i.value).toLowerCase(), who: s(i.who), memberId: member?.id ?? null, memberName: (member?.name ?? s(i.who))?.split(/\s+/)[0] ?? null };
     });
 }
 
@@ -151,7 +151,7 @@ export function normaliseLikes(raw, members = [], vocab = { categories: [], subc
       items.push({
         kind: i.kind, phrase: s(i.phrase).toLowerCase(), category, subcategory,
         label: subcategory ? subs.get(subcategory).label : vocab.categories.find((c) => c.key === category)?.label ?? cap(s(i.phrase)),
-        who, memberId: m?.id ?? null, memberName: m?.name ?? (who && !/^(the )?(kids|children)$/i.test(who) ? who : null),
+        who, memberId: m?.id ?? null, memberName: (m?.name ?? (who && !/^(the )?(kids|children)$/i.test(who) ? who : null))?.split(/\s+/)[0] ?? null,
       });
     }
   }
