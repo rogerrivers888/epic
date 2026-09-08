@@ -51,10 +51,23 @@ function putRun(sessionId, run) {
   while (RUNS.size > RUN_MAX) RUNS.delete(RUNS.keys().next().value);
   return run;
 }
-function getRun(sessionId) {
+/**
+ * A run belongs to the household that started it.
+ *
+ * The tables hold rented venue content and the family's own tastes — what they
+ * love, what they will not eat — and this map was keyed by session id alone,
+ * so anyone holding another household's session UUID could poll their tables,
+ * read their menus and build a trip from them (Codex, 8 Sep 2026). The id is a
+ * v4 UUID and so not guessable, but "not guessable" is not the same as "not
+ * allowed", and every route that reaches here already knows whose it is.
+ */
+function getRun(sessionId, householdId = null) {
   const run = RUNS.get(sessionId);
   if (!run) return null;
   if (Date.now() - run.at > RUN_TTL_MS) { RUNS.delete(sessionId); return null; }
+  // Indistinguishable from expired, on purpose: whether somebody else's session
+  // exists is not a thing to tell them.
+  if (householdId != null && run.householdId !== householdId) return null;
   return run;
 }
 
@@ -236,6 +249,7 @@ async function runTables({ household, attending, attendees, session, input }) {
   const meter = {};
   const routing = { off: false, note: null };
   const run = putRun(session.id, {
+    householdId: household.id,
     running: true, tastes, tables: [], input, error: null,
     note: googleOn ? null : 'Google Places is off here, so the sources cannot be asked for a dish by name — these are the places nearby whose kind matches.',
   });
@@ -307,8 +321,8 @@ router.post('/tastes', async (req, res, next) => {
     const foodFirst = (moods || []).some((m) => /food/i.test(String(m))) || all.some((t) => t.named) || foodLeads(input.brief);
     if (!foodFirst || !tastes.length) {
       const note = !tastes.length && foodFirst ? 'Nobody coming has a food on their list yet — add likes in Household and this fills itself.' : null;
-      putRun(session.id, { running: false, tastes: [], tables: [], input, error: null, note });
-      return res.json({ ...publicRun(getRun(session.id), session.id), running: false });
+      putRun(session.id, { householdId: household.id, running: false, tastes: [], tables: [], input, error: null, note });
+      return res.json({ ...publicRun(getRun(session.id, household.id), session.id), running: false });
     }
     res.json({ sessionId: session.id, running: true, tastes: tastes.map((t) => ({ key: t.key, label: t.label, title: `Best ${t.label.toLowerCase()}`, loved: t.loved, notFor: t.notFor, named: t.named })), tables: [], note: null, error: null, capMinutes: input.maxTravelMinutes, capFromWords: input.capFromWords });
     runTables({ household, attending, attendees, session, input }).catch(() => { /* recorded on the run */ });
@@ -317,8 +331,8 @@ router.post('/tastes', async (req, res, next) => {
   }
 });
 
-function findPlace(sessionId, tasteKey, venueRef) {
-  const run = getRun(sessionId);
+function findPlace(sessionId, tasteKey, venueRef, householdId = null) {
+  const run = getRun(sessionId, householdId);
   if (!run) return { error: 'tables_gone' };
   const table = (run.tables || []).find((t) => t.key === tasteKey);
   const place = table?.places?.find((p) => p.venueRef === venueRef);
@@ -335,7 +349,7 @@ router.get('/tastes/around', async (req, res, next) => {
     const household = await currentHousehold();
     const members = await loadMembers(household.id);
     const { sessionId, tasteKey, venueRef } = req.query;
-    const found = findPlace(String(sessionId || ''), String(tasteKey || ''), String(venueRef || ''));
+    const found = findPlace(String(sessionId || ''), String(tasteKey || ''), String(venueRef || ''), household.id);
     if (found.error) return res.status(404).json({ error: found.error, message: 'That place is no longer on this session — tap Inspire me again.' });
     const { place } = found;
     const attendingIds = String(req.query.members || '').split(',').filter(Boolean);
@@ -394,7 +408,7 @@ router.post('/tastes/menu', async (req, res, next) => {
     const household = await currentHousehold();
     const members = await loadMembers(household.id);
     const { sessionId, tasteKey, venueRef, attendingMemberIds } = req.body || {};
-    const found = findPlace(String(sessionId || ''), String(tasteKey || ''), String(venueRef || ''));
+    const found = findPlace(String(sessionId || ''), String(tasteKey || ''), String(venueRef || ''), household.id);
     if (found.error) return res.status(404).json({ error: found.error, message: 'That place is no longer on this session — tap Inspire me again.' });
     if (!menuCheckEnabled()) return res.status(503).json({ error: 'menu_check_off', message: 'Reading a menu needs the planner\u2019s Anthropic key, which is not set here.' });
     const { run, place } = found;
@@ -428,7 +442,7 @@ router.post('/tastes/menu', async (req, res, next) => {
 router.get('/tastes/menu', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const found = findPlace(String(req.query.sessionId || ''), String(req.query.tasteKey || ''), String(req.query.venueRef || ''));
+    const found = findPlace(String(req.query.sessionId || ''), String(req.query.tasteKey || ''), String(req.query.venueRef || ''), household.id);
     if (found.error) return res.status(404).json({ error: found.error, message: 'That place is no longer on this session — tap Inspire me again.' });
     const { place } = found;
     res.json({ reading: Boolean(place.menuReading), menu: place.menu ?? null, error: place.menuError ?? null, usage: await menuCheckUsage(household.id) });
@@ -447,7 +461,7 @@ router.post('/tastes/trip', async (req, res, next) => {
     const household = await currentHousehold();
     const members = await loadMembers(household.id);
     const { sessionId, tasteKey, venueRef, attendingMemberIds, around = [] } = req.body || {};
-    const found = findPlace(String(sessionId || ''), String(tasteKey || ''), String(venueRef || ''));
+    const found = findPlace(String(sessionId || ''), String(tasteKey || ''), String(venueRef || ''), household.id);
     if (found.error) return res.status(404).json({ error: found.error, message: 'That place is no longer on this session — tap Inspire me again.' });
     if (household.home_lat == null) return res.status(400).json({ error: 'home_required', message: 'Set a home address in Settings first.' });
     const { table, place } = found;
@@ -515,7 +529,8 @@ router.get('/tastes/menu/usage', async (req, res, next) => {
 /** Where the tables have got to. */
 router.get('/tastes/:sessionId', async (req, res, next) => {
   try {
-    const run = getRun(req.params.sessionId);
+    const household = await currentHousehold();
+    const run = getRun(req.params.sessionId, household.id);
     if (!run) return res.status(404).json({ error: 'tables_gone', message: 'Those tables were found before a restart and are not kept — tap Inspire me again.' });
     res.json(publicRun(run, req.params.sessionId));
   } catch (err) {

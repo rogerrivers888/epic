@@ -69,8 +69,8 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
 export async function putPlace(areaCode, p) {
   await query(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
-                               accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, last_seen, scored_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), now())
+                               accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, from_sources, last_seen, scored_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now(), now())
      on conflict (area_code, venue_ref) do update set
        name = coalesce(excluded.name, scout_places.name), rank = excluded.rank,
        epic_score = excluded.epic_score, owned_score = excluded.owned_score,
@@ -78,6 +78,8 @@ export async function putPlace(areaCode, p) {
        accolades = excluded.accolades, cuisines = excluded.cuisines, chain = excluded.chain,
        website = coalesce(excluded.website, scout_places.website),
        lat = coalesce(excluded.lat, scout_places.lat), lng = coalesce(excluded.lng, scout_places.lng),
+       from_sources = case when excluded.from_sources = '[]'::jsonb
+                          then scout_places.from_sources else excluded.from_sources end,
        chain_scale = excluded.chain_scale, sites = excluded.sites, cuisine_group = excluded.cuisine_group,
        -- Kept if this sweep could not tell: a place we already know is a pub
        -- does not become an unknown because one pass read it thinly.
@@ -86,7 +88,10 @@ export async function putPlace(areaCode, p) {
     [areaCode, p.venueRef, p.name ?? null, p.rank, p.epicScore, p.ownedScore, p.crowdBand, p.countBand,
       JSON.stringify(p.accolades ?? []), JSON.stringify(p.cuisines ?? []), p.chain === true,
       p.website ?? null, p.lat ?? null, p.lng ?? null, p.chainScale ?? 'independent', p.sites ?? 1, p.cuisineGroup ?? null,
-      p.category ?? null],
+      p.category ?? null,
+      // Which sources actually contributed, so the device can be told the truth
+      // about who to credit (migration 072).
+      JSON.stringify(Array.isArray(p.from) && p.from.length ? p.from : [])],
   );
   await query(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score, crowd_band, count_band, rank)
@@ -485,6 +490,7 @@ export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
     `select distinct on (p.venue_ref)
             p.venue_ref, p.name, p.lat, p.lng, p.website, p.cuisines, p.cuisine_group,
             p.accolades, p.crowd_band, p.count_band, p.chain, p.chain_scale, p.epic_score,
+            p.from_sources,
             -- What kind of place, from the sweep first and the open map second.
             -- The research lands after the sweep does, so a place matched to
             -- OpenStreetMap last night is a café this morning rather than in

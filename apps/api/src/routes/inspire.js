@@ -137,6 +137,23 @@ const FOOD_CATEGORIES = new Set(['restaurant', 'cafe', 'pub', 'bar', 'bakery']);
  * line of text or as a list of them, so both shapes end as a list — a card that
  * shows the content and not the credit is the licence broken.
  */
+/**
+ * The credit lines for a swept place: one per source that contributed to it.
+ *
+ * An empty or unknown provenance falls back to the shape of the identifier,
+ * which is the only evidence a row swept before migration 072 still carries.
+ */
+export function creditFor(fromSources, venueRef, lines) {
+  let from = Array.isArray(fromSources) ? fromSources : [];
+  if (!from.length) {
+    const prefix = String(venueRef || '').split(':')[0];
+    from = prefix ? [prefix] : [];
+  }
+  const credits = from.map((key) => lines[key]).filter(Boolean);
+  // Never nothing: a place with no source we can name is still somebody's work.
+  return credits.length ? [...new Set(credits)] : ['Sources listed in Settings'];
+}
+
 function attributionOf(v, lines) {
   // A merged venue carries the readable line already; an unmerged one carries
   // the keys of the sources that contributed, which the registry names.
@@ -321,7 +338,16 @@ inspire.get('/near', async (req, res, next) => {
         summary: null, heritage: null,
         website: f.website ?? null, wikipediaUrl: null,
         region: f.locality_name ?? null,
-        attribution: ['OpenStreetMap contributors, ODbL'],
+        /**
+         * Who actually supplied this row, rather than a hopeful constant.
+         *
+         * This said "OpenStreetMap contributors, ODbL" for every swept place,
+         * and around Henley all 150 of them are keyed on a Google identifier —
+         * so the open map was being credited for names it had never held
+         * (Codex, 8 Sep 2026). `from_sources` is written by the sweep now and
+         * backfilled from the identifier for rows swept before it existed.
+         */
+        attribution: creditFor(f.from_sources, f.venue_ref, lines),
         lat: f.lat, lng: f.lng,
         distanceKm: Number(f.km.toFixed(1)),
         travelMinutes: estimateTravelMinutes(origin, f, mode),
