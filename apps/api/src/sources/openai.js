@@ -116,7 +116,32 @@ async function failure(res) {
 /** A 404, or a 400 that names the model: the account cannot use this one. */
 const isModelRefusal = (f) => f.status === 404 || (f.status === 400 && (f.code === 'model_not_found' || /model/i.test(f.message) && !/param/i.test(f.message)));
 /** A 400 naming one of our optional parameters: this model does not take it. */
-const isParamRefusal = (f) => f.status === 400 && (f.code === 'unknown_parameter' || f.code === 'unsupported_parameter' || f.code === 'unsupported_value' || /unrecognized|unknown parameter|unsupported|not supported|does not support/i.test(f.message));
+const isParamRefusal = (f) => f.status === 400 && (f.code === 'unknown_parameter' || f.code === 'unsupported_parameter' || f.code === 'unsupported_value' || f.code === 'invalid_value' || /unrecognized|unknown parameter|unsupported|not supported|does not support|invalid value|invalid type|not a valid/i.test(f.message));
+
+/**
+ * Which of our optional fields a refusal is about, from `param` ("session.audio.
+ * input.noise_reduction", "keywords") or, failing that, from the sentence. Only
+ * the fields we can do without are named here; anything else is a real error.
+ */
+const OPTIONAL = ['keywords', 'languages', 'language', 'prompt', 'noise_reduction', 'turn_detection', 'expires_after', 'reasoning', 'store', 'text.verbosity', 'temperature', 'response_format'];
+function refusedField(f) {
+  const hay = `${f.param ?? ''} ${f.message ?? ''}`;
+  for (const name of OPTIONAL) {
+    const leaf = name.split('.').pop();
+    if (new RegExp(`(^|[^a-z_])${leaf.replace('.', '\\.')}(\\[\\])?([^a-z_]|$)`, 'i').test(hay)) return name;
+  }
+  return null;
+}
+/** Remove a named field from a JSON body (any depth, by its leaf name) or a form. */
+function dropField(body, name) {
+  const leaf = name.split('.').pop();
+  if (body instanceof FormData) { body.delete(leaf); body.delete(`${leaf}[]`); return; }
+  const walk = (o) => {
+    if (!o || typeof o !== 'object') return;
+    for (const k of Object.keys(o)) { if (k === leaf) delete o[k]; else walk(o[k]); }
+  };
+  walk(body);
+}
 
 const plain = (f) => {
   if (f.status === 401 || f.status === 403) return new VoiceProviderError('voice_unavailable', 'Voice is not set up correctly on this server.', `${f.status}: ${f.message}`, 503);
@@ -151,7 +176,7 @@ export async function transcribe({ audio, mime, filename, language = null, hint 
   if (!audio?.length) throw new VoiceProviderError('voice_empty', 'Nothing was recorded.', null, 400);
   const ladder = model ? [model] : FILE_LADDER;
   const started = Date.now();
-  let dropped = false; // keywords/languages refused once: send without them
+  const dropped = new Set(); // optional fields a model refused: sent without them from then on
   for (let i = 0; i < ladder.length; i += 1) {
     const m = ladder[i];
     const form = new FormData();
@@ -163,11 +188,12 @@ export async function transcribe({ audio, mime, filename, language = null, hint 
     if (h) form.append('prompt', h);
     if (language) {
       // gpt-transcribe takes a list; the 4o family and whisper take one code.
-      if (m.startsWith('gpt-transcribe') && !dropped) form.append('languages[]', language);
+      if (m.startsWith('gpt-transcribe') && !dropped.has('languages')) form.append('languages[]', language);
       else form.append('language', language);
     }
-    if (keywords?.length && m.startsWith('gpt-transcribe') && !dropped) for (const k of keywords.slice(0, 40)) form.append('keywords[]', String(k));
+    if (keywords?.length && m.startsWith('gpt-transcribe')) for (const k of keywords.slice(0, 40)) form.append('keywords[]', String(k));
     if (stream) form.append('stream', 'true');
+    for (const d of dropped) dropField(form, d);
 
     let res;
     try {
@@ -178,14 +204,13 @@ export async function transcribe({ audio, mime, filename, language = null, hint 
     }
     if (!res.ok) {
       const f = await failure(res);
-      if (isParamRefusal(f) && !dropped) { dropped = true; i -= 1; continue; }
+      const field = isParamRefusal(f) ? refusedField(f) : null;
+      if (field && !dropped.has(field) && dropped.size < 4) { dropped.add(field); i -= 1; continue; }
       if (isModelRefusal(f) && i < ladder.length - 1) continue;
       throw plain(f);
     }
-    const out = stream && /text\/event-stream/i.test(res.headers.get('content-type') || '')
-      ? await readTranscriptStream(res, onDelta)
-      : await readTranscriptJson(res);
-    return { ...out, model: m, ms: Date.now() - started, fellBack: m !== ladder[0] };
+    const out = await readTranscript(res, stream ? onDelta : null);
+    return { ...out, model: m, ms: Date.now() - started, fellBack: m !== ladder[0], dropped: [...dropped] };
   }
   throw new VoiceProviderError('voice_unavailable', "Epic couldn't hear that just now. Try again, or type it.", 'no transcription model answered');
 }
@@ -199,8 +224,20 @@ const fileNameFor = (mime = '') => {
   return 'speech.webm';
 };
 
-async function readTranscriptJson(res) {
-  const j = await res.json().catch(() => ({}));
+/**
+ * The answer, by what it is rather than by what was asked for: a JSON object
+ * with `text`, or a stream of events. Judged on the content type and then on
+ * the body itself, because a provider that answers a streamed request with a
+ * plain object (or the reverse) should still be read.
+ */
+async function readTranscript(res, onDelta) {
+  const type = res.headers.get('content-type') || '';
+  if (/text\/event-stream/i.test(type)) return readTranscriptStream(res, onDelta);
+  const text = await res.text();
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith('data:') || trimmed.startsWith('event:')) return readTranscriptStream(new Response(text), onDelta);
+  let j = {};
+  try { j = JSON.parse(text); } catch { /* not json */ }
   return { text: String(j.text ?? '').trim(), language: languageOf(j), usage: j.usage ?? null };
 }
 
@@ -217,15 +254,23 @@ export async function readTranscriptStream(res, onDelta) {
   const decoder = new TextDecoder();
   let buffer = '';
   let pieces = '';
+  let segments = '';
   let done = null;
+  const seen = new Set();
   const handle = (raw) => {
     const data = raw.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
     if (!data || data === '[DONE]') return;
     let ev;
     try { ev = JSON.parse(data); } catch { return; }
-    if (ev.type === 'transcript.text.delta' && typeof ev.delta === 'string') { pieces += ev.delta; onDelta?.(ev.delta); }
-    else if (ev.type === 'transcript.text.done') done = ev;
-    else if (ev.type === 'error') throw plain({ status: 502, message: ev.error?.message ?? 'stream error', code: ev.error?.code ?? null });
+    const type = String(ev.type ?? '');
+    seen.add(type);
+    // Judged by shape as much as by name: a `.delta` with a delta is a piece,
+    // a `.done`/`.completed` with text is the whole, a `.segment` is a part of
+    // a transcript that never streams pieces (the diarising models).
+    if (typeof ev.delta === 'string' && /delta$/.test(type)) { pieces += ev.delta; onDelta?.(ev.delta); }
+    else if (typeof ev.text === 'string' && /(done|completed)$/.test(type)) done = ev;
+    else if (typeof ev.text === 'string' && /segment$/.test(type)) { segments = [segments, ev.text].filter(Boolean).join(' '); onDelta?.(`${segments ? ' ' : ''}${ev.text}`); }
+    else if (type === 'error') throw plain({ status: 502, message: ev.error?.message ?? 'stream error', code: ev.error?.code ?? null });
   };
   for (;;) {
     const { value, done: end } = await reader.read();
@@ -235,7 +280,7 @@ export async function readTranscriptStream(res, onDelta) {
     while ((at = buffer.indexOf('\n\n')) >= 0) { handle(buffer.slice(0, at)); buffer = buffer.slice(at + 2); }
   }
   if (buffer.trim()) handle(buffer);
-  return { text: String(done?.text ?? pieces).trim(), language: languageOf(done), usage: done?.usage ?? null };
+  return { text: String(done?.text ?? pieces ?? segments).trim() || segments.trim(), language: languageOf(done), usage: done?.usage ?? null, events: [...seen] };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,14 +303,14 @@ export async function readTranscriptStream(res, onDelta) {
 export async function mintLiveToken({ language = null, hint = '', keywords = [], seconds = 120, model = null } = {}) {
   if (!openaiEnabled()) throw notConfigured();
   const ladder = model ? [model] : LIVE_LADDER;
-  let dropped = false;
+  const dropped = new Set();
   for (let i = 0; i < ladder.length; i += 1) {
     const m = ladder[i];
     const transcription = { model: m };
     const h = trimHint(hint);
     if (h) transcription.prompt = h;
-    if (language) { if (m.startsWith('gpt-live') || m.startsWith('gpt-transcribe')) transcription.languages = [language]; else transcription.language = language; }
-    if (keywords?.length && !dropped && (m.startsWith('gpt-live') || m.startsWith('gpt-transcribe'))) transcription.keywords = keywords.slice(0, 40).map(String);
+    if (language) { if ((m.startsWith('gpt-live') || m.startsWith('gpt-transcribe')) && !dropped.has('languages')) transcription.languages = [language]; else transcription.language = language; }
+    if (keywords?.length && (m.startsWith('gpt-live') || m.startsWith('gpt-transcribe'))) transcription.keywords = keywords.slice(0, 40).map(String);
     const body = {
       expires_after: { anchor: 'created_at', seconds: Math.min(600, Math.max(10, seconds)) },
       session: {
@@ -280,6 +325,7 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
         },
       },
     };
+    for (const d of dropped) dropField(body, d);
     let res;
     try {
       res = await fetch(`${BASE}/realtime/client_secrets`, { method: 'POST', headers: headers({ 'content-type': 'application/json' }), body: JSON.stringify(body) });
@@ -288,7 +334,8 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
     }
     if (!res.ok) {
       const f = await failure(res);
-      if (isParamRefusal(f) && !dropped) { dropped = true; i -= 1; continue; }
+      const field = isParamRefusal(f) ? refusedField(f) : null;
+      if (field && !dropped.has(field) && dropped.size < 4) { dropped.add(field); i -= 1; continue; }
       if (isModelRefusal(f) && i < ladder.length - 1) continue;
       throw plain(f);
     }
@@ -300,6 +347,7 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
       url: LIVE_URL,
       sampleRate: 24000,
       fellBack: m !== ladder[0],
+      dropped: [...dropped],
     };
   }
   throw new VoiceProviderError('voice_unavailable', "Epic couldn't start listening just now. Try again, or type it.", 'no live model answered');
@@ -321,26 +369,34 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
 export async function extract({ system, input, schema, name = 'answer', model = PLAN_MODEL, signal = null } = {}) {
   if (!openaiEnabled()) throw notConfigured();
   const started = Date.now();
+  // Reading a form out of a sentence is not a reasoning problem: with the
+  // default effort gpt-5-mini took eighteen seconds on the first deployed run
+  // (8 Sep 2026), which is the whole "time from stopping speaking to plan
+  // appearing" budget and more. Minimal effort and short prose; a model that
+  // does not take either has the field dropped and is asked again.
   const body = {
     model,
     instructions: system,
     input,
-    text: { format: { type: 'json_schema', name, schema, strict: true } },
+    text: { format: { type: 'json_schema', name, schema, strict: true }, verbosity: 'low' },
+    reasoning: { effort: 'minimal' },
     store: false,
   };
   let res;
-  try {
-    res = await fetch(`${BASE}/responses`, { method: 'POST', headers: headers({ 'content-type': 'application/json' }), body: JSON.stringify(body), signal });
-  } catch (err) {
-    if (signal?.aborted) throw new VoiceProviderError('voice_cancelled', 'Cancelled.', null, 499);
-    throw new VoiceProviderError('voice_unavailable', "Epic couldn't reach its planning service. Check the signal and try again.", err.message, 503);
-  }
-  if (!res.ok) {
+  let j;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      res = await fetch(`${BASE}/responses`, { method: 'POST', headers: headers({ 'content-type': 'application/json' }), body: JSON.stringify(body), signal });
+    } catch (err) {
+      if (signal?.aborted) throw new VoiceProviderError('voice_cancelled', 'Cancelled.', null, 499);
+      throw new VoiceProviderError('voice_unavailable', "Epic couldn't reach its planning service. Check the signal and try again.", err.message, 503);
+    }
+    if (res.ok) { j = await res.json(); break; }
     const f = await failure(res);
-    if (isParamRefusal(f) && f.param === 'store') { delete body.store; return extract({ system, input, schema, name, model, signal }); }
+    const field = isParamRefusal(f) ? refusedField(f) : null;
+    if (field && attempt < 3) { dropField(body, field); continue; }
     throw plain(f);
   }
-  const j = await res.json();
   const message = (j.output || []).find((o) => o.type === 'message');
   const content = message?.content || [];
   const refusal = content.find((c) => c.type === 'refusal');

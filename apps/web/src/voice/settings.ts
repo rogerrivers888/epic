@@ -75,3 +75,6 @@ export const voiceLanguageLabel = (code: string | null) => VOICE_LANGUAGES.find(
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((fn) => fn());
 export const onVoiceSettingsChange = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
+
+/** The longest one turn may run, in seconds: the API refuses a longer recording (EPIC_VOICE_MAX_SECONDS, default 300). */
+export const VOICE_MAX_SECONDS = 300;

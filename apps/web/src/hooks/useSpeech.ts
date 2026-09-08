@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { LiveTranscriber, LiveState, liveSupported } from '../voice/live';
 import { Recorder, closeMicrophone, openMicrophone, recordingSupported } from '../voice/recorder';
 import { transcribeRecording } from '../voice/client';
-import { VoiceMode, getVoiceConfirm, getVoiceLanguage, getVoiceMode, onVoiceSettingsChange } from '../voice/settings';
+import { VOICE_MAX_SECONDS, VoiceMode, getVoiceConfirm, getVoiceLanguage, getVoiceMode, onVoiceSettingsChange } from '../voice/settings';
 
 /**
  * Speech in — one hook, five ways of hearing, chosen in Settings › Voice
@@ -303,6 +303,14 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
 
   const listening = phase === 'listening';
   const toggle = useCallback(() => (phaseRef.current === 'listening' ? void stop() : void start()), [start, stop]);
+
+  // The hard limit: the API refuses a longer recording, so rather than lose
+  // five minutes of talking, Done is tapped for them and the screen says why.
+  useEffect(() => {
+    if (phase !== 'listening' || seconds < VOICE_MAX_SECONDS) return;
+    setError(`That's the limit — ${Math.round(VOICE_MAX_SECONDS / 60)} minutes. Writing it down.`);
+    void stop();
+  }, [phase, seconds, stop]);
 
   // What is on screen while they talk: captions where there are any.
   const transcript = mode === 'browser'

@@ -26,7 +26,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { api, VoiceCaptureMode, VoiceLabInfo, VoiceModeResult, VoiceRun, VoiceRuns, VoiceUtterance } from '../../api';
+import { api, VoiceCaptureMode, VoiceLabInfo, VoiceModeResult, VoiceProbe, VoiceRun, VoiceRuns, VoiceUtterance } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Button, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -72,6 +72,7 @@ export function VoiceLab() {
   const [run, setRun] = useState<VoiceRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [probe, setProbe] = useState<VoiceProbe | 'busy' | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<Recorder | null>(null);
@@ -170,6 +171,27 @@ export function VoiceLab() {
       {info && !info.configured ? <Banner tone="warn">Voice is not set up on this server: OPENAI_API_KEY is missing. Adding it is the owner's, in Doppler.</Banner> : null}
       {info?.switchedOff ? <Banner tone="warn">OpenAI voice is switched off in Settings › Providers. Nothing here will run until it is on.</Banner> : null}
       {!recordingSupported() ? <Banner tone="warn">This browser cannot record. Open the lab in Chrome or Safari on a device with a microphone.</Banner> : null}
+
+      {/* The provider's own words, when something refuses. The household's
+          screens say "Epic couldn't hear that just now" and no more; this is
+          the one place the sentence behind that belongs. */}
+      <Panel title="The connection" sub="Opens one live session and sends a fifth of a second of silence to the file endpoint, and says what came back — a wrong model name or a refused setting reads as a sentence here rather than a guess." right={<Button label={probe === 'busy' ? 'Checking…' : 'Check now'} kind="secondary" onPress={async () => { setProbe('busy'); try { setProbe(await api.voiceProbe()); } catch (e: any) { setProbe({ configured: false, switchedOff: false, live: { ok: false, code: 'failed', message: e.message, detail: null }, transcribe: null }); } }} disabled={probe === 'busy'} />}>
+        {probe && probe !== 'busy' ? (
+          <View style={{ gap: 6 }}>
+            {(['live', 'transcribe'] as const).map((k) => {
+              const r = probe[k];
+              if (!r) return <Text key={k} style={type.small}>{k === 'live' ? 'Live session' : 'File endpoint'}: not tried{!probe.configured ? ' — no key' : probe.switchedOff ? ' — switched off' : ''}.</Text>;
+              return (
+                <View key={k} style={{ gap: 2 }}>
+                  <Row><Pill label={r.ok ? 'ok' : 'refused'} tone={r.ok ? 'ok' : 'crit'} /><Text style={type.small}>{k === 'live' ? 'Live session' : 'File endpoint'}{r.ok ? ` · ${r.model}${r.fellBack ? ' (fell back)' : ''}${r.dropped?.length ? ` · without ${r.dropped.join(', ')}` : ''}${'ms' in r ? ` · ${ms(r.ms)}` : ''}` : ` · ${r.code}: ${r.message}`}</Text></Row>
+                  {!r.ok && r.detail ? <Text style={[type.tiny, { color: colors.overrun }]}>Provider said: {r.detail}</Text> : null}
+                  {r.ok && 'url' in r ? <Text style={type.tiny}>{r.url}</Text> : null}
+                </View>
+              );
+            })}
+          </View>
+        ) : <Text style={type.tiny}>Costs a fraction of a cent. Nothing is kept.</Text>}
+      </Panel>
 
       {/* --- Try one ------------------------------------------------------- */}
       <Panel title="Try one" sub={`The app is set to “${voiceModeLabel(getVoiceMode())}”; the lab runs every way regardless. Models: ${info ? `${info.models.live} · ${info.models.transcribe} · ${info.models.plan}` : '…'}`}>

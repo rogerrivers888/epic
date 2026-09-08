@@ -67,6 +67,10 @@ export class LiveTranscriber {
   private urls: string[] = [];
   private urlIndex = 0;
   private onSettled: (() => void) | null = null;
+  private sentAny = false;
+  private completions = 0;
+  private limitTimer: any = null;
+  private maxSeconds = 300;
 
   constructor(private opts: { language: string | null; sessionId?: string | null; onChange: (s: LiveState) => void }) {}
 
@@ -141,6 +145,7 @@ export class LiveTranscriber {
   private send(b64: string) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
+      this.sentAny = true;
     } else {
       this.held.push(b64);
       if (this.held.length > HOLD / CHUNK) this.held.shift();
@@ -149,7 +154,7 @@ export class LiveTranscriber {
 
   private flushHeld() {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    for (const b64 of this.held) this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
+    for (const b64 of this.held) { this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 })); this.sentAny = true; }
     this.held = [];
   }
 
@@ -166,6 +171,24 @@ export class LiveTranscriber {
       return;
     }
     this.model = token.model;
+    if (token.maxSeconds > 0) this.maxSeconds = token.maxSeconds;
+    // The session ends itself at the server's limit: a socket left open in a
+    // pocket is a paid minute a minute, and the API only learns of it from
+    // what this reports (Codex review, 8 Sep 2026). The recording, if there
+    // is one, carries on; the screen says the captions stopped.
+    if (!this.limitTimer) {
+      const left = this.maxSeconds * 1000 - (Date.now() - this.startedAt);
+      this.limitTimer = setTimeout(() => {
+        if (!this.active || this.stopping) return;
+        this.error = `Live captions stop after ${Math.round(this.maxSeconds / 60)} minutes. Tap Done when you're ready.`;
+        this.active = false;
+        const ws = this.ws; this.ws = null;
+        try { ws?.close(); } catch { /* noop */ }
+        this.closeAudio();
+        this.setStatus('failed');
+        this.report();
+      }, Math.max(1000, left));
+    }
     if (!this.urls.length) {
       // The address the API gives, and the same without its query as a second
       // try: the two spellings the provider has used for a transcription session.
@@ -236,6 +259,7 @@ export class LiveTranscriber {
         this.items.delete(id);
         this.order = this.order.filter((x) => x !== id);
         this.committed = join(this.committed, String(ev.transcript ?? ''));
+        this.completions += 1;
         this.emit();
         if (this.stopping && !this.order.length) this.onSettled?.();
         break;
@@ -267,12 +291,16 @@ export class LiveTranscriber {
     if (this.status !== 'failed') this.setStatus('finishing');
     // The last part-chunk, then the commit.
     if (this.pending.length && this.ws?.readyState === WebSocket.OPEN) { this.send(toBase64(this.pending.splice(0))); }
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === WebSocket.OPEN && this.sentAny) {
+      // Commit what is in flight, then wait for the provider's last word: the
+      // completion of the phrase being spoken when Done was tapped, which may
+      // not have produced a single delta yet (Codex review, 8 Sep 2026 — the
+      // whole transcript of a short utterance was lost by resolving at once).
+      const before = this.completions;
       try { this.ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); } catch { /* noop */ }
       await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, 2000);
-        this.onSettled = () => { clearTimeout(t); resolve(); };
-        if (!this.order.length) { clearTimeout(t); resolve(); }
+        const t = setTimeout(resolve, 3000);
+        this.onSettled = () => { if (this.completions > before && !this.order.length) { clearTimeout(t); resolve(); } };
       });
     }
     this.finish();
@@ -291,13 +319,23 @@ export class LiveTranscriber {
   private finish() {
     this.active = false;
     this.onSettled = null;
+    clearTimeout(this.limitTimer);
+    this.limitTimer = null;
     const ws = this.ws;
     this.ws = null;
     try { ws?.close(); } catch { /* noop */ }
     this.closeAudio();
     if (this.status !== 'failed') this.setStatus('closed');
+    this.report();
+  }
+
+  private reported = false;
+  /** The seconds this session ran, to the ledger — once, however it ended. */
+  private report() {
+    if (this.reported || !this.openedOnce) return;
+    this.reported = true;
     const seconds = Math.round((Date.now() - this.startedAt) / 1000);
-    if (seconds >= 1 && this.openedOnce) void api.voiceLiveUsed({ seconds, sessionId: this.opts.sessionId ?? null, model: this.model }).catch(() => {});
+    if (seconds >= 1) void api.voiceLiveUsed({ seconds, sessionId: this.opts.sessionId ?? null, model: this.model }).catch(() => {});
   }
 
   private closeAudio() {

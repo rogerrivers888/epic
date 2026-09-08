@@ -144,7 +144,7 @@ router.post('/transcribe', express.raw({ type: audioMimes, limit: '25mb' }), asy
         units: { [UNIT]: Math.round((seconds / 60) * 1000) / 1000 },
         costUsd: minuteCost(out.model, seconds),
       });
-      return { transcript: out.text, language: out.language ?? language ?? null, model: out.model, fellBack: out.fellBack, ms: out.ms, seconds, mode: stream ? 'stream' : 'batch' };
+      return { transcript: out.text, language: out.language ?? language ?? null, model: out.model, fellBack: out.fellBack, dropped: out.dropped, events: out.events, ms: out.ms, seconds, mode: stream ? 'stream' : 'batch' };
     };
 
     if (!stream) {
@@ -208,7 +208,11 @@ router.post('/live-used', async (req, res, next) => {
   try {
     const household = await currentHousehold();
     const body = z.object({ seconds: z.number().min(0), sessionId: z.string().max(80).nullish(), model: z.string().max(60).nullish() }).parse(req.body ?? {});
-    const seconds = Math.min(VOICE_MAX_SECONDS, Math.round(body.seconds));
+    // Not capped at the recording limit: a session that ran long was billed in
+    // full and the ledger must say so (Codex review, 8 Sep 2026). The browser
+    // ends a session at the limit itself (voice/live.ts); this is the sanity
+    // bound on a wrong clock — one hour, the longest a Realtime session lives.
+    const seconds = Math.min(3600, Math.round(body.seconds));
     if (seconds < 1) return res.json({ recorded: false });
     const model = body.model && /^[a-z0-9.-]+$/i.test(body.model) ? body.model : LIVE_MODEL;
     await providerCalls.recordMetered({
@@ -282,6 +286,42 @@ adminRouter.get('/utterances', requires('manage_settings'), (req, res) => {
     caps: { minutesMonthly: VOICE_MINUTES_MONTHLY, liveSessionsDaily: VOICE_LIVE_SESSIONS_DAILY, maxSeconds: VOICE_MAX_SECONDS },
   });
 });
+
+/**
+ * GET /probe — can the live session be opened at all, and if not, why.
+ *
+ * The household's screens say "Epic couldn't hear that just now" and nothing
+ * more (owner, 5 Sep 2026); this is where the provider's own sentence belongs.
+ * Mints one client secret and discards it, and tries the file endpoint on a
+ * fifth of a second of silence, so a wrong model name, a refused parameter or
+ * a key on the wrong project reads as a sentence here rather than a guess.
+ */
+adminRouter.get('/probe', requires('manage_settings'), async (req, res) => {
+  const out = { configured: openaiEnabled(), switchedOff: sourceOff(PROVIDER), live: null, transcribe: null };
+  if (out.configured && !out.switchedOff) {
+    try {
+      const t = await mintLiveToken({ language: 'en', seconds: 10 });
+      out.live = { ok: true, model: t.model, url: t.url, fellBack: t.fellBack, dropped: t.dropped };
+    } catch (err) { out.live = { ok: false, code: err.code, message: err.message, detail: err.detail ?? null }; }
+    try {
+      const o = await transcribe({ audio: silentWav(0.2), mime: 'audio/wav', language: 'en' });
+      out.transcribe = { ok: true, model: o.model, fellBack: o.fellBack, dropped: o.dropped, ms: o.ms };
+    } catch (err) { out.transcribe = { ok: false, code: err.code, message: err.message, detail: err.detail ?? null }; }
+  }
+  res.json(out);
+});
+
+/** A WAV of nothing, for the probe: 16 kHz, mono, 16-bit. */
+function silentWav(seconds) {
+  const rate = 16000;
+  const n = Math.round(rate * seconds);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  return buf;
+}
 
 /**
  * POST /runs — one utterance, heard every way, judged and kept.

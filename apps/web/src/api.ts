@@ -1750,6 +1750,7 @@ export const api = {
   voicePlan: (body: { transcript: string; language?: string | null; sessionId?: string | null; context?: Record<string, unknown> | null }) => post<VoicePlanResponse>('/api/voice/plan', body),
   // The lab (back office): the sentences to read, the runs, the tally.
   voiceLab: () => request<VoiceLabInfo>('/api/admin/voice/utterances'),
+  voiceProbe: () => request<VoiceProbe>('/api/admin/voice/probe'),
   voiceRuns: (limit = 100) => request<VoiceRuns>(`/api/admin/voice/runs?limit=${limit}`),
   voiceRecordRun: (body: VoiceRunInput) => post<{ run: VoiceRun }>('/api/admin/voice/runs', body),
   voiceDeleteRun: (id: string) => del<{ removed: boolean }>(`/api/admin/voice/runs/${id}`),
@@ -2666,6 +2667,12 @@ export type VoiceLabInfo = {
   configured: boolean;
   switchedOff: boolean;
   caps: { minutesMonthly: number; liveSessionsDaily: number; maxSeconds: number };
+};
+/** The lab's connection check: the provider's own words when something refuses, which no household screen shows. */
+export type VoiceProbe = {
+  configured: boolean; switchedOff: boolean;
+  live: { ok: true; model: string; url: string; fellBack?: boolean; dropped?: string[] } | { ok: false; code: string; message: string; detail: string | null } | null;
+  transcribe: { ok: true; model: string; fellBack?: boolean; dropped?: string[]; ms: number } | { ok: false; code: string; message: string; detail: string | null } | null;
 };
 export type VoiceCaptureMode = 'live' | 'batch' | 'stream';
 export type VoiceModeResult = { transcript: string | null; ms: number | null; model: string | null; error: string | null };

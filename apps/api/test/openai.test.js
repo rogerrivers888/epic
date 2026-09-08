@@ -149,3 +149,35 @@ test('a refusal is a 422 and the provider\'s sentence stays out of the message',
     return true;
   });
 });
+
+test('a live-session field the provider refuses is dropped by name and the rest kept', async () => {
+  const calls = fakeFetch([
+    { status: 400, body: { error: { message: "Unknown parameter: 'session.audio.input.noise_reduction'.", code: 'unknown_parameter', param: 'session.audio.input.noise_reduction' } } },
+    { status: 400, body: { error: { message: "Invalid value: 'server_vad' for turn_detection", code: 'invalid_value', param: 'session.audio.input.turn_detection.type' } } },
+    { body: { value: 'ek_after', expires_at: 1_800_000_000 } },
+  ]);
+  const out = await mintLiveToken({ language: 'en', keywords: ['Sintra'] });
+  assert.equal(out.token, 'ek_after');
+  assert.equal(out.model, 'gpt-live-transcribe', 'the same model, not the next rung');
+  assert.deepEqual(out.dropped, ['noise_reduction', 'turn_detection']);
+  const last = calls[2].body.session.audio.input;
+  assert.ok(!('noise_reduction' in last) && !('turn_detection' in last));
+  assert.deepEqual(last.transcription.keywords, ['Sintra'], 'what was not refused stays');
+});
+
+test('a refusal that names nothing optional is a real error, not a loop', async () => {
+  fakeFetch([{ status: 400, body: { error: { message: 'Invalid value for session.type', code: 'invalid_value', param: 'session.type' } } }]);
+  await assert.rejects(mintLiveToken({ language: 'en' }), (err) => err.code === 'voice_unavailable');
+});
+
+test('extract asks for little reasoning, and drops it for a model that has none', async () => {
+  const calls = fakeFetch([
+    { status: 400, body: { error: { message: "Unsupported parameter: 'reasoning' is not supported with this model.", code: 'unsupported_parameter', param: 'reasoning' } } },
+    { body: { output_text: '{"a":1}', output: [{ type: 'message', content: [{ type: 'output_text', text: '{"a":1}' }] }] } },
+  ]);
+  const out = await extract({ system: 's', input: 'i', schema: { type: 'object', additionalProperties: false, properties: { a: { type: 'integer' } }, required: ['a'] } });
+  assert.deepEqual(out.parsed, { a: 1 });
+  assert.equal(calls[0].body.reasoning.effort, 'minimal');
+  assert.ok(!('reasoning' in calls[1].body));
+  assert.equal(calls[1].body.store, false, 'only the refused field goes');
+});

@@ -65,10 +65,12 @@ export function wer(reference, hypothesis) {
  * Whether two extracted plans say different things, and where.
  *
  * Flattens both to dotted paths and compares values as JSON, ignoring the
- * fields that are prose about the plan rather than the plan (`summary`), so a
- * differently worded sentence is not a changed plan.
+ * fields that are prose about the plan rather than the plan — the summary, the
+ * verbatim `as_said` quotes, the list of corrections — so a differently worded
+ * sentence, or a transcript that kept "no, sorry" where another dropped it, is
+ * not a changed plan. What changes a plan is a date, a place, a number.
  */
-export function planDiff(a, b, { ignore = ['summary'] } = {}) {
+export function planDiff(a, b, { ignore = ['summary', 'dates.as_said', 'party.as_said', 'corrections'] } = {}) {
   const flat = (o, prefix = '', out = {}) => {
     if (o === null || typeof o !== 'object' || Array.isArray(o)) { out[prefix || '$'] = JSON.stringify(o ?? null); return out; }
     for (const [k, v] of Object.entries(o)) flat(v, prefix ? `${prefix}.${k}` : k, out);
