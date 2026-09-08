@@ -96,7 +96,9 @@ test('the wizard’s pages merge: later words win, silence keeps what was there,
 test('the results address is Inspire, set by what was said, and the trip draft is the create route’s own shape', () => {
   const out = resolveIntake({ facts: { ...heard, destination: 'Windsor' }, flow: 'returning', household, members, profile: { travelMode: 'car', maxMinutes: 60 }, today });
   const href = resultsHref({ resolved: out.resolved, intakeId: 'abc', destinationPoint: { lat: 51.4839, lng: -0.6044, label: 'Windsor' } });
-  assert.ok(href.startsWith('/inspire/activity?'), href);
+  assert.ok(href.startsWith('/inspire?'), `active is every shelf, not the thin Active one: ${href}`);
+  const fun = resultsHref({ resolved: { ...out.resolved, vibe: 'fun' }, intakeId: 'abc' });
+  assert.ok(fun.startsWith('/inspire/fun?'), fun);
   const q = new URL(`http://x${href}`).searchParams;
   assert.equal(q.get('at'), '51.48390,-0.60440');
   assert.equal(q.get('intake'), 'abc');
@@ -180,6 +182,14 @@ test('everyone named is the whole family, and who is never written into the resu
   assert.equal(out.slots.find((x) => x.key === 'who').label, 'Whole family · 4');
   const some = resolveIntake({ facts: normaliseTripFacts({ ...heard, who: { kind: 'named', names: ['Sam', 'Priya'], adults: null, children: null, kids_mentioned: true } }), flow: 'returning', household, members, today });
   assert.equal(some.slots.find((x) => x.key === 'who').label, 'Sam & Priya');
-  const q = new URL(`http://x${resultsHref({ resolved: some.resolved, intakeId: 'z' })}`).searchParams;
-  assert.equal(q.get('who'), null);
+  const q = new URL(`http://x${resultsHref({ resolved: some.resolved, intakeId: 'z', memberCount: 4 })}`).searchParams;
+  assert.equal(q.get('who'), 'a,c', 'some of the household: Inspire ranks for them');
+  const all = new URL(`http://x${resultsHref({ resolved: out.resolved, intakeId: 'z', memberCount: 4 })}`).searchParams;
+  assert.equal(all.get('who'), null, 'everybody is not written');
+});
+
+test('an exact age claims its child before a band does, whatever the order', () => {
+  const f = normaliseTripFacts({ ...heard, kids_ages: [{ name: null, age: null, band: '9-12' }, { name: null, age: 9, band: null }] });
+  const kids = [{ id: 'x', name: 'Nine', age: 9, isMinor: true }, { id: 'y', name: 'Ten', age: 10, isMinor: true }];
+  assert.equal(harvestOffer({ facts: f, members: [members[0], ...kids], profile: { diets: ['vegetarian'] } }), null, 'the nine is the nine and the band is the ten');
 });

@@ -244,7 +244,13 @@ export const TRIP_TO_MODE = { driving: 'car', transit: 'public_transport', walki
 const VIBE_LABEL = { fun: 'Fun', cultural: 'Cultural', active: 'Active', relaxed: 'Relaxed', mixed: 'A bit of everything' };
 const VIBE_ICON = { fun: 'fun', cultural: 'culture', active: 'activity', relaxed: 'relaxing', mixed: 'inspire' };
 /** The Inspire category a mood opens: the address guard in routes.ts knows these words. */
-export const VIBE_TO_CATEGORY = { fun: 'fun', cultural: 'culture', active: 'activity', relaxed: 'relaxing', mixed: null };
+/**
+ * Only the shelves that are full enough to be a page of their own. Our atlas's
+ * Active shelf is thin around most homes (nothing within an hour of Ascot on
+ * the first deployed run, 9 Sep 2026), and an empty page is worse than every
+ * shelf with the mood on the chip — the ranking still knows what was asked.
+ */
+export const VIBE_TO_CATEGORY = { fun: 'fun', cultural: 'culture', active: null, relaxed: 'relaxing', mixed: null };
 const TYPE_LABEL = { today: 'Today', day_out: 'A day out', weekend: 'A weekend', holiday: 'A holiday', event: 'An event' };
 
 export const minutesLabel = (m) => (m == null ? '' : m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hr` : `${Math.floor(m / 60)} hr ${m % 60}`);
@@ -471,7 +477,7 @@ function gapQuestions(slots, f, answers, children) {
  * set by what was said. Only what differs from Inspire's own defaults is
  * written (routes.ts's rule), plus the intake so the chip row can be drawn.
  */
-export function resultsHref({ resolved, intakeId, originPoint = null, destinationPoint = null }) {
+export function resultsHref({ resolved, intakeId, originPoint = null, destinationPoint = null, memberCount = 0 }) {
   const category = resolved.vibe ? VIBE_TO_CATEGORY[resolved.vibe] : null;
   const foodOnly = !resolved.vibe && !resolved.indoors && (resolved.food.cuisines.length || resolved.food.must_haves.length || resolved.food.place) && !resolved.destination;
   const path = foodOnly ? '/inspire/food' : category ? `/inspire/${category}` : '/inspire';
@@ -481,9 +487,11 @@ export function resultsHref({ resolved, intakeId, originPoint = null, destinatio
   if (resolved.maxMinutes && resolved.maxMinutes !== 60) q.set('travel', String(resolved.maxMinutes));
   const by = MODE_TO_INSPIRE[resolved.travelMode] ?? 'drive';
   if (by !== 'drive') q.set('by', by);
-  // Who is coming is not written into the address: Inspire's `who` narrows the
-  // list to places that suit only those people and emptied it on the first
-  // deployed run (9 Sep 2026). The trip's attendees carry it instead.
+  // Who is coming travels only when it is some of the household: Inspire ranks
+  // for whoever is named, and treats an absent `who` as everybody. Everybody
+  // by name is not written (the first deployed run wrote all three and the
+  // list came back empty, 9 Sep 2026).
+  if (resolved.who?.kind === 'named' && resolved.who.memberIds?.length && resolved.who.memberIds.length < memberCount) q.set('who', resolved.who.memberIds.join(','));
   if (intakeId) q.set('intake', intakeId);
   const qs = q.toString();
   return qs ? `${path}?${qs}` : path;
@@ -529,12 +537,19 @@ export function harvestOffer({ facts, members = [], profile = {} }) {
   const children = members.filter((m) => m.isMinor || (m.age != null && m.age < 18));
   // Each household child can account for one said child, not all of them:
   // one ten-year-old on file and two "9-12" answers is one new child.
+  // Exact ages claim their child first; the bands take what is left, so the
+  // order the children were said in cannot cost one of them a match.
   const spare = [...children];
-  const unknownAges = ages.filter((k) => {
-    const at = spare.findIndex((c) => c.age === k.age || (k.approx && c.age != null && bandOfAge(c.age) === k.band));
-    if (at >= 0) { spare.splice(at, 1); return false; }
-    return true;
-  });
+  const claimed = new Set();
+  for (const k of ages.filter((k) => !k.approx)) {
+    const at = spare.findIndex((c) => c.age === k.age);
+    if (at >= 0) { spare.splice(at, 1); claimed.add(k); }
+  }
+  for (const k of ages.filter((k) => k.approx)) {
+    const at = spare.findIndex((c) => c.age != null && bandOfAge(c.age) === k.band);
+    if (at >= 0) { spare.splice(at, 1); claimed.add(k); }
+  }
+  const unknownAges = ages.filter((k) => !claimed.has(k));
   if (unknownAges.length) items.push({ kind: 'kids', ages: unknownAges.map((k) => ({ name: k.name, age: k.age, band: k.band, approx: k.approx })) });
   if (!items.length) return null;
   const parts = [];
