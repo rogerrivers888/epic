@@ -164,6 +164,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   /** The Max detour pill's dropdown, which lives on the map now rather than in the drawer. */
   const [openDetour, setOpenDetour] = useState(false);
   /**
+   * What the browse has open over its list — a sort or detour menu, the
+   * filter takeover — so the header's one back arrow can close that first
+   * (trips V2: "if a menu or the filter takeover is open it closes that;
+   * otherwise from a place → list, from the list → the trip").
+   */
+  const browseMenus = useRef<{ close: () => boolean } | null>(null);
+  /**
    * The household's standing answer to "what are you looking for" (owner,
    * 6 Sep 2026: "I never search for pubs or bakeries. I just want to find
    * restaurants"). It is what the browse *opens* on; the address always wins,
@@ -880,6 +887,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       */}
       <Pressable
         onPress={() => {
+          if (browseMenus.current?.close()) return;
           if (selected) { setSelected(null); return; }
           if (pill) { setPill(null); return; }
           if (section === 'group') { onSection('itinerary'); return; }
@@ -984,6 +992,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   ) : pill ? (
     <BrowseList
       pill={pill}
+      menusRef={browseMenus}
       along={along}
       shown={shownAlong}
       onRowLayout={(ref, y) => rowTops.current.set(ref, y)}
@@ -1917,7 +1926,7 @@ function HeartButton({ on, onPress, bare, onPhoto }: {
   );
 }
 
-function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind, sort, onSort, minRating, onMinRating, priceBand, onPriceBand, saveFilter, onSaveFilter }: {
+function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind, sort, onSort, minRating, onMinRating, priceBand, onPriceBand, saveFilter, onSaveFilter, menusRef }: {
   pill: Pill;
   along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number };
   shortlisted: TripPlace[];
@@ -1960,6 +1969,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   /** Which type the Shortlist's own pill row is showing. */
   saveFilter: SavedFilter;
   onSaveFilter: (k: SavedFilter) => void;
+  /** Handed to the header, so its back arrow can close an open menu before it does anything else. */
+  menusRef?: React.MutableRefObject<{ close: () => boolean } | null>;
 }) {
   const [openKind, setOpenKind] = useState(false);
   const [openSort, setOpenSort] = useState(false);
@@ -1969,6 +1980,17 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   /** The type list opens past its first five rather than scrolling forever. */
   const [moreTypes, setMoreTypes] = useState(false);
   const closeMenus = () => { setOpenSort(false); setOpenDetour(false); };
+  useEffect(() => {
+    if (!menusRef) return;
+    menusRef.current = {
+      close: () => {
+        if (!openSort && !openDetour && !openKind && !filtering) return false;
+        closeMenus(); setOpenKind(false); setFiltering(false);
+        return true;
+      },
+    };
+    return () => { menusRef.current = null; };
+  }, [menusRef, openSort, openDetour, openKind, filtering]);
   /** The one place being looked at, when the sheet has given it the whole room. */
   const chosen = useMemo(
     () => (selected ? shown.find((p) => p.venueRef === selected) ?? null : null),

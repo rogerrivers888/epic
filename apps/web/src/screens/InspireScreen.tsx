@@ -541,6 +541,30 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   );
   const closeDrawer = () => setQuery({ place: null }, { replace: false });
 
+  /**
+   * The heart in the drawer: keep this place, or take it back out. Keeping it
+   * is what fills Places' Shortlisted list ("heart something while browsing to
+   * shortlist it for later"); taking it out removes it from the atlas rather
+   * than marking it dismissed — an un-tapped heart means "I did not mean to
+   * keep that", not "not for us". A place the household has been to cannot be
+   * removed, and the API says so; the heart is then put back.
+   */
+  const [kept, setKept] = useState<Record<string, boolean>>({});
+  const [notice, setNotice] = useState<string | null>(null);
+  const isKept = (i: InspireItem) => kept[i.venueRef] ?? ['saved', 'special'].includes(i.household?.ledger ?? '');
+  const keep = async (i: InspireItem) => {
+    const now = !isKept(i);
+    setKept((k) => ({ ...k, [i.venueRef]: now }));
+    try {
+      if (now) await api.savePlace(i.venueRef, 'saved', { label: i.name, category: i.category, lat: i.lat, lng: i.lng });
+      else await api.deleteAtlasPlace(i.venueRef);
+    } catch (e: any) {
+      setKept((k) => ({ ...k, [i.venueRef]: !now }));
+      setNotice(e?.message ?? 'That could not be saved just now.');
+    }
+  };
+  const openedItem = openedRef ? (pool?.items ?? []).find((i) => i.venueRef === openedRef) ?? null : null;
+
   // --- the controls' words ---------------------------------------------------
   const travelDraw = TRAVEL[travelBy];
   // Before the household has answered there is no town to name yet, and
@@ -715,6 +739,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 </View>
               ) : null}
 
+              {notice ? (
+                <Pressable onPress={() => setNotice(null)} style={[styles.gutter, styles.notice]} accessibilityRole="button">
+                  <Icon name="info" size={14} color={colors.ink} />
+                  <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
+                </Pressable>
+              ) : null}
               {nothingDrawn ? (
                 inMode.length === 0 ? (
                   <EmptyMatch
@@ -811,6 +841,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         onClose={closeDrawer}
         addLabel="Create trip"
         addIcon="trips"
+        shortlisted={openedItem ? isKept(openedItem) : false}
+        onShortlist={async () => { if (openedItem) await keep(openedItem); }}
         onAdd={onCreateTrip ? (it) => {
           closeDrawer();
           onCreateTrip({
