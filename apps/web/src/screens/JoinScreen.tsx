@@ -77,6 +77,8 @@ export function JoinScreen({ token, preview, onExit }: {
   const [heads, setHeads] = useState(1);
   const [moved, setMoved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Not a failure: they are on the trip, and the account they already have is theirs to sign into. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -127,8 +129,14 @@ export function JoinScreen({ token, preview, onExit }: {
           try {
             const r = await api.joinAccount(token, body);
             remember(token, r.participantToken);
-            setSessionToken(r.sessionToken);
-            setMe(r.participantToken); setAccount(r.account); setV(r); setError(null); go('household');
+            // An address that already has an Epic is not signed into from here:
+            // typing somebody's email is not being them. They are on the trip
+            // all the same — that is what the participant token is — and they
+            // sign in to see it beside their own.
+            if (r.sessionToken) setSessionToken(r.sessionToken);
+            setMe(r.participantToken); setV(r); setError(null); setNotice(null);
+            if (r.signInRequired) { setNotice(r.message ?? null); go('landing'); return; }
+            setAccount(r.account); go('household');
           } catch (e: any) { setError(e.message); } finally { setBusy(false); }
         }}
       />
@@ -179,6 +187,7 @@ export function JoinScreen({ token, preview, onExit }: {
           <Text style={[type.small, { color: colors.headerSub }]}>Preview · nothing is saved</Text>
         </Row>
       ) : null}
+      {notice ? <StatusLine tone="good">{notice}</StatusLine> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       {inner}
     </>

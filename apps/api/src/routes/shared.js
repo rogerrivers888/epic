@@ -165,18 +165,22 @@ router.post('/:token/enter', async (req, res, next) => {
       return res.json({ guestId: guest.id, sent: isEmail ? 'email' : 'sms', message: `Code sent to ${isEmail ? contact : 'your phone'}. It works for ${CODE_MINUTES} minutes.` });
     }
 
-    // No sender wired up. The one person who can still be let in is somebody
-    // the organiser added by hand — the vouching a code would have established
-    // has already happened.
-    if (known) {
-      const joined = await chat.markGuestJoined(guest.id);
-      /**
-       * `token` rather than `you`: the payload already carries a `you`, which is
-       * who the reader *is*, and spreading it over the token silently replaced
-       * the one thing this answer exists to hand back.
-       */
-      return res.json({ guestId: guest.id, sent: null, token: joined.token, ...(await guestPayload(trip, joined)) });
-    }
+    /**
+     * No sender wired up, so nobody can be let in here at all.
+     *
+     * This used to admit anyone the organiser had already added by hand, on the
+     * reasoning that the vouching a code would establish had happened already.
+     * That reasoning is wrong, and it was mine (Codex found it, 8 Sep 2026):
+     * the organiser vouched for *the person at that address*, not for anybody
+     * who can type it. A share link is made to be passed around, so knowing the
+     * link and a guest's email — a guest whose name is on the trip for everyone
+     * on it to read — returned that guest's permanent token, and with it their
+     * chat in their name.
+     *
+     * A door that cannot check who is at it does not open. The organiser can
+     * still let somebody in, by sending them a link of their own, which is
+     * proof of exactly the kind this route cannot manufacture.
+     */
     res.json({
       guestId: guest.id, sent: null,
       message: "Epic can't send you a code yet. Ask whoever shared this trip to add you — they can send you a link of your own.",

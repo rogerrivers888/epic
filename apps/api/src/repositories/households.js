@@ -127,7 +127,17 @@ export async function insertMember(householdId, m) {
  * whichever of birth date or birth year the change leaves behind, so the answer
  * cannot disagree with the dates it was derived from.
  */
-export async function updateMember(id, m) {
+/**
+ * A member is only ever edited by the household they belong to.
+ *
+ * These were keyed on the member's UUID alone, so any signed-in household that
+ * came by another's member id could rename them, take their contact details or
+ * delete them outright — and deleting a member takes their allergens and their
+ * whole rating history with them by cascade (Codex, 8 Sep 2026). The check is
+ * in the SQL rather than the route so that the next route to call this cannot
+ * forget it; the household is a required argument for the same reason.
+ */
+export async function updateMember(id, m, householdId) {
   const { rows } = await query(
     `update members
         set name                  = coalesce($2, name),
@@ -147,10 +157,10 @@ export async function updateMember(id, m) {
                                          when coalesce($4, birth_year) is not null
                                          then (extract(year from now())::int - coalesce($4, birth_year)) < 13
                                          else is_minor end
-      where id = $1 returning *`,
+      where id = $1 and household_id = $11 returning *`,
     [id, m.name ?? null, m.relationship ?? null, m.birthYear ?? null, m.avatarUrl ?? null,
       m.typicalVisitMinutes ?? null, m.maxTravelMinutes ?? null, m.birthDate ?? null,
-      m.email ?? null, m.mobile ?? null],
+      m.email ?? null, m.mobile ?? null, householdId],
   );
   return rows[0] ?? null;
 }
@@ -162,8 +172,9 @@ export async function memberById(id) {
 }
 
 /** Epic 1 M3 — this takes their rating history with them, by cascade. */
-export async function deleteMember(id) {
-  const { rowCount } = await query('delete from members where id = $1', [id]);
+export async function deleteMember(id, householdId) {
+  const { rowCount } = await query(
+    'delete from members where id = $1 and household_id = $2', [id, householdId]);
   return rowCount;
 }
 
@@ -209,7 +220,13 @@ export async function upsertConstraint(memberId, c) {
  * assembled rather than written out — and why it is assembled here, where the
  * column names live, rather than in a route.
  */
-export async function patchConstraint(id, fields) {
+/**
+ * A constraint is reached through the member, and the member through the
+ * household — so somebody else's allergen cannot be edited or removed by id
+ * (Codex, 8 Sep 2026). An allergen excludes; quietly deleting one is the most
+ * dangerous write in this file.
+ */
+export async function patchConstraint(id, fields, householdId) {
   const sets = [];
   const params = [id];
   if ('maxMinutes' in fields) {
@@ -221,12 +238,19 @@ export async function patchConstraint(id, fields) {
     sets.push(`favourite = $${params.length} and kind = 'like'`);
   }
   if (!sets.length) return { nothingToDo: true, constraint: null };
-  const { rows } = await query(`update member_constraints set ${sets.join(', ')} where id = $1 returning *`, params);
+  params.push(householdId);
+  const { rows } = await query(
+    `update member_constraints set ${sets.join(', ')}
+      where id = $1 and member_id in (select id from members where household_id = $${params.length})
+      returning *`, params);
   return { nothingToDo: false, constraint: rows[0] ?? null };
 }
 
-export async function deleteConstraint(id) {
-  const { rowCount } = await query('delete from member_constraints where id = $1', [id]);
+export async function deleteConstraint(id, householdId) {
+  const { rowCount } = await query(
+    `delete from member_constraints
+      where id = $1 and member_id in (select id from members where household_id = $2)`,
+    [id, householdId]);
   return rowCount;
 }
 

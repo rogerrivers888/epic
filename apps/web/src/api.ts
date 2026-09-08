@@ -1442,7 +1442,14 @@ export const api = {
   join: (token: string, body: { name: string; contact?: string; contactKind?: string; heads?: number; brings?: string; matchId?: string | null }) => post<JoinView & { participantToken: string }>(`/api/join/${token}`, body),
   /** Joining properly: an account of their own, a household of their own, 30 days of the app. */
   joinAccount: (token: string, body: { name: string; contact: string; matchId?: string | null }) =>
-    post<JoinView & { participantToken: string; sessionToken: string; account: GuestAccount }>(`/api/join/${token}/account`, body),
+    post<JoinView & {
+      participantToken: string;
+      /** Null when the address already has an Epic: joining does not prove it is theirs. */
+      sessionToken: string | null;
+      signInRequired?: boolean;
+      message?: string;
+      account: GuestAccount | null;
+    }>(`/api/join/${token}/account`, body),
   joinHousehold: (token: string, body: { participantToken: string; members: HouseholdMemberInput[] }) =>
     post<JoinView>(`/api/join/${token}/household`, body),
   /** Book your itinerary, confirmed: the picks go up, the money comes back worked out. */

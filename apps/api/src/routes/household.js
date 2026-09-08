@@ -301,12 +301,15 @@ router.patch('/members/:id', async (req, res, next) => {
     if (mobile && !number) return res.status(400).json({ error: 'invalid_mobile', message: `“${mobile}” does not look like a mobile number. A UK one starts 07, or +44.` });
     if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return res.status(400).json({ error: 'invalid_birth_date', message: 'Use YYYY-MM-DD' });
     if (avatarUrl && avatarUrl.length > 600_000) return res.status(413).json({ error: 'avatar_too_large', message: 'Keep photos under ~400KB' });
+    const household = await currentHousehold();
     const member = await households.updateMember(req.params.id, {
       name, relationship,
       birthYear: birthYear ?? (birthDate ? Number(birthDate.slice(0, 4)) : null),
       avatarUrl, typicalVisitMinutes, maxTravelMinutes, birthDate,
       email, mobile: number,
-    });
+    }, household.id);
+    // Somebody else's member is "not found" rather than "not yours": whether it
+    // exists is not a thing to tell them.
     if (!member) return res.status(404).json({ error: 'member_not_found' });
     res.json({ member });
   } catch (err) {
@@ -317,7 +320,8 @@ router.patch('/members/:id', async (req, res, next) => {
 // Epic 1 M3 — deleting a member deletes their profile and rating history.
 router.delete('/members/:id', async (req, res, next) => {
   try {
-    if (!await households.deleteMember(req.params.id)) return res.status(404).json({ error: 'member_not_found' });
+    const household = await currentHousehold();
+    if (!await households.deleteMember(req.params.id, household.id)) return res.status(404).json({ error: 'member_not_found' });
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -520,7 +524,7 @@ router.post('/members/:id/invite', async (req, res, next) => {
       }
     }
 
-    await households.updateMember(member.id, { email: email ?? '', mobile: mobile ?? '' });
+    await households.updateMember(member.id, { email: email ?? '', mobile: mobile ?? '' }, member.household_id);
 
     let account = await accountByMember(member.id);
     if (!account) {
@@ -589,6 +593,12 @@ router.post('/members/:id/constraints', async (req, res, next) => {
     const { kind, value, conceptKey: explicitKey, maxMinutes = null, favourite = false } = req.body;
     if (!KINDS.includes(kind)) return res.status(400).json({ error: 'invalid_kind', message: `kind must be one of ${KINDS.join(', ')}` });
     if (!value?.trim()) return res.status(400).json({ error: 'value_required' });
+    // Whose person this is, before anything is written against them. An
+    // allergen excludes, so an allergen put on somebody by a stranger is not a
+    // tidiness problem (Codex, 8 Sep 2026).
+    const household = await currentHousehold();
+    const target = await households.memberById(req.params.id);
+    if (!target || target.household_id !== household.id) return res.status(404).json({ error: 'member_not_found' });
 
     let concept = explicitKey ? conceptByKey(explicitKey) : null;
     if (!concept && kind !== 'allergen') concept = resolveConcept(value, { kinds: kindsFor(kind) });
@@ -654,7 +664,8 @@ router.post('/members/:id/constraints', async (req, res, next) => {
  */
 router.patch('/constraints/:id', async (req, res, next) => {
   try {
-    const { nothingToDo, constraint } = await households.patchConstraint(req.params.id, req.body || {});
+    const household = await currentHousehold();
+    const { nothingToDo, constraint } = await households.patchConstraint(req.params.id, req.body || {}, household.id);
     if (nothingToDo) return res.status(400).json({ error: 'nothing_to_update', message: 'send maxMinutes and/or favourite' });
     if (!constraint) return res.status(404).json({ error: 'constraint_not_found' });
     res.json({ constraint });
@@ -665,7 +676,8 @@ router.patch('/constraints/:id', async (req, res, next) => {
 
 router.delete('/constraints/:id', async (req, res, next) => {
   try {
-    if (!await households.deleteConstraint(req.params.id)) return res.status(404).json({ error: 'constraint_not_found' });
+    const household = await currentHousehold();
+    if (!await households.deleteConstraint(req.params.id, household.id)) return res.status(404).json({ error: 'constraint_not_found' });
     res.status(204).end();
   } catch (err) {
     next(err);

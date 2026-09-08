@@ -31,6 +31,7 @@ import * as accountsRepo from '../repositories/accounts.js';
 import * as householdsRepo from '../repositories/households.js';
 import { openSession } from '../auth.js';
 import { currentHousehold, householdOf } from './household.js';
+import { currentAccount } from '../context.js';
 import { CADENCES, DEFAULT_CADENCE, QUIET_HOURS, dueRuns, nextRun, reminderBody, schedule } from '../domain/reminders.js';
 import { channelReady, sendReminder } from '../sources/notify.js';
 import { DEFAULT_TZ } from '../domain/time.js';
@@ -1149,10 +1150,25 @@ router.post('/join/:token/account', async (req, res, next) => {
       return res.status(409).json({ error: 'group_full', message: `This trip is full — ${heads} of ${group.maximum_count}.` });
     }
 
+    /**
+     * Knowing somebody's address is not being them.
+     *
+     * This looked an account up by the contact typed into a public invite form
+     * and opened a session on it, so anybody holding any invite link — and they
+     * are made to be passed around — could type the owner's email and be handed
+     * his household (Codex, 8 Sep 2026). The convenience it was reaching for is
+     * real: somebody who already has Epic should not be made to start again.
+     * But it is only convenience, and it cannot be paid for with the front door.
+     *
+     * So: a brand-new guest account is opened and signed into as before, since
+     * there is nothing there to take. An account that already exists is joined
+     * to the trip by name and told to sign in — unless the person is already
+     * signed into it on this device, in which case they have proved it.
+     */
     const existing = await accountsRepo.accountByContact({ email: isEmail ? contact : null, mobile: isEmail ? null : contact });
-    const account = existing && existing.status !== 'suspended'
-      ? existing
-      : await accountsRepo.createGuestAccount({ name, email: isEmail ? contact : null, mobile: isEmail ? null : contact });
+    const live = existing && existing.status !== 'suspended' ? existing : null;
+    const proved = live && currentAccount()?.id === live.id;
+    const account = proved ? live : (live ? null : await accountsRepo.createGuestAccount({ name, email: isEmail ? contact : null, mobile: isEmail ? null : contact }));
 
     // Their row on this group: the one the organiser added by name if it
     // matches, otherwise a new one. Never two rows for one person.
@@ -1162,6 +1178,21 @@ router.post('/join/:token/account', async (req, res, next) => {
     const me = match
       ? await groupsRepo.joinOntoParticipant(match.id, { name, contact, contactKind: isEmail ? 'email' : 'mobile', heads: match.heads || 1, token: token() })
       : await groupsRepo.insertParticipant(group.id, { name, contact, contactKind: isEmail ? 'email' : 'mobile', heads: 1, joinedAt: new Date(), token: token() });
+    // Their place on the trip is theirs either way: the organiser invited this
+    // contact, and the participant token is good for this group and nothing
+    // else. Only the account — and the session on it — waits for proof.
+    if (!account) {
+      return res.status(201).json({
+        participantToken: me.token,
+        sessionToken: null,
+        signInRequired: true,
+        account: null,
+        contact,
+        message: 'You already have an Epic. You are on the trip — sign in with that address to see it beside your own.',
+        ...(await joinPayload(group, me.token)),
+      });
+    }
+
     await groupsRepo.linkParticipantAccount(me.id, account.id);
 
     const { token: sessionToken } = await openSession(`${name} · invited to ${group.name ?? 'a trip'}`, account.id);
@@ -1173,7 +1204,7 @@ router.post('/join/:token/account', async (req, res, next) => {
       account: {
         id: account.id, name: account.name ?? name, email: account.email, mobile: account.mobile,
         householdId: account.household_id, plan: account.plan, trialEndsOn: ymd(account.trial_ends_on),
-        returning: Boolean(existing),
+        returning: Boolean(live),
       },
       ...(await joinPayload(group, me.token)),
     });
