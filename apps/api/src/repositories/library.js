@@ -481,6 +481,8 @@ export async function publishedFor(slug) {
        left join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero'
        left join image_assets i on i.id = l.image_id and i.moderation = 'approved'
       where a.region_slug = $1 and a.state = 'published'
+        -- The same bar as the home screen. A county page is a screen too.
+        and a.visiting = 'yes'
       order by a.rank nulls last, a.score desc`, [slug]);
   return rows;
 }
@@ -579,10 +581,23 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
          left join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero'
          left join image_assets i on i.id = l.image_id and i.moderation = 'approved'
         where a.state = 'published'
-          -- Somewhere that has been established as closed to the public is not
-          -- an answer to "what shall we do". Null is "nobody has established
-          -- it" and stays in; only a refusal is skipped (domain/visiting.js).
-          and a.visiting is distinct from 'no'
+          /*
+           * Shown only where something establishes that the public may come.
+           *
+           * The owner, 7 Sep 2026: "We're going to need to develop something
+           * that makes sure we never show private residences… If you're not
+           * sure, I'd err on the side of caution and not show it." So this
+           * asks for yes rather than for not-no: a place nobody has established is
+           * treated exactly like a refusal here, and the difference between
+           * them is kept for the back office rather than for the screen.
+           *
+           * It costs 11% of the published atlas, measured before the switch
+           * rather than after. That number only fell to 11% because four
+           * sources answer instead of one (domain/visiting.js), and it keeps
+           * falling on its own: Google settles a place the first time anybody
+           * is shown it, and OpenStreetMap and Wikipedia keep improving.
+           */
+          and a.visiting = 'yes'
           and a.lat between $3 and $4 and a.lng between $5 and $6
           ${illustratedOnly ? 'and i.id is not null' : ''}
      ),
@@ -1547,11 +1562,16 @@ export async function setVisiting(id, { visiting, because, by }) {
  */
 export async function unsettledVisiting({ limit = 100 } = {}) {
   const { rows } = await query(
-    `select id, name, region_slug, category, kinds, summary, score, website
+    `select distinct on (coalesce(wikidata_id, id::text))
+            id, name, region_slug, category, kinds, summary, score, website
        from attractions
       where state = 'published' and visiting is null
-      order by score desc nulls last limit $1`, [limit]);
-  return rows;
+      -- One row per place. The Forth Road Bridge is filed under three counties
+      -- and appeared three times in this list, which is three decisions where
+      -- there is one place (owner, 7 Sep 2026: "if something covers 2 counties,
+      -- we should still just de-dup it. Should never be in the same view").
+      order by coalesce(wikidata_id, id::text), score desc nulls last`);
+  return rows.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, limit);
 }
 
 export async function listLessons({ scope = null, limit = 200 } = {}) {

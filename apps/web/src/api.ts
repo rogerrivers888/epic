@@ -1813,7 +1813,23 @@ export const api = {
     request<{ types: LibraryType[] }>(`/api/admin/library/types${qs(p)}`),
   libraryAttractions: (p: { region?: string; state?: string; q?: string; category?: string; kind?: string; limit?: number }) =>
     request<{ attractions: LibraryAttraction[] }>(`/api/admin/library/attractions${qs(p)}`),
-  libraryCurate: (id: string, body: { state?: string; pinned?: boolean; note?: string }) =>
+
+  /**
+   * Who can be visited, who cannot, and who nobody has established.
+   *
+   * The third of those is the one worth a screen: a place is only shown when
+   * something says the public may come, so an unestablished place is invisible
+   * — and an invisible place with no list to appear on is indistinguishable
+   * from a bug (owner, 7 Sep 2026).
+   */
+  libraryVisiting: (p: { limit?: number } = {}) =>
+    request<LibraryVisiting>(`/api/admin/library/visiting${qs(p)}`),
+  libraryVisitingImpact: () => request<LibraryVisitingImpact>('/api/admin/library/visiting/impact'),
+  libraryVisitingGather: (body: { region?: string | null; limit?: number } = {}) =>
+    post<{ counts: { looked: number; withOsm: number; withCategories: number } }>('/api/admin/library/visiting/gather', body),
+  libraryVisitingRejudge: (body: { region?: string | null } = {}) =>
+    post<{ counts: { looked: number; yes: number; no: number; unknown: number; changed: number } }>('/api/admin/library/visiting/rejudge', body),
+  libraryCurate: (id: string, body: { state?: string; pinned?: boolean; note?: string; visiting?: 'yes' | 'no' | null; visitingBecause?: string }) =>
     patch<{ attraction: LibraryAttraction }>(`/api/admin/library/attractions/${id}`, body),
   libraryImages: (p: { q?: string; source?: string; licence?: string; region?: string; category?: string; subjectType?: string; subjectId?: string; moderation?: string; unlinked?: boolean; credit?: boolean; limit?: number; offset?: number }) =>
     request<{ images: LibraryImage[]; total: number }>(`/api/admin/library/images${qs(p)}`),
@@ -2384,6 +2400,24 @@ export type ScoutMenuMiss = {
   attempts: number;
   read_at: string | null;
   website: string | null;
+};
+
+export type VisitingPlace = {
+  id: string; name: string; region_slug: string; category: string | null;
+  score: number | null; website: string | null; summary: string | null;
+  visiting_because?: string | null; visiting_by?: string | null;
+};
+
+export type LibraryVisiting = {
+  counts: { visiting: 'yes' | 'no' | null; visiting_by: string | null; n: number }[];
+  swept: { total: number; considered: number };
+  closed: VisitingPlace[];
+  unsettled: VisitingPlace[];
+};
+
+export type LibraryVisitingImpact = {
+  total: { published: number; shown: number; refused: number; unestablished: number; asked: number };
+  regions: { region_slug: string; published: number; shown: number; refused: number; unestablished: number; asked: number }[];
 };
 
 export type LibraryOverview = {

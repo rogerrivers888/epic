@@ -32,7 +32,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { api, HarvestRun, LibraryAttraction, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
+import { api, HarvestRun, LibraryAttraction, LibraryVisiting, LibraryVisitingImpact, VisitingPlace, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, Chip, Row, Wrap } from '../../components/ui';
@@ -43,11 +43,12 @@ import { Reading } from './Reading';
 
 const WIDE = 900;
 
-type Section = 'coverage' | 'attractions' | 'reading' | 'pictures' | 'uploads' | 'types';
+type Section = 'coverage' | 'attractions' | 'visiting' | 'reading' | 'pictures' | 'uploads' | 'types';
 
 const SECTIONS: { key: Section; label: string; needs?: 'manage' }[] = [
   { key: 'coverage', label: 'Coverage' },
   { key: 'attractions', label: 'Attractions' },
+  { key: 'visiting', label: 'Can you visit?' },
   { key: 'reading', label: 'Reading' },
   { key: 'pictures', label: 'Pictures' },
   { key: 'uploads', label: 'Uploads' },
@@ -76,7 +77,7 @@ export function Library({ canManage }: { canManage: boolean }) {
   // Which part of the atlas is in the address, so a colleague can be sent the
   // exact page: /admin/library?tab=pictures&region=Somerset.
   const [section, setSection] = useQueryState<Section>(
-    'tab', 'coverage', asOneOf(['coverage', 'attractions', 'reading', 'pictures', 'uploads', 'types'] as const, 'coverage'),
+    'tab', 'coverage', asOneOf(['coverage', 'attractions', 'visiting', 'reading', 'pictures', 'uploads', 'types'] as const, 'coverage'),
   );
   const [overview, setOverview] = useState<LibraryOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +150,7 @@ export function Library({ canManage }: { canManage: boolean }) {
       {section === 'attractions' ? (
         <Attractions regions={overview?.coverage ?? []} region={region} onRegion={setRegion} canManage={canManage} wide={wide} />
       ) : null}
+      {section === 'visiting' ? <Visiting canManage={canManage} wide={wide} /> : null}
       {section === 'reading' ? <Reading canManage={canManage} /> : null}
       {section === 'pictures' ? <Pictures regions={overview?.coverage ?? []} canManage={canManage} wide={wide} /> : null}
       {section === 'uploads' ? <Uploads canManage={canManage} /> : null}
@@ -729,6 +731,161 @@ function Uploads({ canManage }: { canManage: boolean }) {
 // ---------------------------------------------------------------------------
 // types — the classifier
 // ---------------------------------------------------------------------------
+// can you visit?
+// ---------------------------------------------------------------------------
+
+/**
+ * Who can be visited, who cannot, and who nobody has established.
+ *
+ * A place is shown on a screen only when something establishes that the public
+ * may come — the owner's rule, because the alternative is a family turning up
+ * at somebody's front door (7 Sep 2026: "we get very significant complaints").
+ * The cost of that rule is that an unestablished place is invisible, and an
+ * invisible place with no list to appear on is indistinguishable from a bug.
+ * This is that list.
+ *
+ * Three things are on it. What the switch actually costs, county by county. The
+ * places refused, with the sentence behind each, because a refusal nobody can
+ * read is a refusal nobody can argue with. And the ones nobody has settled,
+ * best-known first — because a place that will never reach a screen is not
+ * worth anybody's decision, and the one at the top of this list is.
+ */
+function Visiting({ canManage, wide }: { canManage: boolean; wide: boolean }) {
+  const [data, setData] = useState<LibraryVisiting | null>(null);
+  const [impact, setImpact] = useState<LibraryVisitingImpact | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [show, setShow] = useState<'unsettled' | 'refused'>('unsettled');
+
+  const load = useCallback(async () => {
+    try {
+      const [v, i] = await Promise.all([api.libraryVisiting({ limit: 200 }), api.libraryVisitingImpact()]);
+      setData(v); setImpact(i); setError(null);
+    } catch (e: any) { setError(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const run = async (what: 'gather' | 'rejudge') => {
+    setBusy(what);
+    try {
+      if (what === 'gather') await api.libraryVisitingGather({ limit: 400 });
+      else await api.libraryVisitingRejudge({});
+      await load();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const settle = async (place: VisitingPlace, visiting: 'yes' | 'no') => {
+    setBusy(place.id);
+    try {
+      await api.libraryCurate(place.id, { visiting, visitingBecause: 'settled by hand in the back office' });
+      await load();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const t = impact?.total;
+  // The counties that would lose most of themselves, which is where gathering
+  // more evidence is worth the time. Small counties are noisy, so a county has
+  // to hold ten places before it is worth ranking.
+  const worst = useMemo(() => (impact?.regions ?? [])
+    .filter((r) => r.published >= 10)
+    .map((r) => ({ ...r, dark: r.refused + r.unestablished }))
+    .sort((a, b) => b.dark / b.published - a.dark / a.published)
+    .slice(0, 8), [impact]);
+
+  const list = show === 'refused' ? (data?.closed ?? []) : (data?.unsettled ?? []);
+
+  return (
+    <View style={{ gap: spacing.md }}>
+      {error ? <Banner tone="crit">{error}</Banner> : null}
+
+      {t ? (
+        <TileRow>
+          <Tile label="Shown" value={count(t.shown)} tone="ok"
+                sub={`${Math.round((100 * t.shown) / Math.max(1, t.published))}% of published places`} />
+          <Tile label="Refused" value={count(t.refused)} tone={t.refused ? 'warn' : 'plain'}
+                sub="Something says the public cannot go" />
+          <Tile label="Nobody has said" value={count(t.unestablished)} tone={t.unestablished ? 'warn' : 'plain'}
+                sub="Not shown either — this is the queue" />
+          <Tile label="Asked about" value={count(t.asked)}
+                sub={`of ${count(t.published)} published`} />
+        </TileRow>
+      ) : null}
+
+      <Banner>
+        A place reaches a screen only when something establishes that the public may visit it.
+        Four sources answer: the Wikidata types, the OpenStreetMap tags on the same feature, the
+        categories on its Wikipedia article, and — for a place already being looked up for its
+        rating — what Google calls it. A dwelling or an access=private tag refuses it outright and
+        nothing can talk that round.
+      </Banner>
+
+      {canManage ? (
+        <Wrap>
+          <Button label={busy === 'gather' ? 'Asking…' : 'Ask the open sources'} onPress={() => run('gather')}
+                  disabled={Boolean(busy)} icon="search" />
+          <Button label={busy === 'rejudge' ? 'Judging…' : 'Judge again'} onPress={() => run('rejudge')}
+                  disabled={Boolean(busy)} icon="refresh" />
+        </Wrap>
+      ) : null}
+
+      {worst.length ? (
+        <Panel title="Counties that lose most" sub="Where gathering more evidence is worth the time">
+          {worst.map((r) => (
+            <Row key={r.region_slug} style={styles.visitRow}>
+              <Text style={[type.body, { flex: 1 }]}>{r.region_slug.replace(/-/g, ' ')}</Text>
+              <Text style={type.small}>{r.shown} of {r.published} shown</Text>
+              <Pill label={`${Math.round((100 * r.dark) / r.published)}% dark`}
+                    tone={r.dark / r.published > 0.25 ? 'warn' : 'plain'} />
+            </Row>
+          ))}
+        </Panel>
+      ) : null}
+
+      <FilterRow>
+        <FilterChip label="Nobody has said" on={show === 'unsettled'} onPress={() => setShow('unsettled')}
+                    count={data?.unsettled.length} />
+        <FilterChip label="Refused" on={show === 'refused'} onPress={() => setShow('refused')}
+                    count={data?.closed.length} />
+      </FilterRow>
+
+      <Panel
+        title={show === 'refused' ? 'Refused' : 'Nobody has established it'}
+        sub={show === 'refused'
+          ? 'Kept off every screen, and why'
+          : 'Also kept off every screen. Best-known first, because that is the order they are worth deciding in.'}
+      >
+        {!list.length ? <Text style={type.small}>Nothing here.</Text> : null}
+        {list.map((p) => (
+          <View key={p.id} style={styles.visitRow}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={type.body}>{p.name}</Text>
+              <Text style={type.small}>
+                {p.region_slug.replace(/-/g, ' ')}
+                {p.visiting_because ? ` · ${p.visiting_because}` : ''}
+                {p.visiting_by && p.visiting_by !== 'rule' ? ` · ${p.visiting_by}` : ''}
+              </Text>
+            </View>
+            {canManage ? (
+              <Wrap>
+                {show === 'unsettled' ? (
+                  <Button label="Can visit" kind="secondary" onPress={() => settle(p, 'yes')} disabled={busy === p.id} />
+                ) : null}
+                <Button label={show === 'refused' ? 'Can visit' : 'Cannot'}
+                        kind={show === 'refused' ? 'secondary' : 'ghost'}
+                        onPress={() => settle(p, show === 'refused' ? 'yes' : 'no')}
+                        disabled={busy === p.id} />
+              </Wrap>
+            ) : null}
+          </View>
+        ))}
+      </Panel>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 function Types({ canManage }: { canManage: boolean }) {
   const [rows, setRows] = useState<LibraryKind[]>([]);
@@ -775,6 +932,10 @@ function Types({ canManage }: { canManage: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  visitRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.sm, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+  },
   tab: {
     paddingHorizontal: spacing.md, height: 34, justifyContent: 'center',
     borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,

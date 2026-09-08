@@ -261,9 +261,16 @@ adminRouter.get('/visiting', requires('view_library'), async (req, res, next) =>
       `select count(*)::int as total,
               count(*) filter (where visiting_by is not null)::int as considered
          from attractions where state <> 'hidden'`);
+    // One row per place, however many counties file it. The Forth Road Bridge
+    // straddles three and read as three separate refusals.
     const { rows: closed } = await query(
-      `select id, name, region_slug, visiting_because, visiting_by from attractions
-        where visiting = 'no' and state = 'published' order by name limit 300`);
+      `select distinct on (coalesce(wikidata_id, id::text))
+              id, name, region_slug, visiting_because, visiting_by
+         from attractions
+        where visiting = 'no' and state = 'published'
+        order by coalesce(wikidata_id, id::text), name
+        limit 300`);
+    closed.sort((a, b) => a.name.localeCompare(b.name));
     res.json({
       counts: rows,
       swept,

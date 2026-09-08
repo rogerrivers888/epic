@@ -124,7 +124,8 @@ export async function contentsOf(loc, { kind = null, missing = null, limit = 200
     const where = [`a.${col} = $1`, "a.state <> 'hidden'"];
     if (missing && FACTS[missing]) where.push(`not (${FACTS[missing].go})`);
     const { rows } = await query(
-      `select a.id::text as id, a.name, a.slug, 'go' as side, a.category as type, a.score,
+      `select distinct on (coalesce(a.wikidata_id, a.id::text))
+              a.id::text as id, a.name, a.slug, 'go' as side, a.category as type, a.score,
               a.rank, a.state, a.website, a.outcode, a.locality_slug, a.region_slug,
               (select li.image_id from image_links li
                 where li.subject_type = 'attraction' and li.subject_id = a.id::text and li.role = 'hero' limit 1) as hero_id,
@@ -142,8 +143,11 @@ export async function contentsOf(loc, { kind = null, missing = null, limit = 200
                                        where w.value ~ '^[0-9.]+$' and w.value::numeric >= 0.6))) as has_shelf
          from attractions a
         where ${where.join(' and ')}
-        order by a.score desc nulls last, a.name
+        -- One row per place: a postcode area can span two counties and the
+        -- atlas files a straddling place under each of them.
+        order by coalesce(a.wikidata_id, a.id::text), a.score desc nulls last
         limit $2`, [v, limit]);
+    rows.sort((x, y) => (y.score ?? 0) - (x.score ?? 0) || String(x.name).localeCompare(String(y.name)));
     out.push(...rows.map((r) => ({ ...r, has_picture: r.image_count > 0, has_menu: null })));
   }
 

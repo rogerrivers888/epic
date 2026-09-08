@@ -86,11 +86,34 @@ test('every verdict carries the sentence behind it', () => {
   }
 });
 
-test('the home screen skips refusals and keeps the unestablished', () => {
+test('a screen shows only what something has established', () => {
+  // Deny by default, on the owner's instruction (7 Sep 2026: "if you're not
+  // sure, I'd err on the side of caution and not show it"). So this asks for
+  // yes rather than for not-no: a place nobody has established is treated
+  // exactly like a refusal on a screen, and the difference between them is kept
+  // for the back office. Measured at 11% of the published atlas before the
+  // switch rather than after.
   const sql = readFileSync(new URL('../src/repositories/library.js', import.meta.url), 'utf8');
-  assert.match(sql, /a\.visiting is distinct from 'no'/,
-    "must skip only 'no' — `= 'yes'` would hide everything nobody has settled");
-  assert.ok(!/a\.visiting = 'yes'/.test(sql), 'that would hide most of the atlas');
+  const near = sql.slice(sql.indexOf('with candidates as ('), sql.indexOf('export async function attractionsNeedingDetail'));
+  assert.match(near, /a\.visiting = 'yes'/, 'the home screen must require positive evidence');
+  assert.ok(!/a\.visiting is distinct from 'no'/.test(sql),
+    'not-no would show every place nobody has looked at, which is where private houses live');
+  // The county page is a screen too.
+  assert.match(sql, /and a\.visiting = 'yes'\n\s*order by a\.rank/, 'publishedFor must apply the same bar');
+});
+
+test('one place is one row in every list that shows places', () => {
+  // The Forth Road Bridge is filed under three counties and read as three
+  // separate refusals in the back office (owner, 7 Sep 2026: "if something
+  // covers 2 counties, we should still just de-dup it. Should never be in the
+  // same view").
+  const lib = readFileSync(new URL('../src/repositories/library.js', import.meta.url), 'utf8');
+  const routes = readFileSync(new URL('../src/routes/library.js', import.meta.url), 'utf8');
+  const loc = readFileSync(new URL('../src/repositories/localities.js', import.meta.url), 'utf8');
+  const dedupe = /distinct on \(coalesce\((a\.)?wikidata_id, (a\.)?id::text\)\)/;
+  for (const [name, src, n] of [['publishedNear + worklist', lib, 2], ['refusals list', routes, 1], ['locality contents', loc, 1]]) {
+    assert.ok((src.match(new RegExp(dedupe, 'g')) ?? []).length >= n, `${name} must collapse a place filed twice`);
+  }
 });
 
 test('a verdict set by hand survives the next pass', () => {
