@@ -173,3 +173,13 @@ test('one child on file accounts for one said child, not two', () => {
   assert.equal(offer.items.length, 1);
   assert.equal(offer.items[0].ages.length, 1, 'Priya (9) covers one of the two; the other is new');
 });
+
+test('everyone named is the whole family, and who is never written into the results address', () => {
+  const f = normaliseTripFacts({ ...heard, who: { kind: 'named', names: ['Sam', 'Jo', 'Priya', 'Alfie'], adults: 2, children: 2, kids_mentioned: true } });
+  const out = resolveIntake({ facts: f, flow: 'returning', household, members, today });
+  assert.equal(out.slots.find((x) => x.key === 'who').label, 'Whole family · 4');
+  const some = resolveIntake({ facts: normaliseTripFacts({ ...heard, who: { kind: 'named', names: ['Sam', 'Priya'], adults: null, children: null, kids_mentioned: true } }), flow: 'returning', household, members, today });
+  assert.equal(some.slots.find((x) => x.key === 'who').label, 'Sam & Priya');
+  const q = new URL(`http://x${resultsHref({ resolved: some.resolved, intakeId: 'z' })}`).searchParams;
+  assert.equal(q.get('who'), null);
+});

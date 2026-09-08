@@ -340,7 +340,10 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   // --- who --------------------------------------------------------------------
   const count = members.length;
   if (f.who.kind === 'just_me') said('who', 'Just me', 'person', { kind: 'just_me' });
-  else if (f.who.kind === 'named' && f.who.names.length) {
+  else if (f.who.kind === 'named' && f.who.names.length && members.length && members.every((m) => f.who.names.some((nm) => m.name.toLowerCase().startsWith(nm.toLowerCase())))) {
+    // Everyone, by name: "Roger, Gina and Phoenix" is the whole family.
+    said('who', `Whole family · ${members.length}`, 'household', { kind: 'whole_household' });
+  } else if (f.who.kind === 'named' && f.who.names.length) {
     const known = f.who.names.filter((nm) => members.some((m) => m.name.toLowerCase().startsWith(nm.toLowerCase())));
     // First names on the chip: "Roger, Gina & Phoenix", however the model spelt them out.
     const first = f.who.names.map((nm) => nm.trim().split(/\s+/)[0]);
@@ -478,7 +481,9 @@ export function resultsHref({ resolved, intakeId, originPoint = null, destinatio
   if (resolved.maxMinutes && resolved.maxMinutes !== 60) q.set('travel', String(resolved.maxMinutes));
   const by = MODE_TO_INSPIRE[resolved.travelMode] ?? 'drive';
   if (by !== 'drive') q.set('by', by);
-  if (resolved.who?.kind === 'named' && resolved.who.memberIds?.length) q.set('who', resolved.who.memberIds.join(','));
+  // Who is coming is not written into the address: Inspire's `who` narrows the
+  // list to places that suit only those people and emptied it on the first
+  // deployed run (9 Sep 2026). The trip's attendees carry it instead.
   if (intakeId) q.set('intake', intakeId);
   const qs = q.toString();
   return qs ? `${path}?${qs}` : path;
