@@ -123,7 +123,7 @@ test('the live token asks for a transcription session and hands back only the cl
   assert.equal(session.audio.input.format.rate, 24000);
   assert.equal(session.audio.input.transcription.model, 'gpt-live-transcribe');
   assert.deepEqual(session.audio.input.transcription.languages, ['pt']);
-  assert.equal(session.audio.input.turn_detection.type, 'server_vad');
+  assert.ok(!('turn_detection' in session.audio.input), 'the live model finds its own turns and refuses to be told');
   assert.equal(calls[0].body.expires_after.anchor, 'created_at');
 });
 
@@ -156,13 +156,14 @@ test('a live-session field the provider refuses is dropped by name and the rest 
     { status: 400, body: { error: { message: "Invalid value: 'server_vad' for turn_detection", code: 'invalid_value', param: 'session.audio.input.turn_detection.type' } } },
     { body: { value: 'ek_after', expires_at: 1_800_000_000 } },
   ]);
-  const out = await mintLiveToken({ language: 'en', keywords: ['Sintra'] });
+  const out = await mintLiveToken({ language: 'en', keywords: ['Sintra'], model: 'gpt-4o-transcribe' });
   assert.equal(out.token, 'ek_after');
-  assert.equal(out.model, 'gpt-live-transcribe', 'the same model, not the next rung');
+  assert.equal(out.model, 'gpt-4o-transcribe', 'the same model, not the next rung');
   assert.deepEqual(out.dropped, ['noise_reduction', 'turn_detection']);
+  assert.equal(out.refusals[1].said, "Invalid value: 'server_vad' for turn_detection", 'what it said is kept for the probe');
   const last = calls[2].body.session.audio.input;
   assert.ok(!('noise_reduction' in last) && !('turn_detection' in last));
-  assert.deepEqual(last.transcription.keywords, ['Sintra'], 'what was not refused stays');
+  assert.equal(last.transcription.language, 'en', 'what was not refused stays');
 });
 
 test('a refusal that names nothing optional is a real error, not a loop', async () => {

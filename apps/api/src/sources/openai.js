@@ -323,19 +323,19 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
     if (h) transcription.prompt = h;
     if (language) { if ((m.startsWith('gpt-live') || m.startsWith('gpt-transcribe')) && !dropped.has('languages')) transcription.languages = [language]; else transcription.language = language; }
     if (keywords?.length && (m.startsWith('gpt-live') || m.startsWith('gpt-transcribe'))) transcription.keywords = keywords.slice(0, 40).map(String);
+    const input = {
+      format: { type: 'audio/pcm', rate: 24000 },
+      transcription,
+      noise_reduction: { type: 'near_field' },
+    };
+    // `gpt-live-transcribe` finds the turns itself and refuses to be told
+    // ("Turn detection is not supported for this transcription model", seen on
+    // the deployed probe, 8 Sep 2026); asking cost a refused round trip on
+    // every tap of the mic. The older models still want to be told.
+    if (!m.startsWith('gpt-live')) input.turn_detection = { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500 };
     const body = {
       expires_after: { anchor: 'created_at', seconds: Math.min(600, Math.max(10, seconds)) },
-      session: {
-        type: 'transcription',
-        audio: {
-          input: {
-            format: { type: 'audio/pcm', rate: 24000 },
-            transcription,
-            turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500 },
-            noise_reduction: { type: 'near_field' },
-          },
-        },
-      },
+      session: { type: 'transcription', audio: { input } },
     };
     for (const d of dropped) dropField(body, d);
     let res;
