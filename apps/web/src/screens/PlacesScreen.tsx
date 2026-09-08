@@ -77,7 +77,10 @@ const LINE_COLOURS: Record<string, string> = {
   DLR: '#00A4A7', 'London Overground': '#EE7C0E', Liberty: '#5D6061', Lioness: '#FAA61A', Mildmay: '#0077AD', Suffragette: '#5BBD72', Weaver: '#823A62', Windrush: '#ED1B00', Tram: '#84B817',
 };
 
-const EATING = ['restaurant', 'cafe', 'pub', 'bar'];
+// `takeaway` is one of these (5 Sep 2026). It has to be, or a chip shop shows
+// up under Things to do — being told apart from a restaurant is not the same as
+// not being somewhere to eat.
+const EATING = ['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'bakery'];
 const SLEEPING = ['hotel', 'lodging'];
 
 /** Which segment a place will show up under, from its category alone. */
@@ -88,7 +91,7 @@ const experiencesOf = (p: AtlasPlace) => (((p.venue ?? {}) as Partial<Venue>).ex
 
 // In Food & drink a restaurant is the assumption, so only the exceptions are
 // named (owner, 4 Sep 2026: "if it's a bar, we put a bar pill in").
-const CATEGORY_PILL: Record<string, string> = { bar: 'Bar', pub: 'Pub', cafe: 'Café' };
+const CATEGORY_PILL: Record<string, string> = { bar: 'Bar', pub: 'Pub', cafe: 'Café', takeaway: 'Takeaway', bakery: 'Bakery' };
 
 /**
  * Which of the three lists a place belongs to. A pub is somewhere you drink,
@@ -98,14 +101,17 @@ const CATEGORY_PILL: Record<string, string> = { bar: 'Bar', pub: 'Pub', cafe: 'C
 function kindsOf(p: AtlasPlace): Kind[] {
   const c = p.category ?? '';
   if (SLEEPING.includes(c) || (p.kind as string) === 'stay') return ['stay'];
-  if (c === 'restaurant' || c === 'cafe') return ['eat'];
+  if (c === 'restaurant' || c === 'cafe' || c === 'takeaway' || c === 'bakery') return ['eat'];
   if (c === 'pub' || c === 'bar') return experiencesOf(p).length ? ['eat', 'do'] : ['eat'];
   if (!c && p.kind === 'food') return ['eat'];
   return ['do'];
 }
 
 /** What Food & drink's Type dropdown offers: what the place *is*, before what it serves. */
-const EAT_KIND: Record<string, string> = { restaurant: 'Restaurants', cafe: 'Cafés', pub: 'Pubs', bar: 'Bars' };
+const EAT_KIND: Record<string, string> = {
+  restaurant: 'Restaurants', cafe: 'Cafés', bakery: 'Cafés', pub: 'Pubs', bar: 'Bars',
+  takeaway: 'Fast food & takeaways',
+};
 
 /** The kind of thing it is, in the words the Type dropdown uses, for the segment being looked at. */
 function typeOf(p: AtlasPlace, kind: Kind): string {
@@ -121,7 +127,12 @@ function typeOf(p: AtlasPlace, kind: Kind): string {
   // (owner, 7 Sep 2026: "I want an extra dropdown to appear once I select
   // Restaurant to select the type of restaurant"). Type answers the first;
   // Cuisine, which only appears once this one is set, answers the second.
-  if (k === 'eat') return EAT_KIND[c] ?? 'Restaurants';
+  // The drawer it is filed in, which under Food & drink means the Type
+  // dropdown offers Restaurants, Pubs & bars, Cafés & bakeries and Fast food &
+  // takeaways — and choosing Restaurants is how fast food stops appearing among
+  // them (owner, 5 Sep 2026). `EAT_KIND` is the fallback for a place the
+  // taxonomy has not filed yet, and says the same thing in fewer words.
+  if (k === 'eat') return p.subcategoryLabel ?? EAT_KIND[c] ?? 'Restaurants';
   if (c === 'pub' || c === 'bar') return 'Pubs & bars';
   if (c === 'event') return 'Events';
   // What kind of thing it is, in the words the Shelves page keeps: the drawer

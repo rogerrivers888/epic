@@ -24,7 +24,10 @@ export function VenueRow({ venue, onPress, action, stack }: { venue: Venue; onPr
           <View style={{ flex: 1 }}>
             <Text style={type.h3}>{venue.name}</Text>
             <Text style={type.small}>
-              {[venue.category, ...venue.experiences, ...venue.cuisines].filter(Boolean).join(' · ')}
+              {/* The drawer it is filed in where the taxonomy has named one —
+                  "Fast food & takeaways" rather than the bare word "takeaway",
+                  and the same words the Places filters and the back office use. */}
+              {[venue.subcategoryLabel ?? venue.category, ...venue.experiences, ...venue.cuisines].filter(Boolean).join(' · ')}
               {venue.rating != null ? ` · rated ${venue.rating.toFixed(1)}${venue.ratingCount ? ` (${venue.ratingCount.toLocaleString()})` : ''}` : ''}
               {venue.distanceKm != null ? ` · ${venue.distanceKm} km` : ''}
             </Text>

@@ -360,6 +360,10 @@ export type Venue = {
   /** Today's hours where the place is — "12:00 – 11:00 PM", or "Closed". */
   hoursToday?: string | null; hoursDay?: string | null; closesAt?: string | null; opensAt?: string | null;
   summary?: string | null; mapsUrl?: string | null; externalUrl?: string | null; reviews?: Review[]; chain?: boolean; brand?: string | null;
+  /** What the source said about how the food is served: `fast-food`, `takeaway`. */
+  styles?: string[];
+  /** Where the taxonomy files it — the same answer the home screen and the back office give. */
+  shelf?: MoodKey | null; subcategory?: string | null; subcategoryLabel?: string | null;
   distanceKm?: number;
   photos?: VenuePhotoRef[];
   household?: { visits?: number; lastOn?: string; loved?: number; notForMe?: number; ledger?: string } | null;
