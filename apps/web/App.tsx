@@ -330,9 +330,10 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
    */
   const fullBleed = !desktop && isFullBleed(route);
   /** Whether the tab bar is on screen, and therefore what carries the bottom inset. */
-  const hasTabs = !desktop && !isImmersive(route);
+  const { query } = splitHref(href);
+  const hasTabs = !desktop && !isImmersive(route, query);
   // A screen that is all form takes the tab bar's strip too.
-  const immersive = !desktop && isImmersive(route);
+  const immersive = !desktop && isImmersive(route, query);
   /**
    * Where each tab was left (owner, 4 Sep 2026: "I come back 10 minutes later
    * after navigating off that tab, everything's disappeared").

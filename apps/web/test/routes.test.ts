@@ -367,4 +367,11 @@ test('the trip is full-bleed; configuring its group is immersive', () => {
   assert.ok(isImmersive(group));
   assert.ok(!isImmersive(trip) && !isImmersive(shortlist) && !isImmersive(newTrip));
   assert.ok(!isImmersive(parseRoute('/places/home')));
+
+  // And a browse, which is in the query rather than the path: the page is
+  // still the trip's map (trips V2, 8 Sep 2026).
+  const browsing = new URLSearchParams('pill=activities');
+  assert.ok(isImmersive(trip, browsing), 'a browse takes the tab bar with it');
+  assert.ok(!isImmersive(trip, new URLSearchParams()), 'and gives it back on the trip itself');
+  assert.ok(!isImmersive(parseRoute('/places/home'), browsing), 'a pill elsewhere means nothing');
 });

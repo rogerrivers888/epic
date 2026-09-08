@@ -41,7 +41,7 @@ import { MapGL, MapMarker, MapRoute } from '../components/MapGL';
 import { searchGround } from '../components/searchGround';
 import { GroupPanel } from '../components/GroupPanel';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { asOneOf, asText, useQueryState, useRouter } from '../router';
+import { asNumber, asOneOf, asText, useQueryState, useRouter } from '../router';
 import { paths, type TripSection } from '../routes';
 import { weeksOf } from './tripWeeks';
 import { caliperFor } from '../components/detourCaliper';
@@ -131,6 +131,21 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * In the address, so the three are three links he can put side by side.
    */
   const [pins, setPins] = useQueryState<'list' | 'only' | 'card'>('pins', 'only', asOneOf(['list', 'only', 'card'] as const, 'only'));
+  /**
+   * How the browse is set: the order, the floor under the rating, and the price
+   * band. In the address, like every other thing that decides what is drawn —
+   * "Pubs under £15 within 30 minutes, best first" is a sendable screen.
+   */
+  const [sort, setSort] = useQueryState<SortKey>('sort', 'rating', asOneOf(['rating', 'detour', 'price', 'type'] as const, 'rating'));
+  const [minRating, setMinRating] = useQueryState<number>('stars', 0, asNumber(0));
+  const [priceBand, setPriceBand] = useQueryState<string>('price', 'any', asOneOf(PRICE_BANDS.map((b) => b.key), 'any'));
+  /**
+   * The Shortlist's pill row. Local rather than in the address, and reset every
+   * time the Shortlist is opened — the handoff asks for exactly that, and it is
+   * right: a list of four things you saved is not a page anybody sends.
+   */
+  const [saveFilter, setSaveFilter] = useState<SavedFilter>('all');
+  useEffect(() => { if (pill === 'shortlist') setSaveFilter('all'); }, [pill]);
   /** The Max detour pill's dropdown, which lives on the map now rather than in the drawer. */
   const [openDetour, setOpenDetour] = useState(false);
   /**
@@ -292,10 +307,34 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     [selected, along.places],
   );
 
-  const shownAlong = useMemo(
-    () => along.places.filter((p) => (!kindNow || isKind(p, kindNow)) && (!cuisineNow || isKind(p, cuisineNow))),
-    [along.places, kindNow, cuisineNow],
-  );
+  /**
+   * The pool, narrowed and ordered — and the same list the map pins (trips V2:
+   * "filters and sort also drive the map pins"). A filter that changed the list
+   * and left the map alone would be two answers to one question.
+   *
+   * All of it is done here rather than sent back to the sources: no provider
+   * call, no wait, and a rating you can move without the screen emptying while
+   * it re-fetches.
+   */
+  const shownAlong = useMemo(() => {
+    const band = PRICE_BANDS.find((b) => b.key === priceBand)?.holds ?? null;
+    const kept = along.places.filter((p) =>
+      (!kindNow || isKind(p, kindNow))
+      && (!cuisineNow || isKind(p, cuisineNow))
+      // Unrated places are kept at "Any" and dropped the moment a floor is
+      // set: "4 stars and up" cannot honestly include a place nobody has rated.
+      && (!minRating || (p.rating != null && p.rating >= minRating))
+      && (!band || band(p)));
+    const by = {
+      // Best first, and an unrated place last rather than in the middle:
+      // no stars is not the same fact as two.
+      rating: (a: TripAlongPlace, b: TripAlongPlace) => (b.rating ?? -1) - (a.rating ?? -1),
+      detour: (a: TripAlongPlace, b: TripAlongPlace) => (a.detourMinutes ?? 1e9) - (b.detourMinutes ?? 1e9),
+      price: (a: TripAlongPlace, b: TripAlongPlace) => (a.priceLevel ?? 9) - (b.priceLevel ?? 9),
+      type: (a: TripAlongPlace, b: TripAlongPlace) => String(kitchen(a) ?? a.category ?? '').localeCompare(String(kitchen(b) ?? b.category ?? '')),
+    }[sort] ?? null;
+    return by ? [...kept].sort(by) : kept;
+  }, [along.places, kindNow, cuisineNow, minRating, priceBand, sort]);
 
   // Somewhere to sleep, ranked the way the criteria asked. Only fetched when
   // the Stay pill is lit — it is an Overpass call and sometimes a price call.
@@ -488,7 +527,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         out.push({
           id: p.venueRef, lat: p.lat as number, lng: p.lng as number,
           kind: p.scheduled ? 'added' : 'saved',
-          icon: p.group === 'eat' ? 'utensils' : p.group === 'stay' ? 'bed' : 'sparkles',
+          // On the Shortlist the pin is a heart, so the map says the same
+          // thing the list does (trips V2). On the trip itself a place is
+          // still what kind of place it is.
+          icon: pill === 'shortlist' ? 'heart' : p.group === 'eat' ? 'utensils' : p.group === 'stay' ? 'bed' : 'sparkles',
           // Only what is chosen, or what is actually on the day, says its name.
           // Forty labels over each other is a map you cannot read.
           label: selected === p.venueRef ? (p.name ?? null) : null,
@@ -698,13 +740,24 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         32px hit area — outlined, the header read as three buttons competing
         with the title, which is the thing you are meant to read.
       */}
+      {/*
+        One arrow, one step at a time (trips V2): an open place goes back to
+        the list it came from, the list goes back to the trip, and the trip
+        goes back to Trips. It used to jump from a place straight out of the
+        browse, which threw away the search you had just run.
+      */}
       <Pressable
-        onPress={() => (pill ? setPill(null) : section === 'group' ? onSection('itinerary') : onBack())}
+        onPress={() => {
+          if (selected) { setSelected(null); return; }
+          if (pill) { setPill(null); return; }
+          if (section === 'group') { onSection('itinerary'); return; }
+          onBack();
+        }}
         style={styles.backBare}
         accessibilityRole="button"
-        accessibilityLabel={pill || section === 'group' ? 'Back to the trip' : 'Trips'}
+        accessibilityLabel={selected ? 'Back to the list' : pill || section === 'group' ? 'Back to the trip' : 'Trips'}
       >
-        <Icon name={pill ? 'trips' : 'back'} size={20} color={colors.ink} strokeWidth={2} />
+        <Icon name={pill && !selected ? 'trips' : 'back'} size={20} color={colors.ink} strokeWidth={2} />
       </Pressable>
 
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
@@ -714,26 +767,36 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           things you do to a trip occasionally; they did not need a permanent
           button beside the two you use every time.
         */}
-        <Pressable
-          onLongPress={onMenu}
-          delayLongPress={400}
-          accessibilityRole="button"
-          accessibilityLabel={`${tripName(trip)}. Hold for rename, share and delete`}
-        >
-          <Text style={styles.title} numberOfLines={1}>{tripName(trip)}</Text>
-        </Pressable>
-        <Text style={type.small} numberOfLines={1}>
-          {(() => {
-            const range = isTrip && trip.startDate && trip.endDate && trip.startDate !== trip.endDate;
-            return [
-              range
-                ? `${fmtDate(trip.startDate!).replace(/ \w+$/, '')} – ${fmtDate(trip.endDate!)}`
-                : fmtDate(trip.startDate ?? trip.departAt),
-              range ? `${nights + 1} days` : base ? `from ${base.label.split(',')[0]}` : 'from home',
-              pill === 'stay' ? 'choosing a stay' : null,
-            ].filter(Boolean).join(' · ');
-          })()}
-        </Text>
+        {/* Inside a browse the header names the browse, not the trip: you are
+            looking at what is nearby, and the trip's dates are not the
+            question (trips V2). The trip's name comes back on the way out. */}
+        {pill ? (
+          <Text style={styles.browseTitle} numberOfLines={1}>
+            {pill === 'shortlist' ? 'Shortlist' : pill === 'food' ? 'Food nearby' : pill === 'stay' ? 'Stays nearby' : 'Activities nearby'}
+          </Text>
+        ) : (
+          <>
+            <Pressable
+              onLongPress={onMenu}
+              delayLongPress={400}
+              accessibilityRole="button"
+              accessibilityLabel={`${tripName(trip)}. Hold for rename, share and delete`}
+            >
+              <Text style={styles.title} numberOfLines={1}>{tripName(trip)}</Text>
+            </Pressable>
+            <Text style={type.small} numberOfLines={1}>
+              {(() => {
+                const range = isTrip && trip.startDate && trip.endDate && trip.startDate !== trip.endDate;
+                return [
+                  range
+                    ? `${fmtDate(trip.startDate!).replace(/ \w+$/, '')} – ${fmtDate(trip.endDate!)}`
+                    : fmtDate(trip.startDate ?? trip.departAt),
+                  range ? `${nights + 1} days` : base ? `from ${base.label.split(',')[0]}` : 'from home',
+                ].filter(Boolean).join(' · ');
+              })()}
+            </Text>
+          </>
+        )}
       </View>
 
       {/* Bare icons: the people who are coming, and the conversation. */}
@@ -816,6 +879,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       onOpen={openPlace}
       kindOf={kindNow}
       onKind={(k) => setKindOf(k ?? 'any')}
+      sort={sort}
+      onSort={setSort}
+      minRating={minRating}
+      onMinRating={setMinRating}
+      priceBand={priceBand}
+      onPriceBand={setPriceBand}
+      saveFilter={saveFilter}
+      onSaveFilter={setSaveFilter}
       cuisine={cuisineNow}
       onCuisine={(c) => setCuisine(c ?? 'any')}
       onAlways={async (next) => {
@@ -1490,11 +1561,49 @@ function TripPlacesList({ data, onSelect, onDelete }: {
 
 const DETOURS = [10, 15, 30, 45];
 
+/** The Shortlist's own pill row: everything, or one kind of thing. */
+type SavedFilter = 'all' | 'activities' | 'food' | 'stay';
+
+/** How the browse is ordered. Best first is the default, as the handoff asks. */
+type SortKey = 'rating' | 'detour' | 'price' | 'type';
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'rating', label: 'Rating' },
+  { key: 'detour', label: 'Detour' },
+  { key: 'price', label: 'Price' },
+  { key: 'type', label: 'Type' },
+];
+
+/** The floors the rating filter offers. `0` is "any", and keeps the unrated. */
+const RATINGS = [0, 3.5, 4, 4.5];
+
+/**
+ * What it costs, in the three bands the handoff draws.
+ *
+ * One set rather than a different one per browse: `priceLevel` is the only
+ * price a browse holds, and an entry fee for an activity or a nightly rate for
+ * a hotel is not in it. Pretending otherwise — "Under £15", "£145 a night" —
+ * would be a filter that quietly threw away everything it could not price.
+ */
+const PRICE_BANDS: { key: string; label: string; holds: ((p: TripAlongPlace) => boolean) | null }[] = [
+  { key: 'any', label: 'Any', holds: null },
+  { key: 'cheap', label: '£', holds: (p) => p.priceLevel != null && p.priceLevel <= 1 },
+  { key: 'mid', label: '££', holds: (p) => p.priceLevel === 2 },
+  { key: 'dear', label: '£££+', holds: (p) => p.priceLevel != null && p.priceLevel >= 3 },
+];
+
+
+
 /** Which of the three browses a place belongs to — the shape of its half view. */
 type PlaceKind = 'activity' | 'food' | 'stay';
 const EATING = new Set(['restaurant', 'cafe', 'bar', 'pub', 'bakery']);
 const placeKind = (p: { category?: string | null }): PlaceKind =>
   (p.category === 'hotel' ? 'stay' : EATING.has(String(p.category)) ? 'food' : 'activity');
+
+/** "+6 min detour", or the honest thing to say when there is no number. */
+const detourWords = (p: TripAlongPlace, anchorLabel: string | null, hasRoute: boolean): string =>
+  (p.detourMinutes != null
+    ? `+${p.detourMinutes} min detour`
+    : anchorLabel ? `near ${anchorLabel}` : hasRoute ? 'off the route' : 'nearby');
 
 /** Just the domain, which is what a website line is for: "piccolino.co.uk". */
 const hostOf = (url: string): string => {
@@ -1675,7 +1784,7 @@ function HeartButton({ on, onPress, bare }: { on: boolean; onPress: () => void; 
   );
 }
 
-function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
+function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind, sort, onSort, minRating, onMinRating, priceBand, onPriceBand, saveFilter, onSaveFilter }: {
   pill: Pill;
   along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number };
   shortlisted: TripPlace[];
@@ -1709,14 +1818,50 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   onRowLayout: (ref: string, y: number) => void;
   /** Which of the three ways a pin and its row talk to each other. */
   pins: 'list' | 'only' | 'card';
+  sort: SortKey;
+  onSort: (s: SortKey) => void;
+  minRating: number;
+  onMinRating: (n: number) => void;
+  priceBand: string;
+  onPriceBand: (k: string) => void;
+  /** Which type the Shortlist's own pill row is showing. */
+  saveFilter: SavedFilter;
+  onSaveFilter: (k: SavedFilter) => void;
 }) {
   const [openKind, setOpenKind] = useState(false);
+  const [openSort, setOpenSort] = useState(false);
+  /** The filter is a takeover of the drawer, not a sheet over it (handoff). */
+  const [filtering, setFiltering] = useState(false);
+  /** The type list opens past its first five rather than scrolling forever. */
+  const [moreTypes, setMoreTypes] = useState(false);
+  /**
+   * How wide a card's picture is — measured inside the card, not worked out.
+   *
+   * A 3:2 frame needs a real number, and every attempt to derive one was wrong
+   * by a gutter: the sheet has padding, the card has more, and the picture ran
+   * off the right-hand edge. The frame that holds it is the only thing that
+   * knows, so it says.
+   */
+  const [cardW, setCardW] = useState(0);
 
   /**
    * The type, applied to the pool rather than sent back to the sources. No
    * provider call, no wait, and it tests what a place *is* — so Walk means the
    * places somebody has tagged as a walk, not the ones with "walk" in the name.
    */
+  /**
+   * What the Filters control is doing, in its own words — "Pub · ££ · ★ 4.0+".
+   * A row of small grey boxes cannot say that, and a screen with four places on
+   * it needs to explain itself before you go looking for the bug.
+   */
+  const filterWords = [
+    cuisine ? cap(cuisine) : null,
+    kindOf ? cap(kindOf) : null,
+    PRICE_BANDS.find((b) => b.key === priceBand && b.holds)?.label ?? null,
+    minRating ? `★ ${minRating}+` : null,
+  ].filter(Boolean).join(' · ');
+  const narrowed = Boolean(filterWords);
+
   /** The one place being looked at, when the sheet has given it the whole room. */
   const chosen = useMemo(
     () => (selected ? shown.find((p) => p.venueRef === selected) ?? null : null),
@@ -1753,34 +1898,85 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   }, [along.places, kindOf, pill]);
 
   if (pill === 'shortlist') {
+    /**
+     * The Shortlist is its own browse: no detour, no filters, no sort — a list
+     * of things you have already chosen is not a search — but one pill row, so
+     * a mixed list of ten can be read as three places to eat.
+     */
+    const kindOfSaved = (x: TripPlace): SavedFilter =>
+      (x.group === 'stay' || x.category === 'hotel' ? 'stay' : x.group === 'eat' || EATING.has(String(x.category)) ? 'food' : 'activities');
+    const counts = {
+      all: shortlisted.length,
+      activities: shortlisted.filter((x) => kindOfSaved(x) === 'activities').length,
+      food: shortlisted.filter((x) => kindOfSaved(x) === 'food').length,
+      stay: shortlisted.filter((x) => kindOfSaved(x) === 'stay').length,
+    };
+    const list = saveFilter === 'all' ? shortlisted : shortlisted.filter((x) => kindOfSaved(x) === saveFilter);
+    const SAVED_PILLS: { key: SavedFilter; label: string }[] = [
+      { key: 'all', label: 'All' },
+      { key: 'activities', label: 'Activities' },
+      { key: 'food', label: 'Food' },
+      { key: 'stay', label: 'Stays' },
+    ];
+
+    if (!shortlisted.length) {
+      return (
+        <View style={styles.emptySaved}>
+          <Text style={styles.emptySavedTitle}>Nothing saved yet</Text>
+          <Text style={type.small}>
+            Tap the heart on any activity, restaurant or stay to keep it here for this trip.
+          </Text>
+        </View>
+      );
+    }
+
     return (
-      <View style={{ paddingHorizontal: 16 }}>
-        <Text style={[type.small, { paddingVertical: spacing.sm }]}>
-          {/* "Ring ahead" is only offered where somebody can: the button is on
-              the rows whose owned record has a number, and the line stops
-              promising it when none of them do. */}
-          {shortlisted.length
-            ? `${shortlisted.length} saved · ${shortlisted.some((p) => p.phone) ? 'ring ahead, then ' : ''}Add the one you want`
-            : 'Nothing saved for this trip yet.'}
-        </Text>
-        {/* A saved row is the same row as a browsed one: it opens the place,
-            and it has the Add that puts it on the day. It had neither (owner,
-            6 Sep 2026: "for the 2 others that I've shortlisted, there is no add
-            button to add it to the trip, so I have no way of selecting from the
-            shortlist. Also, they don't open any side drawer"). A shortlist you
-            cannot choose from is a list of regrets. */}
-        {shortlisted.map((p) => (
+      <View>
+        {/* Only the kinds that are actually on the list: a Stays pill reading
+            zero is a control that does nothing when you press it. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.savedPills}>
+          {SAVED_PILLS.filter((x) => counts[x.key] > 0 || x.key === 'all').map((x) => {
+            const on = saveFilter === x.key;
+            return (
+              <Pressable
+                key={x.key}
+                onPress={() => onSaveFilter(x.key)}
+                style={[styles.savedPill, on && styles.savedPillOn]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on }}
+              >
+                <Text style={[styles.savedPillText, on && { color: colors.selectedFg }]}>{`${x.label} · ${counts[x.key]}`}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {list.map((p) => (
           <Pressable
             key={p.venueRef}
             onPress={() => onOpenSaved(p)}
-            style={[styles.row, selected === p.venueRef && styles.rowOn]}
+            style={[styles.savedRow, selected === p.venueRef && styles.rowOn]}
             accessibilityRole="button"
           >
-            {/* The same picture as a browse row: one list, one size (8 Sep 2026). */}
-            <VenueThumb name={p.name} image={p.image} category={p.category} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false} />
-            <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+            {/*
+              A picture only where there is one. A place with none gets its
+              type in an outlined tile instead of an empty grey box, so a list
+              of restaurants looks intentional rather than broken.
+            */}
+            {p.image ? (
+              <VenueThumb name={p.name} image={p.image} category={p.category} width={64} height={64} rounded={10} credit={false} />
+            ) : (
+              <View style={styles.savedTileBox}>
+                <View style={styles.savedTile}>
+                  <Icon name={kindOfSaved(p) === 'stay' ? 'hotel' : kindOfSaved(p) === 'food' ? 'restaurant' : 'inspire'} size={18} color={colors.ink} />
+                </View>
+              </View>
+            )}
+            <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
               <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
-              <Text style={type.small} numberOfLines={1}>{p.day ?? 'no time yet'}</Text>
+              <Text style={type.tiny} numberOfLines={1}>
+                {[cap(kindOfSaved(p) === 'stay' ? 'stay' : kindOfSaved(p) === 'food' ? 'food' : 'activity'), plainCategory(p.category), p.day ?? null].filter(Boolean).join(' · ')}
+              </Text>
               <View style={styles.rowActions}>
                 {/* Ringing ahead is what a shortlist is for (§7), so the number
                     comes off the owned record — the venue's own published page,
@@ -1798,18 +1994,135 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                     <Icon name="phone" size={15} color={colors.ink} />
                   </Pressable>
                 ) : null}
-                {/* Here the bookmark takes it off the list (handoff §07). */}
-                <Pressable onPress={() => onUnshortlist(p)} hitSlop={8} style={styles.bookmark} accessibilityRole="button" accessibilityLabel={`Take ${p.name ?? 'this'} off the shortlist`}>
-                  <Icon name="shortlisted" size={17} color={colors.ink} fill />
-                </Pressable>
                 <Pressable onPress={() => onAddSaved(p)} style={styles.add} accessibilityRole="button" accessibilityLabel={`Add ${p.name ?? 'this'} to the day`}>
                   <Icon name="add" size={13} color={colors.ink} />
                   <Text style={styles.addText}>Add</Text>
                 </Pressable>
               </View>
             </View>
+            {/* A filled heart here takes it off — and only that: without
+                stopping the press the row would open the place it just
+                removed. */}
+            <Pressable
+              onPress={(e) => { (e as any)?.stopPropagation?.(); onUnshortlist(p); }}
+              hitSlop={10}
+              style={styles.heartHit}
+              accessibilityRole="button"
+              accessibilityLabel={`Take ${p.name ?? 'this'} off the shortlist`}
+            >
+              <Icon name="shortlisted" size={20} color={colors.selected} fill fillColor={colors.selected} strokeWidth={2.2} />
+            </Pressable>
           </Pressable>
         ))}
+      </View>
+    );
+  }
+
+  /**
+   * A group's counts, worked out with that group's own answer taken out.
+   *
+   * "Live counts that respect the other groups" — so ★ 4.5+ says how many
+   * would survive if you moved the rating and left the price where it is.
+   * Counted with its own answer applied instead, every option but the chosen
+   * one reads zero and the filter looks broken.
+   */
+  const countIf = (over: { rating?: number; price?: string; kind?: string | null }) => {
+    const band = PRICE_BANDS.find((b) => b.key === (over.price ?? priceBand))?.holds ?? null;
+    const r = over.rating ?? minRating;
+    const k = over.kind !== undefined ? over.kind : kindOf;
+    return along.places.filter((p) =>
+      (!k || isKind(p, k))
+      && (!cuisine || isKind(p, cuisine))
+      && (!r || (p.rating != null && p.rating >= r))
+      && (!band || band(p))).length;
+  };
+
+  if (filtering) {
+    return (
+      <View style={styles.filterPage}>
+        <View style={styles.filterHead}>
+          <Pressable onPress={() => setFiltering(false)} hitSlop={8} style={styles.halfBack} accessibilityRole="button" accessibilityLabel="Back to the list">
+            <Icon name="back" size={20} color={colors.ink} />
+          </Pressable>
+          <Text style={styles.filterTitle}>Filter</Text>
+        </View>
+
+        <Text style={styles.kicker}>Rating</Text>
+        <View style={styles.segRow}>
+          {RATINGS.map((r) => {
+            const on = r === minRating;
+            return (
+              <Pressable
+                key={r}
+                onPress={() => onMinRating(r)}
+                style={[styles.seg, on && styles.segOn]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on }}
+              >
+                <Text style={[styles.segText, on && { color: colors.selectedFg }]}>{r ? `${r}+` : 'Any'}</Text>
+                <Text style={[styles.segCount, on && { color: colors.selectedFg }]}>{countIf({ rating: r })}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/*
+          Only where anything is actually priced. Attractions carry no price
+          level at all, so the group read Any 60 · £ 0 · ££ 0 · £££ 0 — which
+          is the same failure as offering Castle where there is no castle: you
+          press it, nothing happens, and you cannot tell whether the control is
+          broken or the world is.
+        */}
+        {along.places.some((p) => p.priceLevel != null) ? (
+        <>
+        <Text style={styles.kicker}>Price</Text>
+        <View style={styles.segRow}>
+          {PRICE_BANDS.map((b) => {
+            const on = b.key === priceBand;
+            return (
+              <Pressable
+                key={b.key}
+                onPress={() => onPriceBand(b.key)}
+                style={[styles.seg, on && styles.segOn]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on }}
+              >
+                <Text style={[styles.segText, on && { color: colors.selectedFg }]}>{b.label}</Text>
+                <Text style={[styles.segCount, on && { color: colors.selectedFg }]}>{countIf({ price: b.key })}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        </>
+        ) : null}
+
+        <Text style={styles.kicker}>{pill === 'food' ? 'Kind of place' : 'Type of thing'}</Text>
+        <View>
+          <Pressable onPress={() => { onKind(null); onCuisine(null); }} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf }}>
+            <Text style={[type.body, { flex: 1 }]}>Everything</Text>
+            <Text style={type.small}>{countIf({ kind: null })}</Text>
+          </Pressable>
+          {/* Commonest first, and only what is actually out there: offering
+              Castle where there is no castle is how a filter comes to look
+              broken — you pick it, nothing changes, and you cannot tell
+              whether the control is wrong or the world is. */}
+          {(moreTypes ? kinds : kinds.slice(0, 5)).map((k) => (
+            <Pressable key={k.kind} onPress={() => onKind(k.kind === kindOf ? null : k.kind)} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: k.kind === kindOf }}>
+              <Text style={[type.body, { flex: 1 }, k.kind === kindOf && { fontWeight: '700' }]}>{cap(k.kind)}</Text>
+              <Text style={type.small}>{k.count}</Text>
+            </Pressable>
+          ))}
+          {kinds.length > 5 && !moreTypes ? (
+            <Pressable onPress={() => setMoreTypes(true)} style={styles.typeRow} accessibilityRole="button">
+              <Text style={[styles.moreInfoText, { flex: 1 }]}>{`All ${kinds.length} types`}</Text>
+              <Icon name="more" size={14} color={colors.accent} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Pressable onPress={() => setFiltering(false)} style={styles.halfAdd} accessibilityRole="button">
+          <Text style={styles.halfAddText}>{`Show ${shown.length} place${shown.length === 1 ? '' : 's'}`}</Text>
+        </Pressable>
       </View>
     );
   }
@@ -1822,19 +2135,45 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           somewhere to look around. "Near the end" is gone: it asked somebody to
           hold a picture of the route in their head, and the chip did not even
           show the minutes they had chosen. */}
-      {/* Max detour is not here any more: it is a pill on the map (owner,
-          8 Sep 2026), where the shaded ground it controls actually is. */}
-      <View style={styles.chips}>
+      {/*
+        The controls row (trips V2): plain text, no boxes, Filters on the left
+        and the order on the right. Max detour is not here — it is a pill on
+        the map (owner, 8 Sep 2026), over the shaded ground it sets.
+      */}
+      <View style={styles.controls}>
+        <Pressable onPress={() => setFiltering(true)} style={styles.control} accessibilityRole="button">
+          <Icon name="filters" size={16} color={narrowed ? colors.accent : colors.ink} />
+          {/* The label becomes what it is doing, so a short list explains
+              itself without opening anything. */}
+          <Text style={[styles.controlText, narrowed && styles.controlOn]} numberOfLines={1}>
+            {narrowed ? filterWords : 'Filters'}
+          </Text>
+        </Pressable>
         {anchorLabel ? <Chip label={`Around ${anchorLabel}`} on onClear={onClearAnchor} /> : null}
-        <Chip
-          label={kindOf || cuisine
-            ? `${[cuisine && cap(cuisine), kindOf && cap(kindOf)].filter(Boolean).join(' ')} · ${shown.length}`
-            : 'Type'}
-          on={!!(kindOf || cuisine)}
-          chevron
-          onPress={() => setOpenKind((v) => !v)}
-        />
+        <View style={{ flex: 1 }} />
+        <Pressable onPress={() => setOpenSort((v) => !v)} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openSort }}>
+          <Text style={styles.controlText} numberOfLines={1}>{`Sort: ${SORTS.find((x) => x.key === sort)?.label ?? 'Rating'}`}</Text>
+          <Icon name={openSort ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
+        </Pressable>
       </View>
+
+      {openSort ? (
+        // Anchored under the control that opened it, right-aligned to it.
+        <View style={[styles.dropdown, styles.sortMenu]}>
+          {SORTS.map((o) => (
+            <Pressable
+              key={o.key}
+              onPress={() => { onSort(o.key); setOpenSort(false); }}
+              style={styles.optRow}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: o.key === sort }}
+            >
+              <Text style={[type.body, { flex: 1 }]}>{o.label}</Text>
+              {o.key === sort ? <Icon name="check" size={16} color={colors.accent} /> : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       {openKind ? (
         /*
@@ -1985,122 +2324,113 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             backLabel={`Back to all ${shown.length} place${shown.length === 1 ? '' : 's'}`}
           />
         ) : shown.map((p) => (
-          /*
-            Tapping a row shows it on the map, it does not open it (owner,
-            6 Sep 2026: "I can see lots of icons on a map, but I don't know
-            which icons are which restaurants… I click Piccolino Virginia Water
-            to see where it is on the map. It should then appear with a little
-            expansion icon that I can click on to view Piccolino's side
-            drawer"). The chevron on the pin is that second tap — and a second
-            tap on the row itself does the same, so a thumb already in the list
-            never has to go via the map to open something.
-          */
-          <Pressable
-            key={p.venueRef}
-            onLayout={(e) => onRowLayout(p.venueRef, e.nativeEvent.layout.y)}
-            /*
-              One tap picks a place and shows it on the map; the same tap again
-              lets it go. It does **not** open anything — opening has a button
-              of its own, at the end of the row and on the pin.
-
-              It used to open on the second tap, and the owner named exactly
-              what is wrong with that (7 Sep 2026): "How am I supposed to know
-              as a user that that's what happens, that I need to click twice?"
-              Nothing on screen said so, and a hidden gesture is not an
-              affordance. A toggle is at least the thing people expect a second
-              tap to do.
-            */
-            onPress={() => onSelect(selected === p.venueRef ? null : p.venueRef)}
-            style={[styles.row, selected === p.venueRef && styles.rowOn]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: selected === p.venueRef }}
-            accessibilityLabel={selected === p.venueRef ? `${p.name} — hide on the map` : `${p.name} — show on the map`}
-          >
-            {/*
-              The picture is a third bigger and its corners are curved, and the
-              bookmark sits on it rather than beside the buttons (owner, 8 Sep
-              2026). It is the one thing on the row you tap without reading, so
-              it belongs on the thing you are looking at.
-            */}
-            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false}>
+          pill === 'food'
+            ? (
+              /*
+                Food is text, and only text (trips V2). Most restaurants have no
+                photograph, and a list of grey rectangles with forks in them is
+                a list that looks broken rather than a list of restaurants.
+              */
               <Pressable
-                onPress={() => onShortlist(p)}
-                hitSlop={8}
-                style={styles.thumbMark}
+                key={p.venueRef}
+                onLayout={(e) => onRowLayout(p.venueRef, e.nativeEvent.layout.y)}
+                onPress={() => onSelect(selected === p.venueRef ? null : p.venueRef)}
+                style={[styles.foodRow, selected === p.venueRef && styles.rowOn]}
                 accessibilityRole="button"
-                accessibilityLabel={p.onShortlist ? `Take ${p.name} off the shortlist` : `Save ${p.name} to the shortlist`}
+                accessibilityState={{ selected: selected === p.venueRef }}
               >
-                {/*
-                  No disc under it (owner, 8 Sep 2026, against Airbnb: "there is
-                  no white frame around the heart. It's just the heart"). What
-                  makes a bare glyph read on a photograph of anything is the
-                  glyph itself being two colours: a cream fill inside an ink
-                  outline, which has an edge against a bright sky and a dark
-                  room alike. Saved fills with lime instead.
-                  
-                  INK and CREAM rather than the palette's, on purpose: a
-                  photograph is a photograph in either theme, and `colors.ink`
-                  turns cream in the dark, which would leave nothing to see.
-                */}
-                <Icon
-                  name={p.onShortlist ? 'shortlisted' : 'shortlist'}
-                  size={22}
-                  color={INK}
-                  strokeWidth={2}
-                  fill
-                  fillColor={p.onShortlist ? LIME : CREAM}
-                />
+                <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                  <View style={styles.rowMeta}>
+                    <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
+                    {p.rating != null ? (
+                      <Stars value={p.rating} size={12}>
+                        <Text style={styles.ratingText}>{p.rating.toFixed(1)}{p.ratingCount ? ` (${p.ratingCount >= 1000 ? `${(p.ratingCount / 1000).toFixed(1)}k` : p.ratingCount})` : ''}</Text>
+                      </Stars>
+                    ) : null}
+                  </View>
+                  <Text style={type.small} numberOfLines={1}>
+                    {[kitchen(p) ?? plainCategory(p.category), money(p.priceLevel), detourWords(p, anchorLabel, along.hasRoute)].filter(Boolean).join(' · ')}
+                  </Text>
+                  {/* Whether you could walk in now — the one line that decides
+                      whether a restaurant is any use this evening. */}
+                  {openLine(p) ? (
+                    <Text style={[styles.openLine, !openLine(p)!.strong && { color: colors.inkMuted, fontWeight: '400' }]} numberOfLines={1}>
+                      {openLine(p)!.text}
+                    </Text>
+                  ) : null}
+                </View>
+                <HeartButton on={p.onShortlist} onPress={() => onShortlist(p)} bare />
               </Pressable>
-            </VenueThumb>
-            <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-              <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
-              {/* Type · price · the stars, on one line and never wrapping the
-                  rating on its own (handoff § Row layout). */}
-              <View style={styles.rowMeta}>
-                {/* What it is belongs in the pill below, so it is not said
-                    twice — "Pub · ££" over a "Pub" pill was the same word
-                    within an inch of itself. */}
-                <Text style={type.small} numberOfLines={1}>
-                  {[kitchen(p) ? null : plainCategory(p.category), money(p.priceLevel)].filter(Boolean).join(' · ')}
-                </Text>
-                {p.rating != null ? (
-                  <Stars value={p.rating} size={12}>
-                    <Text style={styles.ratingText}>{p.rating.toFixed(1)}{p.ratingCount ? ` (${p.ratingCount >= 1000 ? `${(p.ratingCount / 1000).toFixed(1)}k` : p.ratingCount})` : ''}</Text>
-                  </Stars>
-                ) : <Text style={type.tiny}>no reviews yet</Text>}
-              </View>
-              {/*
-                What it serves, and what it costs you to get there, on one line.
+            )
+            : (
+              /*
+                Activities and stays are cards: one per row, the picture full
+                width at a fixed 3:2 so a wide shot and a tall one make the same
+                shape, and the heart on the picture rather than beside a button
+                — it is the one thing you tap without reading.
+              */
+              <Pressable
+                key={p.venueRef}
+                onLayout={(e) => onRowLayout(p.venueRef, e.nativeEvent.layout.y)}
+                onPress={() => onSelect(selected === p.venueRef ? null : p.venueRef)}
+                style={[styles.card2, selected === p.venueRef && styles.rowOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: selected === p.venueRef }}
+              >
+                <View
+                  style={styles.cardMedia}
+                  onLayout={(e) => { const w = Math.round(e.nativeEvent.layout.width); if (w && w !== cardW) setCardW(w); }}
+                >
+                  {/* Nothing until it has been measured: a frame drawn at a
+                      guessed width and corrected a frame later is a list that
+                      jumps as you open it. */}
+                  <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={cardW || 1} height={cardW ? Math.round(cardW / 1.5) : 1} rounded={12} credit={false}>
+                    <Pressable
+                      onPress={() => onShortlist(p)}
+                      hitSlop={8}
+                      style={styles.thumbMark}
+                      accessibilityRole="button"
+                      accessibilityLabel={p.onShortlist ? `Take ${p.name} off the shortlist` : `Save ${p.name} to the shortlist`}
+                    >
+                      {/*
+                        No disc under it (owner, 8 Sep 2026, against Airbnb:
+                        "there is no white frame around the heart. It's just the
+                        heart"). What makes a bare glyph read on a photograph of
+                        anything is the glyph being two colours: a cream fill in
+                        an ink outline, which has an edge against a bright sky
+                        and a dark room alike. Saved fills with lime.
 
-                "Piccolino is Italian, but it's not telling me on this list
-                view, and I absolutely need to see that" (owner, 6 Sep 2026) —
-                the kitchen is the first thing anybody wants from a restaurant
-                row, and it was the one fact the row left out. The detour lost
-                its sentence to make the room: "+6 min" is the whole of what
-                "about 6 minutes off route" was saying.
-              */}
-              <View style={styles.rowMeta}>
-                {kitchen(p) ? <Text style={styles.tagPill} numberOfLines={1}>{kitchen(p)}</Text> : null}
-                <Text style={styles.detour} numberOfLines={1}>
-                  {p.detourMinutes != null ? `+${p.detourMinutes} min` : anchorLabel ? `near ${anchorLabel}` : along.hasRoute ? 'off the route' : 'nearby'}
-                  <Text style={{ color: colors.inkMuted, fontWeight: '400' }}>{` · ${p.detourMiles} mi`}</Text>
+                        INK and CREAM rather than the palette's, on purpose: a
+                        photograph is a photograph in either theme, and
+                        `colors.ink` turns cream in the dark, leaving nothing.
+                      */}
+                      <Icon name={p.onShortlist ? 'shortlisted' : 'shortlist'} size={30} color={INK} strokeWidth={2} fill fillColor={p.onShortlist ? LIME : CREAM} />
+                    </Pressable>
+                    {money(p.priceLevel) ? (
+                      <View style={styles.priceTag}><Text style={styles.priceTagText}>{money(p.priceLevel)}</Text></View>
+                    ) : null}
+                  </VenueThumb>
+                </View>
+                <View style={styles.rowMeta}>
+                  <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
+                  {p.rating != null ? (
+                    <Stars value={p.rating} size={12}>
+                      <Text style={styles.ratingText}>{p.rating.toFixed(1)}{p.ratingCount ? ` (${p.ratingCount >= 1000 ? `${(p.ratingCount / 1000).toFixed(1)}k` : p.ratingCount})` : ''}</Text>
+                    </Stars>
+                  ) : <Text style={type.tiny}>no reviews yet</Text>}
+                </View>
+                <Text style={type.small} numberOfLines={1}>
+                  {[kitchen(p) ?? plainCategory(p.category), detourWords(p, anchorLabel, along.hasRoute)].filter(Boolean).join(' · ')}
                 </Text>
-              </View>
-            </View>
-            {/*
-              Bookmark and Add, centred against the three lines rather than
-              sitting under them. They had a line of their own and the whole of
-              the left was empty beside it — three lines a row, on every row
-              (owner, 6 Sep 2026).
-            */}
-            <View style={styles.rowSide}>
-              {/* The bookmark moved onto the picture; Add keeps this side. */}
-              <Pressable onPress={() => onAdd(p)} style={styles.add} accessibilityRole="button">
-                <Icon name={p.onDay ? 'check' : 'add'} size={13} color={colors.ink} />
-                <Text style={styles.addText}>{p.onDay ? 'Added' : 'Add'}</Text>
+                {p.summary ? <Text style={styles.cardBlurb} numberOfLines={2}>{p.summary}</Text> : null}
+                <View style={styles.cardSide}>
+                  <Pressable onPress={() => onAdd(p)} style={styles.add} accessibilityRole="button">
+                    <Icon name={p.onDay ? 'check' : 'add'} size={13} color={colors.ink} />
+                    <Text style={styles.addText}>{p.onDay ? 'Added' : 'Add'}</Text>
+                  </Pressable>
+                </View>
               </Pressable>
-            </View>
-          </Pressable>
+            )
         ))}
 
         {/* What the corridor left out, and the one tap that brings it back. A
@@ -3225,6 +3555,67 @@ const styles = StyleSheet.create({
   // The name and the expand glyph on one line, the glyph pinned to the right
   // and never squeezing the name.
 
+
+
+
+  // --- The Shortlist browse -------------------------------------------------
+  savedPills: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10 },
+  savedPill: { paddingHorizontal: 12, minHeight: 34, justifyContent: 'center', backgroundColor: colors.switchOff },
+  savedPillOn: { backgroundColor: colors.selected },
+  savedPillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
+  savedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 16,
+    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+  },
+  // A type in an outline, where there is no photograph. Not an empty grey box:
+  // a list of restaurants should look intentional, not broken.
+  savedTile: {
+    width: 40, height: 40, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.line,
+  },
+  // The tile is the handoff's 40px, in a box the width of a thumbnail — so a
+  // list of places with and without pictures still starts its names in one line.
+  savedTileBox: { width: 64, alignItems: 'center' },
+  emptySaved: { gap: 8, paddingHorizontal: 16, paddingVertical: 24 },
+  emptySavedTitle: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.ink },
+  // --- The V2 browse lists --------------------------------------------------
+  // A card per row, ruled off from the next. No box around it: the picture is
+  // the edge, which is what stops a list of cards reading as a list of boxes.
+  card2: { gap: 8, paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  cardMedia: { alignSelf: 'stretch', minHeight: 4 },
+  cardBlurb: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, lineHeight: 18 },
+  cardSide: { alignItems: 'flex-start', paddingTop: 2 },
+  // Bottom left of the picture, where it cannot fight the heart.
+  priceTag: {
+    position: 'absolute', left: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 3,
+    backgroundColor: colors.surface,
+  },
+  priceTagText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.ink },
+  foodRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 14, paddingHorizontal: 16,
+    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+  },
+  openLine: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent },
+  // --- The browse controls, the sort popover and the filter takeover --------
+  controls: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 4, minHeight: TARGET },
+  control: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: TARGET, flexShrink: 1 },
+  controlText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, flexShrink: 1 },
+  controlOn: { color: colors.accent },
+  sortMenu: { alignSelf: 'flex-end', minWidth: 170 },
+
+  filterPage: { paddingHorizontal: 16, paddingBottom: 24, gap: 6 },
+  filterHead: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: TARGET },
+  filterTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6, color: colors.ink },
+  // Equal cells in one outline, divided by the same rule — the pack's segmented
+  // control, with the count under each so a choice is made knowing its cost.
+  segRow: { flexDirection: 'row', borderWidth: 1, borderColor: colors.lineSoft, marginBottom: 6 },
+  seg: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 10, minHeight: 54, borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
+  segOn: { backgroundColor: colors.selected },
+  segText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
+  segCount: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
+  typeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: TARGET, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   // --- The place half view (trips V2) ---------------------------------------
   half: { gap: 10, paddingVertical: 12 },
   halfHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
@@ -3258,6 +3649,7 @@ const styles = StyleSheet.create({
   },
   halfAdded: { backgroundColor: colors.selected },
   halfAddText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.primaryFg },
+  browseTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6, color: colors.ink },
   chosenHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   expandHit: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6, marginTop: -4, flex: 0 },
   chosenName: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, lineHeight: 26 },

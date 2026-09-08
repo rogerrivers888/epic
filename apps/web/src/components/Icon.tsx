@@ -5,7 +5,7 @@ import {
   Bird, Fish,
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
-  Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode, Maximize2,
+  Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode, Maximize2, SlidersHorizontal,
   Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
@@ -49,6 +49,8 @@ const ICONS = {
   shortlist: Heart, shortlisted: Heart,
   /** Open this out to the whole screen: the half view's expand glyph. */
   fullscreen: Maximize2,
+  /** Narrowing a list down, rather than a single setting: the browse's Filters. */
+  filters: SlidersHorizontal,
   allergen: TriangleAlert, archived: Archive, refresh: RefreshCw, delete: Trash2,
   // the device's own copy: no signal, saving it, and what Epic owns outright
   offline: CloudOff, download: Download, owned: Database,

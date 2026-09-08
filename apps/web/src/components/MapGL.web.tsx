@@ -36,6 +36,9 @@ const GLYPH: Record<string, string> = {
   sparkles: '<path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z"/>',
   utensils: '<path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10"/><path d="M17 3c-1.5 1-2 3-2 5s.5 3 2 3v10"/>',
   bookmark: '<path d="M5 3h14v18l-7-5-7 5z"/>',
+  // The shortlist's own pin: the same heart the chip and the rows use, so the
+  // map says what the list says (trips V2, 8 Sep 2026).
+  heart: '<path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10Z"/>',
   flag: '<path d="M5 21V4h13l-2 4 2 4H5"/>',
   car: '<path d="M5 13h14M6.5 13 8 8h8l1.5 5M6 17h1M17 17h1"/><rect x="4" y="13" width="16" height="4" rx="1"/>',
   tree: '<path d="M12 3 6 12h3l-3 5h12l-3-5h3z"/><path d="M12 17v4"/>',

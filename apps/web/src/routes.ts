@@ -454,8 +454,21 @@ export function ownsHeader(route: Route): boolean {
  * anything"). The way out is the header's own Back, which is on screen the
  * whole time; the tabs come back the moment the group is left.
  */
-export function isImmersive(route: Route): boolean {
-  return route.name === 'trips' && !route.creating && route.tripId != null && route.section === 'group';
+/**
+ * A browse is immersive too (trips V2, 8 Sep 2026): "the bottom tab bar hides
+ * for the whole browse, and in place views; it returns on back to the trip".
+ *
+ * The reason is the same as the group's. A browse is the map, a sheet you drag
+ * and a list you scroll, and the tab bar was seventy pixels of somewhere else
+ * pinned under all three. Which browse is open is in the query rather than the
+ * path — the page is still the trip's map — so the query is what answers it.
+ */
+export function isImmersive(route: Route, query?: URLSearchParams): boolean {
+  if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
+  if (route.section === 'group') return true;
+  // The bare `/trips/<id>` is the map, and parses with no section at all.
+  const onTheMap = route.section == null || route.section === 'map' || route.section === 'itinerary';
+  return onTheMap && Boolean(query?.get('pill'));
 }
 
 /** Which tab in the shell a route belongs under, so the rail can light up. */
