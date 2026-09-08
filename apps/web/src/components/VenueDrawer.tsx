@@ -529,15 +529,31 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
    * is one we must not make. So this is the facts on the record, and a place
    * with nothing to say gets no rows rather than three empty ones.
    */
-  const highlights: { icon: IconName; title: string; sub: string | null }[] = [
-    openNow ? { icon: 'hours' as IconName, title: openNow.state, sub: openNow.detail } : null,
+  /*
+    `satisfies` rather than `as`, and it is not a style point.
+
+    Every row here used to cast its own name — `'clock' as IconName` — and a
+    cast is a promise to the compiler, not a question. There is no `clock` in
+    the set; the clock is called `hours`. So this row handed `Icon` a name it
+    had nothing for, `Icon` rendered `undefined`, and React took the whole
+    screen down with it. It only showed on a place with no opening hours, no
+    price and no children's answer — which is to say on every atlas attraction,
+    which is to say on everything you can tap on Inspire.
+
+    `satisfies` checks each row against the type and still infers it, so a name
+    that is not in the set is a red squiggle here rather than a dead screen on
+    the owner's phone.
+  */
+  type Highlight = { icon: IconName; title: string; sub: string | null };
+  const highlights: Highlight[] = ([
+    openNow ? { icon: 'hours', title: openNow.state, sub: openNow.detail } : null,
     v?.goodForChildren ?? item.goodForChildren
-      ? { icon: 'children' as IconName, title: 'Good for children', sub: null }
+      ? { icon: 'children', title: 'Good for children', sub: null }
       : null,
-    item.reservable ? { icon: 'calendar' as IconName, title: 'Takes bookings', sub: null } : null,
-    price ? { icon: 'money' as IconName, title: price, sub: 'Typical spend, as the source bands it' } : null,
-    item.dwellMinutes > 0 ? { icon: 'clock' as IconName, title: `Allow ${minutes(item.dwellMinutes)}`, sub: null } : null,
-  ].filter(Boolean).slice(0, 3) as { icon: IconName; title: string; sub: string | null }[];
+    item.reservable ? { icon: 'calendar', title: 'Takes bookings', sub: null } : null,
+    price ? { icon: 'money', title: price, sub: 'Typical spend, as the source bands it' } : null,
+    item.dwellMinutes > 0 ? { icon: 'duration', title: `Allow ${minutes(item.dwellMinutes)}`, sub: null } : null,
+  ] satisfies (Highlight | null)[]).filter((h) => h !== null).slice(0, 3);
 
   const travelBits = [
     item.distanceKm != null ? `${item.distanceKm} km from ${baseLabel ?? 'base'}` : null,

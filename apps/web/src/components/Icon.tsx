@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   Archive, ArrowLeft, ArrowRight, ChevronLeft, Baby, Ban, BedDouble, Beer, Calendar, Camera, Car, CarTaxiFront, Check, ChevronDown, ChevronRight, ChevronUp, CircleCheck,
   Bird, Fish,
-  Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
+  Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, Hourglass, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
   Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode, Maximize2, SlidersHorizontal,
   Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet,
@@ -56,6 +56,12 @@ const ICONS = {
   offline: CloudOff, download: Download, owned: Database,
   // facts about a place
   address: MapPin, hours: Clock, children: Baby, phone: Phone, message: MessageSquare, camera: Camera, calendar: Calendar, ticket: Ticket,
+  /**
+   * How long you would spend there, which is not what time it opens. `hours` is
+   * the clock on "Open until 17:15"; this is the glass on "Allow 2h", and they
+   * turn up in the same three-row list, so they cannot be the same picture.
+   */
+  duration: Hourglass,
   // the journey: ways of getting about, booking states, list and map, order
   walking: Footprints, driving: Car, transit: TrainFront, taxi: CarTaxiFront, directions: Navigation, home: House,
   // where the device says the household is standing, right now
@@ -98,7 +104,25 @@ export function Icon({ name, size = 18, color = colors.icon, fill, fillColor, st
   fillColor?: string;
   strokeWidth?: number;
 }) {
+  /*
+    A name that is not in the set draws the pin rather than bringing the screen
+    down.
+
+    `ICONS[name]` on a name that is not a key is `undefined`, and rendering
+    `undefined` is React error #130 — which is not "this icon is missing", it
+    is the whole screen replaced by "This screen stopped working". That is what
+    a single `'clock' as IconName` in the place drawer did on 8 Sep 2026: every
+    place on Inspire was untappable, and the message said nothing about icons.
+
+    A cast can always get a bad name past the compiler, so the guard is here as
+    well as in the types. It is deliberately not silent — the console says which
+    name, because a pin where a castle should be is a bug, just a cheap one.
+  */
   const Glyph = ICONS[name];
+  if (!Glyph) {
+    console.warn(`Icon: no glyph called "${name}" — drawing the pin instead.`);
+    return <MapPin size={size} color={color} strokeWidth={strokeWidth} fill={fill ? (fillColor ?? color) : 'none'} />;
+  }
   return <Glyph size={size} color={color} strokeWidth={strokeWidth} fill={fill ? (fillColor ?? color) : 'none'} />;
 }
 
