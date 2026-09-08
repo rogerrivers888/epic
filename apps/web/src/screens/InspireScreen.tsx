@@ -828,6 +828,20 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
 
           {pool && !loading ? (
             <>
+              {/* Why every square is missing its star, said once and in plain
+                  words rather than eighty times as "No ratings yet" — which
+                  would be a claim about the places instead of about us.
+
+                  Above the shelves rather than under them: the question is
+                  asked at the first card somebody looks at, and an answer seven
+                  screens down is not an answer. It draws only on a day the
+                  source has actually refused. */}
+              {ratingsOff ? (
+                <View style={[styles.gutter, styles.notice]}>
+                  <Icon name="info" size={14} color={colors.ink} />
+                  <Text style={[type.small, { flex: 1, color: colors.ink }]}>{ratingsOff}</Text>
+                </View>
+              ) : null}
               {/* 8a: nothing picked, so every category gets a carousel and the
                   title is the door into the whole of it. 8d: in Food, the same
                   place in the hierarchy is a list of cuisines instead. */}
@@ -904,15 +918,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
                   <Icon name="info" size={14} color={colors.ink} />
                   <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
                 </Pressable>
-              ) : null}
-              {/* Why every square is missing its star, said once and in plain
-                  words rather than eighty times as "No ratings yet" — which
-                  would be a claim about the places instead of about us. */}
-              {ratingsOff ? (
-                <View style={[styles.gutter, styles.notice]}>
-                  <Icon name="info" size={14} color={colors.ink} />
-                  <Text style={[type.small, { flex: 1, color: colors.ink }]}>{ratingsOff}</Text>
-                </View>
               ) : null}
               <View style={[styles.gutter, styles.foot]}>
                 <Text style={type.tiny}>
