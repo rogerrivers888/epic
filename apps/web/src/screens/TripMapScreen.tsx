@@ -823,7 +823,25 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       >
         <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
       </Pressable>
-      <Text style={styles.placeTitle} numberOfLines={1}>{openPlaceHere.name}</Text>
+      {/*
+        The name and what people made of it are one block, so the rating sits
+        directly under the title and indented to it rather than starting back
+        at the gutter (owner, 8 Sep 2026: "the reviews are not in the same
+        place. They're supposed to be directly under the title").
+      */}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.placeTitle} numberOfLines={1}>{openPlaceHere.name}</Text>
+        <View style={styles.placeRating}>
+          {openPlaceHere.rating != null ? (
+            <Stars value={openPlaceHere.rating} size={13}>
+              {/* The figure is the stars said in numbers, so it is their
+                  colour; the count is a different fact and takes the green. */}
+              <Text style={styles.placeRatingValue}>{openPlaceHere.rating.toFixed(1)}</Text>
+              {openPlaceHere.ratingCount ? <Text style={styles.placeReviews}>{` · ${openPlaceHere.ratingCount.toLocaleString()} reviews`}</Text> : null}
+            </Stars>
+          ) : <Text style={type.small}>No rating yet</Text>}
+        </View>
+      </View>
       <Pressable
         onPress={() => setDrawer(alongToItem(openPlaceHere))}
         hitSlop={10}
@@ -1673,6 +1691,54 @@ const openLine = (p: { openNow?: boolean | null; closesAt?: string | null; opens
 };
 
 /**
+ * What kind of thing this is, in one word — the bold line above the bullets.
+ *
+ * `plainCategory` answers nothing for a bare "attraction", which is most of
+ * the atlas, so the taxonomy's own word for it is tried first: the drawing
+ * says "Walks" over a lake, not nothing.
+ */
+const typeWords = (p: TripAlongPlace): string | null => {
+  const k = kitchen(p);
+  if (k) return k;
+  const own = primaryKind(p, placeKind(p) === 'food' ? FOOD_KINDS : THING_KINDS);
+  if (own) return cap(own);
+  const plain = plainCategory(p.category);
+  if (plain) return plain;
+  /*
+    Something in every case. `plainCategory` returns nothing for the vague
+    words — "attraction" is most of the atlas — and the drawing has a type on
+    every card. What the sources called this place is the honest last word: a
+    miniature railway is not a walk or a park, and saying so beats a blank.
+  */
+  const said = (p.experiences ?? [])[0];
+  return said ? cap(said.replace(/-/g, ' ')) : 'Day out';
+};
+
+/**
+ * Two or three true things about a place, for the half view's bullets.
+ *
+ * Never fewer than two where there is anything at all to say: the drawing has
+ * content in that space and an empty gap reads as a broken screen (owner,
+ * 8 Sep 2026). Ordered by what somebody standing there would want first —
+ * whether it is open, what it costs, how long it takes to reach — and every
+ * line is a fact off the record. Nothing here is inferred or filled in.
+ */
+const bulletsFor = (p: TripAlongPlace): { text: string; strong?: boolean }[] => {
+  const out: { text: string; strong?: boolean }[] = [];
+  const open = openLine(p);
+  if (open) out.push({ text: open.text, strong: open.strong });
+  // Only where the source actually banded it. `priceLevel` is absent on almost
+  // every attraction, and "Free" said of a place nobody has priced is a claim.
+  if (p.priceLevel != null) out.push({ text: money(p.priceLevel) as string });
+  if (!open && p.openingHours) out.push({ text: p.openingHours.split(' · ')[0] });
+  if (p.detourMiles) out.push({ text: `${p.detourMiles} miles off the route` });
+  if (p.ratingCount) out.push({ text: `Rated by ${p.ratingCount.toLocaleString()} people` });
+  if (p.website) out.push({ text: hostOf(p.website) });
+  if (p.address) out.push({ text: p.address });
+  return out.slice(0, 3);
+};
+
+/**
  * What we can say about a place with no photograph.
  *
  * The handoff asks for menu dishes here for a restaurant and rooms for a hotel;
@@ -1723,30 +1789,10 @@ function PlaceHalf({ place, onShortlist, onAdd, onMore, addLabel }: {
         handoff draws it: what people made of it, where it is, the picture,
         what it is, and what you can do about it.
       */}
-      <View style={styles.halfRating}>
-        {place.rating != null ? (
-          <Stars value={place.rating} size={13}>
-            {/* One string: two adjacent Text runs set solid, and "4.8" beside
-                "309 reviews" read as 4.8309. */}
-            <Text style={styles.halfRatingText}>
-              {`${place.rating.toFixed(1)}${place.ratingCount ? ` · ${place.ratingCount.toLocaleString()} reviews` : ''}`}
-            </Text>
-          </Stars>
-        ) : <Text style={type.small}>No rating yet</Text>}
-      </View>
-
-      {/* Somewhere you eat or sleep is somewhere you may have to ring or book,
-          so its own page is one tap from here. */}
-      {place.website && kind !== 'activity' ? (
-        <Pressable onPress={() => Linking.openURL(place.website as string)} style={styles.halfSite} accessibilityRole="link">
-          <Icon name="external" size={13} color={colors.accent} />
-          <Text style={styles.halfSiteText} numberOfLines={1}>{hostOf(place.website)}</Text>
-        </Pressable>
-      ) : null}
-
+      {/* The name and the rating are the header's; this starts at the detour,
+          right-aligned above the picture, as the drawing has it. */}
       <Text style={styles.halfDetour} numberOfLines={1}>
         {place.detourMinutes != null ? `+${place.detourMinutes} min detour` : 'nearby'}
-        {place.detourMiles ? ` · ${place.detourMiles} mi` : ''}
       </Text>
 
       {photo ? (
@@ -1786,15 +1832,22 @@ function PlaceHalf({ place, onShortlist, onAdd, onMore, addLabel }: {
 
       {place.summary ? <Text style={styles.halfSummary}>{place.summary}</Text> : null}
 
-      {/* What it is, then what is true about it today. A line is only drawn
-          where there is something to put on it — a lone "·" was the shape of
-          this before, on every attraction the sources gave no type for. */}
+      {/*
+        What it is, then two or more things that are true about it (owner,
+        8 Sep 2026: "we should have at least 2 bullet points always… it might
+        vary depending on what you have available, but I want to see them").
+        `bulletsFor` decides what to say from what we hold, so a place with
+        hours and a price says those and a place with neither still says
+        something rather than leaving a hole where the drawing has content.
+      */}
       <View style={styles.halfLines}>
-        {kitchen(place) ?? plainCategory(place.category)
-          ? <Text style={styles.halfType}>{kitchen(place) ?? plainCategory(place.category)}</Text>
-          : null}
-        {open ? <Text style={[styles.halfFact, open.strong && { color: colors.accent, fontWeight: '600' }]}>{open.text}</Text> : null}
-        {money(place.priceLevel) ? <Text style={styles.halfFact}>{money(place.priceLevel)}</Text> : null}
+        {typeWords(place) ? <Text style={styles.halfType}>{typeWords(place)}</Text> : null}
+        {bulletsFor(place).map((b) => (
+          <View key={b.text} style={styles.halfFactRow}>
+            <Text style={styles.halfBullet}>·</Text>
+            <Text style={[styles.halfFact, b.strong && styles.halfFactOn]} numberOfLines={2}>{b.text}</Text>
+          </View>
+        ))}
       </View>
 
       <Pressable onPress={onMore} style={styles.moreInfo} accessibilityRole="button">
@@ -3803,7 +3856,7 @@ const styles = StyleSheet.create({
   // The remainder is a fact, not a filter: it is counted but cannot be picked.
   typeRest: { borderBottomWidth: 0 },
   // --- The place half view (trips V2) ---------------------------------------
-  half: { gap: 10, paddingVertical: 12 },
+  half: { gap: 10, paddingTop: 2, paddingBottom: 12 },
   halfHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   halfBack: { width: 28, height: 32, alignItems: 'flex-start', justifyContent: 'center', marginLeft: -4 },
   halfName: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink, lineHeight: 27 },
@@ -3812,7 +3865,7 @@ const styles = StyleSheet.create({
   halfReviews: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
   halfSite: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, minHeight: 24 },
   halfSiteText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent, flexShrink: 1 },
-  halfDetour: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, textAlign: 'right' },
+  halfDetour: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, textAlign: 'right', marginBottom: -4 },
   halfMedia: { position: 'relative' },
   // Bare, over the picture, and clear of the corner (owner, 8 Sep 2026: "the
   // heart is a bit too close to the corner").
@@ -3824,6 +3877,7 @@ const styles = StyleSheet.create({
   halfFactRow: { flexDirection: 'row', gap: 6 },
   halfBullet: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
   halfFact: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, flexShrink: 1 },
+  halfFactOn: { color: colors.accent, fontWeight: '600' },
   halfSummary: { fontFamily: fonts.body, fontSize: 14, color: colors.ink, lineHeight: 20 },
   halfLines: { gap: 3 },
   halfType: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
@@ -3836,9 +3890,20 @@ const styles = StyleSheet.create({
   halfAdded: { backgroundColor: colors.selected },
   halfAddText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.primaryFg },
   browseTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6, color: colors.ink },
-  placeTitle: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink },
+  placeTitle: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink },
+  // Tight under the name, as the drawing has it.
+  placeRating: { marginTop: 2 },
+  placeRatingValue: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
+  placeReviews: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
   chosenHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  expandHit: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6, marginTop: -4, flex: 0 },
+  /**
+   * Square, fixed, and flush with the right-hand gutter — so its right edge
+   * lands on the same line as the picture below it, and a long name being
+   * truncated cannot move it (owner, 8 Sep 2026: "the expand option is too
+   * close to the edge… they need to be moved in so the right edge of the arrow
+   * is aligned with the right edge of the photo below").
+   */
+  expandHit: { width: 32, height: 32, alignItems: 'flex-end', justifyContent: 'center', marginTop: -2, flex: 0 },
   chosenName: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, lineHeight: 26 },
   addStrong: { backgroundColor: colors.primary, borderColor: colors.primary, height: 38, paddingHorizontal: 14, flex: 1, justifyContent: 'center' },
   backToList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: TARGET, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
