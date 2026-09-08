@@ -731,7 +731,17 @@ export async function fetchPhoto(name, maxWidthPx = 480) {
     // the screen for as long as you cared to look at it (owner, 4 Sep 2026);
     // the screen can only give up quickly if it is told.
     const why = await res.text().catch(() => '');
-    const err = new Error(`Google photo ${res.status}: ${why.slice(0, 200)}`);
+    /*
+      Long enough to reach the end of the sentence.
+      
+      Google's quota refusal names the metric, the limit *and* the project it
+      counted against — and at 200 characters it was cut off at "for consumer
+      'project", which is the one word that says where to go and raise it
+      (8 Sep 2026). This never reaches a phone; the screen falls back to the
+      category icon and says nothing. It is for the back office, and a
+      diagnostic truncated before its own diagnosis is not one.
+    */
+    const err = new Error(`Google photo ${res.status}: ${why.slice(0, 600)}`);
     err.status = res.status;
     throw err;
   }
