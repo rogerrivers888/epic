@@ -101,7 +101,43 @@ async function main() {
   }
 
   console.log(ran === 0 ? 'migrations up to date' : `${ran} migration(s) applied`);
+  await settleVisiting(pool);
   await pool.end();
+}
+
+/**
+ * Whether the public may visit, decided once for a database that has never been
+ * asked (migration 069, `domain/visiting.js`).
+ *
+ * The atlas is filtered on `visiting = 'yes'` before anything reaches a screen,
+ * and the rule that sets it lives in JavaScript rather than SQL, so a migration
+ * cannot backfill it. Nothing in a deploy ran it either: it is called by a
+ * region harvest and by a back-office button, both of which somebody has to
+ * start. On this production database that was done by hand and 89% of the atlas
+ * is settled — but a restored backup, or a second environment, would come up
+ * with every verdict null and therefore with an empty Inspire and empty county
+ * pages, looking for all the world like a bug in the query (Codex, 8 Sep 2026).
+ *
+ * `visiting_by is null` is the test rather than `visiting is null`, because a
+ * place the rule *considered* and could not settle is stored as a null verdict
+ * with a reason. Those have been asked. This asks only about the ones that
+ * never have, so a database that is already settled does no work at all.
+ */
+async function settleVisiting(pool) {
+  let unasked = 0;
+  try {
+    const { rows } = await pool.query(
+      `select count(*)::int as n from attractions
+        where state = 'published' and visiting is null and visiting_by is null`);
+    unasked = rows[0]?.n ?? 0;
+  } catch {
+    return;   // no atlas in this database yet; nothing to settle
+  }
+  if (!unasked) return;
+  console.log(`${unasked} place(s) have never been asked whether you can visit — settling`);
+  const { rejudgeVisiting } = await import('./repositories/library.js');
+  const counts = await rejudgeVisiting({});
+  console.log(`visiting settled: ${JSON.stringify(counts)}`);
 }
 
 // Only when run as a command. Imported — by a test, or by anything that wants

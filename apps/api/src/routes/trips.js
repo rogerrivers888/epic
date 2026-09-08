@@ -252,7 +252,14 @@ router.get('/search', async (req, res, next) => {
       : null;
     const homeCode = String(household.home_country_code ?? '').toUpperCase() || null;
 
-    const places = await searchAreas(q, { limit: 8, near: home });
+    // The country the search has already been narrowed to, if any. It has to
+    // bound the query rather than filter its answer: the answer is capped at
+    // eight and biased to home, so filtering afterwards can empty a list that
+    // had matches in it — type "Springfield" with Italy chosen and all eight
+    // come back English. `searchAreas` asks Photon for forty and applies this
+    // before its own limit, which is where a bound of this kind belongs.
+    const country = String(req.query.country ?? '').trim().toUpperCase() || null;
+    const places = await searchAreas(q, { limit: 8, near: country ? null : home, countryCode: country });
     const needle = q.toLowerCase();
     const countries = Object.entries(COUNTRIES)
       .filter(([, c]) => c.name.toLowerCase().startsWith(needle))

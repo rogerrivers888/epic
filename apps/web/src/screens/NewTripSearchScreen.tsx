@@ -48,7 +48,7 @@ export function NewTripSearchScreen({ onClose, onPick }: {
     setBusy(true);
     const t = setTimeout(async () => {
       try {
-        const next = await api.searchTrips(q);
+        const next = await api.searchTrips(q, country?.code ?? null);
         if (seq.current === mine) { setAnswer(next); setError(null); }
       } catch (e: any) {
         if (seq.current === mine) setError(e.message);
@@ -57,8 +57,12 @@ export function NewTripSearchScreen({ onClose, onPick }: {
       }
     }, 220);
     return () => clearTimeout(t);
-  }, [text]);
+  }, [text, country?.code]);
 
+  // The country is a bound on the *query* now, not a sieve over its answer —
+  // filtering here threw away a capped list and left nothing behind (Codex,
+  // 8 Sep 2026). Kept as a guard only, for an answer already in flight when the
+  // country was chosen.
   const places = (answer?.places ?? []).filter((p) => !country || String(p.countryCode ?? '').toUpperCase() === country.code);
   const countries = country ? [] : (answer?.countries ?? []);
 

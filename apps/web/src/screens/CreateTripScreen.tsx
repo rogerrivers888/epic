@@ -217,7 +217,13 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
         ...(holiday
           ? { startDate: start, endDate: end! }
           : { date: start, arriveAt: toClock(arrive), allowMinutes: allow }),
-        ...(seed?.place ? { place: seed.place } : seed?.placeText ? { placeText: seed.placeText } : {}),
+        // `where` rather than `seed.place`: arriving on a cold URL
+        // (`/trips/new?place=Rome`) the seed carries only the words, and the
+        // screen resolves them into a real place — which is what drew the
+        // picture and the drive. Sending the words on would have saved a trip
+        // with no destination and no first stop, against a form that had been
+        // showing Rome all along (Codex, 8 Sep 2026).
+        ...(where ? { place: where } : seed?.placeText ? { placeText: seed.placeText } : {}),
         ...(seed?.venue
           ? {
             destination: {
@@ -225,7 +231,7 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
               lat: seed.venue.lat ?? 0, lng: seed.venue.lng ?? 0,
             } as any,
           }
-          : seed?.place && !holiday ? { destination: seed.place as any } : {}),
+          : where && !holiday ? { destination: where as any } : {}),
         // A picked hotel travels with its coordinates; a name nobody picked is
         // still sent, and the API geocodes it in lodging mode as it always has.
         ...(holiday && stay ? { base: stay, baseKind: 'hotel' } : {}),

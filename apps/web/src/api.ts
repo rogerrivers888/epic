@@ -1530,7 +1530,8 @@ export const api = {
   // --- the trip rebuild (7 Sep 2026) ----------------------------------------
 
   /** "Where are you going?" — countries first, then cities and towns (3a). */
-  searchTrips: (q: string) => request<TripSearchAnswer>(`/api/trips/search${qs({ q })}`),
+  searchTrips: (q: string, country?: string | null) =>
+    request<TripSearchAnswer>(`/api/trips/search${qs({ q, country: country ?? undefined })}`),
 
   /** The picture at the top of the create screen: ours, from the library, never a provider's. */
   tripPicture: (p: { venueRef?: string | null; country?: string | null; locality?: string | null }) =>

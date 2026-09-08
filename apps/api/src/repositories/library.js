@@ -1488,23 +1488,38 @@ export async function gatherVisitingEvidence({ region = null, limit = 400, onLin
     `select id, name, wikidata_id, wikipedia_url from attractions
       where ${where.join(' and ')}
       order by score desc nulls last limit $1`, args);
-  if (!rows.length) return { looked: 0, withOsm: 0, withCategories: 0 };
+  if (!rows.length) return { looked: 0, skipped: 0, withOsm: 0, withCategories: 0 };
 
-  const counts = { looked: rows.length, withOsm: 0, withCategories: 0 };
+  const counts = { looked: 0, skipped: 0, withOsm: 0, withCategories: 0 };
   // Overpass is a donated service and Wikipedia asks for fifty titles a call;
   // both are batched rather than hammered, and a batch that fails is skipped
   // rather than losing the run.
+  // A batch that fails is skipped rather than losing the run — but *skipped*
+  // has to mean "come back to it". The next gather selects only rows where
+  // `visiting_looked_at` is null, so stamping the clock after a failed request
+  // records a source as examined that was never read, and the place is never
+  // asked about again: an Overpass wobble of a few seconds could hide a castle
+  // for good (Codex, 8 Sep 2026). The clock is only set when both sources
+  // actually answered; a batch where either fell over is left for next time.
+  counts.looked = 0;
+  counts.skipped = 0;
   for (let i = 0; i < rows.length; i += 50) {
     const batch = rows.slice(i, i + 50);
     const [osm, cats] = await Promise.all([
-      osmForWikidata(batch.map((r) => r.wikidata_id)).catch(() => new Map()),
-      wikipediaCategories(batch.map((r) => titleFromUrl(r.wikipedia_url)).filter(Boolean)).catch(() => new Map()),
+      osmForWikidata(batch.map((r) => r.wikidata_id)).then((m) => m, () => null),
+      wikipediaCategories(batch.map((r) => titleFromUrl(r.wikipedia_url)).filter(Boolean)).then((m) => m, () => null),
     ]);
+    if (osm === null || cats === null) {
+      counts.skipped += batch.length;
+      onLine?.(`a source did not answer — ${batch.length} left for next time`);
+      continue;
+    }
     for (const r of batch) {
       const tags = osm.get(r.wikidata_id) ?? null;
       const categories = cats.get(titleFromUrl(r.wikipedia_url)) ?? null;
       if (tags) counts.withOsm += 1;
       if (categories?.length) counts.withCategories += 1;
+      counts.looked += 1;
       await query(
         `update attractions set visiting_evidence = $2, visiting_looked_at = now() where id = $1`,
         [r.id, JSON.stringify({ osm: tags, categories: categories ?? null })]);
