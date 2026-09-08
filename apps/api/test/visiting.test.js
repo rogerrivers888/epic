@@ -125,3 +125,58 @@ test('nothing of Google\u2019s is written down but our own conclusion', () => {
   }
   assert.match(fn, /visiting_by = 'google'/, 'the rows it touched must be findable and droppable in one statement');
 });
+
+test('a whole-place claim outranks a tag on one structure', () => {
+  // Run absolutely, the residential veto hid Hatfield House, Nostell Priory,
+  // Muncaster Castle, Castle Campbell, Forde Abbey and The Homewood — several
+  // of them National Trust. The mansion at Nostell really is `building=house`
+  // and the estate road at Balmoral really is `access=private`; a tag describes
+  // one feature, and "Historic house museums in West Yorkshire" describes the
+  // institution. Checked by hand against the refusals, the category calls 15 of
+  // 18 genuinely-open places public and none of 18 private houses.
+  const open = (name, kinds, categories, osm) => {
+    const got = judgeVisiting({ kinds, categories, osm });
+    assert.equal(got.visiting, 'yes', `${name} must survive the veto, got ${got.visiting}`);
+  };
+  open('Nostell Priory', ['Q1343246'], ['Historic house museums in West Yorkshire'], { building: 'detached' });
+  open('Hatfield House', ['Q1343246'], ['Historic house museums in Hertfordshire'], { access: 'private' });
+  open('Balmoral Castle', ['Q23413', 'Q131986827'], ['Art museums and galleries in Aberdeenshire'], { access: 'private' });
+});
+
+test('a house nobody calls an attraction is still refused', () => {
+  for (const [name, kinds, osm] of [
+    ['Bagshot Park', ['Q131986827', 'Q1343246'], { building: 'house', historic: 'castle' }],
+    ['Highgrove House', ['Q131986827', 'Q1343246'], { building: 'house' }],
+    ['Tittenhurst Park', ['Q1343246'], { building: 'house' }],
+    ['Treago Castle', ['Q23413'], { building: 'residential' }],
+  ]) {
+    const got = judgeVisiting({ kinds, osm, categories: [] });
+    assert.equal(got.visiting, 'no', `${name} must stay hidden, got ${got.visiting}`);
+  }
+});
+
+test('historic=* is about fabric and never means the public may come in', () => {
+  // Chequers is historic=manor and Fort Belvedere is historic=castle, and both
+  // are somebody's home. Ruins and abbeys are carried by their Wikipedia
+  // category instead, which is a claim about the institution.
+  const chequers = judgeVisiting({
+    kinds: ['Q1343246'], categories: [], osm: { building: 'yes', historic: 'manor' },
+    summary: 'Chequers is the country house of the prime minister of the United Kingdom.',
+  });
+  assert.equal(chequers.visiting, 'no');
+  const belvedere = judgeVisiting({ kinds: ['Q1343246'], categories: [], osm: { building: 'yes', historic: 'castle' } });
+  assert.equal(belvedere.visiting, null, 'nothing establishes it either way, and unestablished is not shown');
+});
+
+test('a strong type beats the veto and a weak one does not', () => {
+  // A museum in a mansion is still a museum. A castle that is somebody's house
+  // is still somebody's house.
+  assert.equal(judgeVisiting({ kinds: ['Q2087181'], osm: { building: 'house' } }).visiting, 'yes');
+  assert.equal(judgeVisiting({ kinds: ['Q23413'], osm: { building: 'house' } }).visiting, 'no');
+});
+
+test('access=customers is not a refusal', () => {
+  // Kew Gardens is tagged that way and you buy a ticket.
+  const got = judgeVisiting({ kinds: [], categories: [], osm: { access: 'customers', leisure: 'garden' } });
+  assert.equal(got.visiting, 'yes');
+});

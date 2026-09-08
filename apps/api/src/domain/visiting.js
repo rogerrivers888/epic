@@ -38,7 +38,42 @@
  * round.
  */
 
-/** Wikidata types that mean people visit: if a place is one of these, it is open. */
+/**
+ * Types that are a statement about *function*: the place exists to be visited.
+ *
+ * These outrank the residential veto, because a museum housed in a mansion is
+ * still a museum and the mansion is still tagged `building=house`.
+ */
+export const STRONG_OPEN_KINDS = new Set([
+  'Q2087181',    // historic house museum
+  'Q33506',      // museum
+  'Q16735822',   // history museum
+  'Q115154402',  // independent museum
+  'Q115154345',  // local authority museum
+  'Q1595639',    // local museum
+  'Q207694',     // art museum
+  'Q22698',      // park
+  'Q1107656',    // garden
+  'Q15835',      // Japanese garden
+  'Q179049',     // nature reserve
+]);
+
+/**
+ * Types that are a statement about *fabric*: usually somewhere you can go, but
+ * describing what a place is built as rather than what it is for.
+ *
+ * Most castles are visitable and some are somebody's house, so these do not
+ * outrank the veto — they only speak when nothing has refused.
+ */
+export const WEAK_OPEN_KINDS = new Set([
+  'Q23413',      // castle
+  'Q16560',      // palace
+  'Q24354',      // theatre building
+  'Q483110',     // stadium
+  'Q39614',      // cemetery
+]);
+
+/** Everything that can establish a place is open, for callers that only want the question answered. */
 export const OPEN_KINDS = new Set([
   'Q2087181',    // historic house museum
   'Q33506',      // museum
@@ -69,13 +104,20 @@ export const OPEN_KINDS = new Set([
  * against everything else that carries it.
  */
 export const CLOSED_KINDS = new Map([
-  // Windsor Castle, Sandringham and Osborne House all carry this too and are
-  // all museums as well, so the open tests keep them; what is left is Bagshot
-  // Park, Highgrove and Gatcombe Park.
-  ['Q131986827', 'a residence of the royal family, and not a museum'],
   ['Q917182', 'a military academy'],
   ['Q209465', 'a university campus'],
 ]);
+
+/*
+ * "Residence of the British Royal Family" (Q131986827) is deliberately not in
+ * that list. It lives in `residentialVeto` instead, which fires only when
+ * nothing else about the place says people visit — so it still catches Bagshot
+ * Park, Highgrove and Gatcombe Park, and no longer catches Windsor Castle,
+ * Sandringham, Osborne House or the Palace of Holyroodhouse, which are all
+ * royal residences you can buy a ticket for. Held in one place rather than two
+ * because it was in both, and the copy in this list ran first and overruled the
+ * exception the other copy was carefully making.
+ */
 
 /** Said outright, in the words these summaries actually use. */
 const SAYS_OPEN = /national trust|english heritage|historic houses|cadw|open to the public|open to visitors|country park|visitor cent|now a museum|houses a museum|is a museum|open all year|admission charge/i;
@@ -93,7 +135,14 @@ const WAS_ONCE = /ceased to be private|no longer (a )?private|formerly a private
 // OpenStreetMap
 // ---------------------------------------------------------------------------
 
-/** Somewhere the map says people go. */
+/**
+ * Somewhere the map says people go.
+ *
+ * `historic` is deliberately absent. It says what a thing is, not who may come
+ * in: Chequers is `historic=manor` and Fort Belvedere is `historic=castle`, and
+ * both are somebody's home. The ruins and abbeys it used to carry are caught by
+ * their Wikipedia category instead, which is a claim about the institution.
+ */
 const OSM_PUBLIC_KEYS = ['tourism', 'leisure', 'natural', 'shop', 'aeroway'];
 
 /** A building that is somebody's home. `access` is the legal statement; this is the physical one. */
@@ -189,31 +238,50 @@ export function googleSaysPublic({ types = [], primaryType = null, ratingCount =
  * @returns {{ visiting: 'yes'|'no'|null, because: string|null, by: string|null }}
  */
 export function judgeVisiting({ kinds = [], summary = '', osm = null, categories = null, google = null } = {}) {
-  // 1. The veto. Nothing below can overturn this.
-  const vetoed = residentialVeto({ osm, kinds });
-  if (vetoed) return { visiting: 'no', because: vetoed, by: 'veto' };
-
   const set = new Set(kinds || []);
   const text = String(summary || '');
 
-  // 2. Positive evidence, cheapest source first.
+  /*
+   * 1. Statements about the whole place, which outrank the veto.
+   *
+   * The veto reads OpenStreetMap tags, and a tag is attached to one feature: the
+   * mansion at Nostell Priory is `building=house` and the estate road at
+   * Balmoral is `access=private`, and both places sell tickets. Run absolutely,
+   * the veto hid Hatfield House, Muncaster Castle, Castle Campbell, Forde Abbey
+   * and The Homewood — several of them National Trust.
+   *
+   * A Wikipedia category is a different kind of claim: "Historic house museums
+   * in Cheshire" is about the institution, not a structure. Checked against the
+   * refusals by hand, it calls 15 of 18 genuinely-open places public and none of
+   * 18 private houses. So it goes first, along with the Wikidata types that
+   * describe function rather than fabric, and a description that says outright
+   * that the public may come.
+   */
+  const byWiki = wikipediaSaysPublic(categories);
+  if (byWiki) return { visiting: 'yes', because: byWiki, by: 'wikipedia' };
+
   for (const q of set) {
-    if (OPEN_KINDS.has(q)) return { visiting: 'yes', because: 'it is a museum, a park or somewhere else people go', by: 'kinds' };
+    if (STRONG_OPEN_KINDS.has(q)) return { visiting: 'yes', because: 'it is a museum, a park or a garden — somewhere whose purpose is being visited', by: 'kinds' };
   }
   const open = text.match(SAYS_OPEN);
   if (open) return { visiting: 'yes', because: `its description says "${open[0].toLowerCase()}"`, by: 'summary' };
 
-  const byOsm = osmSaysPublic(osm);
-  if (byOsm) return { visiting: 'yes', because: byOsm, by: 'osm' };
-
-  const byWiki = wikipediaSaysPublic(categories);
-  if (byWiki) return { visiting: 'yes', because: byWiki, by: 'wikipedia' };
-
-  const byGoogle = google ? googleSaysPublic(google) : null;
-  if (byGoogle) return { visiting: 'yes', because: byGoogle, by: 'google' };
+  // 2. The veto. Nothing below this line can overturn it.
+  const vetoed = residentialVeto({ osm, kinds });
+  if (vetoed) return { visiting: 'no', because: vetoed, by: 'veto' };
 
   // 3. Refusals that are not vetoes.
   for (const [q, why] of CLOSED_KINDS) if (set.has(q)) return { visiting: 'no', because: why, by: 'kinds' };
+
+  // 4. Weaker acceptances, which only speak once nothing has refused.
+  for (const q of set) {
+    if (WEAK_OPEN_KINDS.has(q)) return { visiting: 'yes', because: 'it is a castle, a palace or another building of the kind people visit', by: 'kinds' };
+  }
+  const byOsm = osmSaysPublic(osm);
+  if (byOsm) return { visiting: 'yes', because: byOsm, by: 'osm' };
+
+  const byGoogle = google ? googleSaysPublic(google) : null;
+  if (byGoogle) return { visiting: 'yes', because: byGoogle, by: 'google' };
 
   // Only the defining sentence counts. Read over the whole summary this was
   // wrong as often as right: "Following its dissolution in 1536, the buildings
