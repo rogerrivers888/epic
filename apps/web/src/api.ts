@@ -703,6 +703,12 @@ export type TripPlace = {
   /** The household's own mark out of five, or null where nobody has said — which is what the Rate nudge is for. */
   score: number | null;
   image: OwnedImage | null;
+  /**
+   * A provider's photograph, for the rows the library has none of yet. Shown
+   * live and never written down — `offline/policy.ts` strips it on the way to
+   * the device, and `VenueThumb` prefers `image` whenever there is one.
+   */
+  photos?: VenuePhotoRef[] | null;
   /** The number to ring ahead on, from the owned record — null where we have none. */
   phone?: string | null;
 };

@@ -27,6 +27,7 @@ import { upsertHouseholdPlace, ownedImage } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
 import * as ownedRepo from '../repositories/ownedPlaces.js';
 import { heroesForPlaces } from '../repositories/library.js';
+import { fillPhotos, photosKept } from '../sources/rentedPhoto.js';
 import { claimPlace } from '../sources/own.js';
 import { matchOsm } from '../sources/openMatch.js';
 import { mirrorHealth as overpassHealth } from '../sources/overpass.js';
@@ -576,6 +577,23 @@ router.get('/:id/places', async (req, res, next) => {
         // that is what the red Rate nudge is for.
         score: scores.length ? Math.round((scores.reduce((n, x) => n + Number(x.score), 0) / scores.length) * 10) / 10 : null,
         image: ownedImage(heroes.get(r.venue_ref) ?? null),
+        /**
+         * A picture for the rows the library has none of yet.
+         *
+         * Every tile on this list was a lime square with an icon on it (owner,
+         * 8 Sep 2026: "none of the activities have images, not 1") — because it
+         * only ever drew what Epic owns, and the owned pipeline has not reached
+         * a place somebody added an hour ago.
+         *
+         * Only what is already in hand: `photosKept` is the twelve-hour memory
+         * a search left behind, so this costs nothing. What is missing is
+         * fetched *after* the response, eight at a time (below), the way the
+         * atlas does it — a list must never become a page of billed calls the
+         * moment it is opened. Rented in the strictest sense: shown now, never
+         * written down, and stripped again before anything reaches a device
+         * (`offline/policy.ts`).
+         */
+        photos: heroes.get(r.venue_ref) ? undefined : photosKept(r.venue_ref) ?? undefined,
       };
     });
 
@@ -600,6 +618,11 @@ router.get('/:id/places', async (req, res, next) => {
         stay: places.filter((p) => p.group === 'stay').length,
       },
     });
+
+    // After the answer has gone, and capped: the next look at this trip has its
+    // pictures, and opening it never costs more than eight calls.
+    const household = await currentHousehold();
+    fillPhotos(household.id, places.map((p) => ({ venueRef: p.venueRef, hasOwn: Boolean(p.image) }))).catch(() => null);
   } catch (err) { next(err); }
 });
 

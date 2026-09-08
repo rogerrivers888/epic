@@ -119,12 +119,19 @@ export function storable(fullPath: string, body: any): any | null {
       shortlist: (body.shortlist ?? []).map(cleanPlaceRow),
     };
   }
-  // Every place a trip touched. Each row is a place the household put on this
-  // trip and a name the household wrote (repositories/trips.js placesOfTrip);
-  // no provider's record is carried, so there is nothing here to strip. It goes
-  // to the device because a trip you are on is exactly the thing to be looking
-  // at with no signal.
-  if (isTripPlaces(p)) return body;
+  /**
+   * Every place a trip touched. Each row is a place the household put on this
+   * trip and a name the household wrote (repositories/trips.js placesOfTrip),
+   * so it goes to the device — a trip you are on is exactly the thing to be
+   * looking at with no signal.
+   *
+   * One thing does not go with it. The rows carry `photos` now, so a place the
+   * library has no picture of still has a tile (owner, 8 Sep 2026), and that
+   * photograph is a provider's, held in memory on the server for twelve hours
+   * and written down nowhere. `cleanPlaceRow` takes it off, along with a rented
+   * rating — the same strip the atlas rows get.
+   */
+  if (isTripPlaces(p)) return { ...body, places: (body.places ?? []).map(cleanPlaceRow) };
 
   /**
    * The trip's conversation, and one stop's Ask (trip rebuild, 7 Sep 2026).

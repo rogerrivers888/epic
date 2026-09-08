@@ -30,7 +30,7 @@ import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } fr
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
-import { colors, fonts, radius, spacing, ON_LIME, TARGET, type, BORDER } from '../theme';
+import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
 import { Icon, IconName, Stars } from '../components/Icon';
@@ -72,8 +72,19 @@ const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string;
 
 /** The height of the tab bar the shell draws under this screen. */
 const TABBAR = 70;
-/** The picture on a browse row: a third bigger than it was (owner, 8 Sep 2026). */
-const THUMB = 117;
+/**
+ * The picture on a row: a landscape rectangle, the shape Inspire uses, at a
+ * little under its size (owner, 8 Sep 2026: "keep the sort of rectangle image
+ * that we have on the Inspire screen… slightly smaller"). Inspire's card is
+ * 256×176; this is the same 1.45 at a size that still leaves a row its words.
+ *
+ * It carries the same area as the square it replaces, so it is still the third
+ * bigger he asked for the day before — just no longer square.
+ */
+const THUMB_W = 142;
+const THUMB_H = 98;
+/** Airbnb's corner, near enough: generous, and the only radius in the app. */
+const THUMB_RADIUS = 14;
 
 export function TripMapScreen({ d, section, household, onBack, onChanged, onSection, onDelete, onMenu, onChat, onPeople, onOpenStop, chatUnread = 0 }: {
   d: TripDetail;
@@ -1323,7 +1334,9 @@ function TripPlacesList({ data, onSelect, onDelete }: {
     <View style={{ paddingHorizontal: 16 }}>
       {data.places.map((p) => (
         <Pressable key={p.venueRef} onPress={() => onSelect(p.venueRef)} style={styles.row} accessibilityRole="button">
-          <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={6} credit={false} />
+          {/* Ours first, then the provider's — which is why a list of places
+              nobody has researched yet is no longer a column of blank tiles. */}
+          <VenueThumb name={p.name} image={p.image} photos={p.photos} category={p.category} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false} />
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
             <Text style={type.small} numberOfLines={1}>
@@ -1455,7 +1468,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             accessibilityRole="button"
           >
             {/* The same picture as a browse row: one list, one size (8 Sep 2026). */}
-            <VenueThumb name={p.name} image={p.image} category={p.category} width={THUMB} height={THUMB} rounded={12} credit={false} />
+            <VenueThumb name={p.name} image={p.image} category={p.category} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
               <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
               <Text style={type.small} numberOfLines={1}>{p.day ?? 'no time yet'}</Text>
@@ -1758,7 +1771,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               2026). It is the one thing on the row you tap without reading, so
               it belongs on the thing you are looking at.
             */}
-            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={THUMB} height={THUMB} rounded={12} credit={false}>
+            <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false}>
               <Pressable
                 onPress={() => onShortlist(p)}
                 hitSlop={8}
@@ -1766,7 +1779,26 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 accessibilityRole="button"
                 accessibilityLabel={p.onShortlist ? `Take ${p.name} off the shortlist` : `Save ${p.name} to the shortlist`}
               >
-                <Icon name={p.onShortlist ? 'shortlisted' : 'shortlist'} size={16} color={colors.ink} fill={p.onShortlist} />
+                {/*
+                  No disc under it (owner, 8 Sep 2026, against Airbnb: "there is
+                  no white frame around the heart. It's just the heart"). What
+                  makes a bare glyph read on a photograph of anything is the
+                  glyph itself being two colours: a cream fill inside an ink
+                  outline, which has an edge against a bright sky and a dark
+                  room alike. Saved fills with lime instead.
+                  
+                  INK and CREAM rather than the palette's, on purpose: a
+                  photograph is a photograph in either theme, and `colors.ink`
+                  turns cream in the dark, which would leave nothing to see.
+                */}
+                <Icon
+                  name={p.onShortlist ? 'shortlisted' : 'shortlist'}
+                  size={22}
+                  color={INK}
+                  strokeWidth={2}
+                  fill
+                  fillColor={p.onShortlist ? LIME : CREAM}
+                />
               </Pressable>
             </VenueThumb>
             <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
@@ -2915,10 +2947,8 @@ const styles = StyleSheet.create({
    * a rounded shape is right, because it is sitting on a photo rather than in
    * the layout.
    */
-  thumbMark: {
-    position: 'absolute', top: 6, right: 6, width: 28, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(255,253,249,0.92)', alignItems: 'center', justifyContent: 'center',
-  },
+  /** Just the glyph, on the corner of the picture. No plate. */
+  thumbMark: { position: 'absolute', top: 6, right: 6, width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   ratingText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.ink },
   rowActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 2 },
