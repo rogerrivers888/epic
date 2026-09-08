@@ -365,7 +365,11 @@ places.get('/search', async (req, res, next) => {
     // Food & drink came back with care homes, a pharmacy and barber shops
     // (owner, 4 Sep 2026). Whatever the sources hand over, the segment is kept
     // here, where no source can talk its way past it.
-    const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar']);
+    // `takeaway` joined these on 5 Sep 2026 (owner: "I don't really want fast
+    // food appearing in restaurants"). It is a separate category so it can be
+    // told apart, not so it can be hidden — a chip shop is still somewhere to
+    // eat and still belongs in a search for one.
+    const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'bakery']);
     const THINGS = new Set(['attraction', 'event']);
     const wants = new Set(categories);
     const asked = wants.has('food') || wants.has('things') || [...wants].some((c) => FOOD.has(c) || THINGS.has(c));
@@ -527,7 +531,7 @@ places.get('/suggest', async (req, res, next) => {
     await visitsRepo.recordProviderCall(household.id, 'google', 'places.suggest', JSON.stringify(meter)).catch(() => null);
     // Your own places obey the segment as well: a museum you saved does not
     // belong in a list of somewhere to eat.
-    const FOOD_CATS = new Set(['restaurant', 'cafe', 'pub', 'bar']);
+    const FOOD_CATS = new Set(['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'bakery']);
     const oursHere = ours.filter((o) => {
       if (kind === 'all' || !o.category) return true;
       return kind === 'eat' ? FOOD_CATS.has(o.category) : !FOOD_CATS.has(o.category);

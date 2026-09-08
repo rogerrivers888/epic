@@ -8,7 +8,7 @@ import {
   Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode,
   Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
-  Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
+  Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
 } from 'lucide-react-native';
 import { colors, spacing, type } from '../theme';
 
@@ -61,7 +61,7 @@ const ICONS = {
   // a currency; this is the budget you are spending in it.
   wallet: Wallet,
   // categories
-  restaurant: Utensils, cafe: Coffee, pub: Beer, bar: Wine, attraction: Landmark, event: Ticket, hotel: BedDouble, place: MapPin,
+  restaurant: Utensils, cafe: Coffee, pub: Beer, bar: Wine, takeaway: Sandwich, attraction: Landmark, event: Ticket, hotel: BedDouble, place: MapPin,
   // What a place actually is, over the closed experience vocabulary
   // (api/src/domain/concepts.js). A card with no photograph shows one of these
   // instead, so four playgrounds do not all sit under a Greek temple.
@@ -91,7 +91,7 @@ export function Icon({ name, size = 18, color = colors.icon, fill, fillColor, st
   return <Glyph size={size} color={color} strokeWidth={strokeWidth} fill={fill ? (fillColor ?? color) : 'none'} />;
 }
 
-const CATEGORY: Record<string, IconName> = { restaurant: 'restaurant', cafe: 'cafe', pub: 'pub', bar: 'bar', attraction: 'attraction', event: 'event', hotel: 'hotel', lodging: 'hotel' };
+const CATEGORY: Record<string, IconName> = { restaurant: 'restaurant', cafe: 'cafe', pub: 'pub', bar: 'bar', takeaway: 'takeaway', attraction: 'attraction', event: 'event', hotel: 'hotel', lodging: 'hotel' };
 
 /**
  * The experience vocabulary the sources answer with, in this set's names. A

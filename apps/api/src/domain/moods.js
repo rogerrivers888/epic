@@ -80,8 +80,29 @@ export const MAX_SHELVES = 1;
  */
 export const SHELF_FLOOR = 0.6;
 
-/** Somewhere you eat or drink. Food is decided by what a place *is*, not by a tag. */
-const EATING = new Set(['restaurant', 'cafe', 'pub', 'bar']);
+/**
+ * Somewhere you eat or drink. Food is decided by what a place *is*, not by a
+ * tag — and a takeaway is one of them: still food, still findable, just not a
+ * restaurant (owner, 5 Sep 2026).
+ */
+const EATING = new Set(['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'bakery']);
+
+/**
+ * Which drawer of Food a place to eat goes in.
+ *
+ * The atlas holds no restaurants, so nothing in `attractions.kinds` can file
+ * these — the venue's own category is the only signal there is, and it is
+ * enough. `styles` overrides it, because Google types a chicken shop as a
+ * restaurant that also does takeaway and the takeaway is the truer word.
+ */
+const FOOD_DRAWER = {
+  restaurant: 'restaurants',
+  cafe: 'cafes',
+  bakery: 'cafes',
+  pub: 'pubs-bars',
+  bar: 'pubs-bars',
+  takeaway: 'fast-food',
+};
 
 /**
  * Where each experience starts, over the closed experience vocabulary in
@@ -378,14 +399,26 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
 
   if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]]])) {
     const weights = { food: 1 };
-    return place(chain, rules, vocab, {
+    const fast = (venue?.styles ?? []).some((s) => s === 'fast-food' || s === 'takeaway');
+    const drawer = fast ? 'fast-food' : FOOD_DRAWER[venue.category] ?? null;
+    const known = drawer && vocab?.parentOf?.get(drawer) === 'food' ? drawer : null;
+    return {
+      category: 'food',
+      subcategory: known,
       weights,
-      because: {
+      shelves: ['food'],
+      confident: true,
+      because: [{
         scope: 'default', subject: venue.category,
-        subject_label: `somewhere you ${venue.category === 'cafe' ? 'have a coffee' : 'eat or drink'}`,
-        weights, subcategory: null, reason: 'Somewhere to eat is Food and nothing else.',
-      },
-    });
+        subject_label: fast
+          ? 'somewhere you take it away'
+          : `somewhere you ${venue.category === 'cafe' ? 'have a coffee' : 'eat or drink'}`,
+        weights, subcategory: known,
+        reason: fast
+          ? 'Google and OpenStreetMap both say this is fast food or a takeaway, which is its own drawer of Food rather than a restaurant.'
+          : 'Somewhere to eat is Food and nothing else.',
+      }],
+    };
   }
 
   // Where the experiences it was tagged with start, before anybody teaches it.

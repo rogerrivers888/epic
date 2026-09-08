@@ -49,9 +49,22 @@ test('the seed covers every drawer the taxonomy ships with', () => {
   }
   assert.ok(shipped.size >= 51, `expected to find the shipped drawers, found ${shipped.size}`);
 
+  // 067 gave every drawer that existed then a time. A drawer added afterwards
+  // brings its own in its own migration — migration 073 is the first — so the
+  // seed is read from every file rather than from one filename, which would
+  // otherwise fail the moment somebody did the right thing.
   const seeded = new Set();
-  const seed = readFileSync(new URL('067_dwell_by_subcategory.sql', dir), 'utf8');
-  for (const m of seed.matchAll(/\('([a-z-]+)',\s*\d+\)/g)) seeded.add(m[1]);
+  for (const f of readdirSync(dir).sort()) {
+    if (!f.endsWith('.sql')) continue;
+    const sql = readFileSync(new URL(f, dir), 'utf8');
+    if (f === '067_dwell_by_subcategory.sql') {
+      for (const m of sql.matchAll(/\('([a-z-]+)',\s*\d+\)/g)) seeded.add(m[1]);
+      continue;
+    }
+    // A later migration seeds the drawer and its time on the same row.
+    if (!/insert into shelf_subcategories[^;]*typical_minutes/.test(sql)) continue;
+    for (const m of sql.matchAll(/\(\s*'[a-z-]+'\s*,\s*'([a-z-]+)'\s*,/g)) seeded.add(m[1]);
+  }
 
   const missing = [...shipped].filter((k) => !seeded.has(k));
   assert.deepEqual(missing, [], `subcategories with no dwell time: ${missing.join(', ')}`);

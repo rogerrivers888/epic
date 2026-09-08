@@ -164,7 +164,7 @@ export const tripadvisorSource = {
     if (!KEY() || !center || center.lat == null) return [];
     // With other sources in the mix the page is a waste; `enrich` does the work.
     if (Array.isArray(sources) && sources.length > 1) return [];
-    const wantsFood = !categories.length || categories.some((c) => ['restaurant', 'cafe', 'pub', 'bar', 'food'].includes(c));
+    const wantsFood = !categories.length || categories.some((c) => ['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'food'].includes(c));
     const wantsThings = !categories.length || categories.some((c) => ['attraction', 'event', 'things'].includes(c));
     const kinds = new Set([...(wantsFood ? ['restaurant'] : []), ...(wantsThings ? ['attraction'] : [])]);
     const size = Math.min(NEARBY_PAGE, Math.max(1, limit));

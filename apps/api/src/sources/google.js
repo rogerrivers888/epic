@@ -41,10 +41,51 @@ const THING_TYPES = [
   'observation_deck', 'cultural_landmark', 'monument', 'beach', 'ice_skating_rink', 'adventure_sports_center', 'roller_coaster',
 ];
 
+/**
+ * A takeaway is not a restaurant.
+ *
+ * The owner, 5 Sep 2026: "I don't really want fast food appearing in
+ * restaurants." Google's `meal_takeaway` and `meal_delivery` were both mapped
+ * to `restaurant` here, which is how a chicken shop and a pizza-by-the-slice
+ * counter came back on the same row as somewhere you book a table. They get
+ * their own category now: still food, still findable, not a restaurant.
+ */
 const TYPE_TO_CATEGORY = {
-  restaurant: 'restaurant', meal_takeaway: 'restaurant', meal_delivery: 'restaurant', bakery: 'bakery', cafe: 'cafe', coffee_shop: 'cafe', ice_cream_shop: 'cafe',
+  restaurant: 'restaurant', bakery: 'bakery', cafe: 'cafe', coffee_shop: 'cafe', ice_cream_shop: 'cafe',
+  meal_takeaway: 'takeaway', meal_delivery: 'takeaway', fast_food_restaurant: 'takeaway',
   bar: 'bar', wine_bar: 'bar', night_club: 'bar', pub: 'pub',
 };
+
+/**
+ * The types that mean "eaten standing up, or in the car".
+ *
+ * Three separate signals and all three are real: `fast_food_restaurant` is a
+ * primary type in its own right, `meal_takeaway` and `meal_delivery` say how
+ * the food leaves the building, and the shop types below are counters rather
+ * than kitchens. Any of them is enough to keep a place out of Restaurants.
+ */
+const FAST_TYPES = new Set([
+  'fast_food_restaurant', 'meal_takeaway', 'meal_delivery', 'food_delivery',
+  'sandwich_shop', 'bagel_shop', 'donut_shop', 'juice_shop', 'hamburger_restaurant',
+]);
+
+/**
+ * Why the secondary types have to be read, not just the primary one.
+ *
+ * Asked on the live API, 5 Sep 2026:
+ *
+ *   KFC Bracknell   fast_food_restaurant · meal_takeaway · **restaurant** ·
+ *                   chicken_restaurant · chicken_wings_restaurant
+ *   Domino's Ascot  meal_delivery · meal_takeaway · food_delivery ·
+ *                   **restaurant**
+ *
+ * Both carry `restaurant` in the list, which is exactly how they were getting
+ * through. And Domino's has no `fast_food_restaurant` type at all — only the
+ * takeaway and delivery types say what it is, which is precisely the second
+ * signal the owner guessed at. So the answer is not "read the primary type
+ * harder": any of these anywhere in the list settles it.
+ */
+const isFast = (types) => types.some((t) => FAST_TYPES.has(t));
 const TYPE_TO_EXPERIENCE = {
   museum: 'museum', art_gallery: 'art-gallery', park: 'park', garden: 'park', botanical_garden: 'park', playground: 'playground', zoo: 'zoo', aquarium: 'aquarium',
   amusement_park: 'theme-park', roller_coaster: 'theme-park', water_park: 'swimming', swimming_pool: 'swimming', historical_landmark: 'history', monument: 'history',
@@ -142,7 +183,11 @@ function priceLevelNumber(p) {
   return { PRICE_LEVEL_FREE: 0, PRICE_LEVEL_INEXPENSIVE: 1, PRICE_LEVEL_MODERATE: 2, PRICE_LEVEL_EXPENSIVE: 3, PRICE_LEVEL_VERY_EXPENSIVE: 4 }[p] ?? null;
 }
 
-function toVenue(place, justification = null) {
+/**
+ * Exported for `test/takeaway.test.js`, which pins the KFC and Domino's shapes
+ * the live API actually returns. Nothing else calls it from outside this file.
+ */
+export function toVenue(place, justification = null) {
   const types = place.types || [];
   const primary = place.primaryType || types[0] || '';
   // The primary type decides. A museum with a café is a museum; Selfridges is
@@ -156,6 +201,11 @@ function toVenue(place, justification = null) {
     || (primaryIsThing || types.some((t) => THING_FIRST.has(t) && !TYPE_TO_CATEGORY[primary]) ? 'attraction' : null)
     || types.map((t) => TYPE_TO_CATEGORY[t]).find(Boolean)
     || 'attraction';
+  // A place that takes away is a takeaway, whatever else it is also called.
+  // This is deliberately after the primary type has spoken: KFC's primary type
+  // is already `fast_food_restaurant`, but Domino's is a `restaurant` that
+  // happens to deliver, and the delivery is the truer word for it.
+  if ((category === 'restaurant' || category === 'cafe') && isFast(types)) category = 'takeaway';
   const experiences = [...new Set([TYPE_TO_EXPERIENCE[primary], ...types.map((t) => TYPE_TO_EXPERIENCE[t])].filter(Boolean))];
   if (category === 'attraction' && !experiences.length && !types.some((t) => t in TYPE_TO_EXPERIENCE)) category = 'attraction';
   // The primary type first, so a row says what the place mostly is.
@@ -190,7 +240,13 @@ function toVenue(place, justification = null) {
     mapsUrl: place.googleMapsUri ?? null,
     summary: place.editorialSummary?.text ?? null,
     upmarket: types.includes('fine_dining_restaurant') || null,
-    styles: types.includes('fast_food_restaurant') ? ['fast-food'] : [],
+    // Marked, not dropped. Somewhere the family actually wants on a Friday is
+    // not made to disappear; it is simply told apart from a restaurant, and the
+    // Places tab and the Food drawers can then keep them separate.
+    styles: [
+      ...(isFast(types) ? ['fast-food'] : []),
+      ...(['meal_takeaway', 'meal_delivery', 'food_delivery'].some((t) => types.includes(t)) ? ['takeaway'] : []),
+    ],
     // Photo references only; the image is fetched through our proxy with the
     // key. Each leaves here stamped with a short-lived signature, so the `<img>`
     // that asks for it needs no cookie — see sources/photoLinks.js.
@@ -234,7 +290,7 @@ export const googleSource = {
     if (!KEY() || !center || center.lat == null) return [];
     const groups = new Set();
     for (const c of categories || []) {
-      if (['restaurant', 'cafe', 'pub', 'bar', 'food'].includes(c)) groups.add('food');
+      if (['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'food'].includes(c)) groups.add('food');
       if (['attraction', 'event', 'things'].includes(c)) groups.add('things');
     }
     if (!groups.size) { groups.add('food'); groups.add('things'); }

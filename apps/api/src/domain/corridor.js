@@ -29,7 +29,7 @@ const MAX_ADDED_MINUTES_PER_LEG = 120;
 // somewhere, not what they do with a castle beside the motorway.
 const BREAK_MINUTES = { food: 90, thing: 75 };
 
-const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar']);
+const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar', 'takeaway']);
 const ACTIVITY = new Set(['attraction', 'event']);
 
 // Meals, in hours of the local clock. A place is only planned in as a meal if

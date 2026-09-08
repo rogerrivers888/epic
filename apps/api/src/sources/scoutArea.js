@@ -48,6 +48,11 @@ import { firstHousehold } from '../repositories/households.js';
 const QUERIES = ['restaurants', 'best restaurants', 'italian restaurant', 'indian restaurant', 'asian restaurant', 'pub food', 'fine dining', 'brunch'];
 /** A sweep comes round twice a year; a rating that has moved is rare and slow. */
 const RESWEEP_DAYS = Number(process.env.EPIC_RESWEEP_DAYS || 180);
+// `takeaway` is deliberately absent. The sweep is "the top-rated restaurants
+// in each postcode" (owner, 4 Sep 2026), and he does not want fast food in
+// among them (5 Sep 2026) — so a chicken shop is never a candidate here, and
+// none of the menu-reading spend goes on one. It is still findable in Places;
+// it is just not what a sweep is for.
 const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar', 'bakery']);
 /** Backoff for a menu that would not open, in hours. */
 const MENU_BACKOFF_H = [24, 168, 720, 2160];

@@ -14,8 +14,16 @@
  * not.
  */
 
-/** Where a household eats, as opposed to somewhere they go and do something. */
-export const FOOD_CATEGORY_LIST = ['restaurant', 'cafe', 'pub', 'bar'];
+/**
+ * Where a household eats, as opposed to somewhere they go and do something.
+ *
+ * `takeaway` joined on 5 Sep 2026. It is a separate category from `restaurant`
+ * so that a chip shop can be told apart from somewhere you book a table (owner:
+ * "I don't really want fast food appearing in restaurants") — but it is still
+ * food, and every list that means "somewhere to eat" has to include it or the
+ * takeaways simply disappear, which is not what was asked for.
+ */
+export const FOOD_CATEGORY_LIST = ['restaurant', 'cafe', 'pub', 'bar', 'takeaway'];
 export const FOOD_CATEGORIES = new Set(FOOD_CATEGORY_LIST);
 export const isFoodCategory = (category) => FOOD_CATEGORIES.has(category);
 

@@ -33,7 +33,7 @@ function preferenceHits(venue, pref) {
   );
 }
 
-const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar']);
+const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar', 'takeaway']);
 
 /** Does the venue have something for this diet? null = unknown, true/false when known. */
 function dietSupport(venue, dietSlug) {

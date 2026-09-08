@@ -12,7 +12,11 @@ import { mirrorsInOrder, mirrorAnswered, mirrorFailed, UA } from './overpass.js'
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 
 const AMENITY_TO_CATEGORY = {
-  restaurant: 'restaurant', fast_food: 'restaurant', food_court: 'restaurant',
+  // A chip shop is not a restaurant (owner, 5 Sep 2026: "I don't really want
+  // fast food appearing in restaurants"). OpenStreetMap draws the line itself
+  // and always has: `amenity=fast_food` is its own tag, and Roam was throwing
+  // that away by filing it as a restaurant.
+  restaurant: 'restaurant', fast_food: 'takeaway', food_court: 'takeaway',
   cafe: 'cafe', ice_cream: 'cafe',
   pub: 'pub', biergarten: 'pub',
   bar: 'bar', nightclub: 'bar',
@@ -160,7 +164,7 @@ export function venueFromOsmElement(el) {
     lat,
     lng,
     dishes: [],
-    styles: t.amenity === 'fast_food' ? ['fast-food'] : [],
+    styles: t.amenity === 'fast_food' || t.amenity === 'food_court' ? ['fast-food', 'takeaway'] : [],
     // A cinema or theatre needs a booking and a showtime; it is not a wander-in stop.
     ticketed: ['cinema', 'theatre'].includes(t.amenity) || t.tourism === 'theme_park' || /\b(theatre|theater|opera house|playhouse|cinema|concert hall)\b/i.test(t.name),
     justification: null,
@@ -267,7 +271,7 @@ export const osmSource = {
     if (!center || center.lat == null) return [];
     const groups = new Set();
     for (const c of categories || []) {
-      if (['restaurant', 'cafe', 'pub', 'bar', 'food'].includes(c)) groups.add('food');
+      if (['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'food'].includes(c)) groups.add('food');
       if (['attraction', 'event', 'things'].includes(c)) groups.add('things');
       // Only when it is asked for by name: nobody looking for lunch wants hotels.
       if (['stay', 'hotel', 'lodging'].includes(c)) groups.add('stay');
@@ -303,7 +307,7 @@ export const osmSource = {
     // are nearly all cafés and restaurants, and the museums never made the cut
     // — which read as "Epic has no ideas for things to do".
     const sorted = [...seen.values()].sort((a, b) => d2(a) - d2(b));
-    const isFoodCat = (v) => ['restaurant', 'cafe', 'pub', 'bar', 'bakery'].includes(v.category);
+    const isFoodCat = (v) => ['restaurant', 'cafe', 'pub', 'bar', 'bakery', 'takeaway'].includes(v.category);
     return [...sorted.filter(isFoodCat).slice(0, 200), ...sorted.filter((v) => !isFoodCat(v)).slice(0, 200)];
   },
 };
