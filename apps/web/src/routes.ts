@@ -485,6 +485,11 @@ export function isFullBleed(route: Route): boolean {
  * the tab bar under it, because it is still a tab.
  */
 export function ownsHeader(route: Route): boolean {
+  // The voice intake's screens draw their own head — a back arrow and a big
+  // title, or the wordmark on the two doors (handoff boards, 8 Sep 2026); the
+  // shell's lime band above them would be a second header on every one.
+  if (route.name === 'say' || route.name === 'welcome' || route.name === 'setup') return true;
+  if (route.name === 'household' && route.voice) return true;
   if (route.name === 'inspire') return !route.searching;
   /**
    * Places draws its own too (handover v8, §3): the wordmark over a lime band

@@ -415,6 +415,9 @@ test('the voice intake: the mic, the wizard, the card and its questions', () => 
   assert.equal(parentOf(parseRoute('/say/abc/ask')), '/say/abc');
   assert.equal(parentOf(parseRoute('/say/abc')), '/say');
   assert.equal(isImmersive(parseRoute('/say'), new URLSearchParams()), true, 'no tab bar on the mic');
+  for (const href of ['/say', '/say/steps', '/say/abc', '/say/abc/ask', '/welcome', '/setup', '/household/m1/tell']) {
+    assert.equal(ownsHeader(parseRoute(href)), true, `${href} draws its own head`);
+  }
 });
 
 test('first run and the two-minute set-up', () => {
