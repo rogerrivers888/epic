@@ -78,7 +78,18 @@ export function VenueThumb({
   // Ours first, always. A provider's photo is only reached when we have nothing
   // of our own, and it is never stored.
   const photo = photos?.[0];
-  const rented = !image && (photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${width > 240 ? 480 : 240}` : null));
+  /**
+   * The provider's photograph, with the key that lets it through the door.
+   *
+   * `sig`/`exp` come stamped on the reference (api/sources/photoLinks.js). They
+   * are what makes the picture load at all in a browser that blocks third-party
+   * cookies — which is Safari, and soon Chrome — where the session cookie the
+   * route used to rely on never arrives and every tile fell back to its icon.
+   */
+  const rented = !image && (photo?.url ?? (photo?.ref
+    ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${width > 240 ? 480 : 240}`
+      + (photo.sig && photo.exp ? `&s=${encodeURIComponent(photo.sig)}&e=${photo.exp}` : '')
+    : null));
   // A mark is small by nature; asking for 960 of a 180px PNG just serves the
   // same bytes back under a different name.
   const ourWidth = image?.source === 'logo' ? 500 : width > 240 ? 960 : 500;

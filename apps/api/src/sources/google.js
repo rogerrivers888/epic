@@ -1,5 +1,6 @@
 import { bump } from './meter.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
+import { stampPhotos } from './photoLinks.js';
 // Google Places API (New) — the primary licensed source (Technical Constraints §3.1).
 //
 // What it adds over OpenStreetMap: ratings and review counts, up to 5 reviews,
@@ -190,8 +191,10 @@ function toVenue(place, justification = null) {
     summary: place.editorialSummary?.text ?? null,
     upmarket: types.includes('fine_dining_restaurant') || null,
     styles: types.includes('fast_food_restaurant') ? ['fast-food'] : [],
-    // Photo references only; the image is fetched through our proxy with the key.
-    photos: (place.photos || []).slice(0, 3).map((p) => ({ ref: p.name, attribution: (p.authorAttributions || []).map((a) => a.displayName).join(', ') })),
+    // Photo references only; the image is fetched through our proxy with the
+    // key. Each leaves here stamped with a short-lived signature, so the `<img>`
+    // that asks for it needs no cookie — see sources/photoLinks.js.
+    photos: stampPhotos((place.photos || []).slice(0, 3).map((p) => ({ ref: p.name, attribution: (p.authorAttributions || []).map((a) => a.displayName).join(', ') }))),
     ticketed: ['movie_theater', 'performing_arts_theater', 'stadium', 'concert_hall'].includes(primary),
     attribution: GOOGLE_ATTRIBUTION,
     // Per-field retention per Google's terms: ids indefinite, coordinates 30 days, the rest not stored at all.
@@ -370,10 +373,10 @@ export const googleSource = {
   async photos(id, { meter = null } = {}) {
     if (!KEY()) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,photos.name,photos.authorAttributions', meter });
-    const found = (p?.photos || []).slice(0, 3).map((ph) => ({
+    const found = stampPhotos((p?.photos || []).slice(0, 3).map((ph) => ({
       ref: ph.name,
       attribution: (ph.authorAttributions || []).map((a) => a.displayName).join(', '),
-    }));
+    })));
     return found.length ? found : null;
   },
 

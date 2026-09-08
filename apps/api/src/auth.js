@@ -41,6 +41,7 @@ import { accountById, touchAccount } from './repositories/accounts.js';
 import { accessFor, accessOf } from './access.js';
 import { runAsAccount } from './context.js';
 import { canonicalOrigins } from './origins.js';
+import { photoLinkValid } from './sources/photoLinks.js';
 
 export const COOKIE = 'epic_session';
 /**
@@ -225,6 +226,21 @@ const PUBLIC = [
    */
   (req) => req.path.startsWith('/api/shared/'),
   (req) => /^\/api\/order\/[^/]+$/.test(req.path),
+  /**
+   * A photograph with its own key.
+   *
+   * An `<img>` cannot carry a header, so this route used to be authorised by
+   * the session cookie — which is third-party between `epic.day` and the API's
+   * hostname, and therefore blocked by Safari and on its way out of Chrome.
+   * Every rented picture came back 401 and every tile fell back to its icon
+   * (owner, 8 Sep 2026: "there are no images, none").
+   *
+   * A signed link proves the same thing the cookie did — that Epic issued this
+   * request — without asking the browser to prove anything. It is good for one
+   * named photograph, for a few hours, and cannot be minted by anybody else
+   * (sources/photoLinks.js). The cookie still works where it works.
+   */
+  (req) => req.method === 'GET' && req.path === '/api/photos/google' && photoLinkValid(req.query),
 ];
 
 export const isPublicPath = (req) => PUBLIC.some((test) => test(req));

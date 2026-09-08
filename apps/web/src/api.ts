@@ -336,7 +336,16 @@ export type Budget = {
 export type Review = { text: string; rating: number | null; author: string | null; authorUri?: string | null; when: string | null };
 
 /** A licensed photo: a reference the API proxies, plus the author credit the licence requires on screen. */
-export type VenuePhotoRef = { ref?: string; url?: string; attribution?: string };
+/**
+ * A provider's photograph, as a reference rather than bytes.
+ *
+ * `sig` and `exp` are the link's own key (api/sources/photoLinks.js): an `<img>`
+ * cannot send a header, and the session cookie is third-party between the site
+ * and the API, so the signature is what gets the picture through the door in a
+ * browser that blocks those. Neither is ever stored — `offline/policy.ts` takes
+ * the whole photo off before anything reaches a device.
+ */
+export type VenuePhotoRef = { ref?: string; url?: string; attribution?: string; sig?: string; exp?: number };
 
 export type Venue = {
   /** Set when this place sits inside another's grounds — a ride in a theme park. It belongs in that place's drawer, not beside it in a list. */

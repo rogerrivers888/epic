@@ -52,7 +52,7 @@ test('with no passcode set, nothing matches at all', async () => {
   });
 });
 
-test('exactly five kinds of path answer without a session', () => {
+test('the kinds of path that answer without a session', () => {
   const open = (method, path) => isPublicPath({ method, path });
 
   assert.equal(open('GET', '/health'), true);
@@ -70,6 +70,38 @@ test('exactly five kinds of path answer without a session', () => {
     // The ticket is one order behind one token, and nothing above or below it.
     '/api/order', '/api/order/abc123/anything', '/api/orders/abc123',
   ]) assert.equal(open('GET', path), false, `${path} must need a session`);
+});
+
+/**
+ * A photograph carries its own key (sources/photoLinks.js).
+ *
+ * An `<img>` cannot send a header, and the session cookie is third-party
+ * between the site and the API — blocked by Safari, going in Chrome — so every
+ * rented picture came back 401 and every tile fell back to its icon (owner,
+ * 8 Sep 2026). The link proves Epic issued it instead. What must stay true is
+ * that only a *good* link gets through.
+ */
+test('a photograph is let through by its own signature, and by nothing less', async () => {
+  const { stampPhoto } = await import('../src/sources/photoLinks.js');
+  const name = 'places/ChIJexample/photos/AXQxyz';
+  const { sig, exp } = stampPhoto({ ref: name });
+
+  const ask = (query) => isPublicPath({ method: 'GET', path: '/api/photos/google', query });
+
+  // The wire form — what `VenueThumb` actually puts in the URL.
+  assert.equal(ask({ name, s: sig, e: exp }), true, 'a good link opens it');
+  // And the long names, which is what stampPhoto calls them on the object.
+  assert.equal(ask({ name, sig, exp }), true);
+
+  // Nothing less does.
+  assert.equal(ask({}), false, 'no link at all');
+  assert.equal(ask({ name }), false, 'a name on its own');
+  assert.equal(ask({ name, s: sig, e: Date.now() - 1000 }), false, 'expired');
+  assert.equal(ask({ name, s: 'not-the-signature', e: exp }), false, 'a made-up signature');
+  // A signature is good for the one photograph it was made for.
+  assert.equal(ask({ name: 'places/ChIJother/photos/AXQzzz', s: sig, e: exp }), false, 'lifted onto another picture');
+  // And a POST is never a picture.
+  assert.equal(isPublicPath({ method: 'POST', path: '/api/photos/google', query: { name, s: sig, e: exp } }), false);
 });
 
 test('a path that merely starts with a public one is not public', () => {

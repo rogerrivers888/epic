@@ -33,6 +33,7 @@
 import * as providerCalls from '../repositories/providerCalls.js';
 import { googleSource } from './google.js';
 import { venueFromKept } from './cache.js';
+import { stampPhotos } from './photoLinks.js';
 
 // Twelve hours, not the seven days taxonomy.js keeps. A kind of place ("Italian")
 // is true for years; a photo reference is a handle the provider reissues, and a
@@ -53,7 +54,17 @@ const fresh = (hit) => hit && Date.now() - hit.at < TTL_MS;
  */
 export function photosKept(venueRef) {
   const hit = kept.get(venueRef);
-  return fresh(hit) ? hit.value : null;
+  if (!fresh(hit)) return null;
+  /**
+   * Signed again on the way out, not on the way in.
+   *
+   * This memory lasts twelve hours and a photo link lasts six, so a reference
+   * stamped when it was first fetched would be handed out expired for half of
+   * its life — the browser would ask, be refused, and draw the icon. Signing at
+   * the moment of serving means every link a page receives is good for the next
+   * six hours from now (sources/photoLinks.js).
+   */
+  return stampPhotos(hit.value);
 }
 
 function remember(venueRef, value) {
