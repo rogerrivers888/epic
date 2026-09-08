@@ -1,11 +1,11 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
-  Archive, ArrowLeft, ArrowRight, ChevronLeft, Baby, Ban, BedDouble, Beer, Bookmark, BookmarkCheck, Calendar, Camera, Car, CarTaxiFront, Check, ChevronDown, ChevronRight, ChevronUp, CircleCheck,
+  Archive, ArrowLeft, ArrowRight, ChevronLeft, Baby, Ban, BedDouble, Beer, Calendar, Camera, Car, CarTaxiFront, Check, ChevronDown, ChevronRight, ChevronUp, CircleCheck,
   Bird, Fish,
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
-  Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode,
+  Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode, Maximize2,
   Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
@@ -39,7 +39,16 @@ const ICONS = {
   // row ends in and means "there is a page behind this"; this one means "there
   // is a menu here", and drawing one as the other reads as a broken link.
   menu: Ellipsis,
-  keep: Heart, favourite: Star, halfStar: StarHalf, shortlist: Bookmark, shortlisted: BookmarkCheck, pinned: Pin,
+  keep: Heart, favourite: Star, halfStar: StarHalf, pinned: Pin,
+  /**
+   * A shortlist is hearted, not bookmarked (owner, 8 Sep 2026: "Shortlist is
+   * now a heart not a bookmark icon"). One glyph for both states — `fill` is
+   * what says it is on, the same way the loved heart works everywhere else —
+   * so a row that fills in place does not swap shapes as well as colours.
+   */
+  shortlist: Heart, shortlisted: Heart,
+  /** Open this out to the whole screen: the half view's expand glyph. */
+  fullscreen: Maximize2,
   allergen: TriangleAlert, archived: Archive, refresh: RefreshCw, delete: Trash2,
   // the device's own copy: no signal, saving it, and what Epic owns outright
   offline: CloudOff, download: Download, owned: Database,

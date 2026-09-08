@@ -27,7 +27,7 @@
  */
 
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
@@ -131,6 +131,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * In the address, so the three are three links he can put side by side.
    */
   const [pins, setPins] = useQueryState<'list' | 'only' | 'card'>('pins', 'only', asOneOf(['list', 'only', 'card'] as const, 'only'));
+  /** The Max detour pill's dropdown, which lives on the map now rather than in the drawer. */
+  const [openDetour, setOpenDetour] = useState(false);
   /**
    * The household's standing answer to "what are you looking for" (owner,
    * 6 Sep 2026: "I never search for pubs or bakeries. I just want to find
@@ -491,7 +493,18 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           // Forty labels over each other is a map you cannot read.
           label: selected === p.venueRef ? (p.name ?? null) : null,
           selected: selected === p.venueRef,
-          onPress: () => { setSelected(p.venueRef); setDrawer(tripPlaceToItem(p)); setAnchor({ lat: p.lat as number, lng: p.lng as number, label: p.name ?? 'here' }); },
+          /*
+            A pin opens the half view in the sheet, not the whole screen
+            (owner, 8 Sep 2026). It used to go straight to the full drawer,
+            which covered the map you had just tapped — so looking at two of
+            your own places in turn meant closing a modal between them. The
+            expand glyph in the half view is the way on.
+          */
+          onPress: () => {
+            setSelected(selected === p.venueRef ? null : p.venueRef);
+            setAnchor({ lat: p.lat as number, lng: p.lng as number, label: p.name ?? 'here' });
+            if (detent === 'peek') setDetent('half');
+          },
         });
       }
     }
@@ -741,6 +754,20 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     </View>
   );
 
+  /**
+   * The trip's own place that a pin has chosen, if one has.
+   *
+   * Only on the trip itself and on the Shortlist: a browse has its own list and
+   * its own chosen place, and both showing at once would be two half views over
+   * one map.
+   */
+  const chosenSaved = useMemo(
+    () => (selected && (!pill || pill === 'shortlist')
+      ? (places?.places ?? []).find((x) => x.venueRef === selected && x.lat != null) ?? null
+      : null),
+    [selected, pill, places],
+  );
+
   const body = pill === 'stay' ? (
     <StayList
       stays={stays}
@@ -825,6 +852,23 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     section === 'places' ? (
       <TripPlacesList data={places} onSelect={(ref) => { setSelected(ref); setDetent('half'); }} onDelete={onDelete} />
     ) : (
+      chosenSaved ? (
+        /*
+          A pin on the trip itself, opened in place. The day is still under it —
+          `Back to the day` puts it back — so choosing between two of your own
+          stops never leaves the map.
+        */
+        <View style={{ paddingHorizontal: spacing.lg }}>
+          <PlaceHalf
+            place={savedAsCandidate(chosenSaved)}
+            onOpen={() => setDrawer(tripPlaceToItem(chosenSaved))}
+            onShortlist={() => (chosenSaved.shortlisted ? unshortlist(chosenSaved) : shortlistIt(savedAsCandidate(chosenSaved)))}
+            onAdd={() => setAdding(savedAsCandidate(chosenSaved))}
+            onBack={() => setSelected(null)}
+            backLabel="Back to the day"
+          />
+        </View>
+      ) : (
       <>
         <SheetHead
           days={days}
@@ -845,10 +889,34 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       </>
     )
     )
+    )
   );
 
   /** How many maybes are on this trip — the number in the Shortlist pill. */
   const savedCount = (places?.places ?? []).filter((x) => x.shortlisted && !x.scheduled).length;
+
+  /**
+   * The heart on the Shortlist chip beats when the count goes up (owner, 8 Sep
+   * 2026: "when you heart an item, the shortlist heart flashes so you know it's
+   * worked").
+   *
+   * The glyph, not the chip: a chip that flashes lime reads as a chip that has
+   * been selected, and this one has not — you are still standing in Activities.
+   * Scale 1 → 2 → 1.6 → 1 over 0.6s, which is a heartbeat rather than a bounce.
+   * Only upwards: taking something off the list is not an achievement to
+   * celebrate, and a pulse on the way down would say the opposite of what
+   * happened.
+   */
+  const beat = useRef(new Animated.Value(1)).current;
+  const beatFrom = useRef(savedCount);
+  useEffect(() => {
+    const grew = savedCount > beatFrom.current;
+    beatFrom.current = savedCount;
+    if (!grew) return;
+    const step = (toValue: number, duration: number) =>
+      Animated.timing(beat, { toValue, duration, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== 'web' });
+    Animated.sequence([step(2, 180), step(1.6, 140), step(1, 280)]).start();
+  }, [savedCount, beat]);
 
   const pills = (
     <View style={[styles.pills, wantsStay && styles.pillsFour, wide && { left: 24, right: undefined }]}>
@@ -864,7 +932,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
           >
-            <Icon name={p.icon} size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+            {p.key === 'shortlist' ? (
+              <Animated.View style={{ transform: [{ scale: beat }] }}>
+                <Icon name="shortlist" size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} fill={savedCount > 0} />
+              </Animated.View>
+            ) : (
+              <Icon name={p.icon} size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+            )}
             <Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{p.label}</Text>
           </Pressable>
         );
@@ -891,6 +965,56 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         // finished. The sheet is moved by the sheet.
         onMapPress={() => setSelected(null)}
       />
+
+      {/*
+        How far off the route you will go, top left, over the ground it shades
+        (owner, 8 Sep 2026: "max detour is now a dropdown on the map").
+        It used to sit in the drawer's chip row, one scroll below the shaded
+        band it controls — you changed a number here and watched nothing,
+        because the thing it changed was behind the sheet.
+
+        Browsing only: with nothing being searched for there is no detour to
+        cap, and the trip's own pins are where they are.
+      */}
+      {!wide && pill && pill !== 'shortlist' && pill !== 'stay' ? (
+        <View style={styles.detourWrap} pointerEvents="box-none">
+          <Pressable
+            onPress={() => setOpenDetour((v) => !v)}
+            style={styles.detourChip}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: openDetour }}
+            accessibilityLabel={`Max detour, ${maxDetourMin} minutes. Change it`}
+          >
+            <Icon name="driving" size={13} color={colors.ink} />
+            <Text style={styles.driveChipText}>{`Max detour · ${maxDetourMin} min`}</Text>
+            <Icon name={openDetour ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
+          </Pressable>
+          {openDetour ? (
+            <View style={styles.detourMenu}>
+              {/* His words, 6 Sep 2026: "something shorter and punchier, like
+                  'Max detour', and then, when I expand, it can say, 'How far
+                  off the route are you prepared to travel?'" */}
+              <Text style={styles.detourAsk}>
+                {anchor?.label
+                  ? `How far from ${anchor.label}?`
+                  : along.hasRoute ? 'How far off the route?' : 'How far are you prepared to travel?'}
+              </Text>
+              {DETOURS.map((n) => (
+                <Pressable
+                  key={n}
+                  onPress={() => { setDetour(String(n)); setOpenDetour(false); }}
+                  style={styles.detourOpt}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: n === maxDetourMin }}
+                >
+                  <Text style={[type.body, { flex: 1 }]}>Up to {n} minutes</Text>
+                  {n === maxDetourMin ? <Icon name="check" size={16} color={colors.accent} /> : null}
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* The drive chip (handoff §01): how long the day's driving is, and what
           the stops added to it. Top right, clear of the status bar. */}
@@ -1363,7 +1487,88 @@ function TripPlacesList({ data, onSelect, onDelete }: {
 // Browse
 // ---------------------------------------------------------------------------
 
-const DETOURS = [5, 10, 15, 30];
+const DETOURS = [10, 15, 30, 45];
+
+/**
+ * One place, in the sheet, without leaving the map (the handoff's "place half
+ * view"; owner, 8 Sep 2026: "it opens the bottom draw with the activity
+ * details, with an expansion option to open the FULL screen view").
+ *
+ * It is a component rather than a block inside the browse list because a pin on
+ * the trip itself opens the same thing, and two copies of this would be two
+ * click-throughs that slowly stopped matching.
+ */
+function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLabel }: {
+  place: TripAlongPlace;
+  /** The whole screen: the expand glyph, and the card itself. */
+  onOpen: () => void;
+  onShortlist: () => void;
+  onAdd: () => void;
+  onBack: () => void;
+  backLabel: string;
+  addLabel?: string;
+}) {
+  return (
+    <View style={{ gap: 12, paddingVertical: 12 }}>
+      {/*
+        The name on its own line with the way out to the whole screen beside
+        it. A glyph rather than only the hint underneath, because a card that
+        happens to be tappable is not an affordance: nothing on it said there
+        was more, and the sentence that did was the smallest type in the sheet.
+      */}
+      <View style={styles.chosenHead}>
+        <Text style={styles.chosenName} numberOfLines={2}>{place.name}</Text>
+        <Pressable
+          onPress={onOpen}
+          hitSlop={10}
+          style={styles.expandHit}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${place.name} on the whole screen`}
+        >
+          <Icon name="fullscreen" size={20} color={colors.ink} />
+        </Pressable>
+      </View>
+
+      <Pressable onPress={onOpen} style={styles.chosen} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
+        <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={134} height={134} rounded={10} credit={false} />
+        <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+          <View style={styles.rowMeta}>
+            {kitchen(place) ? <Text style={styles.tagPill} numberOfLines={1}>{kitchen(place)}</Text> : null}
+            {place.rating != null ? (
+              <Stars value={place.rating} size={13}>
+                <Text style={styles.ratingText}>{place.rating.toFixed(1)}{place.ratingCount ? ` (${place.ratingCount >= 1000 ? `${(place.ratingCount / 1000).toFixed(1)}k` : place.ratingCount})` : ''}</Text>
+              </Stars>
+            ) : null}
+          </View>
+          <Text style={styles.detour} numberOfLines={1}>
+            {place.detourMinutes != null ? `+${place.detourMinutes} min` : 'nearby'}
+            <Text style={{ color: colors.inkMuted, fontWeight: '400' }}>{` · ${place.detourMiles} mi${money(place.priceLevel) ? ` · ${money(place.priceLevel)}` : ''}`}</Text>
+          </Text>
+          <Text style={type.tiny}>Tap for the menu, the hours and what the family thought</Text>
+        </View>
+      </Pressable>
+
+      <Row style={{ gap: 8 }}>
+        <Pressable onPress={onShortlist} style={[styles.add, { height: 38, paddingHorizontal: 14 }]} accessibilityRole="button">
+          <Icon name={place.onShortlist ? 'shortlisted' : 'shortlist'} size={15} color={colors.ink} fill={place.onShortlist} />
+          <Text style={styles.addText}>{place.onShortlist ? 'Saved' : 'Save'}</Text>
+        </Pressable>
+        <Pressable onPress={onAdd} style={[styles.add, styles.addStrong]} accessibilityRole="button">
+          <Icon name={place.onDay ? 'check' : 'add'} size={15} color={colors.primaryFg} />
+          <Text style={[styles.addText, { color: colors.primaryFg }]}>{place.onDay ? 'On the day' : (addLabel ?? 'Add to the day')}</Text>
+        </Pressable>
+      </Row>
+
+      {/* The way back, said in words and put where the thumb already is. */}
+      <Pressable onPress={onBack} style={styles.backToList} accessibilityRole="button">
+        <Icon name="back" size={15} color={colors.ink} />
+        <Text style={styles.backToListText}>{backLabel}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+
 
 function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
   pill: Pill;
@@ -1400,7 +1605,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   /** Which of the three ways a pin and its row talk to each other. */
   pins: 'list' | 'only' | 'card';
 }) {
-  const [openDetour, setOpenDetour] = useState(false);
   const [openKind, setOpenKind] = useState(false);
 
   /**
@@ -1513,13 +1717,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           somewhere to look around. "Near the end" is gone: it asked somebody to
           hold a picture of the route in their head, and the chip did not even
           show the minutes they had chosen. */}
+      {/* Max detour is not here any more: it is a pill on the map (owner,
+          8 Sep 2026), where the shaded ground it controls actually is. */}
       <View style={styles.chips}>
-        <Chip
-          label={`Max detour · ${maxDetourMin} min`}
-          on
-          chevron
-          onPress={() => setOpenDetour((v) => !v)}
-        />
         {anchorLabel ? <Chip label={`Around ${anchorLabel}`} on onClear={onClearAnchor} /> : null}
         <Chip
           label={kindOf || cuisine
@@ -1607,25 +1807,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         </View>
       ) : null}
 
-      {openDetour ? (
-        <View style={styles.dropdown}>
-          {/* His words, 6 Sep 2026: "something shorter and punchier, like 'Max
-              detour', and then, when I expand, it can say, 'How far off the
-              route are you prepared to travel?'" */}
-          <Text style={styles.kicker}>
-            {anchorLabel
-              ? `How far from ${anchorLabel} are you prepared to travel?`
-              : along.hasRoute ? 'How far off the route are you prepared to travel?' : 'How far are you prepared to travel?'}
-          </Text>
-          {DETOURS.map((n) => (
-            <Pressable key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
-              <Text style={[type.body, { flex: 1 }]}>Up to {n} minutes</Text>
-              {n === maxDetourMin ? <Icon name="check" size={16} color={colors.accent} /> : null}
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
       {/*
         Two sentences used to sit here and both are gone (owner, 8 Sep 2026):
         "Tap a place — on the map or here — for a closer look", which explained
@@ -1690,49 +1871,14 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             automatically open the side drawer". No little arrow to hit — he
             called that fiddly and he is right at 28 pixels.
           */
-          <View style={{ gap: 12, paddingVertical: 12 }}>
-            <Pressable
-              onPress={() => onOpen(chosen)}
-              style={styles.chosen}
-              accessibilityRole="button"
-              accessibilityLabel={`Open ${chosen.name}`}
-            >
-              <VenueThumb name={chosen.name} photos={chosen.photos} category={chosen.category} experiences={chosen.experiences} width={134} height={134} rounded={10} credit={false} />
-              <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
-                <Text style={styles.chosenName} numberOfLines={2}>{chosen.name}</Text>
-                <View style={styles.rowMeta}>
-                  {kitchen(chosen) ? <Text style={styles.tagPill} numberOfLines={1}>{kitchen(chosen)}</Text> : null}
-                  {chosen.rating != null ? (
-                    <Stars value={chosen.rating} size={13}>
-                      <Text style={styles.ratingText}>{chosen.rating.toFixed(1)}{chosen.ratingCount ? ` (${chosen.ratingCount >= 1000 ? `${(chosen.ratingCount / 1000).toFixed(1)}k` : chosen.ratingCount})` : ''}</Text>
-                    </Stars>
-                  ) : null}
-                </View>
-                <Text style={styles.detour} numberOfLines={1}>
-                  {chosen.detourMinutes != null ? `+${chosen.detourMinutes} min` : 'nearby'}
-                  <Text style={{ color: colors.inkMuted, fontWeight: '400' }}>{` · ${chosen.detourMiles} mi${money(chosen.priceLevel) ? ` · ${money(chosen.priceLevel)}` : ''}`}</Text>
-                </Text>
-                <Text style={type.tiny}>Tap for the menu, the hours and what the family thought</Text>
-              </View>
-            </Pressable>
-
-            <Row style={{ gap: 8 }}>
-              <Pressable onPress={() => onShortlist(chosen)} style={[styles.add, { height: 38, paddingHorizontal: 14 }]} accessibilityRole="button">
-                <Icon name={chosen.onShortlist ? 'shortlisted' : 'shortlist'} size={15} color={colors.ink} fill={chosen.onShortlist} />
-                <Text style={styles.addText}>{chosen.onShortlist ? 'Saved' : 'Save'}</Text>
-              </Pressable>
-              <Pressable onPress={() => onAdd(chosen)} style={[styles.add, styles.addStrong]} accessibilityRole="button">
-                <Icon name={chosen.onDay ? 'check' : 'add'} size={15} color={colors.primaryFg} />
-                <Text style={[styles.addText, { color: colors.primaryFg }]}>{chosen.onDay ? 'On the day' : 'Add to the day'}</Text>
-              </Pressable>
-            </Row>
-
-            {/* The way back, said in words and put where the thumb already is. */}
-            <Pressable onPress={() => onSelect(null)} style={styles.backToList} accessibilityRole="button">
-              <Icon name="back" size={15} color={colors.ink} />
-              <Text style={styles.backToListText}>{`Back to all ${shown.length} place${shown.length === 1 ? '' : 's'}`}</Text>
-            </Pressable>
-          </View>
+          <PlaceHalf
+            place={chosen}
+            onOpen={() => onOpen(chosen)}
+            onShortlist={() => onShortlist(chosen)}
+            onAdd={() => onAdd(chosen)}
+            onBack={() => onSelect(null)}
+            backLabel={`Back to all ${shown.length} place${shown.length === 1 ? '' : 's'}`}
+          />
         ) : shown.map((p) => (
           /*
             Tapping a row shows it on the map, it does not open it (owner,
@@ -2970,7 +3116,11 @@ const styles = StyleSheet.create({
   // The chosen place, given the room. A block of colour rather than a tint on
   // one row of many — the tint was there and he could not see it.
   chosen: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, borderWidth: BORDER, borderColor: colors.ink },
-  chosenName: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, lineHeight: 23 },
+  // The name and the expand glyph on one line, the glyph pinned to the right
+  // and never squeezing the name.
+  chosenHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  expandHit: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6, marginTop: -4, flex: 0 },
+  chosenName: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, lineHeight: 26 },
   addStrong: { backgroundColor: colors.primary, borderColor: colors.primary, height: 38, paddingHorizontal: 14, flex: 1, justifyContent: 'center' },
   backToList: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: TARGET, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   backToListText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
@@ -2978,6 +3128,26 @@ const styles = StyleSheet.create({
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + var(--epic-sat))' as any) },
+  // Top left, opposite the drive chip, over the shaded ground it sets.
+  detourWrap: { position: 'absolute', left: 16, top: ('calc(16px + var(--epic-sat))' as any), zIndex: 3, alignItems: 'flex-start' },
+  detourChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34,
+    paddingHorizontal: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+  },
+  // Anchored under the pill rather than centred on the screen: it belongs to
+  // the thing that opened it, and the map behind stays readable.
+  detourMenu: {
+    marginTop: 6, minWidth: 210, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.line, paddingVertical: 6,
+  },
+  detourAsk: {
+    fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.inkMuted,
+    paddingHorizontal: 12, paddingTop: 4, paddingBottom: 6,
+  },
+  detourOpt: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    minHeight: TARGET, paddingHorizontal: 12,
+  },
   driveChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill,
     backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
