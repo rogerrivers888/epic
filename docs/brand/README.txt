@@ -106,9 +106,12 @@ Generated icons live beside the app, not here:
   reads as the browser's own location marker; and the ink tile is offered to
   dark tab strips through `media`.
 
-  In the app, `Pin` still drops the hole below 24px — a 30px wordmark's dot is
-  about 9px across, which is a different question from a 16px tile where the pin
-  is the whole picture.
+  In the app, `Pin` cuts the hole at every size too (owner, 8 Sep 2026: "Yes
+  hole that also!"). The pack's "drop it below 24px" is not followed anywhere:
+  the wordmark's dot never did, on his instruction of 7 Sep, and the tab icon
+  settled it at 16px. `Pin`'s `hole` prop still exists for a caller that wants
+  the solid pin, and `epic-symbol-solid.svg` / `epic-icon-lime-solid.svg` are
+  still written out because the pack lists them; nothing in the app uses either.
 
   None of these are drawn by hand. `npm run brand` rewrites every one of them
   from `scripts/brand.mjs`, which holds the pin path, the palette and the

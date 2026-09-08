@@ -83,20 +83,26 @@ export function Wordmark({ height = 40, ink = colors.ink, ground = colors.header
  * squatter copy of it is a different mark.
  *
  * The viewBox is cropped to the ink, so `size` is the pin's height and the
- * width follows from it. Below 24px the hole is dropped, because at that size
- * it closes up into a smudge.
+ * width follows from it. The hole is cut at every size — see `hole` below.
  */
 export const PIN_ASPECT = 38 / 52;
 
-export function Pin({ size = 24, ink = INK, ground = CREAM, hole = size >= 24 }: {
+export function Pin({ size = 24, ink = INK, ground = CREAM, hole = true }: {
   size?: number; ink?: string; ground?: string;
   /**
-   * Whether to cut the hole. The pack drops it below 24px, where it closes into
-   * a smudge — but that rule is about the pin standing alone as an icon. As the
-   * dot of the i it is around 9px at the header's 30px wordmark and the hole is
-   * still what makes it a pin rather than a full stop, so the wordmark asks for
-   * it regardless (owner, 7 Sep 2026: "the location thing above the eye doesn't
-   * have a black bit in the middle").
+   * Whether to cut the hole. It defaults on at every size.
+   *
+   * The pack (§02) says to drop it below 24px because it "closes up into a
+   * smudge". The wordmark never obeyed that, on Roger's instruction (7 Sep
+   * 2026: "the location thing above the eye doesn't have a black bit in the
+   * middle") — as the dot of the i it is about 9px and the hole is still what
+   * makes it a pin rather than a full stop. On 8 Sep the same question was
+   * settled for the tab icon by rendering both at 16, 20, 24 and 32px: the hole
+   * holds at all of them and it is the *solid* pin that turns into a blob. So
+   * the threshold is gone and the rule is one rule — "Yes hole that also!"
+   *
+   * The prop stays, so a caller that genuinely wants the solid pin the pack
+   * describes can still ask for it. Nothing in the app does.
    */
   hole?: boolean;
 }) {
