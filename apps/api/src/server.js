@@ -35,6 +35,7 @@ import { offline as offlineRoutes } from './routes/offline.js';
 import { startOwnLoop } from './sources/own.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
+import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
 import { currentHousehold } from './routes/household.js';
@@ -45,7 +46,7 @@ import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor } from './access.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
-import { generalLimit, photoLimit, signInLimit, spendLimit } from './limits.js';
+import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import * as providerCalls from './repositories/providerCalls.js';
@@ -135,6 +136,9 @@ app.use('/api', deviceRoutes);
 // Provider money is spent under these, so they are held to a tighter number
 // than the rest of the API (limits.js).
 for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places']) app.use(path, spendLimit);
+// Speech is a paid minute per request, held to its own number per household
+// (`voiceLimit`) as well as the monthly minutes in routes/voice.js.
+app.use('/api/voice', voiceLimit);
 // Photographs get their own, wider budget: a browse is twenty of them at once,
 // and a search is one. See `photoLimit`.
 app.use('/api/photos', photoLimit);
@@ -151,6 +155,8 @@ app.use('/api/admin/scout', requireDoor('admin'), scoutRoutes);
 app.use('/api/admin/library', requireDoor('admin'), libraryAdminRoutes);
 app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);
 app.use('/api/admin/places', requireDoor('admin'), localityRoutes);
+// The voice lab: the modes compared on the same sentences (routes/voice.js).
+app.use('/api/admin/voice', requireDoor('admin'), voiceLabRoutes);
 
 // Telemetry is the household's own — which screen, and still here — and is
 // always written against the session's own household (routes/activity.js).
@@ -175,6 +181,8 @@ app.use('/api/plan', planRoutes);
 // The home screen's one read. Mounted after the planner because it borrows
 // the planner's look-around, not its paths.
 app.use('/api/inspire', inspireRoutes);
+// Speech in, a transcript out; a transcript in, an intent out (routes/voice.js).
+app.use('/api/voice', voiceRoutes);
 app.use('/api/concepts', conceptRoutes);
 app.use('/api/prototypes', prototypeRoutes);
 app.use('/api/places', placeRoutes);
@@ -303,7 +311,7 @@ app.get('/api/keys', requireOwner, (_req, res) => {
   };
 
   const expected = [
-    'DATABASE_URL', 'EPIC_PASSCODE', 'ANTHROPIC_API_KEY', 'GOOGLE_MAPS_API_KEY',
+    'DATABASE_URL', 'EPIC_PASSCODE', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY',
     'TRIPADVISOR_API_KEY', 'TICKETMASTER_API_KEY', 'SEATGEEK_CLIENT_ID',
     'PREDICTHQ_API_KEY', 'DATATHISTLE_API_KEY', 'LITEAPI_KEY', 'MAPILLARY_TOKEN',
   ];

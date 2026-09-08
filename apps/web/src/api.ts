@@ -1742,6 +1742,18 @@ export const api = {
    */
   requestSignInLink: (email: string) => post<{ sent: boolean; message: string }>('/api/session/request-link', { email }),
 
+  // --- voice: the two stages (routes/voice.js) -------------------------------
+  // The recording itself goes through `voice/client.ts`, not here: it is the
+  // one body in the app that is not JSON and must never be cached or queued.
+  voiceLiveToken: (body: { language?: string | null; sessionId?: string | null }) => post<VoiceLiveToken>('/api/voice/live-token', body),
+  voiceLiveUsed: (body: { seconds: number; sessionId?: string | null; model?: string | null }) => post<{ recorded: boolean }>('/api/voice/live-used', body),
+  voicePlan: (body: { transcript: string; language?: string | null; sessionId?: string | null; context?: Record<string, unknown> | null }) => post<VoicePlanResponse>('/api/voice/plan', body),
+  // The lab (back office): the sentences to read, the runs, the tally.
+  voiceLab: () => request<VoiceLabInfo>('/api/admin/voice/utterances'),
+  voiceRuns: (limit = 100) => request<VoiceRuns>(`/api/admin/voice/runs?limit=${limit}`),
+  voiceRecordRun: (body: VoiceRunInput) => post<{ run: VoiceRun }>('/api/admin/voice/runs', body),
+  voiceDeleteRun: (id: string) => del<{ removed: boolean }>(`/api/admin/voice/runs/${id}`),
+
   // --- the admin module: only the owner's API answers any of these ----------
 
   /** Everybody who has Epic, with what they are on and what they have spent. */
@@ -2622,4 +2634,59 @@ export type OfflineManifest = {
   /** The subset that costs nothing to fetch; the automatic fill uses only these. */
   free: string[];
   owned: { claimed: number; researched: number; inOpenMap: number; described: number; waiting: number; failed: number; lastChange: string | null };
+};
+
+// --- voice ------------------------------------------------------------------
+
+export type VoiceLiveToken = {
+  token: string; expiresAt: string | null; model: string; url: string; sampleRate: number; fellBack?: boolean;
+  language: string | null; maxSeconds: number;
+};
+/** Stage two's answer: only what was said, null for the rest, doubts as questions (domain/voiceIntent.js). */
+export type VoiceIntent = {
+  language: string | null;
+  trip_type: 'multi_day' | 'day_out' | null;
+  destination: string | null;
+  origin: string | null;
+  dates: { start: string | null; end: string | null; duration_days: number | null; as_said: string | null };
+  party: { adults: number | null; children: number | null; ages: number[]; as_said: string | null };
+  budget: { amount: number | null; currency: string | null; per: string | null; level: string | null };
+  interests: string[];
+  exclusions: string[];
+  accessibility: string[];
+  ambiguities: { about: string; question: string; options: string[] }[];
+  corrections: { field: string; from: string; to: string }[];
+  summary: string;
+};
+export type VoicePlanResponse = { intent: VoiceIntent; model: string; ms: number };
+export type VoiceUtterance = { id: string; language: string; text: string; expect: Record<string, unknown>; note?: string };
+export type VoiceLabInfo = {
+  utterances: VoiceUtterance[];
+  models: { transcribe: string; live: string; plan: string };
+  configured: boolean;
+  switchedOff: boolean;
+  caps: { minutesMonthly: number; liveSessionsDaily: number; maxSeconds: number };
+};
+export type VoiceCaptureMode = 'live' | 'batch' | 'stream';
+export type VoiceModeResult = { transcript: string | null; ms: number | null; model: string | null; error: string | null };
+export type VoiceAccuracy = { wer: number; errors: number; substitutions: number; deletions: number; insertions: number; words: number };
+export type VoiceRunInput = {
+  utteranceId?: string | null; reference?: string | null; language?: string | null; mode?: string | null;
+  results: Partial<Record<VoiceCaptureMode, VoiceModeResult>>;
+  edited?: string | null; device?: string | null; sessionId?: string | null; plan?: boolean;
+};
+export type VoiceRun = {
+  id: string; utterance_id: string | null; reference: string | null; language: string | null; mode: string | null;
+  results: Partial<Record<VoiceCaptureMode, VoiceModeResult>>;
+  accuracy: Partial<Record<VoiceCaptureMode, VoiceAccuracy>>;
+  live_vs_batch: number | null;
+  plans: Partial<Record<VoiceCaptureMode, { intent?: VoiceIntent; ms?: number; model?: string; expectation?: { ok: boolean; misses: { path: string; want: unknown; got: unknown }[] } | null; error?: string }>>;
+  plan_changed: boolean | null;
+  plan_diff: { field: string; a: unknown; b: unknown }[];
+  edited: string | null; device: string | null; ran_by: string | null; created_at: string;
+};
+export type VoiceRuns = {
+  runs: VoiceRun[];
+  tally: Record<VoiceCaptureMode, { runs: number; errors: number; meanWer: number | null; medianMs: number | null; planRight: number | null }>;
+  agreement: { compared: number; disagreed: number; disagreementRate: number | null; meanLiveVsBatch: number | null; planJudged: number; planChanged: number; planChangedRate: number | null };
 };

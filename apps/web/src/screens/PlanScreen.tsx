@@ -247,6 +247,10 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
       const field = fieldRef.current; fieldRef.current = null;
       send(text, true, field);
     },
+    // Inspire's box is already a box you can edit, so the words go straight
+    // in; the rows get the check (Settings › Voice decides whether at all).
+    confirm: () => mode === 'tell',
+    sessionId,
   });
 
   // While the household is talking, the words so far are read every few
@@ -387,7 +391,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
           home={household?.household?.home ?? null}
           onPlan={(utterance) => { setMode('tell'); send(utterance); }}
           onOpenTrip={onOpenTrip}
-          listening={speech.listening} transcript={speech.transcript} supported={speech.supported}
+          listening={speech.listening || speech.phase === 'transcribing'} transcript={speech.phase === 'transcribing' ? (speech.transcript || 'Writing that down…') : speech.transcript} supported={speech.supported}
           onSpeak={() => { fieldRef.current = null; speech.start(); }} onStop={speech.stop}
         />
       ) : (
@@ -556,18 +560,35 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
           {/* The box is small on purpose: the rows are what you watch. One control: Stop while listening, else Speak and Plan it (Send only once something is typed). */}
           {!plan?.trip || true ? (
             <Card style={{ gap: spacing.sm }}>
+              {/* The box is the transcript while they talk, the words being
+                  written down after Done, and — in the confirm phase — the
+                  words to check before Epic plans from them (voice brief,
+                  8 Sep 2026). Modes without captions show the clock instead. */}
               <TextInput
-                value={speech.listening ? speech.transcript : input}
-                onChangeText={setInput}
+                value={speech.phase === 'confirm' ? speech.draft : speech.phase !== 'idle' ? speech.transcript : input}
+                onChangeText={speech.phase === 'confirm' ? speech.setDraft : setInput}
                 multiline
-                editable={!speech.listening}
-                placeholder={plan?.trip ? 'I like this, but not that…' : plan?.rows ? 'Add or change anything…' : 'Where, when, how long, who is coming, and anything you must fit in…'}
+                editable={speech.phase === 'idle' || speech.phase === 'confirm'}
+                placeholder={speech.phase === 'listening' ? `Listening… ${Math.floor(speech.seconds / 60)}:${String(speech.seconds % 60).padStart(2, '0')}${speech.live && (speech.live.status === 'connecting' || speech.live.status === 'reconnecting') ? ' · connecting' : ''}` : speech.phase === 'transcribing' ? 'Writing that down…' : plan?.trip ? 'I like this, but not that…' : plan?.rows ? 'Add or change anything…' : 'Where, when, how long, who is coming, and anything you must fit in…'}
                 placeholderTextColor={colors.inkFaint}
-                style={[styles.input, speech.listening && styles.inputLive]}
-                accessibilityLabel="What do you want to do"
+                style={[styles.input, speech.phase !== 'idle' && styles.inputLive]}
+                accessibilityLabel={speech.phase === 'confirm' ? 'The words Epic heard — change anything before planning' : 'What do you want to do'}
               />
               {speech.listening ? (
                 <Pressable onPress={speech.stop} style={styles.stop} accessibilityRole="button" accessibilityLabel="Stop"><Icon name="stop" size={14} color={colors.bg} /><Text style={styles.stopText}>Stop</Text></Pressable>
+              ) : speech.phase === 'transcribing' ? (
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Row><ActivityIndicator color={colors.accent} /><Text style={type.small}>Writing that down…</Text></Row>
+                  <Button label="Cancel" kind="ghost" onPress={speech.cancel} />
+                </Row>
+              ) : speech.phase === 'confirm' ? (
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={type.tiny}>Is this right? Change anything, then use it.</Text>
+                  <Row>
+                    <Button label="Say it again" kind="ghost" icon="mic" onPress={speech.retry} />
+                    <Button label="Use these words" icon="check" onPress={speech.accept} disabled={!speech.draft.trim() || !!busy} />
+                  </Row>
+                </Row>
               ) : (
                 <Row style={{ justifyContent: 'space-between' }}>
                   {speech.supported ? (

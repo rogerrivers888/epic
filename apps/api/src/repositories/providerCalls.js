@@ -38,6 +38,19 @@ export async function recordTokens(c) {
   );
 }
 
+/**
+ * One call billed in units *and* estimated in money — a minute of speech, say.
+ * `units` is the object form (`{ 'openai-minutes': 0.4 }`) so the Settings
+ * spend table can add it up by key, and the cost is the list price for it.
+ */
+export async function recordMetered({ householdId, sessionId = null, provider, purpose, units, costUsd = null }) {
+  await query(
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [householdId, sessionId, provider, purpose, units, costUsd],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // the caps
 // ---------------------------------------------------------------------------
@@ -80,6 +93,21 @@ export async function countOfPurpose(householdId, provider, purposeLike, window 
     `select count(*)::int as n from provider_calls
       where household_id = $1 and provider = $2 and purpose like $3 and created_at >= ${since}`,
     [householdId, provider, purposeLike],
+  );
+  return rows[0].n;
+}
+
+/**
+ * How much of one unit a purpose has used in a window — the minutes of speech
+ * a household has sent this month, for the voice purse. Same clock as above.
+ */
+export async function unitsOfPurpose(householdId, provider, purposeLike, unitKey, window = 'month') {
+  const since = window === 'day' ? "date_trunc('day', now())" : "date_trunc('month', now())";
+  const { rows } = await query(
+    `select coalesce(sum((units ->> $4)::numeric), 0)::float as n from provider_calls
+      where household_id = $1 and provider = $2 and purpose like $3
+        and jsonb_typeof(units) = 'object' and units ? $4 and created_at >= ${since}`,
+    [householdId, provider, purposeLike, unitKey],
   );
   return rows[0].n;
 }

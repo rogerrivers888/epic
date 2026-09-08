@@ -107,6 +107,23 @@ export const photoLimit = limit({
   message: 'That is a lot of pictures at once. Give it a minute.',
 });
 
+/**
+ * Speech, per household rather than per address.
+ *
+ * A recording is one request but it is a paid minute, and the live captions
+ * mint a token per tap. Thirty of either in five minutes is a family talking a
+ * lot; a hundred is a script. Keyed on the account's household, so a shared
+ * office address does not lock a second household out — with the caller's
+ * address as the key for a session that has no account (the passcode).
+ */
+export const voiceLimit = limit({
+  name: 'voice',
+  windowMs: 5 * MINUTE,
+  max: 30,
+  message: 'That is a lot of talking at once. Give it a minute, or type it.',
+  keyOf: (req) => req.account?.household_id ?? `ip:${callerOf(req)}`,
+});
+
 /** Everything else. Generous: a screen opening can be a dozen requests. */
 export const generalLimit = limit({ name: 'general', windowMs: 5 * MINUTE, max: 900 });
 

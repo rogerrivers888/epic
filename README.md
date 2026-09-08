@@ -27,6 +27,14 @@ npm run web                        # http://localhost:8081  (Expo web)
 
 The conversational planner needs an Anthropic key in the API's environment: `ANTHROPIC_API_KEY=sk-ant-…` (put it in `.env`; it is git-ignored). Without it, household, trips and the touch controls work; interpreting what you *say* does not.
 
+### Voice
+
+Voice is the primary way in, and it is two stages that are never merged (owner's brief, 8 Sep 2026): **speech → a faithful transcript** (no tidying — "the 14th, no, the 15th" arrives with both dates), then **transcript → structured intent** on the server. The recogniser is given place names and the household's own words to expect, never asked to clean up.
+
+Stage one is built three ways behind a switch so they can be compared on the same sentences (Settings › Voice, on the device): **record then send** (`MediaRecorder` → `POST /api/voice/transcribe`), **live** (a Realtime transcription session the browser opens with a one-session client secret from `POST /api/voice/live-token`; the standing key never leaves the API), and **streamed** (the same upload, answered as server-sent events). The default is the **hybrid** — live captions so the household knows they are heard, and the whole recording transcribed for the words the plan is made from. The browser's own recogniser is kept as the free baseline. Stage two is `POST /api/voice/plan` (`domain/voiceIntent.js`: only what was said, null over a guess, corrections resolved, doubts as questions).
+
+The back office's **Voice lab** (`/admin/voice`) runs one recording every way at once and keeps the word error rate, the time to words, how far live and the recording disagreed, and whether that changed the plan (`voice_runs`, migration 074). Audio is never stored anywhere. Caps: a per-household rate limit, monthly minutes (`EPIC_VOICE_MINUTES_MONTHLY`), live sessions a day, and the estate's call bounds.
+
 Place data comes from two sources behind one interface (`apps/api/src/sources/`): **OpenStreetMap** (Overpass for places, Nominatim for geocoding, Photon for the "where are we going?" typeahead — all the same open data, no key, cacheable with attribution; no reviews, ratings or allergen data) and a local **fixture** set of invented Boston venues used for development. `EPIC_SOURCES` defaults to `fixtures,osm`; Google, Yelp and TripAdvisor slot in behind the same interface once credentials and spend caps exist. Taste vocabulary (dishes, cuisines, experiences, diets, with aliases and fuzzy matching) lives in `apps/api/src/domain/concepts.js`.
 
 ## API sketch
@@ -250,6 +258,11 @@ spends it.
 | `EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND` | optional | Provider calls a household may make in a calendar month before Epic stops searching for it (default 3000). Per-account ceilings on the Accounts screen override it; a new account starts at a quarter of it. |
 | `EPIC_WEB_ORIGIN` | recommended | Comma-separated list of origins the web app is served from, e.g. `https://epic.day, https://www.epic.day`. Non-secret. Restricts which sites may open a session-carrying request; unset, any origin is answered and the passcode is the only guard. `EPIC_APP_URL` and its `www.` are **always** allowed whatever this says — an allowlist that can be emptied by forgetting a variable is a way to take the app down with a config change. |
 | `ANTHROPIC_API_KEY` | yes | conversational planner (Doppler) |
+| `OPENAI_API_KEY` | for voice | Speech to text and the reading of it (`apps/api/src/sources/openai.js`, `routes/voice.js`). Doppler, owner-set. Without it every mic in the app falls back to the browser's own recogniser and the Voice lab says so. The key never reaches a browser: recordings go to `POST /api/voice/transcribe`, and live captions use a one-session client secret the API mints. |
+| `EPIC_TRANSCRIBE_MODEL` | optional | The file-transcription model (default `gpt-transcribe`, $0.0045/min). A model the account cannot use steps down to `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`. |
+| `EPIC_LIVE_TRANSCRIBE_MODEL` | optional | The live-captions model (default `gpt-live-transcribe`, $0.017/min). `EPIC_LIVE_TRANSCRIBE_URL` overrides the WebSocket address the browser connects to. |
+| `EPIC_VOICE_PLAN_MODEL` | optional | Stage two — transcript to structured intent (default `gpt-5-mini`). |
+| `EPIC_VOICE_MINUTES_MONTHLY` | optional | Minutes of speech a household may send in a calendar month, all modes together (default 120). Shown on the Settings spend table as "OpenAI voice". `EPIC_VOICE_LIVE_SESSIONS_DAILY` (60) caps live sessions a day; `EPIC_VOICE_MAX_SECONDS` (300) caps one recording. |
 | `ANTHROPIC_WORKSPACE_ID` | if the key is identity-linked | The Anthropic workspace the key acts in (`wrkspc_…`). Console-issued keys that are linked to a person require it; a legacy workspace key does not. |
 | `RAILPACK_START_CMD` | yes | see table above (non-secret) |
 | `GOOGLE_MAPS_API_KEY` | recommended | Google Places API (New) + Routes API: ratings, reviews, photos, hours, family flags, dish-search evidence, **real travel times**. Restrict the key to those APIs; set a budget and per-API quota in Cloud Console. Switches on automatically. |

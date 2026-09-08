@@ -13,6 +13,7 @@
 
 import { HOUSEHOLD_MONTHLY_CALL_BOUND } from '../claude.js';
 import { SCOUT_MONTHLY_RUNS } from './localscout.js';
+import { VOICE_MINUTES_MONTHLY } from './openai.js';
 
 const ANTHROPIC_CONSOLE = { label: 'Anthropic console', url: 'https://console.anthropic.com/' };
 
@@ -89,6 +90,13 @@ export const LINES = [
     what: 'Events including community ones. Free plan after a 14-day trial; limits are set on the plan, not published here.',
     legacyUnitsPerCall: () => 1,
     console: { label: 'PredictHQ control center', url: 'https://control.predicthq.com/' },
+  },
+  {
+    key: 'openai-minutes', label: 'OpenAI voice', source: 'openai', unit: 'minute', unitPlural: 'minutes',
+    what: 'Turns what you say into words (a recording at $0.0045 a minute, live captions at $0.017 a minute) and reads the words into a plan (tokens). Every minute is counted here whichever way it was heard.',
+    cap: { kind: 'monthly', limit: VOICE_MINUTES_MONTHLY, label: 'household cap on minutes of speech', env: 'EPIC_VOICE_MINUTES_MONTHLY' },
+    hardStop: 'The usage limit in the OpenAI console is the hard stop.',
+    console: { label: 'OpenAI usage', url: 'https://platform.openai.com/usage' },
   },
   {
     key: 'liteapi', label: 'LiteAPI hotel rates', source: 'liteapi', unit: 'request', unitPlural: 'requests',

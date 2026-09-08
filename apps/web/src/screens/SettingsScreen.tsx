@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { api, HouseholdResponse, Place } from '../api';
 import { colors, fonts, radius, resolveTheme, spacing, TARGET, type, BORDER } from '../theme';
-import { Button, Card, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
+import { Button, Card, Chip, FoldLine, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
 import { useRouter } from '../router';
 import { paths, type Route, type SettingsSection } from '../routes';
 import { PlacePicker } from '../components/PlacePicker';
@@ -13,6 +13,7 @@ import { isAdmin, setAdmin } from '../admin';
 import { Icon } from '../components/Icon';
 import { OfflineCard } from '../components/OfflineCard';
 import { AccountCard } from '../components/AccountCard';
+import { VOICE_LANGUAGES, VOICE_MODES, VoiceMode, getVoiceConfirm, getVoiceLanguage, getVoiceMode, setVoiceConfirm, setVoiceLanguage, setVoiceMode, voiceLanguageLabel, voiceModeLabel } from '../voice/settings';
 
 export const SPEAK_KEY = 'epic.speakReplies';
 export const getSpeakPref = () => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(SPEAK_KEY) !== 'off' : true);
@@ -92,6 +93,11 @@ function Preferences({ data, refresh }: { data: HouseholdResponse; refresh: () =
   const { household } = data;
   const [name, setName] = useState(household.name ?? '');
   const [speak, setSpeak] = useState(getSpeakPref());
+  // How Epic listens — the voice experiment's switch (voice/settings.ts). On
+  // this device only, like the theme.
+  const [voiceMode, setVoiceModeState] = useState<VoiceMode>(getVoiceMode());
+  const [voiceLanguage, setVoiceLanguageState] = useState<string>(getVoiceLanguage() ?? 'auto');
+  const [voiceConfirm, setVoiceConfirmState] = useState(getVoiceConfirm());
   const { pref: themePref, setPref: setThemePref } = useTheme();
   const [viewer, setViewerState] = useState<string | null>(getViewer(data.members));
   const [confirm, setConfirm] = useState('');
@@ -192,12 +198,35 @@ function Preferences({ data, refresh }: { data: HouseholdResponse; refresh: () =
         />
       </Card>
 
-      <SectionTitle>Voice</SectionTitle>
+      <SectionTitle hint="Voice is how you tell Epic what you want. These decide how it listens while the ways of listening are being compared; the back office's Voice lab shows the numbers.">Voice</SectionTitle>
       <Card>
+        <FoldLine label="How Epic listens" value={voiceModeLabel(voiceMode)} icon="mic">
+          <View style={{ gap: spacing.sm }}>
+            {VOICE_MODES.map((m) => (
+              <Pressable key={m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} accessibilityRole="button" accessibilityState={{ selected: voiceMode === m.value }} style={styles.voiceOption}>
+                <Chip label={m.label} selected={voiceMode === m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} />
+                <Text style={type.tiny}>{m.blurb}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </FoldLine>
+        <FoldLine label="Language" value={voiceLanguageLabel(voiceLanguage === 'auto' ? null : voiceLanguage)} icon="web">
+          <Text style={[type.tiny, { marginBottom: spacing.sm }]}>Telling Epic the language makes it quicker and more accurate. Left to detect, it works it out from the first words. The plan comes back in the language you spoke.</Text>
+          <Row style={{ flexWrap: 'wrap', gap: 6 }}>
+            {VOICE_LANGUAGES.map((l) => <Chip key={l.value} label={l.label} selected={voiceLanguage === l.value} onPress={() => { setVoiceLanguage(l.value); setVoiceLanguageState(l.value); }} />)}
+          </Row>
+        </FoldLine>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={type.body}>Show me the words before planning</Text>
+            <Text style={type.tiny}>After Done, what Epic heard is shown in a box to check and change. Off, it plans straight away.</Text>
+          </View>
+          <Switch value={voiceConfirm} onValueChange={(v) => { setVoiceConfirm(v); setVoiceConfirmState(v); }} />
+        </Row>
         <Row style={{ justifyContent: 'space-between' }}>
           <View style={{ flex: 1 }}>
             <Text style={type.body}>Speak replies back when I use my voice</Text>
-            <Text style={type.tiny}>Recordings are never kept. Voice is interpreted only against what's on screen.</Text>
+            <Text style={type.tiny}>Recordings are never kept: they go to the server, are written down, and are forgotten in the same breath.</Text>
           </View>
           <Switch value={speak} onValueChange={(v) => { setSpeak(v); if (Platform.OS === 'web') localStorage.setItem(SPEAK_KEY, v ? 'on' : 'off'); }} />
         </Row>
@@ -253,6 +282,7 @@ function Providers() {
 }
 
 const styles = StyleSheet.create({
+  voiceOption: { gap: 4, alignItems: 'flex-start' },
   // Settings is flush-left groups on rules — no cards, no radius (10a/10b).
   identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingBottom: spacing.lg, borderBottomWidth: BORDER, borderBottomColor: colors.line, marginBottom: spacing.lg },
   identityTile: { width: 52, height: 52, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },

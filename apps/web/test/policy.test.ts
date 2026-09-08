@@ -21,7 +21,7 @@ test('the household’s own answers are kept whole', () => {
 });
 
 test('an endpoint nobody has thought about is not saved', () => {
-  for (const path of ['/api/plan/preview', '/api/discover', '/api/menu/read', '/api/places/where', '/api/something/new']) {
+  for (const path of ['/api/plan/preview', '/api/discover', '/api/menu/read', '/api/places/where', '/api/something/new', '/api/voice/transcribe', '/api/voice/plan', '/api/voice/live-token']) {
     assert.equal(storable(path, { anything: true }), null, `${path} must not be saved by default`);
   }
 });
@@ -167,4 +167,13 @@ test('a path nobody has thought about is not queued', () => {
 test('the query string does not change the answer', () => {
   assert.equal(queueable('PATCH', '/api/household?x=1'), true);
   assert.equal(queueable('POST', '/api/plan/preview?live=1'), false);
+});
+
+test('a recording is never queued for later', () => {
+  // A transcription replayed an hour after the signal came back is a different
+  // call that costs money and answers nobody; and a live token minted into an
+  // empty room is a paid minute waiting to happen.
+  for (const path of ['/api/voice/transcribe', '/api/voice/transcribe?seconds=12&stream=1', '/api/voice/live-token', '/api/voice/plan']) {
+    assert.equal(queueable('POST', path), false, `${path} must not be queued`);
+  }
 });

@@ -968,11 +968,17 @@ function DayPlanPanel({ trip, day, initial, onCommitted }: { trip: TripDetail; d
     try { await api.planCommit(plan.sessionId, plan.options.find((o) => o.id === 'pinned')?.id ?? plan.options[0].id); await onCommitted(); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
 
-  // While speaking, this card is the transcript and nothing else (owner, 3 Sep 2026).
-  if (speech.listening) {
+  // While speaking, this card is the transcript and nothing else (owner, 3 Sep
+  // 2026) — and stays so while the recording is written down and the words are
+  // checked (the voice brief, 8 Sep 2026).
+  if (speech.phase !== 'idle') {
     return (
       <Card style={{ borderColor: colors.accent, gap: spacing.md }}>
-        <Listening transcript={speech.transcript} hint={`Say what you're after near ${baseLabel} — the kind of place, who it's for, what to avoid.`} onDone={speech.stop} onCancel={speech.cancel} />
+        <Listening
+          transcript={speech.transcript} phase={speech.phase} live={speech.live} seconds={speech.seconds}
+          draft={speech.draft} onDraft={speech.setDraft} onAccept={speech.accept} onRetry={speech.retry} error={speech.error}
+          captions={speech.mode !== 'record' && speech.mode !== 'stream'}
+          hint={`Say what you're after near ${baseLabel} — the kind of place, who it's for, what to avoid.`} onDone={speech.stop} onCancel={speech.cancel} />
       </Card>
     );
   }

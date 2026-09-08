@@ -199,6 +199,8 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/prototypes'), { name: 'prototypes', section: null });
   assert.deepEqual(roundTrip('/prototypes/trips'), { name: 'prototypes', section: 'trips' });
   assert.deepEqual(roundTrip('/admin/reporting'), { name: 'admin', screen: 'reporting' });
+  // The voice lab: the ways of hearing compared on the same sentences.
+  assert.deepEqual(roundTrip('/admin/voice'), { name: 'admin', screen: 'voice' });
   assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'overview' });
 });
 

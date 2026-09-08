@@ -15,6 +15,7 @@ import { predicthqSource } from './predicthq.js';
 import { datathistleSource } from './datathistle.js';
 import { localScoutSource } from './localscout.js';
 import { liteapiEnabled } from './liteapi.js';
+import { openaiEnabled } from './openai.js';
 import { detectChain } from '../domain/chains.js';
 import { kmBetween } from '../domain/travel.js';
 import * as settings from '../repositories/settings.js';
@@ -34,6 +35,9 @@ const REGISTRY = [fixturesSource, osmSource, googleSource, tripadvisorSource, ti
  */
 const ASIDE = [
   { key: 'liteapi', label: 'LiteAPI hotel rates', enabled: liteapiEnabled },
+  // Speech to text, and the reading of it (routes/voice.js). Never a place
+  // search; a switch here turns the microphone's server side off.
+  { key: 'openai', label: 'OpenAI voice', enabled: openaiEnabled },
 ];
 
 /** Whether the Stay tab may ask for prices: the key exists and the owner has not switched it off. */
