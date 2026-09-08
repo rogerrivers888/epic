@@ -299,9 +299,16 @@ export function PanelKicker({ children }: { children: React.ReactNode }) {
   return <Text style={styles.kicker}>{children}</Text>;
 }
 
-export function FilterButton({ label, icon, on, narrowed, open, onPress, toggle }: {
+export function FilterButton({ label, icon, on, narrowed, open, onPress, toggle, spoken }: {
   label: string;
   icon?: IconName;
+  /**
+   * What a screen reader hears, where the chip's words are not the whole
+   * setting. The travel chip draws the mode as an icon and says only "Within
+   * 30 minutes of Sunningdale", so drive, transport and walk would otherwise
+   * be announced identically (Codex, 8 Sep 2026). A glyph is not a label.
+   */
+  spoken?: string;
   /** A toggle that is currently on (Open now). */
   on?: boolean;
   /**
@@ -327,6 +334,7 @@ export function FilterButton({ label, icon, on, narrowed, open, onPress, toggle 
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityLabel={spoken ?? label}
       accessibilityState={toggle ? { checked: !!on } : { expanded: !!open }}
       style={[styles.filterBtn, narrowed && !open && styles.filterNarrowed, open && styles.filterOpen]}
     >

@@ -803,6 +803,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
               narrowed={travelBy !== 'drive'}
               open={panel === 'travel'}
               label={travelChipLabel(cap as TravelMinutes, whereName)}
+              // The words dropped "by transport" because the icon says it —
+              // but only to the eye, so the mode is spoken here instead.
+              spoken={`${travelChipLabel(cap as TravelMinutes, whereName)}, ${travelBy === 'walk' ? 'on foot' : travelBy === 'transit' ? 'by transport' : 'driving'}`}
               onPress={() => setPanel(panel === 'travel' ? null : 'travel')}
             />
             <FilterButton
