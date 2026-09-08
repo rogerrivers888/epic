@@ -33,7 +33,7 @@ import { useViewport } from '../hooks/useViewport';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
-import { Icon, IconName, Stars } from '../components/Icon';
+import { Icon, IconName, Rating, Stars } from '../components/Icon';
 import { VenueThumb } from '../components/VenueThumb';
 import { Avatar } from '../components/Faces';
 import { BottomSheet, Detent, detentHeights } from '../components/BottomSheet';
@@ -2340,7 +2340,7 @@ function StayCriteria({
                         <Text style={[styles.tileTitle, on && { color: colors.primaryFg }]} numberOfLines={2}>
                           {o.title.replace('{town}', town)}
                         </Text>
-                        <Text style={[styles.tileSub, on && { color: '#C9C5C2' }]}>
+                        <Text style={[styles.tileSub, on && { color: colors.mutedOnInk }]}>
                           {o.key === 'plans' && !planned
                             ? 'Best placed for whatever you plan — it improves as you fill days in'
                             : o.key === 'town' && criteria.town
@@ -2758,10 +2758,19 @@ function AddSheet({ place, trip, party, onCancel, onSave }: {
             <Text style={styles.addTitle} numberOfLines={2}>Add {place.name}</Text>
             <Pressable onPress={onCancel} accessibilityRole="button"><Text style={[type.small, { fontWeight: '600' }]}>Cancel</Text></Pressable>
           </View>
-          <Text style={type.small} numberOfLines={2}>
-            {[place.category ? cap(place.category) : null, money(place.priceLevel), place.rating != null ? `★ ${place.rating}` : null,
-              place.detourMinutes != null ? `about ${place.detourMinutes} min off the route (${place.detourMiles} mi)` : null].filter(Boolean).join(' · ')}
-          </Text>
+          {/*
+            The rating is drawn, not typed. This line read `★ ${place.rating}`,
+            and a ★ character is exactly the thing the icon set exists to stop
+            (Codex, 8 Sep 2026) — Epic has one glyph for a rating and it comes
+            from `Icon.tsx`.
+          */}
+          <View style={styles.addFacts}>
+            {place.rating != null ? <Rating value={place.rating} /> : null}
+            <Text style={type.small} numberOfLines={2}>
+              {[place.category ? cap(place.category) : null, money(place.priceLevel),
+                place.detourMinutes != null ? `about ${place.detourMinutes} min off the route (${place.detourMiles} mi)` : null].filter(Boolean).join(' · ')}
+            </Text>
+          </View>
 
           <View style={styles.legs}>
             {([['out', 'On the way', 0.95], ['back', 'On the way back', 1.35], [null, 'No time yet', 1]] as const).map(([k, label, flex]) => (
@@ -3009,7 +3018,8 @@ const styles = StyleSheet.create({
   signpost: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 14, padding: 12, paddingHorizontal: 14, borderRadius: 12, backgroundColor: colors.primary },
   signIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   signTitle: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.primaryFg },
-  signSub: { fontFamily: fonts.body, fontSize: 12, color: '#C9C5C2' },
+  signSub: { fontFamily: fonts.body, fontSize: 12, color: colors.mutedOnInk },
+  addFacts: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   // The wizard (§16–18).
   progSeg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.line },
   progSegOn: { backgroundColor: colors.ink },

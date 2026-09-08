@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, HouseholdResponse, Take, Venue, Visit, VisitTake, VisitTakeInput } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from './ui';
-import { CategoryIcon, Icon } from './Icon';
+import { CategoryIcon, Icon, IconText } from './Icon';
 import { VenuePhoto } from './VenuePhoto';
 import { FaceRow } from './Faces';
 import { TakePicker, TakeRow } from './TakePicker';
@@ -139,7 +139,16 @@ export function BeenCapture({ venue, household, onCreate, onSaved, onMore }: {
           <Button label="Save" onPress={() => save(takes, 'some')} loading={busy === 'some'} />
           <Button label="Back" kind="ghost" onPress={() => setMode('ask')} />
         </Row>
-        <Text style={type.tiny}>♥ loved it · – it was fine · ✕ not for us</Text>
+        {/*
+          The key to the three buttons above, drawn with the same glyphs they
+          are — it was typed as ♥ · – · ✕, which is the one thing the icon set
+          exists to prevent (Codex, 8 Sep 2026).
+        */}
+        <View style={styles.key}>
+          <IconText name="favourite">loved it</IconText>
+          <Text style={type.tiny}>· – it was fine ·</Text>
+          <IconText name="close">not for us</IconText>
+        </View>
       </View>
     );
   }
@@ -240,6 +249,7 @@ export function VisitForm({ venue, household, onDone, onCancel, initial, createV
 }
 
 const styles = StyleSheet.create({
+  key: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
     borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,

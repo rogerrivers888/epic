@@ -3,6 +3,7 @@ import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View }
 import { api, KeyReport, SourcesStatus, SpendLine, SpendResponse, SpendSeries } from '../api';
 import { Comparison, MonthBars } from './SpendChart';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { Icon } from './Icon';
 import { Button, Card, Chip, FoldLine, Meter, Row, Segmented, StatusLine, Wrap } from './ui';
 import { useViewport } from '../hooks/useViewport';
 
@@ -297,7 +298,7 @@ function ProviderDrawer({ line, period, spend, series, initialMonth, source, onC
                 <Text style={type.h2}>{line.label}</Text>
                 <Text style={type.small}>{line.what}</Text>
               </View>
-              <Pressable onPress={onClose} style={styles.close} accessibilityLabel="Close"><Text style={{ fontSize: 20 }}>✕</Text></Pressable>
+              <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={20} color={colors.ink} strokeWidth={2.2} /></Pressable>
             </Row>
             {line.key === line.source && line.key !== 'claude' ? (
               <Row style={{ justifyContent: 'space-between' }}>

@@ -109,6 +109,15 @@ const LIGHT = {
   selectedFg: ON_LIME,
   hover: LIME_TINT,
   /**
+   * The second line on an ink ground — a tile that is on, the map signpost.
+   *
+   * `inkMuted` is grey 700 and reads as muted against cream; on ink it is very
+   * nearly invisible, which is why a hex kept being written into the screens
+   * instead (Codex, 8 Sep 2026). This is that grey, named, so the rule that
+   * every colour comes from here can actually be kept.
+   */
+  mutedOnInk: '#C9C5C2',
+  /**
    * The three grounds of the v2 menu bar (handoff "Shared header - v2").
    *
    * `switchOff` is the half of the pair you are not in: a warm neutral grey
@@ -198,6 +207,7 @@ const DARK: typeof LIGHT = {
   selected: LIME,
   selectedFg: ON_LIME,
   hover: D.limeTint,
+  mutedOnInk: '#C9C5C2',
   switchOff: D.bubble,
   onLimeMuted: '#335200',  // oklch(0.40 0.11 130) - on the band, which stays lime in the dark
   bandSub: '#34440D',      // oklch(0.36 0.08 125)
