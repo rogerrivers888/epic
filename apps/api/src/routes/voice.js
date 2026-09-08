@@ -104,6 +104,21 @@ export async function vocabularyFor(household) {
 }
 
 // ---------------------------------------------------------------------------
+// what the app needs to know before it records
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /config — the limits, from the one place they are set.
+ *
+ * The app taps Done for the household at the recording limit rather than lose
+ * five minutes of talking to a 413, and that number has to be this server's
+ * number, not a copy of its default (Codex review, 8 Sep 2026).
+ */
+router.get('/config', (req, res) => {
+  res.json({ configured: openaiEnabled() && !sourceOff(PROVIDER), maxSeconds: VOICE_MAX_SECONDS, minutesMonthly: VOICE_MINUTES_MONTHLY, liveSessionsDaily: VOICE_LIVE_SESSIONS_DAILY });
+});
+
+// ---------------------------------------------------------------------------
 // stage one
 // ---------------------------------------------------------------------------
 
@@ -192,7 +207,8 @@ router.post('/live-token', async (req, res, next) => {
     const { hint, keywords } = await vocabularyFor(household);
     const token = await mintLiveToken({ language, hint, keywords, seconds: 120 });
     await providerCalls.recordMetered({ householdId: household.id, sessionId, provider: PROVIDER, purpose: 'speech.live.start', units: { 'openai-live-sessions': 1 }, costUsd: 0 });
-    res.json({ ...token, language, maxSeconds: VOICE_MAX_SECONDS });
+    const { refusals: _refusals, ...safe } = token;
+    res.json({ ...safe, language, maxSeconds: VOICE_MAX_SECONDS });
   } catch (err) { next(err); }
 });
 
@@ -296,19 +312,27 @@ adminRouter.get('/utterances', requires('manage_settings'), (req, res) => {
  * fifth of a second of silence, so a wrong model name, a refused parameter or
  * a key on the wrong project reads as a sentence here rather than a guess.
  */
-adminRouter.get('/probe', requires('manage_settings'), async (req, res) => {
+adminRouter.get('/probe', requires('manage_settings'), async (req, res, next) => {
   const out = { configured: openaiEnabled(), switchedOff: sourceOff(PROVIDER), live: null, transcribe: null };
-  if (out.configured && !out.switchedOff) {
+  if (!out.configured || out.switchedOff) return res.json(out);
+  try {
+    // A check spends like a call, and is bounded and written down like one.
+    const household = await currentHousehold();
+    const sessionId = sessionOf(req, null);
+    await assertWithinBounds({ householdId: household.id, sessionId });
+    await assertMinutes(household.id, 1);
     try {
       const t = await mintLiveToken({ language: 'en', seconds: 10 });
-      out.live = { ok: true, model: t.model, url: t.url, fellBack: t.fellBack, dropped: t.dropped };
+      await providerCalls.recordMetered({ householdId: household.id, sessionId, provider: PROVIDER, purpose: 'speech.live.start.probe', units: { 'openai-live-sessions': 1 }, costUsd: 0 });
+      out.live = { ok: true, model: t.model, url: t.url, fellBack: t.fellBack, dropped: t.dropped, refusals: t.refusals };
     } catch (err) { out.live = { ok: false, code: err.code, message: err.message, detail: err.detail ?? null }; }
     try {
       const o = await transcribe({ audio: silentWav(0.2), mime: 'audio/wav', language: 'en' });
-      out.transcribe = { ok: true, model: o.model, fellBack: o.fellBack, dropped: o.dropped, ms: o.ms };
+      await providerCalls.recordMetered({ householdId: household.id, sessionId, provider: PROVIDER, purpose: 'speech.transcribe.probe', units: { [UNIT]: 0.004 }, costUsd: minuteCost(o.model, 0.2) });
+      out.transcribe = { ok: true, model: o.model, fellBack: o.fellBack, dropped: o.dropped, refusals: o.refusals, ms: o.ms };
     } catch (err) { out.transcribe = { ok: false, code: err.code, message: err.message, detail: err.detail ?? null }; }
-  }
-  res.json(out);
+    res.json(out);
+  } catch (err) { next(err); }
 });
 
 /** A WAV of nothing, for the probe: 16 kHz, mono, 16-bit. */

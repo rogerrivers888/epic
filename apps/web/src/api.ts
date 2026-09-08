@@ -1745,6 +1745,7 @@ export const api = {
   // --- voice: the two stages (routes/voice.js) -------------------------------
   // The recording itself goes through `voice/client.ts`, not here: it is the
   // one body in the app that is not JSON and must never be cached or queued.
+  voiceConfig: () => request<VoiceConfig>('/api/voice/config'),
   voiceLiveToken: (body: { language?: string | null; sessionId?: string | null }) => post<VoiceLiveToken>('/api/voice/live-token', body),
   voiceLiveUsed: (body: { seconds: number; sessionId?: string | null; model?: string | null }) => post<{ recorded: boolean }>('/api/voice/live-used', body),
   voicePlan: (body: { transcript: string; language?: string | null; sessionId?: string | null; context?: Record<string, unknown> | null }) => post<VoicePlanResponse>('/api/voice/plan', body),
@@ -2639,6 +2640,7 @@ export type OfflineManifest = {
 
 // --- voice ------------------------------------------------------------------
 
+export type VoiceConfig = { configured: boolean; maxSeconds: number; minutesMonthly: number; liveSessionsDaily: number };
 export type VoiceLiveToken = {
   token: string; expiresAt: string | null; model: string; url: string; sampleRate: number; fellBack?: boolean;
   language: string | null; maxSeconds: number;

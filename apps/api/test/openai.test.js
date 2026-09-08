@@ -181,3 +181,12 @@ test('extract asks for little reasoning, and drops it for a model that has none'
   assert.ok(!('reasoning' in calls[1].body));
   assert.equal(calls[1].body.store, false, 'only the refused field goes');
 });
+
+test('a stream with Windows line ends and one object per line is still read', async () => {
+  const sse = 'data: {"type":"transcript.text.delta","delta":"Four "}\r\ndata: {"type":"transcript.text.delta","delta":"nights."}\r\n\r\ndata: {"type":"transcript.text.done","text":"Four nights."}\r\n\r\n';
+  const pieces = [];
+  const out = await readTranscriptStream(new Response(sse), (d) => pieces.push(d));
+  assert.deepEqual(pieces, ['Four ', 'nights.']);
+  assert.equal(out.text, 'Four nights.');
+  assert.deepEqual(out.events.sort(), ['transcript.text.delta', 'transcript.text.done']);
+});

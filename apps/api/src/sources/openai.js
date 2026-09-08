@@ -177,6 +177,7 @@ export async function transcribe({ audio, mime, filename, language = null, hint 
   const ladder = model ? [model] : FILE_LADDER;
   const started = Date.now();
   const dropped = new Set(); // optional fields a model refused: sent without them from then on
+  const refusals = [];       // and what it said about each, for the probe
   for (let i = 0; i < ladder.length; i += 1) {
     const m = ladder[i];
     const form = new FormData();
@@ -205,12 +206,12 @@ export async function transcribe({ audio, mime, filename, language = null, hint 
     if (!res.ok) {
       const f = await failure(res);
       const field = isParamRefusal(f) ? refusedField(f) : null;
-      if (field && !dropped.has(field) && dropped.size < 4) { dropped.add(field); i -= 1; continue; }
+      if (field && !dropped.has(field) && dropped.size < 4) { dropped.add(field); refusals.push({ field, said: f.message }); i -= 1; continue; }
       if (isModelRefusal(f) && i < ladder.length - 1) continue;
       throw plain(f);
     }
     const out = await readTranscript(res, stream ? onDelta : null);
-    return { ...out, model: m, ms: Date.now() - started, fellBack: m !== ladder[0], dropped: [...dropped] };
+    return { ...out, model: m, ms: Date.now() - started, fellBack: m !== ladder[0], dropped: [...dropped], refusals };
   }
   throw new VoiceProviderError('voice_unavailable', "Epic couldn't hear that just now. Try again, or type it.", 'no transcription model answered');
 }
@@ -257,11 +258,21 @@ export async function readTranscriptStream(res, onDelta) {
   let segments = '';
   let done = null;
   const seen = new Set();
+  // One event per `data:` line. The standard allows an event's data to span
+  // several lines, but the provider writes one JSON object per line — and
+  // joining lines that are each whole objects makes something nothing can
+  // parse (the first deployed run read 13 s of speech into "", 8 Sep 2026).
   const handle = (raw) => {
-    const data = raw.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
-    if (!data || data === '[DONE]') return;
-    let ev;
-    try { ev = JSON.parse(data); } catch { return; }
+    for (const line of raw.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      let ev;
+      try { ev = JSON.parse(data); } catch { continue; }
+      event(ev);
+    }
+  };
+  const event = (ev) => {
     const type = String(ev.type ?? '');
     seen.add(type);
     // Judged by shape as much as by name: a `.delta` with a delta is a piece,
@@ -275,7 +286,7 @@ export async function readTranscriptStream(res, onDelta) {
   for (;;) {
     const { value, done: end } = await reader.read();
     if (end) break;
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
     let at;
     while ((at = buffer.indexOf('\n\n')) >= 0) { handle(buffer.slice(0, at)); buffer = buffer.slice(at + 2); }
   }
@@ -304,6 +315,7 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
   if (!openaiEnabled()) throw notConfigured();
   const ladder = model ? [model] : LIVE_LADDER;
   const dropped = new Set();
+  const refusals = [];
   for (let i = 0; i < ladder.length; i += 1) {
     const m = ladder[i];
     const transcription = { model: m };
@@ -335,12 +347,13 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
     if (!res.ok) {
       const f = await failure(res);
       const field = isParamRefusal(f) ? refusedField(f) : null;
-      if (field && !dropped.has(field) && dropped.size < 4) { dropped.add(field); i -= 1; continue; }
+      if (field && !dropped.has(field) && dropped.size < 4) { dropped.add(field); refusals.push({ field, said: f.message }); i -= 1; continue; }
       if (isModelRefusal(f) && i < ladder.length - 1) continue;
       throw plain(f);
     }
     const j = await res.json();
     return {
+      refusals,
       token: j.value,
       expiresAt: j.expires_at ? new Date(j.expires_at * 1000).toISOString() : null,
       model: m,

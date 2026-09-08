@@ -21,7 +21,7 @@ test('the household’s own answers are kept whole', () => {
 });
 
 test('an endpoint nobody has thought about is not saved', () => {
-  for (const path of ['/api/plan/preview', '/api/discover', '/api/menu/read', '/api/places/where', '/api/something/new', '/api/voice/transcribe', '/api/voice/plan', '/api/voice/live-token']) {
+  for (const path of ['/api/plan/preview', '/api/discover', '/api/menu/read', '/api/places/where', '/api/something/new', '/api/voice/transcribe', '/api/voice/plan', '/api/voice/live-token', '/api/voice/config']) {
     assert.equal(storable(path, { anything: true }), null, `${path} must not be saved by default`);
   }
 });

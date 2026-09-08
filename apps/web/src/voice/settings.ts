@@ -76,5 +76,19 @@ const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((fn) => fn());
 export const onVoiceSettingsChange = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 
-/** The longest one turn may run, in seconds: the API refuses a longer recording (EPIC_VOICE_MAX_SECONDS, default 300). */
-export const VOICE_MAX_SECONDS = 300;
+/**
+ * The longest one turn may run, in seconds. The API refuses a longer recording
+ * (EPIC_VOICE_MAX_SECONDS), so the number has to be the server's: it is asked
+ * for once and kept, and 300 — the server's own default — stands in only until
+ * the answer arrives or when it never does.
+ */
+export const VOICE_MAX_SECONDS_FALLBACK = 300;
+let maxSeconds = VOICE_MAX_SECONDS_FALLBACK;
+let asked: Promise<number> | null = null;
+export const voiceMaxSeconds = () => maxSeconds;
+export function loadVoiceLimits(fetchConfig: () => Promise<{ maxSeconds: number }>): Promise<number> {
+  if (!asked) {
+    asked = fetchConfig().then((c) => { if (c?.maxSeconds > 0) maxSeconds = c.maxSeconds; return maxSeconds; }).catch(() => { asked = null; return maxSeconds; });
+  }
+  return asked;
+}

@@ -3,7 +3,8 @@ import { Platform } from 'react-native';
 import { LiveTranscriber, LiveState, liveSupported } from '../voice/live';
 import { Recorder, closeMicrophone, openMicrophone, recordingSupported } from '../voice/recorder';
 import { transcribeRecording } from '../voice/client';
-import { VOICE_MAX_SECONDS, VoiceMode, getVoiceConfirm, getVoiceLanguage, getVoiceMode, onVoiceSettingsChange } from '../voice/settings';
+import { VoiceMode, getVoiceConfirm, getVoiceLanguage, getVoiceMode, loadVoiceLimits, onVoiceSettingsChange, voiceMaxSeconds } from '../voice/settings';
+import { api } from '../api';
 
 /**
  * Speech in — one hook, five ways of hearing, chosen in Settings › Voice
@@ -98,6 +99,8 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
   const supported = mode === 'browser' ? browserAvailable() : recordingSupported();
 
   useEffect(() => onVoiceSettingsChange(() => { if (phaseRef.current === 'idle') setMode(usable(getVoiceMode())); }), []);
+  // The recording limit is the server's number, asked for once (Codex review, 8 Sep 2026).
+  useEffect(() => { void loadVoiceLimits(api.voiceConfig); }, []);
 
   // --- the browser recogniser -------------------------------------------------
   useEffect(() => {
@@ -307,8 +310,9 @@ export function useSpeech({ onFinal, lang = 'en-GB', confirm, sessionId = null }
   // The hard limit: the API refuses a longer recording, so rather than lose
   // five minutes of talking, Done is tapped for them and the screen says why.
   useEffect(() => {
-    if (phase !== 'listening' || seconds < VOICE_MAX_SECONDS) return;
-    setError(`That's the limit — ${Math.round(VOICE_MAX_SECONDS / 60)} minutes. Writing it down.`);
+    const limit = voiceMaxSeconds();
+    if (phase !== 'listening' || seconds < limit) return;
+    setError(`That's the limit — ${Math.round(limit / 60)} minutes. Writing it down.`);
     void stop();
   }, [phase, seconds, stop]);
 

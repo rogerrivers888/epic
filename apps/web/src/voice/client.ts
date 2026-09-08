@@ -96,7 +96,7 @@ export async function transcribeRecording({ blob, mime, seconds, language = null
   for (;;) {
     const { value, done: end } = await reader.read();
     if (end) break;
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
     let at: number;
     while ((at = buffer.indexOf('\n\n')) >= 0) { handle(buffer.slice(0, at)); buffer = buffer.slice(at + 2); }
   }
