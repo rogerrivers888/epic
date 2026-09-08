@@ -652,12 +652,41 @@ const waiting = [];
 const queued = new Set();
 let running = 0;
 
+/**
+ * How long one place may hold the queue.
+ *
+ * `enrich` awaits the open map, the venue's own page and the encyclopedias, and
+ * not every one of those has a timeout of its own. With `CONCURRENCY` at one, a
+ * single request that never settles holds the only slot for the life of the
+ * process — and that is exactly what happened: seven hundred and fifty jobs
+ * queued across a hundred minutes and not one place was identified, while the
+ * same `enrich` run straight from a route finished in seconds (found 8 Sep
+ * 2026). The work was never the problem; nothing could get to it.
+ *
+ * Generous, because a real research pass legitimately takes the better part of
+ * a minute. It is a deadlock guard, not a performance budget.
+ */
+const JOB_TIMEOUT_MS = Number(process.env.EPIC_ENRICH_TIMEOUT_MS || 120_000);
+
+/** Whichever comes first: the work, or giving the next place its turn. */
+function withDeadline(promise, venueRef) {
+  let timer = null;
+  const bell = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`own: ${venueRef} gave up its turn after ${Math.round(JOB_TIMEOUT_MS / 1000)}s`);
+      resolve(null);
+    }, JOB_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  return Promise.race([promise, bell]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
 function pump() {
   while (running < CONCURRENCY && waiting.length) {
     const job = waiting.shift();
     queued.delete(job.venueRef);
     running += 1;
-    enrich(job.venueRef, job)
+    withDeadline(enrich(job.venueRef, job), job.venueRef)
       .catch((err) => console.warn(`own: ${job.venueRef} failed: ${err.message}`))
       .finally(() => { running -= 1; pump(); });
   }
