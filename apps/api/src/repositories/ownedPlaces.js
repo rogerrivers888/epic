@@ -185,11 +185,19 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
  * a household would actually see are identified first.
  */
 export async function needingKind(limit = 25) {
-  // No ceiling on attempts here, deliberately. All 764 of these had spent all
-  // six, and every one was spent on a question that could not be answered: the
-  // loop re-queued them with no seed, so `enrich` had no name and no point to
-  // search the open map with and failed on the spot. Attempts made without a
-  // seed are not evidence about the place, and this pass brings one.
+  // No ceiling on attempts, deliberately. All 764 of these had spent all six,
+  // and every one was spent on a question that could not be answered: the loop
+  // re-queued them with no seed, so `enrich` had no name and no point to search
+  // the open map with and failed on the spot. Attempts made without a seed are
+  // not evidence about the place, and this pass brings one.
+  //
+  // But least-tried first, or the pass never moves. Ranked by prominence alone
+  // it handed back the same twenty-five every time — and OpenStreetMap has
+  // never heard of some of them, so those twenty-five failed, were asked again,
+  // and failed again while seven hundred untried places waited behind them
+  // (found 8 Sep 2026: fourteen batches, three hundred and fifty jobs, backlog
+  // unchanged). Attempts ascending rotates through the whole list, and anything
+  // that keeps failing sinks to the bottom by itself.
   //
   // `distinct on` has to be ordered by its own key first, so the ranking has to
   // happen outside it — ordered inside, the limit took an arbitrary slice in
@@ -197,7 +205,7 @@ export async function needingKind(limit = 25) {
   const { rows } = await query(
     `select venue_ref, name, lat, lng, website from (
        select distinct on (r.venue_ref)
-              r.venue_ref, p.name, p.lat, p.lng, p.website, p.epic_score
+              r.venue_ref, p.name, p.lat, p.lng, p.website, p.epic_score, r.enrich_attempts
          from place_records r
          join scout_places p on p.venue_ref = r.venue_ref
         where r.category is null
@@ -205,7 +213,7 @@ export async function needingKind(limit = 25) {
           and p.name is not null and p.lat is not null and p.lng is not null
         order by r.venue_ref, p.epic_score desc nulls last
      ) best
-      order by epic_score desc nulls last
+      order by enrich_attempts asc, epic_score desc nulls last
       limit $1`,
     [limit],
   );
