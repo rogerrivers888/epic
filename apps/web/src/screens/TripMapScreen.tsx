@@ -70,7 +70,12 @@ const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string;
   { key: 'shortlist', label: saved ? `Shortlist (${saved})` : 'Shortlist', icon: 'shortlist' },
 ];
 
-/** The height of the tab bar the shell draws under this screen. */
+/**
+ * The height of the tab bar the shell draws under this screen — and nothing at
+ * all inside a browse, where the shell takes it away (`isImmersive`, routes.ts).
+ * Reserving room for a bar that is not there floats the sheet seventy pixels
+ * off the bottom of the screen.
+ */
 const TABBAR = 70;
 /**
  * The picture on a row: a landscape rectangle, the shape Inspire uses, at a
@@ -618,7 +623,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * the way out is the header's own Back.
    */
   const covering = !wide && section === 'group';
-  const heights = detentHeights(height, wide ? 0 : TABBAR);
+  /**
+   * What is actually under the sheet. Nothing, in a browse: the shell drops the
+   * tab bar for the whole of one (trips V2), and reserving seventy pixels for a
+   * bar that is not there leaves the sheet floating off the bottom edge.
+   */
+  const bar = wide || covering || pill ? 0 : TABBAR;
+  const heights = detentHeights(height, bar);
   /**
    * Two different numbers, deliberately.
    *
@@ -629,7 +640,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * is why home had a label and the destination did not — a few pixels either
    * side of the same edge (owner, 7 Sep 2026).
    */
-  const covered = heights[detent] + TABBAR + 48;
+  const covered = heights[detent] + bar + 48;
   const mapPadding = wide
     ? { top: 40, bottom: 40, left: 40, right: 460 }
     : { top: 96, bottom: covered + 36, left: 28, right: 28 };
@@ -1114,7 +1125,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           drawer mode… I should not see the activities, food, and drink pills").
           The sheet's own header carries the way back. */}
       {!wide && !covering && detent !== 'full' ? (
-        <View style={{ position: 'absolute', left: 0, right: 0, bottom: heights[detent] + TABBAR + 10, zIndex: 2 }} pointerEvents="box-none">
+        <View style={{ position: 'absolute', left: 0, right: 0, bottom: heights[detent] + bar + 10, zIndex: 2 }} pointerEvents="box-none">
           {!pill && detent === 'peek' ? <Text style={styles.nudge}>Pick one — we'll search along the route</Text> : null}
           {pills}
         </View>
@@ -1133,7 +1144,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           </View>
         </View>
       ) : (
-        <BottomSheet detent={covering ? 'full' : detent} onDetent={setDetent} header={header} screenHeight={height} insetBottom={TABBAR} cover={covering} listRef={listRef}>
+        <BottomSheet detent={covering ? 'full' : detent} onDetent={setDetent} header={header} screenHeight={height} insetBottom={bar} cover={covering} listRef={listRef}>
           {body}
         </BottomSheet>
       )}
@@ -1173,7 +1184,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         whole card opens the place; the × puts it away.
       */}
       {pins === 'card' && cardFor && !drawer ? (
-        <View style={[styles.cardWrap, { bottom: heights[detent] + TABBAR + 62 }]} pointerEvents="box-none">
+        <View style={[styles.cardWrap, { bottom: heights[detent] + bar + 62 }]} pointerEvents="box-none">
           <Pressable onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
             <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={83} height={83} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
@@ -1680,8 +1691,11 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
           <View style={styles.halfRating}>
             {place.rating != null ? (
               <Stars value={place.rating} size={13}>
-                <Text style={styles.halfRatingText}>{place.rating.toFixed(1)}</Text>
-                {place.ratingCount ? <Text style={styles.halfReviews}>{`${place.ratingCount.toLocaleString()} reviews`}</Text> : null}
+                {/* One string: two adjacent <Text> runs set solid, and
+                    "4.8" beside "309 reviews" read as 4.8309. */}
+                <Text style={styles.halfRatingText}>
+                  {`${place.rating.toFixed(1)}${place.ratingCount ? ` · ${place.ratingCount.toLocaleString()} reviews` : ''}`}
+                </Text>
               </Stars>
             ) : <Text style={type.small}>No rating yet</Text>}
           </View>
@@ -1735,10 +1749,15 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
 
       {place.summary ? <Text style={styles.halfSummary} numberOfLines={3}>{place.summary}</Text> : null}
 
+      {/* What it is, then what is true about it today. A line is only drawn
+          where there is something to put on it — a lone "·" was the shape of
+          this before, on every attraction the sources gave no type for. */}
       <View style={styles.halfLines}>
-        <Text style={styles.halfType}>{kitchen(place) ?? plainCategory(place.category)}</Text>
-        {open ? <Text style={[styles.halfFact, open.strong && { color: colors.accent, fontWeight: '600' }]}>{`· ${open.text}`}</Text> : null}
-        {money(place.priceLevel) ? <Text style={styles.halfFact}>{`· ${money(place.priceLevel)}`}</Text> : null}
+        {kitchen(place) ?? plainCategory(place.category)
+          ? <Text style={styles.halfType}>{kitchen(place) ?? plainCategory(place.category)}</Text>
+          : null}
+        {open ? <Text style={[styles.halfFact, open.strong && { color: colors.accent, fontWeight: '600' }]}>{open.text}</Text> : null}
+        {money(place.priceLevel) ? <Text style={styles.halfFact}>{money(place.priceLevel)}</Text> : null}
       </View>
 
       <Pressable onPress={onOpen} style={styles.moreInfo} accessibilityRole="button">
@@ -2525,6 +2544,17 @@ function alongToItem(p: TripAlongPlace): BrowseItem {
     startsAt: null, endsAt: null, pinned: false, source: p.source,
     cuisines: p.cuisines ?? [], experiences: p.experiences ?? [],
     address: p.address, website: p.website, openingHours: p.openingHours,
+    /**
+     * Everything the row already had.
+     *
+     * These were dropped on the way in, so the full view opened on a blank
+     * hero and an empty title row and then re-fetched, from the source, facts
+     * that were sitting in the list you tapped. The picture is the first thing
+     * that screen is for, and it was the first thing to go.
+     */
+    photos: p.photos ?? [], attribution: p.attribution ?? null,
+    rating: p.rating, ratingCount: p.ratingCount, priceLevel: p.priceLevel,
+    summary: p.summary,
   };
 }
 

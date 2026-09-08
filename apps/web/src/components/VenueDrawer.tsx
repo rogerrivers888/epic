@@ -3,7 +3,7 @@ import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Tex
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
 import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
-import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, fonts, radius, spacing, TARGET, type, BORDER, CREAM, INK, LIME } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
 import { MenuPanel, OrderPanel, PastMeals, StaffSheet, useMenuOrder } from './MenuOrder';
 import { FamilyVerdict } from './FamilyVerdict';
@@ -43,6 +43,18 @@ type Tab = 'overview' | 'travel' | 'reviews' | 'menu' | 'order' | 'inside';
 
 // Somewhere you eat, where the menu is worth a row of its own.
 const EATING = new Set(['restaurant', 'cafe', 'bar', 'pub']);
+
+/**
+ * One width for every rented photograph in the app, and the one `VenueThumb`
+ * already asks for.
+ *
+ * A different width is a different fetch: the same picture at 960 is a second
+ * trip to Google that the row's 480 has not paid for, and the hero was asking
+ * for exactly that. On this household's quota it came back 429 and the hero
+ * was a blank green rectangle — the row's thumbnail beside it loading fine
+ * from the copy already cached. So: one size, one fetch, one photograph.
+ */
+const PHOTO_W = 480;
 
 /**
  * Open today, or not. Google decides `openNow` in the place's own timezone, so
@@ -387,6 +399,33 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     enabled: !!item && EATING.has(item.category),
   });
 
+  /**
+   * Send this place to somebody.
+   *
+   * The venue's own page where it has one, and its name and address where it
+   * does not — never a link into Epic, which the person receiving it cannot
+   * open. `navigator.share` on a phone, the clipboard everywhere else, and a
+   * tick for a second so the tap is not silent.
+   *
+   * Above the `if (!item)` below, with the rest of the hooks: React counts
+   * them, and one declared after an early return is a drawer that crashes the
+   * moment it is opened.
+   */
+  const [shared, setShared] = useState(false);
+  const sharePlace = async () => {
+    if (!item) return;
+    const url = venue?.website ?? item.website ?? null;
+    const text = [item.name, venue?.address ?? item.address ?? null].filter(Boolean).join(', ');
+    try {
+      const nav = (globalThis as any).navigator;
+      if (nav?.share) await nav.share({ title: item.name, text, ...(url ? { url } : {}) });
+      else if (nav?.clipboard) await nav.clipboard.writeText(url ?? text);
+      else return;
+      setShared(true);
+      setTimeout(() => setShared(false), 1500);
+    } catch { /* a share somebody cancelled is not an error worth a screen */ }
+  };
+
   if (!item) return null;
   const v = venue ?? undefined;
   // A place the atlas holds only by identifier takes its name from the source when the drawer opens.
@@ -409,7 +448,21 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   // with, and where "Been again" belongs, both turn on it.
   const been = (visits?.length ?? 0) > 0;
   const sourceName = SOURCE_LABEL[source] ?? source;
-  const photoUri = (p: { ref?: string; url?: string }, w: number) => p.url ?? (p.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(p.ref)}&w=${w}` : null);
+  /**
+   * A rented photograph, with the signature that lets it through the door.
+   *
+   * `sig`/`exp` come stamped on the reference (api/sources/photoLinks.js) and
+   * are what makes the picture load in a browser that blocks third-party
+   * cookies — which is Safari, and soon Chrome — where the session cookie the
+   * route used to lean on never arrives. Without them every hero in this
+   * drawer was a blank green rectangle; `VenueThumb` has sent them all along,
+   * which is why a row's thumbnail worked and the picture it opened did not.
+   */
+  const photoUri = (p: { ref?: string; url?: string; sig?: string; exp?: number }) =>
+    p.url ?? (p.ref
+      ? `${API_URL}/api/photos/google?name=${encodeURIComponent(p.ref)}&w=${PHOTO_W}`
+        + (p.sig && p.exp ? `&s=${encodeURIComponent(p.sig)}&e=${p.exp}` : '')
+      : null);
 
   const eating = EATING.has(item.category);
   const basket = ctl.menu ? ctl.chosen.length : ctl.order?.items.length ?? 0;
@@ -459,8 +512,17 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     const owned = item.image;
     // A mark stretched across 220px is a smear; it has its own place below.
     if (owned && owned.source !== 'logo') return { uri: `${API_URL}/api/images/${owned.id}/960`, lqip: owned.lqip ?? null };
-    const photo = item.photos?.[0];
-    const uri = photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=960` : null);
+    /*
+      The first photograph that will actually load, from either list.
+      
+      A rented reference needs its signature to get through the door, and the
+      two lists do not always carry one — preferring whichever list happened to
+      be longer put an unsigned reference in the hero and the picture 401'd,
+      which on screen is a green rectangle with no explanation.
+    */
+    const usable = [...(item.photos ?? []), ...(venue?.photos ?? [])]
+      .find((ph) => ph.url || (ph.ref && ph.sig && ph.exp));
+    const uri = usable ? photoUri(usable) : null;
     return uri ? { uri, lqip: null } : null;
   })();
   const travelBits = [
@@ -517,6 +579,27 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               <View style={styles.hero}>
                 {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
                 <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
+                {/*
+                  The two things you do to a place you are looking at, on the
+                  picture where your thumb already is (trips V2). Cream tiles
+                  rather than bare glyphs: a photograph can be any colour, and
+                  these have to be legible on all of them.
+                */}
+                <View style={styles.heroTiles}>
+                  <Pressable onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
+                    <Icon name={shared ? 'check' : 'external'} size={18} color={INK} />
+                  </Pressable>
+                  {onShortlist ? (
+                    <Pressable onPress={() => onShortlist(item)} style={styles.heroTile} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                      <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
+                    </Pressable>
+                  ) : null}
+                </View>
+                {/* How many there are, so one photograph does not look like all
+                    there is. Only when there is more than one. */}
+                {photos.length > 1 ? (
+                  <View style={styles.heroCount}><Text style={styles.heroCountText}>{`1 / ${photos.length}`}</Text></View>
+                ) : null}
               </View>
             ) : null}
             {/* A strip on the 2px ink rule, not a row of pills (Inspire rework,
@@ -641,7 +724,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
                   {photos.length ? (
                     <View style={{ gap: spacing.sm }}>
-                      {photos.map((p, i) => <Hero key={i} uri={photoUri(p, 800)} attribution={p.attribution ?? null} />)}
+                      {photos.map((p, i) => <Hero key={i} uri={photoUri(p)} attribution={p.attribution ?? null} />)}
                     </View>
                   ) : null}
 
@@ -737,7 +820,16 @@ const styles = StyleSheet.create({
   ratingBit: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ratingValue: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.accent },
   // Full-bleed: the head's gutter is given back on both sides.
-  hero: { height: 220, marginHorizontal: -spacing.lg, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
+  // 300 rather than 220 (trips V2): the picture is the first thing the full
+  // view is for, and at 220 it read as a banner over a page of text.
+  hero: { height: 300, marginHorizontal: -spacing.lg, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
+  heroTiles: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
+  // CREAM rather than the palette's surface, on purpose: a photograph is a
+  // photograph in either theme, and a tile that turns near-black in the dark
+  // disappears into half the pictures it sits on.
+  heroTile: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: CREAM },
+  heroCount: { position: 'absolute', right: 12, bottom: 12, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: CREAM },
+  heroCountText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: INK },
   // Two columns, ruled top and bottom and between — the handoff's facts grid.
   facts: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.lineSoft, marginTop: spacing.sm },
   fact: { flex: 1, paddingVertical: spacing.md, paddingRight: spacing.md, gap: 4 },

@@ -331,12 +331,25 @@ test('two changes in one tap compose instead of racing', () => {
 
 test('the sheet’s three detents fit the screen they are on', async () => {
   const { detentHeights } = await import('../src/components/detents.ts');
-  // A phone, as the handoff draws it: peek 112, half 470, full to 60 from the top.
+  /**
+   * A phone, as the handoff draws it — and said the way the handoff says it,
+   * which is how much *map* is left: 672 down, 310 by default, 100 up (trips
+   * V2). Under a tab bar there are seventy fewer pixels to hand out.
+   */
   const phone = detentHeights(844, 70);
-  assert.equal(phone.peek, 112);
-  assert.equal(phone.half, 470);
-  assert.equal(phone.full, 844 - 60 - 70);
+  assert.equal(phone.half, 844 - 70 - 310);
+  assert.equal(phone.full, 844 - 70 - 100);
+  // Peek wants the handoff's 672 of map, and stops at 120 — below that there
+  // is not room for the handle, the title and the line under it, which is the
+  // whole of what the drawer-down state is for.
+  assert.equal(phone.peek, Math.max(120, 844 - 70 - 672));
   assert.ok(phone.peek < phone.half && phone.half < phone.full, 'the detents must be in order');
+
+  // Inside a browse the shell takes the tab bar away, so the sheet gets it.
+  const browsing = detentHeights(844, 0);
+  assert.equal(browsing.half, 844 - 310);
+  assert.equal(browsing.peek, 844 - 672, 'with no bar under it, peek is the handoff’s own number');
+  assert.ok(browsing.half > phone.half, 'no tab bar means more sheet, not a gap under it');
 
   // A short window — a laptop in the phone frame, or a browser with the
   // developer tools open — cannot have a half taller than its full.
@@ -346,7 +359,8 @@ test('the sheet’s three detents fit the screen they are on', async () => {
 
   // And an absurdly short one still leaves something to hold on to.
   const tiny = detentHeights(200, 70);
-  assert.ok(tiny.full >= 320, 'the sheet never collapses to nothing');
+  assert.ok(tiny.full >= 300, 'the sheet never collapses to nothing');
+  assert.ok(tiny.peek <= tiny.half && tiny.half <= tiny.full, 'and stays in order doing it');
 });
 
 /**

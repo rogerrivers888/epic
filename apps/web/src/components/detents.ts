@@ -16,9 +16,18 @@ export type Detent = 'peek' | 'half' | 'full';
 export const DETENTS: Detent[] = ['peek', 'half', 'full'];
 
 export function detentHeights(screenHeight: number, insetBottom: number): Record<Detent, number> {
-  const full = Math.max(320, screenHeight - 60 - insetBottom);
-  // 470 on the 844-tall phone the handoff draws, and two thirds of whatever is
-  // there on anything else — so a short window shrinks the half rather than
-  // ending up with a half taller than its full.
-  return { peek: Math.min(112, full), half: Math.min(470, Math.round(full * 0.66)), full };
+  /**
+   * Said as how much map is left, which is what the handoff measures and what
+   * you are actually choosing between (trips V2: 100 up, 310 default, 672
+   * down). Working from the sheet's own height instead made the map an
+   * afterthought, and the map is the screen.
+   *
+   * Each is clamped so a short window shrinks from the bottom up rather than
+   * ending with a peek taller than its half.
+   */
+  const usable = Math.max(320, screenHeight - insetBottom);
+  const full = Math.max(300, usable - 100);
+  const half = Math.max(260, Math.min(full, usable - 310));
+  const peek = Math.max(120, Math.min(half, usable - 672));
+  return { peek, half, full };
 }
