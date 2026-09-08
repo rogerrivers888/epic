@@ -797,20 +797,25 @@ export async function sweepExpired() {
  */
 export async function identifyKinds({ limit = 25, householdId = null } = {}) {
   const rows = await owned.needingKind(limit);
-  let found = 0;
-  const kinds = {};
   for (const { ref, ...seed } of rows) {
-    // Seeded from the sweep. These records are empty — no name, no point —
-    // which is exactly why the open map was never asked about them: `enrich`
-    // gives up before Overpass without something to search for.
-    // Never throws; a place the open map has never heard of is left as it was.
-    await enrich(ref, { householdId, force: true, replace: false, paid: false, seed }).catch(() => null);
-    const rec = await ownedRecord(ref).catch(() => null);
-    if (rec?.category) { found += 1; kinds[rec.category] = (kinds[rec.category] ?? 0) + 1; }
+    /*
+      Queued, not awaited.
+
+      Each of these is an Overpass query and then a read of the venue's own
+      page, and two of them took fifty-four seconds — past Railway's proxy
+      timeout, so every call to this returned 502 having done the work anyway.
+      The researcher already has a background queue for exactly this shape of
+      job; `catchUp` uses it. So this hands the batch over and answers with
+      what is left, and the caller watches the backlog fall.
+
+      Seeded from the sweep, because these records are empty — no name, no
+      point — which is why the open map was never asked about them.
+    */
+    queueEnrichment(ref, { householdId, force: true, replace: false, paid: false, seed });
   }
-  // What is left, and what is holding it up: a pass that asked nothing should
+  // What is left, and what is holding it up: a pass that queued nothing should
   // say which of the three reasons that was.
-  return { asked: rows.length, identified: found, kinds, backlog: await owned.kindBacklog(MAX_ATTEMPTS) };
+  return { queued: rows.length, backlog: await owned.kindBacklog(MAX_ATTEMPTS) };
 }
 
 /** Places claimed but never researched, or due to be tried again. */
