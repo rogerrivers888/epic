@@ -56,6 +56,7 @@ import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
 import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.js';
 import { dwellFor } from '../domain/options.js';
+import { distinguish } from '../domain/naming.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
@@ -385,6 +386,7 @@ inspire.get('/near', async (req, res, next) => {
         heritage: a.heritage,
         website: a.website,
         wikipediaUrl: a.wikipedia_url,
+        outcode: a.outcode ?? null,
         region: a.region_name,
         attribution: [
           ...(a.image_id && a.attribution_required && a.credit_line ? [a.credit_line] : []),
@@ -420,6 +422,12 @@ inspire.get('/near', async (req, res, next) => {
       });
       atlasCount += 1;
     }
+
+    // Two places called the same thing read as one place shown twice, which is
+    // the same bug from the household's side even when it is not one. Renamed
+    // from the Wikipedia article, which is already disambiguated, and only
+    // where something else in this answer shares the name.
+    distinguish(items, { url: (i) => i.wikipediaUrl, area: (i) => i.outcode });
 
     // The heart on each card: whether this household has already kept, been to
     // or made a special of the place. One query for the lot.
