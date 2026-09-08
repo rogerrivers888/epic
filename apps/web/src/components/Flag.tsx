@@ -21,11 +21,17 @@ import { colors, fonts, radius as r, BORDER } from '../theme';
  * static origin to fetch from, the tile falls back to the two-letter code —
  * which is what every country row drew before the flags arrived.
  */
-export function Flag({ code, width = 44, height = 32, rounded = r.sm }: {
+export function Flag({ code, width = 44, height = 32, rounded = r.sm, bare }: {
   code: string;
   width?: number;
   height?: number;
   rounded?: number;
+  /**
+   * The Places rows (handover v8, option F-B): "36×24 flat rectangular flag
+   * artwork with a hairline edge, bare (no grey box)". No ink rule, no tint —
+   * a hairline is the only thing that stops a white stripe vanishing into cream.
+   */
+  bare?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const cc = (code || '').trim().toUpperCase();
@@ -34,7 +40,7 @@ export function Flag({ code, width = 44, height = 32, rounded = r.sm }: {
   const drawn = Platform.OS === 'web' && !failed && iso.length === 2 && hasFlag(iso);
 
   return (
-    <View style={[styles.tile, { width, height, borderRadius: rounded }]}>
+    <View style={[styles.tile, bare && styles.bare, { width, height, borderRadius: rounded }]}>
       {drawn ? (
         <Image
           source={{ uri: `/flags/${iso}.svg` }}
@@ -59,5 +65,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  bare: { borderWidth: 0, backgroundColor: 'transparent', boxShadow: '0 0 0 1px rgba(32,30,29,0.14)' },
   code: { fontFamily: fonts.heading, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, color: colors.headerSub },
 });

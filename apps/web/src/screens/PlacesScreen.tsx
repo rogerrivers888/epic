@@ -1,69 +1,61 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useViewport } from '../hooks/useViewport';
-import { CategoryIcon, Icon, Rating } from '../components/Icon';
-import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, Place, TripBrief, TripSummary, Venue, Visit } from '../api';
-import { MapView, MapPin } from '../components/MapView';
+import { Icon, iconFor } from '../components/Icon';
+import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, TripBrief, Venue, Visit } from '../api';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { VenueThumb } from '../components/VenueThumb';
 import { Flag } from '../components/Flag';
+import { Wordmark } from '../components/Wordmark';
 import type { TripSeed } from './TripsScreen';
-import { TripCard } from '../components/TripCard';
-import { asList, asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
+import { asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
 import { MOODS, paths, type Route } from '../routes';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
-
-/** The picture square at the head of a place row, and at the head of an area row (handover §6: 56–64px). */
-const WELL = 56;
-const AREA_WELL = 60;
-import { Button, Card, Chip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
-import { PlacePicker } from '../components/PlacePicker';
-import { PickPanel } from '../components/PickPanel';
+import { Button, Card, Chip, Row, StatusLine, Wrap } from '../components/ui';
 import { SourcePicker } from '../components/SourcePicker';
 import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '../components/Visits';
-import { getViewer, onViewerChange, setViewer as rememberViewer } from '../viewer';
+import { getViewer, onViewerChange } from '../viewer';
 import { isAdmin } from '../admin';
+import { CategoryStrip, PairSwitch, TOP_INSET } from '../components/InspireHeader';
+import { ControlButton, ControlRow, CrumbHead, Popover, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
+import { Crowd, MEDIA_RADIUS } from '../components/InspireBody';
+import { EMPTY_LIST, LIST_KEYS, LISTS, PLACE_SORTS, PLACE_SORT_KEYS, epicRating, foodType, inList, sortPlaces, whenLabel, type ListKey, type PlaceSort } from './placesRows';
 
 // Trips still imports these from here.
 export { VenueRow, VisitForm, VisitSummary } from '../components/Visits';
 export type { VisitCreateBody } from '../components/Visits';
 
 /**
- * Places (owner, 3 Sep 2026, /mockups/places-styled.html): the atlas is rows —
- * countries that fold open to cities, the cities first when there is only one
- * country — and inside a city everything the household has put there, with
- * Everything / Things to do / Food & drink on top, Status and Type as
- * dropdowns, list or map, and no trips (trips live in Trips). A row shows one
- * number, your own score out of 5, and where the place is at a glance: the
- * postcode district and the nearest station with its line. Loved — the mark the
- * ledger still calls `special` — is a red heart on the row's icon (style guide:
- * red is the heart). Everything else about a place is in the drawer.
+ * Places — rebuilt as a hierarchy (handover v8, 8 Sep 2026, §3).
+ *
+ * The root is one flat list under a lime band: Near home, the country you
+ * live in, and each country you have visited. A country opens to its towns
+ * and cities; a town, or Near home, opens to the place list — Activities |
+ * Food & drink over a lime band of Been · Loved · Shortlisted, a plain-text
+ * control row of Type · Mood · Sort, and rows that carry the household's own
+ * mark in a column of its own: the Epic rating.
+ *
+ * Everything the household says about a place is still in the drawer (owner,
+ * 4 Sep 2026): whether they have been, who loved it, the menu, the order,
+ * getting there. The row is for finding it.
  */
 
+/** The picture square at the head of a place row: "64px 10px-radius thumbnail". */
+const WELL = 64;
+/** "…or a 40px outlined type glyph when there is no photo." */
+const GLYPH_WELL = 40;
+/** The flat flag on a country row: "36×24". */
+const FLAG_W = 36;
+const FLAG_H = 24;
+const GUTTER = 20;
+
 /**
- * An area's three lists (handover, 5 Sep 2026): something to do, somewhere to
- * eat, somewhere to stay. There is no "Everything" tab any more — the owner's
- * redesign draws three segments and the Hotels one only where there is one.
+ * An area's lists: something to do, somewhere to eat — and, only where the
+ * household has kept somewhere to sleep, somewhere to stay. The handover draws
+ * the first two; the third is kept for the areas that have one, because a
+ * hotel saved on a trip must not become unreachable.
  */
 type Kind = 'do' | 'eat' | 'stay';
-/**
- * Been there, kept for later, or been there and loved it. The status dropdown.
- *
- * "Loved" is the word now, and the heart is why (owner, 7 Sep 2026: "the
- * Special can be renamed Loved because we're using a heart icon, so I think it
- * makes sense"). It is the same mark underneath — `place_ledger.status =
- * 'special'` — and it is still only sayable about somewhere you have been.
- *
- * `saved` is called Shortlisted on screen, because saving and shortlisting were
- * being read as the same thing and they are not: shortlisting is somewhere you
- * are thinking about, and the screen no longer opens on it.
- */
-type Status = 'any' | 'been' | 'saved' | 'loved';
-/** What each answer is called, in the order the dropdown reads: the strongest thing you can say about a place first. */
-const STATUS_LABEL: Record<Status, string> = { loved: 'Loved', been: 'Been', saved: 'Shortlisted', any: 'All' };
-type Sort = 'name' | 'mine' | 'recent';
-/** The sort dropdown's three answers; the first is the default and is never written into the address. */
-const SORTS: { value: Sort; label: string }[] = [{ value: 'name', label: 'A–Z' }, { value: 'mine', label: 'My rating' }, { value: 'recent', label: 'Most recent' }];
 
 const uuid = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1).replace(/-/g, ' ');
@@ -86,17 +78,12 @@ const SLEEPING = ['hotel', 'lodging'];
 /** Which segment a place will show up under, from its category alone. */
 const kindOfCategory = (c?: string | null): Kind => (SLEEPING.includes(String(c)) ? 'stay' : EATING.includes(String(c)) ? 'eat' : 'do');
 
-const cuisinesOf = (p: AtlasPlace) => (((p.venue ?? {}) as Partial<Venue>).cuisines ?? []).filter(Boolean);
 const experiencesOf = (p: AtlasPlace) => (((p.venue ?? {}) as Partial<Venue>).experiences ?? []).filter(Boolean);
 
-// In Food & drink a restaurant is the assumption, so only the exceptions are
-// named (owner, 4 Sep 2026: "if it's a bar, we put a bar pill in").
-const CATEGORY_PILL: Record<string, string> = { bar: 'Bar', pub: 'Pub', cafe: 'Café', takeaway: 'Takeaway', bakery: 'Bakery' };
-
 /**
- * Which of the three lists a place belongs to. A pub is somewhere you drink,
- * so it is Food & drink; a pub with a kitchen is also a thing to do on a
- * Sunday, so it is both.
+ * Which of the lists a place belongs to. A pub is somewhere you drink, so it
+ * is Food & drink; a pub with a kitchen is also a thing to do on a Sunday, so
+ * it is both.
  */
 function kindsOf(p: AtlasPlace): Kind[] {
   const c = p.category ?? '';
@@ -107,44 +94,23 @@ function kindsOf(p: AtlasPlace): Kind[] {
   return ['do'];
 }
 
-/** What Food & drink's Type dropdown offers: what the place *is*, before what it serves. */
-const EAT_KIND: Record<string, string> = {
-  restaurant: 'Restaurants', cafe: 'Cafés', bakery: 'Cafés', pub: 'Pubs', bar: 'Bars',
-  takeaway: 'Fast food & takeaways',
-};
-
-/** The kind of thing it is, in the words the Type dropdown uses, for the segment being looked at. */
+/**
+ * The kind of thing it is, in the words the Type dropdown uses, for the list
+ * being looked at: the drawer it is filed in ("Theme parks & rides", "Castles")
+ * — the answer to the question a row is actually asking (owner, 7 Sep 2026) —
+ * then whatever the map tagged it, then the cabinet's own name. Food & drink
+ * has its own one word (placesRows.ts).
+ */
 function typeOf(p: AtlasPlace, kind: Kind): string {
   const c = p.category ?? '';
-  const k = kind ?? kindsOf(p)[0];
-  if (k === 'stay') {
+  if (kind === 'stay') {
     const experiences = experiencesOf(p);
     if (experiences.length) return cap(experiences[0]);
     return c === 'lodging' ? 'Places to stay' : 'Hotels';
   }
-  // Under Food & drink the first question is what kind of place it is — a
-  // restaurant, a café, a pub — and the food it serves is the second one
-  // (owner, 7 Sep 2026: "I want an extra dropdown to appear once I select
-  // Restaurant to select the type of restaurant"). Type answers the first;
-  // Cuisine, which only appears once this one is set, answers the second.
-  // The drawer it is filed in, which under Food & drink means the Type
-  // dropdown offers Restaurants, Pubs & bars, Cafés & bakeries and Fast food &
-  // takeaways — and choosing Restaurants is how fast food stops appearing among
-  // them (owner, 5 Sep 2026). `EAT_KIND` is the fallback for a place the
-  // taxonomy has not filed yet, and says the same thing in fewer words.
-  if (k === 'eat') return p.subcategoryLabel ?? EAT_KIND[c] ?? 'Restaurants';
+  if (kind === 'eat') return foodType(p);
   if (c === 'pub' || c === 'bar') return 'Pubs & bars';
   if (c === 'event') return 'Events';
-  // What kind of thing it is, in the words the Shelves page keeps: the drawer
-  // it is filed in — "Theme parks & rides", "Parks & commons", "Castles" —
-  // which is the answer to the question a row is actually asking (owner, 7 Sep
-  // 2026: it "should say what type of attraction it is, like theme park or
-  // whatever… the subcategory, not just say attractions repeatedly").
-  //
-  // Below the drawer, whatever the map tagged it. Below that, the cabinet's own
-  // name: "Outdoors" is a smaller answer than "Woodland & forests" but it is
-  // still an answer, and "Attractions" is not one at all. Windsor Great Park is
-  // the case that made the point — a walk, filed under a word that says nothing.
   if (p.subcategoryLabel) return p.subcategoryLabel;
   const experiences = experiencesOf(p);
   if (experiences.length) return cap(experiences[0]);
@@ -152,65 +118,14 @@ function typeOf(p: AtlasPlace, kind: Kind): string {
   return c === 'attraction' ? 'Attractions' : 'Other';
 }
 
-/**
- * What the row itself says a place is. Under Food & drink the restaurant goes
- * without saying, so the words are the kind of food — Italian, Steakhouse — and
- * a bar, pub or café is marked by its pill instead (owner, 4 Sep 2026).
- */
-function rowType(p: AtlasPlace, kind: Kind): string {
-  const c = p.category ?? '';
-  const cuisines = cuisinesOf(p);
-  if (kind === 'stay') return typeOf(p, 'stay');
-  if (kind === 'eat') return cuisines.length ? cap(cuisines[0]) : '';
-  if (kind === 'do' || kindsOf(p)[0] === 'do') return typeOf(p, 'do');
-  if (cuisines.length) return cap(cuisines[0]);
-  return CATEGORY_PILL[c] ?? 'Restaurant';
-}
-
-const statusOf = (p: AtlasPlace): Exclude<Status, 'any'> => (p.special ? 'loved' : p.visits > 0 ? 'been' : 'saved');
-const matchesStatus = (p: AtlasPlace, s: Status) =>
-  s === 'any' || (s === 'loved' ? p.special : s === 'been' ? p.visits > 0 : p.visits === 0);
-/**
- * The mark on a row: one person's if somebody is chosen, and the household's
- * between them when nobody is ("Anyone ▾"). An average of one is that one.
- */
+/** The household's mark on a place, on this device: the chosen viewer's, else the average. */
 const myScore = (p: AtlasPlace, viewer: string | null) => {
   if (viewer) return p.scores.find((s) => s.memberId === viewer)?.score ?? null;
   if (!p.scores.length) return null;
   return Math.round((p.scores.reduce((n, s) => n + s.score, 0) / p.scores.length) * 10) / 10;
 };
 
-/**
- * The mark under a row, and whose it is.
- *
- * The line here used to be "Saved · for Bath, Sep 2026" — where a place came
- * from and which trip put it there. The owner, 7 Sep 2026: "I don't need to see
- * that. I can just see if I click into it… we should only use the main view for
- * stuff that's really relevant." So the trip and the date have moved to the
- * drawer, and the row's third line answers the question the row is for: is this
- * place any good.
- *
- * Ours first and always — the person the "Anyone ▾" chip has chosen, or the
- * household between them — and only where nobody here has scored it does the
- * crowd get a say. It is marked as theirs, by carrying its review count and no
- * name, rather than being dressed up as one of our marks: "If I haven't rated
- * it, then you should show the general rating."
- */
-function rowRating(p: AtlasPlace, viewer: string | null, members: { id: string; name: string }[]):
-  { value: number; whose: string | null } | null {
-  const mine = myScore(p, viewer);
-  if (mine != null) {
-    const who = viewer ? members.find((m) => m.id === viewer)?.name ?? null : p.scores.length > 1 ? 'us' : p.scores[0]?.member ?? null;
-    return { value: mine, whose: who };
-  }
-  // Rented, and only here at all because nobody in the household has been:
-  // never stored, never kept on a device (api/src/sources/rentedRating.js).
-  if (p.rating != null) return { value: p.rating, whose: p.ratingCount ? `(${p.ratingCount.toLocaleString()})` : null };
-  return null;
-}
-
 function atlasToVenue(p: AtlasPlace): Venue {
-
   const [source, ...rest] = p.venueRef.split(':');
   const v = (p.venue ?? {}) as Partial<Venue>;
   return {
@@ -242,26 +157,28 @@ function atlasToBrowseItem(p: AtlasPlace): BrowseItem {
   };
 }
 
-/** Inside a city: how the list is filtered and sorted, and whether it is a map. All of it is in the address. */
-const CITY_KEYS = ['kind', 'status', 'type', 'cuisine', 'mood', 'trip', 'year', 'sort', 'view'];
+/** Inside a list: how it is set. All of it is in the address. */
+const CITY_KEYS = ['kind', 'list', 'type', 'mood', 'sort'];
+/** The old `status=` addresses still land where they meant to. */
+const LEGACY_STATUS: Record<string, ListKey> = { been: 'been', loved: 'loved', special: 'loved', saved: 'short', any: 'been' };
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 // ---------------------------------------------------------------------------
 // The screen
 // ---------------------------------------------------------------------------
 
-export function PlacesScreen({ route, household, refreshHousehold, onPlanTrip }: {
+export function PlacesScreen({ route, household, refreshHousehold }: {
   /**
-   * Which layer the address asks for: the atlas (`/places`), everything close
-   * to home (`/places/home`), one country (`/places/IT`) or one area inside it
-   * (`/places/GB/London`). Inspire's Food chip lands on `/places/home?kind=eat`
-   * — the question already asked (owner, 5 Sep 2026: "if I clicked on food, it
-   * would take me to the places tab and search for food").
+   * Which layer the address asks for: the root (`/places`), everything close
+   * to home (`/places/home`), one country's towns (`/places/IT`) or one town's
+   * places (`/places/GB/London`).
    */
   route: Extract<Route, { name: 'places' }>;
   household: HouseholdResponse | null; refreshHousehold: () => Promise<void>; onPlanTrip?: (p: TripSeed) => void;
 }) {
-  const { width, height } = useViewport();
-  const wide = width >= 1000;
+  const { width } = useViewport();
+  const wide = width >= 900;
   const { query, navigate, setQuery } = useRouter();
   const [data, setData] = useState<{ countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -270,7 +187,6 @@ export function PlacesScreen({ route, household, refreshHousehold, onPlanTrip }:
   const atHome = !!sel && 'home' in sel;
   const country = sel && !atHome ? (sel as { country: string; city: string | null }) : null;
   const inArea = atHome || !!country?.city;
-  const [addingCity, setAddingCity] = useState(false);
   const [places, setPlaces] = useState<AtlasPlace[]>([]);
   const [wherePending, setWherePending] = useState(0);
   // Which place's drawer is open, over whichever layer is showing.
@@ -278,13 +194,21 @@ export function PlacesScreen({ route, household, refreshHousehold, onPlanTrip }:
   const open = openRef ? places.find((p) => p.venueRef === openRef) ?? null : null;
   const setOpen = (p: AtlasPlace | null) => setQuery({ place: p?.venueRef ?? null }, { replace: false });
   // A place found by searching, before it is anything of ours: the drawer shows
-  // its details so you can be sure it is the right one. It has no address of its
-  // own — it is not one of the household's places yet.
+  // its details so you can be sure it is the right one.
   const [newVenue, setNewVenue] = useState<Venue | null>(null);
-  // A place the household has just added: close the search, show the segment it
-  // is in, and mark the row (owner, 4 Sep 2026: "when I exit out of that screen,
-  // I want to come back to my places… and see the place that I've just added").
+  // A place the household has just added: close the search, show the list it
+  // is in, and mark the row (owner, 4 Sep 2026).
   const [landed, setLanded] = useState<{ venueRef: string; kind: Kind } | null>(null);
+  /** How tall the head is, so a panel can hang off the bottom of it. */
+  const [headH, setHeadH] = useState(0);
+  /** Which panel is open over the list, and whether the add-a-place search is. Reset on every move. */
+  const [menu, setMenu] = useState<ListMenu>(null);
+  const [adding, setAdding] = useState(false);
+  const areaName = atHome ? 'home' : country?.city ? `${country.country}.${country.city}` : null;
+  useEffect(() => { setMenu(null); setAdding(false); }, [areaName]);
+  // How this list was last set, per area: coming back to London should not
+  // bring Lisbon's "food only, shortlisted" with it — and the address wins.
+  useStickyQuery(areaName ? `places.city.${areaName}` : 'places.root', areaName ? CITY_KEYS : []);
 
   const refills = useRef(0);
 
@@ -307,7 +231,8 @@ export function PlacesScreen({ route, household, refreshHousehold, onPlanTrip }:
     } catch (e: any) { setError(e.message); }
   }, [inArea, atHome ? 'home' : country?.country, atHome ? '' : country?.city]);
   useEffect(() => { refills.current = 0; loadPlaces(); }, [loadPlaces]);
-  // Postcode and station are looked up in the background after the first read; ask again a few times while any row is waiting.
+  // Postcode, station, pictures and ratings are looked up in the background
+  // after the first read; ask again a few times while any row is waiting.
   useEffect(() => {
     if (!wherePending || refills.current >= 6) return;
     const t = setTimeout(() => { refills.current += 1; loadPlaces(); }, 5000);
@@ -315,46 +240,70 @@ export function PlacesScreen({ route, household, refreshHousehold, onPlanTrip }:
   }, [wherePending, places]);
 
   const refreshAll = async () => { await loadAtlas(); await loadPlaces(); await refreshHousehold(); };
+  const st = useListState(places, viewer);
+  const ui = { menu, setMenu, adding, setAdding };
+
+  const homeTown = data?.home?.label ? shortTown(data.home.label) : null;
+  const homeCode = data?.home?.countryCode ?? null;
+
+  /** The crumb at every level below the root: back arrow · title · subtitle. */
+  const crumb = !sel ? null
+    : atHome ? { title: 'Near home', sub: data?.home ? plural(data.home.places, 'place') : null, back: paths.places() }
+      : country && !country.city ? {
+        title: countryRow?.name ?? country.country,
+        sub: countryRow ? (countryRow.code === homeCode ? `${countryRow.cities.length} towns and cities` : plural(countryRow.cities.length, 'city', 'cities')) : null,
+        back: paths.places(),
+      }
+        : { title: country!.city!, sub: countryRow?.name ?? country!.country, back: paths.placesCountry(country!.country) };
 
   return (
-    <ScrollView contentContainerStyle={[styles.page, wide && styles.pageWide]} keyboardShouldPersistTaps="handled">
-      {/* One tree, whichever layer the address asks for, so the Web / Mobile
-          toggle does not throw the screen's state away (CLAUDE.md). */}
-      {!sel ? (
-        <AtlasRoot
-          data={data} error={error} household={household} members={members} viewer={viewer} wide={wide}
-          adding={addingCity} onAdding={setAddingCity}
-          onAdd={async (place) => {
-            try { const r = await api.createAtlasCity({ place }); await loadAtlas(); setAddingCity(false); navigate(paths.placesCity(r.city.countryCode, r.city.name)); setError(null); }
-            catch (e: any) { setError(e.message); }
-          }}
-        />
-      ) : null}
+    <View style={styles.fill}>
+      <ScrollView style={styles.fill} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" stickyHeaderIndices={[0]}>
+        {/* One tree, whichever layer the address asks for, so the Web / Mobile
+            toggle does not throw the screen's state away (CLAUDE.md). The head
+            is lime at the root only; below it the ground is cream, so the lime
+            switch inside a list keeps its selected state. */}
+        <View style={[styles.head, !sel && styles.headLime]} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
+          <View style={styles.top}>
+            <Wordmark height={30} ground={!sel ? colors.lime : colors.bg} />
+          </View>
+          {!sel ? (
+            <View style={styles.rootTitle}>
+              <Text style={styles.rootTitleText}>Places</Text>
+              <Text style={styles.rootSub}>Everywhere you've been, loved and shortlisted</Text>
+            </View>
+          ) : crumb ? (
+            <View style={styles.crumbWrap}>
+              <CrumbHead size={24} onBack={() => navigate(crumb.back)} title={crumb.title} sub={crumb.sub} />
+            </View>
+          ) : null}
+          {inArea && (city || home) ? <ListHead st={st} ui={ui} onLandedShown={() => setLanded(null)} /> : null}
+        </View>
 
-      {country && !country.city ? (
-        <CountryPanel
-          key={country.country}
-          code={country.country} row={countryRow} wide={wide}
-          onBack={() => navigate(paths.places())}
-          onArea={(name) => navigate(paths.placesCity(country.country, name))}
-        />
-      ) : null}
+        {!sel ? (
+          <AtlasRoot data={data} error={error} homeTown={homeTown} onGo={(href) => navigate(href)} />
+        ) : null}
 
-      {inArea && (city || home) ? (
-        <CityPanel
-          key={home ? 'home' : `${countryRow?.code}/${city!.name}`}
-          country={countryRow} city={city} home={home} places={places} household={household} viewer={viewer} wide={wide} viewportHeight={height}
-          onBack={() => navigate(home ? paths.places() : paths.placesCountry(countryRow!.code))}
-          onOpen={setOpen} onOpenVenue={setNewVenue} openRef={open?.venueRef ?? null}
-          landed={landed} onLandedShown={() => setLanded(null)}
-          onPlanTrip={() => onPlanTrip?.(home ? { placeText: home.label ?? 'home' } : { placeText: `${city!.name}, ${countryRow!.name}`, countryCode: countryRow!.code })}
-          onChanged={refreshAll}
-        />
-      ) : null}
+        {country && !country.city ? (
+          <CountryCities row={countryRow} data={data} onCity={(name) => navigate(paths.placesCity(country.country, name))} />
+        ) : null}
 
-      {sel && !inArea && !countryRow && data ? (
-        <View style={styles.body}><StatusLine tone="warn">Nothing in your atlas for {country?.country} yet.</StatusLine></View>
-      ) : null}
+        {inArea && (city || home) ? (
+          <ListBody
+            st={st} ui={ui} places={places} viewer={viewer}
+            country={countryRow} city={city} homeArea={home} household={household}
+            onOpen={setOpen} onOpenVenue={setNewVenue} openRef={open?.venueRef ?? null}
+            landed={landed} onLandedShown={() => setLanded(null)}
+            onChanged={refreshAll}
+          />
+        ) : null}
+
+        {sel && !inArea && !countryRow && data ? (
+          <View style={styles.body}><StatusLine tone="warn">Nothing in your atlas for {country?.country} yet.</StatusLine></View>
+        ) : null}
+      </ScrollView>
+
+      {inArea && (city || home) ? <ListMenus st={st} ui={ui} top={headH} /> : null}
 
       <VenueDrawer
         item={newVenue ? venueToBrowseItem(newVenue) : open ? atlasToBrowseItem(open) : null}
@@ -374,124 +323,113 @@ export function PlacesScreen({ route, household, refreshHousehold, onPlanTrip }:
           : open ? <OursPanel place={open} household={household} ctx={countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {}} viewer={viewer} onChanged={refreshAll} onRemoved={() => setOpen(null)} /> : null}
         gettingThere={open ? <GettingThere place={open} /> : null}
       />
-    </ScrollView>
+    </View>
   );
 }
 
+/** "Sunningdale" out of "Fairways, Titlarks Hill, Sunningdale, SL5 0JD". */
+function shortTown(label: string): string {
+  const parts = label.split(',').map((p) => p.trim()).filter((p) => p && !/\d/.test(p));
+  return parts[parts.length - 1] ?? label.split(',')[0].trim();
+}
+
 // ---------------------------------------------------------------------------
-// The atlas: near home, the country you live in, and abroad
+// The root: near home, the country you live in, and every country visited
 // ---------------------------------------------------------------------------
 
 /**
- * The root of Places (handover, 5 Sep 2026, screen 3a): "All areas · Anyone
- * only — Saved/Been lives at city level. Below: Near home · UK · Abroad
- * (countries, flag tiles). Each row carries areas · places · trips and a
- * last/next trip line."
- *
- * So the country is the unit here, not the city, and the counting is what a row
- * says rather than a filter to set: a household with places in five countries
- * wants to see five rows, not thirty cities.
+ * "Title 'Places / Everywhere you've been, loved and shortlisted', then one
+ * flat scrolling list: Near home — lime 36px tile with a home glyph; United
+ * Kingdom — flag, three example cities, count; each country visited — flag,
+ * its cities, count. There is no 'Abroad' step."
  */
-function AtlasRoot({ data, error, household, members, viewer, wide, adding, onAdding, onAdd }: {
+function AtlasRoot({ data, error, homeTown, onGo }: {
   data: { countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null } | null;
-  error: string | null; household: HouseholdResponse | null; members: { id: string; name: string }[]; viewer: string | null; wide: boolean;
-  adding: boolean; onAdding: (v: boolean) => void; onAdd: (place: Place) => Promise<void>;
+  error: string | null; homeTown: string | null; onGo: (href: string) => void;
 }) {
-  const { navigate } = useRouter();
-  // How the list is set — which part of the world, and whose verdicts the rows
-  // show — is query, never path (CLAUDE.md).
-  const [area, setArea] = useQueryState<'all' | 'home' | 'uk' | 'abroad'>('area', 'all', asOneOf(['all', 'home', 'uk', 'abroad'] as const, 'all'));
-  const [sheet, setSheet] = useState<'area' | 'who' | null>(null);
-
   const homeCode = data?.home?.countryCode ?? null;
   const countries = data?.countries ?? [];
   const homeCountry = homeCode ? countries.find((c) => c.code === homeCode) ?? null : null;
-  const abroad = countries.filter((c) => c.code !== homeCode);
-
-  const showHome = area === 'all' || area === 'home';
-  const showHomeCountry = area === 'all' || area === 'uk';
-  const showAbroad = area === 'all' || area === 'abroad';
-
-  const areaOptions = [
-    { value: 'all', label: 'All areas', count: countries.length },
-    { value: 'home', label: 'Near home', count: data?.home?.places ?? 0 },
-    ...(homeCountry ? [{ value: 'uk', label: homeCountry.name, count: homeCountry.places }] : []),
-    { value: 'abroad', label: 'Abroad', count: abroad.reduce((n, c) => n + c.places, 0) },
-  ];
-  const whoOptions = [{ value: '', label: 'Anyone' }, ...members.map((m) => ({ value: m.id, label: m.name }))];
-  const whoLabel = members.find((m) => m.id === viewer)?.name ?? 'Anyone';
-
+  const others = countries.filter((c) => c.code !== homeCode).sort((a, b) => a.name.localeCompare(b.name));
+  const citiesOf = (c: AtlasCountry) => [...c.cities].sort((a, b) => b.places - a.places).slice(0, 3).map((ci) => ci.name).join(' · ');
   return (
-    <View style={{ width: '100%' }}>
-      <View style={[styles.field, wide && styles.fieldWideCentred]}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={type.title}>Places</Text>
-          <Pressable onPress={() => onAdding(!adding)} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel={adding ? 'Close' : 'Add an area'}>
-            <Icon name={adding ? 'close' : 'add'} size={19} color={colors.ink} />
-          </Pressable>
-        </Row>
-        <Text style={[type.small, { color: colors.headerSub }]}>Where you've been and what you liked.</Text>
-        {adding ? (
-          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
-            <PlacePicker kind="area" autoFocus value={null} onPick={(p) => { if (p) onAdd(p); }} placeholder="Lisbon · Bath · the Lake District" />
-          </View>
-        ) : null}
-        {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-      </View>
-
-      <View style={[styles.body, wide && styles.bodyCentred]}>
-        <View style={styles.filters}>
-          <FilterChip label={areaOptions.find((o) => o.value === area)?.label ?? 'All areas'} on={area !== 'all'} open={sheet === 'area'} onPress={() => setSheet(sheet === 'area' ? null : 'area')} />
-          <FilterChip label={whoLabel} on={!!viewer} open={sheet === 'who'} onPress={() => setSheet(sheet === 'who' ? null : 'who')} />
+    <View style={styles.list}>
+      {error ? <View style={styles.gutter}><StatusLine tone="warn">{error}</StatusLine></View> : null}
+      {!data ? <Text style={[type.small, styles.gutter, { paddingTop: spacing.md }]}>Loading your atlas…</Text> : null}
+      {data && !countries.length && !data.home?.places ? (
+        <View style={styles.emptyRoot}>
+          <Text style={styles.emptyTitle}>Nothing here yet</Text>
+          <Text style={styles.emptyBody}>Heart a place on Inspire or on a trip, or say you have been somewhere, and it lands here under where it is.</Text>
         </View>
-        <PickPanel open={sheet === 'area'} title="Which part of the world" options={areaOptions} value={area}
-          onPick={(v) => { setArea(v as any); setSheet(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'who'} title="Whose verdicts" options={whoOptions} value={viewer ?? ''}
-          empty="Only you are in this household so far — add somebody on the Household tab."
-          onPick={(v) => { rememberViewer(v || null); setSheet(null); }} onClose={() => setSheet(null)} />
-
-        {!data ? <Text style={type.small}>Loading your atlas…</Text> : null}
-        {data && !countries.length && !data.home?.places ? (
-          <Card><Text style={type.body}>Your atlas is empty so far.</Text><Text style={type.small}>Add an area above, then the places you know there. Visits and trip shortlists land here by themselves.</Text></Card>
-        ) : null}
-
-        {showHome && data?.home ? (
-          <>
-            <Text style={type.label}>Near home</Text>
-            <View style={styles.list}>
-              <AreaRow
-                title="Close to home"
-                meta={data.home.places ? `Within ${data.home.radiusMiles} miles · ${data.home.places} place${data.home.places === 1 ? '' : 's'}${data.home.special ? ` · ${data.home.special} loved` : ''}` : `Nothing within ${data.home.radiusMiles} miles yet`}
-                status={data.home.been ? `${data.home.been} been · ${data.home.places - data.home.been} to try` : null}
-                image={data.home.image} category="place" first
-                onPress={() => navigate(paths.placesHome())}
-              />
-            </View>
-          </>
-        ) : null}
-
-        {showHomeCountry && homeCountry ? (
-          <>
-            <Text style={type.label}>{homeCountry.name}</Text>
-            <View style={styles.list}>
-              <CountryRow country={homeCountry} first onPress={() => navigate(paths.placesCountry(homeCountry.code))} />
-            </View>
-          </>
-        ) : null}
-
-        {showAbroad && abroad.length ? (
-          <>
-            <Text style={type.label}>Abroad · {abroad.length} {abroad.length === 1 ? 'country' : 'countries'}</Text>
-            <View style={styles.list}>
-              {abroad.map((c, i) => <CountryRow key={c.code} country={c} first={i === 0} onPress={() => navigate(paths.placesCountry(c.code))} />)}
-            </View>
-          </>
-        ) : null}
-
-        {data?.unplaced ? <Text style={type.tiny}>{data.unplaced} place{data.unplaced === 1 ? '' : 's'} still being placed on the map.</Text> : null}
-      </View>
-
+      ) : null}
+      {data?.home ? (
+        <NavRow
+          tile={<View style={styles.homeTile}><Icon name="home" size={19} color={colors.selectedFg} strokeWidth={2.1} /></View>}
+          label="Near home"
+          sub={`${homeTown ?? 'Home'} · within ${data.home.radiusMiles} miles`}
+          count={plural(data.home.places, 'place')}
+          onPress={() => onGo(paths.placesHome())}
+        />
+      ) : null}
+      {homeCountry ? (
+        <NavRow
+          tile={<Flag code={homeCountry.code} width={FLAG_W} height={FLAG_H} bare />}
+          label={homeCountry.name}
+          sub={citiesOf(homeCountry) || 'No places yet'}
+          count={plural(homeCountry.places, 'place')}
+          onPress={() => onGo(paths.placesCountry(homeCountry.code))}
+        />
+      ) : null}
+      {others.map((c) => (
+        <NavRow
+          key={c.code}
+          tile={<Flag code={c.code} width={FLAG_W} height={FLAG_H} bare />}
+          label={c.name}
+          sub={citiesOf(c) || 'No places yet'}
+          count={plural(c.places, 'place')}
+          onPress={() => onGo(paths.placesCountry(c.code))}
+        />
+      ))}
+      {data?.unplaced ? <Text style={[type.tiny, styles.gutter, { paddingTop: spacing.md }]}>{data.unplaced} place{data.unplaced === 1 ? '' : 's'} still being placed on the map.</Text> : null}
     </View>
+  );
+}
+
+/** One country's towns and cities. */
+function CountryCities({ row, data, onCity }: {
+  row: AtlasCountry | null; data: { home: AtlasHome | null } | null; onCity: (name: string) => void;
+}) {
+  const cities = [...(row?.cities ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  if (!row) return data ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>Nothing in your atlas here yet.</Text></View> : null;
+  return (
+    <View style={styles.list}>
+      {cities.map((ci) => (
+        <NavRow
+          key={ci.name}
+          tile={<Flag code={row.code} width={FLAG_W} height={FLAG_H} bare />}
+          label={ci.name}
+          sub={ci.nextTrip ? `Next: ${tripWhen(ci.nextTrip)}` : ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : row.name}
+          count={plural(ci.places, 'place')}
+          onPress={() => onCity(ci.name)}
+        />
+      ))}
+      {!cities.length ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>No towns in {row.name} yet.</Text></View> : null}
+    </View>
+  );
+}
+
+/** A row of the hierarchy: tile, label 19/800, sub 13 grey, count 13 grey, chevron. */
+function NavRow({ tile, label, sub, count, onPress }: { tile: React.ReactNode; label: string; sub: string; count: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={styles.navRow} accessibilityRole="button" accessibilityLabel={`${label}, ${count}`}>
+      <View style={styles.navTile}>{tile}</View>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text style={styles.navLabel} numberOfLines={1}>{label}</Text>
+        <Text style={styles.navSub} numberOfLines={1}>{sub}</Text>
+      </View>
+      <Text style={styles.navCount}>{count}</Text>
+      <Icon name="more" size={18} color={colors.ink} strokeWidth={2.2} />
+    </Pressable>
   );
 }
 
@@ -507,475 +445,272 @@ function tripWhen(t: TripBrief): string {
   return said.includes(mon.slice(0, 3).toLowerCase()) && said.includes(year) ? name : `${name} · ${t.on}`;
 }
 
-/**
- * A country, as a row: the flag tile the redesign draws, the areas and places
- * and trips in it, and the trip that says when the household was last there.
- *
- * The tile was the two-letter code while the handover's "2-letter code
- * placeholders pending real flags" stood. It is the flag now (owner, 6 Sep
- * 2026) — `Flag` draws it from country-flag-icons and falls back to the code
- * for anywhere that has no drawing.
- */
-function CountryRow({ country: c, first, onPress }: { country: AtlasCountry; first?: boolean; onPress: () => void }) {
-  const bits = [
-    c.areas ? `${c.areas} area${c.areas === 1 ? '' : 's'}` : null,
-    c.places ? `${c.places} place${c.places === 1 ? '' : 's'}` : null,
-    c.trips ? `${c.trips} trip${c.trips === 1 ? '' : 's'}` : null,
-  ].filter(Boolean);
-  const line = c.nextTrip ? `Next: ${tripWhen(c.nextTrip)}`
-    : c.lastTrip ? `Last: ${tripWhen(c.lastTrip)}`
-      : 'Nothing planned yet';
-  return (
-    <Pressable onPress={onPress} style={[styles.arow, !first && styles.rowLine]} accessibilityRole="button">
-      <Flag code={c.code} />
-      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <Text style={type.h3} numberOfLines={1}>{c.name}</Text>
-        <Text style={type.small} numberOfLines={1}>{bits.join(' · ') || 'Nothing saved yet'}</Text>
-        <Text style={styles.green} numberOfLines={1}>{line}</Text>
-      </View>
-      <Icon name="more" size={18} color={colors.inkMuted} />
-    </Pressable>
-  );
-}
-
-/** An area, or the standing "close to home" view: picture, name, counts, green line. */
-function AreaRow({ title, meta, status, image, category, first, selected, onPress }: {
-  title: string; meta: string; status?: string | null; image?: AtlasCity['image']; category?: string | null;
-  first?: boolean; selected?: boolean; onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={[styles.arow, !first && styles.rowLine, selected && styles.rowOn]} accessibilityRole="button">
-      <VenueThumb name={title} image={image ?? null} category={category ?? 'place'} width={AREA_WELL} height={AREA_WELL} rounded={radius.md} credit={false} />
-      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <Text style={type.h3} numberOfLines={1}>{title}</Text>
-        <Text style={type.small} numberOfLines={1}>{meta}</Text>
-        {status ? <Text style={styles.green} numberOfLines={1}>{status}</Text> : null}
-      </View>
-      <Icon name="more" size={18} color={colors.inkMuted} />
-    </Pressable>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// One country: its areas, and the trips that went there
+// Inside a town, or near home: the place list
 // ---------------------------------------------------------------------------
+
+type ListMenu = null | 'type' | 'mood' | 'sort';
+type ListUi = { menu: ListMenu; setMenu: (m: ListMenu) => void; adding: boolean; setAdding: (v: boolean) => void };
 
 /**
- * Handover 3b: "Areas · 4 | Trips · 3 segmented — one list at a time. Areas
- * drill into a city; Trips opens the trip itself, back returns here."
+ * How the list is set, from the address, and everything counted from it. One
+ * hook, held by the screen, because the head (sticky, inside the scroll), the
+ * rows and the panels (anchored, outside it) are three parts of one list and
+ * their counts must not drift apart.
  */
-function CountryPanel({ code, row, wide, onBack, onArea }: {
-  code: string; row: AtlasCountry | null; wide: boolean; onBack: () => void; onArea: (name: string) => void;
-}) {
-  const { navigate } = useRouter();
-  const [list, setList] = useQueryState<'areas' | 'trips'>('list', 'areas', asOneOf(['areas', 'trips'] as const, 'areas'));
-  const [trips, setTrips] = useState<TripSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    api.trips({ country: code }).then((r) => { if (alive) setTrips(r.trips); }).catch((e) => setError(e.message));
-    return () => { alive = false; };
-  }, [code]);
-
-  const cities = row?.cities ?? [];
-  return (
-    <View style={{ width: '100%' }}>
-      <View style={[styles.field, wide && styles.fieldWideCentred]}>
-        <Row style={{ gap: spacing.sm }}>
-          <Pressable onPress={onBack} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Places"><Icon name="back" size={19} color={colors.ink} /></Pressable>
-          <Text style={[type.title, { flex: 1 }]} numberOfLines={1}>{row?.name ?? code}</Text>
-          <Flag code={code} />
-        </Row>
-      </View>
-      <View style={[styles.body, wide && styles.bodyCentred]}>
-        <Segmented
-          value={list}
-          options={[{ value: 'areas' as const, label: `Areas · ${cities.length}` }, { value: 'trips' as const, label: `Trips · ${trips?.length ?? row?.trips ?? 0}` }]}
-          onChange={setList}
-        />
-        {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-
-        {list === 'areas' ? (
-          cities.length ? (
-            <View style={styles.list}>
-              {cities.map((ci, i) => (
-                <AreaRow
-                  key={ci.name} first={i === 0} image={ci.image} category="place"
-                  title={ci.name}
-                  meta={[ci.places ? `${ci.places} place${ci.places === 1 ? '' : 's'}` : null,
-                    ci.places && ci.places - ci.been ? `${ci.places - ci.been} saved` : null,
-                    ci.trips ? `${ci.trips} trip${ci.trips === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || 'Nothing saved yet'}
-                  status={ci.nextTrip ? `Next: ${tripWhen(ci.nextTrip)}` : ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : 'Not yet visited'}
-                  onPress={() => onArea(ci.name)}
-                />
-              ))}
-            </View>
-          ) : <Card><Text style={type.small}>No areas here yet. Open a trip to {row?.name ?? code}, or add one from Places.</Text></Card>
-        ) : null}
-
-        {list === 'trips' ? (
-          trips == null ? <Text style={type.small}>Loading…</Text>
-            : trips.length ? <View style={{ gap: spacing.sm }}>{trips.map((t) => <TripCard key={t.id} trip={t} onPress={() => navigate(paths.trip(t.id))} />)}</View>
-              : <Card><Text style={type.small}>No trips to {row?.name ?? code} yet.</Text></Card>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Inside a city
-// ---------------------------------------------------------------------------
-
-/**
- * One area (handover 3c/3d): "Activities | Food & drink | Hotels segmented
- * (Hotels only in holiday areas). Chips are dropdowns: All ▾ (All / Saved /
- * Been), Type ▾ (Historic, Museum, Outdoors…), Mood ▾ (Fun, Culture…), plus a
- * specific trip. Green tick = been, red heart = saved."
- */
-function CityPanel({ country, city, home, places, household, viewer, wide, viewportHeight, onBack, onOpen, onOpenVenue, openRef, onPlanTrip, onChanged, landed, onLandedShown }: {
-  country: AtlasCountry | null; city: AtlasCity | null; home: AtlasHome | null; places: AtlasPlace[]; household: HouseholdResponse | null; viewer: string | null; wide: boolean; viewportHeight: number;
-  onBack: () => void; onOpen: (p: AtlasPlace) => void; onOpenVenue: (v: Venue) => void; openRef: string | null; onPlanTrip: () => void; onChanged: () => Promise<void>;
-  landed: { venueRef: string; kind: Kind } | null; onLandedShown: () => void;
-}) {
-  /**
-   * How this area's list is set — and all of it is in the address, so
-   * `/places/GB/London?kind=eat&status=been&sort=recent` is a page somebody can
-   * be sent (owner, 5 Sep 2026).
-   *
-   * What is *remembered* is per area, because coming back to London should not
-   * bring Lisbon's "food only, been" with it — and the address always wins, so
-   * arriving with the question already asked (Inspire's Food chip lands on
-   * `?kind=eat`) beats what was left here last time.
-   */
-  const memoryKey = `places.city.${home ? 'home' : `${country?.code ?? '?'}.${city?.name ?? '?'}`}`;
-  useStickyQuery(memoryKey, CITY_KEYS);
-  const { query } = useRouter();
-  const members = household?.members ?? [];
+function useListState(places: AtlasPlace[], viewer: string | null) {
+  const { query, setQuery } = useRouter();
   const [kind, setKind] = useQueryState<Kind>('kind', 'do', asOneOf(['do', 'eat', 'stay'] as const, 'do'));
   /**
-   * Loved is where this screen opens now (owner, 7 Sep 2026: "it should just
-   * default to Been and only the ones that I've rated. Or maybe it could be
-   * Loved… and I think that should be the default"). It used to open on All,
-   * which meant the first thing a household saw was its shortlist — somewhere
-   * they are thinking about rather than somewhere they know is good.
+   * The band: Been · Loved · Shortlisted. Been is where the list opens — it
+   * includes loved, so it is rarely empty — and only where nothing has been
+   * visited yet does an *unasked* list step down to Shortlisted, so a new
+   * household does not open on "Nothing here yet". The moment the address
+   * says a list, the address wins.
    */
-  const [status, setStatus] = useQueryState<Status>('status', 'loved', asOneOf(['any', 'been', 'saved', 'loved'] as const, 'loved'));
+  const [list, setList] = useQueryState<ListKey>('list', 'been', asOneOf(LIST_KEYS, 'been'));
   const [typeF, setTypeF] = useQueryState<string | null>('type', null, asText);
-  /**
-   * The second question in Food & drink, and only ever the second: what the
-   * food is. It cannot be asked before Type, because "Italian" is an answer
-   * about a restaurant and the dropdown that offers it does not exist until
-   * there is a restaurant to be asked about.
-   */
-  const [cuisineF, setCuisineF] = useQueryState<string | null>('cuisine', null, asText);
   const [moodF, setMoodF] = useQueryState<string | null>('mood', null, asText);
-  const [tripF, setTripF] = useQueryState<string | null>('trip', null, asText);
-  const [yearF, setYearF] = useQueryState<string | null>('year', null, asText);
-  const [sort, setSort] = useQueryState<Sort>('sort', 'name', asOneOf(['name', 'mine', 'recent'] as const, 'name'));
-  const [view, setView] = useQueryState<'list' | 'map'>('view', 'list', asOneOf(['list', 'map'] as const, 'list'));
-  const [sheet, setSheet] = useState<'status' | 'type' | 'cuisine' | 'mood' | 'trip' | 'year' | 'sort' | null>(null);
-  /**
-   * Whether the household has picked a status themselves on this screen.
-   *
-   * The address cannot answer that on its own: Loved is the default and a
-   * default is never written down, so tapping "Loved" leaves the query exactly
-   * as it was. Without this, tapping Loved on a tab with nothing loved would
-   * step straight back down to Been, and the chip flipping to a word nobody
-   * chose reads as a bug rather than as an empty list.
-   */
-  const [chose, setChose] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [selPin, setSelPin] = useState<string | null>(null);
-
-  // An area, or everything within a few miles of the front door.
-  const title = home ? 'Close to home' : city!.name;
-  const centre = home ? { lat: home.lat, lng: home.lng } : city!.lat != null && city!.lng != null ? { lat: city!.lat, lng: city!.lng } : null;
-  const searchRadiusKm = home ? Math.round(home.radiusMiles * 1.60934) : 5;
-  const ctx = home ? {} : { country: country!.name, countryCode: country!.code, locality: city!.name };
-
-  // Something just added: the search closes, the segment follows the place, and
-  // the row is marked so the eye finds it.
+  const [sort, setSort] = useQueryState<PlaceSort>('sort', 'recent', asOneOf(PLACE_SORT_KEYS, 'recent'));
+  // An older address said `status=`; it still means what it meant.
   useEffect(() => {
-    if (!landed) return;
-    setAdding(false); setKind(landed.kind); setStatus('any'); setChose(true); setTypeF(null); setCuisineF(null); setMoodF(null); setTripF(null); setYearF(null); setView('list');
-  }, [landed?.venueRef]);
+    const legacy = query.get('status');
+    if (legacy && !query.get('list')) setQuery({ list: LEGACY_STATUS[legacy] ?? null, status: null }, { replace: true });
+  }, []);
 
   const counts = useMemo(() => ({
     do: places.filter((p) => kindsOf(p).includes('do')).length,
     eat: places.filter((p) => kindsOf(p).includes('eat')).length,
     stay: places.filter((p) => kindsOf(p).includes('stay')).length,
   }), [places]);
+  const hasStay = counts.stay > 0;
+  const shown: Kind = kind === 'stay' && !hasStay ? 'do' : kind;
+  const inKind = useCallback((p: AtlasPlace) => kindsOf(p).includes(shown), [shown]);
+  const onTab = useMemo(() => places.filter(inKind), [places, inKind]);
 
-  /**
-   * Whether this area gets a Hotels tab. The API decides it from the fact —
-   * somewhere to stay is kept here, or the household has slept a night here —
-   * and the tab appears anyway the moment there is one to show, so a hotel
-   * saved into a day-trip area is never invisible.
-   */
-  const hasStay = counts.stay > 0 || !!city?.holiday;
-  const segments = [
-    { value: 'do' as const, label: `Activities${counts.do ? ` · ${counts.do}` : ''}` },
-    { value: 'eat' as const, label: `Food & drink${counts.eat ? ` · ${counts.eat}` : ''}` },
-    ...(hasStay ? [{ value: 'stay' as const, label: `Hotels${counts.stay ? ` · ${counts.stay}` : ''}` }] : []),
-  ];
-  // An address asking for a tab this area does not draw shows the first one.
-  const shown: Kind = segments.some((sg) => sg.value === kind) ? kind : 'do';
+  const listCounts = useMemo(() => ({
+    been: onTab.filter((p) => inList(p, 'been')).length,
+    loved: onTab.filter((p) => inList(p, 'loved')).length,
+    short: onTab.filter((p) => inList(p, 'short')).length,
+  }), [onTab]);
+  const asked = query.get('list') != null;
+  const showing: ListKey = asked ? list : listCounts.been ? 'been' : listCounts.short ? 'short' : 'been';
+  const inShowing = useMemo(() => onTab.filter((p) => inList(p, showing)), [onTab, showing]);
 
-  const inKind = (p: AtlasPlace) => kindsOf(p).includes(shown);
-  /** Everything on this tab, before any of the dropdowns have been touched. */
-  const inList = places.filter(inKind);
-  // What this tab holds, in words, for the empties: the list's, and every
-  // dropdown's, because a dropdown with nothing in it has to say why.
-  const thingsHere = shown === 'stay' ? 'places to stay' : shown === 'eat' ? 'food & drink' : 'things to do';
-  const nothingOnTab = !inList.length;
-  const noneYet = `No ${thingsHere} saved in ${title} yet.`;
-  const inKindAndType = places.filter((p) => inKind(p) && (!typeF || typeOf(p, shown) === typeF));
-  // All leads, however the list opens (owner, 7 Sep 2026: "the All option is the
-  // last one. That should definitely be the first"). Widest first, then the
-  // three narrowings in the order of how much they say about a place.
-  const statusOptions = [
-    { value: 'any', label: STATUS_LABEL.any, count: inKindAndType.length },
-    { value: 'loved', label: STATUS_LABEL.loved, count: inKindAndType.filter((p) => p.special).length },
-    { value: 'been', label: STATUS_LABEL.been, count: inKindAndType.filter((p) => p.visits > 0).length },
-    { value: 'saved', label: STATUS_LABEL.saved, count: inKindAndType.filter((p) => p.visits === 0).length },
-  ];
-  /**
-   * What the screen is actually showing.
-   *
-   * Loved is the default, and a default that opens on an empty list is not a
-   * default anybody wants: a household with nothing hearted on this tab yet
-   * would arrive at "nothing matches — clear a filter" on a screen they have
-   * not filtered. So an *unasked* status steps down — loved, then been, then
-   * everything — and stops at the first one with something in it. The moment
-   * the address says a status, the address wins and nothing steps down, which
-   * is what keeps `?status=loved` a page somebody can be sent.
-   */
-  const asked = chose || query.get('status') != null;
-  const showing: Status = asked ? status
-    : inKindAndType.some((p) => p.special) ? 'loved'
-      : inKindAndType.some((p) => p.visits > 0) ? 'been'
-        : 'any';
-  // Mood is a question about a day out, and a day out is not a dinner (owner,
-  // 7 Sep 2026: "I don't need a mood in Food and Drink. That's for activities,
-  // not for food"). It is not drawn on the other two tabs, so it does not
-  // filter there either — a mood left behind on Activities must not quietly
-  // hide half of Food & drink.
   const moodShown = shown === 'do';
   const matchesMood = (p: AtlasPlace) => !moodShown || !moodF || (p.moods ?? []).includes(moodF as any);
-  /**
-   * The second dropdown, and it is not drawn until the first has been answered
-   * — a list of cuisines beside a list of kinds of place is two ways of saying
-   * "type" and was the thing that made Restaurant, Café and Pub disappear.
-   *
-   * It is offered for whichever kind was chosen, not for restaurants alone:
-   * where the pubs here have said what they cook, the same question applies to
-   * them, and where nothing on the chosen kind has, the chip stays away rather
-   * than opening empty.
-   */
-  const cuisineShown = shown === 'eat' && !!typeF;
-  const matchesCuisine = (p: AtlasPlace) => !cuisineShown || !cuisineF || cuisinesOf(p).some((c) => cap(c) === cuisineF);
-  // Which trip put it here is a question about somewhere you travelled to, and
-  // nobody travels to their own front door (owner, 7 Sep 2026: "I don't think I
-  // need a trip dropdown either… if I'm looking at something in Italy, then
-  // maybe I can filter by trip. That makes sense, but not when I'm looking at
-  // my home"). Close to home the same slot asks the question that does apply
-  // there — which year you went — and only once there is more than one answer.
-  const tripShown = !home;
-  const matchesTrip = (p: AtlasPlace) => !tripShown || !tripF || (p.onTrips ?? []).some((t) => t.id === tripF);
-  const yearOf = (p: AtlasPlace) => (p.lastOn ? String(p.lastOn).slice(0, 4) : null);
-  const matchesYear = (p: AtlasPlace) => !yearF || yearOf(p) === yearF;
+  const matchesType = (p: AtlasPlace) => !typeF || typeOf(p, shown) === typeF;
 
   const typeCounts = new Map<string, number>();
-  places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p)).forEach((p) => { const t = typeOf(p, shown); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); });
-  // The cuisines of whatever kind of place is being looked at, and only those:
-  // asking "Italian" of the cafés must not offer the restaurants' answers.
-  const cuisineCounts = new Map<string, number>();
-  if (cuisineShown) {
-    places.filter((p) => inKind(p) && typeOf(p, shown) === typeF && matchesStatus(p, showing))
-      .forEach((p) => cuisinesOf(p).forEach((c) => cuisineCounts.set(cap(c), (cuisineCounts.get(cap(c)) ?? 0) + 1)));
-  }
-  const cuisineOptions = cuisineCounts.size
-    ? [{ value: '', label: 'Any food', count: places.filter((p) => inKind(p) && typeOf(p, shown) === typeF).length },
-      ...[...cuisineCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c, n]) => ({ value: c, label: c, count: n }))]
-    : [];
-  const typeOptions = [{ value: '', label: shown === 'eat' ? 'Any kind of place' : shown === 'stay' ? 'Any kind of stay' : 'Any kind', count: [...typeCounts.values()].reduce((a, b) => a + b, 0) }, ...[...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ value: t, label: t, count: n }))];
-
-  // Mood is the same closed set of six the home screen's shelves are (the API
-  // works it out per place); only the ones that are actually here are offered.
+  inShowing.filter(matchesMood).forEach((p) => { const t = typeOf(p, shown); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); });
+  const typeOptions: PopoverOption[] = [
+    { key: '', label: 'All', count: inShowing.filter(matchesMood).length, on: !typeF },
+    ...[...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ key: t, label: t, count: n, on: typeF === t })),
+  ];
   const moodCounts = new Map<string, number>();
-  places.filter((p) => inKind(p) && matchesStatus(p, showing)).forEach((p) => (p.moods ?? []).forEach((m) => moodCounts.set(m, (moodCounts.get(m) ?? 0) + 1)));
-  const moodOptions = [{ value: '', label: 'Any mood', count: places.filter(inKind).length }, ...MOODS.filter((m) => moodCounts.has(m)).map((m) => ({ value: m, label: cap(m), count: moodCounts.get(m)! }))];
+  inShowing.filter(matchesType).forEach((p) => (p.moods ?? []).forEach((m) => moodCounts.set(m, (moodCounts.get(m) ?? 0) + 1)));
+  const moodOptions: PopoverOption[] = [
+    { key: '', label: 'Any', count: inShowing.filter(matchesType).length, on: !moodF },
+    ...MOODS.filter((m) => moodCounts.has(m)).map((m) => ({ key: m, label: cap(m), count: moodCounts.get(m)!, on: moodF === m })),
+  ];
+  const sortOptions: PopoverOption[] = PLACE_SORTS.map((s) => ({ key: s.key, label: s.label, on: sort === s.key }));
 
-  // The trips this area's places were on: the redesign's fourth chip, "Rome ·
-  // Feb 2024" — one trip's worth of an area at a time.
-  const tripOptions = useMemo(() => {
-    const seen = new Map<string, { value: string; label: string; count: number }>();
-    for (const p of places) for (const t of p.onTrips ?? []) {
-      const row = seen.get(t.id) ?? { value: t.id, label: [t.title, t.on].filter(Boolean).join(' · ') || 'A trip', count: 0 };
-      row.count += 1; seen.set(t.id, row);
-    }
-    return [{ value: '', label: 'Any trip', count: places.length }, ...[...seen.values()].sort((a, b) => b.count - a.count)];
-  }, [places]);
+  const rows = useMemo(
+    () => sortPlaces(inShowing.filter((p) => matchesType(p) && matchesMood(p)), sort, viewer),
+    [inShowing, typeF, moodF, moodShown, sort, viewer, shown],
+  );
 
-  /**
-   * Close to home, the years the household actually went. It is the trip chip's
-   * place on this layer (owner, 7 Sep 2026: "maybe even then, I can have a year
-   * picker because there could be lots of different trips"), and it earns that
-   * place only when there is a choice to make: one year of visits is not a
-   * filter, it is a fact.
-   */
-  const yearOptions = useMemo(() => {
-    const seen = new Map<string, number>();
-    for (const p of inList) { const y = yearOf(p); if (y) seen.set(y, (seen.get(y) ?? 0) + 1); }
-    if (seen.size < 2) return [];
-    return [{ value: '', label: 'Any year', count: inList.length },
-      ...[...seen.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([y, n]) => ({ value: y, label: y, count: n }))];
-  }, [places, shown]);
+  return {
+    kind, shown, hasStay, counts, setKind, list: showing, setList, listCounts, inShowing,
+    typeF, setTypeF, moodF, setMoodF, moodShown, sort, setSort,
+    typeOptions, moodOptions, sortOptions, rows,
+  };
+}
+type ListState = ReturnType<typeof useListState>;
 
-  const rows = useMemo(() => {
-    const list = places.filter((p) => inKind(p) && matchesStatus(p, showing) && matchesMood(p) && matchesTrip(p) && matchesYear(p) && matchesCuisine(p) && (!typeF || typeOf(p, shown) === typeF));
-    const by: Record<Sort, (a: AtlasPlace, b: AtlasPlace) => number> = {
-      name: (a, b) => a.name.localeCompare(b.name),
-      mine: (a, b) => (myScore(b, viewer) ?? -1) - (myScore(a, viewer) ?? -1) || a.name.localeCompare(b.name),
-      recent: (a, b) => (b.lastOn ?? '').localeCompare(a.lastOn ?? '') || a.name.localeCompare(b.name),
-    };
-    return [...list].sort(by[sort]);
-  }, [places, shown, showing, typeF, cuisineF, moodF, tripF, yearF, home, sort, viewer]);
-
-  const pins: MapPin[] = rows.filter((p) => p.lat != null && p.lng != null).map((p) => ({
-    id: p.venueRef, lat: p.lat as number, lng: p.lng as number, label: p.name, number: '', heart: p.special,
-    tone: p.visits > 0 ? 'base' : 'hollow', onPress: () => setSelPin(p.venueRef),
-  }));
-  const selected = selPin ? rows.find((p) => p.venueRef === selPin) ?? null : null;
-  const mapHeight = wide ? 640 : Math.max(360, viewportHeight - 330);
-  const showMap = view === 'map';
-  const showList = view === 'list' || wide;
-
-  // "Italy · 4 activities · 2 food & drink" — what is here, in one line.
-  const subtitle = [
-    home ? `Within ${home.radiusMiles} miles of home` : country!.name,
-    counts.do ? `${counts.do} activit${counts.do === 1 ? 'y' : 'ies'}` : null,
-    counts.eat ? `${counts.eat} food & drink` : null,
-    counts.stay ? `${counts.stay} hotel${counts.stay === 1 ? '' : 's'}` : null,
-  ].filter(Boolean).join(' · ');
-
+/** Inside the head: the switch, the band, and the control row. */
+function ListHead({ st, ui, onLandedShown }: { st: ListState; ui: ListUi; onLandedShown: () => void }) {
+  const close = () => ui.setMenu(null);
+  const toggle = (m: Exclude<ListMenu, null>) => () => ui.setMenu(ui.menu === m ? null : m);
+  const typeLabel = st.typeF ?? (st.shown === 'eat' ? 'Cuisine' : 'Type');
+  const moodLabel = st.moodF ? cap(st.moodF) : 'Mood';
+  const sortLabel = `Sort: ${PLACE_SORTS.find((s) => s.key === st.sort)?.label ?? 'Most recent'}`;
   return (
-    <View style={{ width: '100%' }}>
-      <View style={[styles.field, wide && styles.fieldWideCentred]}>
-        <Row style={{ gap: spacing.sm }}>
-          <Pressable onPress={onBack} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Back"><Icon name="back" size={19} color={colors.ink} /></Pressable>
-          <Text style={[type.title, { flex: 1 }]} numberOfLines={1}>{title}</Text>
-          <Pressable onPress={() => setAdding((a) => !a)} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel={adding ? 'Close' : 'Add a place'}>
-            <Icon name={adding ? 'close' : 'add'} size={19} color={colors.ink} />
-          </Pressable>
-        </Row>
-        <Row style={{ justifyContent: 'space-between', gap: spacing.sm }}>
-          <Text style={[type.small, { color: colors.headerSub, flex: 1 }]} numberOfLines={2}>{subtitle}</Text>
-          {/* Nobody plans a trip to their own doorstep (owner, 4 Sep 2026). It
-              is a chip rather than a slab: the redesign leads with what is here,
-              not with what could be booked. */}
-          {home ? null : <Chip label="Plan a trip" icon="plan" onPress={onPlanTrip} />}
-        </Row>
-      </View>
-      <View style={[styles.body, wide && styles.bodyCentred]}>
-        <Segmented value={shown} options={segments} onChange={(k) => { setKind(k); setTypeF(null); setCuisineF(null); if (k !== 'do') setMoodF(null); setSelPin(null); onLandedShown(); }} />
-        {adding ? (
-          <AddPlace household={household} kind={shown} centre={centre} radiusKm={searchRadiusKm} ctx={ctx} wide={wide} onAdded={onChanged} onOpen={onOpenVenue} />
-        ) : (
-        <>
-        <View style={styles.filters}>
-          {/* The status chip always says which list you are looking at, default or
-              not — a screen that has quietly stepped down to Been must not read
-              as though it were showing everything. */}
-          <FilterChip label={STATUS_LABEL[showing]} on={showing !== 'any'} open={sheet === 'status'} onPress={() => setSheet(sheet === 'status' ? null : 'status')} />
-          <FilterChip label={typeF ?? 'Type'} on={!!typeF} open={sheet === 'type'} onPress={() => setSheet(sheet === 'type' ? null : 'type')} />
-          {cuisineShown && cuisineOptions.length ? <FilterChip label={cuisineF ?? 'Cuisine'} on={!!cuisineF} open={sheet === 'cuisine'} onPress={() => setSheet(sheet === 'cuisine' ? null : 'cuisine')} /> : null}
-          {moodShown ? <FilterChip label={moodF ? cap(moodF) : 'Mood'} on={!!moodF} open={sheet === 'mood'} onPress={() => setSheet(sheet === 'mood' ? null : 'mood')} /> : null}
-          {tripShown && tripOptions.length > 1 ? <FilterChip label={tripF ? tripOptions.find((o) => o.value === tripF)?.label ?? 'Trip' : 'Trip'} on={!!tripF} open={sheet === 'trip'} onPress={() => setSheet(sheet === 'trip' ? null : 'trip')} /> : null}
-          {!tripShown && yearOptions.length ? <FilterChip label={yearF ?? 'Year'} on={!!yearF} open={sheet === 'year'} onPress={() => setSheet(sheet === 'year' ? null : 'year')} /> : null}
-          <FilterChip label={sort === 'name' ? 'A–Z' : sort === 'mine' ? 'My rating' : 'Most recent'} on={sort !== 'name'} open={sheet === 'sort'} onPress={() => setSheet(sheet === 'sort' ? null : 'sort')} />
-          <View style={{ flex: 1 }} />
-          <View style={styles.viewToggle}>
-            <Pressable onPress={() => setView('list')} style={[styles.viewBtn, view === 'list' && styles.viewBtnOn]} accessibilityRole="button" accessibilityLabel="List" accessibilityState={{ selected: view === 'list' }}><Icon name="list" size={15} color={view === 'list' ? colors.primaryFg : colors.ink} /></Pressable>
-            <Pressable onPress={() => setView('map')} style={[styles.viewBtn, view === 'map' && styles.viewBtnOn]} accessibilityRole="button" accessibilityLabel="Map" accessibilityState={{ selected: view === 'map' }}><Icon name="map" size={15} color={view === 'map' ? colors.primaryFg : colors.ink} /></Pressable>
-          </View>
-        </View>
-
-        {/* The answer opens under the question (owner, 5 Sep 2026), and a
-            filter with nothing to offer says why rather than opening empty. */}
-        <PickPanel open={sheet === 'status'} title="What are we looking at?" options={statusOptions} value={showing}
-          onPick={(v) => { setStatus(v as Status); setChose(true); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'type'} title={shown === 'eat' ? 'What kind of place' : shown === 'stay' ? 'Kind of stay' : 'Kind of thing'}
-          options={typeOptions} value={typeF ?? ''}
-          empty={nothingOnTab ? 'Nothing on this tab yet, so there is nothing to narrow.' : 'Nothing here has said what kind of thing it is yet.'}
-          onPick={(v) => { setTypeF(v || null); setCuisineF(null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        {/* The second question, under the first. Changing the kind of place
-            clears it, because "Italian cafés" is not what somebody who has just
-            tapped Cafés is asking for. */}
-        <PickPanel open={sheet === 'cuisine' && cuisineShown} title={`What ${(typeF ?? '').toLowerCase() || 'they'} serve`} options={cuisineOptions} value={cuisineF ?? ''}
-          onPick={(v) => { setCuisineF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'mood' && moodShown} title="What's the day for?" options={moodOptions} value={moodF ?? ''}
-          empty={nothingOnTab ? 'Nothing on this tab yet, so there is no mood to pick.' : 'Nothing here has been given a mood yet.'}
-          onPick={(v) => { setMoodF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'trip' && tripShown} title="On which trip" options={tripOptions} value={tripF ?? ''}
-          onPick={(v) => { setTripF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'year' && !tripShown} title="Which year you went" options={yearOptions} value={yearF ?? ''}
-          onPick={(v) => { setYearF(v || null); setSheet(null); setSelPin(null); }} onClose={() => setSheet(null)} />
-        <PickPanel open={sheet === 'sort'} title="Sort by" options={SORTS} value={sort}
-          onPick={(v) => { setSort(v as Sort); setSheet(null); }} onClose={() => setSheet(null)} />
-
-        <View style={[styles.split, wide && showMap && styles.splitWide]}>
-          {showList ? (
-            <View style={[{ gap: spacing.sm }, wide && showMap && { width: 440 }]}>
-              {rows.length ? (
-                <View style={styles.list}>
-                  {rows.map((p, i) => <PlaceRow key={p.venueRef} place={p} kind={shown} viewer={viewer} members={members} first={i === 0} selected={openRef === p.venueRef || landed?.venueRef === p.venueRef} onPress={() => { onLandedShown(); onOpen(p); }} />)}
-                </View>
-              ) : (
-                <Card>
-                  {/* Three different empties, because they need three different
-                      answers: nothing anywhere, nothing on this tab, and a
-                      filter that has hidden everything. */}
-                  <Text style={type.small}>
-                    {!places.length ? "Nothing here yet. Add a place you know, or a trip's shortlist will fill it."
-                      : nothingOnTab ? `${noneYet}${shown === 'stay' ? ' A hotel you book on a trip here lands in this list.' : ''}`
-                        : 'Nothing matches — clear a filter.'}
-                  </Text>
-                </Card>
-              )}
-              {landed && rows.some((p) => p.venueRef === landed.venueRef) ? (
-                <StatusLine tone="good">{rows.find((p) => p.venueRef === landed.venueRef)?.name} is in your places.</StatusLine>
-              ) : null}
-              <Text style={type.tiny}>{rows.length} of {inList.length} · tap a row for the drawer.</Text>
-            </View>
-          ) : null}
-          {showMap ? (
-            <View style={[styles.mapWrap, wide && { flex: 1 }]}>
-              <MapView pins={pins} height={mapHeight} focusId={selPin} />
-              {selected ? (
-                <View style={styles.pinCard}>
-                  <PlaceRow place={selected} kind={shown} viewer={viewer} members={members} first selected={false} onPress={() => onOpen(selected)} />
-                </View>
-              ) : <Text style={[type.tiny, styles.mapHint]}>{pins.length} pins · filled been · hollow saved · tap one</Text>}
-            </View>
-          ) : null}
-        </View>
-        </>
-        )}
-      </View>
-
+    <View style={styles.chrome}>
+      <PairSwitch
+        value={st.shown}
+        options={[
+          { value: 'do' as Kind, label: 'Activities' },
+          { value: 'eat' as Kind, label: 'Food & drink' },
+          // Only where the household has kept somewhere to sleep: a hotel
+          // saved on a trip must not become unreachable.
+          ...(st.hasStay ? [{ value: 'stay' as Kind, label: 'Stays' }] : []),
+        ]}
+        onPick={(k) => { st.setKind(k); st.setTypeF(null); if (k !== 'do') st.setMoodF(null); close(); onLandedShown(); }}
+      />
+      <CategoryStrip
+        light
+        items={LISTS.map((l) => ({ key: l.key, label: `${l.label} · ${st.listCounts[l.key]}` }))}
+        value={st.list}
+        onPick={(k) => { st.setList(k as ListKey); st.setTypeF(null); close(); onLandedShown(); }}
+      />
+      <ControlRow
+        left={<ControlButton label={typeLabel} set={!!st.typeF} open={ui.menu === 'type'} onPress={toggle('type')} />}
+        centre={st.moodShown ? <ControlButton label={moodLabel} set={!!st.moodF} open={ui.menu === 'mood'} onPress={toggle('mood')} /> : null}
+        right={<ControlButton label={sortLabel} set={st.sort !== 'recent'} open={ui.menu === 'sort'} onPress={toggle('sort')} />}
+      />
     </View>
   );
 }
 
-
-/** A chip that opens its answers in a panel under the row. The chevron says which way. */
-function FilterChip({ label, on, open, onPress }: { label: string; on: boolean; open?: boolean; onPress: () => void }) {
+/** The panels, anchored under the head. */
+function ListMenus({ st, ui, top }: { st: ListState; ui: ListUi; top: number }) {
+  const close = () => ui.setMenu(null);
   return (
-    <Pressable onPress={onPress} style={[styles.fchip, on && styles.fchipOn, open && !on && styles.fchipOpen]} accessibilityRole="button" accessibilityState={{ expanded: !!open }}>
-      <Text style={[styles.fchipText, on && { color: colors.primaryFg }]} numberOfLines={1}>{label}</Text>
-      <Icon name={open ? 'collapse' : 'expand'} size={13} color={on ? colors.primaryFg : colors.ink} />
+    <>
+      <Popover open={ui.menu === 'type'} top={top} onClose={close} align="left">
+        <PopoverGroup title={st.shown === 'eat' ? 'Cuisine' : st.shown === 'stay' ? 'Kind of stay' : 'Type'}>
+          {st.typeOptions.length > 1
+            ? <PopoverList options={st.typeOptions} onPick={(k) => { st.setTypeF(k || null); close(); }} />
+            : <Text style={styles.panelNote}>{st.inShowing.length ? 'Nothing here has said what kind of thing it is yet.' : 'Nothing on this list yet, so there is nothing to narrow.'}</Text>}
+        </PopoverGroup>
+      </Popover>
+      <Popover open={ui.menu === 'mood' && st.moodShown} top={top} onClose={close} align="centre">
+        <PopoverGroup title="Mood">
+          {st.moodOptions.length > 1
+            ? <PopoverList options={st.moodOptions} onPick={(k) => { st.setMoodF(k || null); close(); }} />
+            : <Text style={styles.panelNote}>Nothing here has been given a mood yet.</Text>}
+        </PopoverGroup>
+      </Popover>
+      <Popover open={ui.menu === 'sort'} top={top} onClose={close} align="right">
+        <PopoverGroup title="Sort by">
+          <PopoverList options={st.sortOptions} onPick={(k) => { st.setSort(k as PlaceSort); close(); }} />
+        </PopoverGroup>
+      </Popover>
+    </>
+  );
+}
+
+/** The rows, or the add-a-place search in their place. */
+function ListBody({ st, ui, places, viewer, country, city, homeArea, household, onOpen, onOpenVenue, openRef, onChanged, landed, onLandedShown }: {
+  st: ListState; ui: ListUi; places: AtlasPlace[]; viewer: string | null;
+  country: AtlasCountry | null; city: AtlasCity | null; homeArea: AtlasHome | null; household: HouseholdResponse | null;
+  onOpen: (p: AtlasPlace) => void; onOpenVenue: (v: Venue) => void; openRef: string | null; onChanged: () => Promise<void>;
+  landed: { venueRef: string; kind: Kind } | null; onLandedShown: () => void;
+}) {
+  const home = !!homeArea;
+  // Something just added: the search closes, the tab follows the place, and
+  // the row is marked so the eye finds it.
+  useEffect(() => {
+    if (!landed) return;
+    ui.setAdding(false); ui.setMenu(null);
+    st.setKind(landed.kind);
+    const p = places.find((x) => x.venueRef === landed.venueRef);
+    if (p) st.setList(inList(p, 'loved') ? 'loved' : inList(p, 'been') ? 'been' : 'short');
+    st.setTypeF(null); st.setMoodF(null);
+  }, [landed?.venueRef]);
+
+  const centre = homeArea ? { lat: homeArea.lat, lng: homeArea.lng } : city?.lat != null && city?.lng != null ? { lat: city.lat, lng: city.lng } : null;
+  const searchRadiusKm = homeArea ? Math.round(homeArea.radiusMiles * 1.60934) : 5;
+  const ctx = homeArea || !country || !city ? {} : { country: country.name, countryCode: country.code, locality: city.name };
+  const title = home ? 'near home' : city?.name ?? 'here';
+  const kindLabel = st.shown === 'eat' ? 'food & drink' : st.shown === 'stay' ? 'stays' : 'activities';
+
+  return (
+    <View style={styles.listBody}>
+      <View style={styles.addRow}>
+        <Pressable onPress={() => { ui.setAdding(!ui.adding); ui.setMenu(null); }} style={styles.addBtn} accessibilityRole="button" accessibilityLabel={ui.adding ? 'Close the search' : 'Add a place'}>
+          <Icon name={ui.adding ? 'close' : 'add'} size={15} color={colors.ink} strokeWidth={2.2} />
+          <Text style={styles.addText}>{ui.adding ? 'Close' : 'Add a place'}</Text>
+        </Pressable>
+      </View>
+      {ui.adding ? (
+        <View style={styles.gutter}>
+          <AddPlace household={household} kind={st.shown} centre={centre} radiusKm={searchRadiusKm} ctx={ctx} wide={false} onAdded={onChanged} onOpen={onOpenVenue} />
+        </View>
+      ) : (
+        <>
+          {st.rows.length ? (
+            <View>
+              {st.rows.map((p) => (
+                <PlaceRow
+                  key={p.venueRef} place={p} kind={st.shown} viewer={viewer}
+                  selected={openRef === p.venueRef || landed?.venueRef === p.venueRef}
+                  onPress={() => { onLandedShown(); onOpen(p); }}
+                />
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyList}>
+              <Text style={styles.emptyTitle}>Nothing here yet</Text>
+              <Text style={styles.emptyBody}>
+                {!places.length ? `Nothing ${title} yet. Add a place you know, or heart one on Inspire or a trip.`
+                  : st.typeF || st.moodF ? 'Nothing matches — clear a filter.'
+                    : `${EMPTY_LIST[st.list]}${st.list === 'been' && st.listCounts.short ? ` ${st.listCounts.short} shortlisted so far.` : ''}`}
+              </Text>
+              {st.typeF || st.moodF ? (
+                <Pressable onPress={() => { st.setTypeF(null); st.setMoodF(null); }} accessibilityRole="button" style={styles.emptyAction}>
+                  <Text style={styles.emptyActionText}>Clear filters</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+          {landed && st.rows.some((p) => p.venueRef === landed.venueRef) ? (
+            <View style={styles.gutter}><StatusLine tone="good">{st.rows.find((p) => p.venueRef === landed.venueRef)?.name} is in your places.</StatusLine></View>
+          ) : null}
+          {st.rows.length ? <Text style={[type.tiny, styles.gutter, { paddingTop: spacing.sm }]}>{st.rows.length} of {st.inShowing.length} {kindLabel} · tap a row for the drawer.</Text> : null}
+        </>
+      )}
+    </View>
+  );
+}
+
+/**
+ * One place, one row (handover v8): a 64px thumbnail or a 40px outlined type
+ * glyph; the name; "Pub · Sunningdale"; ★ rating (count) and the date; and,
+ * in a column of its own, the Epic rating — the household's own mark, over
+ * the crowd's, which stays on the meta line. Rows with no Epic rating leave
+ * the column empty.
+ */
+function PlaceRow({ place, kind, viewer, selected, onPress }: { place: AtlasPlace; kind: Kind; viewer: string | null; selected: boolean; onPress: () => void }) {
+  const ours = epicRating(place, viewer);
+  const what = typeOf(place, kind);
+  const meta = [what, place.locality].filter(Boolean).join(' · ');
+  const when = whenLabel(place.lastOn);
+  const hasPicture = Boolean(place.image) || Boolean(place.photos?.length);
+  return (
+    <Pressable onPress={onPress} style={[styles.prow, selected && styles.rowOn]} accessibilityRole="button" accessibilityLabel={place.name}>
+      {hasPicture ? (
+        <VenueThumb
+          name={place.name} image={place.image} photos={place.photos} category={place.category}
+          experiences={(place.venue as Partial<Venue> | null)?.experiences ?? []}
+          width={WELL} height={WELL} rounded={MEDIA_RADIUS - 2} credit={false}
+        />
+      ) : (
+        <View style={styles.glyphWell}>
+          <View style={styles.glyph}>
+            <Icon name={iconFor({ category: place.category, experiences: (place.venue as Partial<Venue> | null)?.experiences ?? [] })} size={20} color={colors.ink} strokeWidth={2} />
+          </View>
+        </View>
+      )}
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text style={[styles.prowName, place.unnamed && { fontStyle: 'italic', color: colors.inkMuted }]} numberOfLines={1}>{place.unnamed ? 'Unnamed place — open for its name' : place.name}</Text>
+        {meta ? <Text style={styles.prowMeta} numberOfLines={1}>{meta}</Text> : null}
+        <View style={styles.prowLine}>
+          {place.rating != null ? <Crowd rating={place.rating} count={place.ratingCount} size={12} brief /> : null}
+          {when ? <Text style={[styles.prowMeta, place.rating != null && { marginLeft: 6 }]}>{when}</Text> : null}
+        </View>
+      </View>
+      {ours ? (
+        <View style={styles.ours} accessibilityLabel={`Epic rating ${ours.score}, ${ours.by}`}>
+          <Text style={styles.oursCaption}>Epic rating</Text>
+          <View style={styles.oursBlock}>
+            <Icon name="favourite" size={13} color={colors.selectedFg} fill />
+            <Text style={styles.oursScore}>{ours.score.toFixed(1)}</Text>
+          </View>
+          <Text style={styles.oursBy} numberOfLines={1}>{ours.by}</Text>
+        </View>
+      ) : <View style={styles.oursBlank} />}
     </Pressable>
   );
 }
@@ -983,8 +718,6 @@ function FilterChip({ label, on, open, onPress }: { label: string; on: boolean; 
 /**
  * How you get to it, in the drawer (owner, 4 Sep 2026: "we could actually show
  * what line it's on or more information on getting there on the side drawer").
- * The row says only the station's name; the lines, the walk and the postcode
- * live here.
  */
 function GettingThere({ place }: { place: AtlasPlace }) {
   const lines = (place.stationLines ?? []).filter(Boolean);
@@ -1024,91 +757,13 @@ function GettingThere({ place }: { place: AtlasPlace }) {
   );
 }
 
-/**
- * One place, one row, and the same anatomy everywhere in the redesign
- * (handover §6): a 56–64px picture, the name, a meta line, a green status line,
- * and a trailing tick or heart.
- *
- * Green tick = been. Red heart = loved or shortlisted, filled when it is loved.
- * That is the whole trailing column — red stays the heart (style guide) — and
- * the third line is the mark: ours if anybody here has given one, the crowd's
- * only if nobody has (owner, 7 Sep 2026).
- */
-function PlaceRow({ place, kind, viewer, members, first, selected, onPress }: { place: AtlasPlace; kind: Kind; viewer: string | null; members: { id: string; name: string }[]; first?: boolean; selected: boolean; onPress: () => void }) {
-  const been = place.visits > 0;
-  // Where it is, in as few words as possible: the station, not the district and
-  // the lines (owner, 4 Sep 2026: "that's too much detail… just show the tube
-  // station"). The lines and the walk are in the drawer.
-  const pill = kind === 'eat' ? CATEGORY_PILL[place.category ?? ''] : null;
-  const what = rowType(place, kind);
-  const where = [what, place.station].filter(Boolean).join(' · ');
-  return (
-    <Pressable onPress={onPress} style={[styles.prow, !first && styles.rowLine, selected && styles.rowOn]} accessibilityRole="button">
-      {/* The well was the category icon and nothing else, which is what made a
-          list of places read as a text listing (owner, 5 Sep 2026). It is now
-          whatever the ladder found for this place — their mark, a photograph of
-          the building, the shopfront — then, only where we own nothing, the
-          provider's photograph fetched at display and never stored (owner,
-          5 Sep 2026: "at least that we can have restaurant pictures, which is
-          really useful in some instances"), and the same icon on the same lime
-          ground when there is neither. A list with three pictures in it still
-          reads as one list.
-
-          No credit line under a 56px well: it would not fit and would not be
-          read. The licence is met where the picture is actually looked at —
-          VenueDrawer draws the same photograph large, with its attribution
-          under it. */}
-      <View style={styles.well}>
-        <VenueThumb
-          name={place.name}
-          image={place.image}
-          photos={place.photos}
-          category={place.category}
-          experiences={(place.venue as Partial<Venue> | null)?.experiences ?? []}
-          width={WELL}
-          height={WELL}
-          rounded={radius.md}
-          credit={false}
-        />
-      </View>
-      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <Text style={[type.h3, place.unnamed && { fontStyle: 'italic', color: colors.inkMuted }]} numberOfLines={1}>{place.unnamed ? 'Unnamed place — open for its name' : place.name}</Text>
-        <View style={styles.meta}>
-          {pill ? <View style={styles.pill}><Text style={styles.pillText}>{pill}</Text></View> : null}
-          {where ? <Text style={[type.small, { flexShrink: 1 }]} numberOfLines={1}>{where}</Text> : null}
-        </View>
-        {(() => {
-          const mark = rowRating(place, viewer, members);
-          if (!mark) return <Text style={type.tiny}>No rating yet</Text>;
-          return <Rating value={mark.value}>{mark.whose ? ` ${mark.whose}` : ''}</Rating>;
-        })()}
-      </View>
-      {been ? (
-        <View style={styles.tick} accessibilityLabel="Been here"><Icon name="check" size={13} color={colors.headerSub} strokeWidth={3} /></View>
-      ) : (
-        <View style={{ paddingHorizontal: 2 }} accessibilityLabel={place.special ? 'Loved' : 'Shortlisted'}>
-          <Icon name="keep" size={17} color={colors.loved} fill={place.special} />
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-
-
 // ---------------------------------------------------------------------------
 // Our side of a place, at the top of the drawer
 // ---------------------------------------------------------------------------
 
 /**
- * A place just found by searching, before it is anything of ours: save it to
- * try, or say we have been — with the source's own details, menu and order in
- * the tabs beside it, so the first thing you can check is that it is the right
- * one (owner, 4 Sep 2026).
- */
-/**
  * The one question, at the top of the drawer: did everyone love it. It saves on
- * the tap and then says so; the household's fuller record — history, special,
+ * the tap and then says so; the household's fuller record — history, loved,
  * removing it — is under Ours (owner, 4 Sep 2026).
  */
 function CapturePanel({ venue, household, ctx: where, been, saved, onChanged, onLanded }: {
@@ -1160,7 +815,7 @@ function NewPlacePanel({ venue, household, ctx: where, onChanged }: {
   const ctx = { label: venue.name, category: venue.category, lat: venue.lat ?? undefined, lng: venue.lng ?? undefined, venue, ...where };
 
   return (
-    <View style={styles.ours}>
+    <View style={styles.ours2}>
       <Row style={{ flexWrap: 'wrap' }}>
         <Text style={type.h3}>Ours</Text>
         <Chip label="Not in your places yet" />
@@ -1188,7 +843,7 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
   const [detailed, setDetailed] = useState(false);
   const ctx = { label: place.name, category: place.category, lat: place.lat ?? undefined, lng: place.lng ?? undefined, ...where };
   const venue = atlasToVenue(place);
-  const mine = myScore(place, viewer);
+  void myScore(place, viewer);
 
   const load = useCallback(async () => {
     try { const d = await api.place(place.venueRef); setDetail({ visits: d.visits }); } catch { setDetail({ visits: [] }); }
@@ -1196,38 +851,25 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
   useEffect(() => { load(); }, [load]);
 
   return (
-    <View style={styles.ours}>
+    <View style={styles.ours2}>
       <Row style={{ flexWrap: 'wrap' }}>
         <Text style={type.h3}>Ours</Text>
         {place.visits ? <Chip label={`Been ${place.visits}×${place.lastOn ? ` · last ${fmtMonth(place.lastOn)}` : ''}`} /> : <Chip label="Shortlisted" />}
         {place.special ? <Chip label="Loved" icon="keep" iconFill /> : null}
-
       </Row>
-      {/* Where this place came from. It used to be the row's third line —
-          "Saved · for Bath, Sep 2026" — and the owner, 7 Sep 2026: "I don't need
-          to see that. I can just see if I click into it, maybe I can see then
-          when I saved it or what trip it was part of." So it is here, where
-          there is room for all of it rather than the first trip and no more. */}
+      {/* Where this place came from — here, where there is room for all of it,
+          rather than on the row (owner, 7 Sep 2026). */}
       {place.onTrips?.length ? (
         <Text style={type.small}>
           {place.visits ? 'Been here on ' : 'Kept for '}
-          {/* Deduplicated, because three plans for the same weekend all begin
-              "London" and would otherwise read as three separate trips. */}
           {[...new Set(place.onTrips.map((t) => tripWhen({ id: t.id, label: t.title, startsOn: null, endsOn: null, on: t.on })))].join(' · ')}
         </Text>
       ) : null}
-      {/* What each of us thought is the meal's record now, not a form on the
-          place (owner, 4 Sep 2026): the stars are given on the order, and
-          "our history here" shows what was ordered and what was loved. */}
       <Wrap>
-        {/* "We've been here" is the first thing in the drawer now; this is the
-            long way round, for another date, who came, a note or exact scores. */}
         <Button label={adding ? 'Close' : 'Record a past visit'} icon={adding ? 'close' : undefined} kind="ghost" onPress={() => { setEditing(null); setDetailed(true); setAdding((a) => !a); }} />
         {!place.visits && place.ledger !== 'saved' && !place.special ? <Button label="Save to try" kind="secondary" onPress={async () => { await api.savePlace(place.venueRef, 'saved', ctx); setMsg('Saved to try.'); await onChanged(); }} /> : null}
         {place.visits > 0 && !place.special ? <Button label="We loved it" icon="keep" kind="secondary" onPress={async () => { await api.savePlace(place.venueRef, 'special', ctx); setMsg('Loved — the planner will go further for it.'); await onChanged(); }} /> : null}
       </Wrap>
-      {/* Loved is ours alone — no source has an opinion about it — and it is
-          what you say after you have been (owner, 4 Sep 2026). */}
       {!place.visits && !place.special ? <Text style={type.tiny}>Loved comes after you've been. Record the visit and it appears here.</Text> : null}
       {msg ? <StatusLine tone="good">{msg}</StatusLine> : null}
       {adding && household ? (
@@ -1264,8 +906,6 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
       {detail?.visits.length ? (
         <View style={{ gap: spacing.sm }}>
           <Text style={type.h3}>Our history here</Text>
-          {/* A record, not a form: what everyone thought is given on the order
-              after the meal, and this shows it (owner, 4 Sep 2026). */}
           {detail.visits.map((v) => <VisitSummary key={v.id} visit={v} />)}
         </View>
       ) : detail ? <Text style={type.small}>No visit recorded here yet.</Text> : <Text style={type.tiny}>Loading our history…</Text>}
@@ -1280,9 +920,8 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
 /**
  * Add a place: a search box, and that is all (owner, 4 Sep 2026 — "I'm already
  * in London. I don't need to see any of that stuff… I have my search box.
- * That's it"). The bar above chooses what kind of place; the city, or the
- * radius from home, is where it looks. Which sources answered is an admin's
- * question, so it hides behind a chip on a wide screen only.
+ * That's it"). The switch above chooses what kind of place; the city, or the
+ * radius from home, is where it looks.
  */
 function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpen }: {
   household: HouseholdResponse | null; kind: Kind; centre: { lat: number; lng: number } | null; radiusKm: number;
@@ -1305,7 +944,6 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
   // Choosing a prediction puts its name in the box; that must not ask for predictions again.
   const justChose = useRef(false);
 
-  // Predictions arrive as the household types, biased by where it is looking.
   useEffect(() => {
     const text = q.trim();
     if (typing.current) clearTimeout(typing.current);
@@ -1320,11 +958,6 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
     return () => { if (typing.current) clearTimeout(typing.current); };
   }, [q, centre?.lat, centre?.lng, kind]);
 
-  /**
-   * A chosen prediction opens in the drawer — the first thing to know is that
-   * this is the right Sebastian's, and the details, menu and order are there
-   * (owner, 4 Sep 2026).
-   */
   const choose = async (venueRef: string, name: string) => {
     justChose.current = true;
     setSuggestions([]); setQ(name); setBusy(true); setMsg(null);
@@ -1336,7 +969,6 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
     } catch (e: any) { setMsg(e.message); } finally { setBusy(false); }
   };
 
-  /** Everything of this kind nearby, when you would rather browse than name something. */
   const search = async () => {
     if (!centre) { setMsg('Nowhere to look from yet — set your home address in Settings.'); return; }
     setSuggestions([]); setBusy(true); setMsg(null);
@@ -1366,9 +998,9 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
         <Button label="Search" icon="search" onPress={search} loading={busy} />
       </View>
       {suggestions.length ? (
-        <View style={styles.list}>
+        <View style={styles.suggestList}>
           {suggestions.map((sg, i) => (
-            <Pressable key={sg.venueRef} onPress={() => choose(sg.venueRef, sg.name)} style={[styles.row, i > 0 && styles.rowLine]} accessibilityRole="button">
+            <Pressable key={sg.venueRef} onPress={() => choose(sg.venueRef, sg.name)} style={[styles.suggestRow, i > 0 && styles.rowLine]} accessibilityRole="button">
               <View style={{ width: 22, alignItems: 'center' }}><Icon name={sg.mine ? 'places' : 'address'} size={16} /></View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={type.h3} numberOfLines={1}>{sg.name}</Text>
@@ -1379,9 +1011,9 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
         </View>
       ) : null}
       {admin ? (
-        <View style={styles.filters}>
-          <FilterChip label={sources?.length ? `Sources · ${sources.length}` : 'Sources'} on={!!sources?.length} onPress={() => setShowSources((v) => !v)} />
-        </View>
+        <Row>
+          <Chip label={sources?.length ? `Sources · ${sources.length}` : 'Sources'} selected={!!sources?.length} onPress={() => setShowSources((v) => !v)} />
+        </Row>
       ) : null}
       {admin && showSources ? <Card><SourcePicker value={sources} onChange={setSources} /></Card> : null}
       {msg ? <StatusLine tone={msg.startsWith('Added') || msg.startsWith('Saved') ? 'good' : 'warn'}>{msg}</StatusLine> : null}
@@ -1402,78 +1034,72 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
 }
 
 const styles = StyleSheet.create({
-  page: { width: '100%', paddingBottom: spacing.xl },
-  pageWide: { maxWidth: 1400, alignSelf: 'center' },
-  atlasCol: { width: '100%' },
-  cityCol: { width: '100%' },
-  // The redesign is a drill-down, so a wide window is the same one column with
-  // room around it rather than a second one (CLAUDE.md: one tree shape).
-  fieldWideCentred: { width: '100%', maxWidth: 860, alignSelf: 'center' },
-  bodyCentred: { width: '100%', maxWidth: 860, alignSelf: 'center' },
-  roundBtn: { width: 40, height: 40, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  // The green status line under every row: what the household did here.
-  green: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.accent },
-  arow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 11, paddingHorizontal: spacing.md, minHeight: TARGET },
-  tick: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.lime, alignItems: 'center', justifyContent: 'center' },
-  /**
-   * The screen's own header. It used to be a second lime field stacked under
-   * the shell's — the shell already carries the one lime band with the wordmark
-   * on it (App.tsx) — and the redesign draws these screens white, so it is the
-   * ground with room around it and nothing else.
-   */
-  field: { backgroundColor: colors.bg, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
-  fieldWide: { backgroundColor: 'transparent', paddingBottom: 0 },
-  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, gap: spacing.md },
-  list: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.md, minHeight: TARGET },
-  rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
-  rowSub: { paddingLeft: 40, backgroundColor: colors.panel },
+  fill: { flex: 1, backgroundColor: colors.bg },
+  page: { paddingBottom: spacing.xxl },
+  gutter: { paddingHorizontal: GUTTER },
+  // The head: the mark, the title or the crumb, and — inside a list — the
+  // switch, the band and the control row. Lime at the root only.
+  head: { backgroundColor: colors.bg, paddingBottom: 4 },
+  headLime: { backgroundColor: colors.lime, paddingBottom: 16 },
+  top: { paddingHorizontal: GUTTER, paddingTop: TOP_INSET, minHeight: 40, justifyContent: 'center' },
+  rootTitle: { paddingHorizontal: GUTTER, paddingTop: 18, gap: 2 },
+  rootTitleText: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.78, lineHeight: 28, color: colors.selectedFg },
+  rootSub: { fontFamily: fonts.body, fontSize: 13, color: colors.selectedFg },
+  crumbWrap: { paddingTop: 14 },
+  chrome: { marginTop: 14 },
+
+  list: { paddingTop: 4 },
+  navRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, marginHorizontal: GUTTER, minHeight: TARGET,
+    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+  },
+  navTile: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  homeTile: { width: 36, height: 36, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
+  navLabel: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.38, color: colors.ink },
+  navSub: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  navCount: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+
+  listBody: { paddingTop: 4 },
+  addRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: GUTTER },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 36, paddingVertical: 4 },
+  addText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  prow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, marginHorizontal: GUTTER, minHeight: TARGET,
+    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+  },
   rowOn: { backgroundColor: colors.accentSoft },
-  counts: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  count: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, height: 20, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
-  countText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },
-  filters: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  fchip: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 32, paddingLeft: 10, paddingRight: 7, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, maxWidth: 150 },
-  fchipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  fchipOpen: { borderColor: colors.ink, backgroundColor: colors.panel },
-  fchipText: { fontSize: 12, fontWeight: '600', color: colors.ink, flexShrink: 1 },
-  viewToggle: { flexDirection: 'row', height: 32, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, padding: 2, gap: 2 },
-  viewBtn: { width: 30, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
-  viewBtnOn: { backgroundColor: colors.primary },
-  split: { gap: spacing.md },
-  splitWide: { flexDirection: 'row', alignItems: 'flex-start' },
-  prow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 10, paddingHorizontal: spacing.md, minHeight: TARGET },
-  well: { width: WELL, height: WELL, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' },
-  prowGap: { gap: spacing.md },
-  heart: { position: 'absolute', right: -5, top: -5, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: 3, minWidth: 0 },
+  rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
+  glyphWell: { width: WELL, height: WELL, alignItems: 'center', justifyContent: 'center' },
+  glyph: { width: GLYPH_WELL, height: GLYPH_WELL, borderWidth: 1, borderColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center' },
+  prowName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
+  prowMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
+  prowLine: { flexDirection: 'row', alignItems: 'center', minHeight: 17 },
+  ours: { alignItems: 'center', gap: 2, minWidth: 78, flexShrink: 0 },
+  oursCaption: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: colors.inkMuted },
+  oursBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.selected, paddingVertical: 4, paddingHorizontal: 9 },
+  oursScore: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.selectedFg },
+  oursBy: { fontFamily: fonts.body, fontSize: 11, color: colors.inkMuted },
+  oursBlank: { width: 24 },
+
+  emptyRoot: { paddingHorizontal: GUTTER, paddingVertical: 28, gap: 8 },
+  emptyList: { paddingHorizontal: GUTTER, paddingVertical: 28, gap: 8 },
+  emptyTitle: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },
+  emptyBody: { fontFamily: fonts.body, fontSize: 14, lineHeight: 21, color: colors.inkMuted },
+  emptyAction: { minHeight: TARGET - 8, justifyContent: 'center', alignSelf: 'flex-start' },
+  emptyActionText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
+  panelNote: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18, color: colors.inkMuted, paddingHorizontal: 12, paddingBottom: 12 },
+
+  body: { paddingHorizontal: GUTTER, paddingBottom: spacing.lg, gap: spacing.md },
+  suggestList: { backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line, overflow: 'hidden' },
+  suggestRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, paddingHorizontal: spacing.md, minHeight: TARGET },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  getting: { gap: 4, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   // A ring the type colour, so the Northern line's black reads on the dark ground and the Circle line's yellow on the light one.
   dot: { width: 8, height: 8, borderRadius: 4, borderWidth: BORDER, borderColor: colors.inkMuted },
-  score: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 4 },
-  scoreText: { fontSize: 13, fontWeight: '700', color: colors.ink },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  pill: { height: 18, paddingHorizontal: 7, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  pillText: { fontSize: 11, fontWeight: '700', color: colors.inkMuted },
-  getting: { gap: 4, paddingTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   line: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 24, paddingHorizontal: 9, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line },
   lineText: { fontSize: 12, fontWeight: '600', color: colors.ink },
-  tryChip: { height: 24, paddingHorizontal: 9, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  tryText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },
-  mapWrap: { position: 'relative' },
-  pinCard: { position: 'absolute', left: spacing.sm, right: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, overflow: 'hidden' },
-  mapHint: { position: 'absolute', left: spacing.sm, bottom: spacing.sm, backgroundColor: colors.surface, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.md, overflow: 'hidden' },
-  sheetWrap: { flex: 1, justifyContent: 'flex-end' },
-  sheetWrapWide: { justifyContent: 'center', alignItems: 'center' },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(29,27,22,0.35)' },
-  sheet: { backgroundColor: colors.panel, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, maxHeight: '80%' },
-  sheetWide: { width: 360, borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line },
-  close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
-  opt: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md },
-  optOn: { backgroundColor: colors.primary },
   capturePanel: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.panel },
-  ours: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line },
-  scores: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'center' },
-  scoreLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ours2: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line },
   input: {
     minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
     borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,

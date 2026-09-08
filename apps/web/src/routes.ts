@@ -423,6 +423,13 @@ export function isFullBleed(route: Route): boolean {
 export function ownsHeader(route: Route): boolean {
   if (route.name === 'inspire') return !route.searching;
   /**
+   * Places draws its own too (handover v8, §3): the wordmark over a lime band
+   * at the root, and over cream at every level below it, so the lime switch
+   * inside a place list keeps its selected state. The shell's band would be a
+   * second wordmark, and it would be lime at every level.
+   */
+  if (route.name === 'places') return true;
+  /**
    * The Trips list draws the same head (trip rebuild, 1a): the wordmark on the
    * left and "+ New trip" on the right, then the Day trips / Holidays switch
    * and the Upcoming · Past · Ideas strip on one 2px ink rule. The shell's lime
@@ -468,7 +475,10 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   if (route.section === 'group') return true;
   // The bare `/trips/<id>` is the map, and parses with no section at all.
   const onTheMap = route.section == null || route.section === 'map' || route.section === 'itinerary';
-  return onTheMap && Boolean(query?.get('pill'));
+  // "Hidden during any trip browse, place view or full view" (handover v8,
+  // §1): a place open over the map is a place view whether or not a browse
+  // is under it.
+  return onTheMap && Boolean(query?.get('pill') || query?.get('place'));
 }
 
 /** Which tab in the shell a route belongs under, so the rail can light up. */

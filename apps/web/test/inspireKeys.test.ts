@@ -32,7 +32,7 @@ test('nor is an open drawer, or a sub-category of a category you have left', () 
 });
 
 test('but where you are looking, and how far, still are', () => {
-  for (const k of ['at', 'where', 'locality', 'travel', 'budget']) {
+  for (const k of ['at', 'where', 'locality', 'travel', 'rating', 'price', 'sort']) {
     assert.ok(KEYS.includes(k), `${k} should survive a visit — it describes how you look, not what is open`);
   }
 });

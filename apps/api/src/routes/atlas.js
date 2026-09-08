@@ -320,10 +320,14 @@ atlas.get('/places', async (req, res, next) => {
             categoryLabel: grounded && shelf.category ? tax.byKey.get(shelf.category)?.label ?? null : null,
           };
         })(),
-        // What everybody else made of it, for a place nobody here has scored.
-        // Rented, held in memory, never written down (sources/rentedRating.js),
-        // and stripped again before a device may keep it.
-        ...(p.scores.length ? {} : ratingKept(p.venueRef) ?? {}),
+        // What everybody else made of it. Rented, held in memory, never
+        // written down (sources/rentedRating.js), and stripped again before a
+        // device may keep it. Sent whether or not anybody here has scored the
+        // place: the Places row draws the household's own mark in its own
+        // column and keeps the crowd's on the meta line beside the date
+        // (handover v8, §3 — "it takes precedence over the global score, which
+        // stays on the meta line"), so both are wanted.
+        ...(ratingKept(p.venueRef) ?? {}),
       };
     });
     // "Loved" is what the screen calls it now (owner, 7 Sep 2026: "the Special
@@ -338,9 +342,10 @@ atlas.get('/places', async (req, res, next) => {
     // yet. Counted with the rest so the screen asks again and the tiles fill in,
     // rather than a household seeing mint squares until they navigate away.
     const wantPictures = places.filter((p) => needsPhoto(p.venueRef, Boolean(p.image)));
-    // A row with nobody's mark on it and no crowd rating held yet. Our own
-    // score always wins, so a place the household has scored never asks.
-    const wantRatings = places.filter((p) => needsRating(p.venueRef, p.scores.length > 0));
+    // A row with no crowd rating held yet. The household's own score no longer
+    // spares a row the question, because the row shows both now (handover v8);
+    // the pace is the same eight a read, and a match is kept for good.
+    const wantRatings = places.filter((p) => needsRating(p.venueRef, false));
     const pending = rows.filter((r) => r.lat != null && r.lng != null && !r.where_checked).length
       + rows.filter(needsTaxonomy).length
       + wantPictures.length

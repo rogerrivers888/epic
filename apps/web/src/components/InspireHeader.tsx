@@ -159,15 +159,26 @@ export type StripItem = { key: string; label: string };
  * does the work now - the chosen word is ink at 800, the rest sit back in a
  * green that is a shade of the band itself.
  */
-export function CategoryStrip({ items, value, onPick }: {
+export function CategoryStrip({ items, value, onPick, align = 'centre', light }: {
   items: StripItem[]; value: string; onPick: (key: string) => void;
+  /**
+   * Centred is the rule; Food's strip is "horizontally scrollable, left-aligned
+   * in food mode" (v8), because five kinds of place and their counts no longer
+   * fit a phone centred.
+   */
+  align?: 'centre' | 'left';
+  /**
+   * The Places band — "Been · N | Loved · N | Shortlisted · N (weights
+   * 600/400 — no heavy bold)". Same band, lighter words.
+   */
+  light?: boolean;
 }) {
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       style={styles.band}
-      contentContainerStyle={styles.strip}
+      contentContainerStyle={[styles.strip, align === 'left' && styles.stripLeft]}
     >
       {items.map((it) => {
         const on = it.key === value;
@@ -176,7 +187,7 @@ export function CategoryStrip({ items, value, onPick }: {
             <View style={styles.stripItem}>
               <Text
                 numberOfLines={1}
-                style={[styles.stripText, on ? styles.stripTextOn : styles.stripTextOff]}
+                style={[styles.stripText, on ? styles.stripTextOn : styles.stripTextOff, light && (on ? styles.stripLightOn : styles.stripLightOff)]}
               >{it.label}</Text>
             </View>
           </Pressable>
@@ -381,6 +392,9 @@ export const styles = StyleSheet.create({
   stripText: { fontFamily: fonts.body, fontSize: 14, lineHeight: 18 },
   stripTextOn: { fontWeight: '800', color: colors.selectedFg },
   stripTextOff: { fontWeight: '500', color: colors.onLimeMuted },
+  stripLeft: { justifyContent: 'flex-start', paddingHorizontal: 16 },
+  stripLightOn: { fontWeight: '600' },
+  stripLightOff: { fontWeight: '400' },
 
   subBand: { backgroundColor: colors.bandSub },
   subStrip: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 16, paddingHorizontal: 12 },

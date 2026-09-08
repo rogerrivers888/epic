@@ -146,6 +146,12 @@ test('the Trips list draws its own head now, so the shell draws none', () => {
   // The trip itself is full-bleed — no header at all, and the tab bar over it.
   assert.equal(ownsHeader(parseRoute('/trips/abc')), false);
   assert.equal(ownsHeader(parseRoute('/trips/abc/shortlist')), false);
+  // Places draws its own head at every level (handover v8): lime at the root,
+  // cream below it, and the wordmark on both.
+  assert.equal(ownsHeader(parseRoute('/places')), true);
+  assert.equal(ownsHeader(parseRoute('/places/home')), true);
+  assert.equal(ownsHeader(parseRoute('/places/GB')), true);
+  assert.equal(ownsHeader(parseRoute('/places/GB/London')), true);
 });
 
 test('where-to is a layer of Trips: it is on the tab, and Back is the trips', () => {
@@ -388,4 +394,9 @@ test('the trip is full-bleed; configuring its group is immersive', () => {
   assert.ok(isImmersive(trip, browsing), 'a browse takes the tab bar with it');
   assert.ok(!isImmersive(trip, new URLSearchParams()), 'and gives it back on the trip itself');
   assert.ok(!isImmersive(parseRoute('/places/home'), browsing), 'a pill elsewhere means nothing');
+  // A place open over the map is a place view, and takes the tab bar with it
+  // whether or not a browse is under it (handover v8, §1).
+  const placeOpen = new URLSearchParams('place=google%3Aabc');
+  assert.ok(isImmersive(trip, placeOpen), 'a place view hides the tab bar');
+  assert.ok(!isImmersive(parseRoute('/places/home'), placeOpen), 'but only on the trip map');
 });

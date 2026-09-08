@@ -1,59 +1,48 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, API_URL } from '../api';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef } from '../api';
 import { useHere } from '../hooks/useHere';
-import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { Icon, IconName, iconFor } from '../components/Icon';
-import { Chip, minutes } from '../components/ui';
+import { colors, fonts, spacing, TARGET, type } from '../theme';
+import { Icon } from '../components/Icon';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { WhereSearch } from '../components/WhereSearch';
+import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
-import { firstName } from '../components/Faces';
-import { asFlag, asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
-import { paths, withQuery, MOODS, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
-import { CategoryStrip, FilterButton, FilterPanel, FilterRow, InspireTop, MenuBar, ModeSwitch, SubStrip } from '../components/InspireHeader';
-import { Carousel, CuisineRow, FoodRow, Kicker, PlaceRow, SectionHead } from '../components/InspireBody';
-import { ChoicePanel, TravelPanel, travelChipLabel, travelLabel, type TravelMinutes, type TravelMode } from '../components/TravelSheet';
+import { asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
+import { paths, withQuery, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
+import { CategoryStrip, InspireTop, MenuBar, ModeSwitch } from '../components/InspireHeader';
+import { BoxRow, ControlButton, ControlRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
+import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
+import { TRAVEL_MODES, type TravelMode } from '../components/TravelSheet';
+import { activeCount, howFarShort, keeps, sortItems, HOW_FAR, PRICE_BANDS, PRICE_KEYS, RATING_FLOORS, SORTS, SORT_KEYS, type Filters, type InspireSort } from './inspireList';
 import type { OpenTripOptions } from './PlanScreen';
-import { PHOTO_W } from '../components/VenueThumb';
 
 /**
- * Inspire — the home screen (owner, 5 Sep 2026; "Supporting docs/Roam Inspire").
+ * Inspire — the home screen (handover v8, 8 Sep 2026, §2; owner, 5 Sep 2026,
+ * "Supporting docs/Roam Inspire").
  *
- * Epic opens on what there is to do, not on a form. A search bar at the top
- * asks the only question the household has to answer — where — and everything
- * under it is shelves of real places, drawn from one retrieved pool.
+ * Epic opens on what there is to do, not on a form. The head says where you
+ * are looking, which half of the app you are in and which category; under it
+ * is one plain-text control row — Where · Filters · Sort — and everything
+ * below is drawn from one retrieved pool.
  *
  * Three rules this screen is built to:
  *
  *  - **One pool.** `/api/inspire/near` makes one place search and hands back
  *    every venue once, each already carrying the moods it belongs to, the
- *    journey to it and how long this household would stay. Every chip, band and
- *    shelf on this screen is composed from that array in memory. Tapping
- *    Culture, narrowing to an hour or picking a price band never asks a
- *    provider anything (Requirements: options come from one pool).
- *  - **A filter opens under the bar it belongs to** (owner, 4 Sep 2026), never
- *    as a sheet at the foot of the page, and the shelves behind it update as it
- *    is tapped. The Budget panel in the design is that pattern; the other four
- *    chips open the same way.
+ *    journey to it and how long this household would stay. Every control on
+ *    this screen is composed from that array in memory (screens/inspireList.ts).
+ *    Tapping Culture, narrowing to an hour or picking a price band never asks
+ *    a provider anything (Requirements: options come from one pool).
+ *  - **A control opens a panel under the row it belongs to**, anchored, with a
+ *    transparent scrim behind it, and the list it is changing stays in view.
  *  - **Nothing here is written down.** The answer carries a provider's names,
  *    photos and ratings, which are rented, so `/api/inspire/near` is absent
  *    from `offline/policy.ts` and never reaches IndexedDB. What is remembered
- *    between visits is what the household *chose* — where they were looking and
- *    how they had it filtered — which is theirs.
+ *    between visits is what the household *chose* — where they were looking
+ *    and how they had it filtered — which is theirs.
  */
 
-// How deep a shelf goes before you have to ask for the rest.
-//
-// The owner, 5 Sep 2026: "60 so the user can keep scrolling, but if they just
-// want to keep on scrolling again, we can just keep loading more. If we have
-// 250, then let them scroll until we've exhausted the 250." So there is no cut
-// in the data at all — the whole pool is already in hand, from our own table —
-// and these are only how much is drawn at once, so a shelf of two hundred
-// places does not put two hundred images in the tree before anybody has
-// scrolled. Opening a shelf shows a page of them and adds another page on ask.
-const SHELF = 24;
-const PAGE = 36;
 /**
  * How many of a shelf go across before "All 41" is the way to the rest — and,
  * because the screen only asks Google about what it is actually drawing, how
@@ -64,35 +53,10 @@ const PAGE = 36;
 const ACROSS = 12;
 /** What `/api/places/ratings` will answer about at once. */
 const BATCH = 24;
+/** The How far the screen opens on. */
+const HOW_FAR_DEFAULT = 60;
 
-/**
- * The chips, in the order the design draws them — and Food is not one of the
- * others (owner, 5 Sep 2026):
- *
- * > "for food, we should not show that on our homepage now, and we should just
- * > show inspirational activities. If they click food, then I feel like we need
- * > to take them into our food listings because food will never have photos...
- * > if I clicked on food, it would take me to the places tab and search for
- * > food."
- *
- * So Food keeps its place in the row and stops being a filter: it is a door
- * into Places, which is where somewhere to eat already lives. It carries an
- * arrow rather than the others' selected state, because a chip that navigates
- * where its neighbours filter has to say so before it is tapped.
- */
-/**
- * The chips, and what each is called.
- *
- * The categories live in a table now (migration 053) and every answer carries
- * them with their labels, so this file no longer decides what the set is — the
- * lists below are only what to draw before the first answer arrives, and while
- * offline. A category added or renamed in the back office appears here at the
- * next refresh without a deploy.
- */
-const MOOD_ORDER: MoodKey[] = MOODS;
-/** The ones that are shelves. Food is a door and never a shelf. */
-const SHELVES: MoodKey[] = MOOD_ORDER.filter((m) => m !== 'food') as MoodKey[];
-const MOOD_LABEL: Record<MoodKey, string> = {
+const MOOD_LABEL: Record<string, string> = {
   fun: 'Fun', food: 'Food', culture: 'Culture',
   // Sport is the ticket and the membership; Active is what you turn up and do
   // (owner, 5 Sep 2026). The key is `activity` because the atlas already has a
@@ -101,48 +65,8 @@ const MOOD_LABEL: Record<MoodKey, string> = {
   adrenaline: 'Adrenaline', relaxing: 'Relaxing', outdoors: 'Outdoors',
 };
 
-/** How far the family will go today. The chip reads the chosen label back. */
-const CAPS: { label: string; value: number | null }[] = [
-  { label: '30 min', value: 30 },
-  { label: '1 hour', value: 60 },
-  { label: '2 hours', value: 120 },
-  { label: 'Any distance', value: null },
-];
+type Menu = null | 'where' | 'filters' | 'sort';
 
-/** How much of a day it is. Travel there and back, plus the time spent. */
-const OUTINGS: { key: string; label: string; maxMinutes: number | null }[] = [
-  { key: 'any', label: 'Any length', maxMinutes: null },
-  { key: 'couple', label: 'A couple of hours', maxMinutes: 180 },
-  { key: 'half', label: 'Half a day', maxMinutes: 300 },
-  { key: 'day', label: 'Day trip', maxMinutes: null },
-];
-
-/**
- * What it costs. `all` is the absence of a choice, not a fifth band — a place
- * whose price no source has told us is shown under All and under nothing else,
- * because putting it in a band would be inventing the price.
- */
-const BUDGETS: { key: string; label: string; max: number | null }[] = [
-  { key: 'all', label: 'Any budget', max: null },
-  { key: 'free', label: 'Free', max: 0 },
-  { key: 'low', label: '£', max: 1 },
-  { key: 'mid', label: '££', max: 2 },
-  { key: 'high', label: '£££', max: 4 },
-];
-
-type Panel = null | 'travel' | 'kind' | 'who' | 'outing' | 'budget';
-
-/**
- * Every part of this screen that somebody chose, and therefore every part of it
- * that has to survive being sent to somebody else (owner, 5 Sep 2026: "I should
- * be able to share a URL … and they should be able to get to the exact point
- * that I was on"). Where you are looking, what the day is about, how far, how
- * long, what it costs, what kind of thing and who is coming.
- *
- * They are query, not path, because they are how the page is set rather than
- * which page it is — and only what differs from the default is written down, so
- * a screen nobody has touched stays at `/inspire`.
- */
 /**
  * What this tab remembers between visits when the address itself is silent.
  *
@@ -160,12 +84,32 @@ type Panel = null | 'travel' | 'kind' | 'who' | 'outing' | 'budget';
  * the visit. When Settings grows the handoff's "Default travel mode" that is
  * where a standing choice belongs, and this can read it.
  */
-const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'outing', 'budget', 'open', 'kinds', 'who'];
+const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'sort', 'who'];
+
+/**
+ * What travels with you when you move around this tab, and what does not.
+ *
+ * Where you are looking and how you are filtering it describe *you*, so they
+ * follow: the town, the ceiling, the rating floor, the price band, the order.
+ * Two things belong to the page you are leaving and must be dropped, or they
+ * arrive somewhere they mean nothing (owner, 7 Sep 2026): `place`, the drawer
+ * open *over* a page, and `within`, a drawer inside one category — Museums
+ * means nothing in Sport.
+ */
+const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'rating', 'price', 'sort', 'who'];
+
+/**
+ * "Nowhere, deliberately." The address says `at=unset` when somebody chose
+ * "Somewhere else…" and has not yet said where: the home address is not to be
+ * fallen back on, the lists are emptied, and the Where control reads "Set your
+ * location" until a town is named (handover v8, "unknown-location state").
+ */
+const UNSET = 'unset';
 
 /** "51.48160,-0.61130" — enough to look around the same town, and no more. */
 const placeFromQuery = (q: URLSearchParams): Place | null => {
   const at = q.get('at');
-  if (!at) return null;
+  if (!at || at === UNSET) return null;
   const [lat, lng] = at.split(',').map(Number);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return { lat, lng, label: q.get('where') ?? `${lat}, ${lng}`, locality: q.get('locality') };
@@ -191,19 +135,13 @@ export function shortPlace(label: string | null | undefined): string {
   return parts[parts.length - 1] ?? label.split(',')[0].trim();
 }
 
-/** "££" — what a source said it costs, in the marks people already read. */
-const priceMarks = (p: number | null) => (p == null ? null : p === 0 ? 'Free' : '£'.repeat(Math.max(1, Math.min(4, p))));
-
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1).replace(/-/g, ' ') : s);
 
 /**
  * The atlas's eight words, said in a way that does not collide with a shelf.
- *
  * `active` is the atlas's word for anything under "sports venue" — what the
- * place *is* — and there is now a shelf called Active, which is what a day
- * there is *like*. Wembley Stadium sitting on the Sport shelf with the word
- * "Active" under it is two vocabularies colliding in one card, so the card uses
- * the longer word. The rest are shown as they are.
+ * place *is* — and there is a shelf called Active, which is what a day there
+ * is *like*.
  */
 const ATLAS_WORD: Record<string, string> = { active: 'Sports venue' };
 
@@ -211,31 +149,41 @@ const ATLAS_WORD: Record<string, string> = { active: 'Sports venue' };
 type Drawers = Map<string, string>;
 
 /**
- * Every word we have for what kind of place this is. The atlas's own is first
- * because it is the researched one — "Heritage", "Outdoors" — and a search's
- * tags follow it.
+ * The one word for what kind of place this is: the drawer it is filed in
+ * ("Castles & houses"), else the atlas's own category, else a search tag.
  */
-const kindsOf = (item: InspireItem, drawers?: Drawers): string[] => {
-  // The subcategory instead of, not as well as, the vocabularies underneath it.
-  // "Historic houses & palaces" is the household's own word for this place;
-  // adding "Heritage" after it says the same thing again in Wikidata's words,
-  // and "Museums · Museum" says it twice in one breath.
-  const drawer = item.subcategory ? drawers?.get(item.subcategory) : null;
-  if (drawer) return [drawer];
-  return [
-    item.atlasCategory ? ATLAS_WORD[item.atlasCategory] ?? item.atlasCategory : null,
-    ...(item.experiences ?? []),
-  ].filter(Boolean) as string[];
-};
-
-/** What kind of place this is, in its own words: "Heritage", "Castle · History", "Italian". */
-function kindLine(item: InspireItem, drawers?: Drawers): string | null {
-  const words = [...kindsOf(item, drawers), ...(item.cuisines ?? [])].filter(Boolean);
-  const bits = words.length ? words.slice(0, 2) : item.category === 'attraction' ? [] : [item.category];
-  return bits.length ? [...new Set(bits.map(cap1))].join(' · ') : null;
+function kindOf(item: InspireItem, drawers: Drawers): string {
+  const drawer = item.subcategory ? drawers.get(item.subcategory) : null;
+  if (drawer) return drawer;
+  if (item.atlasCategory) return cap1(ATLAS_WORD[item.atlasCategory] ?? item.atlasCategory);
+  const tag = item.experiences?.[0];
+  if (tag) return cap1(tag);
+  return item.category === 'attraction' ? '' : cap1(item.category);
 }
 
-export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood, onCreateTrip }: {
+/**
+ * The kind of place the API found, in the word the strip uses. A bar is not a
+ * pub and a bakery is not a café (owner, 8 Sep 2026).
+ */
+const FOOD_KINDS: Record<string, string> = {
+  restaurant: 'restaurants', cafe: 'cafes', pub: 'pubs', bar: 'bars', bakery: 'bakeries', takeaway: 'takeaway',
+};
+const FOOD_LABELS: Record<string, string> = {
+  restaurants: 'Restaurants', pubs: 'Pubs', bars: 'Bars', cafes: 'Cafés', bakeries: 'Bakeries', takeaway: 'Takeaway',
+};
+/**
+ * The first cuisine a place has said, or nothing. The sweep writes "not said"
+ * where the venue's own page did not say, and that is a fact about our
+ * research, not a cuisine to list a restaurant under.
+ */
+const NO_CUISINE = /^(not said|unknown|none|other|n\/a)$/i;
+const cuisineOf = (i: InspireItem): string | null => i.cuisines.find((c) => c && !NO_CUISINE.test(c)) ?? null;
+/** The key a drawer list writes for the places no drawer holds. */
+const OTHER = 'other';
+/** Everything in the category, as one list — the food "All restaurants · by rating" row, and an activities category with no drawers. */
+const ALL = 'all';
+
+export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreateTrip }: {
   /** Which layer of Inspire the address asks for: the shelves, one shelf opened, or the search. */
   route: Extract<Route, { name: 'inspire' }>;
   household: HouseholdResponse | null;
@@ -243,16 +191,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   /**
    * The call to action on a place (owner, 5 Sep 2026): "for each place that I
    * click through, I should have a call to action: Create trip, because that
-   * should then take me into the trips. It will show me the distance, how to
-   * get there, how to add places for food."
-   *
-   * Everything he lists is already Trips' job, so this hands the place over
-   * rather than growing a second version of any of it here.
+   * should then take me into the trips."
    */
   onCreateTrip?: (p: { place: Place; seed: { venueRef: string; name: string; category?: string | null; lat?: number | null; lng?: number | null; image?: OwnedImage | null; photos?: VenuePhotoRef[] | null } }) => void;
   /** The other way to ask: say what the day is for and let Epic think about it. */
   onPlanner?: () => void;
-  /** Somewhere to eat is Places' question, not this screen's. */
+  /** Kept for the shell; Food is a half of this screen now, not a door. */
   onFood?: () => void;
 }) {
   const { width } = useViewport();
@@ -264,65 +208,55 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   const home: Place | null = household?.household.home ?? null;
   const members = household?.members ?? [];
 
-  // Everything somebody chose is in the address, so the whole screen can be sent.
   const searching = route.searching;
-  /**
-   * Which half of the screen, and what is open inside it (Inspire rework, 7 Sep
-   * 2026). Both are the address rather than local state: the whole point of the
-   * strip is that you can send somebody "Culture near Sunningdale".
-   */
   const mode = route.mode;
   const pick = route.pick;
   const chosen = placeFromQuery(query);
-  // `from=here` stays in the address — it records that the browser found this
-  // place rather than somebody searching for it — but nothing draws it now
-  // that the chip has stopped saying "near" (owner, 8 Sep 2026).
-  const setWhere = (p: Place | null, from: 'here' | 'search' | null) => setQuery(placeToQuery(p, from), { replace: false });
-
-  const [mood, setMood] = useQueryState<MoodKey>('mood', 'fun', asOneOf(SHELVES, 'fun'));
-  const [cap, setCap] = useQueryState<number | null>('travel', 60, asNumber(60));
-  const [outing, setOuting] = useQueryState('outing', 'any', asOneOf(OUTINGS.map((o) => o.key), 'any'));
-  const [budget, setBudget] = useQueryState('budget', 'all', asOneOf(BUDGETS.map((b) => b.key), 'all'));
-  const [kinds, setKinds] = useQueryState<string[]>('kinds', [], asList);
-  const [who, setWho] = useQueryState<string[]>('who', [], asList);
-  // Nobody named is everybody: "who" is only in the address once it excludes somebody.
-  const attending = who.length ? new Set(who) : null;
-  const setAttending = (next: Set<string> | null) => setWho(next && next.size !== members.length ? [...next] : []);
-  const [panel, setPanel] = useState<Panel>(null);
+  const fromHere = query.get('from') === 'here';
   /**
-   * How tall the head is, so a filter panel can hang off the bottom of it.
-   *
-   * Measured rather than worked out: the head is one band taller when a
-   * category is open, and a panel pinned to a guessed number would float over
-   * the sub-strip or leave a stripe of the list showing above it.
+   * Nowhere to look from: chosen deliberately, or — once the household has
+   * answered and there is no home address — simply not known. Not before the
+   * household has answered: for that half-second nothing is known yet, which
+   * is not the same as knowing there is nowhere.
+   */
+  const unknown = query.get('at') === UNSET || (household != null && !chosen && !home);
+  const setWhere = (p: Place | null, from: 'here' | 'search' | null) => setQuery(placeToQuery(p, from), { replace: false });
+  /**
+   * "Somewhere else…" is a state of this visit, not a standing choice. The
+   * address carries it (the lists have to empty and the control has to say so)
+   * and the tab's memory would keep it — which is `by=walk` all over again: a
+   * screen with nothing on it, days later, and no clue why. So an `at=unset`
+   * that was not chosen in this visit is put back to home.
+   */
+  const choseElsewhere = useRef(false);
+  const goUnknown = () => { choseElsewhere.current = true; setQuery({ at: UNSET, where: null, locality: null, from: null }, { replace: false }); };
+  useEffect(() => {
+    if (query.get('at') === UNSET && !choseElsewhere.current) setQuery({ at: null, where: null, locality: null, from: null }, { replace: true });
+  }, [query.get('at')]);
+
+  const [travel, setTravel] = useQueryState<number | null>('travel', HOW_FAR_DEFAULT, asNumber(HOW_FAR_DEFAULT));
+  const [travelBy, setTravelBy] = useQueryState<TravelMode>('by', 'drive', asOneOf(['drive', 'transit', 'walk'], 'drive'));
+  const [rating, setRating] = useQueryState<number>('rating', 0, asNumber(0));
+  const [price, setPrice] = useQueryState<string>('price', 'any', asOneOf(PRICE_KEYS, 'any'));
+  const [sort, setSort] = useQueryState<InspireSort>('sort', 'rating', asOneOf(SORT_KEYS, 'rating'));
+  const [who] = useQueryState<string[]>('who', [], asList);
+  /**
+   * The layer inside an open category or kind: nothing (the list of drawers),
+   * one drawer, `all` (everything in it as one list) or `other` (what no
+   * drawer holds). Written as it is — `all` is a page here, not a default.
+   */
+  const [within, setWithin] = useQueryState<string | null>('within', null, { read: (raw) => raw || null, write: (v) => v || null });
+  const [menu, setMenu] = useState<Menu>(null);
+  const toggle = (m: Exclude<Menu, null>) => () => setMenu((cur) => (cur === m ? null : m));
+  const close = () => setMenu(null);
+  /**
+   * How tall the head is, so a panel can hang off the bottom of it. Measured
+   * rather than worked out: the head is one band taller in some states, and a
+   * panel pinned to a guessed number would float over the band or leave a
+   * stripe of the list showing above it.
    */
   const [headH, setHeadH] = useState(0);
-  const [travelBy, setTravelBy] = useQueryState<TravelMode>('by', 'drive', asOneOf(['drive', 'transit', 'walk'], 'drive'));
-  // Food starts closer to home than a day out does: twenty minutes, not an hour.
-  const [openNow, setOpenNow] = useQueryState<boolean>('open', false, asFlag);
-  // The drawer inside an open category, from the sub-strip.
-  // 'all' is the absence of a drawer, so it is never written into the address.
-  const [within, setWithin] = useQueryState<string>('within', 'all', {
-    read: (raw: string) => raw || null,
-    write: (v: string) => (v && v !== 'all' ? v : null),
-  });
-  const goTo = (m: 'activities' | 'food', p: string | null) => navigate(paths.inspireMode(m, p) + hereQuery());
-  /**
-   * What travels with you when you move around this tab, and what does not.
-   *
-   * Where you are looking and how you are filtering it describe *you*, so they
-   * follow: the town, the travel ceiling, the budget, Open now. Two things
-   * belong to the page you are leaving and must be dropped, or they arrive
-   * somewhere they mean nothing (owner, 7 Sep 2026):
-   *
-   *   · `place` is the drawer open *over* a page. Carried across, switching to
-   *     Food kept Cumberland Lodge open above the restaurants, and tapping a
-   *     cuisine looked like tapping a place — it re-opened the same drawer, menu
-   *     tabs and all, over the new list.
-   *   · `within` is a drawer inside one category. Museums means nothing in
-   *     Sport, and a stale one filters the new list down to nothing.
-   */
-  const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'budget', 'open'];
+
   const hereQuery = () => {
     const kept = new URLSearchParams();
     for (const k of CARRIED) { const v = query.get(k); if (v != null) kept.set(k, v); }
@@ -331,14 +265,18 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   };
   /** One address out of a path and a change to the query, for the taps that do both at once. */
   const here = (base: string, patch: Record<string, string | null>) => withQuery(href, patch, base);
+  /** Move to a mode and a pick, carrying how the screen is set. `reset` drops the filters too. */
+  const goTo = (m: 'activities' | 'food', p: string | null, reset = false) => {
+    setMenu(null);
+    const base = paths.inspireMode(m, p);
+    const patch: Record<string, string | null> = { place: null, within: null };
+    if (reset) { patch.rating = null; patch.price = null; patch.sort = null; }
+    navigate(withQuery(paths.inspire() + hereQuery(), patch, base));
+  };
 
   const [pool, setPool] = useState<InspireNear | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Hearts turn the moment they are tapped; the pool they came from is not rewritten.
-  const [kept, setKept] = useState<Record<string, boolean>>({});
-  // Why a heart sprang back: said once, under the shelves, never as a dialogue.
-  const [notice, setNotice] = useState<string | null>(null);
 
   // Where the phone is, when the browser will say without being asked.
   //
@@ -347,53 +285,46 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   // once refused, the browser remembers and will not ask again, which would
   // cost this feature permanently on that phone. So: if permission has already
   // been granted, the fix is taken silently and the screen opens on where they
-  // are standing; if it has not, the offer is one obvious tap under the search
-  // bar. Nothing here ever triggers a prompt the household did not ask for.
+  // are standing; if it has not, the offer is a row in the Where panel.
+  // Nothing here ever triggers a prompt the household did not ask for.
   const me = useHere();
-  const [mayAsk, setMayAsk] = useState(false);
   const askedSilently = useRef(false);
-  // The browser answers a moment later than this screen draws, by which time
-  // the address may have gained a town — from the link, or from what this
-  // screen was last set to. Read it then, not now.
   const chosenNow = useRef(chosen);
   chosenNow.current = chosen;
+  const unknownNow = useRef(query.get('at') === UNSET);
+  unknownNow.current = query.get('at') === UNSET;
   useEffect(() => {
     if (askedSilently.current || !me.supported) return;
     askedSilently.current = true;
     const permissions = (globalThis as any).navigator?.permissions;
-    if (!permissions?.query) { setMayAsk(true); return; }
+    if (!permissions?.query) return;
     permissions.query({ name: 'geolocation' })
       .then(async (status: any) => {
         // Only when nobody has said where: a link that names a town means that
-        // town, whoever opens it and wherever they are standing.
-        if (status.state === 'granted') { if (!chosenNow.current) { const p = await me.ask(); if (p && !chosenNow.current) setWhere(p, 'here'); } }
-        else if (status.state === 'prompt') setMayAsk(true);
+        // town, whoever opens it and wherever they are standing — and a
+        // deliberate "somewhere else" is not to be answered with the phone.
+        if (status.state === 'granted' && !chosenNow.current && !unknownNow.current) {
+          const p = await me.ask();
+          if (p && !chosenNow.current && !unknownNow.current) setWhere(p, 'here');
+        }
       })
-      .catch(() => setMayAsk(true));
+      .catch(() => null);
   }, [me.supported]);
 
-  const useHereNow = async () => { const p = await me.ask(); if (p) { setWhere(p, 'here'); setMayAsk(false); } };
+  const useHereNow = async () => { const p = await me.ask(); if (p) setWhere(p, 'here'); };
 
   // Where somebody said, which wins over home: the most deliberate answer to
   // "where" is the one on screen, and it is in the address so it travels.
-  const centre = chosen ?? home;
+  const centre = unknown ? null : chosen ?? home;
   const load = useCallback(async () => {
     if (!centre) { setPool(null); setLoading(false); return; }
     setLoading(true);
     setError(null);
     try {
-      // The atlas alone, which is what this endpoint now answers by default
-      // (owner, 5 Sep 2026: activities "from our own database with data we
-      // own", loaded "within a second or 2"). One indexed table, no provider
-      // asked, every place illustrated — the live look-around waits seven
-      // seconds on OpenStreetMap and comes back without a photograph, and is
-      // now only reachable by asking for it.
       const r = await api.inspireNear({
         lat: centre.lat, lng: centre.lng,
         label: centre.label, locality: centre.locality ?? null,
-        // How you are getting there is what the travel times are *of*. Without
-        // it every mode gave the same minutes, so the sheet's counts sat still
-        // however the mode was changed (owner, 7 Sep 2026).
+        // How you are getting there is what the travel times are *of*.
         mode: travelBy,
       });
       setPool(r);
@@ -408,75 +339,24 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   useEffect(() => { void load(); }, [load]);
 
   const placeName = shortPlace(pool?.place.locality ?? centre?.locality ?? centre?.label);
-  /**
-   * What the first chip and the panel's field call where we are looking: the
-   * town, and only the town.
-   *
-   * It used to say "near Sunningdale" when the fix came from the browser
-   * rather than from a search — honest about a location accurate to a few
-   * streets, but the owner would rather have the room (8 Sep 2026: "I don't
-   * want to see 'near' ever. I just want to see 'Sunningdale', even if it is
-   * near"). How the place was chosen is still recorded in the address as
-   * `from=here`; it is simply not read out on the chip.
-   *
-   * Empty when nowhere is set at all, and the chip then falls back to
-   * "Within 30 minutes" with no origin claimed.
-   */
+  /** The town, and only the town — never "near" (owner, 8 Sep 2026). */
   const whereName = centre ? placeName : '';
+  const homeTown = home ? shortPlace(home.locality ?? home.label) : null;
 
-  // Everything the sources called a kind of place here, for the kinds panel:
-  // the list is what is actually in this pool, so it is never a menu of
-  // nothing (owner: no dead controls).
-  const kindsHere = useMemo(() => {
-    const seen = new Map<string, number>();
-    for (const i of pool?.items ?? []) for (const e of kindsOf(i)) seen.set(e, (seen.get(e) ?? 0) + 1);
-    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([key, count]) => ({ key, count }));
-  }, [pool]);
-
-  const pricesKnown = useMemo(() => (pool?.items ?? []).filter((i) => i.priceLevel != null).length, [pool]);
-
+  const attending = who.length ? new Set(who) : null;
   const coming = members.filter((m) => !attending || attending.has(m.id));
   const minorComing = coming.some((m) => m.isMinor);
-  // The youngest person coming decides a lot: a four-year-old and a fifteen-
-  // year-old want different days out, and the household already knows both ages.
-  const youngest = coming.reduce<number | null>((y, m) => (m.age == null ? y : y == null ? m.age : Math.min(y, m.age)), null);
-
   /**
    * Who is coming ranks; it does not exclude (Requirements: allergens exclude,
-   * preferences rank — and who is in the car is a preference, not an allergy).
-   *
-   * The owner, 5 Sep 2026: "If the family are going, it should be focused on
-   * family activities. If adults are going, then it shouldn't be showing
-   * playgrounds." So a day with a child in it leads with the places built for
-   * one, and a day without leads with everything else.
-   *
-   * It ranks rather than filters because the atlas's `family` is a coarse word:
-   * it holds amusement parks and heritage railways, and it also holds
-   * distilleries, which are the opposite of a children's day out. Demoting a
-   * distillery on an adults' outing is a small mistake; deleting it is a
-   * bigger one, and the household can always see it by scrolling.
+   * preferences rank). A day with a child in it leads with the places built
+   * for one, and a day without leads with everything else — as a stable
+   * pre-order under whichever sort is chosen.
    */
   const forWhoever = (i: InspireItem): number => {
     const kid = i.atlasCategory === 'family' || i.atlasCategory === 'animals';
     if (!kid) return 0;
     return minorComing ? -1 : 1;
   };
-
-  /** The pool, narrowed by every chip. One pass, no calls. */
-  const shown = useMemo(() => {
-    const outingMax = OUTINGS.find((o) => o.key === outing)?.maxMinutes ?? null;
-    const band = BUDGETS.find((b) => b.key === budget);
-    return (pool?.items ?? []).filter((i) => {
-      if (cap != null && i.travelMinutes > cap) return false;
-      if (outingMax != null && i.travelMinutes * 2 + i.dwellMinutes > outingMax) return false;
-      if (band && band.max != null && (i.priceLevel == null || i.priceLevel > band.max)) return false;
-      if (kinds.length && !kindsOf(i).some((e) => kinds.includes(e))) return false;
-      // A source that has said outright that children are not welcome is taken
-      // at its word; one that has said nothing is not guessed about.
-      if (minorComing && i.goodForChildren === false) return false;
-      return true;
-    });
-  }, [pool, cap, outing, budget, kinds, minorComing]);
 
   /**
    * The crowd's number for the places on screen.
@@ -487,8 +367,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
    * the answers accumulate here. A match is stored server-side for good, so the
    * second sight of a place is cheap and the third is free.
    *
-   * It fills *beside* the list: nothing waits on it, and a card that has not
-   * had its answer yet simply has no star for a moment.
+   * The one time it asks about more than it draws is a rating floor: "4.0+"
+   * over a list nobody has been asked about would be an empty list, so setting
+   * one asks about everything in the mode and the list fills in.
    */
   const [crowd, setCrowd] = useState<Record<string, { rating: number | null; ratingCount: number | null }>>({});
   const askedFor = useRef<Set<string>>(new Set());
@@ -498,11 +379,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
     const want = rows.filter((i) => i.rating == null && !askedFor.current.has(i.venueRef) && i.lat != null && i.lng != null);
     if (!want.length) return;
     for (const i of want) askedFor.current.add(i.venueRef);
-    // The endpoint answers about two dozen places at a time, and seven shelves
-    // of twelve is eighty-four, so one request left five shelves blank for
-    // good — the effect below does not run again once the pool has settled.
-    // Batched, one after the next rather than all at once, so the household's
-    // ceiling is spent at a walk and the first shelf fills first.
     void (async () => {
       for (let at = 0; at < want.length; at += BATCH) {
         const batch = want.slice(at, at + BATCH);
@@ -510,35 +386,24 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
           const d = await api.placeRatings(batch.map((i) => ({ ref: i.venueRef, name: i.name, lat: i.lat, lng: i.lng })));
           // The source refused — out of allowance, most likely. Nothing is
           // written down: a square must not say "No ratings yet" about a place
-          // nobody managed to ask about. The reason is said once, in words, at
-          // the foot of the shelves, and the batches stop there.
+          // nobody managed to ask about. The reason is said once, in words.
           if (d.sourceError) {
             for (const i of batch) askedFor.current.delete(i.venueRef);
             setRatingsOff(d.sourceError);
             return;
           }
-          // Everything asked about is written down, including the ones that
-          // came back with nothing: a card has to be able to tell "no number"
-          // from "not asked yet", or it holds a blank line for ever.
           setCrowd((c) => {
             const next = { ...c };
             for (const i of batch) next[i.venueRef] = d.ratings[i.venueRef] ?? { rating: null, ratingCount: null };
             return next;
           });
         } catch {
-          // A card without a star is not an error — but it is worth trying
-          // again the next time this list is on screen.
           for (const i of batch) askedFor.current.delete(i.venueRef);
         }
       }
     })();
   }, []);
-  /**
-   * A place's own rating, or the one Google gave us for it — and whether
-   * anybody has answered yet, so a square can say "No ratings yet" rather than
-   * leave a gap that reads the same as still loading.
-   */
-  const ratingOf = useCallback((i: InspireItem) => ({
+  const crowdOf = useCallback((i: InspireItem) => ({
     rating: i.rating ?? crowd[i.venueRef]?.rating ?? null,
     ratingCount: i.ratingCount ?? crowd[i.venueRef]?.ratingCount ?? null,
     known: i.rating != null || crowd[i.venueRef] !== undefined,
@@ -549,176 +414,126 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
     () => new Map((pool?.moods ?? []).flatMap((m) => (m.subcategories ?? []).map((sc) => [sc.key, sc.label] as const))),
     [pool],
   );
-
-  /** What each chip is called, from the answer where there is one. */
   const label = useCallback(
-    (key: MoodKey) => pool?.moods.find((m) => m.key === key)?.label ?? MOOD_LABEL[key] ?? key,
+    (key: string) => pool?.moods.find((m) => m.key === key)?.label ?? MOOD_LABEL[key] ?? FOOD_LABELS[key] ?? cap1(key),
     [pool],
   );
 
-  /** The chips to draw: the answer's own list, or the built-in one until it lands. */
-  const chips: MoodKey[] = useMemo(() => (pool?.moods.length ? pool.moods.map((m) => m.key) : MOOD_ORDER), [pool]);
-  const doors = useMemo(() => new Set((pool?.moods ?? []).filter((m) => m.isDoor).map((m) => m.key)), [pool]);
-
-  /**
-   * Food and everything else, told apart by what kind of place it is.
-   *
-   * The Inspire pool holds no restaurants today — `routes/inspire.js` strips
-   * them on the owner's own instruction of 5 Sep 2026, back when Food was a
-   * door into Places. The rework of 7 Sep makes Food a half of this screen, so
-   * this splits whatever does arrive and the Food side fills the moment the API
-   * is allowed to answer with it. It is written against the shape rather than
-   * against today's emptiness.
-   */
-  /**
-   * The kind of place the API found, in the word the strip uses.
-   *
-   * A bar was folded into pubs and a bakery was not here at all, so the strip
-   * could only ever read "Restaurants" (owner, 8 Sep 2026). They are their own
-   * words now: a bar is not a pub and a bakery is not a café.
-   */
-  const FOOD_KINDS: Record<string, string> = {
-    restaurant: 'restaurants', cafe: 'cafes', pub: 'pubs', bar: 'bars', bakery: 'bakeries', takeaway: 'takeaway',
-  };
   /**
    * Somewhere to eat is a *kind of place*, not a place that happens to serve
-   * food. Asking whether the taxonomy had taught it the word "food" put
-   * Cumberland Lodge — a house with a dining room — at the top of the
-   * restaurants (owner, 7 Sep 2026, twice). The sweep's own places and the four
-   * food categories are the answer; an attraction with a café is an attraction.
+   * food (owner, 7 Sep 2026, twice). The sweep's own places and the food
+   * categories are the answer; an attraction with a café is an attraction.
    */
   const isFood = useCallback((i: InspireItem) => i.source === 'scout' || Boolean(FOOD_KINDS[i.category]), []);
-  const inMode = useMemo(() => shown.filter((i) => (mode === 'food' ? isFood(i) : !isFood(i))), [shown, mode, isFood]);
+  const inMode = useMemo(() => (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i))), [pool, mode, isFood]);
 
-  /** The cuisines actually near, biggest first — the body of Food's home (8d). */
-  const cuisines = useMemo(() => {
-    const by = new Map<string, number>();
-    for (const i of inMode) for (const c of i.cuisines.length ? i.cuisines : ['other']) by.set(c, (by.get(c) ?? 0) + 1);
-    return [...by.entries()].filter(([k]) => k !== 'other').sort((a, b) => b[1] - a[1]).map(([key, count]) => ({ key, count }));
-  }, [inMode]);
+  /** Which category or kind a place is in, in the strip's own keys. */
+  const inCategory = useCallback((i: InspireItem, key: string) => (mode === 'food' ? FOOD_KINDS[i.category] === key : i.moods.includes(key)), [mode]);
+  /** The one word the Type sort orders by. */
+  const typeOf = useCallback((i: InspireItem) => (mode === 'food' ? cap1(cuisineOf(i) ?? (FOOD_KINDS[i.category] === 'restaurants' ? 'Restaurant' : FOOD_LABELS[FOOD_KINDS[i.category]] ?? '')) : kindOf(i, drawers)), [mode, drawers]);
 
-  /** What the open category or cuisine holds, as a list (8b, 8e). */
-  const listed = useMemo(() => {
-    if (!pick) return [];
-    if (mode === 'food') {
-      const asKind = (FOOD_CATEGORIES as readonly string[]).includes(pick);
-      const items = asKind ? inMode.filter((i) => FOOD_KINDS[i.category] === pick) : inMode.filter((i) => i.cuisines.includes(pick));
-      return items;
-    }
-    const inCategory = inMode.filter((i) => i.moods.includes(pick));
-    return within === 'all' ? inCategory : inCategory.filter((i) => i.subcategory === within);
-  }, [inMode, mode, pick, within]);
+  const filters: Filters = { travel, rating, price };
+  const active = activeCount(filters, pick);
+  /** The pool, narrowed by every filter and put in order. One pass, no calls. */
+  const shown = useMemo(
+    () => sortItems([...inMode].sort((a, b) => forWhoever(a) - forWhoever(b)).filter((i) => keeps(i, filters, crowdOf)), sort, crowdOf, typeOf),
+    [inMode, travel, rating, price, sort, crowdOf, typeOf, minorComing],
+  );
 
   /**
-   * Has a setting emptied the screen, and what is the shortest way out?
-   *
-   * The pool is answered for one travel mode, so widening the ceiling can be
-   * worked out from what is already in hand; changing the mode cannot, and is
-   * offered as the thing to try rather than as a number. Driving first, because
-   * it is the widest and the default the design assumes.
+   * What the strip offers, per mode: only what is actually here, in the
+   * taxonomy's own order and words (owner, 7 Sep 2026). `all` leads both and
+   * is the absence of a pick rather than a category of its own.
    */
-  const emptied = Boolean(pool) && !loading && inMode.length > 0 && (pick ? listed.length === 0 : shown.length === 0);
-  const wider = useMemo(() => {
-    const all = (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i)));
-    if (travelBy !== 'drive') {
-      return { count: all.length, how: `are within reach if you drive`, label: 'Show driving times', apply: () => setTravelBy('drive') };
-    }
-    const next = ([30, 60, 120, null] as TravelMinutes[]).find((m) => m !== cap && (m == null || (cap != null && m > cap)) && all.some((i) => m == null || i.travelMinutes <= m));
-    const n = all.filter((i) => next == null || i.travelMinutes <= next).length;
-    return {
-      count: n,
-      how: next == null ? 'are further out' : `are within ${next >= 60 ? `${next / 60} hr` : `${next} min`}`,
-      label: next == null ? 'Look anywhere' : `Go up to ${next >= 60 ? `${next / 60} hr` : `${next} min`}`,
-      apply: () => setCap(next ?? null),
-    };
-  }, [pool, mode, isFood, travelBy, cap]);
-
-  /** How many places each travel ceiling would give, for the sheet's counts. */
-  const countAt = useCallback((m: TravelMinutes) => (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i)) && (m == null || i.travelMinutes <= m)).length, [pool, mode, isFood]);
-
-  /**
-   * What the strip offers, per mode. `all` leads both, and is the absence of a
-   * pick rather than a category of its own.
-   *
-   * Activities is the design's five. `relaxing` and `outdoors` are moods the
-   * pool still carries and the address still accepts, so a link to one works —
-   * they simply have no entry point here until the design gives them one.
-   */
-  const FOOD_LABELS: Record<string, string> = {
-    restaurants: 'Restaurants', pubs: 'Pubs', bars: 'Bars', cafes: 'Cafés', bakeries: 'Bakeries', takeaway: 'Takeaway',
-  };
   const stripItems = useMemo(() => {
-    const all = { key: 'all', label: 'All' };
-    // Only what is actually here. The handoff's lists are illustrative — the
-    // strip is built from the pool, so a category with nothing behind it is not
-    // offered rather than offered and empty (owner, 7 Sep 2026).
+    const all = { key: ALL, label: 'All' };
     if (mode === 'food') {
       const kinds = new Set(inMode.map((i) => FOOD_KINDS[i.category]).filter(Boolean));
       return [all, ...FOOD_CATEGORIES.filter((k) => !pool || kinds.has(k)).map((k) => ({ key: k, label: FOOD_LABELS[k] }))];
     }
-    // The taxonomy's own order and its own words, minus Food (which is the
-    // other half of the screen) and minus anything with nothing behind it.
-    const cats = (pool?.moods ?? [])
-      .filter((m) => m.key !== 'food' && (m.count ?? 0) > 0)
-      .map((m) => ({ key: m.key, label: m.label }));
+    const cats = (pool?.moods ?? []).filter((m) => m.key !== 'food' && (m.count ?? 0) > 0).map((m) => ({ key: m.key, label: m.label }));
     return [all, ...(pool ? cats : ACTIVITY_CATEGORIES.map((k) => ({ key: k, label: label(k) })))];
   }, [mode, pool, label, inMode]);
+  const categories = stripItems.filter((s) => s.key !== ALL);
 
-  /** The drawers inside one category that actually hold something (8b's sub-strip). */
-  const drawersFor = useCallback(
-    (key: string) => (pool?.moods.find((m) => m.key === key)?.subcategories ?? []).map((sc) => ({ key: sc.key, label: sc.label })),
-    [pool],
+  /** The shelves (All, in Activities): every category with something in it, filtered and ordered. */
+  const shelves = useMemo(
+    () => categories.map((c) => ({ key: c.key, label: c.label, items: shown.filter((i) => inCategory(i, c.key)) })).filter((s) => s.items.length),
+    [categories, shown, inCategory],
   );
 
-  const shelves = useMemo(() => {
-    const order = [mood, ...SHELVES.filter((m) => m !== mood)];
-    // A stable sort over the answer's own order, so the atlas's ranking still
-    // decides everything except who is in the car.
-    return order.map((key) => ({
-      key,
-      items: shown.filter((i) => i.moods.includes(key)).sort((a, b) => forWhoever(a) - forWhoever(b)),
-    }));
-  }, [shown, mood, minorComing]);
+  /** Inside one category or kind: what is in it, after the filters. */
+  const inPick = useMemo(() => {
+    if (!pick) return [];
+    if (mode === 'food' && !(FOOD_CATEGORIES as readonly string[]).includes(pick)) {
+      // An older address named a cuisine straight under Food; it still answers.
+      return shown.filter((i) => i.cuisines.includes(pick));
+    }
+    return shown.filter((i) => inCategory(i, pick));
+  }, [shown, pick, mode, inCategory]);
+  /** Whether the pick is a kind of place (Food) or a category (Activities), rather than a bare cuisine. */
+  const pickIsCategory = !!pick && (mode === 'activities' || (FOOD_CATEGORIES as readonly string[]).includes(pick));
 
-  // Whichever list is actually on screen is the one worth asking about.
-  useEffect(() => { askAbout(pick ? listed : shelves.flatMap((sh) => sh.items.slice(0, ACROSS))); },
-    [pick, listed, shelves, askAbout]);
-
-  const whoLabel = !attending || attending.size === members.length
-    ? 'Family'
-    : members.filter((m) => attending.has(m.id)).map((m) => firstName(m.name)).join(', ') || 'Nobody yet';
+  /** The drawers inside the pick, with what is in each: the sub-category list. */
+  const subRows = useMemo((): { key: string; label: string; count: number }[] => {
+    if (!pick || !pickIsCategory) return [];
+    if (mode === 'food') {
+      const by = new Map<string, number>();
+      let other = 0;
+      for (const i of inPick) { const c = cuisineOf(i); if (c) by.set(c, (by.get(c) ?? 0) + 1); else other += 1; }
+      const rows = [...by.entries()].sort((a, b) => cap1(a[0]).localeCompare(cap1(b[0]))).map(([key, count]) => ({ key, label: cap1(key), count }));
+      if (other) rows.push({ key: OTHER, label: 'Everything else', count: other });
+      return rows;
+    }
+    const subs = pool?.moods.find((m) => m.key === pick)?.subcategories ?? [];
+    const rows = subs.map((sc) => ({ key: sc.key, label: sc.label, count: inPick.filter((i) => i.subcategory === sc.key).length })).filter((r) => r.count);
+    const other = inPick.filter((i) => !i.subcategory || !subs.some((sc) => sc.key === i.subcategory)).length;
+    if (other && rows.length) rows.push({ key: OTHER, label: 'Everything else', count: other });
+    return rows;
+  }, [pick, pickIsCategory, mode, inPick, pool]);
 
   /**
-   * The place, opened.
-   *
-   * Our own photograph travels in as the drawer's picture, carrying its credit
-   * — which is where the credit now lives (owner, 5 Sep 2026: "I don't want the
-   * credits on the main image. They can go into the side drawer when you click
-   * through onto the image"). The licence is still satisfied: the line is shown
-   * with the picture at the size anybody would actually look at it, rather than
-   * set in 10px grey under a thumbnail, and it is in the drawer's footer too.
+   * Which layer is drawn inside a pick. A category with no drawers at all has
+   * no list of drawers to show, so it goes straight to its places.
    */
+  const layer: 'subs' | 'list' = !pick ? 'list' : !pickIsCategory ? 'list' : within ? 'list' : subRows.length ? 'subs' : 'list';
+  const listed = useMemo(() => {
+    if (!pick) return [];
+    if (!pickIsCategory || within == null || within === ALL) return inPick;
+    if (mode === 'food') {
+      if (within === OTHER) return inPick.filter((i) => !cuisineOf(i));
+      return inPick.filter((i) => cuisineOf(i) === within);
+    }
+    if (within === OTHER) return inPick.filter((i) => !i.subcategory || !subRows.some((r) => r.key === i.subcategory && r.key !== OTHER));
+    return inPick.filter((i) => i.subcategory === within);
+  }, [pick, pickIsCategory, within, inPick, mode, subRows]);
+  const listTitle = !pick ? ''
+    : !pickIsCategory ? cap1(pick)
+      : layer === 'subs' || within == null || within === ALL ? (layer === 'subs' ? label(pick) : `All ${label(pick).toLowerCase()}`)
+        : within === OTHER ? 'Everything else'
+          : mode === 'food' ? cap1(within) : drawers.get(within) ?? cap1(within);
+  const listCount = layer === 'subs' ? inPick.length : listed.length;
+
+  // Whichever list is actually on screen is the one worth asking about — and,
+  // under a rating floor, the whole of the mode, so the floor can be honest.
+  useEffect(() => {
+    if (rating > 0) { askAbout(inMode); return; }
+    askAbout(pick ? listed : shelves.flatMap((sh) => sh.items.slice(0, ACROSS)));
+  }, [pick, listed, shelves, rating, inMode, askAbout]);
+
+  /** The place, opened — `?place=…` over whichever list is showing. */
   const asDrawerItem = (item: InspireItem) => ({
     id: item.venueRef, venueRef: item.venueRef, name: item.name, category: item.category,
     lat: item.lat, lng: item.lng, dwellMinutes: item.dwellMinutes, reasons: [], justification: null,
     startsAt: null, endsAt: null, pinned: false,
     rating: item.rating, ratingCount: item.ratingCount, priceLevel: item.priceLevel,
-    // Ours travels as itself; the provider's travels as `photos`. Folding ours
-    // into `photos` was fine while every one of them was a Commons photograph,
-    // but a logo stretched across an 800px hero is a smear, so the drawer has
-    // to be able to tell them apart (5 Sep 2026).
     image: item.image ?? null,
     photos: item.photos,
     summary: item.summary ?? null, attribution: item.attribution.join(' · ') || null,
     distanceKm: item.distanceKm, travelFromBaseMinutes: item.travelMinutes,
     source: item.source,
   } as BrowseItem);
-  /**
-   * Opening a place is a step, so it is a step in the address too: `?place=…`
-   * over whichever shelf is showing. Send that to somebody and they open the
-   * same drawer, and Back closes it rather than leaving the screen.
-   */
-  const open = (item: InspireItem) => setQuery({ place: item.venueRef }, { replace: false });
+  const open = (item: InspireItem) => { setMenu(null); setQuery({ place: item.venueRef }, { replace: false }); };
   const openedRef = query.get('place');
   const drawer = useMemo(
     () => { const it = openedRef ? (pool?.items ?? []).find((i) => i.venueRef === openedRef) : null; return it ? asDrawerItem(it) : null; },
@@ -726,30 +541,39 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   );
   const closeDrawer = () => setQuery({ place: null }, { replace: false });
 
-  /**
-   * The heart: keep this place, or take it back out. Taking it out removes it
-   * from the atlas rather than marking it dismissed — an un-tapped heart means
-   * "I did not mean to keep that", not "not for us", and the two must not wear
-   * the same control. A place the household has actually been to cannot be
-   * removed, and the API says so.
-   */
-  const keep = async (item: InspireItem) => {
-    const now = !isKept(item);
-    setKept((k) => ({ ...k, [item.venueRef]: now }));
-    try {
-      if (now) {
-        await api.savePlace(item.venueRef, 'saved', { label: item.name, category: item.category, lat: item.lat, lng: item.lng });
-      } else {
-        await api.deleteAtlasPlace(item.venueRef);
-      }
-    } catch (e: any) {
-      // Put the heart back rather than leave it saying something untrue.
-      setKept((k) => ({ ...k, [item.venueRef]: !now }));
-      setNotice(e?.message ?? 'That could not be saved just now.');
-    }
+  // --- the controls' words ---------------------------------------------------
+  const travelDraw = TRAVEL[travelBy];
+  // Before the household has answered there is no town to name yet, and
+  // "1 hr · " with nothing after the dot reads as broken rather than pending.
+  const whereLabel = unknown ? 'Set your location' : whereName ? `${howFarShort(travel)} · ${whereName}${fromHere ? ' (you)' : ''}` : howFarShort(travel);
+  const whereSpoken = unknown ? 'Set your location' : `Within ${howFarShort(travel)} of ${whereName}, ${travelBy === 'walk' ? 'on foot' : travelBy === 'transit' ? 'by public transport' : 'driving'}`;
+  const filtersLabel = active ? `Filters (${active})` : 'Filters';
+  const sortLabel = SORTS[mode].find((s) => s.key === sort)?.label ?? 'Rating';
+  const clearFilters = () => { setMenu(null); navigate(withQuery(paths.inspire() + hereQuery(), { rating: null, price: null, within: null, place: null }, paths.inspireMode(mode, null))); };
+
+  /** The counts in the Filters panel: live, and each one cross-filtered by the other two. */
+  const scope = pick && pickIsCategory ? inMode.filter((i) => inCategory(i, pick)) : pick ? inMode.filter((i) => i.cuisines.includes(pick)) : inMode;
+  const countWith = (f: Filters, rows: InspireItem[] = scope) => rows.filter((i) => keeps(i, f, crowdOf)).length;
+  const ratingOptions: PopoverOption[] = RATING_FLOORS.map((r) => ({ key: String(r.key), label: r.label, count: countWith({ ...filters, rating: r.key }), on: rating === r.key }));
+  const priceOptions: PopoverOption[] = PRICE_BANDS.map((b) => ({ key: b.key, label: b.label, count: countWith({ ...filters, price: b.key }), on: price === b.key }));
+  const typeOptions: PopoverOption[] = [
+    { key: ALL, label: 'All', count: countWith(filters, inMode), on: !pick },
+    ...categories.map((c) => ({ key: c.key, label: c.label, count: countWith(filters, inMode.filter((i) => inCategory(i, c.key))), on: pick === c.key })),
+  ];
+  const pricesKnown = inMode.some((i) => i.priceLevel != null);
+
+  const fromOptions: PopoverOption[] = [
+    ...(home ? [{ key: 'home', label: `${homeTown} · home`, on: !chosen && !unknown }] : []),
+    ...(me.supported ? [{ key: 'here', label: fromHere ? `Using your location · ${whereName}` : 'Use my location', on: fromHere }] : []),
+    ...(chosen && !fromHere ? [{ key: 'chosen', label: chosen.label, on: true }] : []),
+    { key: 'elsewhere', label: 'Somewhere else…', on: false },
+  ];
+  const pickFrom = (k: string) => {
+    if (k === 'home') { setWhere(null, null); close(); }
+    else if (k === 'here') { close(); void useHereNow(); }
+    else if (k === 'elsewhere') { goUnknown(); }
+    else close();
   };
-  const isKept = (item: InspireItem) =>
-    kept[item.venueRef] ?? ['saved', 'special'].includes(item.household?.ledger ?? '');
 
   // The search is a whole screen, drawn in the tab so the tab bar stays put.
   if (searching) {
@@ -757,71 +581,53 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
       <WhereSearch
         home={home}
         onClose={() => back(paths.inspire() + hereQuery())}
-        // One address: the town they picked, with the search screen out of the
-        // way behind them, so Back goes to where they were looking before.
         onPick={(p) => navigate(here(paths.inspire(), placeToQuery(p, 'search')), { replace: true })}
         onPlanner={onPlanner}
       />
     );
   }
 
+  /** What an empty list says, and the one tap out of it. */
+  const emptyBody = `No places within ${howFarShort(travel)} · ${whereName} match these filters.`;
+  const nothingDrawn = !loading && !!pool && (pick ? (layer === 'subs' ? subRows.length === 0 : listed.length === 0) : mode === 'food' ? shown.length === 0 : shelves.length === 0);
+
   return (
     <View style={styles.fill}>
-      <ScrollView style={styles.fill} contentContainerStyle={styles.scroll} stickyHeaderIndices={[0]}>
-        {/* The head of the screen (8a/8b/8d): who and where, which half, which
-            category, and how far. Sticky, because the strip is how you move
-            around this tab and it should not scroll away from you. */}
+      <ScrollView style={styles.fill} contentContainerStyle={styles.scroll} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled">
+        {/* The head of the screen: the mark, which half, which category, and
+            the control row. Sticky, because the strip is how you move around
+            this tab and it should not scroll away from you. */}
         <View style={styles.header} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
           <InspireTop />
           <MenuBar>
-            <ModeSwitch mode={mode} onMode={(m) => goTo(m, null)} />
+            {/* Switching halves puts the filters and the order back to their
+                defaults — a £ band chosen for lunch is not a £ band for a
+                castle — and keeps where you are looking. */}
+            <ModeSwitch mode={mode} onMode={(m) => goTo(m, null, true)} />
             <CategoryStrip
               items={stripItems}
-              value={pick ?? 'all'}
-              onPick={(k) => goTo(mode, k === 'all' ? null : k)}
+              value={pick && pickIsCategory ? pick : ALL}
+              onPick={(k) => goTo(mode, k === ALL ? null : k)}
+              align={mode === 'food' ? 'left' : 'centre'}
             />
-            {/* The drawers inside an open Activities category (8b), inside the
-                bar rather than under it: the paler band is the third field of
-                the same block. Food has no sub-strip - a cuisine is already the
-                narrowest thing here. */}
-            {mode === 'activities' && pick && (drawersFor(pick).length > 0) ? (
-              <SubStrip
-                key={pick}
-                items={drawersFor(pick)}
-                value={within}
-                onPick={setWithin}
-                allLabel={`All ${label(pick).toLowerCase()}`}
-              />
-            ) : null}
           </MenuBar>
-          <FilterRow>
-            {/* The first chip carries both the town and the range (v2): the
-                where-box has left the top row, and "20 minutes" is not a fact
-                until it says twenty minutes from what. */}
-            <FilterButton
-              icon={travelBy === 'walk' ? 'walking' : travelBy === 'transit' ? 'transit' : 'driving'}
-              narrowed={travelBy !== 'drive'}
-              open={panel === 'travel'}
-              label={travelChipLabel(cap as TravelMinutes, whereName)}
-              // The words dropped "by transport" because the icon says it —
-              // but only to the eye, so the mode is spoken here instead.
-              spoken={`${travelChipLabel(cap as TravelMinutes, whereName)}, ${travelBy === 'walk' ? 'on foot' : travelBy === 'transit' ? 'by transport' : 'driving'}`}
-              onPress={() => setPanel(panel === 'travel' ? null : 'travel')}
-            />
-            <FilterButton
-              icon="money"
-              narrowed={budget !== 'all'}
-              open={panel === 'budget'}
-              label={BUDGETS.find((b) => b.key === budget)?.label ?? 'Any budget'}
-              onPress={() => setPanel(panel === 'budget' ? null : 'budget')}
-            />
-          </FilterRow>
+          <ControlRow
+            left={(
+              <ControlButton
+                icon={travelDraw.icon}
+                label={whereLabel}
+                spoken={whereSpoken}
+                set={unknown || travel !== HOW_FAR_DEFAULT}
+                open={menu === 'where'}
+                onPress={toggle('where')}
+              />
+            )}
+            centre={<ControlButton label={filtersLabel} set={active > 0} open={menu === 'filters'} onPress={toggle('filters')} />}
+            right={<ControlButton label={`Sort: ${sortLabel}`} set={sort !== 'rating'} open={menu === 'sort'} onPress={toggle('sort')} />}
+          />
         </View>
 
-        {/* Half a centimetre of air between the controls and the first thing
-            they control (owner, 7 Sep 2026: "the distance between the 'Up to
-            1-hour drive' and the 'Fun' is too close"). */}
-        <View style={[styles.column, wide && styles.columnWide, { paddingTop: 30 }]}>
+        <View style={[styles.column, wide && styles.columnWide]}>
           {loading && !pool ? (
             <View style={styles.waiting}>
               <ActivityIndicator color={colors.icon} />
@@ -829,186 +635,176 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
             </View>
           ) : null}
 
-          {!centre && !loading ? (
-            <Empty
-              title="Epic does not know where you are yet"
-              body="Search for a town above, or set your home address in Household, and this screen fills with what is around it."
+          {unknown && !loading ? (
+            <EmptyMatch
+              title="Where are you?"
+              body="Epic needs somewhere to look from. Use your location, go from home, or search for a town."
+              action="Set your location"
+              onAction={() => setMenu('where')}
             />
           ) : null}
 
-          {error ? <Empty title={`Nothing came back for ${placeName}`} body={error} onRetry={load} /> : null}
+          {error ? <EmptyMatch title={`Nothing came back for ${placeName}`} body={error} action="Try again" onAction={load} /> : null}
 
-          {pool && !loading ? (
+          {pool && !loading && !unknown ? (
             <>
               {/* Why every square is missing its star, said once and in plain
-                  words rather than eighty times as "No ratings yet" — which
-                  would be a claim about the places instead of about us.
-
-                  Above the shelves rather than under them: the question is
-                  asked at the first card somebody looks at, and an answer seven
-                  screens down is not an answer. It draws only on a day the
-                  source has actually refused. */}
+                  words, on a day the source has actually refused. */}
               {ratingsOff ? (
                 <View style={[styles.gutter, styles.notice]}>
                   <Icon name="info" size={14} color={colors.ink} />
                   <Text style={[type.small, { flex: 1, color: colors.ink }]}>{ratingsOff}</Text>
                 </View>
               ) : null}
-              {/* 8a: nothing picked, so every category gets a carousel and the
-                  title is the door into the whole of it. 8d: in Food, the same
-                  place in the hierarchy is a list of cuisines instead. */}
-              {!pick && mode === 'activities' ? shelves.map(({ key, items }) => (
+
+              {/* All: shelves per category, each "All N ›". Empty shelves are dropped. */}
+              {!pick && mode === 'activities' ? shelves.map((sh) => (
                 <Carousel
-                  key={key}
-                  title={label(key)}
-                  count={items.length}
-                  items={items.slice(0, ACROSS)}
-                  onAll={() => goTo('activities', key)}
+                  key={sh.key}
+                  title={sh.label}
+                  count={sh.items.length}
+                  items={sh.items.slice(0, ACROSS)}
+                  onAll={() => goTo('activities', sh.key)}
                   onOpen={open}
-                  crowdOf={ratingOf}
-                  travelWord={travelBy === 'walk' ? 'walk' : travelBy === 'transit' ? 'by transport' : 'drive'}
+                  crowdOf={crowdOf}
+                  travel={travelDraw}
                 />
               )) : null}
 
+              {/* Food, All: text rows, no image slots. */}
               {!pick && mode === 'food' ? (
-                cuisines.length ? (
-                  <View>
-                    <Kicker>Cuisine</Kicker>
-                    {cuisines.map((c) => (
-                      <CuisineRow key={c.key} label={cap1(c.key)} count={c.count} onOpen={() => goTo('food', c.key)} />
-                    ))}
-                  </View>
-                ) : (
-                  <Empty
-                    title={`Nothing to eat around ${placeName} yet`}
-                    body="Epic's own atlas holds places to go rather than places to eat, so Food has nothing to draw here until a source for it is switched on."
-                  />
-                )
-              ) : null}
-
-              {/* 8b and 8e: one category or one cuisine, as a list. */}
-              {/*
-                Why the screen is empty, and one tap out of it.
-
-                Choosing Walk and leaving it on is enough to lose everything:
-                an hour's walk holds four places where an hour's drive holds a
-                hundred and seventy-two, and the only sign of it is three small
-                words in the filter row. A screen that has been emptied by a
-                setting has to say so, and say which (owner, 7 Sep 2026: "you
-                seem to have lost lots of activities").
-              */}
-              {emptied ? (
-                <View style={[styles.gutter, { gap: spacing.sm, paddingVertical: spacing.lg }]}>
-                  <Text style={type.h3}>Nothing within {travelLabel(travelBy, cap as TravelMinutes).toLowerCase()} of {placeName}</Text>
-                  <Text style={type.small}>
-                    {wider.count} place{wider.count === 1 ? '' : 's'} {wider.how}.
-                  </Text>
-                  <Pressable onPress={wider.apply} accessibilityRole="button" style={styles.widen}>
-                    <Text style={styles.widenText}>{wider.label}</Text>
-                    <Icon name="forward" size={16} color={colors.selectedFg} />
-                  </Pressable>
+                <View>
+                  {shown.map((i) => (
+                    <FoodRow key={i.venueRef} item={i} kind={typeOf(i) || null} standing={(i as any).standing ?? null} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />
+                  ))}
                 </View>
               ) : null}
 
-              {/* The heading the count belongs opposite (owner's mock-up, 8 Sep
-                  2026): the category on the left, how many are in it on the
-                  right, in the same line the browse view's shelves use. No
-                  chevron here — you are already inside it. */}
-              {pick && listed.length ? (
-                <SectionHead title={mode === 'food' ? cap1(pick) : label(pick as MoodKey)} count={listed.length} />
+              {/* Inside a category or a kind: the section title row, then the
+                  drawers or the places. The back arrow always returns to All. */}
+              {pick ? (
+                <View style={styles.drill}>
+                  <CrumbHead
+                    onBack={() => goTo(mode, null)}
+                    backLabel="All"
+                    title={listTitle}
+                    aside={listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : null}
+                  />
+                  {layer === 'subs' ? (
+                    <View>
+                      {mode === 'food' ? (
+                        <SubRow label={`All ${label(pick).toLowerCase()} · by rating`} count={inPick.length} onPress={() => { setSort('rating'); setWithin(ALL, { replace: false }); }} />
+                      ) : null}
+                      {subRows.map((r) => (
+                        <SubRow key={r.key} label={r.label} count={r.count} onPress={() => setWithin(r.key, { replace: false })} />
+                      ))}
+                    </View>
+                  ) : mode === 'food' ? (
+                    <View>
+                      {listed.map((i) => (
+                        <FoodRow key={i.venueRef} item={i} kind={typeOf(i) || null} standing={(i as any).standing ?? null} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={styles.cards}>
+                      {listed.map((i) => (
+                        <CardWide key={i.venueRef} item={i} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />
+                      ))}
+                    </View>
+                  )}
+                </View>
               ) : null}
 
-              {pick ? (
-                listed.length ? listed.map((i) => (
-                  mode === 'food'
-                    ? <FoodRow key={i.venueRef} item={i} kind={cap1(i.cuisines[0] ?? '')} where={i.region ? shortPlace(i.region) : null} standing={(i as any).standing ?? null} crowd={ratingOf(i)} onOpen={() => open(i)} />
-                    : <PlaceRow key={i.venueRef} item={i} kind={kindLine(i, drawers)} crowd={ratingOf(i)} onOpen={() => open(i)} />
-                )) : emptied ? null : (
-                  /* The one above already says which setting emptied it and
-                     offers the way out; two empty states is one too many. */
-                  <Empty
-                    title={`Nothing ${label(pick).toLowerCase()} within reach of ${placeName}`}
-                    body="Widen how far you will go, or search another town."
+              {nothingDrawn ? (
+                inMode.length === 0 ? (
+                  <EmptyMatch
+                    title={mode === 'food' ? `Nothing to eat around ${placeName} yet` : `Nothing to do around ${placeName} yet`}
+                    body={mode === 'food'
+                      ? 'The sweep has not reached this area yet, so there is nothing to draw here.'
+                      : 'The atlas has nothing illustrated near here yet. Try another town.'}
+                    action="Somewhere else"
+                    onAction={() => setMenu('where')}
                   />
+                ) : (
+                  <EmptyMatch body={emptyBody} action="Clear filters" onAction={clearFilters} />
                 )
               ) : null}
-
-              {notice ? (
-                <Pressable onPress={() => setNotice(null)} style={[styles.gutter, styles.notice]} accessibilityRole="button">
-                  <Icon name="info" size={14} color={colors.ink} />
-                  <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
-                </Pressable>
-              ) : null}
-              {/*
-                Nothing closes the scroll.
-
-                There was a line here reporting the size and radius of the pool
-                — "400 places within 60 km of Sunningdale · times are from
-                home, estimated" — with a "Look again" under it. Both are gone
-                (owner, 8 Sep 2026): the pool is how the screen was built, not
-                what he asked for, and saying "400 places" under a list of two
-                describes our fetch rather than his search.
-
-                No credits here either. A licence is satisfied where the picture
-                is actually looked at — which is the place, opened — and the
-                drawer carries them there (owner, 7 Sep 2026: "all of these
-                image contributions should not be on the Inspire page").
-              */}
             </>
           ) : null}
         </View>
       </ScrollView>
-      {/* v2: the filters open *under* the line that owns them rather than up
-          from the bottom of the screen, so the list being filtered stays in
-          view behind a light veil while it is being changed. */}
-      {panel === 'travel' ? (
-        <FilterPanel top={headH} onClose={() => setPanel(null)}>
-          <TravelPanel
-            from={whereName || 'Where should we go?'}
-            mode={travelBy}
-            minutes={cap as TravelMinutes}
-            counts={countAt}
-            total={countAt(cap as TravelMinutes)}
-            onEditFrom={() => { setPanel(null); navigate(paths.inspireSearch() + hereQuery()); }}
-            // Only offered where the browser will answer; a dead link to a
-            // permission that was refused is worse than no link.
-            onHere={me.supported ? () => { setPanel(null); void useHereNow(); } : null}
-            // Clearing the town falls back to the household's home, which is
-            // what `centre` does when nobody has said anywhere else.
-            onHome={home ? () => setWhere(null, null) : null}
-            homeLabel="Home"
-            atHome={!chosen && !!home}
-            onMode={setTravelBy}
-            onMinutes={(m) => setCap(m)}
-            // Open now is a third filter chip no longer: it belongs with how
-            // far you will go, because both are questions about whether you
-            // could actually get there and be let in (owner, 8 Sep 2026).
-            // Food only — the atlas holds no opening hours for a hillside.
-            openNow={mode === 'food' ? openNow : null}
-            onOpenNow={setOpenNow}
-            onDone={() => setPanel(null)}
-          />
-        </FilterPanel>
-      ) : null}
-      {/* Budget on the same pattern. The counts matter more here than they do
-          for travel: almost nothing in the atlas carries a price, so a band
-          without them would empty the screen with no explanation. */}
-      {panel === 'budget' ? (
-        <FilterPanel top={headH} onClose={() => setPanel(null)}>
-          <ChoicePanel
-            sub={pricesKnown ? `Where a price is known near ${placeName}.` : `Nothing around ${placeName} has been priced yet, so only Any has anything in it.`}
-            options={BUDGETS.map((b) => ({
-              key: b.key,
-              label: b.label,
-              count: b.max == null
-                ? inMode.length
-                : inMode.filter((i) => i.priceLevel != null && i.priceLevel <= (b.max as number)).length,
-            }))}
-            value={budget}
-            onPick={(k) => { setBudget(k); setPanel(null); }}
-          />
-        </FilterPanel>
-      ) : null}
+
+      {/* The panels, anchored under the control row. Where has two groups —
+          How far and From — or, with nowhere to look from, the question. */}
+      <Popover open={menu === 'where'} top={headH} onClose={close} align="left" maxHeight={420}>
+        {unknown ? (
+          <View style={styles.unknown}>
+            <Text style={styles.unknownTitle}>Where are you?</Text>
+            <Text style={styles.unknownBody}>
+              {me.error ?? "Search for a town or postcode to see what's nearby."}
+            </Text>
+            <PlacePicker kind="area" autoFocus value={null} placeholder="Town, city or postcode" onPick={(p) => { if (p) { setWhere(p, 'search'); close(); } }} />
+            {home ? (
+              <Pressable onPress={() => { setWhere(null, null); close(); }} accessibilityRole="button" style={styles.suggest}>
+                <Text style={styles.suggestLabel}>{homeTown}</Text>
+                <Text style={styles.suggestSub}>Home</Text>
+              </Pressable>
+            ) : null}
+            {me.supported ? (
+              <Pressable onPress={() => { close(); void useHereNow(); }} accessibilityRole="button" style={styles.tryAgain}>
+                <Icon name="here" size={16} color={colors.primaryFg} strokeWidth={2.2} />
+                <Text style={styles.tryAgainText}>{me.error ? 'Try my location again' : 'Use my location'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : (
+          <>
+            <PopoverGroup title="How far">
+              <BoxRow
+                options={HOW_FAR.map((h) => ({ key: String(h.minutes), label: h.label, on: travel === h.minutes }))}
+                onPick={(k) => { setTravel(Number(k)); close(); }}
+              />
+              {/* The way of getting there is what the minutes are measured in,
+                  so it sits with them rather than as a control of its own. */}
+              <View style={styles.ways}>
+                {TRAVEL_MODES.map((m) => {
+                  const on = m.key === travelBy;
+                  return (
+                    <Pressable key={m.key} onPress={() => setTravelBy(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }} style={[styles.way, on && styles.wayOn]}>
+                      <Icon name={m.icon} size={14} color={on ? colors.ink : colors.inkMuted} strokeWidth={2} />
+                      <Text style={[styles.wayText, on && styles.wayTextOn]}>{m.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </PopoverGroup>
+            <PopoverGroup title="From">
+              <PopoverList options={fromOptions} onPick={pickFrom} dense />
+            </PopoverGroup>
+          </>
+        )}
+      </Popover>
+
+      <Popover open={menu === 'filters'} top={headH} onClose={close} align="centre" maxHeight={440}>
+        <PopoverGroup title="Rating">
+          <BoxRow options={ratingOptions} onPick={(k) => setRating(Number(k))} />
+        </PopoverGroup>
+        <PopoverGroup title={mode === 'food' ? 'Price' : 'Cost'}>
+          <BoxRow options={priceOptions} onPick={(k) => setPrice(k)} />
+          {!pricesKnown ? <Text style={styles.panelNote}>Nothing around {placeName} has a price yet, so only Any has anything in it.</Text> : null}
+        </PopoverGroup>
+        <PopoverGroup title={mode === 'food' ? 'Venue' : 'Activity type'}>
+          <PopoverList options={typeOptions} onPick={(k) => goTo(mode, k === ALL ? null : k)} dense />
+        </PopoverGroup>
+        {active ? <PopoverFooter label="Clear filters" onPress={clearFilters} /> : null}
+      </Popover>
+
+      <Popover open={menu === 'sort'} top={headH} onClose={close} align="right">
+        <PopoverGroup title="Sort by">
+          <PopoverList options={SORTS[mode].map((s) => ({ key: s.key, label: s.label, on: sort === s.key }))} onPick={(k) => { setSort(k as InspireSort); close(); }} dense />
+        </PopoverGroup>
+      </Popover>
+
       <VenueDrawer
         item={drawer}
         baseLabel={placeName}
@@ -1018,13 +814,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
         onAdd={onCreateTrip ? (it) => {
           closeDrawer();
           onCreateTrip({
-            // The identifier travels with the destination, not only on the
-            // seed: a day out to a place somebody tapped has that place *on*
-            // it, as the stop the day is built around, and a stop needs a ref.
             place: { ref: it.venueRef, label: it.name, lat: it.lat as number, lng: it.lng as number },
-            // The picture goes with it: the create screen shows the place the
-            // trip is for at the top (5a), and the drawer already has it, so
-            // there is nothing to fetch.
             seed: { venueRef: it.venueRef, name: it.name, category: it.category, lat: it.lat, lng: it.lng, image: it.image, photos: it.photos },
           });
         } : undefined}
@@ -1033,267 +823,34 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onFood,
   );
 }
 
-/**
- * Food, in the chip row but not of it. Somewhere to eat is judged on reviews
- * and menus rather than on a photograph — the atlas holds no restaurants by
- * the owner's own instruction — so this opens Places, where the household's
- * own food places already live, instead of drawing a shelf of grey tiles.
- */
-function FoodDoor({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} accessibilityRole="link" style={styles.foodDoor} accessibilityLabel="Somewhere to eat, in Places">
-      <Icon name="restaurant" size={14} color={colors.ink} />
-      <Text style={styles.foodDoorText}>Food</Text>
-      <Icon name="forward" size={13} color={colors.inkMuted} strokeWidth={2.2} />
-    </Pressable>
-  );
-}
-
-const PANEL_TITLE: Record<Exclude<Panel, null>, string> = {
-  travel: 'How far', kind: 'Kind of thing', who: "Who's coming", outing: 'How long', budget: 'Budget',
-};
-
-/** A chip that opens a panel under the bar. The chevron says so. */
-function FilterChip({ icon, label, open, onPress }: { icon?: IconName; label: string; open: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ expanded: open }} style={[styles.filter, open && styles.filterOpen]}>
-      {icon ? <Icon name={icon} size={14} color={open ? colors.primaryFg : colors.ink} /> : null}
-      <Text style={[styles.filterText, open && { color: colors.primaryFg }]} numberOfLines={1}>{label}</Text>
-      <Icon name={open ? 'collapse' : 'expand'} size={13} color={open ? colors.primaryFg : colors.inkMuted} strokeWidth={2.2} />
-    </Pressable>
-  );
-}
-
-/** One row of equal choices, the way the Budget panel in the design draws them. */
-function Bands({ options, value, onPick, wrap }: { options: { key: string; label: string }[]; value: string; onPick: (k: string) => void; wrap?: boolean }) {
-  return (
-    <View style={[styles.bands, wrap && styles.wrap]}>
-      {options.map((o) => {
-        const on = o.key === value;
-        return (
-          <Pressable key={o.key} onPress={() => onPick(o.key)} accessibilityRole="button" accessibilityState={{ selected: on }}
-            style={[styles.band, wrap ? styles.bandWrap : { flex: 1 }, on && styles.bandOn]}>
-            <Text style={[styles.bandText, on && { color: colors.primaryFg }]} numberOfLines={1}>{o.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-/** One mood's shelf: a title, and its places across or wrapped. */
-function Shelf({ title, items, wide, expanded, onToggle, onOpen, onKeep, isKept, empty, subcategories, drawers }: {
-  title: string; items: InspireItem[]; wide: boolean; expanded: boolean; onToggle: () => void;
-  onOpen: (i: InspireItem) => void; onKeep: (i: InspireItem) => void; isKept: (i: InspireItem) => boolean;
-  empty: string | null;
-  /** The drawers inside this shelf that hold something, in the owner's order. */
-  subcategories?: { key: string; label: string; count: number }[];
-  drawers?: Drawers;
-}) {
-  // How much of an opened shelf has been drawn. It starts again at a page each
-  // time the shelf is closed, which is what somebody expects of a fold.
-  const [drawn, setDrawn] = useState(PAGE);
-  // Which drawer is being looked at inside an opened shelf. Local rather than
-  // in the address: it is a way of reading one shelf, not a place you are.
-  const [only, setOnly] = useState<string | null>(null);
-  useEffect(() => { if (!expanded) { setDrawn(PAGE); setOnly(null); } }, [expanded]);
-  if (!items.length && !empty) return null;
-  const inDrawer = only ? items.filter((i) => i.subcategory === only) : items;
-  const cards = expanded ? inDrawer.slice(0, drawn) : inDrawer.slice(0, SHELF);
-  const more = expanded ? inDrawer.length - cards.length : 0;
-  return (
-    <View style={styles.shelf}>
-      <Pressable onPress={items.length > SHELF || items.length ? onToggle : undefined} style={[styles.shelfHead, styles.gutter]} accessibilityRole="button" accessibilityState={{ expanded }}>
-        <Text style={styles.shelfTitle}>{title}</Text>
-        {items.length ? (
-          <View style={styles.shelfMore}>
-            <Text style={type.tiny}>{expanded ? 'Fewer' : `All ${items.length}`}</Text>
-            <Icon name={expanded ? 'collapse' : 'more'} size={18} color={colors.ink} strokeWidth={2} />
-          </View>
-        ) : null}
-      </Pressable>
-      {/* The drawers, only once the shelf is opened. Closed, a shelf is a
-          glance; opened, it is a list somebody wants to narrow. */}
-      {expanded && (subcategories?.length ?? 0) > 1 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
-          <Chip label={`All ${items.length}`} selected={!only} onPress={() => { setOnly(null); setDrawn(PAGE); }} />
-          {(subcategories ?? []).map((sc) => (
-            <Chip key={sc.key} label={`${sc.label} ${sc.count}`} selected={only === sc.key}
-                  onPress={() => { setOnly(only === sc.key ? null : sc.key); setDrawn(PAGE); }} />
-          ))}
-        </ScrollView>
-      ) : null}
-      {!items.length ? (
-        <Text style={[type.small, styles.gutter]}>{empty}</Text>
-      ) : expanded ? (
-        <View style={[styles.grid, styles.gutter]}>
-          {cards.map((i) => <Card key={i.venueRef} item={i} wide={wide} onOpen={onOpen} onKeep={onKeep} kept={isKept(i)} drawers={drawers} />)}
-          {more ? (
-            <Pressable onPress={() => setDrawn((n) => n + PAGE)} style={[styles.tile, styles.showMore, { width: wide ? 240 : 200, height: wide ? 180 : 150 }]} accessibilityRole="button">
-              <Icon name="expand" size={20} color={colors.icon} />
-              <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>{more} more</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
-          {cards.map((i) => <Card key={i.venueRef} item={i} wide={wide} onOpen={onOpen} onKeep={onKeep} kept={isKept(i)} drawers={drawers} />)}
-        </ScrollView>
-      )}
-    </View>
-  );
-}
-
-/**
- * One place.
- *
- * The picture is Epic's own: harvested from Wikimedia Commons under a licence
- * that lets us keep it, held in our database at three widths, and served from
- * `/api/images/:id/500` outside the session door with a year's immutable
- * caching — so the second time anybody sees this card the bytes come from the
- * browser and nothing reaches the API at all.
- *
- * It paints in two steps. The `lqip` is a 20px JPEG inlined in the answer as a
- * data URI, about half a kilobyte, so the tile has the photograph's own colours
- * before a single image request has been made; the real picture then arrives
- * over the top. That is what "instant" is made of here, and it is why the atlas
- * exists at all.
- *
- * `credit` is drawn whenever the licence requires it. That is a condition of
- * being allowed to show the picture, not a nicety, so it is inside this
- * component rather than left to each caller to remember.
- *
- * A place with no photograph of ours still gets its own icon on the lime tile,
- * so a shelf reads as deliberate rather than broken.
- */
-function Card({ item, wide, onOpen, onKeep, kept, drawers }: {
-  item: InspireItem; wide: boolean; onOpen: (i: InspireItem) => void; onKeep: (i: InspireItem) => void; kept: boolean;
-  /** What each subcategory is called, so the card can print its own word. */
-  drawers?: Drawers;
-}) {
-  const w = wide ? 240 : 200;
-  const h = wide ? 180 : 150;
-  // Ours first. A provider's photo is only ever fetched at display time and is
-  // never stored (Technical Constraints §4); ours is stored because we own it.
-  const owned = item.image;
-  const photo = item.photos?.[0];
-  const uri = owned
-    ? `${API_URL}/api/images/${owned.id}/${wide ? 960 : 500}`
-    : photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}` : null);
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const price = priceMarks(item.priceLevel);
-  const kind = kindLine(item, drawers);
-  return (
-    <Pressable onPress={() => onOpen(item)} style={{ width: w, gap: spacing.sm }} accessibilityRole="button" accessibilityLabel={item.name}>
-      <View style={[styles.tile, { width: w, height: h }]}>
-        {/* The photograph's own colours, half a kilobyte, already in hand. */}
-        {owned?.lqip && !loaded && !failed ? (
-          <Image source={{ uri: owned.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors />
-        ) : null}
-        {uri && !failed ? (
-          <Image source={{ uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" onError={() => setFailed(true)} onLoad={() => setLoaded(true)} accessibilityIgnoresInvertColors />
-        ) : (
-          <View style={styles.tileEmpty}><Icon name={iconFor(item)} size={28} color={colors.icon} /></View>
-        )}
-        <Pressable
-          onPress={(e: any) => { e?.stopPropagation?.(); onKeep(item); }}
-          hitSlop={8}
-          style={styles.heart}
-          accessibilityRole="button"
-          accessibilityState={{ selected: kept }}
-          accessibilityLabel={kept ? `Remove ${item.name} from your places` : `Keep ${item.name}`}
-        >
-          <Icon name="keep" size={16} color={kept ? colors.loved : colors.ink} fill={kept} strokeWidth={2} />
-        </Pressable>
-      </View>
-      <View style={{ gap: 2 }}>
-        <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
-        <Text style={type.small}>{minutes(item.travelMinutes)} · {minutes(item.dwellMinutes)}</Text>
-        {price || kind ? <Text style={[type.small, { color: colors.ink }]} numberOfLines={1}>{price ?? kind}</Text> : null}
-
-      </View>
-    </Pressable>
-  );
-}
-
-function Empty({ title, body, onRetry }: { title: string; body: string; onRetry?: () => void }) {
-  return (
-    <View style={[styles.empty, styles.gutter]}>
-      <Text style={type.h3}>{title}</Text>
-      <Text style={type.small}>{body}</Text>
-      {onRetry ? <Pressable onPress={onRetry} hitSlop={8}><Text style={[type.small, { fontWeight: '700' }]}>Try again</Text></Pressable> : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  // The one tap out of a screen a filter has emptied.
-  widen: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
-    backgroundColor: colors.selected, paddingHorizontal: 16, minHeight: TARGET, justifyContent: 'center',
-  },
-  widenText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.selectedFg },
-
   fill: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingBottom: spacing.xxl },
   // The head of the tab: cream, and carrying the block rule that closes it.
   header: { backgroundColor: colors.bg },
-  top: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, backgroundColor: colors.bg },
-  topWide: { maxWidth: 1120, width: '100%', alignSelf: 'center' },
-  column: { gap: spacing.md },
+  // Half a centimetre of air between the controls and the first thing they
+  // control (owner, 7 Sep 2026).
+  column: { gap: spacing.xl, paddingTop: 20 },
   columnWide: { maxWidth: 1120, width: '100%', alignSelf: 'center' },
   gutter: { paddingHorizontal: spacing.lg },
-  // The one raised thing on the screen: the question the household came to answer.
-  search: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
-    minHeight: 52, paddingHorizontal: spacing.lg, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
-    boxShadow: '0 2px 10px rgba(32,30,29,0.10)',
-  },
-  searchWide: { maxWidth: 560, width: '100%', alignSelf: 'center' },
-  hereOffer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 34, marginTop: 6 },
-  foodDoor: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 12,
-    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surfaceMuted,
-  },
-  foodDoorText: { fontSize: 13, fontWeight: '600', color: colors.ink },
-  searchText: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  moods: { gap: 2 },
-  strip: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: 2 },
-  filters: { gap: 6, paddingHorizontal: spacing.lg, paddingVertical: 2 },
-  filter: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 34, paddingHorizontal: 12,
-    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
-  },
-  filterOpen: { backgroundColor: colors.primary, borderColor: colors.primary },
-  filterText: { fontSize: 12.5, fontWeight: '600', color: colors.ink, maxWidth: 140 },
-  panel: { gap: spacing.md, padding: spacing.md, marginHorizontal: spacing.lg, borderRadius: 12, backgroundColor: colors.panel },
-  panelHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  panelTitle: { fontSize: 13, fontWeight: '700', color: colors.ink },
-  bands: { flexDirection: 'row', gap: 6 },
-  band: { minHeight: 38, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
-  bandWrap: { flexGrow: 0 },
-  bandOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  bandText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  shelf: { gap: spacing.md, marginTop: spacing.sm },
-  shelfHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, minHeight: 34 },
-  shelfTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.ink, flex: 1 },
-  shelfMore: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  tile: { borderRadius: 6, overflow: 'hidden', backgroundColor: colors.surfaceMuted },
-  tileEmpty: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
-  showMore: { alignItems: 'center', justifyContent: 'center', gap: 6 },
-  // The one control that sits on a photograph, so it carries its own ground —
-  // the surface colour of whichever mode is on, not a hardcoded white disc that
-  // would burn a hole in a dark screen.
-  heart: {
-    position: 'absolute', top: 10, right: 10, width: 32, height: 32, borderRadius: radius.pill,
-    backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center',
-  },
-  cardName: { fontSize: 14, fontWeight: '700', lineHeight: 18, color: colors.ink },
+  drill: { gap: 10 },
+  cards: { gap: 22 },
   waiting: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
-  empty: { gap: 6, paddingVertical: spacing.lg },
   notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+
+  ways: { flexDirection: 'row', gap: 14, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
+  way: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  wayOn: { borderBottomColor: colors.ink },
+  wayText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
+  wayTextOn: { color: colors.ink },
+  panelNote: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, color: colors.inkMuted, paddingHorizontal: 12, paddingBottom: 6 },
+
+  unknown: { padding: 12, paddingBottom: 8, gap: 10 },
+  unknownTitle: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', letterSpacing: -0.34, color: colors.ink },
+  unknownBody: { fontFamily: fonts.body, fontSize: 13, lineHeight: 19, color: colors.inkMuted },
+  suggest: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 11, minHeight: TARGET, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  suggestLabel: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
+  suggestSub: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
+  tryAgain: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, paddingVertical: 13, paddingHorizontal: 14, marginTop: 6, marginBottom: 4, minHeight: TARGET },
+  tryAgainText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.primaryFg },
 });
