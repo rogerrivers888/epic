@@ -184,7 +184,13 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
  * the open map. Ordered by how prominent the sweep thought it was, so the ones
  * a household would actually see are identified first.
  */
-export async function needingKind(limit = 25, maxAttempts = 6) {
+export async function needingKind(limit = 25) {
+  // No ceiling on attempts here, deliberately. All 764 of these had spent all
+  // six, and every one was spent on a question that could not be answered: the
+  // loop re-queued them with no seed, so `enrich` had no name and no point to
+  // search the open map with and failed on the spot. Attempts made without a
+  // seed are not evidence about the place, and this pass brings one.
+  //
   // `distinct on` has to be ordered by its own key first, so the ranking has to
   // happen outside it — ordered inside, the limit took an arbitrary slice in
   // venue_ref order and the batch was whichever places sorted early by id.
@@ -196,18 +202,32 @@ export async function needingKind(limit = 25, maxAttempts = 6) {
          join scout_places p on p.venue_ref = r.venue_ref
         where r.category is null
           and r.osm_ref is null
-          and r.enrich_attempts < $2
           and p.name is not null and p.lat is not null and p.lng is not null
         order by r.venue_ref, p.epic_score desc nulls last
      ) best
       order by epic_score desc nulls last
       limit $1`,
-    [limit, maxAttempts],
+    [limit],
   );
   // The sweep's own row, not the record's: the record is empty — that is the
   // whole reason these are on this list — and the open map cannot be asked
   // about a place with no name and no point.
   return rows.map((r) => ({ ref: r.venue_ref, name: r.name, lat: r.lat, lng: r.lng, website: r.website }));
+}
+
+/**
+ * What a sweep already knows about these places, for a researcher that would
+ * otherwise ask the open map about a nameless point.
+ */
+export async function sweepSeeds(refs) {
+  if (!refs?.length) return {};
+  const { rows } = await query(
+    `select distinct on (venue_ref) venue_ref, name, lat, lng, website
+       from scout_places where venue_ref = any($1)
+      order by venue_ref, epic_score desc nulls last`,
+    [refs],
+  );
+  return Object.fromEntries(rows.map((r) => [r.venue_ref, { name: r.name, lat: r.lat, lng: r.lng, website: r.website }]));
 }
 
 /**

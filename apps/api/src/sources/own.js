@@ -796,7 +796,7 @@ export async function sweepExpired() {
  * else's server being generous.
  */
 export async function identifyKinds({ limit = 25, householdId = null } = {}) {
-  const rows = await owned.needingKind(limit, MAX_ATTEMPTS);
+  const rows = await owned.needingKind(limit);
   let found = 0;
   const kinds = {};
   for (const { ref, ...seed } of rows) {
@@ -816,7 +816,18 @@ export async function identifyKinds({ limit = 25, householdId = null } = {}) {
 /** Places claimed but never researched, or due to be tried again. */
 export async function catchUp({ limit = 8 } = {}) {
   const refs = await owned.dueForResearch(limit, MAX_ATTEMPTS, RESEARCH_VERSION);
-  for (const ref of refs) queueEnrichment(ref);
+  /**
+   * Seeded, which this was not.
+   *
+   * A place a sweep found arrives here with an empty record — the sweep writes
+   * to `scout_places`, not to `place_records` — so re-queueing it by reference
+   * alone gave `enrich` a nameless point, which is the one thing it cannot ask
+   * the open map about. It failed, took an attempt, and after six the place was
+   * retired for good: 764 of them, none ever identified (found 8 Sep 2026).
+   * The sweep has held the name and the point all along.
+   */
+  const seeds = await owned.sweepSeeds(refs).catch(() => ({}));
+  for (const ref of refs) queueEnrichment(ref, seeds[ref] ? { seed: seeds[ref] } : {});
   return refs.length;
 }
 
