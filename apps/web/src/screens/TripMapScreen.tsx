@@ -653,6 +653,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     lat: p.lat ?? 0, lng: p.lng ?? 0, cuisines: [], experiences: [],
     rating: null, ratingCount: null, priceLevel: null,
     openingHours: null, phone: null, website: null, address: null,
+    summary: null, openNow: null, closesAt: null, opensAt: null,
     photos: [], attribution: null,
     detourMinutes: null, detourMiles: 0, estimated: true,
     onShortlist: p.shortlisted, onDay: p.scheduled,
@@ -1489,6 +1490,49 @@ function TripPlacesList({ data, onSelect, onDelete }: {
 
 const DETOURS = [10, 15, 30, 45];
 
+/** Which of the three browses a place belongs to — the shape of its half view. */
+type PlaceKind = 'activity' | 'food' | 'stay';
+const EATING = new Set(['restaurant', 'cafe', 'bar', 'pub', 'bakery']);
+const placeKind = (p: { category?: string | null }): PlaceKind =>
+  (p.category === 'hotel' ? 'stay' : EATING.has(String(p.category)) ? 'food' : 'activity');
+
+/** Just the domain, which is what a website line is for: "piccolino.co.uk". */
+const hostOf = (url: string): string => {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+};
+
+/**
+ * Open, closed, or nothing said — the one line that decides whether a place is
+ * any use to you today. Never a guess: a source that did not say leaves this
+ * empty rather than claiming the place is shut.
+ */
+const openLine = (p: { openNow?: boolean | null; closesAt?: string | null; opensAt?: string | null }):
+  { text: string; strong: boolean } | null => {
+  if (p.openNow === true) return { text: p.closesAt ? `Open until ${p.closesAt}` : 'Open now', strong: true };
+  if (p.openNow === false) return { text: p.opensAt ? `Closed · opens ${p.opensAt}` : 'Closed now', strong: false };
+  return null;
+};
+
+/**
+ * What we can say about a place with no photograph.
+ *
+ * The handoff asks for menu dishes here for a restaurant and rooms for a hotel;
+ * neither is in what a browse fetches, and inventing three plausible dishes is
+ * the one thing a food app must never do. So this is the facts we actually
+ * hold, and the drawer behind "More info" is where the menu is read.
+ */
+const goodToKnow = (p: TripAlongPlace): string[] => {
+  const out: string[] = [];
+  const open = openLine(p);
+  if (open) out.push(open.text);
+  if (p.priceLevel != null) out.push(`Around ${money(p.priceLevel)}`);
+  if (p.address) out.push(p.address);
+  if (!open && p.openingHours) out.push(p.openingHours.split(' · ')[0]);
+  return out.slice(0, 3);
+};
+
+
+
 /**
  * One place, in the sheet, without leaving the map (the handoff's "place half
  * view"; owner, 8 Sep 2026: "it opens the bottom draw with the activity
@@ -1500,7 +1544,7 @@ const DETOURS = [10, 15, 30, 45];
  */
 function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLabel }: {
   place: TripAlongPlace;
-  /** The whole screen: the expand glyph, and the card itself. */
+  /** The whole screen: the expand glyph, "More info", and the media itself. */
   onOpen: () => void;
   onShortlist: () => void;
   onAdd: () => void;
@@ -1508,67 +1552,128 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
   backLabel: string;
   addLabel?: string;
 }) {
+  const kind = placeKind(place);
+  const photo = (place.photos ?? []).length > 0;
+  const open = openLine(place);
+  const facts = goodToKnow(place);
+
   return (
-    <View style={{ gap: 12, paddingVertical: 12 }}>
-      {/*
-        The name on its own line with the way out to the whole screen beside
-        it. A glyph rather than only the hint underneath, because a card that
-        happens to be tappable is not an affordance: nothing on it said there
-        was more, and the sentence that did was the smallest type in the sheet.
-      */}
-      <View style={styles.chosenHead}>
-        <Text style={styles.chosenName} numberOfLines={2}>{place.name}</Text>
-        <Pressable
-          onPress={onOpen}
-          hitSlop={10}
-          style={styles.expandHit}
-          accessibilityRole="button"
-          accessibilityLabel={`Open ${place.name} on the whole screen`}
-        >
+    <View style={styles.half}>
+      {/* Back on the title's line, the expand glyph opposite it. */}
+      <View style={styles.halfHead}>
+        <Pressable onPress={onBack} hitSlop={8} style={styles.halfBack} accessibilityRole="button" accessibilityLabel={backLabel}>
+          <Icon name="back" size={20} color={colors.ink} />
+        </Pressable>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.halfName} numberOfLines={1}>{place.name}</Text>
+          {/* The rating sits under the name rather than beside it: a long name
+              and a rating on one line is a name nobody can read. */}
+          <View style={styles.halfRating}>
+            {place.rating != null ? (
+              <Stars value={place.rating} size={13}>
+                <Text style={styles.halfRatingText}>{place.rating.toFixed(1)}</Text>
+                {place.ratingCount ? <Text style={styles.halfReviews}>{`${place.ratingCount.toLocaleString()} reviews`}</Text> : null}
+              </Stars>
+            ) : <Text style={type.small}>No rating yet</Text>}
+          </View>
+          {/* Somewhere you eat or sleep is somewhere you may have to ring or
+              book, so its own page is one tap from here. */}
+          {place.website && kind !== 'activity' ? (
+            <Pressable onPress={() => Linking.openURL(place.website as string)} style={styles.halfSite} accessibilityRole="link">
+              <Icon name="external" size={13} color={colors.accent} />
+              <Text style={styles.halfSiteText} numberOfLines={1}>{hostOf(place.website)}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        <Pressable onPress={onOpen} hitSlop={10} style={styles.expandHit} accessibilityRole="button" accessibilityLabel={`Open ${place.name} on the whole screen`}>
           <Icon name="fullscreen" size={20} color={colors.ink} />
         </Pressable>
       </View>
 
-      <Pressable onPress={onOpen} style={styles.chosen} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
-        <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={134} height={134} rounded={10} credit={false} />
-        <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
-          <View style={styles.rowMeta}>
-            {kitchen(place) ? <Text style={styles.tagPill} numberOfLines={1}>{kitchen(place)}</Text> : null}
-            {place.rating != null ? (
-              <Stars value={place.rating} size={13}>
-                <Text style={styles.ratingText}>{place.rating.toFixed(1)}{place.ratingCount ? ` (${place.ratingCount >= 1000 ? `${(place.ratingCount / 1000).toFixed(1)}k` : place.ratingCount})` : ''}</Text>
-              </Stars>
-            ) : null}
+      <Text style={styles.halfDetour} numberOfLines={1}>
+        {place.detourMinutes != null ? `+${place.detourMinutes} min detour` : 'nearby'}
+        {place.detourMiles ? ` · ${place.detourMiles} mi` : ''}
+      </Text>
+
+      {photo ? (
+        // The picture takes the room the sheet has left, which is what makes
+        // the half view feel like a place rather than a row.
+        <Pressable onPress={onOpen} style={styles.halfMedia} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
+          <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={undefined as any} height={190} rounded={12} credit={false} />
+          <View style={styles.halfHeart}><HeartButton on={place.onShortlist} onPress={onShortlist} /></View>
+        </Pressable>
+      ) : (
+        /*
+          No placeholder (the handoff is explicit). A grey box with a fork in it
+          says nothing; the space goes to what we actually know instead, which
+          for most restaurants is the only thing there is.
+        */
+        <View style={styles.halfFacts}>
+          <View style={styles.halfFactsHead}>
+            <Text style={styles.kicker}>{kind === 'stay' ? 'What we know' : kind === 'food' ? 'Good to know' : 'Good to know'}</Text>
+            <HeartButton on={place.onShortlist} onPress={onShortlist} bare />
           </View>
-          <Text style={styles.detour} numberOfLines={1}>
-            {place.detourMinutes != null ? `+${place.detourMinutes} min` : 'nearby'}
-            <Text style={{ color: colors.inkMuted, fontWeight: '400' }}>{` · ${place.detourMiles} mi${money(place.priceLevel) ? ` · ${money(place.priceLevel)}` : ''}`}</Text>
-          </Text>
-          <Text style={type.tiny}>Tap for the menu, the hours and what the family thought</Text>
+          {facts.length ? facts.map((f) => (
+            <View key={f} style={styles.halfFactRow}>
+              <Text style={styles.halfBullet}>·</Text>
+              <Text style={styles.halfFact} numberOfLines={2}>{f}</Text>
+            </View>
+          )) : (
+            <Text style={type.small}>Nothing beyond the name and where it is, yet. Open it and Epic goes looking.</Text>
+          )}
         </View>
+      )}
+
+      {place.summary ? <Text style={styles.halfSummary} numberOfLines={3}>{place.summary}</Text> : null}
+
+      <View style={styles.halfLines}>
+        <Text style={styles.halfType}>{kitchen(place) ?? plainCategory(place.category)}</Text>
+        {open ? <Text style={[styles.halfFact, open.strong && { color: colors.accent, fontWeight: '600' }]}>{`· ${open.text}`}</Text> : null}
+        {money(place.priceLevel) ? <Text style={styles.halfFact}>{`· ${money(place.priceLevel)}`}</Text> : null}
+      </View>
+
+      <Pressable onPress={onOpen} style={styles.moreInfo} accessibilityRole="button">
+        <Text style={styles.moreInfoText}>More info</Text>
+        <Icon name="more" size={14} color={colors.accent} />
       </Pressable>
 
-      <Row style={{ gap: 8 }}>
-        <Pressable onPress={onShortlist} style={[styles.add, { height: 38, paddingHorizontal: 14 }]} accessibilityRole="button">
-          <Icon name={place.onShortlist ? 'shortlisted' : 'shortlist'} size={15} color={colors.ink} fill={place.onShortlist} />
-          <Text style={styles.addText}>{place.onShortlist ? 'Saved' : 'Save'}</Text>
-        </Pressable>
-        <Pressable onPress={onAdd} style={[styles.add, styles.addStrong]} accessibilityRole="button">
-          <Icon name={place.onDay ? 'check' : 'add'} size={15} color={colors.primaryFg} />
-          <Text style={[styles.addText, { color: colors.primaryFg }]}>{place.onDay ? 'On the day' : (addLabel ?? 'Add to the day')}</Text>
-        </Pressable>
-      </Row>
-
-      {/* The way back, said in words and put where the thumb already is. */}
-      <Pressable onPress={onBack} style={styles.backToList} accessibilityRole="button">
-        <Icon name="back" size={15} color={colors.ink} />
-        <Text style={styles.backToListText}>{backLabel}</Text>
+      <Pressable onPress={onAdd} style={[styles.halfAdd, place.onDay && styles.halfAdded]} accessibilityRole="button">
+        <Icon name={place.onDay ? 'check' : 'add'} size={16} color={place.onDay ? colors.selectedFg : colors.primaryFg} />
+        <Text style={[styles.halfAddText, place.onDay && { color: colors.selectedFg }]}>
+          {place.onDay ? (kind === 'stay' ? 'Your stay' : 'Added to the day') : (addLabel ?? (kind === 'stay' ? 'Set as your stay' : 'Add to the day'))}
+        </Text>
       </Pressable>
     </View>
   );
 }
 
-
+/**
+ * The heart that keeps a place for this trip. Bare, on the picture or beside a
+ * kicker — no tile, because a tile over a photograph is a button sitting on a
+ * place rather than a mark made on it.
+ */
+function HeartButton({ on, onPress, bare }: { on: boolean; onPress: () => void; bare?: boolean }) {
+  return (
+    <Pressable
+      onPress={(e) => { (e as any)?.stopPropagation?.(); onPress(); }}
+      hitSlop={10}
+      style={[styles.heartHit, !bare && styles.heartOnPhoto]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: on }}
+      accessibilityLabel={on ? 'Take off the shortlist' : 'Keep this for the trip'}
+    >
+      <Icon
+        name="shortlist"
+        size={bare ? 22 : 26}
+        // Lime when it is on, in both modes — the pack's one selected colour.
+        color={on ? colors.selected : bare ? colors.ink : colors.bg}
+        fill={on}
+        fillColor={on ? colors.selected : undefined}
+        strokeWidth={2.2}
+      />
+    </Pressable>
+  );
+}
 
 function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind }: {
   pill: Pill;
@@ -2016,6 +2121,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
     </View>
   );
 }
+
 
 /**
  * On the day, or on the shortlist — never both (owner, 6 Sep 2026: "when it's
@@ -3118,6 +3224,40 @@ const styles = StyleSheet.create({
   chosen: { flexDirection: 'row', gap: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, borderWidth: BORDER, borderColor: colors.ink },
   // The name and the expand glyph on one line, the glyph pinned to the right
   // and never squeezing the name.
+
+  // --- The place half view (trips V2) ---------------------------------------
+  half: { gap: 10, paddingVertical: 12 },
+  halfHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  halfBack: { width: 28, height: 32, alignItems: 'flex-start', justifyContent: 'center', marginLeft: -4 },
+  halfName: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink, lineHeight: 27 },
+  halfRating: { marginTop: 2 },
+  halfRatingText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
+  halfReviews: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
+  halfSite: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, minHeight: 24 },
+  halfSiteText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent, flexShrink: 1 },
+  halfDetour: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, textAlign: 'right' },
+  halfMedia: { position: 'relative' },
+  // Bare, over the picture: a tile here would be a button sitting on a place
+  // rather than a mark made on it.
+  halfHeart: { position: 'absolute', top: 10, right: 10 },
+  heartHit: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  heartOnPhoto: { },
+  halfFacts: { gap: 6, paddingVertical: 4 },
+  halfFactsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  halfFactRow: { flexDirection: 'row', gap: 6 },
+  halfBullet: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  halfFact: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, flexShrink: 1 },
+  halfSummary: { fontFamily: fonts.body, fontSize: 14, color: colors.ink, lineHeight: 20 },
+  halfLines: { gap: 3 },
+  halfType: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
+  moreInfo: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 34, alignSelf: 'flex-start' },
+  moreInfoText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
+  halfAdd: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    minHeight: TARGET, paddingVertical: 14, backgroundColor: colors.primary,
+  },
+  halfAdded: { backgroundColor: colors.selected },
+  halfAddText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.primaryFg },
   chosenHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   expandHit: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6, marginTop: -4, flex: 0 },
   chosenName: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, lineHeight: 26 },

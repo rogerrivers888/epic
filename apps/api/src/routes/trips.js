@@ -1050,6 +1050,18 @@ router.get('/:id/along', async (req, res, next) => {
         rating: v.rating ?? null, ratingCount: v.ratingCount ?? null, priceLevel: v.priceLevel ?? null,
         openingHours: v.openingHours ?? null, phone: v.phone ?? null, website: v.website ?? null,
         address: typeof v.address === 'string' ? v.address : v.address?.line1 ?? null,
+        /**
+         * The two lines a browse card needs and had to do without: a sentence
+         * about the place, and whether it is open (trips V2, 8 Sep 2026).
+         *
+         * Rented, both of them, and treated as such — `/along` is not in
+         * `offline/policy.ts`, so none of it is written to a device, and this
+         * changes nothing about that. It is fetched to be drawn and forgotten.
+         */
+        summary: v.summary ?? null,
+        openNow: v.openNow ?? null,
+        closesAt: v.closesAt ?? null,
+        opensAt: v.opensAt ?? null,
         photos: (v.photos ?? []).slice(0, 1),
         attribution: v.attribution ?? null,
         detourMinutes: detour,

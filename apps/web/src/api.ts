@@ -664,6 +664,8 @@ export type TripAlongPlace = {
   cuisines: string[]; experiences: string[];
   rating: number | null; ratingCount: number | null; priceLevel: number | null;
   openingHours: string | null; phone: string | null; website: string | null; address: string | null;
+  /** A sentence about the place, and whether it is open — the browse card's two other lines. */
+  summary: string | null; openNow: boolean | null; closesAt: string | null; opensAt: string | null;
   photos: VenuePhotoRef[]; attribution: string | null;
   detourMinutes: number | null; detourMiles: number;
   estimated: boolean; onShortlist: boolean; onDay: boolean;
