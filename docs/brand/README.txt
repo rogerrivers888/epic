@@ -63,7 +63,10 @@ svg/
   epic-symbol-ink.svg         the pin alone, ink with a cream hole
   epic-symbol-lime.svg        the pin alone, lime with an ink hole
   epic-symbol-solid.svg       the pin alone, no hole — for use below 24px
-  epic-icon-lime-solid.svg    the 16px tile: lime, solid pin, no hole
+  epic-icon-lime-solid.svg    lime tile, solid pin — the pack lists it; nothing
+                              in the app uses it (see the note under the icons)
+  epic-favicon-lime.svg       the tab tile: ink pin, holed, at 0.82 of the tile
+  epic-favicon-ink.svg        the same for a dark tab strip
   epic-wordmark-*.svg         the full wordmark on each ground; the
                               `-transparent` one cuts the pin's hole out of the
                               path, so whatever is behind shows through it
@@ -93,9 +96,19 @@ Generated icons live beside the app, not here:
         transparent, holed. `apps/api/src/sources/mail.js` puts it on the lime
         band, with "Epic" as its alt text for the inboxes that block images.
 
-  At 16px the hole is dropped, because it closes into a smudge at that size.
-  The lime tile stays: an ink pin on nothing disappears into Chrome's dark tab
-  strip.
+  The tab icon keeps its hole at every size. The pack (§04) says to drop it —
+  "at 16px the hole closes up and the mark reads as a blob" — and that was
+  followed until 8 Sep 2026, when Roger said the Chrome icon "doesn't look
+  anything like a pin". Rendered side by side at 16, 20, 24 and 32px the hole
+  holds at all of them, and it is the *solid* pin that reads as a blob. The
+  pack's other two points do hold and are kept: the tile stays full-bleed lime,
+  because an ink pin on nothing disappears into Chrome's dark tab strip and
+  reads as the browser's own location marker; and the ink tile is offered to
+  dark tab strips through `media`.
+
+  In the app, `Pin` still drops the hole below 24px — a 30px wordmark's dot is
+  about 9px across, which is a different question from a 16px tile where the pin
+  is the whole picture.
 
   None of these are drawn by hand. `npm run brand` rewrites every one of them
   from `scripts/brand.mjs`, which holds the pin path, the palette and the

@@ -40,10 +40,11 @@
     <meta property="og:type" content="website" />
     <meta name="description" content="Epic finds what's worth doing near you today and gets you there." />
     <!-- Chrome tab / bookmarks: .ico for older UAs, .svg for modern; 180px for the iOS home screen (docs/brand).
-         The tab icon is the handoff's own art: a full-bleed lime tile with the ink
-         pin and no hole, because at 16px the hole closes up and the mark reads as a
-         blob. A bare pin on a transparent ground is explicitly ruled out — it comes
-         out looking like the browser's default location marker. -->
+         The tab icon is a full-bleed lime tile with the ink pin, hole and all: the
+         handoff's own art drops the hole below 32px, and without it the mark is a
+         lozenge rather than a pin. A bare pin on a transparent ground is ruled out
+         either way — it comes out looking like the browser's default location
+         marker. All of it is drawn by scripts/brand.mjs; don't hand-edit. -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <!-- The dark-tab alternative first: a browser takes the first `icon` whose
          media matches, so the ink tile has to be offered before the lime one. -->

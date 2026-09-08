@@ -34,6 +34,8 @@ const PIN_PATH = 'M24 2C13 2 5 10.5 5 21c0 13 19 33 19 33s19-20 19-33C43 10.5 35
 const VB = { x: 5, y: 2, w: 38, h: 52 };
 const ASPECT = VB.w / VB.h;              // 0.731
 const HOLE = { cx: 24, cy: 21, r: 7 };
+// How much of the tab tile's height the pin takes. The handoff's own art is 0.82.
+const FAVICON_PIN = 0.82;
 /** The pin with the hole cut out of the path, so whatever is behind shows through. */
 const PIN_HOLED = `${PIN_PATH} M${HOLE.cx} ${HOLE.cy - HOLE.r} a${HOLE.r} ${HOLE.r} 0 1 0 0.01 0 Z`;
 
@@ -51,9 +53,8 @@ function placed(size, scale, ink, ground) {
 
 /**
  * A square app icon: a flat ground, the pin, and the hole in the ground's
- * colour. `solid` drops the hole for the 16px tile, where it closes to a smudge
- * — the tile itself stays, because a bare ink pin disappears into Chrome's dark
- * tab strip.
+ * colour. `solid` drops the hole; nothing that ships asks for it any more, but
+ * the pack lists a solid tile so one is still written out.
  */
 const icon = ({ size = 512, ground = LIME, ink = INK, scale = 0.62, border = null, solid = false } = {}) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">`
@@ -95,17 +96,24 @@ function wordmark({ height = 120, ink = INK, ground = CREAM, word = 'Epic', bg =
 }
 
 /**
- * The tab icon and the app icon are supplied art, not drawn here.
+ * The tab icon carries the hole. The app icon is still supplied art.
  *
- * The handoff ships them (`Logo - Chrome icons/assets`) and is specific about
- * why: the tab icon is a full-bleed lime tile with the ink pin and **no hole**,
- * because at 16px the hole closes up and the mark reads as a blob — and the
- * bare pin on a transparent ground "renders as the browser's default-looking
- * black location marker", which is exactly what it was doing. So these are
- * copied in and rasterised rather than generated, and the pin inside them is
- * the handoff's own, at its own inset.
+ * The handoff's §04 says the favicon is "a full-bleed lime tile with the ink pin
+ * and **no hole** — at 16px the hole closes up and the mark reads as a blob",
+ * and it ships `epic-favicon-lime.svg` drawn that way. That was taken at its
+ * word and it was wrong: rendered side by side at 16, 20, 24 and 32px, the hole
+ * holds at every one of them and the solid pin is the thing that reads as a
+ * blob — a lime tile with a black lozenge on it, not a pin (owner, 8 Sep 2026:
+ * "The pin icon in Chrome is supposed to have a hole in it... Now it doesn't
+ * look anything like a pin"). So the tile is drawn here from the same pin as
+ * everything else, holed, at 0.82 of the tile's height.
+ *
+ * The two things the handoff is right about are kept: the tile stays full-bleed
+ * lime, because a bare pin on a transparent ground "renders as the browser's
+ * default-looking black location marker"; and the ink tile is offered to dark
+ * tab strips through `media` in index.html.
  */
-const SUPPLIED = ['epic-favicon-lime.svg', 'epic-favicon-ink.svg', 'epic-app-icon.svg'];
+const SUPPLIED = ['epic-app-icon.svg'];
 
 const SVGS = {
   'epic-icon-lime.svg': icon({}),
@@ -113,6 +121,9 @@ const SVGS = {
   'epic-icon-cream.svg': icon({ ground: CREAM, border: INK }),
   'epic-icon-maskable.svg': icon({ scale: 0.48 }),
   'epic-icon-lime-solid.svg': icon({ solid: true }),
+  // The tab tiles: the pin at 0.82 of the tile, holed. See the note above.
+  'epic-favicon-lime.svg': icon({ size: 100, scale: FAVICON_PIN }),
+  'epic-favicon-ink.svg': icon({ size: 100, scale: FAVICON_PIN, ground: INK, ink: LIME }),
   'epic-android-foreground.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="432" height="432">${placed(108, 0.46, INK, LIME)}</svg>\n`,
   'epic-symbol-ink.svg': symbol({ ground: CREAM }),
   'epic-symbol-lime.svg': symbol({ ink: LIME, ground: INK }),
