@@ -657,11 +657,13 @@ let running = 0;
  *
  * `enrich` awaits the open map, the venue's own page and the encyclopedias, and
  * not every one of those has a timeout of its own. With `CONCURRENCY` at one, a
- * single request that never settles holds the only slot for the life of the
- * process — and that is exactly what happened: seven hundred and fifty jobs
- * queued across a hundred minutes and not one place was identified, while the
- * same `enrich` run straight from a route finished in seconds (found 8 Sep
- * 2026). The work was never the problem; nothing could get to it.
+ * single request that never settles would hold the only slot for the life of
+ * the process and everything behind it would wait for ever.
+ *
+ * Written while chasing a backlog that would not move, on the theory that this
+ * was why. It was not — those places simply are not in OpenStreetMap, and the
+ * pass was working all along. The guard is kept because the hole is real
+ * whether or not anything has fallen down it yet.
  *
  * Generous, because a real research pass legitimately takes the better part of
  * a minute. It is a deadlock guard, not a performance budget.
@@ -815,11 +817,20 @@ export async function sweepExpired() {
 /**
  * What kind of place, for everything a sweep found and never identified.
  *
- * The open map is the only source that answers "is this a bar or a bakery", and
- * it is free — so this is `enrich` with its two paid lookups switched off. It
- * exists because 114 of the 150 places near the household had never been
- * matched to OpenStreetMap, so the Food strip could only offer the kinds the
- * other 36 happened to be (owner, 8 Sep 2026).
+ * The open map is the only *free* source that answers "is this a bar or a
+ * bakery", so this is `enrich` with its two paid lookups switched off.
+ *
+ * Its reach is now measured, and it is small. Of some 800 swept places, 36
+ * matched OpenStreetMap and 764 did not — and the 764 are not a queue waiting
+ * to be worked through, they are places the open map has no entry for. Running
+ * this over them changes nothing; every one comes back "no match in
+ * OpenStreetMap" (measured 8 Sep 2026, three sampled at random from the
+ * backlog, all three unmatched).
+ *
+ * What would identify them is a re-sweep: `scoutArea.js` reads a category off
+ * Google's own types for every candidate, and since migration 070 there is a
+ * column to write it to. That costs licensed searches, so it is the owner's
+ * call rather than something this pass can do for free.
  *
  * Batched, because each one is an Overpass query and Overpass is somebody
  * else's server being generous.
