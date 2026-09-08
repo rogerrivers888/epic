@@ -5,6 +5,8 @@ import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
+/** A spoken mood → the shelf it leads with (the same words the API's VIBE_TO_CATEGORY uses). */
+const VIBE_MOOD: Record<string, string> = { fun: 'fun', cultural: 'culture', active: 'activity', relaxed: 'relaxing' };
 import { VenueDrawer } from '../components/VenueDrawer';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
@@ -460,9 +462,18 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const categories = stripItems.filter((s) => s.key !== ALL);
 
   /** The shelves (All, in Activities): every category with something in it, filtered and ordered. */
+  /**
+   * The mood a spoken request asked for leads the shelves (voice intake, C5 /
+   * R5b): "something active" puts Active first when it has anything, and the
+   * rest follow in their usual order. The shelf is not opened as a page,
+   * because within an hour of most homes it is thin and an empty page says
+   * nothing matches (9 Sep 2026).
+   */
+  const [leadMood, setLeadMood] = useState<string | null>(null);
   const shelves = useMemo(
-    () => categories.map((c) => ({ key: c.key, label: c.label, items: shown.filter((i) => inCategory(i, c.key)) })).filter((s) => s.items.length),
-    [categories, shown, inCategory],
+    () => categories.map((c) => ({ key: c.key, label: c.label, items: shown.filter((i) => inCategory(i, c.key)) })).filter((s) => s.items.length)
+      .sort((a, b) => Number(b.key === leadMood) - Number(a.key === leadMood)),
+    [categories, shown, inCategory, leadMood],
   );
 
   /** Inside one category or kind: what is in it, after the filters. */
@@ -659,7 +670,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
               question is the title and its facts the chip row (C5, R5b);
               otherwise one grey row under the band: "Or just ask" (R5). */}
           {intakeId ? (
-            <IntakeStrip intakeId={intakeId} household={household} onReask={() => navigate(paths.say({ for: 'inspire' }))} />
+            <IntakeStrip intakeId={intakeId} household={household} onReask={() => navigate(paths.say({ for: 'inspire' }))} onLoaded={(i) => setLeadMood(VIBE_MOOD[i.resolved.vibe ?? ''] ?? null)} />
           ) : (
             <AskRow onPress={() => navigate(paths.say({ for: 'inspire' }))} />
           )}

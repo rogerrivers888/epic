@@ -21,7 +21,7 @@ import { useRouter } from '../../router';
 
 const NOT_NOW_KEY = (id: string) => `epic.voice.harvest.notnow.${id}`;
 
-export function IntakeStrip({ intakeId, household, onReask }: { intakeId: string; household: HouseholdResponse | null; onReask: () => void }) {
+export function IntakeStrip({ intakeId, household, onReask, onLoaded }: { intakeId: string; household: HouseholdResponse | null; onReask: () => void; onLoaded?: (intake: Intake) => void }) {
   const { navigate } = useRouter();
   const [intake, setIntake] = useState<Intake | null>(null);
   const [picking, setPicking] = useState<IntakeSlot | null>(null);
@@ -29,7 +29,7 @@ export function IntakeStrip({ intakeId, household, onReask }: { intakeId: string
   const [hidden, setHidden] = useState(false);
   useEffect(() => {
     let live = true;
-    api.voiceIntakeGet(intakeId).then((r) => { if (live) setIntake(r.intake); }).catch(() => {});
+    api.voiceIntakeGet(intakeId).then((r) => { if (live) { setIntake(r.intake); onLoaded?.(r.intake); } }).catch(() => {});
     try { setHidden(sessionStorage.getItem(NOT_NOW_KEY(intakeId)) === '1'); } catch { /* noop */ }
     return () => { live = false; };
   }, [intakeId]);
@@ -40,6 +40,7 @@ export function IntakeStrip({ intakeId, household, onReask }: { intakeId: string
     try {
       const { intake: got } = await api.voiceIntakePatch(intakeId, { set: { [slot]: value } });
       setIntake(got);
+      onLoaded?.(got);
       // The results follow the chip: a new range or a new place is a new address.
       if (got.resultsHref !== intake.resultsHref) navigate(got.resultsHref, { replace: true });
     } catch { /* the chip stays as it was */ } finally { setBusy(false); }

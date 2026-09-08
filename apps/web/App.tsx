@@ -512,7 +512,13 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
   // A banner above a screen that draws its own head is the first thing under
   // the status bar, so on a phone it takes the notch's inset itself; the
   // screen's own inset then sits below it (Codex review, 9 Sep 2026).
-  const bannerInset = !desktop && Platform.OS === 'web' && ownsHeader(route) ? { paddingTop: `calc(${spacing.sm}px + var(--epic-sat))` as any } : null;
+  // Only the first banner drawn takes it: two would open a gap between them
+  // (Codex, twelfth pass). The outbox banner comes first, then the offline or
+  // API one — the same order they are laid out below.
+  const inset = !desktop && Platform.OS === 'web' && ownsHeader(route) ? { paddingTop: `calc(${spacing.sm}px + var(--epic-sat))` as any } : null;
+  const outboxShown = Boolean(outbox.waiting || outbox.rejected);
+  const bannerInset = outboxShown ? null : inset;
+  const waitingInset = outboxShown ? inset : null;
   const banner = (
     <View style={[styles.banner, bannerInset, health === 'down' && styles.bannerDown]}>
       <Text style={type.small}>{health === 'checking' ? `Reaching API at ${API_URL}…` : `Can't reach the API at ${API_URL}. Is it running?`}</Text>
@@ -533,7 +539,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
   // (offline/outbox.ts). Saying so is the difference between "it saved" and the
   // family wondering whether it did.
   const waitingBanner = outbox.waiting || outbox.rejected ? (
-    <View style={[styles.banner, bannerInset]}>
+    <View style={[styles.banner, waitingInset]}>
       <View style={styles.bannerRow}>
         <Icon name={outbox.rejected ? 'allergen' : 'offline'} size={14} color={outbox.rejected ? colors.overrun : colors.ink} />
         <Text style={type.small}>
