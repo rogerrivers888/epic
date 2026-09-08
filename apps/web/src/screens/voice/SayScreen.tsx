@@ -61,7 +61,8 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
   const known = useMemo(() => (door === 'trip' ? knownChips(household) : []), [household, door]);
   // Whether the server can hear at all. Off, the ordinary town search is the way to a trip.
   const [voiceOn, setVoiceOn] = useState<boolean | null>(voiceConfigured());
-  useEffect(() => { void loadVoiceLimits(api.voiceConfig).then(() => setVoiceOn(voiceConfigured())); }, []);
+  useEffect(() => { void loadVoiceLimits(api.voiceConfig, true).then(() => setVoiceOn(voiceConfigured())); }, []);
+  const off = voiceOn === false;
 
   const submit = useCallback(async (transcript: string, mode: 'said' | 'typed') => {
     setBusy('Reading that…');
@@ -137,19 +138,19 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
         <VoiceHeader onBack={() => (door ? back(door === 'trip' ? paths.trips() : paths.inspire()) : back(paths.inspire()))} right={<MicTile onPress={() => { setTyping(false); startMic(); }} />} title={copy.title} />
         {known.length ? <KnownChips chips={known} /> : null}
         <Example>{copy.example}</Example>
-        <SentenceField value={text} onChange={setText} onSubmit={() => text.trim() && submit(text.trim(), 'typed')} placeholder={copy.placeholder} />
-        {voiceOn === false ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
-        {door === 'trip' && voiceOn !== false ? <TextLink label="Or search for a town ›" tone="grey" onPress={() => navigate(paths.tripsSearch())} /> : null}
+        {!off ? <SentenceField value={text} onChange={setText} onSubmit={() => text.trim() && submit(text.trim(), 'typed')} placeholder={copy.placeholder} /> : null}
+        {off ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
+        {door === 'trip' && !off ? <TextLink label="Or search for a town ›" tone="grey" onPress={() => navigate(paths.tripsSearch())} /> : null}
         {busy ? <StatusLine>{busy}</StatusLine> : null}
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-        {list.length ? (
+        {list.length && !off ? (
           <View style={{ gap: 8 }}>
             <Text style={styles.kicker}>Recent</Text>
             {list.map((p) => <ListRow key={p} icon="address" label={p} onPress={() => submit(p, 'typed')} />)}
           </View>
         ) : null}
         <View style={{ flex: 1 }} />
-        <PrimaryCta label={door === 'trip' ? 'Plan it' : 'Show me plans'} onPress={() => text.trim() && submit(text.trim(), 'typed')} disabled={!text.trim()} busy={!!busy} />
+        {!off ? <PrimaryCta label={door === 'trip' ? 'Plan it' : 'Show me plans'} onPress={() => text.trim() && submit(text.trim(), 'typed')} disabled={!text.trim()} busy={!!busy} /> : null}
       </VoiceScreen>
     );
   }
@@ -165,9 +166,9 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
       />
       {known.length ? <KnownChips chips={known} /> : null}
       <Example>{copy.example}</Example>
-      {voiceOn === false ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
+      {off ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
       <View style={{ flex: 1 }} />
-      {supported ? (
+      {off ? null : supported ? (
         <MicControl state={busy ? 'busy' : 'idle'} onStart={startMic} onDone={() => {}} label="Tap and just say it" />
       ) : (
         <View style={{ alignItems: 'center', gap: 8 }}>
@@ -175,7 +176,7 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
           <Text style={[type.small, { textAlign: 'center' }]}>This browser can’t record. Typing does exactly the same thing.</Text>
         </View>
       )}
-      <TypeInstead onPress={() => setTyping(true)} />
+      {!off ? <TypeInstead onPress={() => setTyping(true)} /> : null}
       {busy ? <StatusLine>{busy}</StatusLine> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
     </VoiceScreen>

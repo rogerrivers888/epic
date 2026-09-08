@@ -86,11 +86,20 @@ export const VOICE_MAX_SECONDS_FALLBACK = 300;
 let maxSeconds = VOICE_MAX_SECONDS_FALLBACK;
 let configured: boolean | null = null;
 let asked: Promise<number> | null = null;
+let askedAt = 0;
+const FRESH_MS = 60_000;
 export const voiceMaxSeconds = () => maxSeconds;
 /** Whether the server can hear at all (a key, and the owner's switch on); null until asked. */
 export const voiceConfigured = () => configured;
-export function loadVoiceLimits(fetchConfig: () => Promise<{ maxSeconds: number; configured?: boolean }>): Promise<number> {
-  if (!asked) {
+/**
+ * Asked again after a minute, or when `force` is set: the owner can switch
+ * the provider off and on in Settings › Providers, and a flag cached for the
+ * life of the tab would keep sending new trips the wrong way (Codex review,
+ * 9 Sep 2026).
+ */
+export function loadVoiceLimits(fetchConfig: () => Promise<{ maxSeconds: number; configured?: boolean }>, force = false): Promise<number> {
+  if (!asked || force || Date.now() - askedAt > FRESH_MS) {
+    askedAt = Date.now();
     asked = fetchConfig().then((c) => { if (c?.maxSeconds > 0) maxSeconds = c.maxSeconds; if (typeof c?.configured === 'boolean') configured = c.configured; return maxSeconds; }).catch(() => { asked = null; return maxSeconds; });
   }
   return asked;

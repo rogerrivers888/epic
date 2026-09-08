@@ -522,7 +522,14 @@ export function harvestOffer({ facts, members = [], profile = {} }) {
   // tab can sharpen it to a birthday later (Codex review, 9 Sep 2026).
   const ages = facts.kids_ages.map((k) => ({ ...k, age: k.age ?? ageOfBand(k.band), approx: k.age == null && !!k.band })).filter((k) => k.age != null);
   const children = members.filter((m) => m.isMinor || (m.age != null && m.age < 18));
-  const unknownAges = ages.filter((k) => !children.some((c) => c.age === k.age || (k.approx && c.age != null && bandOfAge(c.age) === k.band)));
+  // Each household child can account for one said child, not all of them:
+  // one ten-year-old on file and two "9-12" answers is one new child.
+  const spare = [...children];
+  const unknownAges = ages.filter((k) => {
+    const at = spare.findIndex((c) => c.age === k.age || (k.approx && c.age != null && bandOfAge(c.age) === k.band));
+    if (at >= 0) { spare.splice(at, 1); return false; }
+    return true;
+  });
   if (unknownAges.length) items.push({ kind: 'kids', ages: unknownAges.map((k) => ({ name: k.name, age: k.age, band: k.band, approx: k.approx })) });
   if (!items.length) return null;
   const parts = [];

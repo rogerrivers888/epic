@@ -166,3 +166,10 @@ test('kids answered by band are offered to remember, as the middle of the band',
   assert.equal(offer.text, 'Remember that the kids are 9-12 & 5-8?');
   assert.deepEqual(offer.items[0].ages.map((k) => k.age), [10, 6]);
 });
+
+test('one child on file accounts for one said child, not two', () => {
+  const f = normaliseTripFacts({ ...heard, kids_ages: [{ name: null, age: null, band: '9-12' }, { name: null, age: null, band: '9-12' }] });
+  const offer = harvestOffer({ facts: f, members: [members[0], members[2]], profile: { diets: ['vegetarian'] } });
+  assert.equal(offer.items.length, 1);
+  assert.equal(offer.items[0].ages.length, 1, 'Priya (9) covers one of the two; the other is new');
+});
