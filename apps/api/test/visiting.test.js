@@ -180,3 +180,31 @@ test('access=customers is not a refusal', () => {
   const got = judgeVisiting({ kinds: [], categories: [], osm: { access: 'customers', leisure: 'garden' } });
   assert.equal(got.visiting, 'yes');
 });
+
+test('an admission charge settles it, whatever the building is tagged as', () => {
+  // Castle Campbell carries `fee=yes` and `building=house` a few characters
+  // apart, and was refused on the second. Nobody sells tickets to their own
+  // house, so the charge is a statement about the place and beats the veto.
+  const got = judgeVisiting({ kinds: ['Q23413'], categories: [], osm: { fee: 'yes', building: 'house' } });
+  assert.equal(got.visiting, 'yes');
+  // `fee=no` is a free attraction, not the absence of one — but it is not the
+  // thing establishing access, so it must not be read as a charge.
+  assert.ok(!/admission/.test(judgeVisiting({ kinds: [], categories: [], osm: { fee: 'no', building: 'house' } }).because ?? ''));
+});
+
+test('public infrastructure is public', () => {
+  // Sixty-one of the places left unestablished were bridges — the Iron Bridge,
+  // the Menai Suspension Bridge, the Severn Bridge — and twenty-one were
+  // lighthouses. You cross a bridge; nobody's front door is a bridge.
+  for (const q of ['Q12280', 'Q537127', 'Q39715', 'Q16970', 'Q160742', 'Q420962', 'Q839954']) {
+    assert.equal(judgeVisiting({ kinds: [q], categories: [] }).visiting, 'yes', `${q} should be public`);
+  }
+  // But the veto still outranks all of them.
+  assert.equal(judgeVisiting({ kinds: ['Q16970'], categories: [], osm: { access: 'private' } }).visiting, 'no');
+});
+
+test('a shipwreck is not somewhere you visit', () => {
+  // HMS Royal Oak is a war grave. Fourteen of the unestablished were wrecks and
+  // they are right to stay that way.
+  assert.notEqual(judgeVisiting({ kinds: ['Q852190'], categories: [], osm: { access: 'private' } }).visiting, 'yes');
+});

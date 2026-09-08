@@ -71,6 +71,32 @@ export const WEAK_OPEN_KINDS = new Set([
   'Q24354',      // theatre building
   'Q483110',     // stadium
   'Q39614',      // cemetery
+  // Public infrastructure. You cross a bridge; nobody's front door is a bridge.
+  // Sixty-one of the places left unestablished were bridges of one sort or
+  // another, the Iron Bridge, the Menai Suspension Bridge and the Severn Bridge
+  // among them.
+  'Q12280',      // bridge
+  'Q537127',     // road bridge
+  'Q1210334',    // railway bridge
+  'Q12042110',   // steel bridge
+  'Q158218',     // truss bridge
+  'Q158555',     // cable-stayed bridge
+  'Q39715',      // lighthouse
+  // Places of worship. A parish church is somewhere you walk into.
+  'Q16970',      // church building
+  'Q108325',     // chapel
+  'Q160742',     // abbey
+  // Heritage and antiquity. A scheduled monument is not somebody's living room.
+  'Q839954',     // archaeological site
+  'Q14752696',   // ancient Roman structure
+  'Q88205',      // castrum
+  'Q91312',      // tower house
+  // Things run as an attraction, which is most of what is left.
+  'Q420962',     // heritage railway
+  'Q1112477',    // narrow-gauge railway
+  'Q10373548',   // whisky distillery
+  'Q1154710',    // association football venue
+  'Q1076486',    // sports venue
 ]);
 
 /** Everything that can establish a place is open, for callers that only want the question answered. */
@@ -184,7 +210,11 @@ export function osmSaysPublic(osm) {
   if (osm.boundary === 'protected_area' || osm.boundary === 'national_park') return 'OpenStreetMap has it as protected land';
   if (osm.amenity === 'place_of_worship') return 'OpenStreetMap has it as a place of worship';
   if (osm.opening_hours) return 'OpenStreetMap has published opening hours for it';
-  if (osm.fee) return 'OpenStreetMap records an admission fee for it';
+  if (osm.fee && osm.fee !== 'no') return 'OpenStreetMap records an admission charge for it';
+  // Somebody runs it. English Heritage runs Witley Court and the Welsh
+  // Government runs the Menai Suspension Bridge, and both were sitting
+  // unestablished with the answer in a tag nothing read.
+  if (osm.operator) return `OpenStreetMap has it run by ${osm.operator}`;
   return null;
 }
 
@@ -259,6 +289,14 @@ export function judgeVisiting({ kinds = [], summary = '', osm = null, categories
    */
   const byWiki = wikipediaSaysPublic(categories);
   if (byWiki) return { visiting: 'yes', because: byWiki, by: 'wikipedia' };
+
+  // An admission charge settles it on its own. Nobody sells tickets to their own
+  // house, and the tag is about the place rather than one of its buildings —
+  // which is how Castle Campbell came to be refused for `building=house` while
+  // carrying `fee=yes` a few characters away.
+  if (osm?.fee && osm.fee !== 'no') {
+    return { visiting: 'yes', because: 'OpenStreetMap records an admission charge for it', by: 'osm' };
+  }
 
   for (const q of set) {
     if (STRONG_OPEN_KINDS.has(q)) return { visiting: 'yes', because: 'it is a museum, a park or a garden — somewhere whose purpose is being visited', by: 'kinds' };
