@@ -89,16 +89,21 @@ self.addEventListener('fetch', (event) => {
   // The icons and the manifest: the network decides, because a redraw changes
   // the bytes without changing the name. The copy is only the offline floor.
   if (isMutable(url)) {
+    const live = fetch(request);
+    // The clone is taken synchronously, in the first callback on `live` — not
+    // after `caches.open` resolves, by which time respondWith has handed the
+    // same response to the browser and reading its body makes the clone throw.
+    // The write is handed to waitUntil so the worker cannot shut down mid-put
+    // and leave these with no offline copy at all.
+    event.waitUntil(
+      live.then((res) => {
+        if (!res || !res.ok) return undefined;
+        const copy = res.clone();
+        return caches.open(ASSETS).then((c) => c.put(request, copy));
+      }).catch(() => {}),
+    );
     event.respondWith(
-      fetch(request)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(ASSETS).then((c) => c.put(request, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => caches.match(request).then((hit) => hit || Response.error())),
+      live.catch(() => caches.match(request).then((hit) => hit || Response.error())),
     );
     return;
   }
