@@ -323,8 +323,9 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    */
   const shownAlong = useMemo(() => {
     const band = PRICE_BANDS.find((b) => b.key === priceBand)?.holds ?? null;
+    const menu = pill === 'food' ? FOOD_KINDS : THING_KINDS;
     const kept = along.places.filter((p) =>
-      (!kindNow || isKind(p, kindNow))
+      (!kindNow || primaryKind(p, menu) === kindNow)
       && (!cuisineNow || isKind(p, cuisineNow))
       // Unrated places are kept at "Any" and dropped the moment a floor is
       // set: "4 stars and up" cannot honestly include a place nobody has rated.
@@ -743,8 +744,57 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   // ---- the sheet ----------------------------------------------------------
 
+  /**
+   * The trip's own place that a pin has chosen, if one has.
+   *
+   * Only on the trip itself and on the Shortlist: a browse has its own list and
+   * its own chosen place, and both showing at once would be two half views over
+   * one map.
+   */
+  const chosenSaved = useMemo(
+    () => (selected && (!pill || pill === 'shortlist')
+      ? (places?.places ?? []).find((x) => x.venueRef === selected && x.lat != null) ?? null
+      : null),
+    [selected, pill, places],
+  );
+
   const party = attendees.length;
-  const header = groupPage ? <View style={{ height: spacing.sm }} /> : (
+  /**
+   * The place, when one is open — the whole header, not a title above a title.
+   *
+   * Inside a place the trip's name, its dates, who is coming and the
+   * conversation are all somebody else's business (owner, 8 Sep 2026: "there's
+   * not supposed to be any people or chat icon when I'm inside an activity…
+   * it's supposed to say 'Deer Park' at the very top"). So the header is the
+   * place's own: back, its name, and the way out to the whole screen.
+   */
+  const openPlaceHere = pill && pill !== 'stay' && selected
+    ? (shownAlong.find((x) => x.venueRef === selected)
+      ?? (chosenSaved ? savedAsCandidate(chosenSaved) : null))
+    : (chosenSaved ? savedAsCandidate(chosenSaved) : null);
+
+  const header = groupPage ? <View style={{ height: spacing.sm }} /> : openPlaceHere ? (
+    <View style={styles.header}>
+      <Pressable
+        onPress={() => setSelected(null)}
+        style={styles.backBare}
+        accessibilityRole="button"
+        accessibilityLabel={pill ? 'Back to the list' : 'Back to the day'}
+      >
+        <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
+      </Pressable>
+      <Text style={styles.placeTitle} numberOfLines={1}>{openPlaceHere.name}</Text>
+      <Pressable
+        onPress={() => setDrawer(alongToItem(openPlaceHere))}
+        hitSlop={10}
+        style={styles.expandHit}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${openPlaceHere.name} on the whole screen`}
+      >
+        <Icon name="fullscreen" size={20} color={colors.ink} />
+      </Pressable>
+    </View>
+  ) : (
     <View style={styles.header}>
       {/*
         No boxes in the drawer (5h). The back arrow is a plain 20px glyph in a
@@ -827,20 +877,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         ) : null}
       </View>
     </View>
-  );
-
-  /**
-   * The trip's own place that a pin has chosen, if one has.
-   *
-   * Only on the trip itself and on the Shortlist: a browse has its own list and
-   * its own chosen place, and both showing at once would be two half views over
-   * one map.
-   */
-  const chosenSaved = useMemo(
-    () => (selected && (!pill || pill === 'shortlist')
-      ? (places?.places ?? []).find((x) => x.venueRef === selected && x.lat != null) ?? null
-      : null),
-    [selected, pill, places],
   );
 
   const body = pill === 'stay' ? (
@@ -944,11 +980,9 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         <View style={{ paddingHorizontal: spacing.lg }}>
           <PlaceHalf
             place={savedAsCandidate(chosenSaved)}
-            onOpen={() => setDrawer(tripPlaceToItem(chosenSaved))}
-            onShortlist={() => (chosenSaved.shortlisted ? unshortlist(chosenSaved) : shortlistIt(savedAsCandidate(chosenSaved)))}
+            onMore={() => setDrawer(tripPlaceToItem(chosenSaved))}
+            onShortlist={() => { void (chosenSaved.shortlisted ? unshortlist(chosenSaved) : shortlistIt(savedAsCandidate(chosenSaved))); }}
             onAdd={() => setAdding(savedAsCandidate(chosenSaved))}
-            onBack={() => setSelected(null)}
-            backLabel="Back to the day"
           />
         </View>
       ) : (
@@ -992,13 +1026,15 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    */
   const beat = useRef(new Animated.Value(1)).current;
   const beatFrom = useRef(savedCount);
+  const [beating, setBeating] = useState(false);
   useEffect(() => {
     const grew = savedCount > beatFrom.current;
     beatFrom.current = savedCount;
     if (!grew) return;
+    setBeating(true);
     const step = (toValue: number, duration: number) =>
       Animated.timing(beat, { toValue, duration, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== 'web' });
-    Animated.sequence([step(2, 180), step(1.6, 140), step(1, 280)]).start();
+    Animated.sequence([step(2, 180), step(1.6, 140), step(1, 280)]).start(() => setBeating(false));
   }, [savedCount, beat]);
 
   const pills = (
@@ -1016,8 +1052,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             accessibilityState={{ selected: on }}
           >
             {p.key === 'shortlist' ? (
+              /*
+                An outline, not a solid (owner, 8 Sep 2026: "it's supposed to
+                be just a white heart icon, not with a black centre"), and it
+                beats in lime — the colour of the thing that just happened,
+                rather than the ink the rest of the chip is drawn in.
+              */
               <Animated.View style={{ transform: [{ scale: beat }] }}>
-                <Icon name="shortlist" size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} fill={savedCount > 0} />
+                <Icon name="shortlist" size={14} color={beating ? colors.selected : on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
               </Animated.View>
             ) : (
               <Icon name={p.icon} size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
@@ -1048,56 +1090,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         // finished. The sheet is moved by the sheet.
         onMapPress={() => setSelected(null)}
       />
-
-      {/*
-        How far off the route you will go, top left, over the ground it shades
-        (owner, 8 Sep 2026: "max detour is now a dropdown on the map").
-        It used to sit in the drawer's chip row, one scroll below the shaded
-        band it controls — you changed a number here and watched nothing,
-        because the thing it changed was behind the sheet.
-
-        Browsing only: with nothing being searched for there is no detour to
-        cap, and the trip's own pins are where they are.
-      */}
-      {!wide && pill && pill !== 'shortlist' && pill !== 'stay' ? (
-        <View style={styles.detourWrap} pointerEvents="box-none">
-          <Pressable
-            onPress={() => setOpenDetour((v) => !v)}
-            style={styles.detourChip}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: openDetour }}
-            accessibilityLabel={`Max detour, ${maxDetourMin} minutes. Change it`}
-          >
-            <Icon name="driving" size={13} color={colors.ink} />
-            <Text style={styles.driveChipText}>{`Max detour · ${maxDetourMin} min`}</Text>
-            <Icon name={openDetour ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
-          </Pressable>
-          {openDetour ? (
-            <View style={styles.detourMenu}>
-              {/* His words, 6 Sep 2026: "something shorter and punchier, like
-                  'Max detour', and then, when I expand, it can say, 'How far
-                  off the route are you prepared to travel?'" */}
-              <Text style={styles.detourAsk}>
-                {anchor?.label
-                  ? `How far from ${anchor.label}?`
-                  : along.hasRoute ? 'How far off the route?' : 'How far are you prepared to travel?'}
-              </Text>
-              {DETOURS.map((n) => (
-                <Pressable
-                  key={n}
-                  onPress={() => { setDetour(String(n)); setOpenDetour(false); }}
-                  style={styles.detourOpt}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: n === maxDetourMin }}
-                >
-                  <Text style={[type.body, { flex: 1 }]}>Up to {n} minutes</Text>
-                  {n === maxDetourMin ? <Icon name="check" size={16} color={colors.accent} /> : null}
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </View>
-      ) : null}
 
       {/* The drive chip (handoff §01): how long the day's driving is, and what
           the stops added to it. Top right, clear of the status bar. */}
@@ -1662,56 +1654,48 @@ const goodToKnow = (p: TripAlongPlace): string[] => {
  * the trip itself opens the same thing, and two copies of this would be two
  * click-throughs that slowly stopped matching.
  */
-function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLabel }: {
+function PlaceHalf({ place, onShortlist, onAdd, onMore, addLabel }: {
   place: TripAlongPlace;
-  /** The whole screen: the expand glyph, "More info", and the media itself. */
-  onOpen: () => void;
   onShortlist: () => void;
   onAdd: () => void;
-  onBack: () => void;
-  backLabel: string;
+  /** "More info" and the picture both open the whole screen. */
+  onMore: () => void;
   addLabel?: string;
 }) {
   const kind = placeKind(place);
   const photo = (place.photos ?? []).length > 0;
   const open = openLine(place);
   const facts = goodToKnow(place);
+  const [w, setW] = useState(0);
 
   return (
     <View style={styles.half}>
-      {/* Back on the title's line, the expand glyph opposite it. */}
-      <View style={styles.halfHead}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.halfBack} accessibilityRole="button" accessibilityLabel={backLabel}>
-          <Icon name="back" size={20} color={colors.ink} />
-        </Pressable>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.halfName} numberOfLines={1}>{place.name}</Text>
-          {/* The rating sits under the name rather than beside it: a long name
-              and a rating on one line is a name nobody can read. */}
-          <View style={styles.halfRating}>
-            {place.rating != null ? (
-              <Stars value={place.rating} size={13}>
-                {/* One string: two adjacent <Text> runs set solid, and
-                    "4.8" beside "309 reviews" read as 4.8309. */}
-                <Text style={styles.halfRatingText}>
-                  {`${place.rating.toFixed(1)}${place.ratingCount ? ` · ${place.ratingCount.toLocaleString()} reviews` : ''}`}
-                </Text>
-              </Stars>
-            ) : <Text style={type.small}>No rating yet</Text>}
-          </View>
-          {/* Somewhere you eat or sleep is somewhere you may have to ring or
-              book, so its own page is one tap from here. */}
-          {place.website && kind !== 'activity' ? (
-            <Pressable onPress={() => Linking.openURL(place.website as string)} style={styles.halfSite} accessibilityRole="link">
-              <Icon name="external" size={13} color={colors.accent} />
-              <Text style={styles.halfSiteText} numberOfLines={1}>{hostOf(place.website)}</Text>
-            </Pressable>
-          ) : null}
-        </View>
-        <Pressable onPress={onOpen} hitSlop={10} style={styles.expandHit} accessibilityRole="button" accessibilityLabel={`Open ${place.name} on the whole screen`}>
-          <Icon name="fullscreen" size={20} color={colors.ink} />
-        </Pressable>
+      {/*
+        The name and the way out to the whole screen are the drawer's header
+        now, not this. What is left is the place itself, in the order the
+        handoff draws it: what people made of it, where it is, the picture,
+        what it is, and what you can do about it.
+      */}
+      <View style={styles.halfRating}>
+        {place.rating != null ? (
+          <Stars value={place.rating} size={13}>
+            {/* One string: two adjacent Text runs set solid, and "4.8" beside
+                "309 reviews" read as 4.8309. */}
+            <Text style={styles.halfRatingText}>
+              {`${place.rating.toFixed(1)}${place.ratingCount ? ` · ${place.ratingCount.toLocaleString()} reviews` : ''}`}
+            </Text>
+          </Stars>
+        ) : <Text style={type.small}>No rating yet</Text>}
       </View>
+
+      {/* Somewhere you eat or sleep is somewhere you may have to ring or book,
+          so its own page is one tap from here. */}
+      {place.website && kind !== 'activity' ? (
+        <Pressable onPress={() => Linking.openURL(place.website as string)} style={styles.halfSite} accessibilityRole="link">
+          <Icon name="external" size={13} color={colors.accent} />
+          <Text style={styles.halfSiteText} numberOfLines={1}>{hostOf(place.website)}</Text>
+        </Pressable>
+      ) : null}
 
       <Text style={styles.halfDetour} numberOfLines={1}>
         {place.detourMinutes != null ? `+${place.detourMinutes} min detour` : 'nearby'}
@@ -1719,12 +1703,18 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
       </Text>
 
       {photo ? (
-        // The picture takes the room the sheet has left, which is what makes
-        // the half view feel like a place rather than a row.
-        <Pressable onPress={onOpen} style={styles.halfMedia} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
-          <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={undefined as any} height={190} rounded={12} credit={false} />
-          <View style={styles.halfHeart}><HeartButton on={place.onShortlist} onPress={onShortlist} /></View>
-        </Pressable>
+        <View
+          style={styles.halfMedia}
+          onLayout={(e) => { const n = Math.round(e.nativeEvent.layout.width); if (n && n !== w) setW(n); }}
+        >
+          {w ? (
+            <Pressable onPress={onMore} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
+              <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={w} height={Math.round(w / 1.5)} rounded={12} credit={false}>
+                <View style={styles.mediaHeart}><HeartButton on={place.onShortlist} onPress={onShortlist} onPhoto /></View>
+              </VenueThumb>
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
         /*
           No placeholder (the handoff is explicit). A grey box with a fork in it
@@ -1733,7 +1723,7 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
         */
         <View style={styles.halfFacts}>
           <View style={styles.halfFactsHead}>
-            <Text style={styles.kicker}>{kind === 'stay' ? 'What we know' : kind === 'food' ? 'Good to know' : 'Good to know'}</Text>
+            <Text style={styles.kicker}>Good to know</Text>
             <HeartButton on={place.onShortlist} onPress={onShortlist} bare />
           </View>
           {facts.length ? facts.map((f) => (
@@ -1747,7 +1737,7 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
         </View>
       )}
 
-      {place.summary ? <Text style={styles.halfSummary} numberOfLines={3}>{place.summary}</Text> : null}
+      {place.summary ? <Text style={styles.halfSummary}>{place.summary}</Text> : null}
 
       {/* What it is, then what is true about it today. A line is only drawn
           where there is something to put on it — a lone "·" was the shape of
@@ -1760,7 +1750,7 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
         {money(place.priceLevel) ? <Text style={styles.halfFact}>{money(place.priceLevel)}</Text> : null}
       </View>
 
-      <Pressable onPress={onOpen} style={styles.moreInfo} accessibilityRole="button">
+      <Pressable onPress={onMore} style={styles.moreInfo} accessibilityRole="button">
         <Text style={styles.moreInfoText}>More info</Text>
         <Icon name="more" size={14} color={colors.accent} />
       </Pressable>
@@ -1768,7 +1758,7 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
       <Pressable onPress={onAdd} style={[styles.halfAdd, place.onDay && styles.halfAdded]} accessibilityRole="button">
         <Icon name={place.onDay ? 'check' : 'add'} size={16} color={place.onDay ? colors.selectedFg : colors.primaryFg} />
         <Text style={[styles.halfAddText, place.onDay && { color: colors.selectedFg }]}>
-          {place.onDay ? (kind === 'stay' ? 'Your stay' : 'Added to the day') : (addLabel ?? (kind === 'stay' ? 'Set as your stay' : 'Add to the day'))}
+          {place.onDay ? (kind === 'stay' ? 'Your stay' : 'Added to the trip') : (addLabel ?? (kind === 'stay' ? 'Set as your stay' : 'Add to trip'))}
         </Text>
       </Pressable>
     </View>
@@ -1780,7 +1770,16 @@ function PlaceHalf({ place, onOpen, onShortlist, onAdd, onBack, backLabel, addLa
  * kicker — no tile, because a tile over a photograph is a button sitting on a
  * place rather than a mark made on it.
  */
-function HeartButton({ on, onPress, bare }: { on: boolean; onPress: () => void; bare?: boolean }) {
+function HeartButton({ on, onPress, bare, onPhoto }: {
+  on: boolean; onPress: () => void; bare?: boolean;
+  /**
+   * Sitting on a photograph, which may be any colour — so the glyph is drawn
+   * in two: a cream fill inside an ink outline, which has an edge against a
+   * bright sky and a dark room alike. Off a photograph that treatment
+   * disappears, because the tile behind it is already pale.
+   */
+  onPhoto?: boolean;
+}) {
   return (
     <Pressable
       onPress={(e) => { (e as any)?.stopPropagation?.(); onPress(); }}
@@ -1793,11 +1792,13 @@ function HeartButton({ on, onPress, bare }: { on: boolean; onPress: () => void; 
       <Icon
         name="shortlist"
         size={bare ? 22 : 26}
-        // Lime when it is on, in both modes — the pack's one selected colour.
-        color={on ? colors.selected : bare ? colors.ink : colors.bg}
-        fill={on}
-        fillColor={on ? colors.selected : undefined}
-        strokeWidth={2.2}
+        // INK and CREAM rather than the palette's on a photograph: a photograph
+        // is a photograph in either theme, and `colors.ink` turns cream in the
+        // dark, which would leave nothing to see.
+        color={onPhoto ? INK : colors.ink}
+        fill={on || onPhoto}
+        fillColor={on ? LIME : onPhoto ? CREAM : undefined}
+        strokeWidth={2}
       />
     </Pressable>
   );
@@ -1849,10 +1850,59 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
 }) {
   const [openKind, setOpenKind] = useState(false);
   const [openSort, setOpenSort] = useState(false);
+  const [openDetour, setOpenDetour] = useState(false);
   /** The filter is a takeover of the drawer, not a sheet over it (handoff). */
   const [filtering, setFiltering] = useState(false);
   /** The type list opens past its first five rather than scrolling forever. */
   const [moreTypes, setMoreTypes] = useState(false);
+  const closeMenus = () => { setOpenSort(false); setOpenDetour(false); };
+  /** The one place being looked at, when the sheet has given it the whole room. */
+  const chosen = useMemo(
+    () => (selected ? shown.find((p) => p.venueRef === selected) ?? null : null),
+    [selected, shown],
+  );
+
+  /** Which kinds are actually along here, commonest first. */
+  const kinds = useMemo(() => {
+    const menu = pill === 'food' ? FOOD_KINDS : THING_KINDS;
+    return menu
+      .map((kind) => ({ kind, count: along.places.filter((p) => primaryKind(p, menu) === kind).length }))
+      .filter((x) => x.count)
+      .sort((a, b) => b.count - a.count);
+  }, [along.places, pill]);
+
+  /**
+   * Which kitchens are along here — counted *inside* the kind of place already
+   * chosen, so "Restaurant · Italian" says how many Italian restaurants there
+   * are rather than how many Italian anythings. A bakery has no kitchen to
+   * offer, which is why the list is empty for one and the section folds away.
+   */
+  const cuisines = useMemo(() => {
+    // A drill-down, not a second list sitting open beside the first: the kind of
+    // place comes first, and the kitchen is what you narrow *within* it (owner,
+    // 7 Sep 2026: "if I click on restaurant, then I should have an extra
+    // dropdown where I can select the type of restaurant"). A pub has no
+    // kitchen to offer and simply gets none.
+    if (pill !== 'food' || !kindOf) return [];
+    const pool = along.places.filter((p) => isKind(p, kindOf));
+    return CUISINES
+      .map((c) => ({ kind: c, count: pool.filter((p) => isKind(p, c)).length }))
+      .filter((x) => x.count)
+      .sort((a, b) => b.count - a.count);
+  }, [along.places, kindOf, pill]);
+
+  /**
+   * How many the named kinds do not between them account for.
+   *
+   * The taxonomy is a fixed vocabulary and the world is not, so a pool of 26
+   * can hold 15 parks and playgrounds and 11 things nobody has a word for.
+   * That is fine; leaving it to be inferred from three numbers that do not add
+   * up is not.
+   */
+  const untyped = useMemo(
+    () => along.places.filter((x) => primaryKind(x, pill === 'food' ? FOOD_KINDS : THING_KINDS) == null).length,
+    [along.places, pill],
+  );
   /**
    * How wide a card's picture is — measured inside the card, not worked out.
    *
@@ -1880,41 +1930,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
     minRating ? `★ ${minRating}+` : null,
   ].filter(Boolean).join(' · ');
   const narrowed = Boolean(filterWords);
-
-  /** The one place being looked at, when the sheet has given it the whole room. */
-  const chosen = useMemo(
-    () => (selected ? shown.find((p) => p.venueRef === selected) ?? null : null),
-    [selected, shown],
-  );
-
-  /** Which kinds are actually along here, commonest first. */
-  const kinds = useMemo(() => {
-    const menu = pill === 'food' ? FOOD_KINDS : THING_KINDS;
-    return menu
-      .map((kind) => ({ kind, count: along.places.filter((p) => isKind(p, kind)).length }))
-      .filter((x) => x.count)
-      .sort((a, b) => b.count - a.count);
-  }, [along.places, pill]);
-
-  /**
-   * Which kitchens are along here — counted *inside* the kind of place already
-   * chosen, so "Restaurant · Italian" says how many Italian restaurants there
-   * are rather than how many Italian anythings. A bakery has no kitchen to
-   * offer, which is why the list is empty for one and the section folds away.
-   */
-  const cuisines = useMemo(() => {
-    // A drill-down, not a second list sitting open beside the first: the kind of
-    // place comes first, and the kitchen is what you narrow *within* it (owner,
-    // 7 Sep 2026: "if I click on restaurant, then I should have an extra
-    // dropdown where I can select the type of restaurant"). A pub has no
-    // kitchen to offer and simply gets none.
-    if (pill !== 'food' || !kindOf) return [];
-    const pool = along.places.filter((p) => isKind(p, kindOf));
-    return CUISINES
-      .map((c) => ({ kind: c, count: pool.filter((p) => isKind(p, c)).length }))
-      .filter((x) => x.count)
-      .sort((a, b) => b.count - a.count);
-  }, [along.places, kindOf, pill]);
 
   if (pill === 'shortlist') {
     /**
@@ -2049,8 +2064,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
     const band = PRICE_BANDS.find((b) => b.key === (over.price ?? priceBand))?.holds ?? null;
     const r = over.rating ?? minRating;
     const k = over.kind !== undefined ? over.kind : kindOf;
+    const menu = pill === 'food' ? FOOD_KINDS : THING_KINDS;
     return along.places.filter((p) =>
-      (!k || isKind(p, k))
+      (!k || primaryKind(p, menu) === k)
       && (!cuisine || isKind(p, cuisine))
       && (!r || (p.rating != null && p.rating >= r))
       && (!band || band(p))).length;
@@ -2127,7 +2143,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               whether the control is wrong or the world is. */}
           {(moreTypes ? kinds : kinds.slice(0, 5)).map((k) => (
             <Pressable key={k.kind} onPress={() => onKind(k.kind === kindOf ? null : k.kind)} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: k.kind === kindOf }}>
-              <Text style={[type.body, { flex: 1 }, k.kind === kindOf && { fontWeight: '700' }]}>{cap(k.kind)}</Text>
+              <Text style={[type.body, { flex: 1 }, k.kind === kindOf && styles.optOn]}>{cap(k.kind)}</Text>
               <Text style={type.small}>{k.count}</Text>
             </Pressable>
           ))}
@@ -2136,6 +2152,20 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               <Text style={[styles.moreInfoText, { flex: 1 }]}>{`All ${kinds.length} types`}</Text>
               <Icon name="more" size={14} color={colors.accent} />
             </Pressable>
+          ) : null}
+          {/*
+            What the named types do not cover, said rather than left to be
+            worked out (owner, 8 Sep 2026: "everything is 26, park 13,
+            playground 2. 13 and 2 do not add up to 26, so there's some issue
+            there"). Nothing was wrong with the counts — the taxonomy has no
+            word for the other eleven — but a list that says 26 and then shows
+            15 is a list you cannot trust. So the remainder is a row of its own.
+          */}
+          {untyped > 0 ? (
+            <View style={[styles.typeRow, styles.typeRest]}>
+              <Text style={[type.body, { flex: 1, color: colors.inkMuted }]}>Not a kind we have a word for</Text>
+              <Text style={type.small}>{untyped}</Text>
+            </View>
           ) : null}
         </View>
 
@@ -2159,8 +2189,23 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         and the order on the right. Max detour is not here — it is a pill on
         the map (owner, 8 Sep 2026), over the shaded ground it sets.
       */}
+      {/*
+        The controls row: plain text, no boxes. Detour on the left, Filters and
+        the order together on the right (owner, 8 Sep 2026: "the filters should
+        be to the right, closer to the rating").
+
+        Only over the list. Inside a place they are somebody else's business —
+        you are not narrowing anything, you are reading one thing.
+      */}
+      {chosen ? null : (
       <View style={styles.controls}>
-        <Pressable onPress={() => setFiltering(true)} style={styles.control} accessibilityRole="button">
+        <Pressable onPress={() => { setOpenSort(false); setOpenDetour((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openDetour }}>
+          <Text style={styles.controlText} numberOfLines={1}>{`Detour ${maxDetourMin} min`}</Text>
+          <Icon name={openDetour ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
+        </Pressable>
+        {anchorLabel ? <Chip label={`Around ${anchorLabel}`} on onClear={onClearAnchor} /> : null}
+        <View style={{ flex: 1 }} />
+        <Pressable onPress={() => { closeMenus(); setFiltering(true); }} style={styles.control} accessibilityRole="button">
           <Icon name="filters" size={16} color={narrowed ? colors.accent : colors.ink} />
           {/* The label becomes what it is doing, so a short list explains
               itself without opening anything. */}
@@ -2168,13 +2213,41 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             {narrowed ? filterWords : 'Filters'}
           </Text>
         </Pressable>
-        {anchorLabel ? <Chip label={`Around ${anchorLabel}`} on onClear={onClearAnchor} /> : null}
-        <View style={{ flex: 1 }} />
-        <Pressable onPress={() => setOpenSort((v) => !v)} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openSort }}>
+        <Pressable onPress={() => { setOpenDetour(false); setOpenSort((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openSort }}>
           <Text style={styles.controlText} numberOfLines={1}>{`Sort: ${SORTS.find((x) => x.key === sort)?.label ?? 'Rating'}`}</Text>
           <Icon name={openSort ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
         </Pressable>
       </View>
+      )}
+
+      {/*
+        An open menu closes on the next tap, wherever it lands (owner, 8 Sep
+        2026: "when I click anywhere on the screen after enabling the rating
+        dropdown, even if I click on filters, it should collapse"). A scrim
+        that covers the list rather than a handler on every row: a menu you can
+        leave open while you use the thing behind it is a menu that is lying
+        about what is in force.
+      */}
+      {openSort || openDetour ? (
+        <Pressable style={styles.menuScrim} onPress={closeMenus} accessibilityRole="button" accessibilityLabel="Close the menu" />
+      ) : null}
+
+      {openDetour ? (
+        <View style={[styles.dropdown, styles.detourMenu]}>
+          {/* His words, 6 Sep 2026: "something shorter and punchier, like 'Max
+              detour', and then, when I expand, it can say, 'How far off the
+              route are you prepared to travel?'" */}
+          <Text style={styles.kicker}>
+            {anchorLabel ? `How far from ${anchorLabel}?` : along.hasRoute ? 'How far off the route?' : 'How far are you prepared to travel?'}
+          </Text>
+          {DETOURS.map((n) => (
+            <Pressable key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
+              <Text style={[type.body, { flex: 1 }, n === maxDetourMin && styles.optOn]}>Up to {n} minutes</Text>
+              {n === maxDetourMin ? <Icon name="check" size={16} color={colors.accent} /> : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       {openSort ? (
         // Anchored under the control that opened it, right-aligned to it.
@@ -2187,7 +2260,10 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               accessibilityRole="radio"
               accessibilityState={{ checked: o.key === sort }}
             >
-              <Text style={[type.body, { flex: 1 }]}>{o.label}</Text>
+              {/* The one in force is said in colour as well as by a tick: a
+                  grey list with a small mark in it does not read as a choice
+                  that has been made (owner, 8 Sep 2026). */}
+              <Text style={[type.body, { flex: 1 }, o.key === sort && styles.optOn]}>{o.label}</Text>
               {o.key === sort ? <Icon name="check" size={16} color={colors.accent} /> : null}
             </Pressable>
           ))}
@@ -2336,11 +2412,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           */
           <PlaceHalf
             place={chosen}
-            onOpen={() => onOpen(chosen)}
-            onShortlist={() => onShortlist(chosen)}
+            onMore={() => onOpen(chosen)}
+            onShortlist={() => { void onShortlist(chosen); }}
             onAdd={() => onAdd(chosen)}
-            onBack={() => onSelect(null)}
-            backLabel={`Back to all ${shown.length} place${shown.length === 1 ? '' : 's'}`}
           />
         ) : shown.map((p) => (
           pill === 'food'
@@ -2413,7 +2487,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                     <Pressable
                       onPress={() => onShortlist(p)}
                       hitSlop={8}
-                      style={styles.thumbMark}
+                      style={styles.cardHeart}
                       accessibilityRole="button"
                       accessibilityLabel={p.onShortlist ? `Take ${p.name} off the shortlist` : `Save ${p.name} to the shortlist`}
                     >
@@ -2437,8 +2511,11 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                   </VenueThumb>
                   ) : null}
                 </View>
-                <View style={styles.rowMeta}>
-                  <Text style={styles.rowName} numberOfLines={1}>{p.name}</Text>
+                {/* The name on the left and the rating hard right, on one
+                    line — and no Add: the card is for choosing what to look
+                    at, and adding is a decision you make having looked. */}
+                <View style={styles.cardLine}>
+                  <Text style={[styles.rowName, { flex: 1, minWidth: 0 }]} numberOfLines={1}>{p.name}</Text>
                   {p.rating != null ? (
                     <Stars value={p.rating} size={12}>
                       <Text style={styles.ratingText}>{p.rating.toFixed(1)}{p.ratingCount ? ` (${p.ratingCount >= 1000 ? `${(p.ratingCount / 1000).toFixed(1)}k` : p.ratingCount})` : ''}</Text>
@@ -2449,12 +2526,6 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                   {[kitchen(p) ?? plainCategory(p.category), detourWords(p, anchorLabel, along.hasRoute)].filter(Boolean).join(' · ')}
                 </Text>
                 {p.summary ? <Text style={styles.cardBlurb} numberOfLines={2}>{p.summary}</Text> : null}
-                <View style={styles.cardSide}>
-                  <Pressable onPress={() => onAdd(p)} style={styles.add} accessibilityRole="button">
-                    <Icon name={p.onDay ? 'check' : 'add'} size={13} color={colors.ink} />
-                    <Text style={styles.addText}>{p.onDay ? 'Added' : 'Add'}</Text>
-                  </Pressable>
-                </View>
               </Pressable>
             )
         ))}
@@ -2625,6 +2696,22 @@ const kindsOf = (p: TripAlongPlace): string[] => {
   return [...out];
 };
 const isKind = (p: TripAlongPlace, kind: string) => kindsOf(p).includes(kind.toLowerCase());
+
+/**
+ * The one kind a place is filed under.
+ *
+ * A place can honestly be several things — a park you also walk in — and while
+ * the counts were inclusive the filter's rows did not add up to the pool it
+ * said they came from (owner, 8 Sep 2026: "13 and 2 do not add up to 26, so
+ * there's some issue there"). Nothing was miscounted; a thing was simply being
+ * counted twice.
+ *
+ * So a place gets one kind, the first it matches in the taxonomy's own order,
+ * and the filter tests the same thing it counts. The rows now partition the
+ * pool exactly, and tapping one gives you the number beside it.
+ */
+const primaryKind = (p: TripAlongPlace, menu: string[]): string | null =>
+  menu.find((k) => isKind(p, k)) ?? null;
 
 /**
  * Search along the route (handoff §08): the sheet at the top, a field, and six
@@ -3558,7 +3645,8 @@ const styles = StyleSheet.create({
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, maxWidth: 220 },
   chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.ink, flexShrink: 1 },
-  dropdown: { marginHorizontal: 16, marginTop: 8, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 6 },
+  dropdown: {
+    zIndex: 2, marginHorizontal: 16, marginTop: 8, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 12, paddingBottom: 6 },
   optRow: { flexDirection: 'row', alignItems: 'center', minHeight: TARGET },
 
   /**
@@ -3624,7 +3712,9 @@ const styles = StyleSheet.create({
   // it would report zero width and never fill.
   cardMedia: { alignSelf: 'stretch', aspectRatio: 1.5, backgroundColor: colors.surfaceMuted, borderRadius: 12, overflow: 'hidden' },
   cardBlurb: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, lineHeight: 18 },
-  cardSide: { alignItems: 'flex-start', paddingTop: 2 },
+  cardLine: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  // Clear of the corner (owner, 8 Sep 2026: "the heart is a bit too close").
+  cardHeart: { position: 'absolute', top: 10, right: 10 },
   // Bottom left of the picture, where it cannot fight the heart.
   priceTag: {
     position: 'absolute', left: 8, bottom: 8, paddingHorizontal: 8, paddingVertical: 3,
@@ -3643,6 +3733,11 @@ const styles = StyleSheet.create({
   controlText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, flexShrink: 1 },
   controlOn: { color: colors.accent },
   sortMenu: { alignSelf: 'flex-end', minWidth: 170 },
+  detourMenu: { alignSelf: 'flex-start', minWidth: 210 },
+  // Over the list, under the menu: the next tap anywhere closes what is open.
+  menuScrim: { ...(StyleSheet.absoluteFill as object), zIndex: 1 },
+  // The choice in force, said in colour as well as by a tick.
+  optOn: { color: colors.accent, fontWeight: '700' },
 
   filterPage: { paddingHorizontal: 16, paddingBottom: 24, gap: 6 },
   filterHead: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: TARGET },
@@ -3655,6 +3750,8 @@ const styles = StyleSheet.create({
   segText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
   segCount: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: TARGET, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  // The remainder is a fact, not a filter: it is counted but cannot be picked.
+  typeRest: { borderBottomWidth: 0 },
   // --- The place half view (trips V2) ---------------------------------------
   half: { gap: 10, paddingVertical: 12 },
   halfHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
@@ -3667,9 +3764,9 @@ const styles = StyleSheet.create({
   halfSiteText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent, flexShrink: 1 },
   halfDetour: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, textAlign: 'right' },
   halfMedia: { position: 'relative' },
-  // Bare, over the picture: a tile here would be a button sitting on a place
-  // rather than a mark made on it.
-  halfHeart: { position: 'absolute', top: 10, right: 10 },
+  // Bare, over the picture, and clear of the corner (owner, 8 Sep 2026: "the
+  // heart is a bit too close to the corner").
+  mediaHeart: { position: 'absolute', top: 6, right: 6 },
   heartHit: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   heartOnPhoto: { },
   halfFacts: { gap: 6, paddingVertical: 4 },
@@ -3689,6 +3786,7 @@ const styles = StyleSheet.create({
   halfAdded: { backgroundColor: colors.selected },
   halfAddText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.primaryFg },
   browseTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6, color: colors.ink },
+  placeTitle: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: colors.ink },
   chosenHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   expandHit: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6, marginTop: -4, flex: 0 },
   chosenName: { flex: 1, minWidth: 0, fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink, lineHeight: 26 },
@@ -3699,26 +3797,6 @@ const styles = StyleSheet.create({
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + var(--epic-sat))' as any) },
-  // Top left, opposite the drive chip, over the shaded ground it sets.
-  detourWrap: { position: 'absolute', left: 16, top: ('calc(16px + var(--epic-sat))' as any), zIndex: 3, alignItems: 'flex-start' },
-  detourChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34,
-    paddingHorizontal: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
-  },
-  // Anchored under the pill rather than centred on the screen: it belongs to
-  // the thing that opened it, and the map behind stays readable.
-  detourMenu: {
-    marginTop: 6, minWidth: 210, backgroundColor: colors.surface,
-    borderWidth: 1, borderColor: colors.line, paddingVertical: 6,
-  },
-  detourAsk: {
-    fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.inkMuted,
-    paddingHorizontal: 12, paddingTop: 4, paddingBottom: 6,
-  },
-  detourOpt: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    minHeight: TARGET, paddingHorizontal: 12,
-  },
   driveChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill,
     backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
