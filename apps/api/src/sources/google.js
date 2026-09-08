@@ -65,9 +65,15 @@ const TYPE_TO_CATEGORY = {
  * than kitchens. Any of them is enough to keep a place out of Restaurants.
  */
 const FAST_TYPES = new Set([
-  'fast_food_restaurant', 'meal_takeaway', 'meal_delivery', 'food_delivery',
-  'sandwich_shop', 'bagel_shop', 'donut_shop', 'juice_shop', 'hamburger_restaurant',
+  'fast_food_restaurant', 'hamburger_restaurant',
+  'sandwich_shop', 'bagel_shop', 'donut_shop', 'juice_shop',
 ]);
+
+/**
+ * How the food leaves the building. Not the same question as whether it is fast
+ * food, and the difference cost a first draft of this.
+ */
+const SERVICE_TYPES = new Set(['meal_takeaway', 'meal_delivery', 'food_delivery']);
 
 /**
  * Why the secondary types have to be read, not just the primary one.
@@ -82,10 +88,24 @@ const FAST_TYPES = new Set([
  * Both carry `restaurant` in the list, which is exactly how they were getting
  * through. And Domino's has no `fast_food_restaurant` type at all — only the
  * takeaway and delivery types say what it is, which is precisely the second
- * signal the owner guessed at. So the answer is not "read the primary type
- * harder": any of these anywhere in the list settles it.
+ * signal the owner guessed at.
+ *
+ * **But `meal_takeaway` on its own is not fast food, and treating it as such
+ * was wrong.** A first version of this moved anything carrying it, and the
+ * deployed search came back with PizzaExpress filed as a takeaway — it is a
+ * restaurant you book a table at that will also box your pizza up, and so is
+ * half the high street. So the two signals are kept apart:
+ *
+ *   `fast_food_restaurant` and its counter cousins say what the place *is*, and
+ *   settle it wherever they appear.
+ *
+ *   `meal_takeaway` and the delivery types say what the place *does*. They only
+ *   settle it when they are the *primary* type — when taking away is the whole
+ *   business rather than a service a restaurant also offers. Otherwise they are
+ *   recorded as a style and change nothing.
  */
 const isFast = (types) => types.some((t) => FAST_TYPES.has(t));
+const isTakeawayFirst = (primary) => SERVICE_TYPES.has(primary);
 const TYPE_TO_EXPERIENCE = {
   museum: 'museum', art_gallery: 'art-gallery', park: 'park', garden: 'park', botanical_garden: 'park', playground: 'playground', zoo: 'zoo', aquarium: 'aquarium',
   amusement_park: 'theme-park', roller_coaster: 'theme-park', water_park: 'swimming', swimming_pool: 'swimming', historical_landmark: 'history', monument: 'history',
@@ -201,11 +221,12 @@ export function toVenue(place, justification = null) {
     || (primaryIsThing || types.some((t) => THING_FIRST.has(t) && !TYPE_TO_CATEGORY[primary]) ? 'attraction' : null)
     || types.map((t) => TYPE_TO_CATEGORY[t]).find(Boolean)
     || 'attraction';
-  // A place that takes away is a takeaway, whatever else it is also called.
-  // This is deliberately after the primary type has spoken: KFC's primary type
-  // is already `fast_food_restaurant`, but Domino's is a `restaurant` that
-  // happens to deliver, and the delivery is the truer word for it.
-  if ((category === 'restaurant' || category === 'cafe') && isFast(types)) category = 'takeaway';
+  // Fast food is fast food wherever it is said; taking away only counts when it
+  // is the whole business. See the note on `isFast` — the first draft of this
+  // line filed PizzaExpress as a takeaway.
+  if ((category === 'restaurant' || category === 'cafe') && (isFast(types) || isTakeawayFirst(primary))) {
+    category = 'takeaway';
+  }
   const experiences = [...new Set([TYPE_TO_EXPERIENCE[primary], ...types.map((t) => TYPE_TO_EXPERIENCE[t])].filter(Boolean))];
   if (category === 'attraction' && !experiences.length && !types.some((t) => t in TYPE_TO_EXPERIENCE)) category = 'attraction';
   // The primary type first, so a row says what the place mostly is.
@@ -243,9 +264,11 @@ export function toVenue(place, justification = null) {
     // Marked, not dropped. Somewhere the family actually wants on a Friday is
     // not made to disappear; it is simply told apart from a restaurant, and the
     // Places tab and the Food drawers can then keep them separate.
+    // Both recorded, whether or not either moved the category: "they will box
+    // it up" is worth knowing about a restaurant even when it stays one.
     styles: [
       ...(isFast(types) ? ['fast-food'] : []),
-      ...(['meal_takeaway', 'meal_delivery', 'food_delivery'].some((t) => types.includes(t)) ? ['takeaway'] : []),
+      ...(types.some((t) => SERVICE_TYPES.has(t)) ? ['takeaway'] : []),
     ],
     // Photo references only; the image is fetched through our proxy with the
     // key. Each leaves here stamped with a short-lived signature, so the `<img>`

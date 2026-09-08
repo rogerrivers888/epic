@@ -50,16 +50,30 @@ test('KFC is a takeaway, though Google also calls it a restaurant', () => {
   assert.ok(kfc.styles.includes('takeaway'));
 });
 
-test("Domino's is a takeaway with no fast-food type at all", () => {
-  // The case that proves the owner's second guess. Its primary type is
-  // `restaurant`; only `meal_delivery`, `meal_takeaway` and `food_delivery`
-  // say otherwise, and if those are not read it stays a restaurant.
+test("a delivery shop whose whole business is delivery is a takeaway", () => {
+  // The owner's second guess, and the case `fast_food_restaurant` alone misses.
+  // It counts because taking away is the *primary* type — the whole business —
+  // not merely something the place also does.
   const dominos = place("Domino's Pizza - Sunningdale", [
     'food_delivery', 'restaurant', 'meal_delivery', 'food', 'meal_takeaway',
     'point_of_interest', 'establishment',
-  ], 'restaurant');
+  ], 'meal_delivery');
   assert.equal(dominos.category, 'takeaway');
   assert.ok(dominos.styles.includes('takeaway'));
+});
+
+test('PizzaExpress will box your pizza up and is still a restaurant', () => {
+  // The first version of this filed it as a takeaway, and the deployed search
+  // showed it. `meal_takeaway` is a service half the high street offers; it
+  // only decides the category when it is the primary type.
+  const pe = place('PizzaExpress', [
+    'pizza_restaurant', 'italian_restaurant', 'restaurant', 'meal_takeaway',
+    'meal_delivery', 'food', 'point_of_interest', 'establishment',
+  ], 'pizza_restaurant');
+  assert.equal(pe.category, 'restaurant');
+  // Recorded all the same: "they will box it up" is worth knowing.
+  assert.ok(pe.styles.includes('takeaway'));
+  assert.ok(!pe.styles.includes('fast-food'));
 });
 
 test('a restaurant that does not do takeaway is still a restaurant', () => {
