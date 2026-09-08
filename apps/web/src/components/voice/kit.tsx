@@ -11,7 +11,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 import { colors, fonts, spacing, type, ON_LIME } from '../../theme';
 import { Icon, IconName } from '../Icon';
 import type { ChipSource } from '../../api';
@@ -294,7 +294,10 @@ export function ListRow({ label, icon, on, onPress, sub, right }: { label: strin
 export const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
+  // These screens own their head (routes.ts `ownsHeader`), so the shell no
+  // longer pads the notch for them; the inset is taken here instead (Codex
+  // review, 9 Sep 2026), the same variable the shell and the drawers use.
+  screen: { flex: 1, backgroundColor: colors.bg, paddingTop: (Platform.OS === 'web' ? 'var(--epic-sat)' : 0) as any },
   scroll: { flexGrow: 1 },
   body: { flex: 1, gap: 20, paddingHorizontal: 20, paddingBottom: 40 },
   footer: { paddingHorizontal: 20, paddingBottom: 24, paddingTop: 8, gap: 12, backgroundColor: colors.bg },
