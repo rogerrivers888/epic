@@ -606,6 +606,14 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
             ) : null}
 
             <Row style={{ alignItems: 'flex-start' }}>
+              {/* No photograph, no tiles to sit on: the heart takes the corner
+                  beside the title instead, so a swept restaurant or an atlas
+                  place with no picture can still be kept (Codex, 8 Sep 2026). */}
+              {!hero && onShortlist ? (
+                <Pressable onPress={() => onShortlist(item)} style={[styles.heroTile, styles.bareHeart, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                  <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
+                </Pressable>
+              ) : null}
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.name}>{title}</Text>
                 {/* One line, in the handoff's own order: what it is, where, and
@@ -937,6 +945,7 @@ const styles = StyleSheet.create({
   // CREAM rather than the palette's surface, on purpose: a photograph is a
   // photograph in either theme, and a tile that turns near-black in the dark
   // disappears into half the pictures it sits on.
+  bareHeart: { borderWidth: BORDER, borderColor: colors.line, marginTop: 2 },
   heroTile: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: CREAM },
   heroCount: { position: 'absolute', right: 12, bottom: 12, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: CREAM },
   heroCountText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: INK },

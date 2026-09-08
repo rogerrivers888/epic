@@ -739,12 +739,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 </View>
               ) : null}
 
-              {notice ? (
-                <Pressable onPress={() => setNotice(null)} style={[styles.gutter, styles.notice]} accessibilityRole="button">
-                  <Icon name="info" size={14} color={colors.ink} />
-                  <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
-                </Pressable>
-              ) : null}
               {nothingDrawn ? (
                 inMode.length === 0 ? (
                   <EmptyMatch
@@ -843,6 +837,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         addIcon="trips"
         shortlisted={openedItem ? isKept(openedItem) : false}
         onShortlist={async () => { if (openedItem) await keep(openedItem); }}
+        // Why the heart sprang back, said inside the drawer where the heart
+        // is — a line under the list would be hidden behind it on a phone.
+        capture={notice ? (
+          <Pressable onPress={() => setNotice(null)} style={styles.notice} accessibilityRole="button">
+            <Icon name="info" size={14} color={colors.ink} />
+            <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
+          </Pressable>
+        ) : null}
         onAdd={onCreateTrip ? (it) => {
           closeDrawer();
           onCreateTrip({
