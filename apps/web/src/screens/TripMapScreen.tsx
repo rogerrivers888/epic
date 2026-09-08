@@ -1134,10 +1134,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
                 rather than the ink the rest of the chip is drawn in.
               */
               <Animated.View style={{ transform: [{ scale: beat }] }}>
-                <Icon name="shortlist" size={14} color={beating ? colors.selected : on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+                <Icon name="shortlist" size={17} color={beating ? colors.selected : on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
               </Animated.View>
             ) : (
-              <Icon name={p.icon} size={14} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+              <Icon name={p.icon} size={17} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
             )}
             <Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{p.label}</Text>
           </Pressable>
@@ -3689,23 +3689,39 @@ const styles = StyleSheet.create({
   // The three pills over the map.
   // Four pills (§15: padding 9px 9px, gap 6px, label "Food") have to fit 390px
   // with the edges clear; three can breathe.
-  pills: { flexDirection: 'row', gap: 8, paddingHorizontal: 20 },
-  pillsFour: { gap: 6, paddingHorizontal: 14 },
-  pillFour: { paddingHorizontal: 9 },
   /**
-   * The chips along the bottom of the map (5c). No outline and no radius: the
-   * handoff draws them as plain cream rectangles, and the ink border I gave
-   * them was compensating for a cream basemap they could not be seen against
-   * (owner, 7 Sep 2026: "you shouldn't. I don't want black circles or a black
-   * border around them… it just makes it very, very buttony"). The basemap is
-   * shaded now (mapStyle.ts), so the fill is enough.
+   * They wrap rather than shrink.
+   *
+   * A quarter bigger will not put four of them across a 390px phone, and the
+   * answer is not to make the words smaller again — that is the thing being
+   * fixed. Two rows over the map costs room the owner has already said he will
+   * pay ("even if that's going to use up more real estate").
+   */
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, rowGap: 8, paddingHorizontal: 20 },
+  pillsFour: { gap: 8, paddingHorizontal: 16 },
+  pillFour: {},
+  /**
+   * The chips along the bottom of the map (5c).
+   *
+   * A quarter bigger than they were (owner, 8 Sep 2026: "people are not
+   * noticing them at all… increase the size, probably about 20-25% bigger, and
+   * we may need to colour them so they stand out more"), and the one you are
+   * not in takes the lime tint rather than cream — which is the pack's own
+   * colour for an inactive tab, and turns four pale boxes lost on a pale map
+   * into one lime strip along it.
+   *
+   * Still no outline and no radius. The border I gave these once was
+   * compensating for a basemap they could not be seen against, and he was
+   * right about it (owner, 7 Sep 2026: "I don't want black circles or a black
+   * border around them… it just makes it very, very buttony"). Size and fill
+   * do the work instead.
    */
   pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 8,
-    backgroundColor: colors.surface,
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10,
+    minHeight: 42, backgroundColor: colors.accentSoft,
   },
   pillOn: { backgroundColor: colors.selected },
-  pillText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.ink },
+  pillText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.ink },
   nudge: {
     alignSelf: 'flex-start', marginLeft: 20, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: radius.pill, backgroundColor: colors.primary, color: colors.primaryFg, overflow: 'hidden',
