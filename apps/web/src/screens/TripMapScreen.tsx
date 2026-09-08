@@ -44,7 +44,6 @@ import { VenueDrawer } from '../components/VenueDrawer';
 import { asNumber, asOneOf, asText, useQueryState, useRouter } from '../router';
 import { paths, type TripSection } from '../routes';
 import { weeksOf } from './tripWeeks';
-import { caliperFor } from '../components/detourCaliper';
 import { fromName, shortPlaceName, tripName } from './tripName';
 
 const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
@@ -692,30 +691,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     ? { top: 40, bottom: 40, left: 40, right: 460 }
     : { top: 96, bottom: covered + 36, left: 28, right: 28 };
 
-  /**
-   * The detour, measured across the road — a prototype the owner asked for
-   * (7 Sep 2026): "surface the detour of 15 minutes on the map, because this
-   * max detour is something that people might not even notice".
-   *
-   * Drawn from the same ground the band is drawn from, so widening one widens
-   * the other. The step either side of the number is the thing to engage with:
-   * it walks the same list of minutes the chip's dropdown offers, and the band
-   * redraws under it at once because nothing has to be fetched to know how wide
-   * fifteen minutes is.
-   */
-  const caliper = useMemo(() => {
-    if (!ground) return null;
-    const c = caliperFor(ground.spine, ground.halfWidthKm);
-    if (!c) return null;
-    const at = DETOURS.indexOf(maxDetourMin);
-    const step = (to: number | undefined) => (to == null ? null : () => setDetour(String(to)));
-    return {
-      a: c.a, b: c.b, mid: c.mid, bearingDeg: c.bearing,
-      label: `+${maxDetourMin} min`,
-      onLess: step(at > 0 ? DETOURS[at - 1] : undefined),
-      onMore: step(at >= 0 && at < DETOURS.length - 1 ? DETOURS[at + 1] : undefined),
-    };
-  }, [ground, maxDetourMin, setDetour]);
 
   // ---- adding -------------------------------------------------------------
 
@@ -766,24 +741,45 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     catch (e: any) { setError(e.message); }
   }, [shortlist, trip.id, onChanged]);
 
+  /**
+   * The heart, both ways.
+   *
+   * It only ever added. Tapping a filled heart posted the same place to the
+   * shortlist a second time, so the count did not move, the chip did not beat,
+   * and from the outside the heart looked broken (owner, 8 Sep 2026: "when I
+   * click the heart on an activity, it doesn't make the shortlist heart pulse,
+   * and it also doesn't change the number of shortlisted items"). A heart is a
+   * toggle everywhere else in Epic and has to be one here.
+   */
   const shortlistIt = useCallback(async (p: TripAlongPlace) => {
-    /*
-      Start the menu (owner, 8 Sep 2026: "that's exactly the time to crawl the
-      menu when someone favourites something. Whenever we think it is likely
-      that someone's going to go into a restaurant, we should be pulling the
-      menu"). Keeping a restaurant is the strongest signal there is that you
-      will open it, and a menu takes the better part of a minute — so the whole
-      value is in having started before you ask.
-
-      Nothing waits on it and nothing on screen changes if it fails.
-    */
-    startMenu(p);
+    const already = shortlist.find((x) => x.venueRef === p.venueRef);
+    // Turn it now. The server is the truth, but a heart that waits for the
+    // network to fill in is a heart you tap twice.
+    setAlong((a) => ({ ...a, places: a.places.map((x) => (x.venueRef === p.venueRef ? { ...x, onShortlist: !already } : x)) }));
     try {
-      await api.addToShortlist(trip.id, { venueRef: p.venueRef, venueLabel: p.name, category: p.category, lat: p.lat, lng: p.lng });
-      setAlong((a) => ({ ...a, places: a.places.map((x) => (x.venueRef === p.venueRef ? { ...x, onShortlist: !x.onShortlist } : x)) }));
+      if (already) {
+        await api.removeFromShortlist(trip.id, already.id);
+      } else {
+        /*
+          Start the menu (owner, 8 Sep 2026: "that's exactly the time to crawl
+          the menu when someone favourites something. Whenever we think it is
+          likely that someone's going to go into a restaurant, we should be
+          pulling the menu"). Keeping a restaurant is the strongest signal there
+          is that you will open it, and a menu takes the better part of a minute
+          — so the whole value is in having started before you ask.
+
+          Nothing waits on it and nothing on screen changes if it fails.
+        */
+        startMenu(p);
+        await api.addToShortlist(trip.id, { venueRef: p.venueRef, venueLabel: p.name, category: p.category, lat: p.lat, lng: p.lng });
+      }
       await onChanged();
-    } catch (e: any) { setError(e.message); }
-  }, [trip.id, onChanged]);
+    } catch (e: any) {
+      // Put the heart back rather than leave it saying something untrue.
+      setAlong((a) => ({ ...a, places: a.places.map((x) => (x.venueRef === p.venueRef ? { ...x, onShortlist: !!already } : x)) }));
+      setError(e.message);
+    }
+  }, [trip.id, onChanged, shortlist, startMenu]);
 
   /**
    * What the drawer is looking at, as something that can be acted on.
@@ -1161,7 +1157,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         focusId={selected}
         shade={ground ? { ...ground, searching: along.loading } : null}
         coverBottom={wide ? undefined : covered}
-        caliper={caliper}
         // A tap on the map clears the chosen pin and nothing else. It used to
         // shrink the sheet too, which read well and was in fact the bug that
         // stopped the sheet opening at all: a drag that ends over the map makes
@@ -1181,15 +1176,15 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         </View>
       ) : null}
 
-      {/* The nudge and the search pill, both only when the map has the screen. */}
-      {!wide && !covering && detent === 'peek' ? (
-        <View style={styles.searchWrap} pointerEvents="box-none">
-          <Pressable onPress={() => setSearching(true)} style={styles.search} accessibilityRole="button">
-            <Icon name="search" size={16} color={colors.inkMuted} />
-            <Text style={[type.small, { flex: 1 }]}>{q || (along.hasRoute ? 'Search along the route' : 'Search nearby')}</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      {/*
+        No search pill and no caliper over the map.
+
+        Neither is in the drawings, and both were a second way to set something
+        the drawer already sets — the caliper walked the same minutes the
+        Detour control walks, and the search box asked the same question the
+        browse asks (owner, 8 Sep 2026: "we've got that on the main view, and I
+        don't think we need to add it anywhere else").
+      */}
 
       {/* At full the sheet has the screen and there is no map left to pin, so
           the pills go with it (owner, 6 Sep 2026: "When I'm in full bottom
