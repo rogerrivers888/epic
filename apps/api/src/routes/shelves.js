@@ -36,8 +36,10 @@ import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import { currentHousehold } from './household.js';
 import {
   BY_ATLAS_CATEGORY, BY_EXPERIENCE, MAX_SHELVES, SHELF_FLOOR,
-  shelvesForAtlas,
+  shelvesForAtlas, shelvesForVenue,
 } from '../domain/moods.js';
+import { searchCached } from '../sources/cache.js';
+import * as visitsRepo from '../repositories/visits.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { readTeaching } from '../domain/teaching.js';
 import { kmBetween } from '../domain/travel.js';
@@ -182,6 +184,100 @@ shelves.get('/shelf', requires('view_library'), async (req, res, next) => {
         .sort((a, b) => (b.weights[mood] ?? 0) - (a.weights[mood] ?? 0))
         .slice(0, 30),
       pool: all.length,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /food?q=&lat=&lng=&km= — somewhere to eat, as the Places tab sees it.
+ *
+ * The gap this closes: the rest of this screen reads the atlas, which holds no
+ * restaurants at all, so the one thing the owner most wanted to correct — a
+ * chicken shop sitting among the restaurants — was the one thing he could not
+ * reach. Google tags most of them (`fast_food_restaurant`, `meal_takeaway`) and
+ * `sources/google.js` reads all of it, but it does not tag every chain: Popeyes
+ * and Chik Box came back as plain restaurants on 5 Sep 2026. Those are corrected
+ * one at a time, by hand, which is what this list is for.
+ *
+ * **It costs a provider call, and it is honest about it.** The same cached
+ * search the Places tab uses, so looking at the same corner twice in an
+ * afternoon asks Google once; and the call is logged against the household like
+ * every other. Nothing here runs on a timer — it happens when somebody presses
+ * the button.
+ *
+ * There is no type to teach against, so the only scope that helps is `place`.
+ * That is not a shortcoming of the screen: Google's own tags are per-place, and
+ * "every branch of Popeyes" is a name, not a type.
+ */
+shelves.get('/food', requires('view_library'), async (req, res, next) => {
+  try {
+    const centre = await centreOf(req);
+    if (!centre) throw bad('Set a home address, or pass lat and lng, and Roam will look around it.');
+    const km = Math.min(25, Math.max(1, Number(req.query.km) || 5));
+    const q = String(req.query.q || '').trim();
+
+    const household = await currentHousehold();
+    const [rules, tax] = await Promise.all([shelfRules.rules(), taxonomy.taxonomy()]);
+
+    const { venues, sourcesQueried, units, fetched, degraded } = await searchCached({
+      center: { lat: centre.lat, lng: centre.lng },
+      radiusKm: km,
+      categories: ['restaurant', 'cafe', 'pub', 'bar', 'takeaway'],
+      query: q,
+      includeEvents: false,
+      deadlineMs: 8000,
+    });
+    // Only a search that actually asked is billed and logged; a cache hit is free.
+    if (fetched) await visitsRepo.recordProviderCall(household.id, sourcesQueried.join('+') || 'none', 'shelves.food', units);
+
+    const rows = venues
+      .filter((v) => v.lat != null && v.lng != null)
+      .map((v) => {
+        const ref = `${v.source}:${v.sourcePlaceId}`;
+        const filed = shelvesForVenue(v, rules, tax.vocab);
+        return {
+          ref,
+          id: ref,
+          name: v.name,
+          region: [v.address, v.locality].filter(Boolean)[0] ?? null,
+          // What the source calls it — restaurant, takeaway, cafe, pub, bar —
+          // which is the thing the drawer is meant to correct.
+          category: v.category,
+          summary: (v.cuisines ?? []).join(', ') || null,
+          score: v.rating ?? null,
+          lat: v.lat,
+          lng: v.lng,
+          imageId: null,
+          shelf: filed.category,
+          subcategory: filed.subcategory,
+          confident: filed.confident,
+          weights: filed.weights,
+          because: filed.because,
+          // Empty on purpose. The teaching form offers a chip per Wikidata type
+          // — "every association football venue" — and a food place has none;
+          // offering `fast-food` there would write a kind rule against a word
+          // that is not a type. The tags below are for reading, not teaching.
+          kinds: [],
+          tags: [...new Set([v.category, ...(v.styles ?? [])].filter(Boolean))],
+          rule: rules.place.get(ref) ?? null,
+          distanceKm: Number(kmBetween(centre, v).toFixed(1)),
+        };
+      })
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+
+    res.json({
+      place: centre,
+      km,
+      q: q || null,
+      items: rows,
+      drawers: tax.subcategories
+        .filter((sc) => sc.category_key === 'food')
+        .map((sc) => ({ ...sc, count: rows.filter((i) => i.subcategory === sc.key).length }))
+        .concat([{ key: null, label: 'Not sorted yet', category_key: 'food', count: rows.filter((i) => !i.subcategory).length }]),
+      // Said outright rather than left to be inferred from a thin list.
+      cached: !fetched,
+      sources: sourcesQueried,
+      degraded,
     });
   } catch (err) { next(err); }
 });

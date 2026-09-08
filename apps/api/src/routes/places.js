@@ -9,6 +9,9 @@
 
 import { Router } from 'express';
 import { ratingsFor, reviewsFor } from '../sources/providerMatch.js';
+import { rules as shelfRules } from '../repositories/shelfRules.js';
+import { taxonomy } from '../repositories/shelfTaxonomy.js';
+import { shelvesForVenue } from '../domain/moods.js';
 import { withTransaction } from '../db.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
@@ -402,7 +405,24 @@ places.get('/search', async (req, res, next) => {
       ...inRange.filter((v) => v.rating == null),
     ].slice(0, KEEP).sort((a, b) => a.distanceKm - b.distanceKm);
     const status = await householdStatus(household.id, withinPage.map((v) => `${v.source}:${v.sourcePlaceId}`));
-    const shown = withinPage.map((v) => ({ ...v, venueRef: `${v.source}:${v.sourcePlaceId}`, household: status[`${v.source}:${v.sourcePlaceId}`] ?? null }));
+    // Which drawer of the taxonomy each one lands in — the same answer the home
+    // screen and the back office give, worked out once here rather than three
+    // times differently. It is what makes a correction made on the Shelves page
+    // visible in the list where the problem was noticed: move a chicken shop
+    // out of Restaurants and this is the field that changes.
+    const [taught, tax] = await Promise.all([shelfRules(), taxonomy()]);
+    const shown = withinPage.map((v) => {
+      const ref = `${v.source}:${v.sourcePlaceId}`;
+      const filed = shelvesForVenue(v, taught, tax.vocab);
+      return {
+        ...v,
+        venueRef: ref,
+        shelf: filed.category,
+        subcategory: filed.subcategory,
+        subcategoryLabel: filed.subcategory ? tax.subByKey.get(filed.subcategory)?.label ?? null : null,
+        household: status[ref] ?? null,
+      };
+    });
     // A ride belongs to its park, not to the list beside it.
     markContained(shown);
 

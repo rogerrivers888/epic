@@ -1892,6 +1892,17 @@ export const api = {
       drawers: { key: string | null; label: string; category_key: MoodKey; count: number }[];
     }>(`/api/admin/shelves/shelf${qs(p)}`),
   shelfFindPlaces: (q: string) => request<{ places: ShelfPlace[] }>(`/api/admin/shelves/places${qs({ q })}`),
+  /**
+   * Somewhere to eat, as the Places tab sees it. Costs a provider call unless
+   * the same corner was looked at recently, so it runs on a press.
+   */
+  shelfFoodPlaces: (p: { q?: string; km?: number; lat?: number; lng?: number } = {}) =>
+    request<{
+      place: { lat: number; lng: number; label: string | null }; km: number; q: string | null;
+      items: ShelfPlace[];
+      drawers: { key: string | null; label: string; count: number }[];
+      cached: boolean; sources: string[]; degraded?: string[];
+    }>(`/api/admin/shelves/food${qs(p)}`),
   shelfTeach: (body: { scope: ShelfRule['scope']; subject: string; subjectLabel?: string | null; weights: ShelfWeights; subcategory?: string | null; reason?: string | null }) =>
     put<{ rule: ShelfRule }>('/api/admin/shelves/rules', body),
   /**
@@ -2304,6 +2315,8 @@ export type ShelfPlace = {
   subcategory?: string | null;
   /** Whether anybody would defend the answer, or it landed there by default. */
   confident?: boolean;
+  /** What the source called it, for a row with no Wikidata types to show. */
+  tags?: string[];
   region: string | null;
   category: string | null;
   summary: string | null;

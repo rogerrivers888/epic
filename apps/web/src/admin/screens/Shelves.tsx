@@ -51,10 +51,11 @@ import { MOODS } from '../../routes';
 
 const WIDE = 900;
 
-type Section = 'shelf' | 'find' | 'taught' | 'taxonomy';
+type Section = 'shelf' | 'food' | 'find' | 'taught' | 'taxonomy';
 
 const SECTIONS: { key: Section; label: string }[] = [
   { key: 'shelf', label: 'On a shelf' },
+  { key: 'food', label: 'Somewhere to eat' },
   { key: 'find', label: 'Find a place' },
   { key: 'taxonomy', label: 'Categories' },
   { key: 'taught', label: 'What you have taught' },
@@ -96,7 +97,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
 
   const [vocab, setVocab] = useState<ShelfVocabulary | null>(null);
   // Which view, and which shelf is being taught, are in the address.
-  const [section, setSection] = useQueryState<Section>('tab', 'shelf', asOneOf(['shelf', 'find', 'taught', 'taxonomy'] as const, 'shelf'));
+  const [section, setSection] = useQueryState<Section>('tab', 'shelf', asOneOf(['shelf', 'food', 'find', 'taught', 'taxonomy'] as const, 'shelf'));
   const [mood, setMood] = useQueryState<MoodKey>('mood', 'adrenaline', asOneOf(MOODS, 'adrenaline'));
   const [items, setItems] = useState<ShelfPlace[]>([]);
   const [nearly, setNearly] = useState<ShelfPlace[]>([]);
@@ -104,6 +105,13 @@ export function Shelves({ canManage }: { canManage: boolean }) {
   const [where, setWhere] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [found, setFound] = useState<ShelfPlace[]>([]);
+  // Somewhere to eat is a live look-around and costs a provider call, so it is
+  // never loaded by arriving on the tab — only by pressing the button.
+  const [food, setFood] = useState<ShelfPlace[]>([]);
+  const [foodDrawers, setFoodDrawers] = useState<{ key: string | null; label: string; count: number }[]>([]);
+  const [foodQ, setFoodQ] = useState('');
+  const [foodKm, setFoodKm] = useState(5);
+  const [foodNote, setFoodNote] = useState<string | null>(null);
   // Which drawer is open is in the address like everything else, so a shelf
   // narrowed to one subcategory is a link somebody can be sent.
   const [drawer, setDrawer] = useQueryState<string>('drawer', '', asText);
@@ -143,11 +151,33 @@ export function Shelves({ canManage }: { canManage: boolean }) {
     return () => clearTimeout(t);
   }, [q, section]);
 
+  /**
+   * The live look-around for somewhere to eat.
+   *
+   * On a press, never on arrival. It is the same cached search the Places tab
+   * runs, so a second look at the same corner within the hour asks nobody.
+   */
+  const loadFood = useCallback(async () => {
+    setBusy(true);
+    try {
+      const d = await api.shelfFoodPlaces({ q: foodQ.trim() || undefined, km: foodKm });
+      setFood(d.items);
+      setFoodDrawers(d.drawers ?? []);
+      setFoodNote(`${d.items.length} within ${d.km} km of ${d.place.label ?? 'here'}${d.cached ? ' — from the cache, nothing was asked' : ` — asked ${d.sources.join(' and ') || 'nobody'}`}.`);
+    } catch (err) { setFoodNote(String((err as Error).message)); }
+    finally { setBusy(false); }
+  }, [foodQ, foodKm]);
+
   /** After anything is taught, the shelf is drawn again — that is the whole loop. */
   const refresh = useCallback(async () => {
     await Promise.all([loadVocab(), loadShelf()]);
     if (q.trim().length >= 2) await api.shelfFindPlaces(q.trim()).then((d) => setFound(d.places)).catch(() => {});
-  }, [loadVocab, loadShelf, q]);
+    // The food list is redrawn from the cache, so a correction shows straight
+    // away without a second provider call.
+    if (food.length) await api.shelfFoodPlaces({ q: foodQ.trim() || undefined, km: foodKm })
+      .then((d) => { setFood(d.items); setFoodDrawers(d.drawers ?? []); })
+      .catch(() => {});
+  }, [loadVocab, loadShelf, q, food.length, foodQ, foodKm]);
 
   /**
    * The fast one. One tap on a drawer files the place there and the shelf is
@@ -178,7 +208,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
 
   const shelfLabel = (key: MoodKey) => vocab?.shelves.find((s) => s.key === key)?.label ?? key;
 
-  const rows = section === 'find' ? found : items;
+  const rows = section === 'find' ? found : section === 'food' ? food : items;
 
   return (
     <AdminPage>
@@ -252,6 +282,47 @@ export function Shelves({ canManage }: { canManage: boolean }) {
         </>
       ) : null}
 
+      {section === 'food' ? (
+        <>
+          <Panel
+            title="Somewhere to eat, as the Places tab sees it"
+            sub="The atlas holds no restaurants, so this is a live look-around — the same cached search Places runs. It costs a provider call unless this corner was looked at recently, so it happens on a press."
+          >
+            <Row style={{ gap: spacing.sm, flexWrap: 'wrap' }}>
+              <View style={[styles.search, { flexGrow: 1, flexBasis: 200 }]}>
+                <Icon name="search" size={15} color={colors.inkMuted} />
+                <TextInput
+                  value={foodQ}
+                  onChangeText={setFoodQ}
+                  placeholder="Everything nearby, or a name — pizza, chicken, Popeyes"
+                  placeholderTextColor={colors.inkFaint}
+                  style={styles.searchInput}
+                  onSubmitEditing={() => void loadFood()}
+                />
+              </View>
+              <Stepper label="Within" value={foodKm} min={1} max={25} onChange={setFoodKm} format={(v) => `${v} km`} />
+              <Button label={busy ? 'Looking…' : 'Look around'} icon="search" disabled={busy || !canManage} onPress={() => void loadFood()} />
+            </Row>
+            {foodNote ? <Text style={type.tiny}>{foodNote}</Text> : null}
+            <Text style={type.tiny}>
+              Google tags most fast food itself — fast_food_restaurant, meal_takeaway — and Epic reads all of it. It
+              does not tag every chain, and those are the ones to move by hand. There is no type to teach against here:
+              a correction is about this one place, because Google's own tags are per-place.
+            </Text>
+          </Panel>
+
+          {food.length ? (
+            <FilterRow>
+              <FilterChip label="All" count={food.length} on={!drawer} onPress={() => setDrawer('')} />
+              {foodDrawers.filter((d) => d.count > 0 || d.key === null).map((d) => (
+                <FilterChip key={d.key ?? 'unsorted'} label={d.label} count={d.count}
+                            on={drawer === (d.key ?? '')} onPress={() => setDrawer(d.key ?? '')} />
+              ))}
+            </FilterRow>
+          ) : null}
+        </>
+      ) : null}
+
       {section === 'find' ? (
         <Panel title="Find the place" sub="Type the name off the card you were looking at">
           <View style={styles.search}>
@@ -282,12 +353,16 @@ export function Shelves({ canManage }: { canManage: boolean }) {
         />
       ) : null}
 
-      {section === 'shelf' || section === 'find' ? (
+      {section === 'shelf' || section === 'find' || section === 'food' ? (
         <Panel
-          title={section === 'find' ? 'What Epic thinks of these' : `${shelfLabel(mood)}, as the home screen draws it`}
+          title={section === 'find' ? 'What Epic thinks of these'
+            : section === 'food' ? 'Where each one is filed'
+            : `${shelfLabel(mood)}, as the home screen draws it`}
           sub={section === 'find'
             ? 'Where each one sits, and why'
-            : 'The same list, composed the same way. Tap anything that does not belong.'}
+            : section === 'food'
+              ? 'Tap the pair on the right to move one. It writes a rule about that place, and the Places tab reads the same answer.'
+              : 'The same list, composed the same way. Tap anything that does not belong.'}
           padded={false}
         >
           {rows.length === 0 ? (
@@ -295,7 +370,9 @@ export function Shelves({ canManage }: { canManage: boolean }) {
               <Text style={type.small}>
                 {section === 'find'
                   ? (q.trim().length < 2 ? 'Type a name above.' : 'Nothing in the atlas by that name.')
-                  : `Nothing is on ${shelfLabel(mood)} near ${where ?? 'home'}.`}
+                  : section === 'food'
+                    ? 'Press "Look around" and this fills with somewhere to eat.'
+                    : `Nothing is on ${shelfLabel(mood)} near ${where ?? 'home'}.`}
               </Text>
               {section === 'shelf' && nearly.length ? (
                 <Text style={type.tiny}>
@@ -305,7 +382,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
                 </Text>
               ) : null}
             </View>
-          ) : rows.map((p) => (
+          ) : (section === 'food' && drawer ? rows.filter((p) => p.subcategory === drawer) : rows).map((p) => (
             <PlaceRow key={p.ref} place={p} wide={wide} order={order} vocab={vocab}
                       canManage={canManage} onTeach={() => setTeaching(p)} shelfLabel={shelfLabel}
                       open={moving === p.ref} onOpen={() => setMoving(moving === p.ref ? null : p.ref)}
@@ -415,6 +492,12 @@ function PlaceRow({ place, wide, order, vocab, canManage, onTeach, shelfLabel, h
         <Pressable onPress={canManage ? onTeach : undefined} style={{ flex: 1, gap: 3, minWidth: 0 }}>
           <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
             <Text style={styles.rowName} numberOfLines={1}>{place.name}</Text>
+            {/* What the source itself called it. A food place has no Wikidata
+                types to explain it, and "restaurant · fast-food · takeaway" is
+                the whole reason it landed where it did. */}
+            {(place.tags ?? []).map((t) => (
+              <Pill key={t} label={t} tone={t === 'fast-food' || t === 'takeaway' ? 'warn' : 'plain'} />
+            ))}
             {place.rule ? <Pill label="taught" tone="accent" /> : null}
             {place.confident === false ? <Pill label="not sure" tone="warn" /> : null}
           </Row>
