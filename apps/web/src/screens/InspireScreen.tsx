@@ -562,8 +562,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // under a rating floor, the whole of the mode, so the floor can be honest.
   useEffect(() => {
     if (rating > 0) { askAbout(inMode); return; }
-    askAbout(pick ? listed : shelves.flatMap((sh) => sh.items.slice(0, ACROSS)));
-  }, [pick, listed, shelves, rating, inMode, askAbout]);
+    // The answer to a spoken request draws every row it has, so every row is asked about.
+    askAbout(pick ? listed : answer?.length ? answer : shelves.flatMap((sh) => sh.items.slice(0, ACROSS)));
+  }, [pick, listed, shelves, rating, inMode, askAbout, answer]);
 
   /** The place, opened — `?place=…` over whichever list is showing. */
   const asDrawerItem = (item: InspireItem) => ({

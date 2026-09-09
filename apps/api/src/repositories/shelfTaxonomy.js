@@ -146,16 +146,20 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
   }
 
   const { rows } = await query(
-    `insert into shelf_subcategories (category_key, key, label, blurb, position, seeded)
-     values ($1, $2, $3, $4, coalesce($5, 100), false)
+    `insert into shelf_subcategories (category_key, key, label, blurb, position, seeded, indoor, for_kids)
+     values ($1, $2, $3, $4, coalesce($5, 100), false,
+             case when $6::text is null or $6 = 'unset' then null else ($6 = 'true') end,
+             case when $7::text is null or $7 = 'unset' then null else ($7 = 'true') end)
      on conflict (key) do update
         set category_key = excluded.category_key,
             label        = excluded.label,
             blurb        = coalesce(excluded.blurb, shelf_subcategories.blurb),
             position     = coalesce($5, shelf_subcategories.position),
+            indoor       = case when $6::text is null then shelf_subcategories.indoor when $6 = 'unset' then null else ($6 = 'true') end,
+            for_kids     = case when $7::text is null then shelf_subcategories.for_kids when $7 = 'unset' then null else ($7 = 'true') end,
             updated_at   = now()
      returning *`,
-    [categoryKey, k, label ?? k, blurb ?? null, position ?? null]);
+    [categoryKey, k, label ?? k, blurb ?? null, position ?? null, triState(indoor), triState(forKids)]);
   forget();
   return rows[0];
 }
