@@ -652,6 +652,9 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       for (const p of places?.places ?? []) {
         if (p.lat == null || p.venueRef.startsWith('base:')) continue;
         if (pill === 'shortlist' && !stillSaved(p)) continue;
+        // The destination's own stop (an outing to a venue seeds one) is the
+        // pin already; an ink square on top of the pin is two marks for one place.
+        if (p.scheduled && dest?.lat != null && kmApart({ lat: p.lat as number, lng: p.lng as number }, { lat: dest.lat, lng: dest.lng as number }) < 0.1) continue;
         out.push({
           id: p.venueRef, lat: p.lat as number, lng: p.lng as number,
           kind: p.scheduled ? 'added' : 'saved',
@@ -779,7 +782,9 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     ? { top: 40, bottom: 40, left: 40, right: 460 }
     // Wide enough at the sides for a label centred under a marker at the edge
     // ("09:19 Home" was cut off at the left of the frame).
-    : { top: 96, bottom: covered + 36, left: 64, right: 64 };
+    // …and under: the tiles stand on the sheet, and a marker at the near end
+    // of the route needs to sit, with its label, above them.
+    : { top: 96, bottom: covered + (welcome ? 112 : 88), left: 64, right: 64 };
 
 
   // ---- adding -------------------------------------------------------------
@@ -1049,14 +1054,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
               const there = trip.journey?.minutes ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
               return (
                 <View style={styles.metaRow}>
-                  <Text style={type.small} numberOfLines={1}>{`${fmtDate(trip.startDate ?? trip.departAt)} ·`}</Text>
+                  <Text style={type.small}>{`${fmtDate(trip.startDate ?? trip.departAt)} ·`}</Text>
                   {there ? (
                     <>
                       <Icon name={modeIcon(trip.travelMode)} size={14} color={colors.inkMuted} strokeWidth={2} />
-                      <Text style={type.small} numberOfLines={1}>{`${mins(there)} each way ·`}</Text>
+                      <Text style={type.small}>{`${mins(there)} each way ·`}</Text>
                     </>
-                  ) : base ? <Text style={type.small} numberOfLines={1}>{`from ${base.label.split(',')[0]} ·`}</Text> : null}
-                  <Text style={type.small} numberOfLines={1}>{`${party || 1} ${(party || 1) === 1 ? 'person' : 'people'}`}</Text>
+                  ) : base ? <Text style={type.small}>{`from ${base.label.split(',')[0]} ·`}</Text> : null}
+                  <Text style={type.small}>{`${party || 1} ${(party || 1) === 1 ? 'person' : 'people'}`}</Text>
                 </View>
               );
             })()}
@@ -3990,7 +3995,8 @@ const styles = StyleSheet.create({
   },
   mapTileBadgeOn: { backgroundColor: colors.ink },
   mapTileBadgeText: { fontFamily: fonts.heading, fontSize: 11, fontWeight: '800', color: colors.ink },
-  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'nowrap', gap: 5 },
+  // Wraps to a second line rather than clipping each word in turn.
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 5, rowGap: 2 },
   beatDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 
   // The app draws under the clock now, so anything floating at the top of the
