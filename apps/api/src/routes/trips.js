@@ -1191,6 +1191,8 @@ router.get('/:id/along', async (req, res, next) => {
        * Bath" instead — the same number, named for what it actually is.
        */
       hasRoute: !!destination,
+      /** The shelves, in the order and words the back office keeps them, so the lanes match Inspire's (Codex, 9 Sep 2026). */
+      moods: (tax?.active?.categories ?? []).map((c) => ({ key: c.key, label: c.label ?? c.key })),
       places: within.slice(0, 60).map(({ _t, _off, _inside, ...p }) => p),
       counts: { route: within.length },
       /** How many were found and left out, so the screen can offer a wider detour honestly. */
