@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, PressableProps, PressableStateCallbackType, StyleSheet, View, ViewStyle } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Platform, Pressable, PressableProps, PressableStateCallbackType, StyleSheet, View, ViewStyle } from 'react-native';
 import { colors } from '../theme';
 import { at, POP, PressEffect, RING, SINK } from './pressMotion';
 
@@ -13,20 +13,24 @@ export type { PressEffect } from './pressMotion';
  * is held, and eases back when it is let go. `effect="pop"` is for the one
  * button that adds something to a trip — a squash and a spring that
  * overshoots. `effect="none"` keeps the plain Pressable for things that are
- * tapped but are not buttons (a photograph, a row that is being dragged).
+ * tapped but are not buttons (a row that is being dragged).
  *
  * It takes exactly what `Pressable` takes, including a style function and a
  * transform of its own, so swapping one for the other changes nothing but the
  * motion. Someone who has asked their system for less motion gets none.
  */
 export const Press = React.forwardRef<View, PressableProps & { effect?: PressEffect; children?: React.ReactNode | ((s: PressableStateCallbackType) => React.ReactNode) }>(function Press(
-  { effect = 'sink', style, onPressIn, onPressOut, disabled, ...rest },
+  { effect = 'sink', style, onPressIn, onPressOut, onHoverIn, onHoverOut, onFocus, onBlur, disabled, ...rest },
   ref,
 ) {
   const v = useRef(new Animated.Value(0)).current;
   const [pressed, setPressed] = useState(false);
-  const still = reducedMotion();
-  const animate = effect !== 'none' && !still;
+  // The animated Pressable cannot take a style function, so the state a
+  // caller's function reads — pressed, and on the web hovered and focused —
+  // is tracked here from the same events and handed to it unchanged.
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const animate = effect !== 'none' && !reducedMotion();
 
   const down = useCallback((e: any) => {
     setPressed(true);
@@ -45,9 +49,7 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
     else Animated.timing(v, { toValue: 0, duration: SINK.upMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
   }, [animate, effect, onPressOut, v]);
 
-  // Pressable's own `pressed` and ours are the same events, so a style
-  // function sees what it always saw.
-  const resolved = typeof style === 'function' ? style({ pressed }) : style;
+  const resolved = typeof style === 'function' ? style({ pressed, hovered, focused } as PressableStateCallbackType) : style;
   const flat = (StyleSheet.flatten(resolved) ?? {}) as ViewStyle;
   const own = animate ? transformFor(effect, v) : [];
   const transform = own.length ? [...((flat.transform as any[]) ?? []), ...own] : flat.transform;
@@ -58,6 +60,10 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
       disabled={disabled}
       onPressIn={down}
       onPressOut={up}
+      onHoverIn={(e) => { setHovered(true); onHoverIn?.(e); }}
+      onHoverOut={(e) => { setHovered(false); onHoverOut?.(e); }}
+      onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+      onBlur={(e) => { setFocused(false); onBlur?.(e); }}
       style={transform ? [flat, { transform }] : flat}
       {...rest}
     />
@@ -117,10 +123,27 @@ export function Ring({ pulse, size = 40, color = colors.ink }: { pulse: number; 
   );
 }
 
-/** True when the person has asked their system for less motion. Read at press time, not at build time, so a change of setting is honoured without a reload. */
+/**
+ * True when the person has asked their system for less motion. One media query
+ * for the whole app on the web, read live each time — so a change of setting is
+ * honoured without a reload, and three hundred rows do not each build a query
+ * per render. On a phone it is the system's Reduce Motion switch, asked once
+ * and listened to from then on.
+ */
 export function reducedMotion(): boolean {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (Platform.OS !== 'web') return nativeStill;
+  if (query === undefined) {
+    query = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : null;
+  }
+  return query?.matches ?? false;
+}
+let query: MediaQueryList | null | undefined;
+let nativeStill = false;
+if (Platform.OS !== 'web') {
+  AccessibilityInfo.isReduceMotionEnabled().then((on) => { nativeStill = on; }).catch(() => {});
+  AccessibilityInfo.addEventListener('reduceMotionChanged', (on) => { nativeStill = on; });
 }
 
 /** For anything that wants the sink's numbers without Animated — a test, a static preview. */
