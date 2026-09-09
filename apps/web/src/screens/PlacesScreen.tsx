@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
-import { Icon, iconFor } from '../components/Icon';
+import { Icon } from '../components/Icon';
 import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, TripBrief, Venue, Visit } from '../api';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { VenueThumb } from '../components/VenueThumb';
+import { CARD_H, CARD_W, VenueThumb } from '../components/VenueThumb';
 import { Flag } from '../components/Flag';
 import { Wordmark } from '../components/Wordmark';
 import type { TripSeed } from './TripsScreen';
@@ -19,7 +19,7 @@ import { getViewer, onViewerChange } from '../viewer';
 import { isAdmin } from '../admin';
 import { CategoryStrip, PairSwitch, TOP_INSET } from '../components/InspireHeader';
 import { ControlButton, ControlRow, CrumbHead, Popover, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
-import { Crowd, MEDIA_RADIUS } from '../components/InspireBody';
+import { Crowd, MediaCard } from '../components/InspireBody';
 import { EMPTY_LIST, LIST_KEYS, LISTS, PLACE_SORTS, PLACE_SORT_KEYS, epicRating, foodType, inList, sortPlaces, whenLabel, type ListKey, type PlaceSort } from './placesRows';
 
 // Trips still imports these from here.
@@ -42,9 +42,7 @@ export type { VisitCreateBody } from '../components/Visits';
  */
 
 /** The picture square at the head of a place row: "64px 10px-radius thumbnail". */
-const WELL = 64;
 /** "…or a 40px outlined type glyph when there is no photo." */
-const GLYPH_WELL = 40;
 /** The flat flag on a country row: "36×24". */
 const FLAG_W = 36;
 const FLAG_H = 24;
@@ -600,6 +598,8 @@ function ListBody({ st, ui, places, viewer, country, city, homeArea, household, 
   landed: { venueRef: string; kind: Kind } | null; onLandedShown: () => void;
 }) {
   const home = !!homeArea;
+  const { width } = useViewport();
+  const wide = width >= 900;
   // Something just added: the search closes, the tab follows the place, and
   // the row is marked so the eye finds it.
   useEffect(() => {
@@ -632,10 +632,16 @@ function ListBody({ st, ui, places, viewer, country, city, homeArea, household, 
       ) : (
         <>
           {st.rows.length ? (
-            <View>
+            // Inspire's cards (owner, 9 Sep 2026: "When I click into Places, it
+            // should be the same thing, same sort of layout, with the photo").
+            // A wrapping grid of Inspire's 208px cards on a wide screen; on a
+            // phone, Inspire's own drill-down form — one full-width card after
+            // another, rule-separated — because a 208px card in a 390px column
+            // is neither a shelf nor a list.
+            <View style={wide ? styles.cardGrid : undefined}>
               {st.rows.map((p) => (
-                <PlaceRow
-                  key={p.venueRef} place={p} kind={st.shown} viewer={viewer}
+                <PlaceCard
+                  key={p.venueRef} place={p} kind={st.shown} viewer={viewer} wide={wide}
                   selected={openRef === p.venueRef || landed?.venueRef === p.venueRef}
                   onPress={() => { onLandedShown(); onOpen(p); }}
                 />
@@ -667,52 +673,58 @@ function ListBody({ st, ui, places, viewer, country, city, homeArea, household, 
 }
 
 /**
- * One place, one row (handover v8): a 64px thumbnail or a 40px outlined type
- * glyph; the name; "Pub · Sunningdale"; ★ rating (count) and the date; and,
- * in a column of its own, the Epic rating — the household's own mark, over
- * the crowd's, which stays on the meta line. Rows with no Epic rating leave
- * the column empty.
+ * One place, one card — Inspire's card, with the Places foot.
+ *
+ * This was a dense row (handover v8: a 64px thumbnail, the name, "Pub ·
+ * Sunningdale", the rating and the date, and the Epic rating in a column). The
+ * owner, 9 Sep 2026: "in Inspire, we have a lovely layout. When I click into
+ * Places, it should be the same thing, same sort of layout, with the photo."
+ * So it is the same component Inspire draws, with the same 3:2 rounded
+ * photograph, and everything the row said is still said — the meta line, the
+ * crowd's rating and the date, and the household's own Epic rating, which was
+ * the point of the row and is not dropped in the move.
+ *
+ * With no picture at all, VenueThumb draws the category's icon on the lime
+ * ground, the same floor every other tab has; the outlined type glyph the row
+ * used to draw was the same idea in a different frame.
  */
-function PlaceRow({ place, kind, viewer, selected, onPress }: { place: AtlasPlace; kind: Kind; viewer: string | null; selected: boolean; onPress: () => void }) {
+function PlaceCard({ place, kind, viewer, selected, wide, onPress }: {
+  place: AtlasPlace; kind: Kind; viewer: string | null; selected: boolean; wide: boolean; onPress: () => void;
+}) {
   const ours = epicRating(place, viewer);
   const what = typeOf(place, kind);
   const meta = [what, place.locality].filter(Boolean).join(' · ');
   const when = whenLabel(place.lastOn);
-  const hasPicture = Boolean(place.image) || Boolean(place.photos?.length);
+  const experiences = (place.venue as Partial<Venue> | null)?.experiences ?? [];
+  const thumb = (
+    <VenueThumb
+      name={place.name} image={place.image} photos={place.photos} category={place.category}
+      experiences={experiences} credit={false}
+      {...(wide ? { width: CARD_W, height: CARD_H } : { fill: true })}
+    />
+  );
   return (
-    <Press onPress={onPress} style={[styles.prow, selected && styles.rowOn]} accessibilityRole="button" accessibilityLabel={place.name}>
-      {hasPicture ? (
-        <VenueThumb
-          name={place.name} image={place.image} photos={place.photos} category={place.category}
-          experiences={(place.venue as Partial<Venue> | null)?.experiences ?? []}
-          width={WELL} height={WELL} rounded={MEDIA_RADIUS - 2} credit={false}
-        />
-      ) : (
-        <View style={styles.glyphWell}>
-          <View style={styles.glyph}>
-            <Icon name={iconFor({ category: place.category, experiences: (place.venue as Partial<Venue> | null)?.experiences ?? [] })} size={20} color={colors.ink} strokeWidth={2} />
-          </View>
-        </View>
-      )}
-      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <Text style={[styles.prowName, place.unnamed && { fontStyle: 'italic', color: colors.inkMuted }]} numberOfLines={1}>{place.unnamed ? 'Unnamed place — open for its name' : place.name}</Text>
-        {meta ? <Text style={styles.prowMeta} numberOfLines={1}>{meta}</Text> : null}
+    <MediaCard
+      wide={!wide} selected={selected} onPress={onPress} thumb={thumb}
+      name={place.unnamed ? 'Unnamed place — open for its name' : place.name} muted={place.unnamed}
+    >
+      {meta ? <Text style={styles.prowMeta} numberOfLines={1}>{meta}</Text> : null}
+      <View style={styles.cardFoot}>
         <View style={styles.prowLine}>
           {place.rating != null ? <Crowd rating={place.rating} count={place.ratingCount} size={12} brief /> : null}
           {when ? <Text style={[styles.prowMeta, place.rating != null && { marginLeft: 6 }]}>{when}</Text> : null}
         </View>
-      </View>
-      {ours ? (
-        <View style={styles.ours} accessibilityLabel={`Epic rating ${ours.score}, ${ours.by}`}>
-          <Text style={styles.oursCaption}>Epic rating</Text>
-          <View style={styles.oursBlock}>
-            <Icon name="favourite" size={13} color={colors.selectedFg} fill />
-            <Text style={styles.oursScore}>{ours.score.toFixed(1)}</Text>
+        {ours ? (
+          <View style={styles.ours} accessibilityLabel={`Epic rating ${ours.score}, ${ours.by}`}>
+            <View style={styles.oursBlock}>
+              <Icon name="favourite" size={13} color={colors.selectedFg} fill />
+              <Text style={styles.oursScore}>{ours.score.toFixed(1)}</Text>
+            </View>
+            <Text style={styles.oursBy} numberOfLines={1}>{ours.by}</Text>
           </View>
-          <Text style={styles.oursBy} numberOfLines={1}>{ours.by}</Text>
-        </View>
-      ) : <View style={styles.oursBlank} />}
-    </Press>
+        ) : null}
+      </View>
+    </MediaCard>
   );
 }
 
@@ -1064,18 +1076,14 @@ const styles = StyleSheet.create({
   addRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: GUTTER },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 36, paddingVertical: 4 },
   addText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
-  prow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, marginHorizontal: GUTTER, minHeight: TARGET,
-    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
-  },
-  rowOn: { backgroundColor: colors.accentSoft },
+  // Inspire's shelf, wrapped: the same 208px cards, the same 12px gap.
+  cardGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: GUTTER },
+  cardFoot: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.sm },
   rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
-  glyphWell: { width: WELL, height: WELL, alignItems: 'center', justifyContent: 'center' },
-  glyph: { width: GLYPH_WELL, height: GLYPH_WELL, borderWidth: 1, borderColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center' },
   prowName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
   prowMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.inkMuted },
   prowLine: { flexDirection: 'row', alignItems: 'center', minHeight: 17 },
-  ours: { alignItems: 'center', gap: 2, minWidth: 78, flexShrink: 0 },
+  ours: { alignItems: 'flex-end', gap: 2, flexShrink: 0 },
   oursCaption: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: colors.inkMuted },
   oursBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.selected, paddingVertical: 4, paddingHorizontal: 9 },
   oursScore: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.selectedFg },
