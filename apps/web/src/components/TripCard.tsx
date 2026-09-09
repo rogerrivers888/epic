@@ -39,7 +39,7 @@ export function TripCard({ trip: t, members = [], onPress }: {
   return (
     <Press onPress={onPress} accessibilityRole="button">
       <View style={styles.tripCard}>
-        <VenueThumb name={tripTitle(t)} image={t.image ?? null} category="place" width={92} height={92} rounded={radius.lg} credit={false} />
+        <VenueThumb name={tripTitle(t)} image={t.image ?? null} category="place" width={120} height={80} credit={false} />
         <View style={{ flex: 1, minWidth: 0, gap: 4, justifyContent: 'center' }}>
           {/* One naming rule for the whole app (tripName.ts): a name somebody
               chose beats a name we derived, and a title auto-made from a

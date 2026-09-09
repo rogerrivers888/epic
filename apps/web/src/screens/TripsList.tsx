@@ -177,8 +177,10 @@ function TripRow({ trip, onPress, onHold }: { trip: TripSummary; onPress: () => 
     >
       {/* 84 at 1.6 (owner, 8 Sep 2026: "increase image size 60%", on Trips as
           on Inspire) — a trip is remembered by where it went, and the picture
-          is the fastest way to say it. */}
-      <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} width={134} height={134} rounded={0} credit={false} />
+          is the fastest way to say it. The width is that 134; the shape is the
+          one every photograph now has (9 Sep 2026): 3:2 and rounded, not a
+          square with square corners. */}
+      <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} width={134} height={89} credit={false} />
       <View style={styles.rowBody}>
         <Text style={styles.name} numberOfLines={2}>{tripTitle(trip)}</Text>
         <Text style={styles.meta} numberOfLines={1}>{meta}</Text>

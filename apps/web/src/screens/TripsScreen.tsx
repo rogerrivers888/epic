@@ -784,8 +784,11 @@ function TripPlaceRow({ place: p, first, isPast, onPress }: { place: TripPlace; 
   const said = p.scores.length ? p.scores.map((s) => `${s.member.split(' ')[0]} ${s.score}`).join(' · ') : null;
   return (
     <Press onPress={onPress} style={[styles.prow, !first && styles.rowLine]} accessibilityRole="button">
-      {/* The same 60% the Trips list took (owner, 8 Sep 2026): 56 becomes 90. */}
-      <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={radius.md} credit={false} />
+      {/* The same 60% the Trips list took (owner, 8 Sep 2026): 56 becomes 90 —
+          and now the shape every photograph has (9 Sep 2026): 3:2, rounded, so
+          a place looks the same here as on Inspire. `radius.md` is nought in
+          Epic, which is why this one was square. */}
+      <VenueThumb name={p.name} image={p.image} category={p.category} width={120} height={80} credit={false} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <Text style={type.h3} numberOfLines={1}>{p.name ?? 'A place'}</Text>
         {meta ? <Text style={type.small} numberOfLines={1}>{meta}</Text> : null}
@@ -1218,7 +1221,7 @@ function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
                         credit; with no picture it falls back to the bed icon on
                         the one lime ground rather than inventing something. */}
                     <Row style={{ gap: spacing.md, alignItems: 'flex-start' }}>
-                      <VenueThumb name={s.name} photos={s.photos} category="hotel" width={147} height={112} credit={false} rounded={radius.sm} />
+                      <VenueThumb name={s.name} photos={s.photos} category="hotel" width={147} height={98} credit={false} />
                       <View style={{ flex: 1, gap: 3 }}>
                         <Text style={type.h3} numberOfLines={2}>{s.name}</Text>
                         {/* What it is graded at, then where it is. */}

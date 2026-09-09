@@ -88,8 +88,13 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
           </Press>
         </View>
 
+        {/* The same photograph as the card that was tapped: inside the gutter,
+            3:2, rounded (owner, 9 Sep 2026). It was a full-width 180px band
+            with square corners. */}
         {place?.image ? (
-          <VenueThumb name={name} image={place.image} category={place.category} width={width >= 900 ? 680 : width - 0} height={180} rounded={0} credit={false} />
+          <View style={{ paddingHorizontal: 20 }}>
+            <VenueThumb name={name} image={place.image} category={place.category} fill credit={false} />
+          </View>
         ) : null}
 
         <View style={styles.tabs}>

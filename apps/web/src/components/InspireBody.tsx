@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
-import { API_URL, InspireItem } from '../api';
+import { InspireItem } from '../api';
 import { colors, fonts, spacing, TARGET } from '../theme';
-import { Icon, IconName, iconFor } from './Icon';
-import { PHOTO_W } from './VenueThumb';
+import { Icon, IconName } from './Icon';
+import { CARD_H, CARD_W, MEDIA_RADIUS, VenueThumb } from './VenueThumb';
 import { briefly, priceMarks } from '../screens/inspireList';
 
 /**
@@ -18,15 +18,13 @@ import { briefly, priceMarks } from '../screens/inspireList';
  */
 
 const GUTTER = 20;
-/** "Cards 208px wide, fixed 3:2 media, 12px radius." */
-const CARD_W = 208;
-const CARD_H = Math.round((CARD_W * 2) / 3);
 /**
- * The one place a corner is rounded: "zero radius except photo media
- * (10–12px)". A picture is not a card — the frame round it is what the pack
- * keeps square.
+ * The card's geometry — 208 wide, 3:2 media, 12px corners — lives with the
+ * component that draws every photograph (VenueThumb), not here. It was here,
+ * and that is how Inspire came to be the only tab that had it (owner, 9 Sep
+ * 2026). Re-exported so nothing that imported it from this file moves.
  */
-export const MEDIA_RADIUS = 12;
+export { MEDIA_RADIUS };
 
 export type Crowd = { rating: number | null; ratingCount: number | null; known?: boolean };
 
@@ -101,30 +99,38 @@ function Journey({ item, travel }: { item: InspireItem; travel?: Travel }) {
  * `fill` makes it as wide as its parent at 3:2 — the full-width card — instead
  * of a fixed size.
  */
-export function PlaceThumb({ item, width, height, fill, rounded = MEDIA_RADIUS }: {
-  item: InspireItem; width?: number; height?: number; fill?: boolean; rounded?: number;
+export function PlaceThumb({ item, width, height, fill }: {
+  item: InspireItem; width?: number; height?: number; fill?: boolean;
 }) {
-  const owned = item.image;
-  const photo = item.photos?.[0];
-  const big = fill || (width ?? 0) > 200;
-  const uri = owned
-    ? `${API_URL}/api/images/${owned.id}/${big ? 960 : 500}`
-    : photo?.url ?? (photo?.ref ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}` : null);
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const box = fill ? { width: '100%' as const, aspectRatio: 3 / 2 } : { width, height };
-  const glyph = fill ? 40 : Math.round(Math.min(width ?? 40, height ?? 40) * 0.26);
+  // The same component as every other photograph in the app. This used to be
+  // its own renderer with its own copy of the lqip-then-photo dance, which is
+  // exactly how two tabs came to draw the same picture two ways.
   return (
-    <View style={[styles.thumb, { borderRadius: rounded }, box]}>
-      {owned?.lqip && !loaded && !failed ? (
-        <Image source={{ uri: owned.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors />
-      ) : null}
-      {uri && !failed ? (
-        <Image source={{ uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" onError={() => setFailed(true)} onLoad={() => setLoaded(true)} accessibilityIgnoresInvertColors />
-      ) : (
-        <View style={styles.thumbEmpty}><Icon name={iconFor(item)} size={glyph} color={colors.icon} /></View>
-      )}
-    </View>
+    <VenueThumb
+      name={item.name} image={item.image} photos={item.photos}
+      category={item.category} experiences={item.experiences} atlasCategory={item.atlasCategory}
+      width={width} height={height} fill={fill} credit={false}
+    />
+  );
+}
+
+/**
+ * The card itself — the picture, the name, and whatever the caller puts under
+ * them. Exported because Places draws the same card with a different foot
+ * (owner, 9 Sep 2026: "in Inspire, we have a lovely layout. When I click into
+ * Places, it should be the same thing, same sort of layout, with the photo").
+ * `wide` is the drill-down's full-width form, rule-separated.
+ */
+export function MediaCard({ thumb, name, muted, wide, selected, onPress, children }: {
+  thumb: React.ReactNode; name: string; muted?: boolean; wide?: boolean; selected?: boolean;
+  onPress: () => void; children?: React.ReactNode;
+}) {
+  return (
+    <Press onPress={onPress} style={wide ? styles.cardWide : styles.card} accessibilityRole="button" accessibilityLabel={name} accessibilityState={{ selected }}>
+      {thumb}
+      <Text style={[wide ? styles.cardWideName : styles.cardName, muted && styles.cardNameMuted, selected && styles.cardNameOn]} numberOfLines={2}>{name}</Text>
+      {children}
+    </Press>
   );
 }
 
@@ -179,15 +185,13 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travel }
 function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crowd; travel?: Travel; onOpen: () => void }) {
   const price = priceMarks(item.priceLevel);
   return (
-    <Press onPress={onOpen} style={styles.card} accessibilityRole="button" accessibilityLabel={item.name}>
-      <PlaceThumb item={item} width={CARD_W} height={CARD_H} />
-      <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+    <MediaCard name={item.name} onPress={onOpen} thumb={<PlaceThumb item={item} width={CARD_W} height={CARD_H} />}>
       {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
       <View style={styles.cardFoot}>
         <Journey item={item} travel={travel} />
         {price ? <Text style={styles.price}>{price}</Text> : null}
       </View>
-    </Press>
+    </MediaCard>
   );
 }
 
@@ -195,15 +199,13 @@ function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crow
 export function CardWide({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crowd; travel?: Travel; onOpen: () => void }) {
   const price = priceMarks(item.priceLevel);
   return (
-    <Press onPress={onOpen} style={styles.cardWide} accessibilityRole="button" accessibilityLabel={item.name}>
-      <PlaceThumb item={item} fill />
-      <Text style={styles.cardWideName} numberOfLines={2}>{item.name}</Text>
+    <MediaCard wide name={item.name} onPress={onOpen} thumb={<PlaceThumb item={item} fill />}>
       {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
       <View style={styles.cardFoot}>
         <Journey item={item} travel={travel} />
         {price ? <Text style={styles.price}>{price}</Text> : null}
       </View>
-    </Press>
+    </MediaCard>
   );
 }
 
@@ -294,9 +296,6 @@ export function EmptyMatch({ title = 'Nothing matches', body, action, onAction }
 }
 
 const styles = StyleSheet.create({
-  thumb: { backgroundColor: colors.switchOff, overflow: 'hidden' },
-  thumbEmpty: { ...(StyleSheet.absoluteFill as object), alignItems: 'center', justifyContent: 'center' },
-
   section: { gap: spacing.md },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: GUTTER },
   sectionTitle: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink },
@@ -304,6 +303,9 @@ const styles = StyleSheet.create({
   carousel: { gap: 12, paddingHorizontal: GUTTER },
   card: { width: CARD_W, gap: 7 },
   cardName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', lineHeight: 18, color: colors.ink },
+  cardNameMuted: { fontStyle: 'italic', color: colors.inkMuted },
+  // The one whose drawer is open: moss, the same green a selected category uses.
+  cardNameOn: { color: colors.accent },
   cardFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   journey: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
   price: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },

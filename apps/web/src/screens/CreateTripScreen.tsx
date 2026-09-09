@@ -51,7 +51,6 @@ export type CreateSeed = {
 };
 
 /** The photograph at the top, at the handoff's height. */
-const PHOTO = 150;
 /** One row of the drop-down, so the list can be opened on the value that is set. */
 const DROP_ROW = 38;
 
@@ -277,19 +276,20 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
             </Press>
           </View>
 
-          {/* The place the trip is for, full-bleed past the gutter — the one
-              thing on this screen that does (5a/5b). `VenueThumb` puts ours
-              first and falls back to a provider's, which is shown and never
-              written down; with neither, it draws the category. */}
+          {/* The place the trip is for. It bled past the gutter with square
+              corners (5a/5b); it is now the photograph every other screen
+              draws — inside the gutter, 3:2, rounded — because the owner asked
+              for one shape wherever a place's picture is clicked through to
+              (9 Sep 2026). `VenueThumb` puts ours first and falls back to a
+              provider's, which is shown and never written down; with neither,
+              it draws the category. */}
           <View style={styles.photoWrap}>
             <VenueThumb
               name={seed?.venue?.name ?? title}
               image={image}
               photos={havePhotos}
               category={seed?.venue?.category ?? null}
-              width={wide ? 720 : Math.max(320, width)}
-              height={PHOTO}
-              rounded={0}
+              fill
               credit={false}
             />
           </View>
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
   close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   // Full-bleed: the picture runs past the gutter, which is the one place on
   // this screen anything does. The wrapper clips it on a wide window.
-  photoWrap: { height: PHOTO, overflow: 'hidden', backgroundColor: colors.surfaceMuted },
+  photoWrap: { paddingHorizontal: 20 },
 
   body: { paddingHorizontal: 20, paddingTop: 14 },
 

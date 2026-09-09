@@ -12,7 +12,7 @@ import { OwnedFacts } from './OwnedFacts';
 import { useOffline } from '../hooks/useOffline';
 import { savedRecord } from '../offline/cache';
 import { SOURCE_LABEL, priceMarks, typeLine } from './StopCard';
-import { PHOTO_W, VenueThumb } from './VenueThumb';
+import { MEDIA_RADIUS, MEDIA_RATIO, PHOTO_W, VenueThumb } from './VenueThumb';
 
 /**
  * The click-through on a place (owner, 3 Sep 2026): a side drawer on a wide
@@ -926,7 +926,11 @@ const styles = StyleSheet.create({
   // Full-bleed: the head's gutter is given back on both sides.
   // 300 rather than 220 (trips V2): the picture is the first thing the full
   // view is for, and at 220 it read as a banner over a page of text.
-  hero: { height: 300, marginHorizontal: -spacing.lg, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
+  // The click-through photograph is the card's photograph, larger: 3:2 and
+  // rounded, inside the gutter, rather than a 300px full-bleed with square
+  // corners (owner, 9 Sep 2026 — the same size and styling as Inspire "in
+  // Trips when I click through to any given photo").
+  hero: { width: '100%', aspectRatio: MEDIA_RATIO, borderRadius: MEDIA_RADIUS, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
   heroTiles: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
   heroBack: { position: 'absolute', top: 12, left: 12 },
   // Saved says so on the tile itself, not only in the glyph.

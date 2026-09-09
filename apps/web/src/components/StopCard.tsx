@@ -48,7 +48,7 @@ export function StopCard({ stop, mode, baseLabel, previousName, dim, pinned, bus
 
   return (
     <View style={[styles.stop, dim && { opacity: 0.35 }]}>
-      {!isAnchor ? <VenuePhoto photos={stop.photos} size={84} /> : null}
+      {!isAnchor ? <VenuePhoto photos={stop.photos} size={126} height={84} /> : null}
       <View style={{ flex: 1, gap: 4 }}>
         <Row>
           <Text style={styles.stopPos}>{stop.position}</Text>
