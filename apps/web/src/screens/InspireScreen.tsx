@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Press } from '../components/press';
-import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef } from '../api';
+import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { Icon } from '../components/Icon';
@@ -68,6 +68,11 @@ const MOOD_LABEL: Record<string, string> = {
   sport: 'Sport', activity: 'Active',
   adrenaline: 'Adrenaline', relaxing: 'Relaxing', outdoors: 'Outdoors',
 };
+
+/** Where a drawer says "it depends", the place's own words decide whether it keeps the rain off, or suits children. */
+const INDOOR_WORDS = /\b(museum|gallery|galleries|cinema|bowling|arcade|soft play|play ?centre|trampoline|climbing|bouldering|swimming|pool|leisure centre|aquarium|theatre|library|escape room|ice rink|skating|laser|indoor|shopping|market hall|cathedral|abbey|church|castle|palace|house|hall)\b/i;
+const OUTDOOR_WORDS = /\b(garden|arboretum|park|common|woodland|forest|beach|coast|lake|river|reservoir|hill|moor|peak|trail|walk|nature reserve|viewpoint|lido|farm|zoo|safari|racecourse|golf|outdoor|meadow|heath)\b/i;
+const KIDS_WORDS = /\b(kids?|children|family|soft play|play|trampoline|zoo|farm|aquarium|adventure|theme park|bowling|cinema|swimming|lido|safari|dinosaur|lego|animal|wildlife|climbing|ice rink)\b/i;
 
 type Menu = null | 'where' | 'filters' | 'sort';
 
@@ -471,6 +476,30 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * nothing matches (9 Sep 2026).
    */
   const [leadMood, setLeadMood] = useState<string | null>(null);
+  /** The spoken request being answered, once the strip has loaded it. */
+  const [ask, setAsk] = useState<Intake | null>(null);
+  /**
+   * The answer to a spoken request: one curated list, pictures and all, not a
+   * category's drawers (owner, 9 Sep 2026). Indoors when they said rain or
+   * indoors, for children when children are in the picture, the mood's
+   * shelves first, the kinds named first of all. A place's drawer says whether
+   * it is indoors or for kids (back office › Shelves); where the drawer says
+   * "it depends", the place's own words decide.
+   */
+  const answer = useMemo(() => {
+    const f = ask?.resolved.filter;
+    if (!intakeId || !f || (f.indoors == null && !f.kids && !f.moods.length && !f.wantTypes.length)) return null;
+    const words = (i: InspireItem) => `${i.name} ${i.category} ${i.subcategory ?? ''} ${(i.experiences ?? []).join(' ')}`.toLowerCase();
+    const indoorsSaid = (i: InspireItem) => i.indoor === true || (i.indoor == null && INDOOR_WORDS.test(words(i)) && !OUTDOOR_WORDS.test(words(i)));
+    const outdoorsSaid = (i: InspireItem) => i.indoor === false || (i.indoor == null && OUTDOOR_WORDS.test(words(i)));
+    const kidsOk = (i: InspireItem) => i.forKids === true || i.goodForChildren === true || (i.forKids == null && i.goodForChildren == null && KIDS_WORDS.test(words(i)));
+    const kept = shown.filter((i) =>
+      (f.indoors !== true || indoorsSaid(i))
+      && (f.indoors !== false || outdoorsSaid(i))
+      && (!f.kids || kidsOk(i)));
+    const rank = (i: InspireItem) => (f.wantTypes.some((t) => words(i).includes(t)) ? 0 : 1) * 10 + (f.moods.length && !i.moods.some((m) => f.moods.includes(m)) ? 1 : 0);
+    return [...kept].sort((a, b) => rank(a) - rank(b));
+  }, [ask, intakeId, shown]);
   const shelves = useMemo(
     () => categories.map((c) => ({ key: c.key, label: c.label, items: shown.filter((i) => inCategory(i, c.key)) })).filter((s) => s.items.length)
       .sort((a, b) => Number(b.key === leadMood) - Number(a.key === leadMood)),
@@ -671,7 +700,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
               question is the title and its facts the chip row (C5, R5b);
               otherwise one grey row under the band: "Or just ask" (R5). */}
           {intakeId ? (
-            <IntakeStrip intakeId={intakeId} household={household} onReask={() => navigate(paths.say({ for: 'inspire' }))} onLoaded={(i) => setLeadMood(VIBE_MOOD[i.resolved.vibe ?? ''] ?? null)} />
+            <IntakeStrip intakeId={intakeId} household={household} onReask={() => navigate(paths.say({ for: 'inspire' }))} onLoaded={(i) => { setAsk(i); setLeadMood(VIBE_MOOD[i.resolved.vibe ?? ''] ?? null); }} />
           ) : (
             <AskRow onPress={() => navigate(paths.say({ for: 'inspire' }))} />
           )}
@@ -704,8 +733,29 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 </View>
               ) : null}
 
+              {/* The answer to what was asked: one list, with pictures. */}
+              {answer && !pick && mode === 'activities' ? (
+                <View style={styles.gutter}>
+                  <Text style={type.small}>
+                    {answer.length ? `${answer.length} place${answer.length === 1 ? '' : 's'}` : 'Nothing'}
+                    {ask?.resolved.filter.indoors === true ? ' indoors' : ask?.resolved.filter.indoors === false ? ' outdoors' : ''}
+                    {ask?.resolved.filter.kids ? ' for the kids' : ''}
+                    {` within ${howFarShort(travel)} of ${placeName}`}
+                    {answer.length ? '' : ' that Epic knows yet — everything nearby is below.'}
+                  </Text>
+                  {answer.length ? (
+                    <View style={styles.cards}>
+                      {answer.map((i) => <CardWide key={i.venueRef} item={i} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />)}
+                    </View>
+                  ) : null}
+                  <Pressable onPress={() => navigate(withQuery(href, { intake: null }, paths.inspire()))} accessibilityRole="button" style={{ paddingVertical: 8 }}>
+                    <Text style={[type.small, { color: colors.accent, fontWeight: '600' }]}>{answer.length ? 'Show everything nearby instead ›' : 'Everything nearby ›'}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+
               {/* All: shelves per category, each "All N ›". Empty shelves are dropped. */}
-              {!pick && mode === 'activities' ? shelves.map((sh) => (
+              {!pick && mode === 'activities' && !(answer && answer.length) ? shelves.map((sh) => (
                 <Carousel
                   key={sh.key}
                   title={sh.label}

@@ -477,7 +477,8 @@ shelves.put('/subcategories', requires('manage_library'), async (req, res, next)
     const subcategory = await taxonomy.saveSubcategory({
       id: req.body?.id, key: req.body?.key, categoryKey: req.body?.categoryKey,
       label: req.body?.label, blurb: req.body?.blurb,
-      position: req.body?.position, active: req.body?.active, by: actorOf(req),
+      position: req.body?.position, active: req.body?.active,
+      indoor: req.body?.indoor, forKids: req.body?.forKids, by: actorOf(req),
     });
     if (!subcategory) return res.status(404).json({ error: 'not_found' });
     res.json({ subcategory });

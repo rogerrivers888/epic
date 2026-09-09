@@ -314,6 +314,11 @@ const VIBE_ICON = { fun: 'fun', cultural: 'culture', active: 'activity', relaxed
  * shelf with the mood on the chip — the ranking still knows what was asked.
  */
 export const VIBE_TO_CATEGORY = { fun: 'fun', cultural: 'culture', active: null, relaxed: 'relaxing', mixed: null };
+/** The shelves a mood ranks first on the answer list — several for the moods that span shelves. */
+export const VIBE_MOODS = { fun: ['fun'], cultural: ['culture'], active: ['activity', 'sport', 'outdoors', 'adrenaline'], relaxed: ['relaxing', 'outdoors'], mixed: [] };
+/** Children are in the picture: said, or in the household and not left out. */
+const kidsInPlay = (f, children) => Boolean(f.who.kids_mentioned || (f.who.children ?? 0) > 0 || f.kids_ages.length > 0
+  || (children.length > 0 && f.who.kind !== 'just_me' && !(f.who.kind === 'named' && !f.who.names.some((nm) => children.some((c) => c.name.toLowerCase().startsWith(nm.toLowerCase()))))));
 const TYPE_LABEL = { today: 'Today', day_out: 'A day out', weekend: 'A weekend', holiday: 'A holiday', event: 'An event' };
 const KIND_ICON = { walk: 'walk', park: 'park', castle: 'culture', museum: 'museum', beach: 'beach', viewpoint: 'viewpoint', playground: 'playground', farm: 'farm', gallery: 'culture' };
 
@@ -521,12 +526,44 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
       /** What the trip's browse leads with: the kinds of thing named, and the named places to put on the shortlist. */
       wants: f.wants,
       leadKinds: uniq(f.wants.map((w) => w.type).filter(Boolean)),
-      leadFoodKinds: uniq(f.food.kinds),
+      leadFoodKinds: foodKindsSaid(f.food),
+      /** What Inspire's answer list is narrowed by: indoors or out, for children, the shelves a mood ranks first, the kinds named. */
+      filter: {
+        indoors: f.indoors,
+        kids: kidsInPlay(f, children),
+        moods: f.vibe ? VIBE_MOODS[f.vibe] ?? [] : [],
+        wantTypes: uniq(f.wants.map((w) => w.type).filter(Boolean)),
+      },
     },
   };
 }
 
 const uniq = (xs) => [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
+
+/**
+ * The kinds of place to eat that were asked for, read from every part of the
+ * food facts rather than the one field the model happened to fill.
+ *
+ * "A pub lunch" came back as a must-have with `kinds` left empty, so the trip's
+ * Food tab opened on everything (owner, 9 Sep 2026: "if I told you I want a pub
+ * lunch, then pub lunch should be filtered"). The words are the same closed set
+ * the browse files places under, so a pub asked for in any sentence leads with
+ * the pubs; the order is the order it was said in.
+ */
+export function foodKindsSaid(food = {}) {
+  const said = [...(food.kinds ?? [])];
+  const phrases = [...(food.must_haves ?? []), ...(food.cuisines ?? []), food.place ?? ''].map((x) => String(x).toLowerCase());
+  const WORDS = [
+    ['pub', /\bpubs?\b|\bgastropub|\binn\b/],
+    ['cafe', /\bcaf[eé]s?\b|\bcoffee\b|\btea ?rooms?\b/],
+    ['restaurant', /\brestaurants?\b|\bbistro|\bbrasserie/],
+    ['bar', /\bbars?\b|\bcocktails?\b|\bwine bar/],
+    ['bakery', /\bbaker(y|ies)\b|\bpatisserie/],
+    ['ice cream', /\bice[ -]?cream\b|\bgelato\b/],
+  ];
+  for (const phrase of phrases) for (const [kind, re] of WORDS) if (re.test(phrase)) said.push(kind);
+  return uniq(said).filter((k) => FOOD_KINDS.includes(k));
+}
 const slotValue = (slots, key) => slots.find((x) => x.key === key && x.source !== 'gap')?.value ?? null;
 const addDays = (iso, days) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
 
@@ -590,9 +627,12 @@ function gapQuestions(slots, f, answers, children) {
  * set by what was said. Only what differs from Inspire's own defaults is
  * written (routes.ts's rule), plus the intake so the chip row can be drawn.
  */
-export function resultsHref({ resolved, intakeId, originPoint = null, destinationPoint = null, memberCount = 0 }) {
-  const category = resolved.vibe ? VIBE_TO_CATEGORY[resolved.vibe] : null;
-  const foodOnly = !resolved.vibe && !resolved.indoors && !(resolved.wants ?? []).length && (resolved.food.cuisines.length || resolved.food.must_haves.length || (resolved.food.kinds ?? []).length || resolved.food.place) && !resolved.destination;
+export function resultsHref({ resolved, intakeId, originPoint = null, destinationPoint = null, memberCount = 0, flow = 'first' }) {
+  // A question asked on Inspire is answered on Inspire's own page as a curated
+  // list — never a category's drawers (owner, 9 Sep 2026: "a rainy afternoon
+  // with the kids" opened Relaxing: gardens and arboretums, no pictures).
+  const category = flow === 'inspire' ? null : resolved.vibe ? VIBE_TO_CATEGORY[resolved.vibe] : null;
+  const foodOnly = !resolved.vibe && resolved.indoors == null && !(resolved.wants ?? []).length && (resolved.food.cuisines.length || resolved.food.must_haves.length || (resolved.food.kinds ?? []).length || resolved.food.place) && !resolved.destination;
   const path = foodOnly ? '/inspire/food' : category ? `/inspire/${category}` : '/inspire';
   const q = new URLSearchParams();
   const at = destinationPoint ?? (resolved.origin?.kind === 'named' || resolved.origin?.kind === 'current' ? originPoint : null);

@@ -542,7 +542,7 @@ async function intakePayload(row, household, members) {
     id: row.id, flow: row.flow, mode: row.mode, language: row.language, asked: row.asked, tripId: row.trip_id,
     facts: out.facts, slots: out.slots, questions: out.questions, ambiguities: out.ambiguities,
     resolved: out.resolved, tripType: out.tripType,
-    resultsHref: resultsHref({ resolved: out.resolved, intakeId: row.id, originPoint, destinationPoint, memberCount: members.length }),
+    resultsHref: resultsHref({ resolved: out.resolved, intakeId: row.id, originPoint, destinationPoint, memberCount: members.length, flow: row.flow }),
     tripDraft: draft, destinationPoint,
     harvest: row.harvested_at ? null : harvestOffer({ facts: out.facts, members, profile }),
     profileComplete: profileComplete(household, members),

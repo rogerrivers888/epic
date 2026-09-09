@@ -676,6 +676,26 @@ function Taxonomy({ vocab, canManage, busy, onChanged, onFailed }: {
                 ) : null}
               </Wrap>
 
+              {editing && subs.some((sc) => sc.id === editing) ? (() => {
+                const sc = subs.find((x) => x.id === editing)!;
+                const tri = (field: 'indoor' | 'forKids', value: boolean | null | undefined, word: string) => (
+                  <Row style={{ gap: 4, alignItems: 'center' }}>
+                    <Text style={type.tiny}>{word}:</Text>
+                    {([['Yes', true], ['No', false], ['Depends', 'unset']] as const).map(([label, v]) => (
+                      <Chip key={label} label={label} selected={v === 'unset' ? value == null : value === v}
+                        onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, [field]: v } as any), `${sc.label}: ${word.toLowerCase()} — ${label.toLowerCase()}.`)} />
+                    ))}
+                  </Row>
+                );
+                return (
+                  <View style={{ gap: spacing.xs }}>
+                    {/* What Inspire's answer list narrows by (owner, 9 Sep 2026: "a
+                        rainy afternoon with the kids" must not offer gardens). */}
+                    {tri('indoor', sc.indoor, 'Indoors')}
+                    {tri('forKids', sc.for_kids, 'For kids')}
+                  </View>
+                );
+              })() : null}
               {editing && subs.some((sc) => sc.id === editing) ? (
                 <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
                   <Text style={type.tiny}>Move it to:</Text>

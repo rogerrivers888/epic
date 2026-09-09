@@ -52,6 +52,9 @@ export async function taxonomy() {
   return cache;
 }
 
+/** true / false / 'unset' → a text the statement can tell apart from "not sent". */
+const triState = (v) => (v === undefined ? null : v === null || v === 'unset' ? 'unset' : String(Boolean(v)));
+
 const slug = (text) => String(text || '').toLowerCase().trim()
   .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
 
@@ -117,7 +120,7 @@ export async function removeCategory(key) {
  * every place filed in that drawer moves shelf with it. That is the intended
  * way to reorganise: move the drawer, not the hundred places inside it.
  */
-export async function saveSubcategory({ id, key, categoryKey, label, blurb, position, active, by }) {
+export async function saveSubcategory({ id, key, categoryKey, label, blurb, position, active, indoor, forKids, by }) {
   if (!categoryKey && !id) throw bad('A subcategory has to belong to a category.');
   const k = key ? slug(key) : slug(label);
   if (!k && !id) throw bad('A subcategory needs a name.');
@@ -130,10 +133,14 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
               blurb        = coalesce($4, blurb),
               position     = coalesce($5, position),
               active       = coalesce($6, active),
+              -- Indoors and for-children are three-valued: a field sent as the
+              -- string 'unset' clears back to "it depends"; left out, it keeps.
+              indoor       = case when $7::text is null then indoor when $7 = 'unset' then null else ($7 = 'true') end,
+              for_kids     = case when $8::text is null then for_kids when $8 = 'unset' then null else ($8 = 'true') end,
               updated_at   = now()
         where id = $1 returning *`,
       [id, categoryKey ?? null, label ?? null, blurb ?? null, position ?? null,
-       active == null ? null : Boolean(active)]);
+       active == null ? null : Boolean(active), triState(indoor), triState(forKids)]);
     forget();
     return rows[0] ?? null;
   }

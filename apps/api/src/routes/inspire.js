@@ -105,6 +105,16 @@ function point(text) {
 const weight = (v) => (v.rating ?? 0) * Math.log10((v.ratingCount ?? 0) + 2);
 
 /**
+ * What a place's drawer says about it that the place itself may not: indoors
+ * or out, and for children (migration 076, taught in the back office). Null
+ * is "it depends" and leaves the place's own words to decide on the screen.
+ */
+const marks = (subcategory, tax, goodForChildren) => {
+  const sub = subcategory ? tax.subByKey.get(subcategory) : null;
+  return { indoor: sub?.indoor ?? null, forKids: sub?.for_kids ?? goodForChildren ?? null };
+};
+
+/**
  * How far out the atlas reaches, unless asked otherwise (`?km=`).
  *
  * Much further than the live look-around's 5 km, and deliberately: a family
@@ -244,7 +254,7 @@ inspire.get('/near', async (req, res, next) => {
       source: v.source,
       name: v.name,
       category: v.category,
-      ...(() => { const p = shelvesForVenue(v, taught, tax.vocab); return { moods: p.shelves, subcategory: p.subcategory }; })(),
+      ...(() => { const p = shelvesForVenue(v, taught, tax.vocab); return { moods: p.shelves, subcategory: p.subcategory, ...marks(p.subcategory, tax, v.goodForChildren) }; })(),
       experiences: v.experiences ?? [],
       cuisines: v.cuisines ?? [],
       rating: v.rating ?? null,
@@ -324,6 +334,7 @@ inspire.get('/near', async (req, res, next) => {
         category: FOOD_CATEGORIES.has(f.category) ? f.category : 'restaurant',
         moods: ['food'],
         subcategory: f.cuisine_group ?? null,
+        indoor: true, forKids: null,
         atlasCategory: null,
         experiences: [],
         cuisines: f.cuisine_group ? [f.cuisine_group, ...cuisines.filter((c) => c !== f.cuisine_group)] : cuisines,
@@ -389,6 +400,7 @@ inspire.get('/near', async (req, res, next) => {
         category: 'attraction',
         moods: shelf.shelves,
         subcategory: shelf.subcategory,
+        ...marks(shelf.subcategory, tax, null),
         // What the atlas calls this place — heritage, outdoors, family, museum,
         // arts, animals, active, landmark. Its own field rather than smuggled
         // into `experiences`, which is a closed vocabulary that voice is

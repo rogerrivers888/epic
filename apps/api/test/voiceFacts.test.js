@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TRIP_FACTS_SCHEMA, applyOverrides, harvestOffer, holdWeekday, mergeTripFacts, normaliseTripFacts, resolveIntake, resultsHref, tripDraft,
+  TRIP_FACTS_SCHEMA, applyOverrides, foodKindsSaid, harvestOffer, holdWeekday, mergeTripFacts, normaliseTripFacts, resolveIntake, resultsHref, tripDraft,
 } from '../src/domain/voiceFacts.js';
 import { schemaIsStrict } from '../src/domain/voiceIntent.js';
 import { FOOD_SCHEMA, LIKES_SCHEMA, WHO_SCHEMA, normaliseLikes, normaliseWho } from '../src/domain/voiceHousehold.js';
@@ -207,6 +207,14 @@ test('what was named leads What; food from the profile waits until food is menti
   const withPub = resolveIntake({ facts: { ...f, food: { ...f.food, kinds: ['pub'], must_haves: ['a pub lunch'] } }, flow: 'returning', household, members, profile: { diets: ['vegetarian'] }, today });
   assert.deepEqual(withPub.slots.filter((x) => x.key.startsWith('food')).map((x) => `${x.key}:${x.label}:${x.source}`).sort(), ['food_diet:Vegetarian:profile', 'food_kind:Pub:said']);
   assert.deepEqual(withPub.resolved.leadFoodKinds, ['pub']);
+  // "A pub lunch" read as a must-have with `kinds` left empty still leads with
+  // the pubs (owner, 9 Sep 2026: "if I told you I want a pub lunch, then pub
+  // lunch should be filtered").
+  const saidOnly = resolveIntake({ facts: { ...f, food: { ...f.food, kinds: [], must_haves: ['pub lunch'] } }, flow: 'returning', household, members, profile: { diets: [] }, today });
+  assert.deepEqual(saidOnly.resolved.leadFoodKinds, ['pub']);
+  assert.deepEqual(foodKindsSaid({ kinds: [], must_haves: ['a nice restaurant', 'a coffee somewhere'], cuisines: [], place: null }), ['restaurant', 'cafe']);
+  assert.deepEqual(foodKindsSaid({ kinds: ['cafe'], must_haves: ['a café with a garden'], cuisines: ['Italian'], place: null }), ['cafe']);
+  assert.deepEqual(foodKindsSaid({ kinds: [], must_haves: ['afternoon tea'], cuisines: [], place: null }), []);
 });
 
 test('more children than the household has is "N other kids", tappable, never a question for a returning household', () => {
