@@ -1659,6 +1659,8 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
     return trip.journey?.minutes
       ?? (startAt?.lat != null && dest?.lat != null ? Math.max(1, Math.round(estimateMinutes({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
   })();
+  /** How this day travels: the day's own mode where one was set, else the trip's (Codex, 9 Sep 2026). */
+  const travelMode = day?.travelMode ?? trip.travelMode;
   /** When you get there: leaving home plus the journey (a day out; a holiday's day starts where it is). */
   const arriveAt = !isTrip && journeyMinutes ? addMinutesToClock(clock(trip.departAt), journeyMinutes) : null;
 
@@ -1714,12 +1716,12 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
       */}
       <Beat
         time={isTrip ? trip.dayStart ?? null : clock(trip.departAt)}
-        icon={!sleepingAt && fromHome ? 'home' : modeIcon(trip.travelMode)}
+        icon={!sleepingAt && fromHome ? 'home' : modeIcon(travelMode)}
         /* "Start day 3" on a trip with days in it, so the timeline says which
            one you are looking at without a kicker repeating the strip (5h). */
         title={days.length > 1 && dayIndex >= 0 ? `Start day ${dayIndex + 1}` : !sleepingAt && fromHome ? 'Leave home' : 'Start the day'}
-        detail={journeyMinutes ? `${mins(journeyMinutes)} ${journeyWord(trip.travelMode)}` : fromName(trip)}
-        detailIcon={journeyMinutes ? modeIcon(trip.travelMode) : undefined}
+        detail={journeyMinutes ? `${mins(journeyMinutes)} ${journeyWord(travelMode)}` : fromName(trip)}
+        detailIcon={journeyMinutes ? modeIcon(travelMode) : undefined}
       />
       {stops.map((s, i) => (
         <Fragment key={s.id}>
@@ -4104,7 +4106,7 @@ const styles = StyleSheet.create({
   },
   // The tile is the handoff's 40px, in a box the width of a thumbnail — so a
   // list of places with and without pictures still starts its names in one line.
-  savedTileBox: { width: 64, alignItems: 'center' },
+  savedTileBox: { width: 96, alignItems: 'center' },
   emptySaved: { gap: 8, paddingHorizontal: 16, paddingVertical: 24 },
   emptySavedTitle: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.ink },
   // --- The V2 browse lists --------------------------------------------------
