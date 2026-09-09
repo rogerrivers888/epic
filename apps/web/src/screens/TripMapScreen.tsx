@@ -300,8 +300,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   useEffect(() => { api.tripPlaces(trip.id).then(setPlaces).catch(() => null); }, [trip.id, shortlist.length, days.length]);
 
   // Browse: what is along the way. One fetch per (pill, scope, detour).
-  const [along, setAlong] = useState<{ loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number; corridorKm: number | null; moods: { key: string; label: string }[] }>(
-    { loading: false, places: [], counts: { route: 0 }, error: null, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] },
+  const [along, setAlong] = useState<{ loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number; corridorKm: number | null }>(
+    { loading: false, places: [], counts: { route: 0 }, error: null, degraded: [], hasRoute: false, beyond: 0, corridorKm: null },
   );
   /**
    * One search per pill, scope and distance — and **not** per type.
@@ -329,8 +329,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     // of the corridor until the answer says how wide it really was.
     setAlong((a) => ({ ...a, places: [], beyond: 0, corridorKm: null, hasRoute: trip.destination?.lat != null, loading: true, error: null }));
     api.tripAlong(trip.id, { kind: pill === 'food' ? 'food' : 'things', maxDetourMin, around: around ?? undefined, aroundName: aroundName ?? undefined, q: q || undefined })
-      .then((r) => setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null, moods: r.moods ?? [] }))
-      .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] }));
+      .then((r) => setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null }))
+      .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null }));
   }, [alongKey, trip.id, pill, around, aroundName, maxDetourMin, q]);
 
   /**
@@ -542,20 +542,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   // ---- the map ------------------------------------------------------------
 
-  const home = household?.household?.home ?? null;
-  const startsAtHome = home?.lat != null && start?.lat != null
-    ? kmApart({ lat: start.lat, lng: start.lng as number }, { lat: home.lat, lng: home.lng as number }) < 0.3
-    : (!trip.base || trip.base.kind === 'home' || trip.base.kind == null);
-
   const markers: MapMarker[] = useMemo(() => {
     const out: MapMarker[] = [];
     // Home is the ink tile with the house; a day that starts somewhere else is
     // a plain dot. Both labels carry the time — leaving, and arriving — on a
     // day out (Epic Map Chips 6a).
-    // An outing's origin is stored as its base with kind "home" whether it was
-    // home or a typed starting point (routes/trips.js), so Home is decided by
-    // where home actually is: within 300m of the household's address.
-    const fromHome = !(isTrip && base) && startsAtHome;
+    const fromHome = !(isTrip && base) && (!trip.base || trip.base.kind === 'home' || trip.base.kind == null);
     const there = trip.journey?.minutes
       ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
     if (start?.lat != null) {
@@ -679,7 +671,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       }
     }
     return out;
-  }, [start?.lat, dest?.lat, pill, shownAlong, places, selected, isTrip, base?.label, wantsStay, stayChosen, stays.results, stays.anchors, startsAtHome]);
+  }, [start?.lat, dest?.lat, pill, shownAlong, places, selected, isTrip, base?.label, wantsStay, stayChosen, stays.results, stays.anchors]);
 
   const routes: MapRoute[] = useMemo(() => {
     if (start?.lat == null || dest?.lat == null || dest === start) return [];
@@ -739,13 +731,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    */
   const bar = wide || covering || pill ? 0 : TABBAR;
   const dayStopCount = (day?.slots ?? []).reduce((n, sl) => n + sl.stops.length, 0);
-  /**
-   * Nothing on the day *beyond the destination*: an outing to a venue puts
-   * that venue on the day as its first stop (routes/trips.js), and that stop
-   * is the plan, not something added to it (Codex, 9 Sep 2026).
-   */
-  const beyondDest = (day?.slots ?? []).flatMap((sl) => sl.stops).filter((s) => !(dest?.lat != null && s.lat != null && s.lng != null && kmApart({ lat: s.lat, lng: s.lng }, { lat: dest.lat, lng: dest.lng as number }) < 0.4)).length;
-  const welcome = !wide && !pill && section === 'itinerary' && !selected && !covering && beyondDest === 0 && !touched;
+  const welcome = !wide && !pill && section === 'itinerary' && !selected && !covering && dayStopCount === 0 && !touched;
   // Grab zone (10 + 4 + 10) over the header and the two rows, less the second
   // row's own trailing padding, plus a little air under the last line.
   const welcomeH = headH && rowsH ? 24 + headH + rowsH - 16 + 8 : 0;
@@ -1212,7 +1198,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             the kids" in a lime-tint box here (R4); the owner does not want it
             (9 Sep 2026). What was said still leads the Activities and Food
             browses, which is where the ideas are. */}
-        <TheDay d={d} day={day} fromHome={startsAtHome} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} onFirstRows={setRowsH} />
+        <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} onFirstRows={setRowsH} />
       </>
     )
     )
@@ -1496,15 +1482,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 const journeyWord = (mode: string | null | undefined) =>
   (mode === 'transit' ? 'by train' : mode === 'walking' ? 'walk' : mode === 'cycling' ? 'ride' : 'drive');
 
-/** Straight-line kilometres between two points. */
-function kmApart(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.sqrt(h));
-}
-
 /** The straight-line minutes the day's first beat shows before anything is routed. */
 function estimateMinutes(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371;
@@ -1596,10 +1573,8 @@ function FindYourStay({ onPress }: { onPress: () => void }) {
   );
 }
 
-function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
+function TheDay({ d, day, onAdd, onOpenStop, onFirstRows }: {
   d: TripDetail; day: TripDay | null; onAdd: () => void;
-  /** Whether the day leaves from the household's home, which is what "Leave home" claims. */
-  fromHome: boolean;
   /** A stop opens its own page, where the Ask thread lives (3d). */
   onOpenStop?: (venueRef: string) => void;
   /** How tall the rows down to the destination are — what the welcome drawer is sized to. */
@@ -1634,9 +1609,6 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
     const to = dest ? tripName(trip) : null;
     if (!to || to === from) return null;
     const startAt = trip.base?.lat != null ? trip.base : trip.origin;
-    // A holiday's day starts where it is: the stay is the destination, and a
-    // journey from a place to itself is the estimator's overhead, not a drive.
-    if (startAt?.lat != null && dest?.lat != null && kmApart({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }) < 0.3) return null;
     return trip.journey?.minutes
       ?? (startAt?.lat != null && dest?.lat != null ? Math.max(1, Math.round(estimateMinutes({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
   })();
@@ -1695,10 +1667,10 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
       */}
       <Beat
         time={isTrip ? trip.dayStart ?? null : clock(trip.departAt)}
-        icon={!sleepingAt && fromHome ? 'home' : 'driving'}
+        icon={sleepingAt ? 'driving' : 'home'}
         /* "Start day 3" on a trip with days in it, so the timeline says which
            one you are looking at without a kicker repeating the strip (5h). */
-        title={days.length > 1 && dayIndex >= 0 ? `Start day ${dayIndex + 1}` : !sleepingAt && fromHome ? 'Leave home' : 'Start the day'}
+        title={days.length > 1 && dayIndex >= 0 ? `Start day ${dayIndex + 1}` : sleepingAt ? 'Start the day' : 'Leave home'}
         detail={journeyMinutes ? `${mins(journeyMinutes)} ${journeyWord(trip.travelMode)}` : fromName(trip)}
         detailIcon={journeyMinutes ? (trip.travelMode === 'transit' ? 'transit' : trip.travelMode === 'walking' ? 'walking' : 'driving') : undefined}
       />
@@ -2129,7 +2101,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
   pill: Pill;
   /** What was asked for by voice, which lane leads with (null on a trip made by hand). */
   said: { vibe: string | null; kinds: string[] } | null;
-  along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number; moods?: { key: string; label: string }[] };
+  along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number };
   shortlisted: TripPlace[];
   onUnshortlist: (p: TripPlace) => Promise<void>;
   /** A saved row opens the same drawer a browsed one does. */
@@ -2276,13 +2248,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
    */
   const sequence = useMemo<({ lane: ReturnType<typeof lanesFor<TripAlongPlace>>[number] } | { place: TripAlongPlace })[]>(() => {
     if (pill !== 'activities') return shown.map((place) => ({ place }));
-    // The shelves as the back office keeps them — order and words — when the
-    // answer carries them; the app's own list stands in for an older answer.
-    const vocab = along.moods?.length
-      ? { order: along.moods.map((m) => m.key), label: Object.fromEntries(along.moods.map((m) => [m.key, m.label])), vibeMood: LANE_VOCAB.vibeMood }
-      : LANE_VOCAB;
-    return lanesFor(shown, said, (x) => primaryKind(x, THING_KINDS), vocab).flatMap((lane) => [{ lane }, ...lane.items.map((place) => ({ place }))]);
-  }, [pill, shown, said, along.moods]);
+    return lanesFor(shown, said, (x) => primaryKind(x, THING_KINDS), LANE_VOCAB).flatMap((lane) => [{ lane }, ...lane.items.map((place) => ({ place }))]);
+  }, [pill, shown, said]);
 
   if (pill === 'shortlist') {
     /**
@@ -4084,7 +4051,9 @@ const styles = StyleSheet.create({
   },
   // The tile is the handoff's 40px, in a box the width of a thumbnail — so a
   // list of places with and without pictures still starts its names in one line.
-  savedTileBox: { width: 64, alignItems: 'center' },
+  // 96, the width of the 3:2 thumbnail beside it — Codex caught the box
+  // staying at 64 after the picture widened, which shifted the names in mixed rows.
+  savedTileBox: { width: 96, alignItems: 'center' },
   emptySaved: { gap: 8, paddingHorizontal: 16, paddingVertical: 24 },
   emptySavedTitle: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', letterSpacing: -0.36, color: colors.ink },
   // --- The V2 browse lists --------------------------------------------------
