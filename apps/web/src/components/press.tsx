@@ -45,8 +45,10 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
   const up = useCallback((e: any) => {
     setPressed(false);
     onPressOut?.(e);
-    if (!animate()) return;
     v.stopAnimation();
+    // Motion switched off between the press and the release: the driver must
+    // not be left where the press put it, or the control stays sunk.
+    if (!animate()) { v.setValue(0); return; }
     if (effect === 'pop') Animated.spring(v, { toValue: 0, ...POP.spring, useNativeDriver: NATIVE }).start();
     else Animated.timing(v, { toValue: 0, duration: SINK.upMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
   }, [effect, onPressOut, v]);
