@@ -72,7 +72,11 @@ export function HeardScreen({ intakeId, household, onOpenTrip }: { intakeId: str
       for (const w of named.slice(0, 4)) {
         try {
           const found = await api.shortlistSearch(id, { q: w.name });
-          const hit = found.results.find((r) => r.name.toLowerCase().includes(w.name.toLowerCase().split(' ')[0])) ?? found.results[0];
+          // Every meaningful word of the name has to be in the result's name:
+          // "Windsor Castle" is not any place in Windsor, and a name nothing
+          // answers to is not added (Codex, 9 Sep 2026).
+          const words = w.name.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 2 && !['the', 'and'].includes(x));
+          const hit = found.results.find((r) => { const n = r.name.toLowerCase(); return words.length > 0 && words.every((x) => n.includes(x)); });
           if (hit && hit.lat != null && hit.lng != null) await api.addToShortlist(id, { venueRef: `${hit.source}:${hit.sourcePlaceId}`, venueLabel: hit.name, kind: 'do', category: hit.category ?? null, lat: hit.lat, lng: hit.lng, mustDo: true });
         } catch { /* not found: the list still opens */ }
       }
@@ -127,6 +131,7 @@ export function HeardScreen({ intakeId, household, onOpenTrip }: { intakeId: str
         current={picking}
         heard={picking ? heardFor(picking) : null}
         household={household}
+        wants={intake?.resolved.wants ?? []}
         onSet={(slot, value) => { void setSlot(slot, value); }}
         onClose={() => setPicking(null)}
       />

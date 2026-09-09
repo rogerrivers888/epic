@@ -193,14 +193,21 @@ const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'frida
  */
 export function holdWeekday(when, today) {
   if (!when?.as_said || !today) return when;
-  const m = when.as_said.toLowerCase().match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  const words = when.as_said.toLowerCase();
+  const m = words.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
   if (!m) return when;
+  // A weekday that names the way back ("this weekend, coming back Sunday",
+  // "until Monday") is not the start; leave a range like that alone.
+  const before = words.slice(0, m.index);
+  if (/\b(back|return|home|until|till|to|through|coming)\s*(on\s*)?$/.test(before.trimEnd() + ' ') || /\b(back|return|home|until|till)\b/.test(before)) return when;
   const wanted = WEEKDAYS.indexOf(m[1]);
   const d = new Date(`${today}T12:00:00Z`);
   const add = (wanted - d.getUTCDay() + 7) % 7 || 7;
   d.setUTCDate(d.getUTCDate() + add);
+  // "Saturday week" / "a week on Saturday" / "the Saturday after next" is the one after.
+  if (/\b(week on|after next)\b|\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday) week\b/.test(when.as_said.toLowerCase())) d.setUTCDate(d.getUTCDate() + 7);
   const next = d.toISOString().slice(0, 10);
-  if (when.start && new Date(`${when.start}T12:00:00Z`).getUTCDay() === wanted) return when;
+  if (when.start === next) return when;
   const nights = when.start && when.end ? Math.round((Date.parse(when.end) - Date.parse(when.start)) / 86_400_000) : 0;
   return { ...when, start: next, end: nights > 0 ? addDays(next, nights) : when.end };
 }
@@ -268,6 +275,10 @@ export function mergeTripFacts(base, next) {
   ['kind', 'name'].forEach((k) => take(['origin', k]));
   ['kind', 'names', 'adults', 'children', 'kids_mentioned'].forEach((k) => take(['who', k]));
   ['diets', 'cuisines', 'must_haves', 'kinds', 'avoids', 'place', 'no_preference'].forEach((k) => take(['food', k]));
+  // "Not Windsor Castle, Legoland instead": a correction about a want takes
+  // the corrected one off before the new one goes on.
+  const corrected = (next.corrections ?? []).filter((c) => /want|place|activit|thing/i.test(c.slot)).map((c) => c.from.toLowerCase()).filter(Boolean);
+  if (corrected.length) out.wants = (out.wants ?? []).filter((w) => !corrected.some((from) => w.name.toLowerCase().includes(from) || from.includes(w.name.toLowerCase())));
   if (next.wants?.length) { const seen = new Set((out.wants ?? []).map((w) => w.name.toLowerCase())); out.wants = [...(out.wants ?? []), ...next.wants.filter((w) => !seen.has(w.name.toLowerCase()))]; }
   // Kids' ages and questions are replaced, not joined: a second breath about
   // the children is a correction of the first.
@@ -330,8 +341,12 @@ const nextSaturday = (today) => {
  * what was understood).
  */
 export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'first', household, members = [], profile = {}, today, timezone = 'Europe/London' }) {
-  const f = applyOverrides(facts, { ...answers, ...overrides });
-  f.when = holdWeekday(f.when, today);
+  // Rows saved before a slot existed have no `wants` or `food.kinds`; the
+  // normaliser gives every slot its empty shape, and is a no-op on a new row.
+  // The weekday guard is applied when the words are read and stored
+  // (routes/voice.js), not here: re-running it on every load against a later
+  // "today" would walk a date forward a week at a time (Codex, 9 Sep 2026).
+  const f = applyOverrides(normaliseTripFacts(facts), { ...answers, ...overrides });
   const home = household?.home_lat != null ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng } : null;
   const children = members.filter((m) => m.isMinor || (m.age != null && m.age < 18));
   const adults = members.filter((m) => !children.includes(m));
@@ -388,7 +403,9 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   const dest = profile.destinationPoint ?? null;
   if (dest && home) {
     const minutes = estimateTravelMinutes(home, dest, MODE_TO_TRIP[mode] ?? 'driving');
-    slots.push({ key: 'journey', label: `${MODE_LABEL[mode]} · ${minutesLabel(minutes)}`, icon: MODE_ICON[mode], value: { mode, minutes }, source: f.travel_mode ? 'said' : 'profile' });
+    // A day's reach only: a holiday's flight is Getting there's business, and
+    // a number like "Car · 122 hr" on a card is a wrong match, not a plan.
+    if (minutes <= 600) slots.push({ key: 'journey', label: `${MODE_LABEL[mode]} · ${minutesLabel(minutes)}`, icon: MODE_ICON[mode], value: { mode, minutes }, source: f.travel_mode ? 'said' : 'profile' });
   }
 
   // --- who --------------------------------------------------------------------
@@ -415,11 +432,26 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   // drawn only for what the profile cannot know: ages said this time, or more
   // children than the household has — "2 other kids", tappable for their ages.
   // An entry that is one of the household's own children — by name, or an
-  // exact age with no name — is the profile talking, however it arrived.
-  const saidAges = f.kids_ages.filter((k) => (k.age != null || k.band)
-    && !children.some((c) => (k.name && c.name.toLowerCase().startsWith(k.name.toLowerCase())) || (!k.name && k.age != null && c.age === k.age)));
+  // exact age with no name — is the profile talking, however it arrived. Each
+  // of ours accounts for one entry only: "bringing another six-year-old" in a
+  // household with one six-year-old keeps the second six (Codex, 9 Sep 2026).
   const saidCount = f.who.children ?? (f.who.kids_mentioned && !children.length ? 1 : 0);
-  const extra = Math.max(0, saidCount - children.length);
+  const extraKids = Math.max(0, saidCount - children.length);
+  const spareKids = [...children];
+  const saidAges = f.kids_ages.filter((k) => {
+    if (k.age == null && !k.band) return false;
+    // A named entry that is one of ours is ours. An unnamed age that matches
+    // one of ours is ours too — unless more children are coming than we have,
+    // when it describes the extra one and is kept.
+    const byName = k.name ? spareKids.findIndex((c) => c.name.toLowerCase().startsWith(k.name.toLowerCase())) : -1;
+    if (byName >= 0) { spareKids.splice(byName, 1); return false; }
+    if (!k.name && k.age != null && !extraKids) {
+      const byAge = spareKids.findIndex((c) => c.age === k.age);
+      if (byAge >= 0) { spareKids.splice(byAge, 1); return false; }
+    }
+    return true;
+  });
+  const extra = extraKids;
   if (saidAges.length) {
     said('kids_ages', `Kids ${joinNames(saidAges.map((k) => (k.age != null ? String(k.age) : k.band)))}`, 'children', saidAges);
   } else if (extra > 0 && children.length) {
@@ -511,7 +543,7 @@ export function applyOverrides(facts, overrides) {
       case 'vibe': if (VIBES.includes(v)) { f.vibe = v; f.vibe_no_preference = false; } else if (v === 'any') { f.vibe = null; f.vibe_no_preference = true; } break;
       case 'several_things': f.several_things = b(v); break;
       case 'indoors': f.indoors = b(v); break;
-      case 'food': if (v && typeof v === 'object') f.food = { ...f.food, diets: list(v.diets ?? f.food.diets), cuisines: list(v.cuisines ?? f.food.cuisines), must_haves: list(v.must_haves ?? f.food.must_haves), avoids: list(v.avoids ?? f.food.avoids), place: 'place' in v ? s(v.place) : f.food.place, no_preference: 'no_preference' in v ? Boolean(v.no_preference) : f.food.no_preference }; break;
+      case 'food': if (v && typeof v === 'object') f.food = { ...f.food, diets: list(v.diets ?? f.food.diets), cuisines: list(v.cuisines ?? f.food.cuisines), must_haves: list(v.must_haves ?? f.food.must_haves), kinds: list(v.kinds ?? f.food.kinds).filter((k) => FOOD_KINDS.includes(k)), avoids: list(v.avoids ?? f.food.avoids), place: 'place' in v ? s(v.place) : f.food.place, no_preference: 'no_preference' in v ? Boolean(v.no_preference) : f.food.no_preference }; break;
       default: break;
     }
   }
@@ -554,7 +586,7 @@ function gapQuestions(slots, f, answers, children) {
  */
 export function resultsHref({ resolved, intakeId, originPoint = null, destinationPoint = null, memberCount = 0 }) {
   const category = resolved.vibe ? VIBE_TO_CATEGORY[resolved.vibe] : null;
-  const foodOnly = !resolved.vibe && !resolved.indoors && (resolved.food.cuisines.length || resolved.food.must_haves.length || resolved.food.place) && !resolved.destination;
+  const foodOnly = !resolved.vibe && !resolved.indoors && !(resolved.wants ?? []).length && (resolved.food.cuisines.length || resolved.food.must_haves.length || (resolved.food.kinds ?? []).length || resolved.food.place) && !resolved.destination;
   const path = foodOnly ? '/inspire/food' : category ? `/inspire/${category}` : '/inspire';
   const q = new URLSearchParams();
   const at = destinationPoint ?? (resolved.origin?.kind === 'named' || resolved.origin?.kind === 'current' ? originPoint : null);

@@ -24,11 +24,13 @@ const VIBES = [{ value: 'fun', label: 'Fun' }, { value: 'cultural', label: 'Cult
 const TYPES = [{ value: 'today', label: 'Today' }, { value: 'day_out', label: 'A day out' }, { value: 'weekend', label: 'A weekend' }, { value: 'holiday', label: 'A holiday' }, { value: 'event', label: 'An event' }];
 const BANDS = ['0-4', '5-8', '9-12', '13+'];
 const DIETS = ['Vegetarian', 'Vegan', 'Pescatarian', 'Halal', 'Kosher', 'Gluten-free', 'Dairy-free'];
+const FOOD_KINDS = [{ value: 'pub', label: 'Pub' }, { value: 'restaurant', label: 'Restaurant' }, { value: 'cafe', label: 'Café' }, { value: 'bar', label: 'Bar' }, { value: 'bakery', label: 'Bakery' }];
+const THING_TYPES = ['walk', 'park', 'castle', 'museum', 'beach', 'viewpoint', 'playground', 'farm', 'gallery'];
 
 const TITLES: Record<string, string> = {
   origin: 'Where from?', destination: 'Where to?', travel_mode: 'How will you travel?', max_minutes: 'How far, each way?', journey: 'How will you travel?',
   who: 'Who’s going?', kids_ages: 'How old are the kids?', vibe: 'What’s the mood?', several_things: 'One thing, or a few?', when: 'When?',
-  time_of_day: 'What time of day?', trip_type: 'What kind of day?', indoors: 'Indoors or out?', food: 'Anything on food?',
+  time_of_day: 'What time of day?', trip_type: 'What kind of day?', indoors: 'Indoors or out?', food: 'Anything on food?', want: 'What do you want to do?',
 };
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -45,8 +47,10 @@ const dayOffsets = () => {
   ];
 };
 
-export function ChipPicker({ slot, current, heard, household, onSet, onClose }: {
+export function ChipPicker({ slot, current, heard, household, onSet, onClose, wants = [] }: {
   slot: PickerSlot | null;
+  /** Every want on the card, for the want picker (one chip is one of them). */
+  wants?: { name: string; kind: 'place' | 'type'; type: string | null }[];
   /** The slot as it stands, for the tick. */
   current: IntakeSlot | null;
   /** The words, when this slot was said ("We heard 'Sunningdale'"). */
@@ -68,6 +72,7 @@ export function ChipPicker({ slot, current, heard, household, onSet, onClose }: 
   }, [q, slot, household]);
 
   const value: any = current?.value ?? null;
+  const allWants = wants;
   const base = slot?.startsWith('food') ? 'food' : slot === 'journey' ? 'travel_mode' : slot;
   const set = (v: unknown) => { onSet(base!, v); onClose(); };
   const members = household?.members ?? [];
@@ -121,9 +126,10 @@ export function ChipPicker({ slot, current, heard, household, onSet, onClose }: 
       );
       case 'kids_ages': return <KidsPicker initial={Array.isArray(value) ? value : []} onDone={(kids) => set(kids)} />;
       case 'food': return <FoodPicker current={current} onDone={(food) => set(food)} />;
+      case 'want': return <WantsPicker wants={allWants} onDone={(wants) => set(wants)} />;
       default: return null;
     }
-  }, [base, q, results, value, text, members, home, current]);
+  }, [base, q, results, value, text, members, home, current, allWants]);
 
   if (!slot) return null;
   const frameBox = framed && origin ? { position: 'absolute' as const, left: origin.x, top: origin.y, width, height, borderRadius: radius.lg, overflow: 'hidden' as const } : { position: 'absolute' as const, left: 0, right: 0, top: 0, bottom: 0 };
@@ -193,12 +199,18 @@ export function KidsPicker({ initial, onDone, names = [], inline = false, onChan
 }
 export const bandOf = (age: number) => (age <= 4 ? '0-4' : age <= 8 ? '5-8' : age <= 12 ? '9-12' : '13+');
 
-function FoodPicker({ current, onDone }: { current: IntakeSlot | null; onDone: (food: { diets?: string[]; must_haves?: string[]; avoids?: string[]; no_preference?: boolean }) => void }) {
+function FoodPicker({ current, onDone }: { current: IntakeSlot | null; onDone: (food: { diets?: string[]; kinds?: string[]; must_haves?: string[]; avoids?: string[]; no_preference?: boolean }) => void }) {
   const [diets, setDiets] = useState<string[]>(current?.key === 'food_diet' && typeof current.value === 'string' ? [current.value] : []);
+  const [kinds, setKinds] = useState<string[]>(current?.key === 'food_kind' && typeof current.value === 'string' ? [current.value] : []);
   const [must, setMust] = useState('');
   const [avoid, setAvoid] = useState('');
   return (
     <View style={{ gap: 14 }}>
+      <Text style={styles.hint}>Kind of place</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {FOOD_KINDS.map((k) => <FactChip key={k.value} label={k.label} look={kinds.includes(k.value) ? 'said' : 'profile'} onPress={() => setKinds((p) => (p.includes(k.value) ? p.filter((x) => x !== k.value) : [...p, k.value]))} />)}
+      </View>
+      <Text style={styles.hint}>Diet</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
         {DIETS.map((d) => <FactChip key={d} label={d} look={diets.includes(d) ? 'said' : 'profile'} onPress={() => setDiets((p) => (p.includes(d) ? p.filter((x) => x !== d) : [...p, d]))} />)}
       </View>
@@ -209,9 +221,33 @@ function FoodPicker({ current, onDone }: { current: IntakeSlot | null; onDone: (
         <TextInput value={avoid} onChangeText={setAvoid} placeholder="Something to avoid · seafood" placeholderTextColor={colors.inkMuted} style={styles.typed} />
       </View>
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        <Pressable onPress={() => onDone({ diets, must_haves: must.trim() ? [must.trim()] : undefined, avoids: avoid.trim() ? [avoid.trim()] : undefined, no_preference: false })} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use this</Text></Pressable>
-        <Pressable onPress={() => onDone({ diets: [], must_haves: [], avoids: [], no_preference: true })} accessibilityRole="button" style={[styles.use, { backgroundColor: colors.warm }]}><Text style={[styles.useText, { color: colors.ink }]}>No preference</Text></Pressable>
+        <Pressable onPress={() => onDone({ diets, kinds, must_haves: must.trim() ? [must.trim()] : undefined, avoids: avoid.trim() ? [avoid.trim()] : undefined, no_preference: false })} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use this</Text></Pressable>
+        <Pressable onPress={() => onDone({ diets: [], kinds: [], must_haves: [], avoids: [], no_preference: true })} accessibilityRole="button" style={[styles.use, { backgroundColor: colors.warm }]}><Text style={[styles.useText, { color: colors.ink }]}>No preference</Text></Pressable>
       </View>
+    </View>
+  );
+}
+
+/** The things to do: take one off, add a place or a kind of thing. */
+function WantsPicker({ wants, onDone }: { wants: { name: string; kind: 'place' | 'type'; type: string | null }[]; onDone: (wants: { name: string; kind: 'place' | 'type'; type: string | null }[]) => void }) {
+  const [list, setList] = useState(wants);
+  const [place, setPlace] = useState('');
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {list.map((w, i) => <FactChip key={`${w.name}-${i}`} label={`${w.kind === 'type' ? cap(w.name) : w.name} ×`} look="said" onPress={() => setList(list.filter((_, j) => j !== i))} />)}
+        {!list.length ? <Text style={styles.hint}>Nothing named yet.</Text> : null}
+      </View>
+      <Text style={styles.hint}>A kind of thing</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {THING_TYPES.map((t) => <FactChip key={t} label={cap(t)} look={list.some((w) => w.type === t && w.kind === 'type') ? 'said' : 'profile'} onPress={() => setList(list.some((w) => w.type === t && w.kind === 'type') ? list.filter((w) => !(w.type === t && w.kind === 'type')) : [...list, { name: t, kind: 'type', type: t }])} />)}
+      </View>
+      <View style={styles.typedRow}>
+        <TextInput value={place} onChangeText={setPlace} placeholder="Or a place by name · Legoland" placeholderTextColor={colors.inkMuted} style={styles.typed} />
+        <Pressable onPress={() => { if (place.trim()) { setList([...list, { name: place.trim(), kind: 'place', type: null }]); setPlace(''); } }} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Add</Text></Pressable>
+      </View>
+      <Pressable onPress={() => onDone(list)} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }]}><Text style={styles.useText}>That’s it</Text></Pressable>
     </View>
   );
 }

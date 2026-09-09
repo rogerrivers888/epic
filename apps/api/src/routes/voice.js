@@ -40,7 +40,7 @@ import { VOICE_INTENT_SCHEMA, VOICE_INTENT_SYSTEM, normaliseVoiceIntent, voiceIn
 import { UTTERANCES, meetsExpectation } from '../domain/voiceUtterances.js';
 import { planDiff, wer } from '../domain/wer.js';
 import {
-  TRIP_FACTS_SCHEMA, TRIP_FACTS_SYSTEM, TRIP_TO_MODE, harvestOffer, mergeTripFacts, normaliseTripFacts,
+  TRIP_FACTS_SCHEMA, TRIP_FACTS_SYSTEM, TRIP_TO_MODE, harvestOffer, holdWeekday, mergeTripFacts, normaliseTripFacts,
   resolveIntake, resultsHref, tripDraft, tripFactsInput,
 } from '../domain/voiceFacts.js';
 import {
@@ -511,11 +511,17 @@ async function pointFor(text, home, { attraction = false } = {}) {
   // A town is an area; a castle is a place. Asking the area search for
   // "Windsor Castle" answered with somewhere 122 hours' drive away (9 Sep 2026).
   const tries = attraction ? [() => geocode(text, { limit: 1, near: home }), () => searchAreas(text, { limit: 1, near: home })] : [() => searchAreas(text, { limit: 1, near: home }), () => geocode(text, { limit: 1, near: home })];
+  let best = null;
   for (const t of tries) {
     const [hit] = await t().catch(() => []);
-    if (hit?.lat != null && (!home || kmBetween(home, hit) < 1500)) return shape(hit);
+    if (hit?.lat == null) continue;
+    // The first answer is taken unless it is a long way off and the other
+    // lookup knows somewhere nearer by the same name — a holiday to New York
+    // stays New York; "Windsor Castle" stops being a farm in another country.
+    if (!best) { best = hit; if (!home || kmBetween(home, hit) < 500) break; continue; }
+    if (home && kmBetween(home, hit) < kmBetween(home, best)) best = hit;
   }
-  return null;
+  return best ? shape(best) : null;
 }
 
 /** Everything a screen draws for one intake row. */
@@ -553,7 +559,11 @@ async function readTripFacts({ household, members, transcript, language, session
     householdId: household.id, sessionId, provider: PROVIDER, purpose,
     inputTokens: out.usage?.input_tokens ?? null, outputTokens: out.usage?.output_tokens ?? null, costUsd: tokenCost(PLAN_MODEL, out.usage),
   });
-  return { facts: normaliseTripFacts(out.parsed), language: language ?? out.parsed?.language ?? null };
+  const facts = normaliseTripFacts(out.parsed);
+  // "On Saturday" is held to the Saturday after the day it was said, once,
+  // here — what is stored is what was meant, whenever it is read back.
+  facts.when = holdWeekday(facts.when, today);
+  return { facts, language: language ?? out.parsed?.language ?? null };
 }
 
 async function loadIntake(id, household) {

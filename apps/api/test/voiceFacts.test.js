@@ -223,6 +223,8 @@ test('"on Saturday" is the next Saturday whatever date the model wrote, and a ra
   assert.equal(holdWeekday({ start: '2026-09-12', end: null, as_said: 'on Saturday' }, '2026-09-09').start, '2026-09-12', 'right already');
   assert.deepEqual(holdWeekday({ start: '2026-09-10', end: '2026-09-11', as_said: 'Friday to Saturday' }, '2026-09-09'), { start: '2026-09-11', end: '2026-09-12', as_said: 'Friday to Saturday' });
   assert.equal(holdWeekday({ start: '2026-09-11', end: null, as_said: 'tomorrow' }, '2026-09-09').start, '2026-09-11', 'no weekday, no change');
+  assert.equal(holdWeekday({ start: '2026-09-19', end: null, as_said: 'on Saturday' }, '2026-09-09').start, '2026-09-12', 'a Saturday, but not the next one');
+  assert.equal(holdWeekday({ start: '2026-09-12', end: null, as_said: 'Saturday week' }, '2026-09-09').start, '2026-09-19', '"Saturday week" is the one after');
 });
 
 test('the household’s own children are not "said" ages, and food or a mood is not a want', () => {
@@ -235,4 +237,29 @@ test('the household’s own children are not "said" ages, and food or a mood is 
   const out = resolveIntake({ facts: f, flow: 'returning', household, members, today });
   assert.equal(out.slots.find((x) => x.key === 'kids_ages'), undefined, 'Priya 9 and the 6 are the household; nothing to say');
   assert.equal(out.slots.find((x) => x.key === 'several_things'), undefined);
+});
+
+test('a row saved before wants existed still resolves, a correction replaces a want, and a café alone is a food page', () => {
+  const old = { ...heard };
+  delete old.wants;
+  old.food = { diets: [], cuisines: [], must_haves: [], avoids: [], place: null, no_preference: false };
+  const out = resolveIntake({ facts: old, flow: 'returning', household, members, today });
+  assert.ok(out.slots.length, 'resolves without throwing');
+  const base = normaliseTripFacts({ ...heard, wants: [{ name: 'Windsor Castle', kind: 'place', type: 'castle' }] });
+  const later = normaliseTripFacts({ ...heard, wants: [{ name: 'Legoland', kind: 'place', type: null }], corrections: [{ slot: 'wants', from: 'Windsor Castle', to: 'Legoland' }] });
+  assert.deepEqual(mergeTripFacts(base, later).wants.map((w) => w.name), ['Legoland']);
+  const cafe = resolveIntake({ facts: normaliseTripFacts({ ...heard, vibe: null, wants: [], food: { diets: [], cuisines: [], must_haves: [], kinds: ['cafe'], avoids: [], place: null, no_preference: false } }), flow: 'inspire', household, members, today });
+  assert.ok(resultsHref({ resolved: cafe.resolved, intakeId: 'q' }).startsWith('/inspire/food'));
+});
+
+test('a weekday that names the way back is left alone; the guard is not re-run on a later load; an extra six keeps its age', () => {
+  assert.deepEqual(holdWeekday({ start: '2026-09-12', end: '2026-09-13', as_said: 'this weekend, coming back Sunday' }, '2026-09-09'), { start: '2026-09-12', end: '2026-09-13', as_said: 'this weekend, coming back Sunday' });
+  assert.equal(holdWeekday({ start: '2026-09-12', end: '2026-09-14', as_said: 'Saturday until Monday' }, '2026-09-09').start, '2026-09-12');
+  // Stored on the 9th as the 12th; read back on the 12th, it is still the 12th.
+  const f = normaliseTripFacts({ ...heard, when: { start: '2026-09-12', end: null, as_said: 'on Saturday' } });
+  const later = resolveIntake({ facts: f, flow: 'returning', household, members, today: '2026-09-12' });
+  assert.equal(later.resolved.start, '2026-09-12');
+  const extra = normaliseTripFacts({ ...heard, who: { kind: 'whole_household', names: [], adults: 2, children: 3, kids_mentioned: true }, kids_ages: [{ name: null, age: 6, band: null }] });
+  const out = resolveIntake({ facts: extra, flow: 'returning', household, members, today });
+  assert.equal(out.slots.find((x) => x.key === 'kids_ages').label, 'Kids 6', 'the household has a six (Alfie); a second six said is kept');
 });

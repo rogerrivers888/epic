@@ -69,7 +69,7 @@ export function IntakeStrip({ intakeId, household, onReask, onLoaded }: { intake
           </View>
         </View>
       ) : null}
-      <ChipPicker slot={picking?.key ?? null} current={picking} heard={picking?.source === 'said' ? picking.label : null} household={household} onSet={(slot, value) => { void setSlot(slot, value); }} onClose={() => setPicking(null)} />
+      <ChipPicker slot={picking?.key ?? null} current={picking} heard={picking?.source === 'said' ? picking.label : null} household={household} wants={intake.resolved.wants ?? []} onSet={(slot, value) => { void setSlot(slot, value); }} onClose={() => setPicking(null)} />
     </View>
   );
 }
