@@ -76,12 +76,13 @@ async function loadTrip(tripId) {
 }
 
 /** From where the day starts (the bed, else home) to where it is for. Null without both, or when they are the same place. */
-function journeyOf(t) {
+function journeyOf(t, dayMode = null) {
   const from = t.base_lat != null ? { lat: t.base_lat, lng: t.base_lng } : t.origin_lat != null ? { lat: t.origin_lat, lng: t.origin_lng } : null;
   const to = t.destination_lat != null ? { lat: t.destination_lat, lng: t.destination_lng } : null;
   if (!from || !to) return null;
   if (kmBetween(from, to) < 0.3) return null;
-  const mode = isTravelMode(t.travel_mode) ? t.travel_mode : 'driving';
+  // The day's own mode where one was set over the trip's (Codex, 9 Sep 2026).
+  const mode = isTravelMode(dayMode) ? dayMode : isTravelMode(t.travel_mode) ? t.travel_mode : 'driving';
   return { minutes: Math.max(1, Math.round(estimateTravelMinutes(from, to, mode))), mode, estimated: true };
 }
 
@@ -178,7 +179,8 @@ export async function tripPayload(tripId) {
   });
 
   return {
-    trip: publicTrip(trip),
+    // The journey is worked out for the day's mode where the day set one.
+    trip: { ...publicTrip(trip), journey: journeyOf(trip, days[0]?.travel_mode ?? null) },
     attendees: attendees.map((a) => ({ id: a.id, name: a.name, isMinor: a.is_minor, avatarUrl: a.avatar_url })),
     days: dayPayloads,
     shortlist: shortlist.map((s) => ({

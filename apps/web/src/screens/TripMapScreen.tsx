@@ -542,6 +542,16 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   // ---- the map ------------------------------------------------------------
 
+  /**
+   * Whether a stop is the one the API seeded from the destination itself — an
+   * outing to a venue puts that venue on the day (routes/trips.js): the
+   * destination's own name, at its place, on a day out. One stop, never
+   * everything near it (Codex, 9 Sep 2026).
+   */
+  const isSeededDestination = (s: { name?: string | null; lat: number | null; lng: number | null }) =>
+    !isTrip && trip.destination?.lat != null && s.lat != null && s.lng != null
+    && (s.name ?? '').trim().toLowerCase() === (trip.destination.label ?? '').trim().toLowerCase()
+    && kmApart({ lat: s.lat, lng: s.lng }, { lat: trip.destination.lat as number, lng: trip.destination.lng as number }) < 0.4;
   const home = household?.household?.home ?? null;
   const startsAtHome = home?.lat != null && start?.lat != null
     ? kmApart({ lat: start.lat, lng: start.lng as number }, { lat: home.lat, lng: home.lng as number }) < 0.3
@@ -654,7 +664,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         if (pill === 'shortlist' && !stillSaved(p)) continue;
         // The destination's own stop (an outing to a venue seeds one) is the
         // pin already; an ink square on top of the pin is two marks for one place.
-        if (p.scheduled && dest?.lat != null && kmApart({ lat: p.lat as number, lng: p.lng as number }, { lat: dest.lat, lng: dest.lng as number }) < 0.1) continue;
+        if (p.scheduled && isSeededDestination(p)) continue;
         out.push({
           id: p.venueRef, lat: p.lat as number, lng: p.lng as number,
           kind: p.scheduled ? 'added' : 'saved',
@@ -749,12 +759,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    */
   const beyondDest = (() => {
     const stops = (day?.slots ?? []).flatMap((sl) => sl.stops);
-    // The seeded one is the stop with the destination's own name at the
-    // destination itself — one stop, not everything near it (Codex).
-    const seeded = trip.destination?.lat != null
-      ? stops.find((s) => s.name?.trim().toLowerCase() === trip.destination!.label?.trim().toLowerCase()
-        && s.lat != null && s.lng != null && kmApart({ lat: s.lat, lng: s.lng }, { lat: trip.destination!.lat as number, lng: trip.destination!.lng as number }) < 0.4)
-      : null;
+    const seeded = stops.find((s) => isSeededDestination(s));
     return stops.length - (seeded ? 1 : 0);
   })();
   // A day out only: a trip with days has its day strip and its stay (5h).
@@ -1057,7 +1062,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
                   <Text style={type.small}>{`${fmtDate(trip.startDate ?? trip.departAt)} ·`}</Text>
                   {there ? (
                     <>
-                      <Icon name={modeIcon(trip.travelMode)} size={14} color={colors.inkMuted} strokeWidth={2} />
+                      <Icon name={modeIcon(trip.journey?.minutes ? trip.journey.mode : 'driving')} size={14} color={colors.inkMuted} strokeWidth={2} />
                       <Text style={type.small}>{`${mins(there)} each way ·`}</Text>
                     </>
                   ) : base ? <Text style={type.small}>{`from ${base.label.split(',')[0]} ·`}</Text> : null}
@@ -1659,8 +1664,12 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
     return trip.journey?.minutes
       ?? (startAt?.lat != null && dest?.lat != null ? Math.max(1, Math.round(estimateMinutes({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
   })();
-  /** How this day travels: the day's own mode where one was set, else the trip's (Codex, 9 Sep 2026). */
-  const travelMode = day?.travelMode ?? trip.travelMode;
+  /**
+   * The mode the minutes belong to: the API works the journey out for the
+   * day's own mode (routes/trips.js `journeyOf`); the screen's fallback is a
+   * drive, and says so (Codex, 9 Sep 2026).
+   */
+  const travelMode = trip.journey?.minutes ? trip.journey.mode : 'driving';
   /** When you get there: leaving home plus the journey (a day out; a holiday's day starts where it is). */
   const arriveAt = !isTrip && journeyMinutes ? addMinutesToClock(clock(trip.departAt), journeyMinutes) : null;
 
