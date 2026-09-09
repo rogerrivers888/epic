@@ -196,16 +196,15 @@ export function holdWeekday(when, today) {
   const words = when.as_said.toLowerCase();
   const mentions = [...words.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g)];
   if (mentions.length !== 1) return when;
-  // Only a phrase that is plainly one day: a range or a way back ("tomorrow to
-  // Monday", "this weekend, coming back Sunday", "Saturday until Monday") is
-  // left as the model read it — rewriting a range's start is worse than
-  // trusting it. "Move it to next Monday" is one day, and the "to" is the
-  // verb's (Codex, 9 Sep 2026, four passes on this line).
+  // Only a phrase that is plainly one day. Anything that could be a range or
+  // a way back — a "to" anywhere, an en dash, a hyphen between days or
+  // numbers, "until", "back", "from" — is left as the model read it:
+  // rewriting a range's start is worse than trusting it, and a "to" that is
+  // really a verb's ("move it to Monday") loses only the correction, never
+  // the date (Codex, 9 Sep 2026, six passes on this line — it stays simple).
   const [m] = mentions;
-  const before = words.slice(0, m.index);
-  const changeVerb = /\b(move|moving|change|changing|make|switch|shift|put|push|reschedule|rescheduling|book)\b/.test(before);
-  const dashRange = /\s[–-]\s|\d\s*[–-]\s*\d/.test(words); // "Fri – Sun", "10-12", not "all-day"
-  const rangy = /\b(back|returning|return|home|until|till|through|between|from)\b/.test(words) || dashRange || (/\bto\b/.test(before) && !changeVerb);
+  const dashRange = /–|\s-\s|\d\s*-\s*\d/.test(words); // "tomorrow–Monday", "Fri - Sun", "10-12"; not "all-day"
+  const rangy = /\b(to|back|returning|return|home|until|till|through|between|from)\b/.test(words) || dashRange;
   if (rangy) return when;
   const wanted = WEEKDAYS.indexOf(m[1]);
   const d = new Date(`${today}T12:00:00Z`);

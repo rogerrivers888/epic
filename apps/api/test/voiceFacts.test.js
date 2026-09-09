@@ -258,9 +258,11 @@ test('a weekday that names the way back is left alone; the guard is not re-run o
   assert.equal(holdWeekday({ start: '2026-09-11', end: null, as_said: 'this coming Saturday' }, '2026-09-09').start, '2026-09-12', '"coming Saturday" is a start');
   assert.deepEqual(holdWeekday({ start: '2026-09-12', end: '2026-09-14', as_said: 'away this weekend to Monday' }, '2026-09-09'), { start: '2026-09-12', end: '2026-09-14', as_said: 'away this weekend to Monday' }, '"to Monday" is the way back');
   assert.equal(holdWeekday({ start: '2026-09-10', end: '2026-09-13', as_said: 'Thursday to Sunday' }, '2026-09-09').start, '2026-09-10', 'the first weekday is the start');
-  assert.equal(holdWeekday({ start: '2026-09-21', end: null, as_said: 'move it to next Monday' }, '2026-09-09').start, '2026-09-14', '"move it to next Monday" is one day, held to the next Monday');
+  assert.equal(holdWeekday({ start: '2026-09-21', end: null, as_said: 'move it to next Monday' }, '2026-09-09').start, '2026-09-21', 'a "to" anywhere: the model\'s reading stands');
+  assert.deepEqual(holdWeekday({ start: '2026-09-10', end: '2026-09-14', as_said: 'book tomorrow to Monday' }, '2026-09-09'), { start: '2026-09-10', end: '2026-09-14', as_said: 'book tomorrow to Monday' });
+  assert.deepEqual(holdWeekday({ start: '2026-09-10', end: '2026-09-14', as_said: 'tomorrow–Monday' }, '2026-09-09'), { start: '2026-09-10', end: '2026-09-14', as_said: 'tomorrow–Monday' }, 'an unspaced en dash is a range');
   assert.deepEqual(holdWeekday({ start: '2026-09-10', end: '2026-09-14', as_said: 'tomorrow to Monday' }, '2026-09-09'), { start: '2026-09-10', end: '2026-09-14', as_said: 'tomorrow to Monday' }, 'a range from a relative day is left as read');
-  assert.equal(holdWeekday({ start: '2026-09-21', end: null, as_said: 'please reschedule it to Monday' }, '2026-09-09').start, '2026-09-14', 'a change verb anywhere before the day');
+  assert.equal(holdWeekday({ start: '2026-09-21', end: null, as_said: 'please reschedule it to Monday' }, '2026-09-09').start, '2026-09-21', 'a "to", so the model\'s reading stands');
   assert.equal(holdWeekday({ start: '2026-09-15', end: null, as_said: 'all-day Wednesday' }, '2026-09-09').start, '2026-09-16', 'a hyphen inside a word is not a range');
   assert.equal(holdWeekday({ start: '2026-09-11', end: '2026-09-13', as_said: 'Fri - Sun' }, '2026-09-09').start, '2026-09-11', 'a dash between days is');
   assert.equal(holdWeekday({ start: '2026-09-12', end: '2026-09-14', as_said: 'Saturday until Monday' }, '2026-09-09').start, '2026-09-12', 'a range is left as read');
