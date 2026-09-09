@@ -194,24 +194,23 @@ const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'frida
 export function holdWeekday(when, today) {
   if (!when?.as_said || !today) return when;
   const words = when.as_said.toLowerCase();
-  const m = words.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
-  if (!m) return when;
-  // A weekday that names the way back ("this weekend, coming back Sunday",
-  // "until Monday") is not the start; leave a range like that alone.
+  const mentions = [...words.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g)];
+  if (mentions.length !== 1) return when;
+  // Only a phrase that is plainly one day: a range or a way back ("tomorrow to
+  // Monday", "this weekend, coming back Sunday", "Saturday until Monday") is
+  // left as the model read it — rewriting a range's start is worse than
+  // trusting it. "Move it to next Monday" is one day, and the "to" is the
+  // verb's (Codex, 9 Sep 2026, four passes on this line).
+  const [m] = mentions;
   const before = words.slice(0, m.index);
-  // "coming back Sunday", "home on Monday", "until Tuesday", "this weekend to
-  // Monday" name the end; "this coming Saturday" names the start (Codex,
-  // 9 Sep 2026, twice).
-  // "to Monday" ends a range only when something earlier in the words began
-  // one ("this weekend to Monday"); "move it to next Monday" is a start.
-  const toEnd = /\bto\s+(the\s+)?(next\s+)?$/.test(before) && /\b(weekend|week|from|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d)/.test(before.replace(/\bto\s+(the\s+)?(next\s+)?$/, ''));
-  if (/\b(back|returning|return|home|until|till|through)\b/.test(before) || toEnd) return when;
+  const rangy = /\b(back|returning|return|home|until|till|through|between|from)\b|[–-]/.test(words) || (/\bto\b/.test(before) && !/^\s*(move|change|make|switch|shift|put|push)\b/.test(words));
+  if (rangy) return when;
   const wanted = WEEKDAYS.indexOf(m[1]);
   const d = new Date(`${today}T12:00:00Z`);
   const add = (wanted - d.getUTCDay() + 7) % 7 || 7;
   d.setUTCDate(d.getUTCDate() + add);
   // "Saturday week" / "a week on Saturday" / "the Saturday after next" is the one after.
-  if (/\b(week on|after next)\b|\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday) week\b/.test(when.as_said.toLowerCase())) d.setUTCDate(d.getUTCDate() + 7);
+  if (/\b(week on|after next)\b|\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday) week\b/.test(words)) d.setUTCDate(d.getUTCDate() + 7);
   const next = d.toISOString().slice(0, 10);
   if (when.start === next) return when;
   const nights = when.start && when.end ? Math.round((Date.parse(when.end) - Date.parse(when.start)) / 86_400_000) : 0;
