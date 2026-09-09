@@ -19,7 +19,8 @@
  */
 
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { BORDER, colors, radius, spacing, TARGET, type } from '../theme';
 import { Icon } from './Icon';
 
@@ -61,14 +62,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
               tabs under it, the outer one does not, and "try again" is the way
               back from both. */}
           <Text style={[type.small, styles.body]}>Nothing has been lost. Try it again.</Text>
-          <Pressable
+          <Press
             onPress={() => this.setState({ failed: false })}
             accessibilityRole="button"
             style={styles.retry}
           >
             <Icon name="refresh" size={16} color={colors.primaryFg} />
             <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
+          </Press>
         </View>
       </View>
     );

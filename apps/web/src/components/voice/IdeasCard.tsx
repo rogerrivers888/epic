@@ -11,7 +11,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../press';
 import { api, Intake, InspireItem } from '../../api';
 import { colors, fonts } from '../../theme';
 import { MicTile } from './kit';
@@ -80,5 +81,3 @@ const styles = StyleSheet.create({
   link: { fontWeight: '700', textDecorationLine: 'underline' },
   added: { textDecorationLine: 'none', color: colors.accent },
 });
-
-export type { Pressable };

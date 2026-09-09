@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Press, Ring } from './press';
 import { api, OptionStop, Venue } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Chip, Row, Wrap, clock, minutes } from './ui';
@@ -41,6 +42,7 @@ export function StopCard({ stop, mode, baseLabel, previousName, dim, pinned, bus
   onDislike: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [pulse, setPulse] = useState(0);
   const isAnchor = stop.fixed || stop.venueRef.startsWith('anchor:');
   const price = priceMarks(stop.priceLevel);
 
@@ -91,21 +93,22 @@ export function StopCard({ stop, mode, baseLabel, previousName, dim, pinned, bus
         {stop.justification ? <Text style={type.tiny}>"{stop.justification}"</Text> : null}
 
         {!isAnchor ? (
-          <Pressable onPress={() => setOpen((o) => !o)} style={styles.details} accessibilityRole="button">
+          <Press onPress={() => setOpen((o) => !o)} style={styles.details} accessibilityRole="button">
             <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>{open ? 'Hide details' : 'Details & reviews'}</Text>
-          </Pressable>
+          </Press>
         ) : null}
         {open ? <StopDetails stop={stop} /> : null}
       </View>
 
       <View style={{ gap: 6 }}>
-        <Pressable onPress={onLike} disabled={busy} style={[styles.reactBtn, pinned && styles.reactBtnOn]} accessibilityRole="button" accessibilityLabel={pinned ? `Stop keeping ${stop.name}` : `Keep ${stop.name}`}>
+        <Press onPress={() => { if (!pinned) setPulse((n) => n + 1); onLike(); }} disabled={busy} style={[styles.reactBtn, pinned && styles.reactBtnOn]} accessibilityRole="button" accessibilityLabel={pinned ? `Stop keeping ${stop.name}` : `Keep ${stop.name}`}>
+          <Ring pulse={pulse} size={28} color={colors.ink} />
           <View style={styles.reactInner}><Icon name="keep" size={14} color={pinned ? colors.bg : colors.ink} fill={pinned} /><Text style={[styles.reactText, pinned && { color: '#fff' }]}>{pinned ? 'Keeping' : 'Keep'}</Text></View>
-        </Pressable>
+        </Press>
         {!isAnchor ? (
-          <Pressable onPress={onDislike} disabled={busy} style={styles.reactBtn} accessibilityRole="button" accessibilityLabel={`Not ${stop.name}`}>
+          <Press onPress={onDislike} disabled={busy} style={styles.reactBtn} accessibilityRole="button" accessibilityLabel={`Not ${stop.name}`}>
             <View style={styles.reactInner}><Icon name="close" size={14} color={colors.ink} /><Text style={styles.reactText}>Not this</Text></View>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
     </View>
@@ -136,7 +139,7 @@ function StopDetails({ stop }: { stop: OptionStop }) {
       {summary ? <Text style={type.body}>{summary}</Text> : null}
       {address ? <IconText name="address">{address}</IconText> : null}
       {hours ? <IconText name="hours">{hours}</IconText> : null}
-      {website ? <Pressable onPress={() => Linking.openURL(website)}><Text style={[type.small, { color: colors.accent }]}>{website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</Text></Pressable> : null}
+      {website ? <Press onPress={() => Linking.openURL(website)}><Text style={[type.small, { color: colors.accent }]}>{website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</Text></Press> : null}
       {stop.goodForChildren != null ? <IconText name="children">{stop.goodForChildren ? 'Good for children' : 'Not noted as good for children'}{stop.menuForChildren ? " · children's menu" : ''}</IconText> : null}
 
       {reviews.length ? (

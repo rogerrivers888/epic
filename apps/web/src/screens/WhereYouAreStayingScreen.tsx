@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, Place } from '../api';
 import { colors, fonts, BORDER, TARGET } from '../theme';
 import { Icon } from '../components/Icon';
@@ -73,13 +74,13 @@ export function WhereYouAreStayingScreen({ where, meta, initial, onClose, onDone
     <View style={[styles.page, wide && styles.wide]}>
       <View style={styles.head}>
         <View style={styles.topRow}>
-          <Pressable onPress={onClose} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
+          <Press onPress={onClose} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
             <Icon name="previous" size={16} color={colors.ink} strokeWidth={2.4} />
             <Text style={styles.backText} numberOfLines={1}>{city ?? 'Back'}</Text>
-          </Pressable>
-          <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+          </Press>
+          <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
             <Icon name="close" size={20} color={colors.ink} strokeWidth={2.2} />
-          </Pressable>
+          </Press>
         </View>
         <View>
           <Text style={styles.title}>Where you're staying</Text>
@@ -103,7 +104,7 @@ export function WhereYouAreStayingScreen({ where, meta, initial, onClose, onDone
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {results.length ? <Text style={styles.kicker}>{city ? `Matches in ${city}` : 'Matches'}</Text> : null}
         {results.map((p) => (
-          <Pressable
+          <Press
             key={`${p.label}|${p.lat}|${p.lng}`}
             onPress={() => onDone({ kind: 'place', place: p })}
             style={styles.row}
@@ -120,18 +121,18 @@ export function WhereYouAreStayingScreen({ where, meta, initial, onClose, onDone
               </Text>
             </View>
             <Text style={styles.select}>Select ›</Text>
-          </Pressable>
+          </Press>
         ))}
 
         {/* Not on the map, or not findable by name: their words are the answer. */}
         {text.trim().length >= 3 ? (
-          <Pressable onPress={() => onDone({ kind: 'typed', text: text.trim() })} style={styles.row} accessibilityRole="button">
+          <Press onPress={() => onDone({ kind: 'typed', text: text.trim() })} style={styles.row} accessibilityRole="button">
             <View style={[styles.tile, styles.tileOutline]}><Icon name="add" size={18} color={colors.ink} strokeWidth={2.4} /></View>
             <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
               <Text style={styles.rowName} numberOfLines={1}>{`Use “${text.trim()}” as typed`}</Text>
               <Text style={styles.rowSub}>Add a booking reference later</Text>
             </View>
-          </Pressable>
+          </Press>
         ) : null}
 
         {/*
@@ -148,25 +149,25 @@ export function WhereYouAreStayingScreen({ where, meta, initial, onClose, onDone
             Save the trip first, add what you want to do, then find hotels close to your plans from the trip map —{' '}
             <Text style={styles.signpostStrong}>Stays</Text> sits beside Activities and Food &amp; drink.
           </Text>
-          <Pressable onPress={() => onDone({ kind: 'later' })} style={styles.skip} accessibilityRole="button">
+          <Press onPress={() => onDone({ kind: 'later' })} style={styles.skip} accessibilityRole="button">
             <Text style={styles.skipText}>Skip for now — find stays on the map</Text>
             <Icon name="forward" size={16} color={colors.primaryFg} strokeWidth={2.2} />
-          </Pressable>
+          </Press>
         </View>
 
         <View style={styles.links}>
           <Text style={styles.linkOn}>Forward booking email</Text>
-          <Pressable onPress={() => onDone({ kind: 'typed', text: 'Staying with friends' })} accessibilityRole="button">
+          <Press onPress={() => onDone({ kind: 'typed', text: 'Staying with friends' })} accessibilityRole="button">
             <Text style={styles.link}>Staying with friends</Text>
-          </Pressable>
+          </Press>
         </View>
       </ScrollView>
 
       <View style={styles.foot}>
-        <Pressable onPress={onClose} style={styles.primary} accessibilityRole="button">
+        <Press onPress={onClose} style={styles.primary} accessibilityRole="button">
           <Text style={styles.primaryText}>Done</Text>
           <Icon name="forward" size={18} color={colors.primaryFg} strokeWidth={2.4} />
-        </Pressable>
+        </Press>
       </View>
     </View>
   );

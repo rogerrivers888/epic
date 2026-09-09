@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, fonts, spacing, BORDER, TARGET } from '../theme';
 import { Icon, IconName } from './Icon';
 import { PanelKicker } from './InspireHeader';
@@ -117,25 +118,25 @@ export function TravelPanel({
 
       {/* The field is a button: what it holds is a place, and places are picked
           on the search screen rather than typed into a filter. */}
-      <Pressable onPress={onEditFrom} style={panel.field} accessibilityRole="button" accessibilityLabel={`Measuring from ${from}. Change it`}>
+      <Press onPress={onEditFrom} style={panel.field} accessibilityRole="button" accessibilityLabel={`Measuring from ${from}. Change it`}>
         <Icon name="address" size={14} color={colors.ink} />
         <Text numberOfLines={1} style={panel.fieldText}>{from}</Text>
         <Icon name="edit" size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
 
       {/* The origins that need no typing. Work is not one of them: the
           household has a home address and nothing else, and a shortcut to an
           address nobody has ever given would do nothing when tapped. */}
       <View style={panel.quick}>
         {onHere ? (
-          <Pressable onPress={onHere} accessibilityRole="button" style={panel.quickHit}>
+          <Press onPress={onHere} accessibilityRole="button" style={panel.quickHit}>
             <Text style={[panel.quickText, panel.quickHere]}>Use my location</Text>
-          </Pressable>
+          </Press>
         ) : null}
         {onHome ? (
-          <Pressable onPress={onHome} accessibilityRole="button" accessibilityState={{ selected: atHome }} style={panel.quickHit}>
+          <Press onPress={onHome} accessibilityRole="button" accessibilityState={{ selected: atHome }} style={panel.quickHit}>
             <Text style={[panel.quickText, atHome && panel.quickOn]}>{homeLabel}</Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
 
@@ -147,11 +148,11 @@ export function TravelPanel({
           {MODES.map((m) => {
             const on = m.key === mode;
             return (
-              <Pressable key={m.key} onPress={() => onMode(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+              <Press key={m.key} onPress={() => onMode(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
                 <View style={[panel.way, on && panel.wayOn]}>
                   <Text style={[panel.wayText, on && panel.wayTextOn]}>{m.short}</Text>
                 </View>
-              </Pressable>
+              </Press>
             );
           })}
         </View>
@@ -162,7 +163,7 @@ export function TravelPanel({
           const on = o.minutes === minutes;
           const n = counts(o.minutes);
           return (
-            <Pressable
+            <Press
               key={String(o.minutes)}
               onPress={() => onMinutes(o.minutes)}
               accessibilityRole="button"
@@ -171,7 +172,7 @@ export function TravelPanel({
             >
               <Text style={[panel.rowText, on && panel.rowTextOn]}>{o.label}</Text>
               <Text style={panel.rowCount}>{o.minutes == null ? 'All' : n == null ? '' : n.toLocaleString()}</Text>
-            </Pressable>
+            </Press>
           );
         })}
       </View>
@@ -180,7 +181,7 @@ export function TravelPanel({
           question as how far, which is why it is here and not a chip of its
           own (owner, 8 Sep 2026). A check, not a chevron: it settles here. */}
       {openNow == null ? null : (
-        <Pressable
+        <Press
           onPress={() => onOpenNow?.(!openNow)}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: openNow }}
@@ -188,13 +189,13 @@ export function TravelPanel({
         >
           <Text style={[panel.rowText, openNow && panel.rowTextOn]}>Open now</Text>
           <Icon name={openNow ? 'check' : 'hours'} size={18} color={openNow ? colors.ink : colors.inkMuted} />
-        </Pressable>
+        </Press>
       )}
 
-      <Pressable onPress={onDone} style={panel.show} accessibilityRole="button">
+      <Press onPress={onDone} style={panel.show} accessibilityRole="button">
         <Text style={panel.showText}>{total == null ? 'Show places' : `Show ${total.toLocaleString()} place${total === 1 ? '' : 's'}`}</Text>
         <Icon name="forward" size={18} color={colors.primaryFg} />
-      </Pressable>
+      </Press>
     </View>
   );
 }
@@ -221,7 +222,7 @@ export function ChoicePanel({ sub, options, value, onPick }: {
         {options.map((o) => {
           const on = o.key === value;
           return (
-            <Pressable
+            <Press
               key={o.key}
               onPress={() => onPick(o.key)}
               accessibilityRole="button"
@@ -230,7 +231,7 @@ export function ChoicePanel({ sub, options, value, onPick }: {
             >
               <Text style={[panel.rowText, on && panel.rowTextOn]}>{o.label}</Text>
               <Text style={panel.rowCount}>{o.count == null ? '' : o.count.toLocaleString()}</Text>
-            </Pressable>
+            </Press>
           );
         })}
       </View>

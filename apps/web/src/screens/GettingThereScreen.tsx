@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, FlightLookup, TravelLeg, TravelMode2, TransferMode, TripDetail, TripTravel } from '../api';
 import { colors, fonts, BORDER, TARGET } from '../theme';
 import { Icon, IconName } from '../components/Icon';
@@ -116,13 +117,13 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
     <View style={[styles.page, wide && styles.wide]}>
       <View style={styles.head}>
         <View style={styles.topRow}>
-          <Pressable onPress={onBack} style={styles.back} accessibilityRole="button" accessibilityLabel={`Back to ${tripName(trip.trip)}`}>
+          <Press onPress={onBack} style={styles.back} accessibilityRole="button" accessibilityLabel={`Back to ${tripName(trip.trip)}`}>
             <Icon name="back" size={16} color={colors.ink} strokeWidth={2.4} />
             <Text style={styles.backText} numberOfLines={1}>{tripName(trip.trip)}</Text>
-          </Pressable>
-          <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+          </Press>
+          <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
             <Icon name="close" size={20} color={colors.ink} strokeWidth={2.4} />
-          </Pressable>
+          </Press>
         </View>
         <View>
           <Text style={styles.title}>Getting there</Text>
@@ -132,11 +133,11 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
           {shown.map((m) => {
             const on = m.key === mode;
             return (
-              <Pressable key={m.key} onPress={() => setMode(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+              <Press key={m.key} onPress={() => setMode(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
                 <View style={[styles.stripItem, on && styles.stripItemOn]}>
                   <Text style={[styles.stripText, on && styles.stripTextOn]}>{m.label}</Text>
                 </View>
-              </Pressable>
+              </Press>
             );
           })}
         </View>
@@ -165,7 +166,7 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
                       l.transit?.departs && l.transit?.arrives ? `${l.transit.departs}–${l.transit.arrives}` : null].filter(Boolean).join(' · ')}
                   </Text>
                 ))}
-                <Pressable
+                <Press
                   onPress={() => save('outbound', {
                     mode, onDate: trip.trip.startDate ?? null,
                     fromLabel: suggested.from ?? null, toLabel: suggested.to ?? null,
@@ -177,7 +178,7 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
                 >
                   <Icon name="add" size={15} color={colors.primaryFg} strokeWidth={2.4} />
                   <Text style={styles.takeText}>{mode === 'train' ? 'Put this train on the trip' : 'Put this drive on the trip'}</Text>
-                </Pressable>
+                </Press>
               </>
             ) : null}
             {!looking && suggested && !suggested.ok ? <Text style={styles.hint}>{suggested.message}</Text> : null}
@@ -221,7 +222,7 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
             {data.transfers.length ? (
               <View style={styles.cells}>
                 {data.transfers.map((t, i) => (
-                  <Pressable
+                  <Press
                     key={t.id}
                     onPress={async () => {
                       setBusy(true);
@@ -237,7 +238,7 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
                     </View>
                     <Text style={styles.cellBig}>{t.minutes != null ? `${t.minutes} min` : '—'}</Text>
                     <Text style={styles.cellDetail}>{t.detail ?? ''}</Text>
-                  </Pressable>
+                  </Press>
                 ))}
               </View>
             ) : (
@@ -254,10 +255,10 @@ export function GettingThereScreen({ trip, onBack, onClose }: {
       </ScrollView>
 
       <View style={styles.foot}>
-        <Pressable onPress={onBack} style={styles.primary} accessibilityRole="button">
+        <Press onPress={onBack} style={styles.primary} accessibilityRole="button">
           <Text style={styles.primaryText}>Done</Text>
           <Icon name="forward" size={18} color={colors.primaryFg} strokeWidth={2.4} />
-        </Pressable>
+        </Press>
       </View>
     </View>
   );
@@ -343,7 +344,7 @@ function Leg({ tripId, direction, mode, leg, date, says, busy, onSave, backFrom 
               </Text>
             ) : null}
           </View>
-          <Pressable
+          <Press
             onPress={() => {
               setService(leg.serviceNo ?? '');
               setFrom(leg.from.code ?? leg.from.label ?? '');
@@ -358,7 +359,7 @@ function Leg({ tripId, direction, mode, leg, date, says, busy, onSave, backFrom 
             accessibilityRole="button"
           >
             <Text style={styles.editText}>Edit</Text>
-          </Pressable>
+          </Press>
         </View>
       </View>
     );
@@ -407,9 +408,9 @@ function Leg({ tripId, direction, mode, leg, date, says, busy, onSave, backFrom 
       ) : null}
 
       <View style={styles.links}>
-        <Pressable onPress={() => setForwarding((f) => !f)} accessibilityRole="button">
+        <Press onPress={() => setForwarding((f) => !f)} accessibilityRole="button">
           <Text style={styles.linkOn}>Forward booking email</Text>
-        </Pressable>
+        </Press>
         <Text style={styles.link}>{says}</Text>
       </View>
       {forwarding ? (
@@ -420,13 +421,13 @@ function Leg({ tripId, direction, mode, leg, date, says, busy, onSave, backFrom 
       ) : null}
 
       <View style={styles.legActions}>
-        <Pressable onPress={commit} style={styles.save} accessibilityRole="button" disabled={busy}>
+        <Press onPress={commit} style={styles.save} accessibilityRole="button" disabled={busy}>
           <Text style={styles.saveText}>{busy ? 'Saving…' : leg ? 'Save changes' : 'Save this leg'}</Text>
-        </Pressable>
+        </Press>
         {leg ? (
-          <Pressable onPress={() => setOpen(false)} style={styles.cancel} accessibilityRole="button">
+          <Press onPress={() => setOpen(false)} style={styles.cancel} accessibilityRole="button">
             <Text style={styles.cancelText}>Cancel</Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
     </View>

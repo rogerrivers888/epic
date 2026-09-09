@@ -26,7 +26,8 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, CategoryProposal, LibraryAttractionDetail, ShelfWeights } from '../../api';
 import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
@@ -90,11 +91,11 @@ export function PlaceInspector({ id, onClose, onChanged }: {
           </Text>
         </View>
         {!editing ? (
-          <Pressable onPress={() => setEditing(true)} accessibilityRole="button" accessibilityLabel="Edit the category"
+          <Press onPress={() => setEditing(true)} accessibilityRole="button" accessibilityLabel="Edit the category"
                      style={styles.editBtn}>
             <Icon name="edit" size={14} color={colors.accent} />
             <Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Edit</Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
 
@@ -157,9 +158,9 @@ function Fact({ label, value, source, link, blank }: {
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         {value ? (
           link ? (
-            <Pressable onPress={() => Linking.openURL(link)} accessibilityRole="link">
+            <Press onPress={() => Linking.openURL(link)} accessibilityRole="link">
               <Text style={[type.small, { color: colors.accent, textDecorationLine: 'underline' }]} numberOfLines={2}>{value}</Text>
-            </Pressable>
+            </Press>
           ) : (
             <Text style={type.small} numberOfLines={4}>{value}</Text>
           )
@@ -264,7 +265,7 @@ function Teach({ row, onCancel, onSaved }: {
             {proposal.options.map((o) => {
               const on = chosen?.scope === o.scope && chosen?.subject === o.subject;
               return (
-                <Pressable
+                <Press
                   key={`${o.scope}:${o.subject}`}
                   onPress={() => setChosen({ scope: o.scope, subject: o.subject })}
                   accessibilityRole="radio"
@@ -280,14 +281,14 @@ function Teach({ row, onCancel, onSaved }: {
                         : `${count(o.affects)} places across ${count(o.regions)} ${o.regions === 1 ? 'county' : 'counties'}.`}
                     </Text>
                   </View>
-                </Pressable>
+                </Press>
               );
             })}
           </View>
 
           {/* The other axis, offered and never assumed. */}
           {proposal.weights && Object.keys(proposal.weights).length ? (
-            <Pressable onPress={() => setWithShelf(!withShelf)} accessibilityRole="checkbox"
+            <Press onPress={() => setWithShelf(!withShelf)} accessibilityRole="checkbox"
                        accessibilityState={{ checked: withShelf }} style={[styles.scope, withShelf && styles.scopeOn]}>
               <View style={[styles.radio, styles.check, withShelf && styles.radioOn]} />
               <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
@@ -307,7 +308,7 @@ function Teach({ row, onCancel, onSaved }: {
                   or above {FLOOR} ever show a card.
                 </Text>
               </View>
-            </Pressable>
+            </Press>
           ) : null}
 
           <View style={styles.summary}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { api, Place } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon } from './Icon';
@@ -153,7 +154,7 @@ export function PlacePicker({
             ) : value.country ? <Text style={type.small}>{[value.locality, value.country].filter(Boolean).join(' · ')}</Text> : null}
           {value.approximate ? <Text style={type.tiny}>Pin placed by {value.matchedBy} — the map data has no exact entry for this address.</Text> : null}
         </View>
-        <Pressable onPress={() => setEditing(true)} style={styles.change} accessibilityRole="button"><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Change</Text></Pressable>
+        <Press onPress={() => setEditing(true)} style={styles.change} accessibilityRole="button"><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Change</Text></Press>
       </View>
     );
   }
@@ -163,11 +164,11 @@ export function PlacePicker({
       {extra?.length || (here && me.supported) ? (
         <View style={styles.pills}>
           {extra?.map((p) => (
-            <Pressable key={p.label} onPress={() => choose(p)} style={styles.pill}><Text style={styles.pillText}>{p.label}</Text></Pressable>
+            <Press key={p.label} onPress={() => choose(p)} style={styles.pill}><Text style={styles.pillText}>{p.label}</Text></Press>
           ))}
           {/* Nothing is asked of the device until this is pressed. */}
           {here && me.supported ? (
-            <Pressable
+            <Press
               onPress={async () => { const p = await me.ask(); if (p) choose(p); }}
               disabled={me.busy}
               style={[styles.pill, styles.herePill]}
@@ -175,7 +176,7 @@ export function PlacePicker({
             >
               {me.busy ? <ActivityIndicator size="small" color={colors.accent} /> : <Icon name="here" size={14} color={colors.accent} />}
               <Text style={[styles.pillText, { color: colors.accent }]}>{me.busy ? 'Finding you…' : 'Where I am'}</Text>
-            </Pressable>
+            </Press>
           ) : null}
         </View>
       ) : null}
@@ -185,7 +186,7 @@ export function PlacePicker({
         <TextInput value={text} onChangeText={type_} placeholder={placeholder} placeholderTextColor={colors.inkFaint} style={styles.boxInput} autoCapitalize="words" autoCorrect={false} onSubmitEditing={() => { if (items[0]) choose(items[0]); }} returnKeyType="search" autoFocus={autoFocus || editing} />
         {busy ? <ActivityIndicator size="small" color={colors.inkFaint} /> : null}
       </View>
-      {value && editing ? <Pressable onPress={() => { setEditing(false); setText(''); onText?.(''); setItems([]); }} style={styles.change}><Text style={type.small}>Cancel — keep "{value.formatted ?? value.label}"</Text></Pressable> : null}
+      {value && editing ? <Press onPress={() => { setEditing(false); setText(''); onText?.(''); setItems([]); }} style={styles.change}><Text style={type.small}>Cancel — keep "{value.formatted ?? value.label}"</Text></Press> : null}
       {!areas && busy ? <Text style={type.tiny}>Looking…</Text> : null}
       {shown.length ? (
         <View style={styles.list}>
@@ -198,7 +199,7 @@ export function PlacePicker({
               {areas && abroad && ours.length && i === ours.length ? (
                 <Text style={[type.tiny, { paddingHorizontal: 4, marginTop: 4 }]}>Everywhere else</Text>
               ) : null}
-              <Pressable onPress={() => choose(p)} style={[styles.result, areas && styles.suggestion]} accessibilityRole="button">
+              <Press onPress={() => choose(p)} style={[styles.result, areas && styles.suggestion]} accessibilityRole="button">
                 <View style={{ flex: 1 }}>
                   {/*
                     A hotel is known by its name, not by its front door. In
@@ -216,18 +217,18 @@ export function PlacePicker({
                   </Text>
                 </View>
                 {areas ? null : <View style={styles.use}><Text style={styles.useText}>Use this</Text></View>}
-              </Pressable>
+              </Press>
             </React.Fragment>
           ))}
           {areas && ours.length && theirs.length ? (
-            <Pressable onPress={() => setAbroad((a) => !a)} style={styles.elsewhere} accessibilityRole="button" accessibilityState={{ expanded: abroad }}>
+            <Press onPress={() => setAbroad((a) => !a)} style={styles.elsewhere} accessibilityRole="button" accessibilityState={{ expanded: abroad }}>
               <Icon name={abroad ? 'collapse' : 'more'} size={14} color={colors.inkMuted} />
               <Text style={[type.small, { color: colors.inkMuted, flex: 1 }]}>
                 {abroad
                   ? `Only ${home?.name ?? 'here'}`
                   : `${capitalise(searched.trim())} in ${elsewhereCount === 1 ? '1 other country' : `${elsewhereCount} other countries`}`}
               </Text>
-            </Pressable>
+            </Press>
           ) : null}
           {areas && !ours.length && home && items.length ? (
             <Text style={[type.tiny, { paddingHorizontal: 4 }]}>Nothing in {home.name ?? home.code} — showing everywhere.</Text>

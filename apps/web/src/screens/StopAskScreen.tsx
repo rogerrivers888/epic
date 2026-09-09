@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, TripChat, TripDetail, TripPlace } from '../api';
 import { colors, fonts, BORDER, TARGET } from '../theme';
 import { Icon } from '../components/Icon';
@@ -82,9 +83,9 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
               {[place?.category, stop?.dwellMinutes ? mins(stop.dwellMinutes) : null].filter(Boolean).join(' · ') || 'On this trip'}
             </Text>
           </View>
-          <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+          <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
             <Icon name="close" size={20} color={colors.ink} strokeWidth={2.4} />
-          </Pressable>
+          </Press>
         </View>
 
         {place?.image ? (
@@ -99,11 +100,11 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
           ]).map((t) => {
             const on = t.key === tab;
             return (
-              <Pressable key={t.key} onPress={() => setTab(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+              <Press key={t.key} onPress={() => setTab(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
                 <View style={[styles.tab, on && styles.tabOn]}>
                   <Text style={[styles.tabText, on && styles.tabTextOn]}>{t.label}</Text>
                 </View>
-              </Pressable>
+              </Press>
             );
           })}
         </View>
@@ -134,10 +135,10 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
             </View>
           ) : null}
           {onOpenPlace ? (
-            <Pressable onPress={() => onOpenPlace(venueRef)} style={styles.link} accessibilityRole="button">
+            <Press onPress={() => onOpenPlace(venueRef)} style={styles.link} accessibilityRole="button">
               <Text style={styles.linkText}>Everything about this place</Text>
               <Icon name="more" size={15} color={colors.accent} strokeWidth={2.4} />
-            </Pressable>
+            </Press>
           ) : null}
         </View>
       ) : null}
@@ -150,10 +151,10 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
             marks beside it.
           </Text>
           {onOpenPlace ? (
-            <Pressable onPress={() => onOpenPlace(venueRef)} style={styles.link} accessibilityRole="button">
+            <Press onPress={() => onOpenPlace(venueRef)} style={styles.link} accessibilityRole="button">
               <Text style={styles.linkText}>Open the reviews</Text>
               <Icon name="more" size={15} color={colors.accent} strokeWidth={2.4} />
-            </Pressable>
+            </Press>
           ) : null}
         </View>
       ) : null}

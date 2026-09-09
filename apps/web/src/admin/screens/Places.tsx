@@ -24,7 +24,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, FactKey, Locality, LocalityPage, LocalityRow, PlaceTree } from '../../api';
 import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
@@ -280,9 +281,9 @@ function Picker({ tree, open, onOpen, wide }: {
             autoCapitalize="none"
           />
           {q ? (
-            <Pressable onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear">
+            <Press onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear">
               <Icon name="close" size={14} color={colors.inkMuted} />
-            </Pressable>
+            </Press>
           ) : null}
         </View>
 
@@ -340,7 +341,7 @@ function Leaf({ row, depth, on, onPress, showKind }: {
 }) {
   const held = Number(row.to_go_count) + Number(row.to_eat_count);
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: on }}
@@ -353,7 +354,7 @@ function Leaf({ row, depth, on, onPress, showKind }: {
       </Text>
       {showKind ? <Pill label={KIND[row.kind].word} /> : null}
       <Text style={type.tiny}>{held ? count(held) : '—'}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -383,9 +384,9 @@ function Place({ page, wide, busy, missing, onMissing, side, onSide, onOpen, ope
         {place.parent_name ? (
           <>
             <Text style={type.tiny}>›</Text>
-            <Pressable onPress={() => place.parent_slug && onOpen(place.parent_slug)} accessibilityRole="button">
+            <Press onPress={() => place.parent_slug && onOpen(place.parent_slug)} accessibilityRole="button">
               <Text style={[type.tiny, { color: colors.accent, textDecorationLine: 'underline' }]}>{place.parent_name}</Text>
-            </Pressable>
+            </Press>
           </>
         ) : null}
         <Text style={type.tiny}>›</Text>
@@ -419,7 +420,7 @@ function Place({ page, wide, busy, missing, onMissing, side, onSide, onOpen, ope
             const applies = c && c.of > 0;
             const shade = shadeOf(applies ? c.pc : null);
             return (
-              <Pressable
+              <Press
                 key={f.key}
                 disabled={!applies || c.held === c.of}
                 onPress={() => onMissing(on ? null : f.key)}
@@ -440,7 +441,7 @@ function Place({ page, wide, busy, missing, onMissing, side, onSide, onOpen, ope
                 ) : (
                   <Text style={[styles.bandGap, { color: shade.fg }]}>{applies ? 'all of them' : '—'}</Text>
                 )}
-              </Pressable>
+              </Press>
             );
           })}
         </View>
@@ -527,7 +528,7 @@ function LocalityRowView({ row, wide, on, onPress }: {
     ['shelf', row.side === 'go' ? row.has_shelf : null],
   ];
   // A restaurant has no atlas row behind it, so only an attraction opens.
-  const Wrapper: any = onPress ? Pressable : View;
+  const Wrapper: any = onPress ? Press : View;
   return (
     <Wrapper
       onPress={onPress}

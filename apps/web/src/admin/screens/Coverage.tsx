@@ -24,7 +24,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, CoverageRow, FactKey, Locality, PlaceTree } from '../../api';
 import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
@@ -168,7 +169,7 @@ export function Coverage() {
 
               {rows.map((r) => (
                 <View key={r.slug} style={styles.matrixRow}>
-                  <Pressable
+                  <Press
                     onPress={() => navigate(`/admin/places?where=${encodeURIComponent(r.slug)}`)}
                     accessibilityRole="button"
                     style={({ hovered }: any) => [styles.rowHead, hovered && { backgroundColor: colors.well }]}
@@ -178,7 +179,7 @@ export function Coverage() {
                       <Text style={type.tiny}>{KIND_WORD[r.kind]}</Text>
                       <Text style={type.tiny}>· {count(r.toGo + r.toEat)}</Text>
                     </Row>
-                  </Pressable>
+                  </Press>
 
                   {FACTS.map((f) => {
                     const c = r.facts[f.key];
@@ -186,7 +187,7 @@ export function Coverage() {
                     const gap = applies ? c.of - c.held : 0;
                     const shade = shadeOf(applies ? c.pc : null);
                     return (
-                      <Pressable
+                      <Press
                         key={f.key}
                         disabled={!gap}
                         onPress={() => work(r.slug, f.key)}
@@ -204,7 +205,7 @@ export function Coverage() {
                         <Text style={[styles.cellGap, { color: shade.fg }]} numberOfLines={1}>
                           {applies ? (gap ? `${count(gap)} without` : 'all') : '—'}
                         </Text>
-                      </Pressable>
+                      </Press>
                     );
                   })}
                 </View>

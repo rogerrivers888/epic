@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { PlanRoute, RouteStop } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Chip, Row, Wrap, clock, minutes } from './ui';
@@ -96,7 +97,7 @@ function WayRow({ stop, busy, onOpen, onPress }: { stop: RouteStop; busy: boolea
   const price = priceMarks(stop.priceLevel);
   return (
     <View style={styles.row}>
-      <Pressable onPress={onOpen} style={{ flexDirection: 'row', gap: spacing.md, flex: 1 }} accessibilityRole="button" accessibilityLabel={`Open ${stop.name}`}>
+      <Press onPress={onOpen} style={{ flexDirection: 'row', gap: spacing.md, flex: 1 }} accessibilityRole="button" accessibilityLabel={`Open ${stop.name}`}>
         <VenuePhoto photos={stop.photos} size={64} credit={false} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{stop.name}</Text>
@@ -118,11 +119,11 @@ function WayRow({ stop, busy, onOpen, onPress }: { stop: RouteStop; busy: boolea
           </Wrap>
           {stop.notProposed ? <Text style={type.tiny}>Not proposed: {stop.notProposed.toLowerCase()}</Text> : null}
         </View>
-      </Pressable>
-      <Pressable onPress={onPress} disabled={busy} style={[styles.btn, stop.chosen && styles.btnOn]} accessibilityRole="button">
+      </Press>
+      <Press onPress={onPress} disabled={busy} style={[styles.btn, stop.chosen && styles.btnOn]} accessibilityRole="button">
         <Icon name={stop.chosen ? 'check' : 'add'} size={14} color={stop.chosen ? colors.bg : colors.ink} />
         <Text style={[styles.btnText, stop.chosen && { color: colors.bg }]}>{stop.chosen ? 'Stopping' : 'Stop here'}</Text>
-      </Pressable>
+      </Press>
     </View>
   );
 }

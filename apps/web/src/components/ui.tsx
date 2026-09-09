@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, StyleProp, Text, TextInput, View, ViewStyle, ActivityIndicator } from 'react-native';
+import { StyleSheet, StyleProp, Text, TextInput, View, ViewStyle, ActivityIndicator } from 'react-native';
+import { Press } from './press';
 import { colors, fonts, radius, spacing, type, TARGET, BORDER } from '../theme';
 import { Icon, IconName } from './Icon';
 
@@ -56,17 +57,17 @@ export function Chip({
       {icon ? <View style={{ marginRight: 5 }}><Icon name={icon} size={14} color={t.fg} fill={iconFill} /></View> : null}
       <Text style={[styles.chipText, { color: t.fg, flexShrink: 1 }]}>{label}</Text>
       {onRemove ? (
-        <Pressable onPress={onRemove} hitSlop={10} accessibilityLabel={`Remove ${label}`} style={{ marginLeft: 6 }}>
+        <Press onPress={onRemove} hitSlop={10} accessibilityLabel={`Remove ${label}`} style={{ marginLeft: 6 }}>
           <Icon name="close" size={14} color={t.fg} />
-        </Pressable>
+        </Press>
       ) : null}
     </View>
   );
   if (!onPress) return body;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} style={{ maxWidth: '100%' }}>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} style={{ maxWidth: '100%' }}>
       {body}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -97,7 +98,7 @@ export function Button({
   const fg = kind === 'primary' ? colors.primaryFg : kind === 'danger' ? colors.overrun : colors.ink;
   const border = kind === 'secondary' ? colors.ink : kind === 'ghost' ? colors.line : 'transparent';
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityRole="button"
@@ -109,7 +110,7 @@ export function Button({
           <Text style={[styles.buttonText, { color: fg }]}>{label}</Text>
         </View>
       )}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -128,7 +129,7 @@ export function Segmented<T extends string>({
       {options.map((o, i) => {
         const active = o.value === value;
         return (
-          <Pressable
+          <Press
             key={o.value}
             onPress={() => onChange(o.value)}
             accessibilityRole="button"
@@ -140,7 +141,7 @@ export function Segmented<T extends string>({
                 than wrap the control to two rows or run out of it. */}
             {o.icon ? <Icon name={o.icon} size={13} color={active ? colors.selectedFg : colors.ink} /> : null}
             <Text numberOfLines={1} style={[styles.segmentText, active && styles.segmentTextActive]}>{o.label}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>
@@ -238,12 +239,12 @@ export function FoldLine({ label, value, children, icon, startOpen = false }: {
   const [open, setOpen] = React.useState(startOpen);
   return (
     <View>
-      <Pressable onPress={() => setOpen((o) => !o)} style={styles.foldLine} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }}>
+      <Press onPress={() => setOpen((o) => !o)} style={styles.foldLine} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }}>
         {icon ? <Icon name={icon} size={14} color={colors.inkMuted} /> : null}
         <Text style={type.tiny}>{label}</Text>
         <Text style={[type.small, { fontWeight: '600', color: colors.ink, flex: 1 }]} numberOfLines={1}>{value}</Text>
         <Icon name={open ? 'collapse' : 'more'} size={14} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
       {open ? <View style={{ marginTop: 4 }}>{children}</View> : null}
     </View>
   );

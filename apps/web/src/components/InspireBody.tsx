@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { API_URL, InspireItem } from '../api';
 import { colors, fonts, spacing, TARGET } from '../theme';
 import { Icon, IconName, iconFor } from './Icon';
@@ -142,10 +143,10 @@ export function SectionHead({ title, count, onAll }: { title: string; count: num
     return <View style={styles.sectionHead}><Text style={styles.sectionTitle}>{title}</Text>{right}</View>;
   }
   return (
-    <Pressable onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`${title}, all ${count}`}>
+    <Press onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`${title}, all ${count}`}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {right}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -178,7 +179,7 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travel }
 function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crowd; travel?: Travel; onOpen: () => void }) {
   const price = priceMarks(item.priceLevel);
   return (
-    <Pressable onPress={onOpen} style={styles.card} accessibilityRole="button" accessibilityLabel={item.name}>
+    <Press onPress={onOpen} style={styles.card} accessibilityRole="button" accessibilityLabel={item.name}>
       <PlaceThumb item={item} width={CARD_W} height={CARD_H} />
       <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
       {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
@@ -186,7 +187,7 @@ function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crow
         <Journey item={item} travel={travel} />
         {price ? <Text style={styles.price}>{price}</Text> : null}
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -194,7 +195,7 @@ function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crow
 export function CardWide({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crowd; travel?: Travel; onOpen: () => void }) {
   const price = priceMarks(item.priceLevel);
   return (
-    <Pressable onPress={onOpen} style={styles.cardWide} accessibilityRole="button" accessibilityLabel={item.name}>
+    <Press onPress={onOpen} style={styles.cardWide} accessibilityRole="button" accessibilityLabel={item.name}>
       <PlaceThumb item={item} fill />
       <Text style={styles.cardWideName} numberOfLines={2}>{item.name}</Text>
       {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
@@ -202,7 +203,7 @@ export function CardWide({ item, crowd, travel, onOpen }: { item: InspireItem; c
         <Journey item={item} travel={travel} />
         {price ? <Text style={styles.price}>{price}</Text> : null}
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -212,13 +213,13 @@ export function CardWide({ item, crowd, travel, onOpen }: { item: InspireItem; c
  */
 export function SubRow({ label, count, onPress }: { label: string; count: number; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.subRow} accessibilityRole="button" accessibilityLabel={`${label}, ${count} place${count === 1 ? '' : 's'}`}>
+    <Press onPress={onPress} style={styles.subRow} accessibilityRole="button" accessibilityLabel={`${label}, ${count} place${count === 1 ? '' : 's'}`}>
       <Text style={styles.subLabel} numberOfLines={1}>{label}</Text>
       <View style={styles.subRight}>
         <Text style={styles.subCount}>{count}</Text>
         <Icon name="more" size={16} color={colors.ink} strokeWidth={2.2} />
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -249,7 +250,7 @@ export function FoodRow({ item, kind, status, standing, crowd, travel, onOpen }:
   const t = travel ?? TRAVEL.drive;
   const bits = [kind, priceMarks(item.priceLevel), `${minutes(item.travelMinutes)} ${t.word}`].filter(Boolean);
   return (
-    <Pressable onPress={onOpen} style={styles.foodRow} accessibilityRole="button" accessibilityLabel={item.name}>
+    <Press onPress={onOpen} style={styles.foodRow} accessibilityRole="button" accessibilityLabel={item.name}>
       <View style={styles.foodTop}>
         <Text style={styles.foodName} numberOfLines={2}>{item.name}</Text>
         {/* Google's number where we have it, our own band where we do not — the
@@ -263,7 +264,7 @@ export function FoodRow({ item, kind, status, standing, crowd, travel, onOpen }:
       </View>
       <Text style={styles.meta} numberOfLines={1}>{bits.join(' · ')}</Text>
       {status ? <Text style={[styles.status, { color: status.open ? colors.accent : colors.inkMuted }]}>{status.text}</Text> : null}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -284,9 +285,9 @@ export function EmptyMatch({ title = 'Nothing matches', body, action, onAction }
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptyBody}>{body}</Text>
       {action && onAction ? (
-        <Pressable onPress={onAction} accessibilityRole="button" style={styles.emptyAction}>
+        <Press onPress={onAction} accessibilityRole="button" style={styles.emptyAction}>
           <Text style={styles.emptyActionText}>{action}</Text>
-        </Pressable>
+        </Press>
       ) : null}
     </View>
   );

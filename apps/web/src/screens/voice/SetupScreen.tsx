@@ -16,7 +16,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Platform, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, HouseholdResponse, Member, Place, SpokenFood, SpokenLike, SpokenPerson } from '../../api';
 import { paths } from '../../routes';
 import { asNumber, useQueryState, useRouter } from '../../router';
@@ -192,7 +193,7 @@ function WhoStep({ household, refresh, onNext, onBack, error, setError }: StepPr
                   {!p.role ? <Boxes options={[{ value: 'adult', label: 'Adult' }, { value: 'child', label: 'Child' }]} value={null} onChange={(v) => update(i, { role: v as any })} /> : null}
                   {p.role === 'child' && p.age == null ? <Boxes options={BANDS.map((b) => ({ value: b, label: b.replace('-', '–') }))} value={p.band ?? null} onChange={(band) => update(i, { band })} /> : null}
                 </View>
-                <Pressable onPress={() => setPeople(people.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel={`Remove ${p.name}`} hitSlop={8}><Icon name="close" size={16} color={colors.inkMuted} /></Pressable>
+                <Press onPress={() => setPeople(people.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel={`Remove ${p.name}`} hitSlop={8}><Icon name="close" size={16} color={colors.inkMuted} /></Press>
                 {editing ? null : null}
               </View>
             );

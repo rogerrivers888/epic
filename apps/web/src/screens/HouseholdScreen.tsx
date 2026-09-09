@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -79,11 +80,11 @@ export function HouseholdScreen({ data, refresh, route }: {
       {/* The soft offer (voice intake, D2): two minutes by voice, and Epic
           stops asking. Shown while anybody here has nothing set. */}
       {members.some((m) => summarise(m) === 'Nothing set yet') || !household.home ? (
-        <Pressable onPress={() => navigate(paths.setup())} accessibilityRole="button" style={styles.tellBanner}>
+        <Press onPress={() => navigate(paths.setup())} accessibilityRole="button" style={styles.tellBanner}>
           <View style={styles.tellTile}><Icon name="mic" size={18} color={colors.selectedFg} strokeWidth={2.2} /></View>
           <Text style={[type.body, { flex: 1 }]}><Text style={{ fontWeight: '600' }}>Tell Epic about your family</Text> — two minutes, and we’ll stop asking.</Text>
           <Icon name="more" size={16} color={colors.inkMuted} />
-        </Pressable>
+        </Press>
       ) : null}
       <Text style={type.small}>Allergens exclude places; diets, likes and dislikes only rank them. Everything saves as you go.</Text>
 
@@ -168,7 +169,7 @@ function HomeCard({ household, refresh, wide }: { household: Household; refresh:
     <Card>
       <View style={[styles.homeCard, wide && styles.homeCardWide]}>
         <View style={{ gap: 4 }}>
-          <Pressable
+          <Press
             onPress={setPhoto}
             accessibilityRole="button"
             accessibilityLabel={photo ? 'Change the picture of home' : 'Add a picture of home'}
@@ -182,11 +183,11 @@ function HomeCard({ household, refresh, wide }: { household: Household; refresh:
                   <Text style={type.tiny}>Add a picture of home</Text>
                 </View>
               )}
-          </Pressable>
+          </Press>
           {photo ? (
             <Row style={{ justifyContent: 'center', gap: spacing.md }}>
-              <Pressable onPress={setPhoto} accessibilityRole="button"><Text style={type.tiny}>change</Text></Pressable>
-              <Pressable onPress={removePhoto} accessibilityRole="button"><Text style={type.tiny}>remove</Text></Pressable>
+              <Press onPress={setPhoto} accessibilityRole="button"><Text style={type.tiny}>change</Text></Press>
+              <Press onPress={removePhoto} accessibilityRole="button"><Text style={type.tiny}>remove</Text></Press>
             </Row>
           ) : null}
         </View>
@@ -233,7 +234,7 @@ function HomeCard({ household, refresh, wide }: { household: Household; refresh:
 
 function PersonRow({ member, index, selected, onPress, onTell }: { member: Member; index: number; selected: boolean; onPress: () => void; onTell?: () => void }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`Show ${member.name}`} style={[styles.personRow, selected && styles.personRowSelected]}>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`Show ${member.name}`} style={[styles.personRow, selected && styles.personRowSelected]}>
       <Avatar name={member.name} index={index} size={44} url={member.avatarUrl} />
       <View style={{ flex: 1 }}>
         <Row style={{ gap: 6 }}>
@@ -251,16 +252,16 @@ function PersonRow({ member, index, selected, onPress, onTell }: { member: Membe
         </Row>
         <Text style={type.tiny} numberOfLines={2}>{summarise(member)}</Text>
         {summarise(member) === 'Nothing set yet' && onTell ? (
-          <Pressable onPress={onTell} accessibilityRole="button" accessibilityLabel={`Tell Epic about ${member.name}`} style={styles.tellLink} hitSlop={6}>
+          <Press onPress={onTell} accessibilityRole="button" accessibilityLabel={`Tell Epic about ${member.name}`} style={styles.tellLink} hitSlop={6}>
             <Icon name="mic" size={14} color={colors.accent} strokeWidth={2.2} />
             <Text style={styles.tellLinkText}>Tell Epic</Text>
-          </Pressable>
+          </Press>
         ) : null}
         {prettyMobile(member.access?.mobile) ? (
           <Text style={type.tiny} numberOfLines={1}>{prettyMobile(member.access?.mobile)}</Text>
         ) : null}
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -433,10 +434,10 @@ function MemberDetail({ member, index, managedBy, relationships, allergens, lear
   return (
     <Card>
       <Row>
-        <Pressable onPress={async () => { const url = await pickPhoto(); if (url) { await api.updateMember(member.id, { avatarUrl: url }); await refresh(); } }} accessibilityRole="button" accessibilityLabel={`Change photo for ${member.name}`}>
+        <Press onPress={async () => { const url = await pickPhoto(); if (url) { await api.updateMember(member.id, { avatarUrl: url }); await refresh(); } }} accessibilityRole="button" accessibilityLabel={`Change photo for ${member.name}`}>
           <Avatar name={member.name} index={index} size={56} url={member.avatarUrl} />
           <Text style={[type.tiny, { textAlign: 'center' }]}>{member.avatarUrl ? 'change' : 'photo'}</Text>
-        </Pressable>
+        </Press>
         <View style={{ flex: 1 }}>
           <Text style={type.h2}>{member.name}</Text>
           {managedBy ? <Text style={type.tiny}>Managed by {managedBy}</Text> : null}

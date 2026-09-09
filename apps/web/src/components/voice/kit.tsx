@@ -11,7 +11,8 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { Animated, Platform, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { Press } from '../press';
 import { colors, fonts, spacing, type, ON_LIME } from '../../theme';
 import { Icon, IconName } from '../Icon';
 import type { ChipSource } from '../../api';
@@ -37,9 +38,9 @@ export function VoiceHeader({ onBack, right, title, sub, big = false }: { onBack
     <View style={styles.header}>
       <View style={styles.headerRow}>
         {onBack ? (
-          <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back" style={styles.backBox} hitSlop={8}>
+          <Press onPress={onBack} accessibilityRole="button" accessibilityLabel="Back" style={styles.backBox} hitSlop={8}>
             <Icon name="back" size={20} color={colors.ink} strokeWidth={2.2} />
-          </Pressable>
+          </Press>
         ) : <View />}
         {right ?? null}
       </View>
@@ -57,10 +58,10 @@ export function Kicker({ children, tone = 'plain' }: { children: React.ReactNode
 /** Ink block, cream label left, arrow right. The one primary action on a voice screen. */
 export function PrimaryCta({ label, onPress, disabled, busy }: { label: string; onPress: () => void; disabled?: boolean; busy?: boolean }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled || busy} accessibilityRole="button" style={[styles.cta, (disabled || busy) && { opacity: 0.5 }]}>
+    <Press onPress={onPress} disabled={disabled || busy} accessibilityRole="button" style={[styles.cta, (disabled || busy) && { opacity: 0.5 }]}>
       <Text style={styles.ctaText}>{busy ? 'One moment…' : label}</Text>
       <Icon name="forward" size={18} color={colors.primaryFg} strokeWidth={2.2} />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -68,10 +69,10 @@ export function PrimaryCta({ label, onPress, disabled, busy }: { label: string; 
 export function TextLink({ label, onPress, icon, tone = 'moss', style }: { label: string; onPress: () => void; icon?: IconName; tone?: 'moss' | 'grey'; style?: ViewStyle }) {
   const color = tone === 'moss' ? colors.accent : colors.inkMuted;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" style={[styles.link, style]} hitSlop={6}>
+    <Press onPress={onPress} accessibilityRole="button" style={[styles.link, style]} hitSlop={6}>
       {icon ? <Icon name={icon} size={16} color={color} strokeWidth={2.2} /> : null}
       <Text style={[styles.linkText, { color }]}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -131,7 +132,7 @@ export function FactChip({ label, icon, look = 'said', onPress, small = false, s
       <Text style={[styles.chipText, small && styles.chipTextSmall, { color }, look === 'avoid' && { textDecorationLine: 'line-through' }]} numberOfLines={2}>{label}</Text>
     </View>
   );
-  return onPress ? <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>{body}</Pressable> : body;
+  return onPress ? <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>{body}</Press> : body;
 }
 // The set of icon names a chip may ask for; anything else is drawn without one.
 const ICON_NAMES: Record<string, true> = {
@@ -160,11 +161,11 @@ export function Boxes<T extends string | number>({ options, value, onChange, ico
         const on = o.value === value;
         const icon = icons?.[String(o.value)];
         return (
-          <Pressable key={String(o.value)} onPress={() => onChange(o.value)} accessibilityRole="button" accessibilityState={{ selected: on }}
+          <Press key={String(o.value)} onPress={() => onChange(o.value)} accessibilityRole="button" accessibilityState={{ selected: on }}
             style={[styles.box, grow && { flex: 1 }, on && styles.boxOn]}>
             {icon ? <Icon name={icon} size={18} color={on ? ON_LIME : colors.ink} strokeWidth={2} /> : null}
             <Text style={[styles.boxText, on && { color: ON_LIME }]} numberOfLines={1}>{o.label}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>
@@ -201,10 +202,10 @@ export function MicControl({ state, onStart, onPause, onResume, onDone, size = '
     return (
       <View style={{ alignItems: 'center', gap: 12 }}>
         {label && size === 'big' ? <Text style={type.small}>{label}</Text> : null}
-        <Pressable onPress={onStart} disabled={state === 'busy'} accessibilityRole="button" accessibilityLabel="Speak"
+        <Press onPress={onStart} disabled={state === 'busy'} accessibilityRole="button" accessibilityLabel="Speak"
           style={[styles.micIdle, { width: px, height: px }, state === 'busy' && { opacity: 0.5 }]}>
           <Icon name="mic" size={size === 'big' ? 40 : 28} color={ON_LIME} strokeWidth={2.2} />
-        </Pressable>
+        </Press>
       </View>
     );
   }
@@ -215,20 +216,20 @@ export function MicControl({ state, onStart, onPause, onResume, onDone, size = '
         <View style={styles.micBigWrap}>
           {!paused ? <Animated.View style={[styles.ring, { inset: -12, borderColor: colors.selected, opacity: pulse }]} /> : null}
           {!paused ? <Animated.View style={[styles.ring, { inset: -24, borderColor: colors.accentSoft, opacity: pulse }]} /> : null}
-          <Pressable
+          <Press
             onPress={paused ? onResume : onPause}
             disabled={!canPause}
             accessibilityRole="button" accessibilityLabel={paused ? 'Resume' : 'Pause'}
             style={[styles.micBig, paused && { backgroundColor: colors.warm }, !canPause && { opacity: 0.4 }]}>
             <Icon name={paused ? 'mic' : 'pause'} size={34} color={ON_LIME} strokeWidth={2.2} />
-          </Pressable>
+          </Press>
         </View>
         <Text style={styles.micLabel}>{paused ? 'Resume' : 'Pause'}</Text>
       </View>
       <View style={{ alignItems: 'center', gap: 6 }}>
-        <Pressable onPress={onDone} accessibilityRole="button" accessibilityLabel="Done" style={styles.doneBox}>
+        <Press onPress={onDone} accessibilityRole="button" accessibilityLabel="Done" style={styles.doneBox}>
           <Icon name="stop" size={22} color={colors.lime} strokeWidth={2.2} />
-        </Pressable>
+        </Press>
         <Text style={styles.micLabel}>Done</Text>
       </View>
     </View>
@@ -238,9 +239,9 @@ export function MicControl({ state, onStart, onPause, onResume, onDone, size = '
 /** The 40px lime mic tile in a header ("tap the mic to add more"). */
 export function MicTile({ onPress, size = 40, label = 'Speak' }: { onPress: () => void; size?: number; label?: string }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[styles.micTile, { width: size, height: size }]}>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[styles.micTile, { width: size, height: size }]}>
       <Icon name="mic" size={Math.round(size * 0.45)} color={ON_LIME} strokeWidth={2.2} />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -280,14 +281,14 @@ export function SentenceField({ value, onChange, onSubmit, placeholder, autoFocu
 /** A row in a list: glyph, label, and a moss tick when it is the current value. */
 export function ListRow({ label, icon, on, onPress, sub, right }: { label: string; icon?: IconName; on?: boolean; onPress: () => void; sub?: string; right?: React.ReactNode }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: !!on }} style={styles.listRow}>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: !!on }} style={styles.listRow}>
       {icon ? <Icon name={icon} size={18} color={on ? colors.ink : colors.inkMuted} strokeWidth={2.2} /> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.listText, on && { fontWeight: '600' }]} numberOfLines={1}>{label}</Text>
         {sub ? <Text style={type.tiny}>{sub}</Text> : null}
       </View>
       {right ?? (on ? <Icon name="check" size={18} color={colors.accent} strokeWidth={2.2} /> : null)}
-    </Pressable>
+    </Press>
   );
 }
 

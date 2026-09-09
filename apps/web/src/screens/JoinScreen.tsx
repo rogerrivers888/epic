@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, GroupBooking, GuestAccount, HouseholdMemberInput, JoinView } from '../api';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
@@ -180,9 +181,9 @@ export function JoinScreen({ token, preview, onExit }: {
     <>
       {preview ? (
         <Row style={styles.previewBar}>
-          <Pressable onPress={onExit} accessibilityRole="button" hitSlop={8}>
+          <Press onPress={onExit} accessibilityRole="button" hitSlop={8}>
             <Row><Icon name="back" size={16} color={colors.headerSub} /><Text style={[type.small, { color: colors.headerSub, fontWeight: '700' }]}>Back to edit</Text></Row>
-          </Pressable>
+          </Press>
           <View style={{ flex: 1 }} />
           <Text style={[type.small, { color: colors.headerSub }]}>Preview · nothing is saved</Text>
         </Row>
@@ -244,9 +245,9 @@ function AccountStep({ v, busy, preview, onBack, onDone }: {
   return (
     <View style={{ gap: spacing.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Pressable onPress={onBack} accessibilityRole="button">
+        <Press onPress={onBack} accessibilityRole="button">
           <Row><Icon name="back" size={18} /><Text style={type.h3}>{v.group.name ?? v.trip.title ?? 'Back'}</Text></Row>
-        </Pressable>
+        </Press>
         <Wordmark height={26} />
       </Row>
 
@@ -390,7 +391,7 @@ function HouseholdStep({ v, account, busy, onBack, onDone }: {
   return (
     <View style={{ gap: spacing.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Pressable onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back</Text></Row></Pressable>
+        <Press onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back</Text></Row></Press>
         <Wordmark height={26} />
       </Row>
 
@@ -402,16 +403,16 @@ function HouseholdStep({ v, account, busy, onBack, onDone }: {
       </View>
 
       <Row style={{ alignItems: 'stretch' }}>
-        <Pressable onPress={() => setAlone(true)} accessibilityRole="button" style={[styles.pick, alone && styles.pickOn]}>
+        <Press onPress={() => setAlone(true)} accessibilityRole="button" style={[styles.pick, alone && styles.pickOn]}>
           <View style={[styles.pickIcon, alone && styles.pickIconOn]}><Icon name="person" size={16} color={alone ? colors.primaryFg : colors.accent} /></View>
           <Text style={type.h3}>Just me</Text>
           <Text style={type.small}>One seat, one bed.</Text>
-        </Pressable>
-        <Pressable onPress={() => setAlone(false)} accessibilityRole="button" style={[styles.pick, !alone && styles.pickOn]}>
+        </Press>
+        <Press onPress={() => setAlone(false)} accessibilityRole="button" style={[styles.pick, !alone && styles.pickOn]}>
           <View style={[styles.pickIcon, !alone && styles.pickIconOn]}><Icon name="home" size={16} color={!alone ? colors.primaryFg : colors.accent} /></View>
           <Text style={type.h3}>My household</Text>
           <Text style={type.small}>Add the people you live with.</Text>
-        </Pressable>
+        </Press>
       </Row>
 
       {!alone ? (
@@ -424,9 +425,9 @@ function HouseholdStep({ v, account, busy, onBack, onDone }: {
                 <Text style={type.small}>{r.you ? 'You · adult' : r.child ? `Child${r.age ? ` · ${r.age}` : ''}` : 'Adult'}</Text>
               </View>
               {!r.you ? (
-                <Pressable onPress={() => setRows(rows.filter((_, j) => j !== n))} accessibilityRole="button" style={{ padding: 6 }}>
+                <Press onPress={() => setRows(rows.filter((_, j) => j !== n))} accessibilityRole="button" style={{ padding: 6 }}>
                   <Icon name="close" size={16} color={colors.inkMuted} />
-                </Pressable>
+                </Press>
               ) : null}
             </Row>
           ))}
@@ -464,9 +465,9 @@ function HouseholdStep({ v, account, busy, onBack, onDone }: {
               </Row>
             </View>
           ) : (
-            <Pressable onPress={() => setAdding(true)} accessibilityRole="button" style={{ paddingVertical: spacing.sm }}>
+            <Press onPress={() => setAdding(true)} accessibilityRole="button" style={{ paddingVertical: spacing.sm }}>
               <Row><View style={styles.addDot}><Icon name="add" size={14} color={colors.accent} /></View><Text style={[type.h3, { color: colors.accent }]}>Add someone</Text></Row>
-            </Pressable>
+            </Press>
           )}
         </View>
       ) : null}
@@ -559,7 +560,7 @@ function BookStep({ v, busy, heads: pretendHeads, preview, onBack, onConfirm }: 
       {/* In a preview the bar above already carries the way back. */}
       <Row style={{ justifyContent: 'space-between' }}>
         {preview ? <View /> : (
-          <Pressable onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back</Text></Row></Pressable>
+          <Press onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back</Text></Row></Press>
         )}
         <Wordmark height={26} />
       </Row>
@@ -645,9 +646,9 @@ function BookRow({ item: i, pick, organiser, epic, heads, onPick }: {
               label="Book" icon="external"
               onPress={() => { if (i.externalUrl && Platform.OS === 'web' && typeof window !== 'undefined') window.open(i.externalUrl, '_blank'); }}
             />
-            <Pressable onPress={() => onPick('declared')} accessibilityRole="button">
+            <Press onPress={() => onPick('declared')} accessibilityRole="button">
               <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>I've booked it</Text>
-            </Pressable>
+            </Press>
           </View>
         )
     ) : <Pill label="In" icon="check" on />
@@ -659,12 +660,12 @@ function BookRow({ item: i, pick, organiser, epic, heads, onPick }: {
     />
   ) : (
     <Row style={{ gap: 0 }}>
-      <Pressable onPress={() => onPick('in')} accessibilityRole="button" style={[styles.yn, styles.ynLeft, pick === 'in' && styles.ynOn]}>
+      <Press onPress={() => onPick('in')} accessibilityRole="button" style={[styles.yn, styles.ynLeft, pick === 'in' && styles.ynOn]}>
         <Text style={[styles.ynText, pick === 'in' && styles.ynTextOn]}>Yes</Text>
-      </Pressable>
-      <Pressable onPress={() => onPick('out')} accessibilityRole="button" style={[styles.yn, styles.ynRight, pick === 'out' && styles.ynOn]}>
+      </Press>
+      <Press onPress={() => onPick('out')} accessibilityRole="button" style={[styles.yn, styles.ynRight, pick === 'out' && styles.ynOn]}>
         <Text style={[styles.ynText, pick === 'out' && styles.ynTextOn]}>No</Text>
-      </Pressable>
+      </Press>
     </Row>
   );
 
@@ -689,7 +690,7 @@ function Pill({ label, icon, on, onPress }: { label: string; icon?: IconName; on
       <Text style={[styles.pillText, on && { color: colors.primaryFg }]}>{label}</Text>
     </View>
   );
-  return onPress ? <Pressable onPress={onPress} accessibilityRole="button">{body}</Pressable> : body;
+  return onPress ? <Press onPress={onPress} accessibilityRole="button">{body}</Press> : body;
 }
 
 /**

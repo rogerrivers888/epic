@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { api, HouseholdResponse, Take, Venue, Visit, VisitTake, VisitTakeInput } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from './ui';
@@ -17,7 +18,7 @@ const uuid = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID
 export function VenueRow({ venue, onPress, action, stack }: { venue: Venue; onPress?: () => void; action?: React.ReactNode; /** Put the buttons under the text: a narrow screen has no room beside it. */ stack?: boolean }) {
   const h = venue.household;
   return (
-    <Pressable onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined}>
+    <Press onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined}>
       <Card style={{ gap: 4 }}>
         <Row>
           {venue.photos?.length ? <VenuePhoto photos={venue.photos} size={56} credit={false} /> : <View style={{ width: 56, height: 56, borderRadius: radius.md, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' }}><CategoryIcon category={venue.category} size={22} /></View>}
@@ -46,7 +47,7 @@ export function VenueRow({ venue, onPress, action, stack }: { venue: Venue; onPr
         </Wrap>
         {stack ? action : null}
       </Card>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -57,7 +58,7 @@ export function VisitSummary({ visit, onPress }: { visit: Visit; onPress?: () =>
   const takes: any[] = visit.takes?.filter((t) => t.subject === 'visit') ?? visit.visitTakes ?? [];
   const names = (visit.attendees as any[]).map((a) => (typeof a === 'string' ? a : a.name));
   return (
-    <Pressable onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined}>
+    <Press onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined}>
       <View style={styles.visitRow}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={type.h3}>{visit.visitedOn}</Text>
@@ -72,7 +73,7 @@ export function VisitSummary({ visit, onPress }: { visit: Visit; onPress?: () =>
         ))}
         {visit.note ? <Text style={type.small}>“{visit.note}”</Text> : null}
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -128,10 +129,10 @@ export function BeenCapture({ venue, household, onCreate, onSaved, onMore }: {
               {(['loved', 'fine', 'not_for_me'] as Take[]).map((t) => {
                 const on = takes[m.id] === t;
                 return (
-                  <Pressable key={t} onPress={() => setTakes((s) => ({ ...s, [m.id]: t }))} style={[styles.whoPick, on && styles.whoPickOn]}
+                  <Press key={t} onPress={() => setTakes((s) => ({ ...s, [m.id]: t }))} style={[styles.whoPick, on && styles.whoPickOn]}
                     accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={`${m.name}: ${WORD_FOR[t]}`}>
                     <Icon name={t === 'loved' ? 'keep' : t === 'fine' ? 'minus' : 'close'} size={15} color={on ? colors.primaryFg : colors.ink} fill={t === 'loved' && on} />
-                  </Pressable>
+                  </Press>
                 );
               })}
             </View>
@@ -162,20 +163,20 @@ export function BeenCapture({ venue, household, onCreate, onSaved, onMore }: {
       {/* All three answers on one row (owner, 4 Sep 2026), so they are drawn
           here rather than as full-size buttons that would not fit a phone. */}
       <View style={styles.answers}>
-        <Pressable onPress={() => everyone('loved')} disabled={!!busy} style={[styles.answer, styles.answerOn]} accessibilityRole="button">
+        <Press onPress={() => everyone('loved')} disabled={!!busy} style={[styles.answer, styles.answerOn]} accessibilityRole="button">
           <Icon name="keep" size={15} color={colors.primaryFg} fill />
           <Text style={[styles.answerText, { color: colors.primaryFg }]}>Everyone loved it</Text>
-        </Pressable>
-        <Pressable onPress={() => setMode('some')} disabled={!!busy} style={styles.answer} accessibilityRole="button">
+        </Press>
+        <Press onPress={() => setMode('some')} disabled={!!busy} style={styles.answer} accessibilityRole="button">
           <Text style={styles.answerText}>Only some of us</Text>
-        </Pressable>
-        <Pressable onPress={() => everyone('not_for_me')} disabled={!!busy} style={styles.answer} accessibilityRole="button">
+        </Press>
+        <Press onPress={() => everyone('not_for_me')} disabled={!!busy} style={styles.answer} accessibilityRole="button">
           <Text style={styles.answerText}>None of us</Text>
-        </Pressable>
+        </Press>
       </View>
       {busy ? <Text style={type.tiny}>Saving…</Text> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-      {onMore ? <Pressable onPress={onMore} accessibilityRole="button"><Text style={styles.moreLink}>More detail — another date, who came, a note, exact scores</Text></Pressable> : null}
+      {onMore ? <Press onPress={onMore} accessibilityRole="button"><Text style={styles.moreLink}>More detail — another date, who came, a note, exact scores</Text></Press> : null}
     </View>
   );
 }

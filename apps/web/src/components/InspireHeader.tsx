@@ -1,5 +1,6 @@
 import React from 'react';
-import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, fonts, spacing, BORDER, TARGET } from '../theme';
 import { Icon, IconName } from './Icon';
 import { Wordmark } from './Wordmark';
@@ -74,11 +75,11 @@ export function TopControl({ label, icon, trailing, onPress, accessibilityLabel 
   accessibilityLabel?: string;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.where} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label}>
+    <Press onPress={onPress} style={styles.where} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label}>
       {icon ? <Icon name={icon} size={16} color={colors.ink} strokeWidth={2.6} /> : null}
       <Text numberOfLines={1} style={styles.whereText}>{label}</Text>
       {trailing ? <Icon name={trailing} size={16} color={colors.inkMuted} /> : null}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -110,7 +111,7 @@ export function PairSwitch<T extends string>({ value, options, onPick }: {
       {options.map((o) => {
         const on = o.value === value;
         return (
-          <Pressable
+          <Press
             key={o.value}
             onPress={() => onPick(o.value)}
             accessibilityRole="tab"
@@ -122,7 +123,7 @@ export function PairSwitch<T extends string>({ value, options, onPick }: {
                 (owner, 7 Sep 2026: "the text and icons inside the green squares
                 are white, not black"). */}
             <Text numberOfLines={1} style={[styles.switchText, { color: on ? colors.selectedFg : colors.inkMuted }]}>{o.label}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>
@@ -183,14 +184,14 @@ export function CategoryStrip({ items, value, onPick, align = 'centre', light }:
       {items.map((it) => {
         const on = it.key === value;
         return (
-          <Pressable key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+          <Press key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
             <View style={styles.stripItem}>
               <Text
                 numberOfLines={1}
                 style={[styles.stripText, on ? styles.stripTextOn : styles.stripTextOff, light && (on ? styles.stripLightOn : styles.stripLightOff)]}
               >{it.label}</Text>
             </View>
-          </Pressable>
+          </Press>
         );
       })}
     </ScrollView>
@@ -215,11 +216,11 @@ export function SubStrip({ items, value, onPick, allLabel }: {
         {all.map((it) => {
           const on = it.key === value;
           return (
-            <Pressable key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+            <Press key={it.key} onPress={() => onPick(it.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
               <View style={styles.subItem}>
                 <Text numberOfLines={1} style={[styles.subText, on ? styles.subTextOn : styles.subTextOff]}>{it.label}</Text>
               </View>
-            </Pressable>
+            </Press>
           );
         })}
       </ScrollView>
@@ -290,7 +291,7 @@ export function FilterPanel({ top, onClose, children }: {
 }) {
   return (
     <>
-      <Pressable
+      <Press
         style={[StyleSheet.absoluteFill, styles.panelScrim]}
         onPress={onClose}
         accessibilityRole="button"
@@ -342,7 +343,7 @@ export function FilterButton({ label, icon, on, narrowed, open, onPress, toggle,
    */
   const colour = open ? colors.selectedFg : colors.ink;
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={spoken ?? label}
@@ -352,7 +353,7 @@ export function FilterButton({ label, icon, on, narrowed, open, onPress, toggle,
       {icon ? <Icon name={icon} size={16} color={colour} strokeWidth={2.2} /> : null}
       <Text style={[styles.filterText, { color: colour, fontWeight: on ? '700' : '600' }]}>{label}</Text>
       {toggle ? null : <Icon name={open ? 'collapse' : 'expand'} size={12} color={colour} strokeWidth={2.6} />}
-    </Pressable>
+    </Press>
   );
 }
 

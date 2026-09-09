@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { api, BrowseItem, IdeaBudget, SketchEvent, Idea, IdeaHeadline, IdeaThing, InspireStage, Taste, TasteTable } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap, minutes } from './ui';
@@ -551,7 +552,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
               ["Who's coming", whoLabel, 'who'],
               ['How far and how much', farLine, 'far'],
             ] as const).map(([label, value, key], i) => (
-              <Pressable
+              <Press
                 key={key}
                 // The form opens on the part that was tapped, not at the top.
                 onPress={() => { setFormChoice(true); if (key === 'mood') setEditing(STEPS[0].key); else setSettingsOpen(true); }}
@@ -562,7 +563,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
                 <Text style={[type.tiny, { width: 108 }]}>{label.toUpperCase()}</Text>
                 <Text style={[type.small, { flex: 1, color: colors.ink }]} numberOfLines={1}>{value}</Text>
                 <Icon name="more" size={14} color={colors.inkMuted} />
-              </Pressable>
+              </Press>
             ))}
           </View>
         ) : (
@@ -579,9 +580,9 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
         />
         <Row style={{ justifyContent: 'space-between' }}>
           {listening ? (
-            <Pressable onPress={onStop} style={styles.stop} accessibilityRole="button" accessibilityLabel="Stop"><Icon name="stop" size={14} color={colors.bg} /><Text style={styles.stopText}>Stop</Text></Pressable>
+            <Press onPress={onStop} style={styles.stop} accessibilityRole="button" accessibilityLabel="Stop"><Icon name="stop" size={14} color={colors.bg} /><Text style={styles.stopText}>Stop</Text></Press>
           ) : supported ? (
-            <Pressable onPress={onSpeak} style={styles.mic} accessibilityRole="button" accessibilityLabel="Speak"><Icon name="mic" size={18} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Speak</Text></Pressable>
+            <Press onPress={onSpeak} style={styles.mic} accessibilityRole="button" accessibilityLabel="Speak"><Icon name="mic" size={18} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Speak</Text></Press>
           ) : <View />}
           {!listening ? <Button label={busy ? 'Thinking…' : 'Inspire me'} icon="plan" onPress={inspire} disabled={busy} /> : null}
         </Row>
@@ -618,14 +619,14 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
 
         {/* Everything else on one line, because most days want the same answer. */}
         <View style={styles.settings}>
-          <Pressable onPress={() => setSettingsOpen((o) => !o)} style={styles.settingsRow} accessibilityRole="button" accessibilityState={{ expanded: settingsOpen }} accessibilityLabel={`${whoLabel}, within ${cap ? minutes(cap) : 'any distance'}, ${budgetLabel}. Tap to change`}>
+          <Press onPress={() => setSettingsOpen((o) => !o)} style={styles.settingsRow} accessibilityRole="button" accessibilityState={{ expanded: settingsOpen }} accessibilityLabel={`${whoLabel}, within ${cap ? minutes(cap) : 'any distance'}, ${budgetLabel}. Tap to change`}>
             <Text style={[type.small, { flex: 1 }]} numberOfLines={1}>
               <Text style={{ fontWeight: '600', color: colors.ink }}>{whoLabel}</Text>
               {cap ? ` · within ${minutes(cap)}` : ' · anywhere'}
               {` · ${budgetLabel}`}
             </Text>
             <Icon name={settingsOpen ? 'expand' : 'more'} size={14} color={colors.inkMuted} />
-          </Pressable>
+          </Press>
           {settingsOpen ? (
             <View style={{ gap: spacing.sm, paddingTop: spacing.sm }}>
               {who}
@@ -710,7 +711,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
               <View key={idea.id} style={styles.ideaWrap}>
                 {/* The picture and the words open the place; the chips below do
                     their own jobs, so they are not inside the same button. */}
-                <Pressable
+                <Press
                   style={styles.idea}
                   onPress={() => openDetail(idea, head)}
                   disabled={!idea.place}
@@ -729,7 +730,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
                     {idea.do.length || idea.eat.length ? <Text style={type.tiny} numberOfLines={1}>{[...idea.do, ...idea.eat].slice(0, 3).join(' · ')}</Text> : null}
                   </View>
                   {idea.place ? <Icon name="more" size={16} color={colors.inkMuted} /> : null}
-                </Pressable>
+                </Press>
                 <Row style={{ flexWrap: 'wrap', paddingLeft: 84 + spacing.md }}>
                   {/* One call to action (owner, 4 Sep 2026: "It should just be
                       1 call to action: 'Plan the day', not 2"). */}

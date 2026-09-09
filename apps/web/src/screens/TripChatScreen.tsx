@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, TripChat, TripDetail } from '../api';
 import { colors, fonts, BORDER, ON_LIME } from '../theme';
 import { Icon } from '../components/Icon';
@@ -89,16 +90,16 @@ export function TripChatScreen({ trip, onBack, onOpenStop, onPeople }: {
         <View style={styles.head}>
           <View style={styles.headRow}>
             {/* Bare, like the drawer's (5h): no boxes in here. */}
-            <Pressable onPress={onBack} style={styles.backBare} accessibilityRole="button" accessibilityLabel="Back to the trip">
+            <Press onPress={onBack} style={styles.backBare} accessibilityRole="button" accessibilityLabel="Back to the trip">
               <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
-            </Pressable>
+            </Press>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.title} numberOfLines={1}>{tripName(trip.trip)}</Text>
             </View>
-            <Pressable onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming">
+            <Press onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming">
               <Icon name="household" size={20} color={colors.ink} strokeWidth={2} />
               <Text style={styles.peopleText}>{people?.count ?? trip.attendees.length}</Text>
-            </Pressable>
+            </Press>
             {/* Open: the icon sits on a small lime tile, which is the only fill
                 in the header and says which of the two you are looking at. */}
             <View style={styles.chatOn}>

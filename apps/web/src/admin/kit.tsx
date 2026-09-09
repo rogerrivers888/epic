@@ -24,7 +24,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Row, Wrap } from '../components/ui';
@@ -130,7 +131,7 @@ export function Tile({ label, value, sub, tone = 'plain', onPress }: {
     </View>
   );
   return onPress
-    ? <Pressable onPress={onPress} style={{ flexGrow: 1, flexBasis: 180, minWidth: 150, maxWidth: 420 }}>{body}</Pressable>
+    ? <Press onPress={onPress} style={{ flexGrow: 1, flexBasis: 180, minWidth: 150, maxWidth: 420 }}>{body}</Press>
     : body;
 }
 
@@ -256,7 +257,7 @@ export function DataTable<T extends { id?: string }>({ rows, columns, onRow, emp
       {wide ? (
         <Row style={styles.head}>
           {shown.map((c) => (
-            <Pressable
+            <Press
               key={c.key}
               disabled={!c.sort}
               onPress={() => setSort((s) => (s?.key === c.key ? { key: c.key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key: c.key, dir: 'desc' }))}
@@ -266,13 +267,13 @@ export function DataTable<T extends { id?: string }>({ rows, columns, onRow, emp
                 <Text style={styles.headText}>{c.head}</Text>
                 {sort?.key === c.key ? <Icon name={sort.dir === 'desc' ? 'expand' : 'collapse'} size={12} color={colors.inkMuted} /> : null}
               </Row>
-            </Pressable>
+            </Press>
           ))}
         </Row>
       ) : null}
 
       {sorted.map((row, i) => (
-        <Pressable
+        <Press
           key={row.id ?? i}
           onPress={onRow ? () => onRow(row) : undefined}
           style={({ hovered }: any) => [styles.row, wide ? styles.rowWide : styles.rowNarrow, hovered && onRow ? styles.rowHover : null]}
@@ -287,7 +288,7 @@ export function DataTable<T extends { id?: string }>({ rows, columns, onRow, emp
               {c.cell(row)}
             </View>
           ))}
-        </Pressable>
+        </Press>
       ))}
     </View>
   );
@@ -300,9 +301,9 @@ export function FilterRow({ children }: { children: React.ReactNode }) {
 
 export function FilterChip({ label, on, onPress, count: n }: { label: string; on?: boolean; onPress: () => void; count?: number }) {
   return (
-    <Pressable onPress={onPress} style={[styles.filter, on && styles.filterOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
+    <Press onPress={onPress} style={[styles.filter, on && styles.filterOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
       <Text style={[type.tiny, on && { color: colors.primaryFg }]}>{label}{n != null ? ` ${n}` : ''}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -312,11 +313,11 @@ export function RangePicker({ days, onDays }: { days: number; onDays: (d: number
   return (
     <Row style={styles.range}>
       {options.map((d) => (
-        <Pressable key={d} onPress={() => onDays(d)} style={[styles.rangeItem, days === d && styles.rangeItemOn]}>
+        <Press key={d} onPress={() => onDays(d)} style={[styles.rangeItem, days === d && styles.rangeItemOn]}>
           <Text style={[type.tiny, days === d && { color: colors.primaryFg, fontWeight: '700' }]}>
             {d === 365 ? '1y' : `${d}d`}
           </Text>
-        </Pressable>
+        </Press>
       ))}
     </Row>
   );

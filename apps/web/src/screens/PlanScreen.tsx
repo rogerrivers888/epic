@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
+import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { api, ApiError, HouseholdResponse, Place, PlanAction, PlanResponse, PlanRow, PlanRowKey, PlanSet, PricePoint } from '../api';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -401,10 +402,10 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
             {travelBits.length ? (
               <View>
                 {/* "Travelling from home with the family": the assumptions, one line. Tap to change either; say "from Bristol" or "just me and Phoenix" and a row appears instead. */}
-                <Pressable onPress={() => { if (!speech.listening) setTravelOpen((o) => !o); }} style={[styles.row, styles.travel]} accessibilityRole="button" accessibilityLabel={`Travelling ${travelBits.join(' ')}. Tap to change`}>
+                <Press onPress={() => { if (!speech.listening) setTravelOpen((o) => !o); }} style={[styles.row, styles.travel]} accessibilityRole="button" accessibilityLabel={`Travelling ${travelBits.join(' ')}. Tap to change`}>
                   <Text style={[type.body, { flex: 1, color: colors.inkMuted }]}>Travelling <Text style={{ fontWeight: '600', color: colors.ink }}>{travelBits.join(' ')}</Text></Text>
                   <Icon name={travelOpen ? 'expand' : 'more'} size={14} color={colors.inkMuted} />
-                </Pressable>
+                </Press>
                 {travelOpen ? (
                   <View style={styles.editor}>
                     {!fromRow ? (
@@ -418,7 +419,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
                         {me.error ? <Text style={[type.tiny, { color: colors.dislike }]}>{me.error}</Text> : null}
                         <TextInput value={fromText} onChangeText={setFromText} style={styles.editInput} placeholder="From…" placeholderTextColor={colors.inkFaint} onSubmitEditing={() => { setTravelOpen(false); send(fromText, false, 'from'); }} accessibilityLabel="Change where you start" />
                         <Row>
-                          {speech.supported ? <Pressable onPress={() => { fieldRef.current = 'from'; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel="Say where you start"><Icon name="mic" size={16} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Say it</Text></Pressable> : null}
+                          {speech.supported ? <Press onPress={() => { fieldRef.current = 'from'; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel="Say where you start"><Icon name="mic" size={16} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Say it</Text></Press> : null}
                           <Button label="Done" onPress={() => { setTravelOpen(false); send(fromText, false, 'from'); }} disabled={!fromText.trim() || !!busy} />
                         </Row>
                       </>
@@ -433,7 +434,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
               const isControl = ['to', 'when', 'do', 'eat', 'budget'].includes(r.key);
               return (
                 <View key={r.key}>
-                  <Pressable onPress={() => openRow(r)} style={[styles.row, (i > 0 || travelBits.length > 0) && styles.rowLine, r.state === 'check' && styles.rowCheck, isEditing && styles.rowEditing]} accessibilityRole="button" accessibilityLabel={`${r.label}: ${r.value ?? 'not said'}`}>
+                  <Press onPress={() => openRow(r)} style={[styles.row, (i > 0 || travelBits.length > 0) && styles.rowLine, r.state === 'check' && styles.rowCheck, isEditing && styles.rowEditing]} accessibilityRole="button" accessibilityLabel={`${r.label}: ${r.value ?? 'not said'}`}>
                     <View style={styles.well}><Icon name={ROW_ICON[r.key] ?? 'info'} size={18} /></View>
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={styles.rowKey}>{r.label}</Text>
@@ -443,7 +444,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
                     </View>
                     {r.state === 'check' ? <View style={styles.flag}><Text style={styles.flagText}>Check</Text></View> : null}
                     <Icon name={isEditing ? 'expand' : 'more'} size={16} color={colors.inkMuted} />
-                  </Pressable>
+                  </Press>
                   {r.key === 'who' && whoOpen ? <View style={styles.editor}>{whoTicks}</View> : null}
                   {isEditing && r.key === 'to' ? (
                     <View style={styles.panel}>
@@ -454,17 +455,17 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
                       {toBusy ? <Row><ActivityIndicator color={colors.accent} /><Text style={type.tiny}>Looking…</Text></Row> : null}
                       {toHits?.length === 0 && !toBusy ? <Text style={type.small}>Nothing on the map by that name — try the town as well.</Text> : null}
                       {(toHits ?? []).map((h) => (
-                        <Pressable key={`${h.place.lat},${h.place.lng}`} onPress={() => { applySet({ destination: h.place }); setEditing(null); setToQuery(''); setToHits(null); }} style={styles.hit} accessibilityRole="button" accessibilityLabel={`${h.label}, ${h.where}`}>
+                        <Press key={`${h.place.lat},${h.place.lng}`} onPress={() => { applySet({ destination: h.place }); setEditing(null); setToQuery(''); setToHits(null); }} style={styles.hit} accessibilityRole="button" accessibilityLabel={`${h.label}, ${h.where}`}>
                           <Icon name={h.isRoad ? 'directions' : h.kind === 'city' || h.kind === 'town' || h.kind === 'village' ? 'address' : 'attraction'} size={18} />
                           <View style={{ flex: 1 }}>
                             <Text style={[type.body, { fontWeight: '600' }]}>{h.label}</Text>
                             <Text style={type.tiny}>{[h.kind[0].toUpperCase() + h.kind.slice(1), h.where, h.travelMinutes != null ? `${minutes(h.travelMinutes)} from home` : null].filter(Boolean).join(' · ')}</Text>
                           </View>
                           <Icon name="more" size={16} color={colors.inkMuted} />
-                        </Pressable>
+                        </Press>
                       ))}
                       <Row>
-                        {speech.supported ? <Pressable onPress={() => { fieldRef.current = 'to'; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel="Say where to"><Icon name="mic" size={16} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Say it</Text></Pressable> : null}
+                        {speech.supported ? <Press onPress={() => { fieldRef.current = 'to'; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel="Say where to"><Icon name="mic" size={16} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Say it</Text></Press> : null}
                         <Text style={[type.tiny, { flex: 1 }]}>Your places first, then the map. A road never stands in for a town.</Text>
                       </Row>
                     </View>
@@ -545,7 +546,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
                     <View style={styles.editor}>
                       <TextInput value={editText} onChangeText={setEditText} style={styles.editInput} placeholder={`${r.label}…`} placeholderTextColor={colors.inkFaint} onSubmitEditing={() => send(editText, false, r.key)} accessibilityLabel={`Change ${r.label}`} />
                       <Row>
-                        {speech.supported ? <Pressable onPress={() => { fieldRef.current = r.key; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel={`Say ${r.label} again`}><Icon name="mic" size={16} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Say it again</Text></Pressable> : null}
+                        {speech.supported ? <Press onPress={() => { fieldRef.current = r.key; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel={`Say ${r.label} again`}><Icon name="mic" size={16} color={colors.ink} /><Text style={[type.small, { fontWeight: '600' }]}>Say it again</Text></Press> : null}
                         <Button label="Done" onPress={() => send(editText, false, r.key)} disabled={!editText.trim() || !!busy} />
                         <Button label="Cancel" kind="ghost" onPress={() => setEditing(null)} />
                       </Row>
@@ -575,7 +576,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
                 accessibilityLabel={speech.phase === 'confirm' ? 'The words Epic heard — change anything before planning' : 'What do you want to do'}
               />
               {speech.listening ? (
-                <Pressable onPress={speech.stop} style={styles.stop} accessibilityRole="button" accessibilityLabel="Stop"><Icon name="stop" size={14} color={colors.bg} /><Text style={styles.stopText}>Stop</Text></Pressable>
+                <Press onPress={speech.stop} style={styles.stop} accessibilityRole="button" accessibilityLabel="Stop"><Icon name="stop" size={14} color={colors.bg} /><Text style={styles.stopText}>Stop</Text></Press>
               ) : speech.phase === 'transcribing' ? (
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Row><ActivityIndicator color={colors.accent} /><Text style={type.small}>Writing that down…</Text></Row>
@@ -592,10 +593,10 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
               ) : (
                 <Row style={{ justifyContent: 'space-between' }}>
                   {speech.supported ? (
-                    <Pressable onPress={() => { fieldRef.current = null; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel="Speak">
+                    <Press onPress={() => { fieldRef.current = null; speech.start(); }} style={styles.mic} accessibilityRole="button" accessibilityLabel="Speak">
                       <Icon name="mic" size={20} color={colors.ink} />
                       <Text style={[type.small, { fontWeight: '600' }]}>Speak</Text>
-                    </Pressable>
+                    </Press>
                   ) : <View />}
                   {input.trim() ? (
                     <Button label="Send" onPress={() => send(input)} disabled={!!busy} />

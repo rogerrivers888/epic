@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, ChatMessage, SharedTrip } from '../api';
 import { colors, fonts, BORDER, type } from '../theme';
 import { Icon } from '../components/Icon';
@@ -82,9 +83,9 @@ export function SharedTripScreen({ token, you: fromLink }: {
             {([{ key: 'plan' as const, label: 'The plan' }, { key: 'chat' as const, label: 'Chat' }]).map((t) => {
               const on = t.key === tab;
               return (
-                <Pressable key={t.key} onPress={() => setTab(t.key)} style={[styles.tab, on && styles.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+                <Press key={t.key} onPress={() => setTab(t.key)} style={[styles.tab, on && styles.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
                   <Text style={[styles.tabText, on && styles.tabTextOn]}>{t.label}</Text>
-                </Pressable>
+                </Press>
               );
             })}
           </View>
@@ -234,9 +235,9 @@ function EnterDoor({ token, canSend, onIn }: {
         onSubmitEditing={enter}
       />
       {!guestId ? (
-        <Pressable onPress={enter} style={styles.primary} accessibilityRole="button" disabled={busy}>
+        <Press onPress={enter} style={styles.primary} accessibilityRole="button" disabled={busy}>
           <Text style={styles.primaryText}>{busy ? 'One moment…' : sending ? 'Send me a code' : 'Open the trip'}</Text>
-        </Pressable>
+        </Press>
       ) : (
         <>
           <TextInput
@@ -249,9 +250,9 @@ function EnterDoor({ token, canSend, onIn }: {
             accessibilityLabel="The code you were sent"
             onSubmitEditing={verify}
           />
-          <Pressable onPress={verify} style={styles.primary} accessibilityRole="button" disabled={busy}>
+          <Press onPress={verify} style={styles.primary} accessibilityRole="button" disabled={busy}>
             <Text style={styles.primaryText}>{busy ? 'Checking…' : 'Open the trip'}</Text>
-          </Pressable>
+          </Press>
         </>
       )}
       {says ? <Text style={styles.doorBody}>{says}</Text> : null}

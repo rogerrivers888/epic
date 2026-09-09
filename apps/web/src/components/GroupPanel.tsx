@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { api, GroupItem, GroupItemInput, GroupItemKind, GroupParticipant, Place, TripDetail, TripGroup } from '../api';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Meter, Row, Segmented, StatusLine, Wrap } from './ui';
@@ -100,7 +101,7 @@ function Block({ n, title, blurb, summary, open, onToggle, children }: {
 }) {
   return (
     <Card style={{ gap: open ? spacing.sm : 0 }}>
-      <Pressable onPress={onToggle} accessibilityRole="button">
+      <Press onPress={onToggle} accessibilityRole="button">
         <Row style={{ alignItems: 'flex-start' }}>
           <View style={[styles.blockNumber, open && { backgroundColor: colors.primary }]}>
             <Text style={[styles.blockNumberText, open && { color: colors.primaryFg }]}>{n}</Text>
@@ -111,7 +112,7 @@ function Block({ n, title, blurb, summary, open, onToggle, children }: {
           </View>
           <Icon name={open ? 'collapse' : 'expand'} size={16} />
         </Row>
-      </Pressable>
+      </Press>
       {open && blurb ? <Text style={type.small}>{blurb}</Text> : null}
       {open ? children : null}
     </Card>
@@ -268,7 +269,7 @@ export function GroupPanel({ d, onChanged, onPage }: {
             it: what it is, when, what it costs, and who takes the money. There
             is no second step it is "priced in" (owner, 7 Sep 2026). */}
         {items.map((i) => (
-          <Pressable key={i.id} style={styles.wantedRow} onPress={() => setEditing(i.id)} accessibilityRole="button">
+          <Press key={i.id} style={styles.wantedRow} onPress={() => setEditing(i.id)} accessibilityRole="button">
             <Row style={{ alignItems: 'flex-start' }}>
               <View style={styles.itemIcon}><Icon name={ICON[i.kind]} size={16} /></View>
               <View style={{ flex: 1, gap: 2 }}>
@@ -281,14 +282,14 @@ export function GroupPanel({ d, onChanged, onPage }: {
               <View style={{ flex: 1 }} />
               <MustAsk value={i.required} onChange={(must) => setItem(i.id, { required: must })} />
             </Row>
-          </Pressable>
+          </Press>
         ))}
         {items.length === 0 ? <Text style={type.small}>Nothing on this trip yet.</Text> : null}
-        <Pressable onPress={() => setEditing('new')} style={styles.addRow} accessibilityRole="button">
+        <Press onPress={() => setEditing('new')} style={styles.addRow} accessibilityRole="button">
           <Icon name="add" size={16} />
           <Text style={[type.h3, { flex: 1 }]}>Add your own event</Text>
           <Icon name="more" size={16} />
-        </Pressable>
+        </Press>
       </>
     ),
     chasing: <Chasing group={g} settingUp={settingUp} onChange={(body) => run(() => api.updateGroup(group.id, body))} />,
@@ -547,9 +548,9 @@ function Wizard({ content, summaries, onDone, onSkip, bare, at, onAt }: {
           <View style={{ flex: 1 }} />
           {/* Skipping is a sentence you can read, not a button competing with Next. */}
           {!last && step.skip ? (
-            <Pressable onPress={() => { onSkip?.(step.key); setAt(at + 1); }} accessibilityRole="button" style={{ paddingHorizontal: spacing.sm, paddingVertical: 6 }}>
+            <Press onPress={() => { onSkip?.(step.key); setAt(at + 1); }} accessibilityRole="button" style={{ paddingHorizontal: spacing.sm, paddingVertical: 6 }}>
               <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]} numberOfLines={1}>{step.skip}</Text>
-            </Pressable>
+            </Press>
           ) : null}
         </Row>
       </View>
@@ -796,12 +797,12 @@ const SELL: { title: string; line: string }[] = [
 function MustAsk({ value, onChange }: { value: boolean; onChange: (must: boolean) => void }) {
   return (
     <View style={styles.mustAsk}>
-      <Pressable onPress={() => onChange(true)} style={[styles.mustAskHalf, value && styles.mustAskOn]} accessibilityRole="button">
+      <Press onPress={() => onChange(true)} style={[styles.mustAskHalf, value && styles.mustAskOn]} accessibilityRole="button">
         <Text style={[styles.mustAskText, value && styles.mustAskTextOn]} numberOfLines={1}>Mandatory</Text>
-      </Pressable>
-      <Pressable onPress={() => onChange(false)} style={[styles.mustAskHalf, !value && styles.mustAskOn]} accessibilityRole="button">
+      </Press>
+      <Press onPress={() => onChange(false)} style={[styles.mustAskHalf, !value && styles.mustAskOn]} accessibilityRole="button">
         <Text style={[styles.mustAskText, !value && styles.mustAskTextOn]} numberOfLines={1}>Optional</Text>
-      </Pressable>
+      </Press>
     </View>
   );
 }
@@ -929,7 +930,7 @@ function EventForm({ group: g, item, busy, onSave, onClose, onRemove, onSettle }
           <Text style={type.label}>{item ? 'Edit event' : 'Add your own event'} · {page + 1} of 2</Text>
           <Text style={type.h2}>{page === 0 ? 'What it is' : 'Numbers and money'}</Text>
         </View>
-        <Pressable onPress={onClose} accessibilityRole="button" hitSlop={10}><Icon name="close" size={18} /></Pressable>
+        <Press onPress={onClose} accessibilityRole="button" hitSlop={10}><Icon name="close" size={18} /></Press>
       </Row>
 
       {page === 0 ? (
@@ -1094,9 +1095,9 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
           <Text style={type.h3}>Point a phone at this</Text>
           <Text style={type.small}>It opens their own list. No account, no password.</Text>
           <Text style={[type.small, { color: colors.accent }]} selectable numberOfLines={2}>{link}</Text>
-          <Pressable onPress={() => onChange({ newLink: true })} accessibilityRole="button" hitSlop={6}>
+          <Press onPress={() => onChange({ newLink: true })} accessibilityRole="button" hitSlop={6}>
             <Text style={type.small}>Replace this link</Text>
-          </Pressable>
+          </Press>
         </View>
       </Row>
       {/* Three chips on one line, as the handover draws them: a long label
@@ -1134,9 +1135,9 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
           <Text style={type.small}>Anyone holding the link can join. A name added first means their join lands on that row.</Text>
         </View>
       ) : (
-        <Pressable onPress={() => setAdding(true)} accessibilityRole="button">
+        <Press onPress={() => setAdding(true)} accessibilityRole="button">
           <Row><Icon name="add" size={16} color={colors.accent} /><Text style={[type.h3, { color: colors.accent }]}>Add the ones you know</Text></Row>
-        </Pressable>
+        </Press>
       )}
 
       {/* What the link opens (Epic 3): the one thing on this step the organiser
@@ -1156,16 +1157,16 @@ function Invite({ group: g, settingUp, onChange, onAdd, onEdit, onPreview }: {
                 : 'Your summary, what they get, how it works. Written from the trip — change any of it.'}
             </Text>
             <Row style={{ marginTop: 4 }}>
-              <Pressable onPress={onEdit} accessibilityRole="button">
+              <Press onPress={onEdit} accessibilityRole="button">
                 <Row><Icon name="edit" size={16} color={colors.accent} /><Text style={[type.h3, { color: colors.accent }]}>{written ? 'Edit' : 'Write it'}</Text></Row>
-              </Pressable>
+              </Press>
               {/* Nothing to preview until there is something written (owner,
                   7 Sep 2026: "there should be no preview… because it hasn't been
                   edited or created yet. I think it should be 'edit' first"). */}
               {written ? (
-                <Pressable onPress={onPreview} accessibilityRole="button" style={{ marginLeft: spacing.md }}>
+                <Press onPress={onPreview} accessibilityRole="button" style={{ marginLeft: spacing.md }}>
                   <Row><Icon name="preview" size={16} color={colors.accent} /><Text style={[type.h3, { color: colors.accent }]}>Preview</Text></Row>
-                </Pressable>
+                </Press>
               ) : null}
             </Row>
           </View>
@@ -1189,13 +1190,13 @@ function DayPick({ value, onChange }: { value: string; onChange: (iso: string) =
   const [open, setOpen] = useState(false);
   return (
     <View style={{ gap: spacing.sm }}>
-      <Pressable onPress={() => setOpen(!open)} accessibilityRole="button">
+      <Press onPress={() => setOpen(!open)} accessibilityRole="button">
         <Row>
           <Icon name="calendar" size={16} />
           <Text style={type.h3}>{value ? longDay(value) : 'Pick a date'}</Text>
           <Icon name={open ? 'collapse' : 'expand'} size={14} />
         </Row>
-      </Pressable>
+      </Press>
       {open ? (
         <DateRangePicker
           single
@@ -1225,7 +1226,7 @@ function Chasing({ group: g, settingUp, onChange }: {
     <View style={{ gap: spacing.md }}>
       <View style={styles.dateCard}>
         {/* The date is the control, not the pencil beside it. */}
-        <Pressable onPress={() => setPick(!pick)} accessibilityRole="button" accessibilityLabel="Change the date">
+        <Press onPress={() => setPick(!pick)} accessibilityRole="button" accessibilityLabel="Change the date">
           <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={styles.fieldLabel}>Everything booked by</Text>
@@ -1234,7 +1235,7 @@ function Chasing({ group: g, settingUp, onChange }: {
             </View>
             <Icon name="edit" size={16} />
           </Row>
-        </Pressable>
+        </Press>
         {pick ? (
           <DateRangePicker
             single
@@ -1302,7 +1303,7 @@ function PersonRow({ p, items, open, busy, onOpen, onMark, onChange, onRemind }:
   const done = items.filter((i) => i.required).length - p.outstanding.length;
   return (
     <View style={styles.person}>
-      <Pressable onPress={onOpen} accessibilityRole="button">
+      <Press onPress={onOpen} accessibilityRole="button">
         <Row style={{ justifyContent: 'space-between' }}>
           <View style={{ flex: 1, gap: 2 }}>
             <Row>
@@ -1320,7 +1321,7 @@ function PersonRow({ p, items, open, busy, onOpen, onMark, onChange, onRemind }:
           </View>
           <Icon name={open ? 'collapse' : 'more'} size={16} />
         </Row>
-      </Pressable>
+      </Press>
       {open ? (
         <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
           {items.map((i) => {

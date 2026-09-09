@@ -39,7 +39,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, MoodKey, ShelfPlace, ShelfProposal, ShelfRule, ShelfVocabulary, ShelfWeights } from '../../api';
 import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
@@ -481,15 +482,15 @@ function PlaceRow({ place, wide, order, vocab, canManage, onTeach, shelfLabel, h
   return (
     <View style={styles.placeWrap}>
       <View style={[styles.placeRow, wide && { alignItems: 'center' }]}>
-        <Pressable onPress={canManage ? onTeach : undefined} style={styles.thumbTap}>
+        <Press onPress={canManage ? onTeach : undefined} style={styles.thumbTap}>
           {place.imageId ? (
             <Image source={{ uri: api.imageUrl(place.imageId, 96) }} style={styles.thumb} />
           ) : (
             <View style={[styles.thumb, styles.thumbEmpty]}><Icon name="place" size={16} color={colors.inkFaint} /></View>
           )}
-        </Pressable>
+        </Press>
 
-        <Pressable onPress={canManage ? onTeach : undefined} style={{ flex: 1, gap: 3, minWidth: 0 }}>
+        <Press onPress={canManage ? onTeach : undefined} style={{ flex: 1, gap: 3, minWidth: 0 }}>
           <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
             <Text style={styles.rowName} numberOfLines={1}>{place.name}</Text>
             {/* What the source itself called it. A food place has no Wikidata
@@ -508,7 +509,7 @@ function PlaceRow({ place, wide, order, vocab, canManage, onTeach, shelfLabel, h
             Because {why?.subject_label ?? 'nothing has been said about it'}
             {why?.scope === 'kind' ? ' (a type rule)' : why?.scope === 'place' ? ' (a rule about this one place)' : ''}
           </Text>
-        </Pressable>
+        </Press>
 
         {/* Where it is filed, and the whole of the quick edit. On a phone this
             takes its own line rather than squeezing the name into three

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, HouseholdResponse, OwnedImage, Place, TripDetail, VenuePhotoRef } from '../api';
 import { colors, fonts, memberPastel, BORDER, ON_LIME, TARGET } from '../theme';
 import { Icon } from '../components/Icon';
@@ -266,14 +267,14 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
                 accessibilityLabel="The trip's name"
               />
             ) : (
-              <Pressable onPress={() => setRenaming(true)} style={styles.titleTap} accessibilityRole="button" accessibilityLabel="Rename this trip">
+              <Press onPress={() => setRenaming(true)} style={styles.titleTap} accessibilityRole="button" accessibilityLabel="Rename this trip">
                 <Text style={styles.title} numberOfLines={2}>{title}</Text>
                 <Icon name="edit" size={18} color={colors.inkMuted} strokeWidth={2.2} />
-              </Pressable>
+              </Press>
             )}
-            <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+            <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
               <Icon name="close" size={20} color={colors.ink} strokeWidth={2.4} />
-            </Pressable>
+            </Press>
           </View>
 
           {/* The place the trip is for, full-bleed past the gutter — the one
@@ -373,7 +374,7 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
             </>
           )}
 
-          <Pressable onPress={() => setWhoOpen((o) => !o)} style={styles.whoRow} accessibilityRole="button" accessibilityState={{ expanded: whoOpen }}>
+          <Press onPress={() => setWhoOpen((o) => !o)} style={styles.whoRow} accessibilityRole="button" accessibilityState={{ expanded: whoOpen }}>
             <Icon name="household" size={22} color={colors.ink} strokeWidth={2.2} />
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
               <Text style={styles.rowTitle}>Who's coming</Text>
@@ -387,13 +388,13 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
               ))}
             </View>
             <Text style={styles.rowAction}>{`${chosen.length} ›`}</Text>
-          </Pressable>
+          </Press>
           {whoOpen ? (
             <View style={styles.ticks}>
               {members.map((m) => {
                 const on = attending.has(m.id);
                 return (
-                  <Pressable
+                  <Press
                     key={m.id}
                     onPress={() => setAttending((was) => {
                       const next = new Set(was);
@@ -406,7 +407,7 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
                   >
                     {on ? <Icon name="check" size={13} color={colors.selectedFg} strokeWidth={2.6} /> : null}
                     <Text style={[styles.tickText, on && { color: colors.selectedFg }]}>{firstName(m.name)}</Text>
-                  </Pressable>
+                  </Press>
                 );
               })}
             </View>
@@ -444,10 +445,10 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
       ) : null}
 
       <View style={styles.foot}>
-        <Pressable onPress={() => save('trip')} style={styles.primary} accessibilityRole="button" disabled={busy || !start}>
+        <Press onPress={() => save('trip')} style={styles.primary} accessibilityRole="button" disabled={busy || !start}>
           <Text style={styles.primaryText}>{busy ? 'Saving…' : 'Save trip'}</Text>
           <Icon name="forward" size={18} color={colors.primaryFg} strokeWidth={2.4} />
-        </Pressable>
+        </Press>
       </View>
     </View>
   );
@@ -480,7 +481,7 @@ function Field({ label, value, open, onPress, options, onPick }: {
   return (
     <View style={styles.cell}>
       <Text style={styles.cellLabel}>{label}</Text>
-      <Pressable
+      <Press
         onPress={onPress}
         style={styles.cellValue}
         accessibilityRole="button"
@@ -489,14 +490,14 @@ function Field({ label, value, open, onPress, options, onPick }: {
       >
         <Text style={styles.cellValueText}>{value}</Text>
         <Icon name={open ? 'collapse' : 'expand'} size={14} color={colors.ink} strokeWidth={2.6} />
-      </Pressable>
+      </Press>
       {open ? (
         <View style={styles.drop}>
           <ScrollView ref={list} style={{ maxHeight: DROP_ROW * 5 }} showsVerticalScrollIndicator={false}>
             {options.map((o) => {
               const on = o.value === value || o.label === value;
               return (
-                <Pressable
+                <Press
                   key={o.value}
                   onPress={() => onPick(o.value)}
                   style={[styles.dropRow, on && styles.dropRowOn]}
@@ -504,7 +505,7 @@ function Field({ label, value, open, onPress, options, onPick }: {
                   accessibilityState={{ selected: on }}
                 >
                   <Text style={[styles.dropText, on && styles.dropTextOn]}>{o.label}</Text>
-                </Pressable>
+                </Press>
               );
             })}
           </ScrollView>
@@ -518,14 +519,14 @@ function FormRow({ icon, title, sub, action, onPress }: {
   icon: 'hotel' | 'transit'; title: string; sub: string; action: string; onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.formRow} accessibilityRole="button" accessibilityLabel={`${title}. ${sub}`}>
+    <Press onPress={onPress} style={styles.formRow} accessibilityRole="button" accessibilityLabel={`${title}. ${sub}`}>
       <Icon name={icon} size={22} color={colors.ink} strokeWidth={2.2} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowSub} numberOfLines={1}>{sub}</Text>
       </View>
       <Text style={styles.rowAction}>{`${action} ›`}</Text>
-    </Pressable>
+    </Press>
   );
 }
 

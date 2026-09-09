@@ -2,7 +2,8 @@
 // `epic.` before any module below reads one. See src/rename.ts.
 import './src/rename';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Press } from './src/components/press';
 import { StatusBar } from 'expo-status-bar';
 import { api, API_URL, HouseholdResponse } from './src/api';
 import { colors, radius, spacing, TARGET, type, BORDER, INK } from './src/theme';
@@ -155,7 +156,7 @@ function Frame() {
         <Text style={type.tiny}>Viewing as</Text>
         <View style={styles.modeSwitch} accessibilityRole="radiogroup">
           {(['web', 'mobile'] as ViewMode[]).map((m) => (
-            <Pressable
+            <Press
               key={m}
               onPress={() => choose(m)}
               accessibilityRole="radio"
@@ -166,7 +167,7 @@ function Frame() {
                 <Icon name={m} size={14} color={mode === m ? colors.primaryFg : colors.inkMuted} />
                 <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>{m === 'web' ? 'Web' : 'Mobile'}</Text>
               </View>
-            </Pressable>
+            </Press>
           ))}
         </View>
         {mode === 'mobile' ? <Text style={type.tiny}>{PHONE.width} × {frameHeight}</Text> : null}
@@ -318,10 +319,10 @@ function NotHere({ title, body, href }: { title: string; body: string; href: str
       <Wordmark height={40} />
       <Text style={type.h3}>{title}</Text>
       <Text style={[type.small, { textAlign: 'center' }]}>{body}</Text>
-      <Pressable onPress={() => navigate(href, { replace: true })} accessibilityRole="button" style={styles.notHereBtn}>
+      <Press onPress={() => navigate(href, { replace: true })} accessibilityRole="button" style={styles.notHereBtn}>
         <Icon name="inspire" size={16} color={colors.primaryFg} />
         <Text style={{ color: colors.primaryFg, fontWeight: '700' }}>Take me home</Text>
-      </Pressable>
+      </Press>
     </Edges>
   );
 }
@@ -596,9 +597,9 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
           <View style={styles.header}>
             <Wordmark height={34} />
             {mayAdminister ? (
-              <Pressable onPress={() => navigate(paths.admin('overview'))} style={styles.headerAdmin} accessibilityRole="link" accessibilityLabel="Back office">
+              <Press onPress={() => navigate(paths.admin('overview'))} style={styles.headerAdmin} accessibilityRole="link" accessibilityLabel="Back office">
                 <Icon name="accounts" size={16} color={colors.inkMuted} />
-              </Pressable>
+              </Press>
             ) : null}
           </View>
         )}
@@ -618,14 +619,14 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
           // every edge (owner, 6 Sep 2026).
           <View style={[styles.tabs, fullBleed && styles.tabsOver]} accessibilityRole="tablist">
             {tabs.map((t) => (
-              <Pressable key={t.key} onPress={() => navigate(t.href)} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === t.key }}>
+              <Press key={t.key} onPress={() => navigate(t.href)} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === t.key }}>
                 {/* "Active (Inspire) ink text with lime-filled icon; inactive
                     grey-700 for both label and icon" — so the glyph itself is
                     lime, and the label is the type colour. Grey 500 is never
                     used here: it fails contrast at 11px. */}
                 <Icon name={t.icon} size={22} color={tab === t.key ? colors.selected : colors.inkMuted} fill={tab === t.key} />
                 <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
-              </Pressable>
+              </Press>
             ))}
           </View>
         ) : null}
@@ -638,7 +639,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
 function NavItem({ icon, label, href, on, quiet }: { icon: IconName; label: string; href: string; on: boolean; quiet?: boolean }) {
   const { navigate } = useRouter();
   return (
-    <Pressable
+    <Press
       onPress={() => navigate(href)}
       style={[styles.navItem, on && styles.navItemActive, quiet && styles.navItemQuiet]}
       accessibilityRole={quiet ? 'button' : 'tab'}
@@ -646,7 +647,7 @@ function NavItem({ icon, label, href, on, quiet }: { icon: IconName; label: stri
     >
       <View style={styles.navIcon}><Icon name={icon} size={18} color={on ? colors.selectedFg : colors.inkMuted} /></View>
       <Text style={[styles.navLabel, on && { color: colors.selectedFg }]}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -671,7 +672,7 @@ function You({ household, onOpen }: { household: HouseholdResponse | null; onOpe
   const next = theme === 'dark' ? 'light' : 'dark';
   return (
     <View style={styles.foot}>
-      <Pressable
+      <Press
         onPress={onOpen}
         accessibilityRole="button"
         accessibilityLabel={me ? `${me.name} — your profile and settings` : 'Your profile and settings'}
@@ -682,8 +683,8 @@ function You({ household, onOpen }: { household: HouseholdResponse | null; onOpe
           <Text style={styles.youName} numberOfLines={1}>{me ? me.name : 'Sign in'}</Text>
           <Text style={type.tiny} numberOfLines={1}>Your profile</Text>
         </View>
-      </Pressable>
-      <Pressable
+      </Press>
+      <Press
         onPress={() => setPref(next)}
         accessibilityRole="button"
         accessibilityLabel={next === 'dark' ? 'Switch to dark mode' : 'Switch to light mode'}
@@ -691,7 +692,7 @@ function You({ household, onOpen }: { household: HouseholdResponse | null; onOpe
         style={({ hovered, pressed }: any) => [styles.themeBtn, hovered && styles.themeBtnHover, pressed && { opacity: 0.85 }]}
       >
         <Icon name={next} size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
     </View>
   );
 }

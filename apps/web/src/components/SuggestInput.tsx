@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { api, Suggestion } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 
@@ -73,22 +74,22 @@ export function SuggestInput({
           returnKeyType="done"
           autoCapitalize="none"
         />
-        <Pressable onPress={commitFree} style={[styles.add, !text.trim() && { opacity: 0.5 }]} disabled={!text.trim()} accessibilityRole="button" accessibilityLabel="Add as typed">
+        <Press onPress={commitFree} style={[styles.add, !text.trim() && { opacity: 0.5 }]} disabled={!text.trim()} accessibilityRole="button" accessibilityLabel="Add as typed">
           <Text style={styles.addText}>Add</Text>
-        </Pressable>
+        </Press>
         {onBrowse ? (
-          <Pressable onPress={onBrowse} style={styles.add} accessibilityRole="button" accessibilityLabel="Browse the list">
+          <Press onPress={onBrowse} style={styles.add} accessibilityRole="button" accessibilityLabel="Browse the list">
             <Text style={styles.addText}>Browse</Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
       {open && items.length ? (
         <View style={styles.pills}>
           {items.map((s) => (
-            <Pressable key={s.key} onPress={() => pick(s)} style={styles.pill} accessibilityRole="button">
+            <Press key={s.key} onPress={() => pick(s)} style={styles.pill} accessibilityRole="button">
               <Text style={styles.pillText}>{s.label}</Text>
               <Text style={styles.pillKind}>{s.kind}</Text>
-            </Pressable>
+            </Press>
           ))}
         </View>
       ) : null}

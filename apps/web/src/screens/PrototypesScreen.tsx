@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, PrototypeStatus } from '../api';
 import { colors, fonts, radius, spacing, type, BORDER } from '../theme';
 import { Button, Card, Row, Wrap } from '../components/ui';
@@ -213,7 +214,7 @@ const when = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '
 /** A menu item: an ink pill when it is the one you are in, an outline when it is not; it fills on hover so it reads as something you can press. */
 function Tab({ label, icon, selected, onPress, wide }: { label: string; icon?: IconName; selected: boolean; onPress: () => void; wide?: boolean }) {
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       accessibilityRole="tab"
       accessibilityState={{ selected }}
@@ -221,7 +222,7 @@ function Tab({ label, icon, selected, onPress, wide }: { label: string; icon?: I
     >
       {icon ? <Icon name={icon} size={14} color={selected ? colors.primaryFg : colors.inkMuted} /> : null}
       <Text style={[styles.tabText, selected && { color: colors.primaryFg }]}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -234,7 +235,7 @@ function Verdict({ label, icon, tone, selected, onPress }: {
   label: string; icon: IconName; tone: { fg: string; on: string; onFg: string; soft: string }; selected: boolean; onPress: () => void;
 }) {
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
@@ -246,7 +247,7 @@ function Verdict({ label, icon, tone, selected, onPress }: {
     >
       <Icon name={icon} size={15} color={selected ? tone.onFg : tone.fg} />
       <Text style={[styles.verdictText, { color: selected ? tone.onFg : tone.fg }]}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 

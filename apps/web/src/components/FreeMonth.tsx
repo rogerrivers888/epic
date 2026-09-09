@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, fonts, radius, spacing, type, BORDER } from '../theme';
 import { Button, Row } from './ui';
 import { Icon } from './Icon';
@@ -43,7 +44,7 @@ export function FreeMonth({ trialEndsOn, tripName, payments = [], onBack, onDone
   return (
     <View style={{ gap: spacing.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        {onBack ? <Pressable onPress={onBack} accessibilityRole="button"><Icon name="back" size={18} /></Pressable> : <View />}
+        {onBack ? <Press onPress={onBack} accessibilityRole="button"><Icon name="back" size={18} /></Press> : <View />}
         <Text style={type.h2}>Your Epic</Text>
         <View style={{ width: 18 }} />
       </Row>

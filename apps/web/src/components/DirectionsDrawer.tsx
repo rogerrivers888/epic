@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { api, Directions, JourneyLeg, LegMode } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
@@ -47,7 +48,7 @@ export function DirectionsDrawer({ tripId, from, to, leg, hasCar, departAt, onCl
   return (
     <Modal visible transparent animationType={wide ? 'fade' : 'slide'} onRequestClose={onClose}>
       <View style={styles.backdropWrap}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <Press style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.panel, wide ? styles.panelSide : styles.panelSheet, frameBox]}>
           <ScrollView contentContainerStyle={{ gap: spacing.md, padding: spacing.lg }}>
             <Row style={{ alignItems: 'flex-start' }}>
@@ -55,7 +56,7 @@ export function DirectionsDrawer({ tripId, from, to, leg, hasCar, departAt, onCl
                 <Text style={type.tiny}>DIRECTIONS</Text>
                 <Text style={type.h2}>{from.label} → {to.label}</Text>
               </View>
-              <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
+              <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Press>
             </Row>
             {opts.length > 1 ? <Segmented value={mode} options={opts} onChange={setMode} /> : null}
             <View style={styles.summary}>

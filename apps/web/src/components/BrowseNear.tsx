@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { api, AtlasPlace, BrowseItem, HouseholdResponse, SketchEvent, TripDetail, Venue } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
@@ -287,7 +288,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
         <Text style={styles.label}>{title}</Text>
         <Row style={{ gap: spacing.md }}>
           {note ? <Text style={type.tiny}>{note}</Text> : null}
-          <Pressable onPress={() => setSheet(null)} hitSlop={8} accessibilityLabel={`Close ${title}`}><Icon name="close" size={16} color={colors.ink} /></Pressable>
+          <Press onPress={() => setSheet(null)} hitSlop={8} accessibilityLabel={`Close ${title}`}><Icon name="close" size={16} color={colors.ink} /></Press>
         </Row>
       </Row>
       {body}
@@ -297,19 +298,19 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
   const tile = (cat: FindCat, icon: 'attraction' | 'restaurant' | 'ticket', label: string, n: number) => {
     const on = find.cat === cat;
     return (
-      <Pressable key={cat} onPress={() => setCat(cat)} style={[styles.tile, on && styles.tileOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
+      <Press key={cat} onPress={() => setCat(cat)} style={[styles.tile, on && styles.tileOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
         <Icon name={icon} size={20} color={on ? colors.primaryFg : colors.icon} />
         <Text style={[styles.tileN, on && { color: colors.primaryFg }]}>{n}</Text>
         <Text style={[styles.tileL, on && { color: colors.primaryFg, opacity: 0.85 }]}>{label}</Text>
-      </Pressable>
+      </Press>
     );
   };
   const pill = (label: string, onPress: () => void, opts: { on?: boolean; icon?: 'plan' | 'attraction' | 'restaurant' | 'ticket' | 'address' | 'close'; chevron?: boolean } = {}) => (
-    <Pressable onPress={onPress} style={[styles.pill, opts.on && styles.pillOn]} accessibilityRole="button">
+    <Press onPress={onPress} style={[styles.pill, opts.on && styles.pillOn]} accessibilityRole="button">
       {opts.icon ? <Icon name={opts.icon} size={13} color={opts.on ? colors.primaryFg : colors.icon} /> : null}
       <Text style={[styles.pillText, opts.on && { color: colors.primaryFg }]}>{label}</Text>
       {opts.chevron ? <Icon name="expand" size={12} color={opts.on ? colors.primaryFg : colors.inkMuted} /> : null}
-    </Pressable>
+    </Press>
   );
 
   return (
@@ -318,7 +319,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
         <View style={styles.search}>
           <Icon name="search" size={16} color={colors.icon} />
           <TextInput value={q} onChangeText={setQ} autoFocus placeholder="Name or kind of place" placeholderTextColor={colors.inkMuted} style={styles.input} onSubmitEditing={() => run({ q })} returnKeyType="search" />
-          <Pressable onPress={() => { setSearching(false); setQ(''); if (find.q) run({ q: '' }); }} hitSlop={8}><Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>Cancel</Text></Pressable>
+          <Press onPress={() => { setSearching(false); setQ(''); if (find.q) run({ q: '' }); }} hitSlop={8}><Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>Cancel</Text></Press>
         </View>
       ) : (
         <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -327,7 +328,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
             <Text style={type.tiny}>{find.loading ? 'Looking…' : find.res ? `${find.res.length} places · ${find.radiusKm} km${find.q ? ` · “${find.q}”` : ''}` : ''}</Text>
           </View>
           {/* Every filter is a pill on the bar below, so there is no second way in. */}
-          <Pressable onPress={() => setSearching(true)} style={styles.iconBtn} accessibilityLabel="Search"><Icon name="search" size={18} color={colors.ink} /></Pressable>
+          <Press onPress={() => setSearching(true)} style={styles.iconBtn} accessibilityLabel="Search"><Icon name="search" size={18} color={colors.ink} /></Press>
         </Row>
       )}
 
@@ -363,9 +364,9 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
         <>
           <View style={styles.seg}>
             {BUDGET_ORDER.map((b) => (
-              <Pressable key={b} onPress={() => setFind((cur) => ({ ...cur, budget: cur.budget === b ? 'any' : b }))} style={[styles.segItem, find.budget === b && styles.segOn]} accessibilityRole="button" accessibilityState={{ selected: find.budget === b }}>
+              <Press key={b} onPress={() => setFind((cur) => ({ ...cur, budget: cur.budget === b ? 'any' : b }))} style={[styles.segItem, find.budget === b && styles.segOn]} accessibilityRole="button" accessibilityState={{ selected: find.budget === b }}>
                 <Text style={[styles.segText, find.budget === b && { color: colors.primaryFg }]}>{BUDGET_LABEL[b]}</Text>
-              </Pressable>
+              </Press>
             ))}
           </View>
           <Text style={type.tiny}>{find.budget === 'free' ? 'Only places that cost nothing to go into.' : find.budget === 'any' ? 'Tap a band to set a ceiling on what a place charges.' : 'A ceiling, not a target — places the sources gave no price for stay in.'}</Text>
@@ -434,7 +435,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
           const meta = metaOf(v, find.cat);
           const when = whenOf(v);
           return (
-            <Pressable key={v.venueRef} onPress={() => setOpen(asItem(v))} style={[styles.card, i === 0 && { borderTopWidth: 0, paddingTop: 4 }]} accessibilityRole="button">
+            <Press key={v.venueRef} onPress={() => setOpen(asItem(v))} style={[styles.card, i === 0 && { borderTopWidth: 0, paddingTop: 4 }]} accessibilityRole="button">
               <View style={[styles.photo, i % 2 === 1 && { backgroundColor: colors.surfaceMuted }]}>
                 <VenuePhoto photos={v.photos} size={88} credit={false} />
                 {loved ? <View style={styles.heart}><Icon name="keep" size={11} color="#fff" fill /></View> : null}
@@ -450,10 +451,10 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
                 {v.stored ? <View style={styles.why}><Icon name="owned" size={12} color={colors.icon} /><Text style={styles.whyText} numberOfLines={1}>Ours — saved, works offline</Text></View>
                   : reasons[0] ? <View style={styles.why}><Icon name={reasons[0].icon} size={12} color={colors.icon} /><Text style={styles.whyText} numberOfLines={1}>{reasons[0].text}</Text></View> : null}
               </View>
-              <Pressable onPress={() => { if (!saved) add(v); }} style={[styles.save, saved && styles.saveOn]} accessibilityRole="button" accessibilityLabel={saved ? 'Shortlisted' : 'Shortlist'}>
+              <Press onPress={() => { if (!saved) add(v); }} style={[styles.save, saved && styles.saveOn]} accessibilityRole="button" accessibilityLabel={saved ? 'Shortlisted' : 'Shortlist'}>
                 <Icon name={saved ? 'shortlisted' : 'shortlist'} size={16} color={saved ? colors.primaryFg : colors.ink} />
-              </Pressable>
-            </Pressable>
+              </Press>
+            </Press>
           );
         })}
       </View>

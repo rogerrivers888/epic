@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { API_URL, GroupItem, GroupItemKind, GroupPricing, JoinView, TripGroup } from '../api';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Row, Segmented, StatusLine, Wrap } from './ui';
@@ -178,9 +179,9 @@ export function InviteLanding({ data, cta, onNext, onBack, backLabel, busy, narr
           'Invited by Roger'… it can just say 'Back to Edit'"). */}
       <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         {onBack ? (
-          <Pressable onPress={onBack} accessibilityRole="button" hitSlop={8}>
+          <Press onPress={onBack} accessibilityRole="button" hitSlop={8}>
             <Row><Icon name="back" size={18} /><Text style={type.h3}>{backLabel ?? 'Back'}</Text></Row>
-          </Pressable>
+          </Press>
         ) : <Wordmark height={28} />}
         {data.organiser ? <Text style={type.label}>INVITED BY {data.organiser.toUpperCase()}</Text> : null}
       </Row>
@@ -341,7 +342,7 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
   return (
     <View style={{ gap: spacing.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Pressable onPress={onClose} accessibilityRole="button" style={{ padding: 4 }}><Icon name="back" size={20} /></Pressable>
+        <Press onPress={onClose} accessibilityRole="button" style={{ padding: 4 }}><Icon name="back" size={20} /></Press>
         <Text style={type.h2}>Edit the invite page</Text>
         <View style={{ width: 18 }} />
       </Row>
@@ -356,15 +357,15 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
               it is one control (owner, 7 Sep 2026: "these 3 buttons… look really
               bad… it should be a dropdown"). */}
           <View style={{ flex: 1, gap: 6 }}>
-            <Pressable onPress={() => setPicking(!picking)} accessibilityRole="button" style={styles.dropdown}>
+            <Press onPress={() => setPicking(!picking)} accessibilityRole="button" style={styles.dropdown}>
               <Icon name={source === 'upload' ? 'upload' : source === 'trip' ? 'picture' : 'climbing'} size={15} color={colors.ink} />
               <Text style={[type.body, { flex: 1 }]}>{SOURCES.find((x) => x.key === source)?.label}</Text>
               <Icon name={picking ? 'collapse' : 'expand'} size={15} color={colors.inkMuted} />
-            </Pressable>
+            </Press>
             {picking ? (
               <View style={styles.dropdownList}>
                 {SOURCES.map((x) => (
-                  <Pressable
+                  <Press
                     key={x.key}
                     onPress={() => { setPicking(false); if (x.key === 'upload') upload(); else setSource(x.key); }}
                     accessibilityRole="button"
@@ -373,7 +374,7 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
                     <Icon name={x.icon} size={15} color={colors.ink} />
                     <Text style={[type.body, { flex: 1 }]}>{x.label}</Text>
                     {source === x.key ? <Icon name="check" size={15} color={colors.accent} /> : null}
-                  </Pressable>
+                  </Press>
                 ))}
               </View>
             ) : null}
@@ -385,9 +386,9 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
         {source !== 'upload' ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
             {gallery.map((g) => (
-              <Pressable key={g} onPress={() => setCoverUrl(g)} accessibilityRole="button">
+              <Press key={g} onPress={() => setCoverUrl(g)} accessibilityRole="button">
                 <Image source={{ uri: coverUri(g, 240)! }} style={[styles.thumb, coverUrl === g && styles.thumbOn]} accessibilityIgnoresInvertColors />
-              </Pressable>
+              </Press>
             ))}
           </ScrollView>
         ) : null}
@@ -437,15 +438,15 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
               />
               <View style={{ alignItems: 'flex-end', marginTop: 4 }}><Counter n={p.length} max={POINT_MAX} /></View>
             </View>
-            <Pressable onPress={() => setPoints(points.filter((_, j) => j !== n))} accessibilityRole="button" style={{ padding: 6 }}>
+            <Press onPress={() => setPoints(points.filter((_, j) => j !== n))} accessibilityRole="button" style={{ padding: 6 }}>
               <Icon name="close" size={16} color={colors.inkMuted} />
-            </Pressable>
+            </Press>
           </Row>
         ))}
         {points.length < POINTS_MAX ? (
-          <Pressable onPress={() => { setPoints([...points, '']); setFresh(points.length); }} accessibilityRole="button">
+          <Press onPress={() => { setPoints([...points, '']); setFresh(points.length); }} accessibilityRole="button">
             <Row><Icon name="add" size={16} color={colors.accent} /><Text style={[type.h3, { color: colors.accent }]}>Add a point</Text></Row>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
 
@@ -458,10 +459,10 @@ export function InviteEditor({ data, draft, tripPhotos, saving, onSave, onClose,
 
 function Pill({ label, icon, on, onPress }: { label: string; icon: IconName; on: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.pill, on && styles.pillOn]}>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.pill, on && styles.pillOn]}>
       <Icon name={icon} size={14} color={on ? colors.primaryFg : colors.ink} />
       <Text style={[styles.pillText, on && { color: colors.primaryFg }]}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 

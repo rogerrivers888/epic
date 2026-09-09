@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, HouseholdResponse, Place } from '../api';
 import { colors, fonts, radius, resolveTheme, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, FoldLine, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
@@ -203,10 +204,10 @@ function Preferences({ data, refresh }: { data: HouseholdResponse; refresh: () =
         <FoldLine label="How Epic listens" value={voiceModeLabel(voiceMode)} icon="mic">
           <View style={{ gap: spacing.sm }}>
             {VOICE_MODES.map((m) => (
-              <Pressable key={m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} accessibilityRole="button" accessibilityState={{ selected: voiceMode === m.value }} style={styles.voiceOption}>
+              <Press key={m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} accessibilityRole="button" accessibilityState={{ selected: voiceMode === m.value }} style={styles.voiceOption}>
                 <Chip label={m.label} selected={voiceMode === m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} />
                 <Text style={type.tiny}>{m.blurb}</Text>
-              </Pressable>
+              </Press>
             ))}
           </View>
         </FoldLine>

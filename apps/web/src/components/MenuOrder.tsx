@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { api, DishNote, HouseholdResponse, Learned, Member, MenuItem, MenuLink, Order, OrderItem, ReadMenu } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { useViewport } from '../hooks/useViewport';
@@ -164,7 +165,7 @@ function FlagChip({ flag }: { flag: Flag }) {
  */
 function Face({ label, on, onPress, size = 30, guest = false }: { label: string; on: boolean; onPress: () => void; size?: number; guest?: boolean }) {
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       accessibilityRole="checkbox"
       accessibilityState={{ checked: on }}
@@ -172,7 +173,7 @@ function Face({ label, on, onPress, size = 30, guest = false }: { label: string;
       style={[styles.face, { width: size, height: size, borderRadius: size / 2 }, guest && styles.faceGuest, on && styles.faceOn]}
     >
       <Text style={[styles.faceText, on && styles.faceTextOn]}>{(label[0] ?? '?').toUpperCase()}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -816,7 +817,7 @@ function BasketPeek({ ctl }: { ctl: MenuOrderCtl }) {
               {l.note ? <Text style={type.tiny}>{l.note}</Text> : null}
             </View>
             <Text style={type.tiny}>{l.priceText ?? ''}</Text>
-            <Pressable
+            <Press
               onPress={() => ctl.dropLine(l.itemId, l.key)}
               disabled={ctl.busy}
               accessibilityRole="button"
@@ -824,7 +825,7 @@ function BasketPeek({ ctl }: { ctl: MenuOrderCtl }) {
               style={styles.rowBtn}
             >
               <Icon name="close" size={14} color={colors.inkMuted} />
-            </Pressable>
+            </Press>
           </Row>
         ))}
       </ScrollView>
@@ -861,7 +862,7 @@ function RatingBoard({ ctl, footer }: { ctl: MenuOrderCtl; footer?: React.ReactN
           const stars = plates.filter((i) => (i.ratings ?? []).some((r) => r.memberId === m.id && r.score)).length;
           const said = Boolean(tookATurn[m.id]);
           return (
-            <Pressable
+            <Press
               key={m.id}
               onPress={() => ctl.handTo(m.id)}
               disabled={busy}
@@ -884,7 +885,7 @@ function RatingBoard({ ctl, footer }: { ctl: MenuOrderCtl; footer?: React.ReactN
               {said
                 ? <Icon name="check" size={20} color={colors.accent} />
                 : <Chip label="Give it to them" icon="forward" />}
-            </Pressable>
+            </Press>
           );
         })}
         {guests.length ? (
@@ -962,10 +963,10 @@ function Turn({ ctl, memberId, footer }: { ctl: MenuOrderCtl; memberId: string; 
               <Row style={{ gap: spacing.md, flexWrap: 'wrap' }}>
                 <Row style={{ gap: 3 }}>
                   {[1, 2, 3, 4, 5].map((n) => (
-                    <Pressable key={n} onPress={() => set({ stars: m.stars === n ? 0 : n, notGreat: false })}
+                    <Press key={n} onPress={() => set({ stars: m.stars === n ? 0 : n, notGreat: false })}
                       accessibilityRole="button" accessibilityLabel={`${n} star${n > 1 ? 's' : ''} for ${i.name}`} hitSlop={6}>
                       <Icon name="favourite" size={30} fill={m.stars >= n} color={m.stars >= n ? colors.rating : colors.inkFaint} />
-                    </Pressable>
+                    </Press>
                   ))}
                 </Row>
                 <Chip label="Not great" icon="close" selected={m.notGreat} onPress={() => set({ notGreat: !m.notGreat, stars: 0 })} />
@@ -1197,14 +1198,14 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
                       {isVeg(item) ? <Text style={styles.veg}> (V)</Text> : null}
                     </Text>
                     <Text style={styles.price}>{item.priceText ?? ''}</Text>
-                    <Pressable
+                    <Press
                       onPress={() => ctl.whatIsThis(item)}
                       accessibilityRole="button"
                       accessibilityLabel={`What is ${item.name}?`}
                       style={styles.rowBtn}
                     >
                       <Icon name="info" size={14} color={note ? colors.icon : colors.inkMuted} />
-                    </Pressable>
+                    </Press>
                   </Row>
                   {item.description ? <Text style={type.small}>{item.description}</Text> : null}
                   {note ? (
@@ -1283,7 +1284,7 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
         <>
           {ctl.peek && chosen.length ? <BasketPeek ctl={ctl} /> : null}
           <View style={styles.bar}>
-            <Pressable
+            <Press
               onPress={() => ctl.setPeek(!ctl.peek)}
               disabled={!chosen.length}
               accessibilityRole="button"
@@ -1305,7 +1306,7 @@ export function MenuPanel({ ctl, onOrder }: { ctl: MenuOrderCtl; onOrder: () => 
                 </View>
                 {chosen.length ? <Icon name={ctl.peek ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} /> : null}
               </Row>
-            </Pressable>
+            </Press>
             <Button label="The order" icon="forward" style={styles.barBtn} onPress={async () => { await ctl.toTheOrder(); onOrder(); }} disabled={!chosen.length || ctl.busy} />
           </View>
         </>
@@ -1395,7 +1396,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                     const on = !!ctl.again[i.id];
                     const r = i.ratings[0];
                     return (
-                      <Pressable
+                      <Press
                         key={i.id}
                         onPress={() => ctl.setAgain((a) => ({ ...a, [i.id]: !a[i.id] }))}
                         accessibilityRole="checkbox"
@@ -1415,7 +1416,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                           <Text style={type.small}>{i.priceText ?? ''}</Text>
                         </Row>
                         {i.note ? <Text style={type.tiny}>{i.note}</Text> : null}
-                      </Pressable>
+                      </Press>
                     );
                   })}
                 </View>
@@ -1630,15 +1631,15 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                   <Text style={type.small}>{i.priceText ?? ''}</Text>
                   {eaten ? null : (
                     <>
-                      <Pressable
+                      <Press
                         onPress={() => setNoting((n) => ({ ...n, [i.id]: !n[i.id] }))}
                         accessibilityRole="button"
                         accessibilityLabel={`${i.note ? 'Change the' : 'Add a'} word for the waiter about ${i.name}`}
                         style={styles.rowBtn}
                       >
                         <Icon name="edit" size={14} color={i.note ? colors.icon : colors.inkMuted} />
-                      </Pressable>
-                      <Pressable
+                      </Press>
+                      <Press
                         onPress={() => ctl.removeFromOrder(i)}
                         disabled={busy}
                         accessibilityRole="button"
@@ -1646,7 +1647,7 @@ export function OrderPanel({ ctl, onMenu, footer }: { ctl: MenuOrderCtl; onMenu:
                         style={styles.rowBtn}
                       >
                         <Icon name="close" size={15} color={colors.inkMuted} />
-                      </Pressable>
+                      </Press>
                     </>
                   )}
                 </Row>
@@ -1822,9 +1823,9 @@ export function StaffSheet({ ctl }: { ctl: MenuOrderCtl }) {
                 ]}
               />
             </View>
-            <Pressable onPress={() => ctl.setStaff(false)} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+            <Press onPress={() => ctl.setStaff(false)} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
               <Icon name="close" size={22} color={colors.ink} />
-            </Pressable>
+            </Press>
           </Row>
           {by === 'code' && link ? (
             <View style={{ alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md }}>

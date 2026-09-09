@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon } from './Icon';
@@ -30,7 +31,7 @@ export function SideSheet({ title, subtitle, onClose, children, footer, size = '
   return (
     <Modal visible transparent animationType={wide ? 'fade' : 'slide'} onRequestClose={onClose}>
       <View style={styles.backdropWrap}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <Press style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.panel, wide ? [styles.panelSide, { width: panelWidth }] : styles.panelSheet, frameBox]}>
           <ScrollView contentContainerStyle={{ gap: spacing.md, padding: spacing.lg }}>
             <Row style={{ alignItems: 'flex-start' }}>
@@ -38,7 +39,7 @@ export function SideSheet({ title, subtitle, onClose, children, footer, size = '
                 <Text style={type.title}>{title}</Text>
                 {subtitle ? <Text style={type.small}>{subtitle}</Text> : null}
               </View>
-              <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
+              <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Press>
             </Row>
             {children}
           </ScrollView>

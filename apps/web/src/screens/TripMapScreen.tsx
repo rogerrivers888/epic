@@ -27,7 +27,8 @@
  */
 
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press, Ring } from '../components/press';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
@@ -858,14 +859,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   const header = groupPage ? <View style={{ height: spacing.sm }} /> : openPlaceHere ? (
     <View style={styles.header}>
-      <Pressable
+      <Press
         onPress={() => setSelected(null)}
         style={styles.backBare}
         accessibilityRole="button"
         accessibilityLabel={pill ? 'Back to the list' : 'Back to the day'}
       >
         <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
-      </Pressable>
+      </Press>
       {/*
         The name and what people made of it are one block, so the rating sits
         directly under the title and indented to it rather than starting back
@@ -885,7 +886,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           ) : <Text style={type.small}>No rating yet</Text>}
         </View>
       </View>
-      <Pressable
+      <Press
         onPress={() => setDrawer(alongToItem(openPlaceHere))}
         hitSlop={10}
         style={styles.expandHit}
@@ -893,7 +894,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         accessibilityLabel={`Open ${openPlaceHere.name} on the whole screen`}
       >
         <Icon name="fullscreen" size={20} color={colors.ink} />
-      </Pressable>
+      </Press>
     </View>
   ) : (
     <View style={styles.header}>
@@ -908,7 +909,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         goes back to Trips. It used to jump from a place straight out of the
         browse, which threw away the search you had just run.
       */}
-      <Pressable
+      <Press
         onPress={() => {
           if (browseMenus.current?.close()) return;
           if (selected) { setSelected(null); return; }
@@ -921,7 +922,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         accessibilityLabel={selected ? 'Back to the list' : pill || section === 'group' ? 'Back to the trip' : 'Trips'}
       >
         <Icon name={pill && !selected ? 'trips' : 'back'} size={20} color={colors.ink} strokeWidth={2} />
-      </Pressable>
+      </Press>
 
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
         {/*
@@ -952,14 +953,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           </>
         ) : (
           <>
-            <Pressable
+            <Press
               onLongPress={onMenu}
               delayLongPress={400}
               accessibilityRole="button"
               accessibilityLabel={`${tripName(trip)}. Hold for rename, share and delete`}
             >
               <Text style={styles.title} numberOfLines={1}>{tripName(trip)}</Text>
-            </Pressable>
+            </Press>
             <Text style={type.small} numberOfLines={1}>
               {(() => {
                 const range = isTrip && trip.startDate && trip.endDate && trip.startDate !== trip.endDate;
@@ -982,17 +983,17 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       */}
       <View style={styles.headEnd}>
         {onPeople && !pill ? (
-          <Pressable onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
+          <Press onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
             <Icon name="household" size={20} color={colors.ink} strokeWidth={2} />
             <Text style={styles.peopleCount}>{party || 1}</Text>
-          </Pressable>
+          </Press>
         ) : null}
         {onChat && !pill ? (
-          <Pressable onPress={onChat} style={styles.chatBare} accessibilityRole="button" accessibilityLabel={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'}>
+          <Press onPress={onChat} style={styles.chatBare} accessibilityRole="button" accessibilityLabel={chatUnread ? `Chat, ${chatUnread} unread` : 'Chat'}>
             {/* Unread turns the icon Moss. No dot — a badge on a bare icon is a
                 box by another name (5h). */}
             <Icon name="message" size={20} color={chatUnread ? colors.accent : colors.ink} strokeWidth={2} />
-          </Pressable>
+          </Press>
         ) : null}
       </View>
     </View>
@@ -1080,10 +1081,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
          nonsense"). */
       <View style={{ padding: spacing.lg, gap: 12 }}>
         {groupPage ? null : (
-          <Pressable onPress={() => onSection('itinerary')} style={styles.backRow} accessibilityRole="button">
+          <Press onPress={() => onSection('itinerary')} style={styles.backRow} accessibilityRole="button">
             <Icon name="back" size={16} color={colors.ink} />
             <Text style={styles.linkText}>Back to the day</Text>
-          </Pressable>
+          </Press>
         )}
         <GroupPanel d={d} onChanged={onChanged} onPage={setGroupPage} />
       </View>
@@ -1177,7 +1178,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         // Shortlist is exclusive with the other two, and dims them (handoff §7).
         const dim = pill === 'shortlist' && p.key !== 'shortlist';
         return (
-          <Pressable
+          <Press
             key={p.key}
             onPress={() => { setPill(on ? null : p.key); setSelected(null); setDetent('half'); }}
             style={[styles.pill, wantsStay && styles.pillFour, on && styles.pillOn, dim && { opacity: 0.45 }]}
@@ -1198,7 +1199,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
               <Icon name={p.icon} size={17} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
             )}
             <Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{p.label}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>
@@ -1309,7 +1310,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       */}
       {pins === 'card' && cardFor && !drawer ? (
         <View style={[styles.cardWrap, { bottom: heights[detent] + bar + 62 }]} pointerEvents="box-none">
-          <Pressable onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
+          <Press onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
             <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={83} height={83} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
               <Text style={styles.rowName} numberOfLines={1}>{cardFor.name}</Text>
@@ -1327,10 +1328,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
               </Text>
             </View>
             <Icon name="more" size={18} color={colors.ink} />
-          </Pressable>
-          <Pressable onPress={() => setSelected(null)} hitSlop={8} style={styles.cardShut} accessibilityRole="button" accessibilityLabel="Put the card away">
+          </Press>
+          <Press onPress={() => setSelected(null)} hitSlop={8} style={styles.cardShut} accessibilityRole="button" accessibilityLabel="Put the card away">
             <Icon name="close" size={14} color={colors.ink} />
-          </Pressable>
+          </Press>
         </View>
       ) : null}
 
@@ -1428,9 +1429,9 @@ function SheetHead({ days, dayId, stops, places, multi, onDay, onPlaces, onMap }
     return (
       <View style={styles.kickerRow}>
         <Text style={styles.kicker}>{stops ? `The day · ${stops} stop${stops === 1 ? '' : 's'}` : 'The day'}</Text>
-        <Pressable onPress={onMap} accessibilityRole="button" accessibilityLabel="See the map">
+        <Press onPress={onMap} accessibilityRole="button" accessibilityLabel="See the map">
           <Text style={styles.mossLink}>Map ›</Text>
-        </Pressable>
+        </Press>
       </View>
     );
   }
@@ -1442,7 +1443,7 @@ function SheetHead({ days, dayId, stops, places, multi, onDay, onPlaces, onMap }
             const on = dd.id === dayId;
             const when = new Date(`${String(dd.date).slice(0, 10)}T12:00:00`);
             return (
-              <Pressable
+              <Press
                 key={dd.id}
                 onPress={() => onDay(dd.id)}
                 style={[styles.dayCell, on && styles.dayCellOn]}
@@ -1452,16 +1453,16 @@ function SheetHead({ days, dayId, stops, places, multi, onDay, onPlaces, onMap }
               >
                 <Text style={[styles.dayWord, on && styles.dayWordOn]}>{when.toLocaleDateString([], { weekday: 'short' })}</Text>
                 <Text style={styles.dayNum}>{when.getDate()}</Text>
-              </Pressable>
+              </Press>
             );
           })}
         </ScrollView>
         <View style={styles.dayMore}><Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} /></View>
       </View>
       <View style={styles.placesLine}>
-        <Pressable onPress={onPlaces} accessibilityRole="button" accessibilityLabel={`${places} places on this trip`}>
+        <Press onPress={onPlaces} accessibilityRole="button" accessibilityLabel={`${places} places on this trip`}>
           <Text style={styles.mossLink}>{`${places} place${places === 1 ? '' : 's'} ›`}</Text>
-        </Pressable>
+        </Press>
       </View>
     </>
   );
@@ -1475,14 +1476,14 @@ function SheetHead({ days, dayId, stops, places, multi, onDay, onPlaces, onMap }
  */
 function FindYourStay({ onPress }: { onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.stayRow} accessibilityRole="button">
+    <Press onPress={onPress} style={styles.stayRow} accessibilityRole="button">
       <Icon name="hotel" size={20} color={colors.ink} strokeWidth={2} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.stayTitle}>Find your stay</Text>
         <Text style={styles.staySub} numberOfLines={1}>Nothing booked · we'll suggest stays near your plans</Text>
       </View>
       <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -1644,7 +1645,7 @@ function Beat({ time, icon, title, detail, last, on, dashed, onPress }: {
     </View>
   );
   if (!onPress) return body;
-  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title}>{body}</Pressable>;
+  return <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={title}>{body}</Press>;
 }
 
 function TripPlacesList({ data, onSelect, onDelete }: {
@@ -1664,7 +1665,7 @@ function TripPlacesList({ data, onSelect, onDelete }: {
   return (
     <View style={{ paddingHorizontal: 16 }}>
       {data.places.map((p) => (
-        <Pressable key={p.venueRef} onPress={() => onSelect(p.venueRef)} style={styles.row} accessibilityRole="button">
+        <Press key={p.venueRef} onPress={() => onSelect(p.venueRef)} style={styles.row} accessibilityRole="button">
           {/* Ours first, then the provider's — which is why a list of places
               nobody has researched yet is no longer a column of blank tiles. */}
           <VenueThumb name={p.name} image={p.image} photos={p.photos} category={p.category} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false} />
@@ -1675,7 +1676,7 @@ function TripPlacesList({ data, onSelect, onDelete }: {
             </Text>
           </View>
           <Icon name={p.scheduled ? 'booked' : 'shortlisted'} size={17} color={p.scheduled ? colors.accent : colors.inkMuted} />
-        </Pressable>
+        </Press>
       ))}
       {/*
         Getting rid of the trip, at the foot of the page that lists everything
@@ -1872,11 +1873,11 @@ function PlaceHalf({ place, onShortlist, onAdd, onMore, addLabel }: {
           onLayout={(e) => { const n = Math.round(e.nativeEvent.layout.width); if (n && n !== w) setW(n); }}
         >
           {w ? (
-            <Pressable onPress={onMore} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
+            <Press onPress={onMore} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
               <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={w} height={Math.round(w / 1.5)} rounded={12} credit={false}>
                 <View style={styles.mediaHeart}><HeartButton on={place.onShortlist} onPress={onShortlist} onPhoto /></View>
               </VenueThumb>
-            </Pressable>
+            </Press>
           ) : null}
         </View>
       ) : (
@@ -1921,17 +1922,17 @@ function PlaceHalf({ place, onShortlist, onAdd, onMore, addLabel }: {
         ))}
       </View>
 
-      <Pressable onPress={onMore} style={styles.moreInfo} accessibilityRole="button">
+      <Press onPress={onMore} style={styles.moreInfo} accessibilityRole="button">
         <Text style={styles.moreInfoText}>More info</Text>
         <Icon name="more" size={14} color={colors.accent} />
-      </Pressable>
+      </Press>
 
-      <Pressable onPress={onAdd} style={[styles.halfAdd, place.onDay && styles.halfAdded]} accessibilityRole="button">
+      <Press effect="pop" onPress={onAdd} style={[styles.halfAdd, place.onDay && styles.halfAdded]} accessibilityRole="button">
         <Icon name={place.onDay ? 'check' : 'add'} size={16} color={place.onDay ? colors.selectedFg : colors.primaryFg} />
         <Text style={[styles.halfAddText, place.onDay && { color: colors.selectedFg }]}>
           {place.onDay ? (kind === 'stay' ? 'Your stay' : 'Added to the trip') : (addLabel ?? (kind === 'stay' ? 'Set as your stay' : 'Add to trip'))}
         </Text>
-      </Pressable>
+      </Press>
     </View>
   );
 }
@@ -1951,15 +1952,19 @@ function HeartButton({ on, onPress, bare, onPhoto }: {
    */
   onPhoto?: boolean;
 }) {
+  // The ring plays on the tap that turns it on, not on the answer from the
+  // server: it is feedback for the finger, and the finger has already left.
+  const [pulse, setPulse] = useState(0);
   return (
-    <Pressable
-      onPress={(e) => { (e as any)?.stopPropagation?.(); onPress(); }}
+    <Press
+      onPress={(e) => { (e as any)?.stopPropagation?.(); if (!on) setPulse((n) => n + 1); onPress(); }}
       hitSlop={10}
       style={[styles.heartHit, !bare && styles.heartOnPhoto]}
       accessibilityRole="button"
       accessibilityState={{ selected: on }}
       accessibilityLabel={on ? 'Take off the shortlist' : 'Keep this for the trip'}
     >
+      <Ring pulse={pulse} size={bare ? 26 : 30} color={onPhoto ? LIME : colors.ink} />
       <Icon
         name="shortlist"
         size={bare ? 22 : 26}
@@ -1971,7 +1976,7 @@ function HeartButton({ on, onPress, bare, onPhoto }: {
         fillColor={on ? LIME : onPhoto ? CREAM : undefined}
         strokeWidth={2}
       />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -2156,7 +2161,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           {SAVED_PILLS.filter((x) => counts[x.key] > 0 || x.key === 'all').map((x) => {
             const on = saveFilter === x.key;
             return (
-              <Pressable
+              <Press
                 key={x.key}
                 onPress={() => onSaveFilter(x.key)}
                 style={[styles.savedPill, on && styles.savedPillOn]}
@@ -2164,13 +2169,13 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 accessibilityState={{ selected: on }}
               >
                 <Text style={[styles.savedPillText, on && { color: colors.selectedFg }]}>{`${x.label} · ${counts[x.key]}`}</Text>
-              </Pressable>
+              </Press>
             );
           })}
         </ScrollView>
 
         {list.map((p) => (
-          <Pressable
+          <Press
             key={p.venueRef}
             onPress={() => onOpenSaved(p)}
             style={[styles.savedRow, selected === p.venueRef && styles.rowOn]}
@@ -2202,7 +2207,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                     to be fetched at display, so a row we have no number for
                     simply has no button rather than a dead one. */}
                 {p.phone ? (
-                  <Pressable
+                  <Press
                     onPress={() => Linking.openURL(`tel:${p.phone!.replace(/[^+0-9]/g, '')}`)}
                     hitSlop={6}
                     style={styles.callBtn}
@@ -2210,18 +2215,18 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                     accessibilityLabel={`Ring ${p.name ?? 'this place'}`}
                   >
                     <Icon name="phone" size={15} color={colors.ink} />
-                  </Pressable>
+                  </Press>
                 ) : null}
-                <Pressable onPress={() => onAddSaved(p)} style={styles.add} accessibilityRole="button" accessibilityLabel={`Add ${p.name ?? 'this'} to the day`}>
+                <Press onPress={() => onAddSaved(p)} style={styles.add} accessibilityRole="button" accessibilityLabel={`Add ${p.name ?? 'this'} to the day`}>
                   <Icon name="add" size={13} color={colors.ink} />
                   <Text style={styles.addText}>Add</Text>
-                </Pressable>
+                </Press>
               </View>
             </View>
             {/* A filled heart here takes it off — and only that: without
                 stopping the press the row would open the place it just
                 removed. */}
-            <Pressable
+            <Press
               onPress={(e) => { (e as any)?.stopPropagation?.(); onUnshortlist(p); }}
               hitSlop={10}
               style={styles.heartHit}
@@ -2229,8 +2234,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               accessibilityLabel={`Take ${p.name ?? 'this'} off the shortlist`}
             >
               <Icon name="shortlisted" size={20} color={colors.selected} fill fillColor={colors.selected} strokeWidth={2.2} />
-            </Pressable>
-          </Pressable>
+            </Press>
+          </Press>
         ))}
       </View>
     );
@@ -2260,9 +2265,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
     return (
       <View style={styles.filterPage}>
         <View style={styles.filterHead}>
-          <Pressable onPress={() => setFiltering(false)} hitSlop={8} style={styles.halfBack} accessibilityRole="button" accessibilityLabel="Back to the list">
+          <Press onPress={() => setFiltering(false)} hitSlop={8} style={styles.halfBack} accessibilityRole="button" accessibilityLabel="Back to the list">
             <Icon name="back" size={20} color={colors.ink} />
-          </Pressable>
+          </Press>
           <Text style={styles.filterTitle}>Filter</Text>
         </View>
 
@@ -2271,7 +2276,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           {RATINGS.map((r) => {
             const on = r === minRating;
             return (
-              <Pressable
+              <Press
                 key={r}
                 onPress={() => onMinRating(r)}
                 style={[styles.seg, on && styles.segOn]}
@@ -2280,7 +2285,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               >
                 <Text style={[styles.segText, on && { color: colors.selectedFg }]}>{r ? `${r}+` : 'Any'}</Text>
                 <Text style={[styles.segCount, on && { color: colors.selectedFg }]}>{countIf({ rating: r })}</Text>
-              </Pressable>
+              </Press>
             );
           })}
         </View>
@@ -2297,7 +2302,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           {PRICE_BANDS.map((b) => {
             const on = b.key === priceBand;
             return (
-              <Pressable
+              <Press
                 key={b.key}
                 onPress={() => onPriceBand(b.key)}
                 style={[styles.seg, on && styles.segOn]}
@@ -2306,32 +2311,32 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               >
                 <Text style={[styles.segText, on && { color: colors.selectedFg }]}>{b.label}</Text>
                 <Text style={[styles.segCount, on && { color: colors.selectedFg }]}>{countIf({ price: b.key })}</Text>
-              </Pressable>
+              </Press>
             );
           })}
         </View>
 
         <Text style={styles.kicker}>{pill === 'food' ? 'Kind of place' : 'Type of thing'}</Text>
         <View>
-          <Pressable onPress={() => { onKind(null); onCuisine(null); }} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf }}>
+          <Press onPress={() => { onKind(null); onCuisine(null); }} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf }}>
             <Text style={[type.body, { flex: 1 }]}>Everything</Text>
             <Text style={type.small}>{countIf({ kind: null })}</Text>
-          </Pressable>
+          </Press>
           {/* Commonest first, and only what is actually out there: offering
               Castle where there is no castle is how a filter comes to look
               broken — you pick it, nothing changes, and you cannot tell
               whether the control is wrong or the world is. */}
           {(moreTypes ? kinds : kinds.slice(0, 5)).map((k) => (
-            <Pressable key={k.kind} onPress={() => onKind(k.kind === kindOf ? null : k.kind)} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: k.kind === kindOf }}>
+            <Press key={k.kind} onPress={() => onKind(k.kind === kindOf ? null : k.kind)} style={styles.typeRow} accessibilityRole="radio" accessibilityState={{ checked: k.kind === kindOf }}>
               <Text style={[type.body, { flex: 1 }, k.kind === kindOf && styles.optOn]}>{cap(k.kind)}</Text>
               <Text style={type.small}>{k.count}</Text>
-            </Pressable>
+            </Press>
           ))}
           {kinds.length > 5 && !moreTypes ? (
-            <Pressable onPress={() => setMoreTypes(true)} style={styles.typeRow} accessibilityRole="button">
+            <Press onPress={() => setMoreTypes(true)} style={styles.typeRow} accessibilityRole="button">
               <Text style={[styles.moreInfoText, { flex: 1 }]}>{`All ${kinds.length} types`}</Text>
               <Icon name="more" size={14} color={colors.accent} />
-            </Pressable>
+            </Press>
           ) : null}
           {/*
             What the named types do not cover, said rather than left to be
@@ -2349,9 +2354,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
           ) : null}
         </View>
 
-        <Pressable onPress={() => setFiltering(false)} style={styles.halfAdd} accessibilityRole="button">
+        <Press onPress={() => setFiltering(false)} style={styles.halfAdd} accessibilityRole="button">
           <Text style={styles.halfAddText}>{`Show ${shown.length} place${shown.length === 1 ? '' : 's'}`}</Text>
-        </Pressable>
+        </Press>
       </View>
     );
   }
@@ -2379,24 +2384,24 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
       */}
       {chosen ? null : (
       <View style={styles.controls}>
-        <Pressable onPress={() => { setOpenSort(false); setOpenDetour((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openDetour }}>
+        <Press onPress={() => { setOpenSort(false); setOpenDetour((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openDetour }}>
           <Text style={styles.controlText} numberOfLines={1}>{`Detour ${maxDetourMin} min`}</Text>
           <Icon name={openDetour ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
-        </Pressable>
+        </Press>
         {anchorLabel ? <Chip label={`Around ${anchorLabel}`} on onClear={onClearAnchor} /> : null}
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => { closeMenus(); setFiltering(true); }} style={styles.control} accessibilityRole="button">
+        <Press onPress={() => { closeMenus(); setFiltering(true); }} style={styles.control} accessibilityRole="button">
           <Icon name="filters" size={16} color={narrowed ? colors.accent : colors.ink} />
           {/* The label becomes what it is doing, so a short list explains
               itself without opening anything. */}
           <Text style={[styles.controlText, narrowed && styles.controlOn]} numberOfLines={1}>
             {narrowed ? filterWords : 'Filters'}
           </Text>
-        </Pressable>
-        <Pressable onPress={() => { setOpenDetour(false); setOpenSort((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openSort }}>
+        </Press>
+        <Press onPress={() => { setOpenDetour(false); setOpenSort((v) => !v); }} style={styles.control} accessibilityRole="button" accessibilityState={{ expanded: openSort }}>
           <Text style={styles.controlText} numberOfLines={1}>{`Sort: ${sortsFor(pill).find((x) => x.key === sort)?.label ?? 'Rating'}`}</Text>
           <Icon name={openSort ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
-        </Pressable>
+        </Press>
       </View>
       )}
 
@@ -2409,7 +2414,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         about what is in force.
       */}
       {openSort || openDetour ? (
-        <Pressable style={styles.menuScrim} onPress={closeMenus} accessibilityRole="button" accessibilityLabel="Close the menu" />
+        <Press style={styles.menuScrim} onPress={closeMenus} accessibilityRole="button" accessibilityLabel="Close the menu" />
       ) : null}
 
       {openDetour ? (
@@ -2421,9 +2426,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             {anchorLabel ? `How far from ${anchorLabel}?` : along.hasRoute ? 'How far off the route?' : 'How far are you prepared to travel?'}
           </Text>
           {DETOURS.map((n) => (
-            <Pressable key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={[styles.optRow, n === maxDetourMin && styles.optRowOn]} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
+            <Press key={n} onPress={() => { onDetour(n); setOpenDetour(false); }} style={[styles.optRow, n === maxDetourMin && styles.optRowOn]} accessibilityRole="radio" accessibilityState={{ checked: n === maxDetourMin }}>
               <Text style={[type.body, { flex: 1 }, n === maxDetourMin && styles.optOn]}>Up to {n} minutes</Text>
-            </Pressable>
+            </Press>
           ))}
         </View>
       ) : null}
@@ -2432,7 +2437,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         // Anchored under the control that opened it, right-aligned to it.
         <View style={[styles.dropdown, styles.sortMenu]}>
           {sortsFor(pill).map((o) => (
-            <Pressable
+            <Press
               key={o.key}
               onPress={() => { onSort(o.key); setOpenSort(false); }}
               style={[styles.optRow, o.key === sort && styles.optRowOn]}
@@ -2447,7 +2452,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 drawing.
               */}
               <Text style={[type.body, { flex: 1 }, o.key === sort && styles.optOn]}>{o.label}</Text>
-            </Pressable>
+            </Press>
           ))}
         </View>
       ) : null}
@@ -2461,17 +2466,17 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
         */
         <View style={styles.dropdown}>
           <Text style={styles.kicker}>{pill === 'food' ? 'Food & drink' : 'Things to do'}{along.hasRoute ? ' · along the route' : ' · nearby'}</Text>
-          <Pressable onPress={() => { onKind(null); onCuisine(null); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf && !cuisine }}>
+          <Press onPress={() => { onKind(null); onCuisine(null); }} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: !kindOf && !cuisine }}>
             <Text style={[type.body, { flex: 1 }]}>Everything</Text>
             <Text style={[type.small, { marginRight: 8 }]}>{along.places.length}</Text>
             {!kindOf && !cuisine ? <Icon name="check" size={16} color={colors.accent} /> : null}
-          </Pressable>
+          </Press>
           {kinds.length ? kinds.map(({ kind, count }) => (
-            <Pressable key={kind} onPress={() => onKind(kindOf === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: kindOf === kind }}>
+            <Press key={kind} onPress={() => onKind(kindOf === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: kindOf === kind }}>
               <Text style={[type.body, { flex: 1 }]}>{cap(kind)}</Text>
               <Text style={[type.small, { marginRight: 8 }]}>{count}</Text>
               {kindOf === kind ? <Icon name="check" size={16} color={colors.accent} /> : null}
-            </Pressable>
+            </Press>
           )) : (
             <Text style={[type.small, { paddingVertical: 10 }]}>
               Nothing along here says what kind of place it is yet.
@@ -2490,11 +2495,11 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             <>
               <Text style={[styles.kicker, { marginTop: 12 }]}>{`Kitchen · ${cap(kindOf ?? '')}`}</Text>
               {cuisines.map(({ kind, count }) => (
-                <Pressable key={kind} onPress={() => onCuisine(cuisine === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: cuisine === kind }}>
+                <Press key={kind} onPress={() => onCuisine(cuisine === kind ? null : kind)} style={styles.optRow} accessibilityRole="radio" accessibilityState={{ checked: cuisine === kind }}>
                   <Text style={[type.body, { flex: 1 }]}>{cap(kind)}</Text>
                   <Text style={[type.small, { marginRight: 8 }]}>{count}</Text>
                   {cuisine === kind ? <Icon name="check" size={16} color={colors.accent} /> : null}
-                </Pressable>
+                </Press>
               ))}
             </>
           ) : null}
@@ -2504,7 +2509,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             one. They are separate acts, so changing the filter never quietly
             rewrites what every trip opens on.
           */}
-          <Pressable
+          <Press
             onPress={() => onAlways(pill === 'food'
               ? { food: { type: kindOf, cuisine } }
               : { things: { type: kindOf } })}
@@ -2524,7 +2529,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               </Text>
             </View>
             {isDefault ? <Icon name="check" size={16} color={colors.accent} /> : <Icon name="keep" size={16} color={colors.accent} />}
-          </Pressable>
+          </Press>
         </View>
       ) : null}
 
@@ -2556,9 +2561,9 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             <Text style={type.small}>
               {`Nothing along here is ${[cuisine && cap(cuisine), kindOf ? cap(kindOf) : 'that'].filter(Boolean).join(' ')} — ${along.places.length} other place${along.places.length === 1 ? '' : 's'} are.`}
             </Text>
-            <Pressable onPress={() => { onKind(null); onCuisine(null); }} accessibilityRole="button">
+            <Press onPress={() => { onKind(null); onCuisine(null); }} accessibilityRole="button">
               <Text style={[type.small, { color: colors.accent, fontWeight: '700', marginTop: 6 }]}>Show everything →</Text>
-            </Pressable>
+            </Press>
           </Card>
         </View>
       ) : null}
@@ -2606,7 +2611,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 photograph, and a list of grey rectangles with forks in them is
                 a list that looks broken rather than a list of restaurants.
               */
-              <Pressable
+              <Press
                 key={p.venueRef}
                 onLayout={(e) => onRowLayout(p.venueRef, e.nativeEvent.layout.y)}
                 onPress={() => onSelect(selected === p.venueRef ? null : p.venueRef)}
@@ -2635,7 +2640,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                   ) : null}
                 </View>
                 <HeartButton on={p.onShortlist} onPress={() => onShortlist(p)} bare />
-              </Pressable>
+              </Press>
             )
             : (
               /*
@@ -2644,7 +2649,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 shape, and the heart on the picture rather than beside a button
                 — it is the one thing you tap without reading.
               */
-              <Pressable
+              <Press
                 key={p.venueRef}
                 onLayout={(e) => onRowLayout(p.venueRef, e.nativeEvent.layout.y)}
                 onPress={() => onSelect(selected === p.venueRef ? null : p.venueRef)}
@@ -2666,7 +2671,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                   */}
                   {cardW ? (
                   <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={cardW} height={Math.round(cardW / 1.5)} rounded={12} credit={false}>
-                    <Pressable
+                    <Press
                       onPress={() => onShortlist(p)}
                       hitSlop={8}
                       style={styles.cardHeart}
@@ -2686,7 +2691,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                         `colors.ink` turns cream in the dark, leaving nothing.
                       */}
                       <Icon name={p.onShortlist ? 'shortlisted' : 'shortlist'} size={30} color={INK} strokeWidth={2} fill fillColor={p.onShortlist ? LIME : CREAM} />
-                    </Pressable>
+                    </Press>
                     {money(p.priceLevel) ? (
                       <View style={styles.priceTag}><Text style={styles.priceTagText}>{money(p.priceLevel)}</Text></View>
                     ) : null}
@@ -2708,7 +2713,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                   {[kitchen(p) ?? plainCategory(p.category), detourWords(p, anchorLabel, along.hasRoute)].filter(Boolean).join(' · ')}
                 </Text>
                 {p.summary ? <Text style={styles.cardBlurb} numberOfLines={2}>{p.summary}</Text> : null}
-              </Pressable>
+              </Press>
             )
         ))}
 
@@ -2716,7 +2721,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             tight corridor is right and a silently short list is not: 17 places
             a little further off should be an offer, not a disappearance. */}
         {!along.loading && along.beyond && maxDetourMin < 30 && !(pins === 'only' && chosen) ? (
-          <Pressable
+          <Press
             onPress={() => onDetour(DETOURS[Math.min(DETOURS.length - 1, DETOURS.indexOf(maxDetourMin) + 1)] ?? 30)}
             style={{ paddingVertical: spacing.md }}
             accessibilityRole="button"
@@ -2724,7 +2729,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>
               {`${along.beyond} more a little further off the route — look up to ${DETOURS[Math.min(DETOURS.length - 1, DETOURS.indexOf(maxDetourMin) + 1)] ?? 30} min out →`}
             </Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
     </View>
@@ -2822,15 +2827,15 @@ function alongToItem(p: TripAlongPlace): BrowseItem {
 
 function Chip({ label, on, chevron, onPress, onClear }: { label: string; on?: boolean; chevron?: boolean; onPress?: () => void; onClear?: () => void }) {
   return (
-    <Pressable onPress={onPress} disabled={!onPress} style={[styles.chip, on && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
+    <Press onPress={onPress} disabled={!onPress} style={[styles.chip, on && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
       <Text style={[styles.chipText, on && { color: colors.primaryFg }]} numberOfLines={1}>{label}</Text>
       {chevron ? <Icon name="expand" size={13} color={on ? colors.primaryFg : colors.ink} /> : null}
       {onClear ? (
-        <Pressable onPress={onClear} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Search the whole route instead of around ${label}`}>
+        <Press onPress={onClear} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Search the whole route instead of around ${label}`}>
           <Icon name="close" size={13} color={on ? colors.primaryFg : colors.ink} />
-        </Pressable>
+        </Press>
       ) : null}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -2924,7 +2929,7 @@ function SearchAlong({ hasRoute, value, onClose, onSearch }: {
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={[{ flex: 1 }, frameBox]}>
-        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
+        <Press style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
         <View style={styles.searchSheet}>
           <Row style={{ gap: 10 }}>
             <View style={styles.searchField}>
@@ -2941,24 +2946,24 @@ function SearchAlong({ hasRoute, value, onClose, onSearch }: {
                 accessibilityLabel="Search"
               />
               {text ? (
-                <Pressable onPress={() => setText('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear">
+                <Press onPress={() => setText('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear">
                   <Icon name="close" size={15} color={colors.inkMuted} />
-                </Pressable>
+                </Press>
               ) : null}
             </View>
-            <Pressable onPress={onClose} accessibilityRole="button"><Text style={[type.small, { fontWeight: '600' }]}>Cancel</Text></Pressable>
+            <Press onPress={onClose} accessibilityRole="button"><Text style={[type.small, { fontWeight: '600' }]}>Cancel</Text></Press>
           </Row>
           <Text style={styles.kicker}>{hasRoute ? "Along the day's route" : 'Around this trip'}</Text>
           <ScrollView keyboardShouldPersistTaps="handled">
             {rows.map((r) => (
-              <Pressable key={r.label} onPress={() => onSearch('', r.category, r.food)} style={styles.searchRow} accessibilityRole="button">
+              <Press key={r.label} onPress={() => onSearch('', r.category, r.food)} style={styles.searchRow} accessibilityRole="button">
                 <View style={styles.searchTile}><Icon name={r.icon} size={18} /></View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.rowName}>{r.label}</Text>
                   <Text style={type.tiny}>{r.hint}</Text>
                 </View>
                 <Icon name="more" size={16} color={colors.inkMuted} />
-              </Pressable>
+              </Press>
             ))}
           </ScrollView>
         </View>
@@ -2999,14 +3004,14 @@ function WhosComing({ household, attending, hasCar, onClose, onSave, onInvite, o
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={[{ flex: 1, justifyContent: 'flex-end' }, frameBox]}>
-        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
+        <Press style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.addSheet, { maxHeight: '88%', gap: 6 }]}>
           <View style={styles.grabSmall} />
           <View style={styles.addHead}>
             <Text style={styles.addTitle}>Who's coming?</Text>
-            <Pressable onPress={async () => { if (busy) return; setBusy(true); try { await onSave(ids); } finally { setBusy(false); } }} accessibilityRole="button">
+            <Press onPress={async () => { if (busy) return; setBusy(true); try { await onSave(ids); } finally { setBusy(false); } }} accessibilityRole="button">
               <Text style={[type.small, { fontWeight: '700', color: colors.accent }]}>{busy ? 'Saving…' : 'Done'}</Text>
-            </Pressable>
+            </Press>
           </View>
           <Text style={[type.small, { paddingBottom: 6 }]}>Tickets, table sizes and the car all follow this.</Text>
 
@@ -3014,7 +3019,7 @@ function WhosComing({ household, attending, hasCar, onClose, onSave, onInvite, o
             {members.map((m, i) => {
               const on = ids.includes(m.id);
               return (
-                <Pressable
+                <Press
                   key={m.id}
                   onPress={() => setIds((v) => (on ? v.filter((x) => x !== m.id) : [...v, m.id]))}
                   style={[styles.whoRow, !on && { opacity: 0.6 }]}
@@ -3027,7 +3032,7 @@ function WhosComing({ household, attending, hasCar, onClose, onSave, onInvite, o
                     <Text style={type.small} numberOfLines={1}>{about(m, on)}</Text>
                   </View>
                   <View style={[styles.check, on && styles.checkOn]}>{on ? <Icon name="check" size={14} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
-                </Pressable>
+                </Press>
               );
             })}
 
@@ -3040,14 +3045,14 @@ function WhosComing({ household, attending, hasCar, onClose, onSave, onInvite, o
               trip, and putting it on the tab row made it look like one.
             */}
             <Text style={[styles.kickerFlat, { paddingTop: 14 }]}>Beyond the household</Text>
-            <Pressable onPress={onInvite} style={styles.linkRow} accessibilityRole="button">
+            <Press onPress={onInvite} style={styles.linkRow} accessibilityRole="button">
               <Text style={styles.linkText}>Invite a friend or family member</Text>
               <Icon name="more" size={17} color={colors.ink} />
-            </Pressable>
-            <Pressable onPress={onGroup} style={styles.linkRow} accessibilityRole="button">
+            </Press>
+            <Press onPress={onGroup} style={styles.linkRow} accessibilityRole="button">
               <Text style={styles.linkText}>Make it a group trip</Text>
               <Icon name="more" size={17} color={colors.ink} />
-            </Pressable>
+            </Press>
           </ScrollView>
 
           <Text style={[type.small, { paddingTop: 10 }]}>
@@ -3121,9 +3126,9 @@ function MinuteBox({ label, value, min, max, step, onChange }: {
     <View style={{ flex: 1, gap: 6, minWidth: 0 }}>
       <Text style={styles.kickerFlat} numberOfLines={1}>{label}</Text>
       <View style={styles.minuteBox}>
-        <Pressable onPress={() => onChange(clamp(value - step))} style={styles.minuteNudge} accessibilityRole="button" accessibilityLabel={`Less ${label}`}>
+        <Press onPress={() => onChange(clamp(value - step))} style={styles.minuteNudge} accessibilityRole="button" accessibilityLabel={`Less ${label}`}>
           <Icon name="minus" size={15} color={colors.ink} />
-        </Pressable>
+        </Press>
         <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', gap: 3, alignItems: 'baseline', justifyContent: 'center' }}>
           <TextInput
             value={text}
@@ -3136,9 +3141,9 @@ function MinuteBox({ label, value, min, max, step, onChange }: {
           />
           <Text style={styles.minuteUnit}>min</Text>
         </View>
-        <Pressable onPress={() => onChange(clamp(value + step))} style={styles.minuteNudge} accessibilityRole="button" accessibilityLabel={`More ${label}`}>
+        <Press onPress={() => onChange(clamp(value + step))} style={styles.minuteNudge} accessibilityRole="button" accessibilityLabel={`More ${label}`}>
           <Icon name="add" size={15} color={colors.ink} />
-        </Pressable>
+        </Press>
       </View>
     </View>
   );
@@ -3182,21 +3187,21 @@ function StayCriteria({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={[{ flex: 1, justifyContent: 'flex-end' }, frameBox]}>
-        <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Cancel" />
+        <Press style={styles.scrim} onPress={onClose} accessibilityLabel="Cancel" />
         <View style={[styles.addSheet, { maxHeight: '90%' }]}>
           <View style={styles.grabSmall} />
           <View style={styles.addHead}>
             <Row style={{ gap: 10, flex: 1, minWidth: 0 }}>
               {step === 2 ? (
-                <Pressable onPress={() => onStep(1)} style={styles.backRound} accessibilityRole="button" accessibilityLabel="Back">
+                <Press onPress={() => onStep(1)} style={styles.backRound} accessibilityRole="button" accessibilityLabel="Back">
                   <Icon name="back" size={16} color={colors.ink} />
-                </Pressable>
+                </Press>
               ) : null}
               <Text style={styles.addTitle} numberOfLines={1}>{step === 1 ? 'Where should it be?' : 'Budget & must-haves'}</Text>
             </Row>
-            <Pressable onPress={onClose} accessibilityRole="button">
+            <Press onPress={onClose} accessibilityRole="button">
               <Text style={[type.small, { fontWeight: '600' }]}>Cancel</Text>
-            </Pressable>
+            </Press>
           </View>
           <Progress step={step} of={3} />
 
@@ -3223,7 +3228,7 @@ function StayCriteria({
                   {PLACEMENTS.map((o) => {
                     const on = placement === o.key;
                     return (
-                      <Pressable
+                      <Press
                         key={o.key}
                         onPress={() => { if (on && o.key === 'town') setSwapping((v) => !v); else onPlacement(o.key); }}
                         style={[styles.tile, on && styles.tileOn]}
@@ -3241,7 +3246,7 @@ function StayCriteria({
                               ? `Chosen, not the trip’s area · change it`
                               : o.blurb.replace('{n}', String(planned)).replace('{n} places', planned === 1 ? 'one place' : `${planned} places`)}
                         </Text>
-                      </Pressable>
+                      </Press>
                     );
                   })}
                 </Row>
@@ -3269,9 +3274,9 @@ function StayCriteria({
                         <Text style={[styles.tintLine, { flex: 1 }]}>
                           Everything within a short hop of <Text style={{ fontWeight: '700' }}>{town}</Text>, with the rest of the trip a drive away.
                         </Text>
-                        <Pressable onPress={() => setSwapping((v) => !v)} accessibilityRole="button">
+                        <Press onPress={() => setSwapping((v) => !v)} accessibilityRole="button">
                           <Text style={styles.spreadLink}>{swapping ? 'Keep' : 'Change'}</Text>
-                        </Pressable>
+                        </Press>
                       </Row>
                       {swapping ? (
                         <TownPick
@@ -3426,18 +3431,18 @@ function TownPick({ own, near, onPick }: {
       />
       {looking && !found.length ? <Text style={type.tiny}>Looking…</Text> : null}
       {found.map((f) => (
-        <Pressable key={`${f.lat},${f.lng}`} onPress={() => onPick({ label: f.label, lat: f.lat, lng: f.lng })} style={styles.optRow} accessibilityRole="button">
+        <Press key={`${f.lat},${f.lng}`} onPress={() => onPick({ label: f.label, lat: f.lat, lng: f.lng })} style={styles.optRow} accessibilityRole="button">
           <Icon name="address" size={15} color={colors.ink} />
           <View style={{ flex: 1, minWidth: 0, marginLeft: 8 }}>
             <Text style={type.body} numberOfLines={1}>{f.label}</Text>
             {f.where ? <Text style={type.tiny} numberOfLines={1}>{f.where}</Text> : null}
           </View>
-        </Pressable>
+        </Press>
       ))}
-      <Pressable onPress={() => onPick(null)} style={styles.optRow} accessibilityRole="button">
+      <Press onPress={() => onPick(null)} style={styles.optRow} accessibilityRole="button">
         <Icon name="refresh" size={15} color={colors.ink} />
         <Text style={[type.body, { flex: 1, marginLeft: 8 }]} numberOfLines={1}>Back to {own}</Text>
-      </Pressable>
+      </Press>
     </View>
   );
 }
@@ -3479,9 +3484,9 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
             {` — ${andList(stays.spread.places)} are about ${stays.spread.minutes} minutes apart at the widest. A stay by a station beats being near any single day.`}
           </Text>
           {by !== 'station' ? (
-            <Pressable onPress={() => onPlacement('station')} accessibilityRole="button">
+            <Press onPress={() => onPlacement('station')} accessibilityRole="button">
               <Text style={styles.spreadLink}>Rank by station instead →</Text>
-            </Pressable>
+            </Press>
           ) : null}
         </View>
       ) : null}
@@ -3540,7 +3545,7 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
 
       <View style={{ paddingHorizontal: 16 }}>
         {stays.results.map((st) => (
-          <Pressable key={st.venueRef} onPress={() => onOpen(st)} style={[styles.row, selected === st.venueRef && styles.rowOn]} accessibilityRole="button">
+          <Press key={st.venueRef} onPress={() => onOpen(st)} style={[styles.row, selected === st.venueRef && styles.rowOn]} accessibilityRole="button">
             <View>
               <VenueThumb name={st.name} photos={st.photos} category="hotel" width={102} height={102} rounded={6} credit={false} />
               {/* The top pick is the brand moment: a lime fill with ink type
@@ -3579,16 +3584,16 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
                     {`£${Math.round(st.offer.perNight)} / night${nights ? ` · ${nights} night${nights === 1 ? '' : 's'}` : ''}`}
                   </Text>
                 ) : <Text style={[type.tiny, { flex: 1 }]} numberOfLines={1}>no price for these nights</Text>}
-                <Pressable onPress={() => onShortlist(st)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`Save ${st.name}`}>
+                <Press onPress={() => onShortlist(st)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={`Save ${st.name}`}>
                   <Icon name="shortlist" size={16} color={colors.ink} />
-                </Pressable>
-                <Pressable onPress={() => onChoose(st)} style={styles.add} accessibilityRole="button">
+                </Press>
+                <Press onPress={() => onChoose(st)} style={styles.add} accessibilityRole="button">
                   <Icon name="check" size={13} color={colors.ink} />
                   <Text style={styles.addText}>Choose</Text>
-                </Pressable>
+                </Press>
               </View>
             </View>
-          </Pressable>
+          </Press>
         ))}
       </View>
     </View>
@@ -3645,12 +3650,12 @@ function AddSheet({ place, trip, party, onCancel, onSave }: {
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onCancel}>
       <View style={[{ flex: 1, justifyContent: 'flex-end' }, frameBox]}>
-        <Pressable style={styles.scrim} onPress={onCancel} accessibilityLabel="Cancel" />
+        <Press style={styles.scrim} onPress={onCancel} accessibilityLabel="Cancel" />
         <View style={styles.addSheet}>
           <View style={styles.grabSmall} />
           <View style={styles.addHead}>
             <Text style={styles.addTitle} numberOfLines={2}>Add {place.name}</Text>
-            <Pressable onPress={onCancel} accessibilityRole="button"><Text style={[type.small, { fontWeight: '600' }]}>Cancel</Text></Pressable>
+            <Press onPress={onCancel} accessibilityRole="button"><Text style={[type.small, { fontWeight: '600' }]}>Cancel</Text></Press>
           </View>
           {/*
             The rating is drawn, not typed. This line read `★ ${place.rating}`,
@@ -3668,9 +3673,9 @@ function AddSheet({ place, trip, party, onCancel, onSave }: {
 
           <View style={styles.legs}>
             {([['out', 'On the way', 0.95], ['back', 'On the way back', 1.35], [null, 'No time yet', 1]] as const).map(([k, label, flex]) => (
-              <Pressable key={String(k)} onPress={() => { setLeg(k as any); setTyped(null); }} style={[styles.leg, { flex }, leg === k && styles.legOn]} accessibilityRole="button" accessibilityState={{ selected: leg === k }}>
+              <Press key={String(k)} onPress={() => { setLeg(k as any); setTyped(null); }} style={[styles.leg, { flex }, leg === k && styles.legOn]} accessibilityRole="button" accessibilityState={{ selected: leg === k }}>
                 <Text style={[styles.legText, leg === k && { color: colors.primaryFg }]} numberOfLines={1}>{label}</Text>
-              </Pressable>
+              </Press>
             ))}
           </View>
 

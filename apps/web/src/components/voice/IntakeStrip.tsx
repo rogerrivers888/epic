@@ -10,7 +10,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from '../press';
 import { api, HouseholdResponse, Intake, IntakeSlot } from '../../api';
 import { colors, fonts } from '../../theme';
 import { FactRow } from './FactCard';
@@ -64,8 +65,8 @@ export function IntakeStrip({ intakeId, household, onReask, onLoaded }: { intake
           <Text style={styles.harvestText}>{intake.harvest.text}</Text>
           <Text style={styles.harvestSub}>We’ll stop asking, and plans will fit from the start.</Text>
           <View style={{ flexDirection: 'row', gap: 6, marginTop: 2, alignItems: 'center' }}>
-            <Pressable onPress={remember} disabled={busy} accessibilityRole="button" style={styles.yes}><Text style={styles.yesText}>{busy ? 'Saving…' : 'Yes, remember'}</Text></Pressable>
-            <Pressable onPress={notNow} accessibilityRole="button" style={styles.no}><Text style={styles.noText}>Not now</Text></Pressable>
+            <Press onPress={remember} disabled={busy} accessibilityRole="button" style={styles.yes}><Text style={styles.yesText}>{busy ? 'Saving…' : 'Yes, remember'}</Text></Press>
+            <Press onPress={notNow} accessibilityRole="button" style={styles.no}><Text style={styles.noText}>Not now</Text></Press>
           </View>
         </View>
       ) : null}
@@ -89,10 +90,10 @@ const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 /** The ask row (R5). */
 export function AskRow({ onPress, example = 'somewhere for a rainy afternoon with the kids' }: { onPress: () => void; example?: string }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Just ask" style={styles.askRow}>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityLabel="Just ask" style={styles.askRow}>
       <View style={styles.askTile}><Icon name="mic" size={16} color={colors.selectedFg} strokeWidth={2.2} /></View>
       <Text style={styles.askText} numberOfLines={2}>Or just ask — “{example}”</Text>
-    </Pressable>
+    </Press>
   );
 }
 

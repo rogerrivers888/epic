@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
@@ -791,16 +792,16 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
             </Text>
             <PlacePicker kind="area" autoFocus value={null} placeholder="Town, city or postcode" onPick={(p) => { if (p) { setWhere(p, 'search'); close(); } }} />
             {home ? (
-              <Pressable onPress={() => { setWhere(null, null); close(); }} accessibilityRole="button" style={styles.suggest}>
+              <Press onPress={() => { setWhere(null, null); close(); }} accessibilityRole="button" style={styles.suggest}>
                 <Text style={styles.suggestLabel}>{homeTown}</Text>
                 <Text style={styles.suggestSub}>Home</Text>
-              </Pressable>
+              </Press>
             ) : null}
             {me.supported ? (
-              <Pressable onPress={() => { close(); void useHereNow(); }} accessibilityRole="button" style={styles.tryAgain}>
+              <Press onPress={() => { close(); void useHereNow(); }} accessibilityRole="button" style={styles.tryAgain}>
                 <Icon name="here" size={16} color={colors.primaryFg} strokeWidth={2.2} />
                 <Text style={styles.tryAgainText}>{me.error ? 'Try my location again' : 'Use my location'}</Text>
-              </Pressable>
+              </Press>
             ) : null}
           </View>
         ) : (
@@ -816,10 +817,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 {TRAVEL_MODES.map((m) => {
                   const on = m.key === travelBy;
                   return (
-                    <Pressable key={m.key} onPress={() => setTravelBy(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }} style={[styles.way, on && styles.wayOn]}>
+                    <Press key={m.key} onPress={() => setTravelBy(m.key)} accessibilityRole="tab" accessibilityState={{ selected: on }} style={[styles.way, on && styles.wayOn]}>
                       <Icon name={m.icon} size={14} color={on ? colors.ink : colors.inkMuted} strokeWidth={2} />
                       <Text style={[styles.wayText, on && styles.wayTextOn]}>{m.label}</Text>
-                    </Pressable>
+                    </Press>
                   );
                 })}
               </View>
@@ -862,10 +863,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         // Why the heart sprang back, said inside the drawer where the heart
         // is — a line under the list would be hidden behind it on a phone.
         capture={notice ? (
-          <Pressable onPress={() => setNotice(null)} style={styles.notice} accessibilityRole="button">
+          <Press onPress={() => setNotice(null)} style={styles.notice} accessibilityRole="button">
             <Icon name="info" size={14} color={colors.ink} />
             <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
-          </Pressable>
+          </Press>
         ) : null}
         onAdd={onCreateTrip ? (it) => {
           closeDrawer();

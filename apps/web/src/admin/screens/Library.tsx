@@ -31,7 +31,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, HarvestRun, LibraryAttraction, LibraryVisiting, LibraryVisitingImpact, VisitingPlace, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
@@ -136,11 +137,11 @@ export function Library({ canManage }: { canManage: boolean }) {
           scrolls sideways rather than wrapping into three lines. */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.xs }}>
         {SECTIONS.map((s) => (
-          <Pressable key={s.key} onPress={() => setSection(s.key)}
+          <Press key={s.key} onPress={() => setSection(s.key)}
                      style={[styles.tab, section === s.key && styles.tabOn]} accessibilityRole="tab"
                      accessibilityState={{ selected: section === s.key }}>
             <Text style={[type.small, section === s.key && { color: colors.primaryFg, fontWeight: '700' }]}>{s.label}</Text>
-          </Pressable>
+          </Press>
         ))}
       </ScrollView>
 
@@ -281,7 +282,7 @@ function RegionRow({ region: r, wide, canManage, onOpen, onHarvest }: {
 }) {
   const short = r.published_count < r.target_count;
   return (
-    <Pressable onPress={onOpen} style={({ hovered }: any) => [styles.regionRow, hovered && styles.rowHover]} accessibilityRole="button">
+    <Press onPress={onOpen} style={({ hovered }: any) => [styles.regionRow, hovered && styles.rowHover]} accessibilityRole="button">
       <View style={{ flex: wide ? 3 : undefined, minWidth: 0 }}>
         <Text style={styles.rowName} numberOfLines={1}>{r.name}</Text>
         <Text style={type.tiny}>{r.nation} · {r.kind}</Text>
@@ -301,11 +302,11 @@ function RegionRow({ region: r, wide, canManage, onOpen, onHarvest }: {
         {r.harvest_error ? <Text style={[type.tiny, { color: colors.overrun }]} numberOfLines={2}>{r.harvest_error}</Text> : null}
       </View>
       {canManage ? (
-        <Pressable onPress={onHarvest} style={styles.rowAction} accessibilityRole="button" accessibilityLabel={`Harvest ${r.name}`}>
+        <Press onPress={onHarvest} style={styles.rowAction} accessibilityRole="button" accessibilityLabel={`Harvest ${r.name}`}>
           <Icon name="refresh" size={15} color={colors.icon} />
-        </Pressable>
+        </Press>
       ) : null}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -496,9 +497,9 @@ function Pictures({ regions, canManage, wide }: { regions: LibraryRegion[]; canM
                      placeholder="Search the library — a place, a county, a photographer, a licence"
                      placeholderTextColor={colors.inkFaint} style={styles.searchInput} />
           {q ? (
-            <Pressable onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear">
+            <Press onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear">
               <Icon name="close" size={14} color={colors.inkMuted} />
-            </Pressable>
+            </Press>
           ) : null}
         </View>
         <FilterRow>
@@ -539,7 +540,7 @@ function Pictures({ regions, canManage, wide }: { regions: LibraryRegion[]; canM
 
       <View style={styles.grid}>
         {images.map((img) => (
-          <Pressable key={img.id} onPress={() => setOpen(img)} style={styles.cell} accessibilityRole="button"
+          <Press key={img.id} onPress={() => setOpen(img)} style={styles.cell} accessibilityRole="button"
                      accessibilityLabel={img.title ?? 'Picture'}>
             <View style={styles.cellShot}>
               {img.lqip ? <Image source={{ uri: img.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}
@@ -553,7 +554,7 @@ function Pictures({ regions, canManage, wide }: { regions: LibraryRegion[]; canM
               <Pill label={img.licence} tone={img.attribution_required ? 'plain' : 'ok'} />
               {img.moderation !== 'approved' ? <Pill label={img.moderation} tone="warn" /> : null}
             </Row>
-          </Pressable>
+          </Press>
         ))}
       </View>
 
@@ -590,7 +591,7 @@ function ImageDetail({ image, canManage, onClose, onChanged, wide }: {
 
   return (
     <Panel title={image.title ?? 'Picture'} sub={image.caption ?? undefined}
-           right={<Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={18} color={colors.inkMuted} /></Pressable>}>
+           right={<Press onPress={onClose} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={18} color={colors.inkMuted} /></Press>}>
       <View style={[styles.detail, wide && { flexDirection: 'row' }]}>
         <View style={[styles.detailShot, wide && { width: 320, height: 220 }]}>
           {image.lqip ? <Image source={{ uri: image.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}

@@ -22,7 +22,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api } from '../../api';
 import { colors, fonts, radius, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
@@ -504,9 +505,9 @@ export function HowItWorks() {
           Anything that changes by the minute — whether travel times are real right now — is read from the API at the top of this page rather
           than written down here.
         </Text>
-        <Pressable onPress={() => Linking.openURL('https://github.com/rogerrivers888/epic/blob/main/CLAUDE.md')} accessibilityRole="link">
+        <Press onPress={() => Linking.openURL('https://github.com/rogerrivers888/epic/blob/main/CLAUDE.md')} accessibilityRole="link">
           <Text style={styles.link}>The working agreements this page draws on →</Text>
-        </Pressable>
+        </Press>
       </Panel>
     </AdminPage>
   );

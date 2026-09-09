@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Modal, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press, Ring } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
 import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
@@ -187,7 +188,7 @@ function InsideList({ inside, busy, full = false }: { inside: PlaceInsideItem[] 
         );
       })}
       {full && !rides.some((r) => r.facts?.restrictionsChecked) ? <IconText name="search">Reading the park's own height restrictions…</IconText> : null}
-      {rides.length > shown.length ? <Pressable onPress={() => setOpen(true)} accessibilityRole="button"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>All {rides.length}</Text></Pressable> : null}
+      {rides.length > shown.length ? <Press onPress={() => setOpen(true)} accessibilityRole="button"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>All {rides.length}</Text></Press> : null}
       {eat.length ? <Text style={type.tiny}>{eat.length} place{eat.length === 1 ? '' : 's'} to eat inside.</Text> : null}
       <Text style={type.tiny}>{[...new Set(inside.flatMap((i) => i.attribution))].join(' · ')}</Text>
     </View>
@@ -407,6 +408,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
    * moment it is opened.
    */
   const [shared, setShared] = useState(false);
+  const [heartPulse, setHeartPulse] = useState(0);
+  const keep = () => { if (!item) return; if (!shortlisted) setHeartPulse((n) => n + 1); onShortlist?.(item); };
   const sharePlace = async () => {
     if (!item) return;
     const url = venue?.website ?? item.website ?? null;
@@ -567,7 +570,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     {ctl.staff ? <StaffSheet ctl={ctl} /> : null}
     <Modal visible transparent animationType={wide ? 'fade' : 'slide'} onRequestClose={onClose}>
       <View style={styles.backdropWrap}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <Press style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.panel, wide ? styles.panelSide : styles.panelSheet, frameBox]}>
 
           {/*
@@ -584,19 +587,20 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               <View style={styles.hero}>
                 {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
                 <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
-                <Pressable onPress={onClose} style={[styles.heroTile, styles.heroBack]} accessibilityRole="button" accessibilityLabel="Back">
+                <Press onPress={onClose} style={[styles.heroTile, styles.heroBack]} accessibilityRole="button" accessibilityLabel="Back">
                   <Icon name="back" size={18} color={INK} />
-                </Pressable>
+                </Press>
                 {/* Cream tiles rather than bare glyphs: a photograph can be any
                     colour, and these have to be legible on all of them. */}
                 <View style={styles.heroTiles}>
-                  <Pressable onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
+                  <Press onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
                     <Icon name={shared ? 'check' : 'upload'} size={18} color={INK} />
-                  </Pressable>
+                  </Press>
                   {onShortlist ? (
-                    <Pressable onPress={() => onShortlist(item)} style={[styles.heroTile, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                    <Press onPress={keep} style={[styles.heroTile, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                      <Ring pulse={heartPulse} size={28} color={INK} />
                       <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
-                    </Pressable>
+                    </Press>
                   ) : null}
                 </View>
                 {photos.length > 1 ? (
@@ -610,9 +614,10 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   beside the title instead, so a swept restaurant or an atlas
                   place with no picture can still be kept (Codex, 8 Sep 2026). */}
               {!hero && onShortlist ? (
-                <Pressable onPress={() => onShortlist(item)} style={[styles.heroTile, styles.bareHeart, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                <Press onPress={keep} style={[styles.heroTile, styles.bareHeart, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
+                  <Ring pulse={heartPulse} size={28} color={INK} />
                   <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
-                </Pressable>
+                </Press>
               ) : null}
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.name}>{title}</Text>
@@ -625,10 +630,10 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 {/* Their own page, named by its domain — for anywhere you might
                     have to ring, book or check before you set off. */}
                 {(v?.website ?? item.website) ? (
-                  <Pressable onPress={() => Linking.openURL((v?.website ?? item.website) as string)} style={styles.siteRow} accessibilityRole="link">
+                  <Press onPress={() => Linking.openURL((v?.website ?? item.website) as string)} style={styles.siteRow} accessibilityRole="link">
                     <Icon name="web" size={13} color={colors.accent} />
                     <Text style={styles.siteText} numberOfLines={1}>{hostOf((v?.website ?? item.website) as string)}</Text>
-                  </Pressable>
+                  </Press>
                 ) : null}
                 {rating != null ? (
                   <View style={styles.ratingBit}>
@@ -646,7 +651,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               {/* No × where the hero carries the way back; without a picture
                   there is nothing else to close on. */}
               {hero ? null : (
-                <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Pressable>
+                <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={22} color={colors.ink} /></Press>
               )}
             </Row>
             {/* A strip on the 2px ink rule, not a row of pills (Inspire rework,
@@ -655,11 +660,11 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 it. Same device as Inspire's own category strip. */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabStrip} style={styles.tabStripWrap}>
               {tabs.map((t) => (
-                <Pressable key={t.value} onPress={() => setTab(t.value)} accessibilityRole="tab" accessibilityState={{ selected: t.value === shown }}>
+                <Press key={t.value} onPress={() => setTab(t.value)} accessibilityRole="tab" accessibilityState={{ selected: t.value === shown }}>
                   <View style={[styles.tabItem, t.value === shown && styles.tabItemOn]}>
                     <Text style={[styles.tabText, { color: t.value === shown ? colors.ink : colors.inkMuted }]}>{t.label}</Text>
                   </View>
-                </Pressable>
+                </Press>
               ))}
             </ScrollView>
             {venue === undefined ? <Text style={type.tiny}>Fetching from {sourceName}…</Text> : null}
@@ -879,15 +884,16 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 worse than no button.
               */}
               {eating && (v?.website ?? item.website) ? (
-                <Pressable
+                <Press
                   onPress={() => Linking.openURL((v?.website ?? item.website) as string)}
                   accessibilityRole="link"
                   style={styles.footerSecond}
                 >
                   <Text style={styles.footerSecondText}>Book a table</Text>
-                </Pressable>
+                </Press>
               ) : null}
-              <Pressable
+              <Press
+                effect="pop"
                 onPress={() => onAdd(item)}
                 disabled={added}
                 accessibilityRole="button"
@@ -900,7 +906,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 {/* No arrow beside a second button: two arrows on one bar is
                     two things claiming to be the way on. */}
                 {eating && (v?.website ?? item.website) ? null : <Icon name="forward" size={18} color={colors.primaryFg} />}
-              </Pressable>
+              </Press>
             </View>
           ) : null}
         </View>

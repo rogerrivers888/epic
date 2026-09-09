@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { ChatMessage } from '../api';
 import { colors, fonts, BORDER, type } from '../theme';
 import { Icon } from './Icon';
@@ -74,7 +75,7 @@ function Bubble({ message: m, onOpenStop }: { message: ChatMessage; onOpenStop?:
    * yourself is exactly the one you want to be able to get back to.
    */
   const pointer = m.onStop && onOpenStop ? (
-    <Pressable
+    <Press
       onPress={() => onOpenStop(m.onStop!.venueRef)}
       style={styles.pointer}
       accessibilityRole="link"
@@ -82,7 +83,7 @@ function Bubble({ message: m, onOpenStop }: { message: ChatMessage; onOpenStop?:
     >
       <Icon name="more" size={12} color={colors.accent} strokeWidth={2.4} />
       <Text style={styles.pointerText}>{`Asked on ${m.onStop.label ?? 'a stop'}`}</Text>
-    </Pressable>
+    </Press>
   ) : null;
 
   if (m.mine) {
@@ -144,9 +145,9 @@ export function Composer({ placeholder, onSend, busy, insetBottom = 0 }: {
       />
       {/* An arrow, not a filled block (5h): the composer is a line you type on,
           and a solid square beside it was the heaviest thing on the screen. */}
-      <Pressable onPress={send} style={styles.send} accessibilityRole="button" accessibilityLabel="Send" disabled={busy}>
+      <Press onPress={send} style={styles.send} accessibilityRole="button" accessibilityLabel="Send" disabled={busy}>
         <Icon name="send" size={20} color={colors.accent} strokeWidth={2.2} />
-      </Pressable>
+      </Press>
     </View>
   );
 }

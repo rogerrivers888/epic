@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { API_URL, OwnedImage, VenuePhotoRef } from '../api';
 import { Icon, IconName, iconFor } from './Icon';
 import { colors, radius, spacing, type } from '../theme';
@@ -151,7 +152,7 @@ export function VenueThumb({
   return (
     <View style={{ width, gap: 2 }}>
       {onPress ? (
-        <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={name ?? undefined}>{tile}</Pressable>
+        <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={name ?? undefined}>{tile}</Press>
       ) : tile}
       {/* Not decoration. For every licence but CC0 and public domain, the
           picture without the line is the licence broken. */}

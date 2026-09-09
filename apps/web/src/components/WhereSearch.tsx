@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { api, Place } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from './Icon';
@@ -112,9 +113,9 @@ export function WhereSearch({ home, onPick, onClose, onPlanner, title = 'Where s
   return (
     <View style={styles.fill}>
       <View style={styles.head}>
-        <Pressable onPress={onClose} hitSlop={10} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
+        <Press onPress={onClose} hitSlop={10} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
           <Icon name="back" size={20} color={colors.ink} />
-        </Pressable>
+        </Press>
         <Text style={[type.h2, { flex: 1 }]}>{title}</Text>
       </View>
       <ScrollView style={styles.fill} contentContainerStyle={[styles.body, wide && styles.bodyWide]} keyboardShouldPersistTaps="handled">
@@ -160,14 +161,14 @@ export function WhereSearch({ home, onPick, onClose, onPlanner, title = 'Where s
         {cities.length ? <Group title="In your atlas" places={cities} onPick={choose} /> : null}
 
         {onPlanner ? (
-          <Pressable onPress={onPlanner} style={styles.planner} accessibilityRole="button">
+          <Press onPress={onPlanner} style={styles.planner} accessibilityRole="button">
             <Icon name="plan" size={18} color={colors.icon} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={type.h3}>Not somewhere — something</Text>
               <Text style={type.small}>Tell Epic what the day is for and it will find the place.</Text>
             </View>
             <Icon name="more" size={16} color={colors.inkMuted} />
-          </Pressable>
+          </Press>
         ) : null}
       </ScrollView>
     </View>
@@ -179,14 +180,14 @@ function Answer({ icon, title, detail, onPress, busy }: {
   icon: IconName; title: string; detail?: string | null; onPress: () => void; busy?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} disabled={busy} style={styles.answer} accessibilityRole="button" accessibilityLabel={title}>
+    <Press onPress={onPress} disabled={busy} style={styles.answer} accessibilityRole="button" accessibilityLabel={title}>
       {busy ? <ActivityIndicator size="small" color={colors.icon} /> : <Icon name={icon} size={16} color={colors.icon} />}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={type.h3} numberOfLines={1}>{title}</Text>
         {detail ? <Text style={type.tiny} numberOfLines={1}>{detail}</Text> : null}
       </View>
       <Icon name="more" size={16} color={colors.inkMuted} />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -198,9 +199,9 @@ function Group({ title, places, onPick, action }: {
       <View style={styles.groupHead}>
         <Text style={[type.label, { marginBottom: 0 }]}>{title}</Text>
         {action ? (
-          <Pressable onPress={action.onPress} hitSlop={8} accessibilityRole="button">
+          <Press onPress={action.onPress} hitSlop={8} accessibilityRole="button">
             <Text style={type.tiny}>{action.label}</Text>
-          </Pressable>
+          </Press>
         ) : null}
       </View>
       {places.map((p) => (

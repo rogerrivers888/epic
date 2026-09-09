@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, iconFor } from '../components/Icon';
 import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, TripBrief, Venue, Visit } from '../api';
@@ -421,7 +422,7 @@ function CountryCities({ row, data, onCity }: {
 /** A row of the hierarchy: tile, label 19/800, sub 13 grey, count 13 grey, chevron. */
 function NavRow({ tile, label, sub, count, onPress }: { tile: React.ReactNode; label: string; sub: string; count: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.navRow} accessibilityRole="button" accessibilityLabel={`${label}, ${count}`}>
+    <Press onPress={onPress} style={styles.navRow} accessibilityRole="button" accessibilityLabel={`${label}, ${count}`}>
       <View style={styles.navTile}>{tile}</View>
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         <Text style={styles.navLabel} numberOfLines={1}>{label}</Text>
@@ -429,7 +430,7 @@ function NavRow({ tile, label, sub, count, onPress }: { tile: React.ReactNode; l
       </View>
       <Text style={styles.navCount}>{count}</Text>
       <Icon name="more" size={18} color={colors.ink} strokeWidth={2.2} />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -619,10 +620,10 @@ function ListBody({ st, ui, places, viewer, country, city, homeArea, household, 
   return (
     <View style={styles.listBody}>
       <View style={styles.addRow}>
-        <Pressable onPress={() => { ui.setAdding(!ui.adding); ui.setMenu(null); }} style={styles.addBtn} accessibilityRole="button" accessibilityLabel={ui.adding ? 'Close the search' : 'Add a place'}>
+        <Press onPress={() => { ui.setAdding(!ui.adding); ui.setMenu(null); }} style={styles.addBtn} accessibilityRole="button" accessibilityLabel={ui.adding ? 'Close the search' : 'Add a place'}>
           <Icon name={ui.adding ? 'close' : 'add'} size={15} color={colors.ink} strokeWidth={2.2} />
           <Text style={styles.addText}>{ui.adding ? 'Close' : 'Add a place'}</Text>
-        </Pressable>
+        </Press>
       </View>
       {ui.adding ? (
         <View style={styles.gutter}>
@@ -649,9 +650,9 @@ function ListBody({ st, ui, places, viewer, country, city, homeArea, household, 
                     : `${EMPTY_LIST[st.list]}${st.list === 'been' && st.listCounts.short ? ` ${st.listCounts.short} shortlisted so far.` : ''}`}
               </Text>
               {st.typeF || st.moodF ? (
-                <Pressable onPress={() => { st.setTypeF(null); st.setMoodF(null); }} accessibilityRole="button" style={styles.emptyAction}>
+                <Press onPress={() => { st.setTypeF(null); st.setMoodF(null); }} accessibilityRole="button" style={styles.emptyAction}>
                   <Text style={styles.emptyActionText}>Clear filters</Text>
-                </Pressable>
+                </Press>
               ) : null}
             </View>
           )}
@@ -679,7 +680,7 @@ function PlaceRow({ place, kind, viewer, selected, onPress }: { place: AtlasPlac
   const when = whenLabel(place.lastOn);
   const hasPicture = Boolean(place.image) || Boolean(place.photos?.length);
   return (
-    <Pressable onPress={onPress} style={[styles.prow, selected && styles.rowOn]} accessibilityRole="button" accessibilityLabel={place.name}>
+    <Press onPress={onPress} style={[styles.prow, selected && styles.rowOn]} accessibilityRole="button" accessibilityLabel={place.name}>
       {hasPicture ? (
         <VenueThumb
           name={place.name} image={place.image} photos={place.photos} category={place.category}
@@ -711,7 +712,7 @@ function PlaceRow({ place, kind, viewer, selected, onPress }: { place: AtlasPlac
           <Text style={styles.oursBy} numberOfLines={1}>{ours.by}</Text>
         </View>
       ) : <View style={styles.oursBlank} />}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -1000,13 +1001,13 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
       {suggestions.length ? (
         <View style={styles.suggestList}>
           {suggestions.map((sg, i) => (
-            <Pressable key={sg.venueRef} onPress={() => choose(sg.venueRef, sg.name)} style={[styles.suggestRow, i > 0 && styles.rowLine]} accessibilityRole="button">
+            <Press key={sg.venueRef} onPress={() => choose(sg.venueRef, sg.name)} style={[styles.suggestRow, i > 0 && styles.rowLine]} accessibilityRole="button">
               <View style={{ width: 22, alignItems: 'center' }}><Icon name={sg.mine ? 'places' : 'address'} size={16} /></View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={type.h3} numberOfLines={1}>{sg.name}</Text>
                 {sg.kind || sg.where ? <Text style={type.tiny} numberOfLines={1}>{[sg.kind, sg.where].filter(Boolean).join(' · ')}</Text> : null}
               </View>
-            </Pressable>
+            </Press>
           ))}
         </View>
       ) : null}

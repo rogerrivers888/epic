@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Row } from './ui';
 
@@ -33,10 +34,10 @@ export function MonthBars({ points, selected, onSelect, height = 120, unitLabel 
           const on = p.month === selected;
           const h = Math.max(p.costUsd > 0 ? 3 : 1, Math.round(((height - 4) * p.costUsd) / max));
           return (
-            <Pressable key={p.month} onPress={() => onSelect(p.month)} onHoverIn={() => setHover(p.month)} onHoverOut={() => setHover(null)} style={styles.slot} accessibilityRole="button" accessibilityLabel={`${monthLabel(p.month, true)}: ${money(p.costUsd)}`}>
+            <Press key={p.month} onPress={() => onSelect(p.month)} onHoverIn={() => setHover(p.month)} onHoverOut={() => setHover(null)} style={styles.slot} accessibilityRole="button" accessibilityLabel={`${monthLabel(p.month, true)}: ${money(p.costUsd)}`}>
               <View style={{ flex: 1 }} />
               <View style={[styles.bar, { height: h, backgroundColor: on ? colors.accent : p.costUsd > 0 ? colors.accentSoft : colors.line }, (hover === p.month) && { opacity: 0.85 }]} />
-            </Pressable>
+            </Press>
           );
         })}
       </View>

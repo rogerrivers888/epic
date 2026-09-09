@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, Place, TripSearchAnswer } from '../api';
 import { colors, fonts, BORDER, TARGET, type } from '../theme';
 import { Icon } from './../components/Icon';
@@ -71,15 +72,15 @@ export function NewTripSearchScreen({ onClose, onPick }: {
       <View style={styles.head}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>New trip</Text>
-          <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+          <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
             <Icon name="close" size={20} color={colors.ink} strokeWidth={2.4} />
-          </Pressable>
+          </Press>
         </View>
         {country ? (
-          <Pressable onPress={() => setCountry(null)} style={styles.crumb} accessibilityRole="button">
+          <Press onPress={() => setCountry(null)} style={styles.crumb} accessibilityRole="button">
             <Icon name="back" size={14} color={colors.accent} strokeWidth={2.4} />
             <Text style={styles.crumbText}>{`In ${country.name} — tap to look anywhere`}</Text>
-          </Pressable>
+          </Press>
         ) : null}
         <View style={styles.field}>
           <Icon name="search" size={18} color={colors.ink} strokeWidth={2.4} />
@@ -132,13 +133,13 @@ export function NewTripSearchScreen({ onClose, onPick }: {
 
 function Row({ title, says, onPress }: { title: string; says: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.row} accessibilityRole="button" accessibilityLabel={`${title}. ${says}`}>
+    <Press onPress={onPress} style={styles.row} accessibilityRole="button" accessibilityLabel={`${title}. ${says}`}>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <Text style={styles.rowName} numberOfLines={1}>{title}</Text>
         <Text style={styles.rowSays} numberOfLines={1}>{says}</Text>
       </View>
       <Icon name="more" size={16} color={colors.inkMuted} />
-    </Pressable>
+    </Press>
   );
 }
 

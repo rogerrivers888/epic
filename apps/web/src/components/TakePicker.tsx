@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from './press';
 import { Take } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Avatar } from './Faces';
@@ -49,9 +50,9 @@ export function TakePicker({ rows, onChange, subject = 'this place' }: { rows: T
               const full = r.score != null && r.score >= n;
               const half = !full && r.score != null && r.score >= n - 0.5;
               return (
-                <Pressable key={n} onPress={() => tapStar(i, r, n)} style={styles.star} accessibilityRole="radio" accessibilityState={{ checked: full }} accessibilityLabel={`${n} out of 5`}>
+                <Press key={n} onPress={() => tapStar(i, r, n)} style={styles.star} accessibilityRole="radio" accessibilityState={{ checked: full }} accessibilityLabel={`${n} out of 5`}>
                   <Icon name={half ? 'halfStar' : 'favourite'} size={26} color={full || half ? colors.icon : colors.line} fill={full || half} />
-                </Pressable>
+                </Press>
               );
             })}
           </View>
@@ -59,7 +60,7 @@ export function TakePicker({ rows, onChange, subject = 'this place' }: { rows: T
             {OPTIONS.map((o) => {
               const on = r.take === o.value;
               return (
-                <Pressable
+                <Press
                   key={o.value}
                   onPress={() => update(i, { take: on ? null : o.value })}
                   style={[styles.opt, on && styles.optOn]}
@@ -68,7 +69,7 @@ export function TakePicker({ rows, onChange, subject = 'this place' }: { rows: T
                   accessibilityLabel={`${r.name}: ${o.label}`}
                 >
                   <Text style={[styles.optText, on && { color: colors.primaryFg }]}>{o.label}</Text>
-                </Pressable>
+                </Press>
               );
             })}
           </View>

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { BrowseItem } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
@@ -168,7 +169,7 @@ function BrowseRow({ item, isPinned, isShortlisted, busy, addLabel, addedLabel, 
   const isEvent = item.category === 'event';
   return (
     <View style={styles.row}>
-      <Pressable onPress={onOpen} style={{ flexDirection: 'row', gap: spacing.md, flex: 1 }} accessibilityRole="button" accessibilityLabel={`Open ${item.name}`}>
+      <Press onPress={onOpen} style={{ flexDirection: 'row', gap: spacing.md, flex: 1 }} accessibilityRole="button" accessibilityLabel={`Open ${item.name}`}>
         <VenuePhoto photos={item.photos} size={72} credit={false} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{item.name}{item.chain ? <Text style={[type.tiny, { color: colors.dislike }]}>  chain</Text> : null}</Text>
@@ -186,17 +187,17 @@ function BrowseRow({ item, isPinned, isShortlisted, busy, addLabel, addedLabel, 
           {item.reasons.length ? <Wrap>{item.reasons.filter((r) => r.kind !== 'chain').slice(0, 3).map((r, i) => <Chip key={i} label={r.text} tone={r.kind === 'dislike' || r.kind === 'diet' ? 'dislike' : r.kind === 'note' ? 'neutral' : 'like'} />)}</Wrap> : null}
           <Text style={[type.tiny, { color: colors.accent }]}>Details, reviews, hours, photos ›</Text>
         </View>
-      </Pressable>
+      </Press>
       <View style={{ gap: 6 }}>
-        <Pressable onPress={isPinned && onRemove ? onRemove : onAdd} disabled={busy || (isPinned && !onRemove)} style={[styles.btn, isPinned && styles.btnOn]} accessibilityRole="button">
+        <Press effect="pop" onPress={isPinned && onRemove ? onRemove : onAdd} disabled={busy || (isPinned && !onRemove)} style={[styles.btn, isPinned && styles.btnOn]} accessibilityRole="button">
           <Icon name={isPinned ? 'keep' : 'add'} size={14} color={isPinned ? colors.bg : colors.ink} fill={isPinned} /><Text style={[styles.btnText, isPinned && { color: colors.primaryFg }]}>{isPinned ? addedLabel : addLabel}</Text>
-        </Pressable>
+        </Press>
         {onShortlist ? (
-          <Pressable onPress={async () => { await onShortlist(); setSaved(true); }} disabled={busy || saved || isShortlisted} style={styles.btn} accessibilityRole="button">
+          <Press onPress={async () => { await onShortlist(); setSaved(true); }} disabled={busy || saved || isShortlisted} style={styles.btn} accessibilityRole="button">
             <Icon name={saved || isShortlisted ? 'shortlisted' : 'shortlist'} size={14} color={colors.ink} /><Text style={styles.btnText}>{saved || isShortlisted ? 'Shortlisted' : 'Shortlist'}</Text>
-          </Pressable>
+          </Press>
         ) : null}
-        <Pressable onPress={onDislike} disabled={busy} style={styles.btn} accessibilityRole="button"><Icon name="close" size={14} color={colors.ink} /><Text style={styles.btnText}>Not this</Text></Pressable>
+        <Press onPress={onDislike} disabled={busy} style={styles.btn} accessibilityRole="button"><Icon name="close" size={14} color={colors.ink} /><Text style={styles.btnText}>Not this</Text></Press>
       </View>
     </View>
   );

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, TripShare } from '../api';
 import { colors, fonts, memberPastel, BORDER, ON_LIME, TARGET, type } from '../theme';
 import { Icon, IconName } from '../components/Icon';
@@ -24,13 +25,13 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.wrap}>
         <View style={[styles.frame, frameBox]}>
-          <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
+          <Press style={styles.scrim} onPress={onClose} accessibilityLabel="Close" />
           <View style={styles.sheet}>
             <View style={styles.sheetHead}>
               <Text style={styles.sheetTitle} numberOfLines={1}>{title}</Text>
-              <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
+              <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
                 <Icon name="close" size={16} color={colors.ink} strokeWidth={2.4} />
-              </Pressable>
+              </Press>
             </View>
             {children}
           </View>
@@ -71,15 +72,15 @@ export function TripMenuSheet({ title, isHoliday, datesFixed, onPick, onClose }:
   return (
     <Sheet title={title} onClose={onClose}>
       {rows.map((r) => (
-        <Pressable key={r.key} onPress={() => onPick(r.key)} style={styles.menuRow} accessibilityRole="button">
+        <Press key={r.key} onPress={() => onPick(r.key)} style={styles.menuRow} accessibilityRole="button">
           <Icon name={r.icon} size={20} color={colors.ink} strokeWidth={2.2} />
           <Text style={styles.menuText}>{r.label}</Text>
-        </Pressable>
+        </Press>
       ))}
-      <Pressable onPress={() => onPick('delete')} style={[styles.menuRow, styles.menuDanger]} accessibilityRole="button">
+      <Press onPress={() => onPick('delete')} style={[styles.menuRow, styles.menuDanger]} accessibilityRole="button">
         <Icon name="delete" size={20} color={colors.ink} strokeWidth={2.2} />
         <Text style={styles.menuText}>Delete trip</Text>
-      </Pressable>
+      </Press>
     </Sheet>
   );
 }
@@ -112,16 +113,16 @@ export function DeleteTripSheet({ tripId, title, onConfirm, onClose }: {
         {guests ? ` ${guests} ${guests === 1 ? 'guest has' : 'guests have'} a link to this trip, and it will stop opening.` : ''}
       </Text>
       <View style={styles.actions}>
-        <Pressable
+        <Press
           onPress={async () => { if (busy) return; setBusy(true); try { await onConfirm(); } finally { setBusy(false); } }}
           style={styles.danger}
           accessibilityRole="button"
         >
           <Text style={styles.dangerText}>{busy ? 'Deleting…' : 'Delete this trip'}</Text>
-        </Pressable>
-        <Pressable onPress={onClose} style={styles.ghost} accessibilityRole="button">
+        </Press>
+        <Press onPress={onClose} style={styles.ghost} accessibilityRole="button">
           <Text style={styles.ghostText}>Keep it</Text>
-        </Pressable>
+        </Press>
       </View>
     </Sheet>
   );
@@ -145,13 +146,13 @@ export function RenameTripSheet({ title, onSave, onClose }: {
         onSubmitEditing={async () => { setBusy(true); try { await onSave(text.trim() || title); } finally { setBusy(false); } }}
       />
       <View style={styles.actions}>
-        <Pressable
+        <Press
           onPress={async () => { if (busy) return; setBusy(true); try { await onSave(text.trim() || title); } finally { setBusy(false); } }}
           style={styles.primary}
           accessibilityRole="button"
         >
           <Text style={styles.primaryText}>{busy ? 'Saving…' : 'Save'}</Text>
-        </Pressable>
+        </Press>
       </View>
     </Sheet>
   );
@@ -251,9 +252,9 @@ export function ShareTripSheet({ tripId, title, onClose, onChanged }: {
             accessibilityLabel="Their mobile or email"
             onSubmitEditing={invite}
           />
-          <Pressable onPress={invite} style={styles.add} accessibilityRole="button" accessibilityLabel="Invite them">
+          <Press onPress={invite} style={styles.add} accessibilityRole="button" accessibilityLabel="Invite them">
             <Text style={styles.addText}>{busy ? '…' : 'Invite'}</Text>
-          </Pressable>
+          </Press>
         </View>
 
         {data ? (
@@ -272,9 +273,9 @@ export function ShareTripSheet({ tripId, title, onClose, onChanged }: {
                   <Text style={[styles.personStatus, m.going && !m.organiser && styles.personGoing]} numberOfLines={1}>{m.status}</Text>
                 </View>
                 {m.organiser ? null : (
-                  <Pressable onPress={() => toggle(m.id, m.going)} style={styles.action} accessibilityRole="button">
+                  <Press onPress={() => toggle(m.id, m.going)} style={styles.action} accessibilityRole="button">
                     <Text style={styles.actionText}>{m.going ? 'Remove' : 'Add'}</Text>
-                  </Pressable>
+                  </Press>
                 )}
               </View>
             ))}
@@ -292,28 +293,28 @@ export function ShareTripSheet({ tripId, title, onClose, onChanged }: {
                   <Text style={styles.personName} numberOfLines={1}>{g.contact ? `${g.name} · ${g.contact}` : g.name}</Text>
                   <Text style={styles.personStatus} numberOfLines={2}>{g.says}</Text>
                 </View>
-                <Pressable
+                <Press
                   onPress={() => (canSend ? api.resendGuest(tripId, g.id).then(setData).catch((e) => setError(e.message)) : g.link && copy(g.link, g.id))}
                   style={styles.action}
                   accessibilityRole="button"
                 >
                   <Text style={styles.actionText}>{canSend ? 'Resend' : 'Copy link'}</Text>
-                </Pressable>
-                <Pressable
+                </Press>
+                <Press
                   onPress={() => api.removeGuest(tripId, g.id).then(setData).catch((e) => setError(e.message))}
                   style={styles.action}
                   accessibilityRole="button"
                   accessibilityLabel={`Remove ${g.name}`}
                 >
                   <Icon name="close" size={15} color={colors.inkMuted} />
-                </Pressable>
+                </Press>
               </View>
             ))}
 
-            <Pressable onPress={() => copy(data.link, 'link')} style={styles.primaryWide} accessibilityRole="button">
+            <Press onPress={() => copy(data.link, 'link')} style={styles.primaryWide} accessibilityRole="button">
               <Text style={styles.primaryText}>{copied === 'link' ? 'Link copied' : 'Copy link'}</Text>
               <Icon name="copy" size={18} color={colors.primaryFg} strokeWidth={2.2} />
-            </Pressable>
+            </Press>
             <Text style={styles.body}>
               Anyone with the link sees the plan, people and chat as a guest — no account needed.
               {canSend ? '' : ' Epic cannot send invitations yet, so send the link yourself; the people you add here are let straight in when they open it.'}

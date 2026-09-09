@@ -1,5 +1,6 @@
 import React from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Text, View } from 'react-native';
+import { Press } from './press';
 import { OwnedRecord } from '../api';
 import { colors, spacing, type, BORDER } from '../theme';
 import { Chip, Wrap } from './ui';
@@ -76,29 +77,29 @@ export function OwnedFacts({ record, offline = false, onResearch }: {
       {record.address ? <Fact icon="address" from={p.address}>{record.address}{record.postcode && !record.address.includes(record.postcode) ? ` · ${record.postcode}` : ''}</Fact> : null}
 
       {record.phone ? (
-        <Pressable onPress={() => Linking.openURL(`tel:${record.phone!.replace(/\s/g, '')}`)} accessibilityRole="link" accessibilityLabel={`Call ${record.phone}`}>
+        <Press onPress={() => Linking.openURL(`tel:${record.phone!.replace(/\s/g, '')}`)} accessibilityRole="link" accessibilityLabel={`Call ${record.phone}`}>
           <Fact icon="phone" from={p.phone}><Text style={{ color: colors.accent, fontWeight: '700' }}>{record.phone}</Text></Fact>
-        </Pressable>
+        </Press>
       ) : null}
 
       {record.openingHours ? <Fact icon="hours" from={p.opening_hours}>{record.openingHours}</Fact> : null}
 
       {record.menuUrl ? (
-        <Pressable onPress={() => Linking.openURL(record.menuUrl!)} accessibilityRole="link" accessibilityLabel="Open the menu">
+        <Press onPress={() => Linking.openURL(record.menuUrl!)} accessibilityRole="link" accessibilityLabel="Open the menu">
           <Fact icon="restaurant" from={p.menu_url}>Menu · <Text style={{ color: colors.accent, fontWeight: '700' }}>{prettyUrl(record.menuUrl)}</Text></Fact>
-        </Pressable>
+        </Press>
       ) : null}
 
       {record.bookingUrl ? (
-        <Pressable onPress={() => Linking.openURL(record.bookingUrl!)} accessibilityRole="link" accessibilityLabel="Book a table">
+        <Press onPress={() => Linking.openURL(record.bookingUrl!)} accessibilityRole="link" accessibilityLabel="Book a table">
           <Fact icon="booked" from={p.booking_url}>Book · <Text style={{ color: colors.accent, fontWeight: '700' }}>{prettyUrl(record.bookingUrl)}</Text></Fact>
-        </Pressable>
+        </Press>
       ) : null}
 
       {record.website ? (
-        <Pressable onPress={() => Linking.openURL(record.website!)} accessibilityRole="link" accessibilityLabel="Open their website">
+        <Press onPress={() => Linking.openURL(record.website!)} accessibilityRole="link" accessibilityLabel="Open their website">
           <Fact icon="external" from={p.website}><Text style={{ color: colors.accent, fontWeight: '700' }}>{prettyUrl(record.website)}</Text></Fact>
-        </Pressable>
+        </Press>
       ) : null}
 
       {record.cuisines?.length || record.experiences?.length ? (
@@ -122,9 +123,9 @@ export function OwnedFacts({ record, offline = false, onResearch }: {
       {record.attribution?.length ? <Text style={type.tiny}>{record.attribution.join(' · ')}</Text> : null}
 
       {onResearch && !offline ? (
-        <Pressable onPress={onResearch} accessibilityRole="button">
+        <Press onPress={onResearch} accessibilityRole="button">
           <Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Look again</Text>
-        </Pressable>
+        </Press>
       ) : null}
     </View>
   );

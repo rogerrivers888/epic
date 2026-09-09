@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { Icon } from './Icon';
 import { Chip } from './ui';
 import { colors, radius, spacing, type, BORDER } from '../theme';
@@ -38,9 +39,9 @@ export function PickPanel({ open, title, options, value, empty, onPick, onClose 
     <View style={styles.panel}>
       <View style={styles.head}>
         <Text style={styles.title}>{title}</Text>
-        <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+        <Press onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
           <Icon name="close" size={16} color={colors.inkMuted} />
-        </Pressable>
+        </Press>
       </View>
       {rest.length ? (
         <View style={styles.wrap}>

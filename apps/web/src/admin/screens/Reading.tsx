@@ -35,7 +35,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import {
   api, AttractionFacts, AttractionFactsRow, ExtractionLesson,
   LibraryAttraction, LibraryAttractionDetail, LibraryType, PlaceContent, ReadingStats,
@@ -154,9 +155,9 @@ export function Reading({ canManage }: { canManage: boolean }) {
         <TextInput value={q} onChangeText={setQ} placeholder="Find a place by name"
                    placeholderTextColor={colors.inkFaint} style={styles.searchInput} />
         {q ? (
-          <Pressable onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear the search" hitSlop={8}>
+          <Press onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear the search" hitSlop={8}>
             <Icon name="close" size={15} color={colors.inkMuted} />
-          </Pressable>
+          </Press>
         ) : null}
       </View>
 
@@ -201,7 +202,7 @@ function PlaceList({ rows, q, onOpen }: { rows: LibraryAttraction[]; q: string; 
   return (
     <View>
       {rows.map((a) => (
-        <Pressable key={a.id} onPress={() => onOpen(a.id)} style={styles.pick} accessibilityRole="button">
+        <Press key={a.id} onPress={() => onOpen(a.id)} style={styles.pick} accessibilityRole="button">
           <Text style={[type.small, { flex: 1, minWidth: 0, fontWeight: '600' }]} numberOfLines={1}>
             {a.rank ? `${a.rank}. ` : ''}{a.name}
           </Text>
@@ -210,7 +211,7 @@ function PlaceList({ rows, q, onOpen }: { rows: LibraryAttraction[]; q: string; 
             {(a as any).detail_state ? <Pill label={(a as any).detail_state === 'done' ? 'sources in' : (a as any).detail_state} /> : <Pill label="no sources" tone="warn" />}
           </Wrap>
           <Icon name="more" size={16} color={colors.inkMuted} />
-        </Pressable>
+        </Press>
       ))}
     </View>
   );
@@ -265,9 +266,9 @@ function Compare({ id, canManage, wide, onClose, onChanged }: {
             {attraction.contents_count ? ` · ${plural(attraction.contents_count, 'thing')} inside` : ''}
           </Text>
         </View>
-        <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+        <Press onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
           <Icon name="close" size={18} color={colors.inkMuted} />
-        </Pressable>
+        </Press>
       </View>
 
       {error ? <View style={{ padding: spacing.sm }}><Banner tone="crit">{error}</Banner></View> : null}
@@ -333,7 +334,7 @@ function Sources({ attraction, contents }: { attraction: LibraryAttractionDetail
         <Banner tone="warn">Nothing fetched yet.</Banner>
       ) : sections.map((s, i) => (
         <View key={i} style={styles.source}>
-          <Pressable onPress={() => setOpenSection(openSection === i ? null : i)} accessibilityRole="button">
+          <Press onPress={() => setOpenSection(openSection === i ? null : i)} accessibilityRole="button">
             <Row style={{ gap: spacing.xs }}>
               <Icon name={openSection === i ? 'expand' : 'more'} size={14} color={colors.inkMuted} />
               <Text style={[type.small, { flex: 1, minWidth: 0, fontWeight: '600' }]} numberOfLines={1}>
@@ -341,7 +342,7 @@ function Sources({ attraction, contents }: { attraction: LibraryAttractionDetail
               </Text>
               {s.doing ? <Pill label="what to do" tone="accent" /> : null}
             </Row>
-          </Pressable>
+          </Press>
           {openSection === i ? <Text style={[type.tiny, { marginTop: spacing.xs }]}>{s.text}</Text> : null}
         </View>
       ))}
@@ -448,12 +449,12 @@ function Extracted({ facts, attraction, lessons, canManage, onReviewed }: {
               <Text style={[type.tiny, { flex: 1, minWidth: 0, fontWeight: '700' }]}>{label}</Text>
               {kind === 'judged' ? <Pill label="judgement" tone="warn" /> : null}
               {canManage ? (
-                <Pressable onPress={() => toggle(String(key))} accessibilityRole="button"
+                <Press onPress={() => toggle(String(key))} accessibilityRole="button"
                            accessibilityLabel={marked ? `${label} is marked wrong` : `Mark ${label} wrong`}
                            hitSlop={8}>
                   <Icon name={marked ? 'close' : 'check'} size={15}
                         color={marked ? colors.overrun : colors.inkFaint} />
-                </Pressable>
+                </Press>
               ) : null}
             </Row>
             <Text style={[type.small, { marginTop: 2 }]}>{shown}</Text>
@@ -575,11 +576,11 @@ function Lessons({ lessons, canManage, onChanged }: {
             {l.field ? <Pill label={l.field} /> : null}
             <View style={{ flex: 1 }} />
             {canManage ? (
-              <Pressable onPress={async () => { await api.librarySetLesson(l.id, { active: !l.active }); onChanged(); }}
+              <Press onPress={async () => { await api.librarySetLesson(l.id, { active: !l.active }); onChanged(); }}
                          accessibilityRole="button" hitSlop={8}
                          accessibilityLabel={l.active ? 'Stop using this rule' : 'Use this rule again'}>
                 <Icon name={l.active ? 'close' : 'refresh'} size={14} color={colors.inkMuted} />
-              </Pressable>
+              </Press>
             ) : null}
           </Row>
           <Text style={[type.small, { marginTop: 2 }]}>{l.rule}</Text>

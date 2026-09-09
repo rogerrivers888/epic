@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { api, AroundThing, MenuRead, Taste, TasteFit, TastePlace, TasteTable } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Card, Chip, Row, StatusLine, Wrap, minutes } from './ui';
@@ -41,7 +42,7 @@ function MenuLines({ menu }: { menu: MenuRead }) {
   if (!menu.checked) return (
     <View style={styles.menu}>
       <Text style={[type.tiny, { color: colors.ink }]}>{menu.whyNot || menu.summary || 'No menu published anywhere Epic could read.'}</Text>
-      {menu.menuUrl ? <Pressable onPress={() => Linking.openURL(menu.menuUrl!)} accessibilityRole="link"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Open the menu yourself</Text></Pressable> : null}
+      {menu.menuUrl ? <Press onPress={() => Linking.openURL(menu.menuUrl!)} accessibilityRole="link"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Open the menu yourself</Text></Press> : null}
       {menu.allergens.length ? <Text style={[type.tiny, { color: colors.overrun }]}>Nothing was read, so nothing is known about {menu.allergens.map((a) => `${a.allergen} for ${a.person}`).join(', ')}. Ask when you book.</Text> : null}
     </View>
   );
@@ -74,7 +75,7 @@ function MenuLines({ menu }: { menu: MenuRead }) {
       {menu.kidsMenu != null ? line(menu.kidsMenu ? 'yes' : 'no', menu.kidsMenu ? "There is a children's menu" : "No children's menu", 'kids') : null}
       <Row style={{ flexWrap: 'wrap', gap: 6 }}>
         <Text style={type.tiny}>Read from their own menu{menu.menuDated ? ` (${menu.menuDated})` : ''}. Menus change — the kitchen is the last word.</Text>
-        {menu.menuUrl ? <Pressable onPress={() => Linking.openURL(menu.menuUrl!)} accessibilityRole="link"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Open the menu</Text></Pressable> : null}
+        {menu.menuUrl ? <Press onPress={() => Linking.openURL(menu.menuUrl!)} accessibilityRole="link"><Text style={[type.tiny, { color: colors.accent, fontWeight: '700' }]}>Open the menu</Text></Press> : null}
       </Row>
     </View>
   );
@@ -143,7 +144,7 @@ function Place({ table, place, open, onToggle, sessionId, attendingIds, onOpenTr
 
   return (
     <View style={styles.place}>
-      <Pressable onPress={onToggle} accessibilityRole="button" accessibilityState={{ expanded: open }} style={styles.placeHead}>
+      <Press onPress={onToggle} accessibilityRole="button" accessibilityState={{ expanded: open }} style={styles.placeHead}>
         <VenuePhoto photos={place.photos} size={56} credit={false} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{place.name}</Text>
@@ -153,7 +154,7 @@ function Place({ table, place, open, onToggle, sessionId, attendingIds, onOpenTr
           </Row>
         </View>
         <Icon name={open ? 'expand' : 'more'} size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
 
       {open ? (
         <View style={{ gap: 6, paddingTop: 2 }}>

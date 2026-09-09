@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { Member, Visit } from '../api';
 import { firstName, mean, verdictOf } from './verdict';
 import { colors, radius, spacing, type, BORDER } from '../theme';
@@ -63,7 +64,7 @@ export function FamilyVerdict({ visits, members, label = 'your family' }: { visi
   const rated = v.said.filter((s) => s.scores.length || s.notGreat.length);
   return (
     <View style={styles.wrap}>
-      <Pressable
+      <Press
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityLabel={open ? 'Hide what everyone said' : `Your family's rating${v.score != null ? `, ${v.score.toFixed(1)} out of 5` : ''} — see what everyone said`}
@@ -82,7 +83,7 @@ export function FamilyVerdict({ visits, members, label = 'your family' }: { visi
           </Text>
         </View>
         <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
 
       {open ? (
         <View style={styles.body}>

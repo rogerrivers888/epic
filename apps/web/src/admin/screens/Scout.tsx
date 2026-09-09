@@ -25,7 +25,8 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { api, BenchResult, BenchRun, MenuCause, ScoutArea, ScoutMenuMiss, ScoutPlace } from '../../api';
 import { colors, radius, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
@@ -238,7 +239,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
             ) : areas.filter((a) => !find.trim()
               || a.code.toLowerCase().includes(find.trim().toLowerCase())
               || (a.label ?? '').toLowerCase().includes(find.trim().toLowerCase())).map((a) => (
-              <Pressable
+              <Press
                 key={a.code}
                 onPress={() => { setChosen(a.code); setSection('places'); }}
                 style={[styles.areaRow, chosen === a.code ? styles.areaRowOn : null]}
@@ -278,7 +279,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
                     />
                   </Wrap>
                 ) : null}
-              </Pressable>
+              </Press>
             ))}
           </Panel>
         </>
@@ -314,9 +315,9 @@ export function Scout({ canManage }: { canManage: boolean }) {
                         ? <Text style={[type.tiny, { color: colors.like }]}>{count(p.menu.items)} dishes, read {ago(p.menu.readAt)}</Text>
                         : <Text style={[type.tiny, { color: colors.inkMuted }]}>no menu yet</Text>}
                       {p.menuUrl ? (
-                        <Pressable onPress={() => void Linking.openURL(p.menuUrl!)}>
+                        <Press onPress={() => void Linking.openURL(p.menuUrl!)}>
                           <Text style={styles.link}>their menu</Text>
-                        </Pressable>
+                        </Press>
                       ) : null}
                     </Row>
                   </View>
@@ -375,7 +376,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
                 <Text style={type.small}>Nothing outstanding — or nothing classified yet.</Text>
               </View>
             ) : causes.map((c) => (
-              <Pressable
+              <Press
                 key={c.key}
                 onPress={() => setCause(cause === c.key ? null : c.key)}
                 accessibilityRole="button"
@@ -408,7 +409,7 @@ export function Scout({ canManage }: { canManage: boolean }) {
                       (r) => `${r.requeued} put back in the queue. Fix the crawler first, or they will fail the same way.`)}
                   />
                 ) : null}
-              </Pressable>
+              </Press>
             ))}
           </Panel>
 
@@ -432,9 +433,9 @@ export function Scout({ canManage }: { canManage: boolean }) {
                   </Text>
                 </View>
                 {m.menu_url ? (
-                  <Pressable onPress={() => void Linking.openURL(m.menu_url!)}><Text style={styles.link}>open</Text></Pressable>
+                  <Press onPress={() => void Linking.openURL(m.menu_url!)}><Text style={styles.link}>open</Text></Press>
                 ) : m.website ? (
-                  <Pressable onPress={() => void Linking.openURL(m.website!)}><Text style={styles.link}>site</Text></Pressable>
+                  <Press onPress={() => void Linking.openURL(m.website!)}><Text style={styles.link}>site</Text></Press>
                 ) : null}
               </View>
             ))}

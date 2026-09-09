@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Press } from './press';
 import { api, KeyReport, SourcesStatus, SpendLine, SpendResponse, SpendSeries } from '../api';
 import { Comparison, MonthBars } from './SpendChart';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
@@ -243,7 +244,7 @@ function ProviderRow({ r, wide, busy, onOpen, onToggle }: { r: RowModel; wide: b
   );
   if (wide) {
     return (
-      <Pressable onPress={onOpen} style={({ hovered }: any) => [styles.tr, hovered && { backgroundColor: colors.surfaceMuted }]} accessibilityRole="button" accessibilityLabel={`Open ${line.label}`}>
+      <Press onPress={onOpen} style={({ hovered }: any) => [styles.tr, hovered && { backgroundColor: colors.surfaceMuted }]} accessibilityRole="button" accessibilityLabel={`Open ${line.label}`}>
         <View style={{ flex: 2 }}>
           <Text style={type.h3}>{line.label}</Text>
           <Text style={type.tiny} numberOfLines={1}>{!r.hasKey && line.key !== 'claude' ? 'No key yet' : r.off ? 'Switched off' : line.allowance?.basis ?? line.what}</Text>
@@ -259,11 +260,11 @@ function ProviderRow({ r, wide, busy, onOpen, onToggle }: { r: RowModel; wide: b
         <Text style={[styles.td, { flex: 1 }]}>{line.perSearchUsd ? `$${line.perSearchUsd.toFixed(2)}` : line.key === 'claude' ? 'by tokens' : 'free'}</Text>
         <Text style={[styles.td, { flex: 1 }]}>{resetText(line)}</Text>
         <View style={{ flex: 0.8, alignItems: 'flex-end' }}>{line.console ? <Text style={[type.tiny, { color: colors.accent, textDecorationLine: 'underline' }]} onPress={() => Linking.openURL(line.console!.url)}>Open ↗</Text> : <Text style={type.tiny}>—</Text>}</View>
-      </Pressable>
+      </Press>
     );
   }
   return (
-    <Pressable onPress={onOpen} style={styles.stack} accessibilityRole="button" accessibilityLabel={`Open ${line.label}`}>
+    <Press onPress={onOpen} style={styles.stack} accessibilityRole="button" accessibilityLabel={`Open ${line.label}`}>
       <Row style={{ justifyContent: 'space-between' }}>
         <Text style={[type.h3, { flex: 1 }]}>{line.label}</Text>
         <Text style={[type.h3, { color: s.paidUsd > 0 ? colors.ink : colors.inkMuted }]}>{s.paidUsd > 0 ? money(s.paidUsd) : 'free'}</Text>
@@ -271,7 +272,7 @@ function ProviderRow({ r, wide, busy, onOpen, onToggle }: { r: RowModel; wide: b
       </Row>
       <Text style={type.small}>{count(s.calls)} {plural(s.calls, 'call', 'calls')}{line.allowance ? ` · free ${al.text} · paid ${count(s.paidUnits)}` : line.cap ? ` · ${al.text}` : ''}{resetText(line) !== '—' ? ` · resets ${resetText(line)}` : ''}</Text>
       {line.allowance || line.cap ? <Meter used={(line.allowance ?? line.cap)!.used} limit={(line.allowance ?? line.cap)!.limit} /> : null}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -290,7 +291,7 @@ function ProviderDrawer({ line, period, spend, series, initialMonth, source, onC
   return (
     <Modal visible transparent animationType={wide ? 'fade' : 'slide'} onRequestClose={onClose}>
       <View style={styles.backdropWrap}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <Press style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.panel, wide ? styles.panelSide : styles.panelSheet, frameBox]}>
           <ScrollView contentContainerStyle={{ gap: spacing.md, padding: spacing.lg }}>
             <Row style={{ alignItems: 'flex-start' }}>
@@ -298,7 +299,7 @@ function ProviderDrawer({ line, period, spend, series, initialMonth, source, onC
                 <Text style={type.h2}>{line.label}</Text>
                 <Text style={type.small}>{line.what}</Text>
               </View>
-              <Pressable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={20} color={colors.ink} strokeWidth={2.2} /></Pressable>
+              <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={20} color={colors.ink} strokeWidth={2.2} /></Press>
             </Row>
             {line.key === line.source && line.key !== 'claude' ? (
               <Row style={{ justifyContent: 'space-between' }}>

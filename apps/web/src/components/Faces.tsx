@@ -1,5 +1,6 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, fonts, memberColor, memberPastel, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Chip, FoldLine, Row } from './ui';
 import { Icon } from './Icon';
@@ -50,7 +51,7 @@ export function FaceRow({
       {members.map((m, i) => {
         const on = attending.has(m.id);
         return (
-          <Pressable
+          <Press
             key={m.id}
             onPress={onToggle ? () => onToggle(m.id) : undefined}
             style={styles.face}
@@ -62,7 +63,7 @@ export function FaceRow({
             <Text style={[type.tiny, { color: on ? colors.ink : colors.inkFaint }]}>
               {m.name}{m.isMinor ? ' ·' : ''}
             </Text>
-          </Pressable>
+          </Press>
         );
       })}
     </View>
@@ -116,7 +117,7 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
   return (
     <View>
       <Row style={styles.whoRow}>
-        <Pressable onPress={() => setOpen((o) => !o)} style={styles.whoTap} accessibilityRole="button" accessibilityLabel="Who's coming" accessibilityState={{ expanded: open }}>
+        <Press onPress={() => setOpen((o) => !o)} style={styles.whoTap} accessibilityRole="button" accessibilityLabel="Who's coming" accessibilityState={{ expanded: open }}>
           <Icon name="household" size={14} color={colors.inkMuted} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={type.tiny}>Who's coming</Text>
@@ -126,7 +127,7 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
               <Icon name={open ? 'collapse' : 'expand'} size={14} color={colors.inkMuted} />
             </Row>
           </View>
-        </Pressable>
+        </Press>
         <Chip label="Group" icon="household" onPress={onGroup} />
       </Row>
 
@@ -134,10 +135,10 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
         <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
           {!solo ? (
             <>
-              <Pressable onPress={() => members.forEach((m) => { if (!attending || attending.has(m.id)) onToggle(m.id); })} style={styles.whoTile} accessibilityRole="button">
+              <Press onPress={() => members.forEach((m) => { if (!attending || attending.has(m.id)) onToggle(m.id); })} style={styles.whoTile} accessibilityRole="button">
                 <Text style={type.h3}>Just me</Text>
                 <Text style={type.small}>A trip for one.</Text>
-              </Pressable>
+              </Press>
               <View style={[styles.whoTile, all && styles.whoTileOn]}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Text style={type.h3}>The family</Text>
@@ -149,7 +150,7 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
             </>
           ) : null}
 
-          <Pressable onPress={onGroup} style={styles.whoTile} accessibilityRole="button">
+          <Press onPress={onGroup} style={styles.whoTile} accessibilityRole="button">
             <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={type.h3}>A group</Text>
@@ -157,7 +158,7 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
               </View>
               <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Set up →</Text>
             </Row>
-          </Pressable>
+          </Press>
 
           {groups?.length ? (
             <View style={{ gap: 4 }}>
@@ -168,9 +169,9 @@ export function WhoLine({ members, attending, onToggle, onGroup, groups, onUseGr
                     <Icon name="household" size={15} color={colors.icon} />
                     <Text style={[type.small, { color: colors.ink }]} numberOfLines={1}>{g.name ?? 'A group'} · {g.joined} in</Text>
                   </Row>
-                  <Pressable onPress={() => onUseGroup?.(g.id)} accessibilityRole="button">
+                  <Press onPress={() => onUseGroup?.(g.id)} accessibilityRole="button">
                     <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Use again</Text>
-                  </Pressable>
+                  </Press>
                 </Row>
               ))}
             </View>

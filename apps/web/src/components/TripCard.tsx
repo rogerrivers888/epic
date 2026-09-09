@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { TripSummary } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Row } from './ui';
@@ -36,7 +37,7 @@ export function TripCard({ trip: t, members = [], onPress }: {
       : { text: [staying ? '1 hotel' : null, t.stopCount ? `${t.stopCount} stop${t.stopCount === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || away, warn: false };
   const indexOf = (id: string) => Math.max(0, members.findIndex((m) => m.id === id));
   return (
-    <Pressable onPress={onPress} accessibilityRole="button">
+    <Press onPress={onPress} accessibilityRole="button">
       <View style={styles.tripCard}>
         <VenueThumb name={tripTitle(t)} image={t.image ?? null} category="place" width={92} height={92} rounded={radius.lg} credit={false} />
         <View style={{ flex: 1, minWidth: 0, gap: 4, justifyContent: 'center' }}>
@@ -59,7 +60,7 @@ export function TripCard({ trip: t, members = [], onPress }: {
           </Row>
         </View>
       </View>
-    </Pressable>
+    </Press>
   );
 }
 

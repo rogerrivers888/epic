@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
 import { api, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
@@ -369,12 +370,12 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onB
   const header = (
     <View style={{ gap: 6 }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Pressable onPress={onBack} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Trips"><Icon name="back" size={19} color={colors.ink} /></Pressable>
+        <Press onPress={onBack} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Trips"><Icon name="back" size={19} color={colors.ink} /></Press>
         <Row style={{ gap: spacing.sm }}>
-          <Pressable onPress={() => setSection('map')} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Map"><Icon name="map" size={18} color={colors.ink} /></Pressable>
-          <Pressable onPress={() => setMenu((m) => !m)} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="More" accessibilityState={{ expanded: menu }}>
+          <Press onPress={() => setSection('map')} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Map"><Icon name="map" size={18} color={colors.ink} /></Press>
+          <Press onPress={() => setMenu((m) => !m)} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="More" accessibilityState={{ expanded: menu }}>
             <Icon name={menu ? 'close' : 'menu'} size={18} color={colors.ink} />
-          </Pressable>
+          </Press>
         </Row>
       </Row>
       <Text style={type.title} numberOfLines={2}>{where}</Text>
@@ -419,11 +420,11 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onB
         const n = stopsOn(dd);
         const on = dd.id === day?.id;
         return (
-          <Pressable key={dd.id} onPress={() => setDayId(dd.id)} style={[styles.dayChip, on && { borderColor: memberColors[i % memberColors.length], backgroundColor: colors.surface }]}>
+          <Press key={dd.id} onPress={() => setDayId(dd.id)} style={[styles.dayChip, on && { borderColor: memberColors[i % memberColors.length], backgroundColor: colors.surface }]}>
             <Text style={[type.tiny, { color: memberColors[i % memberColors.length], fontWeight: '700' }]}>DAY {i + 1}</Text>
             <Text style={type.h3}>{fmtDate(dd.date)}</Text>
             <Text style={type.tiny}>{n ? `${n} stop${n === 1 ? '' : 's'} saved` : 'nothing saved yet'}</Text>
-          </Pressable>
+          </Press>
         );
       })}
     </ScrollView>
@@ -595,14 +596,14 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onB
       {menu ? (
         <View style={styles.menu}>
           {menuItems.map((m) => (
-            <Pressable key={m.value} onPress={() => { setMenu(false); setSection(m.value); }} style={styles.menuRow} accessibilityRole="button">
+            <Press key={m.value} onPress={() => { setMenu(false); setSection(m.value); }} style={styles.menuRow} accessibilityRole="button">
               <Icon name={m.icon} size={17} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={type.h3} numberOfLines={1}>{m.label}</Text>
                 {m.hint ? <Text style={type.tiny} numberOfLines={1}>{m.hint}</Text> : null}
               </View>
               <Icon name="more" size={16} color={colors.inkMuted} />
-            </Pressable>
+            </Press>
           ))}
           <View style={styles.menuRow}><DeleteTrip id={id} onDeleted={onBack} /></View>
         </View>
@@ -708,12 +709,12 @@ function Itinerary({ d, isPast, onPlan, onDay }: { d: TripDetail; isPast: boolea
       ) : null}
       {spine.map(({ day, beats }) => (
         <View key={day.id} style={{ gap: 2 }}>
-          <Pressable onPress={() => onDay(day.id)} style={styles.dayHead} accessibilityRole="button">
+          <Press onPress={() => onDay(day.id)} style={styles.dayHead} accessibilityRole="button">
             <Text style={[type.label, { marginBottom: 0, marginTop: 0, color: colors.ink }]}>
               {new Date(`${day.date}T12:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}
             </Text>
             <View style={styles.rule} />
-          </Pressable>
+          </Press>
           {beats.map((b, i) => (
             <View key={`${day.id}-${i}`} style={styles.beat}>
               <Text style={styles.beatTime}>{b.time ?? ''}</Text>
@@ -782,7 +783,7 @@ function TripPlaceRow({ place: p, first, isPast, onPress }: { place: TripPlace; 
   ].filter(Boolean).join(' · ');
   const said = p.scores.length ? p.scores.map((s) => `${s.member.split(' ')[0]} ${s.score}`).join(' · ') : null;
   return (
-    <Pressable onPress={onPress} style={[styles.prow, !first && styles.rowLine]} accessibilityRole="button">
+    <Press onPress={onPress} style={[styles.prow, !first && styles.rowLine]} accessibilityRole="button">
       {/* The same 60% the Trips list took (owner, 8 Sep 2026): 56 becomes 90. */}
       <VenueThumb name={p.name} image={p.image} category={p.category} width={90} height={90} rounded={radius.md} credit={false} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
@@ -795,7 +796,7 @@ function TripPlaceRow({ place: p, first, isPast, onPress }: { place: TripPlace; 
         // and nobody has said what they thought (handover 4b).
         : p.visited && isPast ? <Text style={styles.rate}>Rate</Text>
           : <Icon name="more" size={16} color={colors.inkMuted} />}
-    </Pressable>
+    </Press>
   );
 }
 
@@ -998,7 +999,7 @@ function DayPlanPanel({ trip, day, initial, onCommitted }: { trip: TripDetail; d
 
       <Row>
         <TextInput value={input} onChangeText={setInput} placeholder="e.g. somewhere upmarket for dinner, no chains, more for Phoenix" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} onSubmitEditing={() => say(input)} />
-        {speech.supported ? <Pressable onPress={speech.toggle} style={[styles.mic, speech.listening && styles.micOn]} accessibilityLabel={speech.listening ? 'Stop' : 'Speak'}><Icon name={speech.listening ? 'stop' : 'mic'} size={18} color={colors.ink} /></Pressable> : null}
+        {speech.supported ? <Press onPress={speech.toggle} style={[styles.mic, speech.listening && styles.micOn]} accessibilityLabel={speech.listening ? 'Stop' : 'Speak'}><Icon name={speech.listening ? 'stop' : 'mic'} size={18} color={colors.ink} /></Press> : null}
         <Button label="Send" onPress={() => say(input)} disabled={!input.trim() || !!busy} />
       </Row>
 
@@ -1210,7 +1211,7 @@ function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
                   {stays.length} places to stay{pricing?.withPrice ? ` · ${pricing.withPrice} with a room free` : ''} · {near?.label ? `measured from ${near.label}` : ''}
                 </Text>
                 {stays.slice(0, 12).map((s) => (
-                  <Pressable key={s.venueRef} onPress={() => choose(s)} style={styles.stayRow} accessibilityRole="button">
+                  <Press key={s.venueRef} onPress={() => choose(s)} style={styles.stayRow} accessibilityRole="button">
                     {/* You choose a hotel with your eyes first. The picture is
                         the provider's, drawn from their URL and never stored —
                         VenueThumb already knows the difference and carries the
@@ -1261,7 +1262,7 @@ function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
                         <View style={styles.stayPick}><Text style={styles.stayPickText}>{saving === s.venueRef ? 'Saving…' : "We'll stay here"}</Text></View>
                       </View>
                     </Row>
-                  </Pressable>
+                  </Press>
                 ))}
                 <Text style={type.tiny}>
                   {credits.length ? credits.join(' · ') : '© OpenStreetMap contributors'}.

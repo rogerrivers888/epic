@@ -20,7 +20,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { api, Account, AccountsResponse, ApiError, Invitation } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, SectionTitle, StatusLine, Wrap, Meter, FoldLine } from '../components/ui';
@@ -260,7 +261,7 @@ function AccountRow({ account: a, wide, open, onOpen, busy, plans, defaultBound,
 
   return (
     <Card>
-      <Pressable onPress={onOpen} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={a.name || a.email}>
+      <Press onPress={onOpen} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={a.name || a.email}>
         <View style={wide ? styles.rowWide : styles.rowNarrow}>
           <View style={wide ? { flex: 3 } : undefined}>
             <Row style={{ gap: 6 }}>
@@ -299,7 +300,7 @@ function AccountRow({ account: a, wide, open, onOpen, busy, plans, defaultBound,
             <Icon name={open ? 'collapse' : 'more'} size={16} color={colors.inkMuted} />
           </View>
         </View>
-      </Pressable>
+      </Press>
 
       {open ? (
         <View style={styles.details}>

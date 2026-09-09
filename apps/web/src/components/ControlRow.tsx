@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, fonts, spacing, TARGET } from '../theme';
 import { Icon, IconName } from './Icon';
 import { useViewport } from '../hooks/useViewport';
@@ -56,7 +57,7 @@ export function ControlButton({ label, icon, set, open, onPress, spoken }: {
 }) {
   const colour = set ? colors.accent : colors.ink;
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={spoken ?? label}
@@ -67,7 +68,7 @@ export function ControlButton({ label, icon, set, open, onPress, spoken }: {
       {icon ? <Icon name={icon} size={15} color={colors.ink} strokeWidth={2.2} /> : null}
       <Text numberOfLines={1} style={[styles.ctlText, { color: colour }]}>{label}</Text>
       <Icon name={open ? 'collapse' : 'expand'} size={12} color={colour} strokeWidth={2.6} />
-    </Pressable>
+    </Press>
   );
 }
 
@@ -97,7 +98,7 @@ export function Popover({ open, top, onClose, align = 'left', maxHeight = 380, c
           the control row stays live above it, so tapping Sort while Filters
           is open switches panels in one tap rather than closing one and
           asking for another, and the band still changes category. */}
-      <Pressable
+      <Press
         style={[styles.scrim, { top }]}
         onPress={onClose}
         accessibilityRole="button"
@@ -140,7 +141,7 @@ export function BoxRow({ options, onPick }: { options: PopoverOption[]; onPick: 
   return (
     <View style={styles.boxes}>
       {options.map((o) => (
-        <Pressable
+        <Press
           key={o.key}
           onPress={() => onPick(o.key)}
           accessibilityRole="button"
@@ -149,7 +150,7 @@ export function BoxRow({ options, onPick }: { options: PopoverOption[]; onPick: 
         >
           <Text numberOfLines={1} style={[styles.boxLabel, o.on && styles.boxLabelOn]}>{o.label}</Text>
           {o.count != null && o.count !== '' ? <Text style={styles.boxCount}>{String(o.count)}</Text> : null}
-        </Pressable>
+        </Press>
       ))}
     </View>
   );
@@ -160,7 +161,7 @@ export function PopoverList({ options, onPick, dense }: { options: PopoverOption
   return (
     <View>
       {options.map((o) => (
-        <Pressable
+        <Press
           key={o.key}
           onPress={() => onPick(o.key)}
           accessibilityRole="menuitem"
@@ -169,7 +170,7 @@ export function PopoverList({ options, onPick, dense }: { options: PopoverOption
         >
           <Text numberOfLines={1} style={[styles.itemLabel, o.on && styles.itemLabelOn]}>{o.label}</Text>
           {o.count != null && o.count !== '' ? <Text style={styles.itemCount}>{String(o.count)}</Text> : null}
-        </Pressable>
+        </Press>
       ))}
     </View>
   );
@@ -178,9 +179,9 @@ export function PopoverList({ options, onPick, dense }: { options: PopoverOption
 /** The panel's foot: "Clear filters", in moss, over a rule. */
 export function PopoverFooter({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" style={styles.foot}>
+    <Press onPress={onPress} accessibilityRole="button" style={styles.foot}>
       <Text style={styles.footText}>{label}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -203,9 +204,9 @@ export function CrumbHead({ onBack, backLabel, title, aside, sub, size = 22, tra
 }) {
   return (
     <View style={styles.crumb}>
-      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={backLabel ?? 'Back'} style={styles.crumbBack} hitSlop={6}>
+      <Press onPress={onBack} accessibilityRole="button" accessibilityLabel={backLabel ?? 'Back'} style={styles.crumbBack} hitSlop={6}>
         <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
-      </Pressable>
+      </Press>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text numberOfLines={1} style={[styles.crumbTitle, size === 24 && styles.crumbTitle24]}>{title}</Text>
         {sub ? <Text numberOfLines={1} style={styles.crumbSub}>{sub}</Text> : null}

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { TripSummary } from '../api';
 import { colors, fonts, type } from '../theme';
 import { CategoryStrip, MenuBar, ScreenTop, PairSwitch, TopControl } from '../components/InspireHeader';
@@ -166,7 +167,7 @@ function TripRow({ trip, onPress, onHold }: { trip: TripSummary; onPress: () => 
   ].filter(Boolean).join(' · ');
 
   return (
-    <Pressable
+    <Press
       onPress={onPress}
       onLongPress={onHold}
       delayLongPress={400}
@@ -183,7 +184,7 @@ function TripRow({ trip, onPress, onHold }: { trip: TripSummary; onPress: () => 
         <Text style={styles.meta} numberOfLines={1}>{meta}</Text>
         <Text style={[styles.status, status.strong && styles.statusOn]} numberOfLines={1}>{status.text}</Text>
       </View>
-    </Pressable>
+    </Press>
   );
 }
 

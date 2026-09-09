@@ -9,7 +9,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../press';
 import { api, HouseholdResponse, IntakeSlot, Place } from '../../api';
 import { colors, fonts, radius } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
@@ -114,7 +115,7 @@ export function ChipPicker({ slot, current, heard, household, onSet, onClose, wa
           {dayOffsets().map((d) => <ListRow key={d.value} icon="calendar" label={d.label} on={value?.start === d.value} onPress={() => set({ start: d.value, end: null })} />)}
           <View style={styles.typedRow}>
             <TextInput value={text} onChangeText={setText} placeholder="Or a date · 2026-10-15" placeholderTextColor={colors.inkMuted} style={styles.typed} />
-            <Pressable onPress={() => { if (/^\d{4}-\d{2}-\d{2}$/.test(text.trim())) set({ start: text.trim(), end: null }); }} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use</Text></Pressable>
+            <Press onPress={() => { if (/^\d{4}-\d{2}-\d{2}$/.test(text.trim())) set({ start: text.trim(), end: null }); }} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use</Text></Press>
           </View>
         </View>
       );
@@ -138,7 +139,7 @@ export function ChipPicker({ slot, current, heard, household, onSet, onClose, wa
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={frameBox}>
-        <Pressable onPress={onClose} style={styles.scrim} accessibilityLabel="Close" />
+        <Press onPress={onClose} style={styles.scrim} accessibilityLabel="Close" />
         <View style={styles.sheet}>
           <View style={{ alignItems: 'center' }}><View style={styles.handle} /></View>
           <View style={styles.titleRow}>
@@ -169,7 +170,7 @@ function WhoPicker({ members, names, onDone }: { members: HouseholdResponse['mem
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
         {members.map((m) => <FactChip key={m.id} label={m.name} look={picked.includes(m.name) ? 'said' : 'profile'} onPress={() => setPicked((p) => (p.includes(m.name) ? p.filter((x) => x !== m.name) : [...p, m.name]))} />)}
       </View>
-      <Pressable onPress={() => picked.length && onDone(picked)} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }, !picked.length && { opacity: 0.5 }]}><Text style={styles.useText}>Just these</Text></Pressable>
+      <Press onPress={() => picked.length && onDone(picked)} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }, !picked.length && { opacity: 0.5 }]}><Text style={styles.useText}>Just these</Text></Press>
     </View>
   );
 }
@@ -192,9 +193,9 @@ export function KidsPicker({ initial, onDone, names = [], inline = false, onChan
           <Boxes options={BANDS.map((b) => ({ value: b, label: b.replace('-', '–') }))} value={k.band} onChange={(band) => update(kids.map((x, j) => (j === i ? { ...x, band } : x)))} />
         </View>
       ))}
-      <Pressable onPress={() => update([...kids, { name: null, band: null }])} accessibilityRole="button"><Text style={styles.more}>+ another child</Text></Pressable>
+      <Press onPress={() => update([...kids, { name: null, band: null }])} accessibilityRole="button"><Text style={styles.more}>+ another child</Text></Press>
       {!inline && onDone ? (
-        <Pressable onPress={() => onDone(kids.filter((k) => k.band).map((k) => ({ name: k.name, band: k.band! })))} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }, !kids.some((k) => k.band) && { opacity: 0.5 }]}><Text style={styles.useText}>That’s them</Text></Pressable>
+        <Press onPress={() => onDone(kids.filter((k) => k.band).map((k) => ({ name: k.name, band: k.band! })))} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }, !kids.some((k) => k.band) && { opacity: 0.5 }]}><Text style={styles.useText}>That’s them</Text></Press>
       ) : null}
     </View>
   );
@@ -227,8 +228,8 @@ function FoodPicker({ current, food, onDone }: { current: IntakeSlot | null; foo
         <TextInput value={avoid} onChangeText={setAvoid} placeholder="Something to avoid · seafood" placeholderTextColor={colors.inkMuted} style={styles.typed} />
       </View>
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        <Pressable onPress={() => onDone({ diets, kinds, must_haves: must.trim() ? [...(food?.must_haves ?? []), must.trim()] : undefined, avoids: avoid.trim() ? [...(food?.avoids ?? []), avoid.trim()] : undefined, no_preference: false })} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use this</Text></Pressable>
-        <Pressable onPress={() => onDone({ diets: [], kinds: [], must_haves: [], avoids: [], no_preference: true })} accessibilityRole="button" style={[styles.use, { backgroundColor: colors.warm }]}><Text style={[styles.useText, { color: colors.ink }]}>No preference</Text></Pressable>
+        <Press onPress={() => onDone({ diets, kinds, must_haves: must.trim() ? [...(food?.must_haves ?? []), must.trim()] : undefined, avoids: avoid.trim() ? [...(food?.avoids ?? []), avoid.trim()] : undefined, no_preference: false })} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use this</Text></Press>
+        <Press onPress={() => onDone({ diets: [], kinds: [], must_haves: [], avoids: [], no_preference: true })} accessibilityRole="button" style={[styles.use, { backgroundColor: colors.warm }]}><Text style={[styles.useText, { color: colors.ink }]}>No preference</Text></Press>
       </View>
     </View>
   );
@@ -251,9 +252,9 @@ function WantsPicker({ wants, onDone }: { wants: { name: string; kind: 'place' |
       </View>
       <View style={styles.typedRow}>
         <TextInput value={place} onChangeText={setPlace} placeholder="Or a place by name · Legoland" placeholderTextColor={colors.inkMuted} style={styles.typed} />
-        <Pressable onPress={() => { if (place.trim()) { setList([...list, { name: place.trim(), kind: 'place', type: null }]); setPlace(''); } }} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Add</Text></Pressable>
+        <Press onPress={() => { if (place.trim()) { setList([...list, { name: place.trim(), kind: 'place', type: null }]); setPlace(''); } }} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Add</Text></Press>
       </View>
-      <Pressable onPress={() => onDone(list)} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }]}><Text style={styles.useText}>That’s it</Text></Pressable>
+      <Press onPress={() => onDone(list)} accessibilityRole="button" style={[styles.use, { alignSelf: 'flex-start' }]}><Text style={styles.useText}>That’s it</Text></Press>
     </View>
   );
 }

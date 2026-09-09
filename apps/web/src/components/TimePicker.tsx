@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button } from './ui';
 import { Icon } from './Icon';
@@ -104,7 +105,7 @@ export function Wheel({ label, value, options, onChange, format = timeLabel }: {
           }}
         >
           {options.map((o) => (
-            <Pressable
+            <Press
               key={o}
               onPress={() => onChange(o)}
               style={styles.slot}
@@ -113,7 +114,7 @@ export function Wheel({ label, value, options, onChange, format = timeLabel }: {
               accessibilityLabel={`${label} ${format(o)}`}
             >
               <Text style={[styles.slotText, o === chosen && styles.slotTextOn]}>{format(o)}</Text>
-            </Pressable>
+            </Press>
           ))}
         </ScrollView>
       </View>
@@ -138,11 +139,11 @@ export function TimeField({ value, onChange, step = 5, placeholder = 'Pick a tim
   const options = slots(step);
   return (
     <View style={{ gap: spacing.sm }}>
-      <Pressable onPress={() => setOpen((o) => !o)} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }}>
+      <Press onPress={() => setOpen((o) => !o)} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded: open }}>
         <Icon name="hours" size={16} color={colors.inkMuted} />
         <Text style={[type.body, { flex: 1 }, !value && { color: colors.inkFaint }]}>{value ? timeLabel(value) : placeholder}</Text>
         <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
       {open ? (
         <View style={styles.panel}>
           <Wheel label={label} value={value || '19:00'} options={options} onChange={onChange} />
@@ -182,11 +183,11 @@ export function TimeRangePicker({ start, end, onChange, step = 15, labels = ['Fr
 
   return (
     <View style={{ gap: spacing.sm }}>
-      <Pressable onPress={() => setOpen((o) => !o)} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel="Choose the times" accessibilityState={{ expanded: open }}>
+      <Press onPress={() => setOpen((o) => !o)} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel="Choose the times" accessibilityState={{ expanded: open }}>
         <Icon name="hours" size={16} color={colors.inkMuted} />
         <Text style={[type.body, { flex: 1 }]}>{timeLabel(start)} – {timeLabel(end)}</Text>
         <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
       {open ? (
         <View style={styles.panel}>
           <View style={styles.wheels}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button } from './ui';
@@ -84,11 +85,11 @@ export function DateRangePicker({ start, end, onApply, single = false, inline = 
   return (
     <View style={{ gap: spacing.sm }}>
       {inline ? null : (
-      <Pressable onPress={() => (open ? cancel() : setOpen(true))} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel={single ? 'Choose the date' : 'Choose the dates'}>
+      <Press onPress={() => (open ? cancel() : setOpen(true))} style={[styles.trigger, open && { borderColor: colors.accent }]} accessibilityRole="button" accessibilityLabel={single ? 'Choose the date' : 'Choose the dates'}>
         <Icon name="calendar" size={16} color={colors.inkMuted} />
         <Text style={[type.body, { flex: 1 }, !applied.s && { color: colors.inkFaint }]}>{rangeLabel(applied.s, single ? applied.s : applied.e, single ? 'Pick a date' : 'Pick dates')}</Text>
         <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.inkMuted} />
-      </Pressable>
+      </Press>
       )}
       {open ? (
         <View style={styles.panel}>
@@ -129,19 +130,19 @@ function MonthGrid({ y, m, selStart, selEnd, onPick, onNav, navLeft, navRight, t
     const inRange = !!selStart && !!selEnd && t > selStart.getTime() && t < selEnd.getTime();
     const isToday = sameDay(ds, today);
     cells.push(
-      <Pressable key={d} onPress={() => onPick(y, m, d)} style={styles.cell} accessibilityRole="button" accessibilityLabel={`${d} ${MONTHS[m]} ${y}`} accessibilityState={{ selected: isSel }}>
+      <Press key={d} onPress={() => onPick(y, m, d)} style={styles.cell} accessibilityRole="button" accessibilityLabel={`${d} ${MONTHS[m]} ${y}`} accessibilityState={{ selected: isSel }}>
         <View style={[styles.day, isSel && styles.daySelected, inRange && styles.dayInRange, !isSel && isToday && styles.dayToday]}>
           <Text style={[styles.dayText, isSel && { color: colors.bg, fontWeight: '700' }]}>{d}</Text>
         </View>
-      </Pressable>,
+      </Press>,
     );
   }
   return (
     <View style={styles.month}>
       <View style={styles.monthHeader}>
-        {navLeft ? <Pressable onPress={() => onNav(-1)} style={styles.nav} accessibilityLabel="Previous month"><Text style={styles.navText}>‹</Text></Pressable> : <View style={styles.nav} />}
+        {navLeft ? <Press onPress={() => onNav(-1)} style={styles.nav} accessibilityLabel="Previous month"><Text style={styles.navText}>‹</Text></Press> : <View style={styles.nav} />}
         <Text style={type.h3}>{MONTHS[m]} {y}</Text>
-        {navRight ? <Pressable onPress={() => onNav(1)} style={styles.nav} accessibilityLabel="Next month"><Text style={styles.navText}>›</Text></Pressable> : <View style={styles.nav} />}
+        {navRight ? <Press onPress={() => onNav(1)} style={styles.nav} accessibilityLabel="Next month"><Text style={styles.navText}>›</Text></Press> : <View style={styles.nav} />}
       </View>
       <View style={styles.grid}>{DOW.map((x) => <View key={x} style={styles.cell}><Text style={[type.tiny, { fontWeight: '700' }]}>{x}</Text></View>)}</View>
       <View style={styles.grid}>{cells}</View>

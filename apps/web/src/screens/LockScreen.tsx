@@ -11,7 +11,8 @@
  */
 
 import React, { useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../components/press';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button } from '../components/ui';
 import { Icon } from '../components/Icon';
@@ -156,9 +157,9 @@ export function LockScreen({ onIn, configured = true, notice = null }: {
               />
             </>
           ) : (
-            <Pressable onPress={() => setAsking(true)} accessibilityRole="button">
+            <Press onPress={() => setAsking(true)} accessibilityRole="button">
               <Text style={[type.small, styles.quiet]}>I sign in with a link instead</Text>
-            </Pressable>
+            </Press>
           )}
         </View>
       </View>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
 import { api } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Button, Row, Wrap } from './ui';
@@ -70,19 +71,19 @@ export function TastePicker({
               return (
                 <View key={it.key} style={{ flexDirection: 'row', gap: 2 }}>
                   {have ? null : (
-                    <Pressable
+                    <Press
                       onPress={() => pick(it)}
                       disabled={busy === it.key}
                       style={[styles.pill, kids.length ? styles.pillLeft : null, busy === it.key && { opacity: 0.5 }]}
                       accessibilityRole="button"
                     >
                       <Text style={styles.pillText}>{it.label}</Text>
-                    </Pressable>
+                    </Press>
                   )}
                   {kids.length ? (
-                    <Pressable onPress={() => setOpen((s) => { const n = new Set(s); n.has(it.key) ? n.delete(it.key) : n.add(it.key); return n; })} style={[styles.pill, have ? null : styles.pillRight, expanded && styles.pillExpanded]} accessibilityLabel={`${expanded ? 'Hide' : 'Show'} ${it.label} dishes`}>
+                    <Press onPress={() => setOpen((s) => { const n = new Set(s); n.has(it.key) ? n.delete(it.key) : n.add(it.key); return n; })} style={[styles.pill, have ? null : styles.pillRight, expanded && styles.pillExpanded]} accessibilityLabel={`${expanded ? 'Hide' : 'Show'} ${it.label} dishes`}>
                       {have ? <Text style={styles.pillText}>{it.label}</Text> : null}<Icon name={expanded ? 'expand' : 'more'} size={14} color={colors.ink} />
-                    </Pressable>
+                    </Press>
                   ) : null}
                 </View>
               );
@@ -96,9 +97,9 @@ export function TastePicker({
                 <Text style={type.tiny}>{it.label} — specifics</Text>
                 <Wrap>
                   {kids.map((c) => (
-                    <Pressable key={c.key} onPress={() => pick(c)} disabled={busy === c.key} style={[styles.pill, styles.pillSmall, busy === c.key && { opacity: 0.5 }]} accessibilityRole="button">
+                    <Press key={c.key} onPress={() => pick(c)} disabled={busy === c.key} style={[styles.pill, styles.pillSmall, busy === c.key && { opacity: 0.5 }]} accessibilityRole="button">
                       <Text style={[styles.pillText, { fontSize: 12 }]}>{c.label}</Text>
-                    </Pressable>
+                    </Press>
                   ))}
                 </Wrap>
               </View>

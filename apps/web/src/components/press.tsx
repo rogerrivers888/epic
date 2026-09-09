@@ -1,0 +1,127 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Platform, Pressable, PressableProps, PressableStateCallbackType, StyleSheet, View, ViewStyle } from 'react-native';
+import { colors } from '../theme';
+import { at, POP, PressEffect, RING, SINK } from './pressMotion';
+
+export type { PressEffect } from './pressMotion';
+
+/**
+ * A `Pressable` that answers the finger.
+ *
+ * Every button in Epic is one of these (owner, 9 Sep 2026). The default is
+ * the *sink*: the control is pushed 2px into the page and shrinks 3% while it
+ * is held, and eases back when it is let go. `effect="pop"` is for the one
+ * button that adds something to a trip — a squash and a spring that
+ * overshoots. `effect="none"` keeps the plain Pressable for things that are
+ * tapped but are not buttons (a photograph, a row that is being dragged).
+ *
+ * It takes exactly what `Pressable` takes, including a style function and a
+ * transform of its own, so swapping one for the other changes nothing but the
+ * motion. Someone who has asked their system for less motion gets none.
+ */
+export const Press = React.forwardRef<View, PressableProps & { effect?: PressEffect; children?: React.ReactNode | ((s: PressableStateCallbackType) => React.ReactNode) }>(function Press(
+  { effect = 'sink', style, onPressIn, onPressOut, disabled, ...rest },
+  ref,
+) {
+  const v = useRef(new Animated.Value(0)).current;
+  const [pressed, setPressed] = useState(false);
+  const still = reducedMotion();
+  const animate = effect !== 'none' && !still;
+
+  const down = useCallback((e: any) => {
+    setPressed(true);
+    onPressIn?.(e);
+    if (!animate) return;
+    v.stopAnimation();
+    Animated.timing(v, { toValue: 1, duration: effect === 'pop' ? POP.downMs : SINK.downMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
+  }, [animate, effect, onPressIn, v]);
+
+  const up = useCallback((e: any) => {
+    setPressed(false);
+    onPressOut?.(e);
+    if (!animate) return;
+    v.stopAnimation();
+    if (effect === 'pop') Animated.spring(v, { toValue: 0, ...POP.spring, useNativeDriver: NATIVE }).start();
+    else Animated.timing(v, { toValue: 0, duration: SINK.upMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
+  }, [animate, effect, onPressOut, v]);
+
+  // Pressable's own `pressed` and ours are the same events, so a style
+  // function sees what it always saw.
+  const resolved = typeof style === 'function' ? style({ pressed }) : style;
+  const flat = (StyleSheet.flatten(resolved) ?? {}) as ViewStyle;
+  const own = animate ? transformFor(effect, v) : [];
+  const transform = own.length ? [...((flat.transform as any[]) ?? []), ...own] : flat.transform;
+
+  return (
+    <AnimatedPressable
+      ref={ref}
+      disabled={disabled}
+      onPressIn={down}
+      onPressOut={up}
+      style={transform ? [flat, { transform }] : flat}
+      {...rest}
+    />
+  );
+});
+
+const NATIVE = Platform.OS !== 'web';
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function transformFor(effect: PressEffect, v: Animated.Value) {
+  if (effect === 'pop') return [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, POP.scaleDown] }) }];
+  if (effect === 'sink') return [{ translateY: v.interpolate(SINK.translateY) }, { scale: v.interpolate(SINK.scale) }];
+  return [];
+}
+
+/**
+ * The ring a heart sends out when it turns on.
+ *
+ * Sits absolutely in the centre of whatever holds it (the parent must be
+ * `position: relative` or a plain View, which it is by default), and plays
+ * once each time `pulse` changes to a value above zero. It is a circle
+ * because a ring is — the one round thing Epic draws beside a person's face
+ * — and it is ink because everything drawn in Epic is, unless it sits on a
+ * photograph, where the caller hands it the colour that shows.
+ *
+ * Only upwards: the caller bumps `pulse` when the heart goes on, never when it
+ * comes off, for the reason the shortlist heartbeat has — taking something off
+ * a list is not the moment to celebrate.
+ */
+export function Ring({ pulse, size = 40, color = colors.ink }: { pulse: number; size?: number; color?: string }) {
+  const v = useRef(new Animated.Value(1)).current;
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    if (!pulse || reducedMotion()) return;
+    v.setValue(0);
+    setLive(true);
+    const a = Animated.timing(v, { toValue: 1, duration: RING.ms, easing: Easing.out(Easing.cubic), useNativeDriver: NATIVE });
+    a.start(({ finished }) => { if (finished) setLive(false); });
+    return () => a.stop();
+  }, [pulse, v]);
+  if (!live) return null;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        left: '50%', top: '50%',
+        width: size, height: size,
+        marginLeft: -size / 2, marginTop: -size / 2,
+        borderRadius: size / 2,
+        borderWidth: RING.stroke,
+        borderColor: color,
+        opacity: v.interpolate(RING.opacity),
+        transform: [{ scale: v.interpolate(RING.scale) }],
+      }}
+    />
+  );
+}
+
+/** True when the person has asked their system for less motion. Read at press time, not at build time, so a change of setting is honoured without a reload. */
+export function reducedMotion(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** For anything that wants the sink's numbers without Animated — a test, a static preview. */
+export const sinkAt = (v: number) => ({ translateY: at(SINK.translateY, v), scale: at(SINK.scale, v) });

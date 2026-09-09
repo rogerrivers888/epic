@@ -5,7 +5,8 @@
  */
 
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
+import { Press } from '../../components/press';
 import { paths } from '../../routes';
 import { useRouter } from '../../router';
 import { PrimaryCta, VoiceScreen } from '../../components/voice/kit';
@@ -26,10 +27,10 @@ export function WelcomeScreen() {
       <Text style={styles.body}>Tell Epic what you fancy and it plans the day — travel, timings and food included.</Text>
       <View style={{ gap: 10, marginTop: 8 }}>
         <PrimaryCta label="Plan something now" onPress={() => { markWelcomed(); navigate(paths.say(), { replace: true }); }} />
-        <Pressable onPress={() => { markWelcomed(); navigate(paths.setup(), { replace: true }); }} accessibilityRole="button" style={styles.second}>
+        <Press onPress={() => { markWelcomed(); navigate(paths.setup(), { replace: true }); }} accessibilityRole="button" style={styles.second}>
           <Text style={styles.secondText}>Set up my family first</Text>
           <Text style={[styles.secondText, { fontWeight: '500' }]}>2 min</Text>
-        </Pressable>
+        </Press>
       </View>
     </VoiceScreen>
   );

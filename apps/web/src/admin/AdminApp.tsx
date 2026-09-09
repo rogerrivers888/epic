@@ -18,7 +18,8 @@
  */
 
 import React, { useMemo } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { Access } from '../api';
 import { AdminScreen } from '../routes';
 import { colors, radius, spacing, type, BORDER } from '../theme';
@@ -127,7 +128,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
           </View>
 
           {items.map((n) => (
-            <Pressable
+            <Press
               key={n.key}
               onPress={() => setScreen(n.key)}
               style={[styles.navItem, screen === n.key && styles.navItemOn]}
@@ -138,7 +139,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.navLabel, screen === n.key && { color: colors.ink, fontWeight: '700' }]}>{n.label}</Text>
               </View>
-            </Pressable>
+            </Press>
           ))}
 
           <View style={{ flex: 1 }} />
@@ -148,24 +149,24 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
           <View style={styles.profile}>
             <Text style={type.tiny}>Signed in as</Text>
             <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>{access?.role?.label ?? 'Owner'}</Text>
-            <Pressable onPress={onLeave} style={styles.leave} accessibilityRole="button">
+            <Press onPress={onLeave} style={styles.leave} accessibilityRole="button">
               <Icon name="back" size={14} color={colors.ink} />
               <Text style={[type.small, { color: colors.ink }]}>The household app</Text>
-            </Pressable>
+            </Press>
           </View>
         </View>
       ) : (
         <View style={styles.phoneHead}>
           <View style={styles.phoneHeadTop}>
             <Text style={styles.badge}>Back office</Text>
-            <Pressable onPress={onLeave} accessibilityRole="button" style={styles.leaveSmall}>
+            <Press onPress={onLeave} accessibilityRole="button" style={styles.leaveSmall}>
               <Icon name="back" size={13} color={colors.ink} />
               <Text style={type.tiny}>The app</Text>
-            </Pressable>
+            </Press>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
             {items.map((n) => (
-              <Pressable
+              <Press
                 key={n.key}
                 onPress={() => setScreen(n.key)}
                 style={[styles.chip, screen === n.key && styles.chipOn]}
@@ -174,7 +175,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               >
                 <Icon name={n.icon} size={13} color={screen === n.key ? colors.primaryFg : colors.inkMuted} />
                 <Text style={[type.tiny, screen === n.key && { color: colors.primaryFg, fontWeight: '700' }]}>{n.label}</Text>
-              </Pressable>
+              </Press>
             ))}
           </ScrollView>
         </View>

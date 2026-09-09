@@ -30,7 +30,8 @@
  */
 
 import React, { useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../components/press';
 import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 
@@ -141,7 +142,7 @@ export function Columns({ points, height = 140, format = shortNumber, tone, empt
           <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
             <View style={{ flexDirection: 'row', height: plot }}>
               {points.map((p, i) => (
-                <Pressable
+                <Press
                   key={`hit-${p.label}-${i}`}
                   style={{ width: slot }}
                   onHoverIn={() => setOver(i)}
@@ -218,7 +219,7 @@ export function TrendLine({ points, height = 140, format = shortNumber }: {
           <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
             <View style={{ flexDirection: 'row', height: plot }}>
               {points.map((p, i) => (
-                <Pressable
+                <Press
                   key={`hit-${i}`} style={{ width: w / points.length }}
                   onHoverIn={() => setOver(i)} onHoverOut={() => setOver((o) => (o === i ? null : o))}
                   accessibilityLabel={`${p.label}: ${format(p.value)}`}
