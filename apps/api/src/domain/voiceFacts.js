@@ -203,7 +203,9 @@ export function holdWeekday(when, today) {
   // verb's (Codex, 9 Sep 2026, four passes on this line).
   const [m] = mentions;
   const before = words.slice(0, m.index);
-  const rangy = /\b(back|returning|return|home|until|till|through|between|from)\b|[–-]/.test(words) || (/\bto\b/.test(before) && !/^\s*(move|change|make|switch|shift|put|push)\b/.test(words));
+  const changeVerb = /\b(move|moving|change|changing|make|switch|shift|put|push|reschedule|rescheduling|book)\b/.test(before);
+  const dashRange = /\s[–-]\s|\d\s*[–-]\s*\d/.test(words); // "Fri – Sun", "10-12", not "all-day"
+  const rangy = /\b(back|returning|return|home|until|till|through|between|from)\b/.test(words) || dashRange || (/\bto\b/.test(before) && !changeVerb);
   if (rangy) return when;
   const wanted = WEEKDAYS.indexOf(m[1]);
   const d = new Date(`${today}T12:00:00Z`);
