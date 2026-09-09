@@ -59,14 +59,27 @@ export function HeardScreen({ intakeId, household, onOpenTrip }: { intakeId: str
       navigate(intake.resultsHref);
       return;
     }
-    setBusy('Creating the trip…');
+    setBusy('Making the trip…');
     try {
       const trip = await api.createTripV3(intake.tripDraft);
       const id = (trip as any).trip?.id ?? (trip as any).id;
       await api.voiceIntakePatch(intake.id, { tripId: id }).catch(() => {});
-      onOpenTrip(id);
+      // The places they named are on the list before they see it (owner,
+      // 9 Sep 2026: "Windsor Castle should already be in my activities list").
+      // Each is looked up by name around the trip and put on the shortlist as a
+      // must-do; a name nothing answers to is simply not added.
+      const named = intake.resolved.wants.filter((w) => w.kind === 'place');
+      for (const w of named.slice(0, 4)) {
+        try {
+          const found = await api.shortlistSearch(id, { q: w.name });
+          const hit = found.results.find((r) => r.name.toLowerCase().includes(w.name.toLowerCase().split(' ')[0])) ?? found.results[0];
+          if (hit && hit.lat != null && hit.lng != null) await api.addToShortlist(id, { venueRef: `${hit.source}:${hit.sourcePlaceId}`, venueLabel: hit.name, kind: 'do', category: hit.category ?? null, lat: hit.lat, lng: hit.lng, mustDo: true });
+        } catch { /* not found: the list still opens */ }
+      }
+      // Straight into Activities, not the map (owner, 9 Sep 2026).
+      navigate(`${paths.trip(id)}?pill=activities`, { replace: true });
     } catch (e: any) { setError(e.message); setBusy(null); }
-  }, [intake, navigate, onOpenTrip]);
+  }, [intake, navigate]);
 
   if (speech.phase === 'listening' || speech.phase === 'transcribing') {
     return (
@@ -86,7 +99,7 @@ export function HeardScreen({ intakeId, household, onOpenTrip }: { intakeId: str
 
   return (
     <VoiceScreen footer={intake ? (
-      <PrimaryCta label={returning ? 'Create trip' : 'Show me plans'} onPress={go} busy={!!busy} />
+      <PrimaryCta label={returning ? 'Next · activities' : 'Show me plans'} onPress={go} busy={!!busy} />
     ) : null}>
       <VoiceHeader onBack={() => back(intake?.flow === 'returning' ? paths.trips() : paths.say())} right={<MicTile onPress={() => { void speech.start(); }} label="Add more" />} title={title} sub={sub} />
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}

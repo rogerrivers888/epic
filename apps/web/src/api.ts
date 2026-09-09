@@ -2737,14 +2737,21 @@ export type TripFacts = {
   who: { kind: string | null; names: string[]; adults: number | null; children: number | null; kids_mentioned: boolean };
   kids_ages: { name: string | null; age: number | null; band: string | null }[];
   vibe: string | null; vibe_no_preference: boolean; several_things: boolean | null; indoors: boolean | null;
-  food: { diets: string[]; cuisines: string[]; must_haves: string[]; avoids: string[]; place: string | null; no_preference: boolean };
+  wants: { name: string; kind: 'place' | 'type'; type: string | null }[];
+  food: { diets: string[]; cuisines: string[]; must_haves: string[]; kinds: string[]; avoids: string[]; place: string | null; no_preference: boolean };
   ambiguities: { slot: string; question: string; options: string[] }[];
   corrections: { slot: string; from: string; to: string }[];
 };
 export type Intake = {
   id: string; flow: IntakeFlow; mode: IntakeMode; language: string | null; asked: string | null; tripId: string | null;
   facts: TripFacts; slots: IntakeSlot[]; questions: IntakeQuestion[]; ambiguities: TripFacts['ambiguities'];
-  resolved: { tripType: string | null; start: string | null; end: string | null; timeOfDay: string | null; destination: string | null; origin: any; travelMode: string; maxMinutes: number; who: any; vibe: string | null; kidsAges: any; indoors: boolean | null; food: TripFacts['food'] };
+  resolved: {
+    tripType: string | null; start: string | null; end: string | null; timeOfDay: string | null; destination: string | null; origin: any; travelMode: string; maxMinutes: number; who: any; vibe: string | null; kidsAges: any; indoors: boolean | null; food: TripFacts['food'];
+    /** The things named: places to put on the list, kinds to lead the browse with. */
+    wants: { name: string; kind: 'place' | 'type'; type: string | null }[];
+    leadKinds: string[];
+    leadFoodKinds: string[];
+  };
   tripType: string | null;
   resultsHref: string;
   tripDraft: Parameters<typeof api.createTripV3>[0];

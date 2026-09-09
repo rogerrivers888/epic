@@ -49,7 +49,7 @@ test('a first-time request: said chips are lime, the profile fills the origin, a
   assert.equal(by.who.label, 'Whole family · 4');
   assert.equal(by.kids_ages.source, 'gap', 'kids were said without ages and the profile has none');
   assert.equal(by.vibe.label, 'Active');
-  assert.equal(by.several_things.source, 'default', 'a day out defaults to a few things');
+  assert.equal(by.several_things, undefined, 'nothing under What that was not said');
   assert.deepEqual(out.slots.filter((x) => x.key === 'food_diet').map((x) => x.label), ['Vegetarian']);
   assert.deepEqual(out.questions.map((q) => q.slot), ['kids_ages']);
   assert.equal(out.questions[0].children.length, 2, 'one row per child the household has');
@@ -59,8 +59,8 @@ test('a returning request asks nothing: the profile answers, in grey', () => {
   const out = resolveIntake({ facts: { ...heard, kids_ages: [] }, flow: 'returning', household, members, profile: { travelMode: 'car', maxMinutes: 60, diets: ['vegetarian'], destinationPoint: { lat: 51.48, lng: -0.61 } }, today });
   const by = Object.fromEntries(out.slots.map((x) => [x.key, x]));
   assert.deepEqual(out.questions, []);
-  assert.equal(by.kids_ages.source, 'profile');
-  assert.equal(by.kids_ages.label, 'Kids 9 & 6');
+  assert.equal(by.kids_ages, undefined, 'the household knows its own children; the whole-family chip says it all');
+  assert.equal(by.who.label, 'Whole family · 4');
   assert.ok(by.journey, 'the journey is worked out from home to the destination');
   assert.match(by.journey.label, /^Car · \d+ min/);
   assert.equal(out.slots.filter((x) => x.key === 'food_diet').length, 1, 'a diet said and on the profile is one chip, lime');
@@ -192,4 +192,28 @@ test('an exact age claims its child before a band does, whatever the order', () 
   const f = normaliseTripFacts({ ...heard, kids_ages: [{ name: null, age: null, band: '9-12' }, { name: null, age: 9, band: null }] });
   const kids = [{ id: 'x', name: 'Nine', age: 9, isMinor: true }, { id: 'y', name: 'Ten', age: 10, isMinor: true }];
   assert.equal(harvestOffer({ facts: f, members: [members[0], ...kids], profile: { diets: ['vegetarian'] } }), null, 'the nine is the nine and the band is the ten');
+});
+
+test('what was named leads What; food from the profile waits until food is mentioned', () => {
+  const f = normaliseTripFacts({
+    ...heard, vibe: null,
+    wants: [{ name: 'Windsor Castle', kind: 'place', type: 'castle' }, { name: 'a playground', kind: 'type', type: 'playground' }],
+    food: { diets: [], cuisines: [], must_haves: [], kinds: [], avoids: [], place: null, no_preference: false },
+  });
+  const out = resolveIntake({ facts: f, flow: 'returning', household, members, profile: { diets: ['vegetarian'], allergens: ['carrots'] }, today });
+  assert.deepEqual(out.slots.filter((x) => x.key === 'want').map((x) => x.label), ['Windsor Castle', 'A playground']);
+  assert.equal(out.slots.some((x) => x.key.startsWith('food')), false, 'no food chips before food is mentioned');
+  assert.deepEqual(out.resolved.leadKinds, ['castle', 'playground']);
+  const withPub = resolveIntake({ facts: { ...f, food: { ...f.food, kinds: ['pub'], must_haves: ['a pub lunch'] } }, flow: 'returning', household, members, profile: { diets: ['vegetarian'] }, today });
+  assert.deepEqual(withPub.slots.filter((x) => x.key.startsWith('food')).map((x) => `${x.key}:${x.label}:${x.source}`).sort(), ['food_diet:Vegetarian:profile', 'food_kind:Pub:said']);
+  assert.deepEqual(withPub.resolved.leadFoodKinds, ['pub']);
+});
+
+test('more children than the household has is "N other kids", tappable, never a question for a returning household', () => {
+  const f = normaliseTripFacts({ ...heard, who: { kind: 'whole_household', names: [], adults: 2, children: 3, kids_mentioned: true } });
+  const out = resolveIntake({ facts: f, flow: 'returning', household, members, today });
+  const kids = out.slots.find((x) => x.key === 'kids_ages');
+  assert.equal(kids.label, '1 other kid');
+  assert.equal(kids.source, 'said');
+  assert.deepEqual(out.questions, []);
 });

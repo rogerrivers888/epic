@@ -365,8 +365,22 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       price: (a: TripAlongPlace, b: TripAlongPlace) => (a.priceLevel ?? 9) - (b.priceLevel ?? 9),
       type: (a: TripAlongPlace, b: TripAlongPlace) => String(kitchen(a) ?? a.category ?? '').localeCompare(String(kitchen(b) ?? b.category ?? '')),
     }[sort] ?? null;
-    return by ? [...kept].sort(by) : kept;
-  }, [along.places, kindNow, cuisineNow, minRating, priceBand, sort]);
+    const ordered = by ? [...kept].sort(by) : kept;
+    // What was said leads (voice intake, 9 Sep 2026: "the playground one
+    // should be at the top because I've told you specifically"). The kinds
+    // named come first, in the order they were named, each in the sort chosen;
+    // a pub asked for as a lunch leads with the pubs that serve food. Nothing
+    // is hidden — the rest follows as it always did.
+    const leads = pill === 'food' ? (voiceIntake?.resolved.leadFoodKinds ?? []) : (voiceIntake?.resolved.leadKinds ?? []);
+    if (!leads.length || kindNow) return ordered;
+    const rank = (p: TripAlongPlace) => {
+      const k = primaryKind(p, menu);
+      const at = k ? leads.indexOf(k) : -1;
+      if (at < 0) return leads.length * 2;
+      return at * 2 + (pill === 'food' && k === 'pub' && !servesFood(p) ? 1 : 0);
+    };
+    return [...ordered].sort((a, b) => rank(a) - rank(b));
+  }, [along.places, kindNow, cuisineNow, minRating, priceBand, sort, voiceIntake, pill]);
 
   /**
    * Start reading the menus of the first few restaurants, before anybody asks.
@@ -920,9 +934,22 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             looking at what is nearby, and the trip's dates are not the
             question (trips V2). The trip's name comes back on the way out. */}
         {pill ? (
-          <Text style={styles.browseTitle} numberOfLines={1}>
-            {pill === 'shortlist' ? 'Shortlist' : pill === 'food' ? 'Food nearby' : pill === 'stay' ? 'Stays nearby' : 'Activities nearby'}
-          </Text>
+          <>
+            <Text style={styles.browseTitle} numberOfLines={1}>
+              {pill === 'shortlist' ? 'Shortlist' : pill === 'food' ? 'Food nearby' : pill === 'stay' ? 'Stays nearby' : 'Activities nearby'}
+            </Text>
+            {/* What was said leads the list (voice intake): named here so the
+                order reads as a choice, and a tap narrows to just that kind. */}
+            {(pill === 'activities' || pill === 'food') && !kindNow && (pill === 'food' ? voiceIntake?.resolved.leadFoodKinds : voiceIntake?.resolved.leadKinds)?.length ? (
+              <Text style={type.small} numberOfLines={1}>
+                {'You said: '}
+                {(pill === 'food' ? voiceIntake!.resolved.leadFoodKinds : voiceIntake!.resolved.leadKinds).map((k, i) => (
+                  <Text key={k} onPress={() => setKindOf(k)} style={{ color: colors.accent, fontWeight: '600' }}>{i ? ' · ' : ''}{k === 'pub' && pill === 'food' ? 'pubs with food' : `${k}s`}</Text>
+                ))}
+                {' — first'}
+              </Text>
+            ) : null}
+          </>
         ) : (
           <>
             <Pressable
@@ -2869,6 +2896,10 @@ const isKind = (p: TripAlongPlace, kind: string) => kindsOf(p).includes(kind.toL
  */
 const primaryKind = (p: TripAlongPlace, menu: string[]): string | null =>
   menu.find((k) => isKind(p, k)) ?? null;
+
+/** A pub that serves food: anything a source said about its kitchen, or a food word among what it is. */
+const servesFood = (p: TripAlongPlace): boolean =>
+  (p.cuisines?.length ?? 0) > 0 || (p.experiences ?? []).some((e) => /food|lunch|dinner|roast|meal|dining|gastro|kitchen|restaurant/i.test(e));
 
 /**
  * Search along the route (handoff §08): the sheet at the top, a field, and six

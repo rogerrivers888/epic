@@ -41,6 +41,9 @@ export const TRAVEL_MODES = ['car', 'public_transport', 'walk', 'cycle'];
 export const WHO_KINDS = ['whole_household', 'named', 'guests', 'just_me'];
 export const VIBES = ['fun', 'cultural', 'active', 'relaxed', 'mixed'];
 export const AGE_BANDS = ['0-4', '5-8', '9-12', '13+'];
+/** The kinds the trip's browse files things under (TripMapScreen THING_KINDS / FOOD_KINDS) — the same words, so a want leads the same lane. */
+export const THING_KINDS = ['walk', 'park', 'castle', 'museum', 'beach', 'viewpoint', 'playground', 'farm', 'gallery'];
+export const FOOD_KINDS = ['restaurant', 'pub', 'cafe', 'bar', 'bakery', 'ice cream'];
 export const MINUTE_BANDS = [20, 30, 60, 120];
 
 export const TRIP_FACTS_SCHEMA = {
@@ -94,7 +97,20 @@ export const TRIP_FACTS_SCHEMA = {
         required: ['name', 'age', 'band'],
       },
     },
-    vibe: oneOf(VIBES, 'The mood they asked for: "fun" (theme parks, play), "cultural" (museums, castles, galleries), "active" (walks, climbing, sport), "relaxed" (gardens, spas, a slow day), "mixed" when they asked for a bit of everything; null if not said'),
+    wants: {
+      type: 'array',
+      description: 'The specific things they want to do: a named place ("Windsor Castle", "the Ashmolean") or a kind of thing ("a playground", "a walk", "a castle", "a museum"). One entry each, in their words; empty if none',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          name: { type: 'string', description: 'The place\'s name as a map would spell it, or the kind of thing in one or two words ("playground", "walk", "castle")' },
+          kind: { type: 'string', enum: ['place', 'type'], description: '"place" for a named place; "type" for a kind of thing' },
+          type: nullable('string', { enum: [...THING_KINDS, null], description: 'For a kind of thing, the nearest of these words; for a named place, what kind of place it is if obvious ("Windsor Castle" → castle); null if none fits' }),
+        },
+        required: ['name', 'kind', 'type'],
+      },
+    },
+    vibe: oneOf(VIBES, 'The mood they asked for: "fun" (theme parks, play), "cultural" (museums, castles, galleries), "active" (walks, climbing, sport), "relaxed" (gardens, spas, a slow day), "mixed" when they asked for a bit of everything; null if not said. A specific thing they named goes in wants, not here'),
     vibe_no_preference: { type: 'boolean', description: 'True only if they said they do not mind what kind of thing it is' },
     several_things: bool('True if they want a few things in the day, false if one thing is enough; null if not said'),
     indoors: bool('True if they asked for somewhere indoors or mentioned rain; false if they asked to be outdoors; null otherwise'),
@@ -104,11 +120,12 @@ export const TRIP_FACTS_SCHEMA = {
         diets: strings('Diets said as applying to the group or the speaker — vegetarian, vegan, pescatarian, halal, kosher, gluten-free; empty if none'),
         cuisines: strings('Kinds of food or cuisine they asked for ("Italian", "a curry", "sushi"); empty if none'),
         must_haves: strings('Things they want from the meal ("a pub lunch", "somewhere with a garden", "afternoon tea"); empty if none'),
+        kinds: { type: 'array', items: { type: 'string', enum: FOOD_KINDS }, description: 'The kind of place to eat they asked for, from these words: "a pub lunch" → pub, "a café" → cafe, "a nice restaurant" → restaurant; empty if none' },
         avoids: strings('Food they do not want, including allergies ("no seafood", "nut allergy"); empty if none'),
         place: str('A named place to eat, if one was said; null otherwise'),
         no_preference: { type: 'boolean', description: 'True only if they said they do not mind about food' },
       },
-      required: ['diets', 'cuisines', 'must_haves', 'avoids', 'place', 'no_preference'],
+      required: ['diets', 'cuisines', 'must_haves', 'kinds', 'avoids', 'place', 'no_preference'],
     },
     ambiguities: {
       type: 'array',
@@ -135,7 +152,7 @@ export const TRIP_FACTS_SCHEMA = {
       },
     },
   },
-  required: ['language', 'trip_type', 'when', 'time_of_day', 'destination', 'origin', 'travel_mode', 'max_minutes', 'who', 'kids_ages', 'vibe', 'vibe_no_preference', 'several_things', 'indoors', 'food', 'ambiguities', 'corrections'],
+  required: ['language', 'trip_type', 'when', 'time_of_day', 'destination', 'origin', 'travel_mode', 'max_minutes', 'who', 'kids_ages', 'wants', 'vibe', 'vibe_no_preference', 'several_things', 'indoors', 'food', 'ambiguities', 'corrections'],
 };
 
 export const TRIP_FACTS_SYSTEM = `You read a faithful transcript of somebody telling a family day-out and trip planner what they want, and you fill in a form of facts.
@@ -148,7 +165,8 @@ Rules:
 5. Place names: spell them as a map would. If a spelling is clearly a mishearing of a real place you can name with confidence, use the real name. If a name could be two different places and the difference matters (Windsor in Berkshire or Windsor in Ontario), raise an ambiguity rather than choosing.
 6. The people named in the input are the household. Match names said in the transcript to them; a name that is not one of them is a guest. Children's ages count only if they were said.
 7. Hesitations, repeated words and false starts are not content.
-8. Every question and option you write is in the language of the transcript.`;
+8. Every question and option you write is in the language of the transcript.
+9. A named attraction ("Windsor Castle", "Legoland") is a want, and the town it is in is the destination when no other place was named. A kind of thing ("a playground", "a good walk") is a want of kind "type".`;
 
 // ---------------------------------------------------------------------------
 // tidying the answer
@@ -184,12 +202,13 @@ export function normaliseTripFacts(raw) {
       kids_mentioned: Boolean(o.who?.kids_mentioned) || kids.length > 0,
     },
     kids_ages: kids,
+    wants: (Array.isArray(o.wants) ? o.wants : []).filter((w) => s(w?.name)).map((w) => ({ name: s(w.name), kind: w.kind === 'place' ? 'place' : 'type', type: inSet(w.type, THING_KINDS) })),
     vibe: inSet(o.vibe, VIBES),
     vibe_no_preference: Boolean(o.vibe_no_preference),
     several_things: b(o.several_things),
     indoors: b(o.indoors),
     food: {
-      diets: list(o.food?.diets), cuisines: list(o.food?.cuisines), must_haves: list(o.food?.must_haves), avoids: list(o.food?.avoids),
+      diets: list(o.food?.diets), cuisines: list(o.food?.cuisines), must_haves: list(o.food?.must_haves), kinds: list(o.food?.kinds).filter((k) => FOOD_KINDS.includes(k)), avoids: list(o.food?.avoids),
       place: s(o.food?.place), no_preference: Boolean(o.food?.no_preference),
     },
     ambiguities: (Array.isArray(o.ambiguities) ? o.ambiguities : []).filter((a) => s(a?.question)).map((a) => ({ slot: s(a.slot) ?? 'plan', question: s(a.question), options: list(a.options) })),
@@ -222,7 +241,8 @@ export function mergeTripFacts(base, next) {
   ['start', 'end', 'as_said'].forEach((k) => take(['when', k]));
   ['kind', 'name'].forEach((k) => take(['origin', k]));
   ['kind', 'names', 'adults', 'children', 'kids_mentioned'].forEach((k) => take(['who', k]));
-  ['diets', 'cuisines', 'must_haves', 'avoids', 'place', 'no_preference'].forEach((k) => take(['food', k]));
+  ['diets', 'cuisines', 'must_haves', 'kinds', 'avoids', 'place', 'no_preference'].forEach((k) => take(['food', k]));
+  if (next.wants?.length) { const seen = new Set((out.wants ?? []).map((w) => w.name.toLowerCase())); out.wants = [...(out.wants ?? []), ...next.wants.filter((w) => !seen.has(w.name.toLowerCase()))]; }
   // Kids' ages and questions are replaced, not joined: a second breath about
   // the children is a correction of the first.
   if (next.kids_ages?.length) out.kids_ages = next.kids_ages;
@@ -252,6 +272,7 @@ const VIBE_ICON = { fun: 'fun', cultural: 'culture', active: 'activity', relaxed
  */
 export const VIBE_TO_CATEGORY = { fun: 'fun', cultural: 'culture', active: null, relaxed: 'relaxing', mixed: null };
 const TYPE_LABEL = { today: 'Today', day_out: 'A day out', weekend: 'A weekend', holiday: 'A holiday', event: 'An event' };
+const KIND_ICON = { walk: 'walk', park: 'park', castle: 'culture', museum: 'museum', beach: 'beach', viewpoint: 'viewpoint', playground: 'playground', farm: 'farm', gallery: 'culture' };
 
 export const minutesLabel = (m) => (m == null ? '' : m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hr` : `${Math.floor(m / 60)} hr ${m % 60}`);
 const snapMinutes = (m) => (m == null ? null : MINUTE_BANDS.find((band) => m <= band) ?? (m <= 180 ? 180 : 240));
@@ -362,36 +383,55 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   else byDefault('who', 'Whole family', 'household', { kind: 'whole_household' });
 
   // --- kids' ages ----------------------------------------------------------------
+  // The household already knows its own children, so "whole family" says it
+  // all (owner, 9 Sep 2026: "it now knows the whole family"). A kids chip is
+  // drawn only for what the profile cannot know: ages said this time, or more
+  // children than the household has — "2 other kids", tappable for their ages.
   const saidAges = f.kids_ages.filter((k) => k.age != null || k.band);
-  const kidsInPlay = f.who.kids_mentioned || (f.who.children ?? 0) > 0 || (f.who.kind !== 'just_me' && children.length > 0 && !(f.who.kind === 'named' && !f.who.names.some((nm) => children.some((c) => c.name.toLowerCase().startsWith(nm.toLowerCase())))));
+  const saidCount = f.who.children ?? (f.who.kids_mentioned && !children.length ? 1 : 0);
+  const extra = Math.max(0, saidCount - children.length);
   if (saidAges.length) {
     said('kids_ages', `Kids ${joinNames(saidAges.map((k) => (k.age != null ? String(k.age) : k.band)))}`, 'children', saidAges);
-  } else if (kidsInPlay) {
-    const known = children.filter((c) => c.age != null);
-    if (known.length && (!f.who.kids_mentioned || known.length >= (f.who.children ?? known.length))) {
-      fromProfile('kids_ages', `Kids ${joinNames(known.map((c) => String(c.age)))}`, 'children', known.map((c) => ({ name: c.name, age: c.age, band: bandOfAge(c.age) })));
-    } else if (asking) gap('kids_ages', 'Kids’ ages?', { count: f.who.children ?? Math.max(children.length, 1) });
-    else if (children.length) fromProfile('kids_ages', `${children.length} ${children.length === 1 ? 'child' : 'kids'}`, 'children', children.map((c) => ({ name: c.name, age: c.age, band: bandOfAge(c.age) })));
+  } else if (extra > 0 && children.length) {
+    said('kids_ages', `${extra} other ${extra === 1 ? 'kid' : 'kids'}`, 'children', [], { count: extra });
+  } else if ((f.who.kids_mentioned || saidCount > 0) && !children.length) {
+    if (asking) gap('kids_ages', 'Kids’ ages?', { count: Math.max(saidCount, 1) });
+    else said('kids_ages', `${Math.max(saidCount, 1)} ${saidCount === 1 ? 'kid' : 'kids'}`, 'children', [], { count: Math.max(saidCount, 1) });
+  } else if (asking && f.who.kids_mentioned && children.length && children.every((c) => c.age == null)) {
+    // First time, and the household's children are on file without ages: the
+    // one question that changes the plan (handoff C4).
+    gap('kids_ages', 'Kids’ ages?', { count: children.length });
   }
 
   // --- what -------------------------------------------------------------------
+  // Only what was said (owner, 9 Sep 2026: "it should just leave that blank
+  // unless I've specified"): the places and kinds of thing they named first,
+  // then a mood if they gave one. No default here.
+  for (const w of f.wants) said('want', w.kind === 'type' ? cap(w.name) : w.name, w.type ? (KIND_ICON[w.type] ?? 'address') : w.kind === 'place' ? 'address' : 'inspire', w);
   if (f.vibe) said('vibe', VIBE_LABEL[f.vibe], VIBE_ICON[f.vibe], f.vibe);
   else if (f.vibe_no_preference) said('vibe', 'Anything', 'inspire', 'any');
-  else if (asking) gap('vibe', 'Mood?');
+  else if (asking && !f.wants.length) gap('vibe', 'Mood?');
   if (f.several_things === true) said('several_things', 'A few things', 'list', true);
   else if (f.several_things === false) said('several_things', 'One thing', 'list', false);
-  else if (tripType === 'day_out' || tripType === 'weekend' || tripType === 'holiday') byDefault('several_things', 'A few things', 'list', true);
   if (f.indoors === true) said('indoors', 'Indoors', 'home', true);
   else if (f.indoors === false) said('indoors', 'Outdoors', 'outdoors', false);
 
   // --- food ------------------------------------------------------------------------
+  // Whether food is on the table at all. Until they say something about eating,
+  // the card says nothing about it — the household's diets are applied to every
+  // list regardless, and a chip saying "Vegetarian" before a meal has been
+  // mentioned answers a question nobody asked (owner, 9 Sep 2026).
+  const foodSaid = f.food.diets.length || f.food.cuisines.length || f.food.must_haves.length || f.food.kinds.length || f.food.avoids.length || f.food.place || f.food.no_preference;
   const profileDiets = uniq((profile.diets ?? []).map(cap));
   const profileAllergies = uniq((profile.allergens ?? []).map((a) => `No ${a}`));
   for (const d of uniq(f.food.diets.map(cap))) said('food_diet', d, 'restaurant', d);
-  for (const d of profileDiets.filter((d) => !f.food.diets.some((x) => x.toLowerCase() === d.toLowerCase()))) fromProfile('food_diet', d, 'restaurant', d);
-  for (const a of profileAllergies) fromProfile('food_allergy', a, 'allergen', a);
+  if (foodSaid) {
+    for (const d of profileDiets.filter((d) => !f.food.diets.some((x) => x.toLowerCase() === d.toLowerCase()))) fromProfile('food_diet', d, 'restaurant', d);
+    for (const a of profileAllergies) fromProfile('food_allergy', a, 'allergen', a);
+  }
   for (const c of uniq(f.food.cuisines.map(cap))) said('food_cuisine', c, 'restaurant', c);
-  for (const m of uniq(f.food.must_haves.map(cap))) said('food_must', m, 'restaurant', m);
+  for (const k of uniq(f.food.kinds)) said('food_kind', k === 'pub' ? 'Pub' : cap(k), 'restaurant', k);
+  for (const m of uniq(f.food.must_haves.map(cap)).filter((m) => !f.food.kinds.some((k) => m.toLowerCase().includes(k)))) said('food_must', m, 'restaurant', m);
   for (const a of uniq(f.food.avoids.map(cap))) said('food_avoid', a, 'allergen', a);
   if (f.food.place) said('food_place', f.food.place, 'restaurant', f.food.place);
   if (f.food.no_preference) said('food_pref', 'No preference', 'restaurant', 'none');
@@ -410,6 +450,10 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
       tripType, start, end, timeOfDay: f.time_of_day, destination: f.destination, origin: slotValue(slots, 'origin'),
       travelMode: mode, maxMinutes: maxMinutes ?? 60, who: slotValue(slots, 'who'), vibe: f.vibe ?? (f.vibe_no_preference ? 'any' : null),
       kidsAges: slotValue(slots, 'kids_ages'), indoors: f.indoors, food: f.food,
+      /** What the trip's browse leads with: the kinds of thing named, and the named places to put on the shortlist. */
+      wants: f.wants,
+      leadKinds: uniq(f.wants.map((w) => w.type).filter(Boolean)),
+      leadFoodKinds: uniq(f.food.kinds),
     },
   };
 }
@@ -433,6 +477,7 @@ export function applyOverrides(facts, overrides) {
       case 'max_minutes': if (n(v) != null) f.max_minutes = v; break;
       case 'who': if (v && typeof v === 'object') f.who = { ...f.who, kind: inSet(v.kind, WHO_KINDS), names: list(v.names), adults: n(v.adults), children: n(v.children) }; break;
       case 'kids_ages': if (Array.isArray(v)) { f.kids_ages = v.map((k) => ({ name: s(k?.name), age: n(k?.age), band: inSet(k?.band, AGE_BANDS) ?? bandOfAge(n(k?.age)) })).filter((k) => k.age != null || k.band); f.who.kids_mentioned = true; } break;
+      case 'want': if (Array.isArray(v)) f.wants = v.filter((w) => s(w?.name)).map((w) => ({ name: s(w.name), kind: w.kind === 'place' ? 'place' : 'type', type: inSet(w.type, THING_KINDS) })); break;
       case 'vibe': if (VIBES.includes(v)) { f.vibe = v; f.vibe_no_preference = false; } else if (v === 'any') { f.vibe = null; f.vibe_no_preference = true; } break;
       case 'several_things': f.several_things = b(v); break;
       case 'indoors': f.indoors = b(v); break;

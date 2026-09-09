@@ -15,20 +15,20 @@ const FIRST: Grouping = [
   { title: 'Where & how far', keys: ['destination', 'origin', 'travel_mode', 'max_minutes', 'journey'] },
   { title: 'When', keys: ['trip_type', 'when', 'time_of_day'] },
   { title: 'Who', keys: ['who', 'kids_ages'] },
-  { title: 'What', keys: ['vibe', 'several_things', 'indoors'] },
-  { title: 'Food', keys: ['food_diet', 'food_allergy', 'food_cuisine', 'food_must', 'food_avoid', 'food_place', 'food_pref'] },
+  { title: 'What', keys: ['want', 'vibe', 'several_things', 'indoors'] },
+  { title: 'Food', keys: ['food_kind', 'food_diet', 'food_allergy', 'food_cuisine', 'food_must', 'food_avoid', 'food_place', 'food_pref'] },
 ];
 const STEPS: Grouping = [
   { title: 'Where & how far', keys: ['destination', 'origin', 'travel_mode', 'max_minutes', 'journey', 'when', 'trip_type', 'time_of_day'] },
-  { title: 'Who & what', keys: ['who', 'kids_ages', 'vibe', 'several_things', 'indoors'] },
-  { title: 'Food & budget', keys: ['food_diet', 'food_allergy', 'food_cuisine', 'food_must', 'food_avoid', 'food_place', 'food_pref'] },
+  { title: 'Who & what', keys: ['who', 'kids_ages', 'want', 'vibe', 'several_things', 'indoors'] },
+  { title: 'Food & budget', keys: ['food_kind', 'food_diet', 'food_allergy', 'food_cuisine', 'food_must', 'food_avoid', 'food_place', 'food_pref'] },
 ];
 const RETURNING: Grouping = [
   { title: 'Where & when', keys: ['destination', 'when', 'trip_type', 'time_of_day'] },
   { title: 'Getting there', keys: ['origin', 'journey', 'travel_mode', 'max_minutes'] },
   { title: 'Who', keys: ['who', 'kids_ages'] },
-  { title: 'What', keys: ['vibe', 'several_things', 'indoors'] },
-  { title: 'Food', keys: ['food_diet', 'food_allergy', 'food_cuisine', 'food_must', 'food_avoid', 'food_place', 'food_pref'] },
+  { title: 'What', keys: ['want', 'vibe', 'several_things', 'indoors'] },
+  { title: 'Food', keys: ['food_kind', 'food_diet', 'food_allergy', 'food_cuisine', 'food_must', 'food_avoid', 'food_place', 'food_pref'] },
 ];
 
 export function groupingFor(intake: Pick<Intake, 'flow' | 'mode'>): Grouping {
