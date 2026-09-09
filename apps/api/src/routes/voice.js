@@ -48,6 +48,7 @@ import {
   applyFood, applyLikes, likesVocabularyText, normaliseFood, normaliseLikes, normaliseWho,
 } from '../domain/voiceHousehold.js';
 import { searchAreas } from '../sources/areas.js';
+import { kmBetween } from '../domain/travel.js';
 import { geocode } from '../sources/geocode.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import * as households from '../repositories/households.js';
@@ -504,12 +505,17 @@ async function profileFor(household, members) {
 const profileComplete = (household, members) => Boolean(household.home_lat != null && members.length && (household.travel_mode || household.max_travel_minutes));
 
 /** A named place → a point, through the area search (a town, never a street). */
-async function pointFor(text, home) {
+async function pointFor(text, home, { attraction = false } = {}) {
   if (!text) return null;
-  const [area] = await searchAreas(text, { limit: 1, near: home }).catch(() => []);
-  if (area?.lat != null) return { lat: area.lat, lng: area.lng, label: area.label ?? text, locality: area.locality ?? null, countryCode: area.countryCode ?? null };
-  const [geo] = await geocode(text, { limit: 1, near: home }).catch(() => []);
-  return geo?.lat != null ? { lat: geo.lat, lng: geo.lng, label: geo.label ?? text, locality: geo.locality ?? null, countryCode: geo.countryCode ?? null } : null;
+  const shape = (p) => ({ lat: p.lat, lng: p.lng, label: p.label ?? text, locality: p.locality ?? null, countryCode: p.countryCode ?? null });
+  // A town is an area; a castle is a place. Asking the area search for
+  // "Windsor Castle" answered with somewhere 122 hours' drive away (9 Sep 2026).
+  const tries = attraction ? [() => geocode(text, { limit: 1, near: home }), () => searchAreas(text, { limit: 1, near: home })] : [() => searchAreas(text, { limit: 1, near: home }), () => geocode(text, { limit: 1, near: home })];
+  for (const t of tries) {
+    const [hit] = await t().catch(() => []);
+    if (hit?.lat != null && (!home || kmBetween(home, hit) < 1500)) return shape(hit);
+  }
+  return null;
 }
 
 /** Everything a screen draws for one intake row. */
@@ -521,7 +527,8 @@ async function intakePayload(row, household, members) {
   const facts = row.facts;
   const first = resolveIntake({ facts, overrides: row.overrides, answers: row.answers, flow: row.flow, household, members, profile, today, timezone });
   // The destination as a point, once, so the journey and the results can use it.
-  const destinationPoint = first.resolved.destination ? await pointFor(first.resolved.destination, home) : null;
+  const namedPlace = first.resolved.wants.some((w) => w.kind === 'place' && w.name.toLowerCase() === String(first.resolved.destination ?? '').toLowerCase());
+  const destinationPoint = first.resolved.destination ? await pointFor(first.resolved.destination, home, { attraction: namedPlace }) : null;
   const originPoint = first.resolved.origin?.kind === 'named' ? await pointFor(first.resolved.origin.name, home) : null;
   const out = destinationPoint ? resolveIntake({ facts, overrides: row.overrides, answers: row.answers, flow: row.flow, household, members, profile: { ...profile, destinationPoint }, today, timezone }) : first;
   const draft = tripDraft({ resolved: out.resolved, destinationPoint, members });

@@ -166,7 +166,9 @@ Rules:
 6. The people named in the input are the household. Match names said in the transcript to them; a name that is not one of them is a guest. Children's ages count only if they were said.
 7. Hesitations, repeated words and false starts are not content.
 8. Every question and option you write is in the language of the transcript.
-9. A named attraction ("Windsor Castle", "Legoland") is a want, and the town it is in is the destination when no other place was named. A kind of thing ("a playground", "a good walk") is a want of kind "type".`;
+9. A named attraction ("Windsor Castle", "Legoland") is a want, and the town it is in is the destination when no other place was named ("Windsor Castle" → destination "Windsor"). A kind of thing ("a playground", "a good walk") is a want of kind "type". Food and drink ("a pub lunch", "a café") are never wants: they go under food. A mood ("somewhere fun", "something relaxed") is vibe, not a want.
+10. when.as_said holds only words about *when* ("on Saturday", "next weekend") — never "a day out". A weekday named means the next such day after today; the input lists the dates of the coming week.
+11. Numbers of people count: "there will be three kids" sets who.children to 3. The household's own children are not kids_ages entries unless their age was actually said in the transcript — never copy ages from the household list.`;
 
 // ---------------------------------------------------------------------------
 // tidying the answer
@@ -182,6 +184,26 @@ const inSet = (v, set) => (set.includes(v) ? v : null);
 export const bandOfAge = (age) => (age == null ? null : age <= 4 ? '0-4' : age <= 8 ? '5-8' : age <= 12 ? '9-12' : '13+');
 /** The middle of a band, when an age was tapped rather than said. */
 export const ageOfBand = (band) => ({ '0-4': 3, '5-8': 6, '9-12': 10, '13+': 15 }[band] ?? null);
+
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+/**
+ * "On Saturday" means the next Saturday, whatever date the model wrote. The
+ * first deployed run put "Saturday" on a Friday (9 Sep 2026); the words are
+ * the evidence, so a weekday in as_said corrects the date to match it.
+ */
+export function holdWeekday(when, today) {
+  if (!when?.as_said || !today) return when;
+  const m = when.as_said.toLowerCase().match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  if (!m) return when;
+  const wanted = WEEKDAYS.indexOf(m[1]);
+  const d = new Date(`${today}T12:00:00Z`);
+  const add = (wanted - d.getUTCDay() + 7) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + add);
+  const next = d.toISOString().slice(0, 10);
+  if (when.start && new Date(`${when.start}T12:00:00Z`).getUTCDay() === wanted) return when;
+  const nights = when.start && when.end ? Math.round((Date.parse(when.end) - Date.parse(when.start)) / 86_400_000) : 0;
+  return { ...when, start: next, end: nights > 0 ? addDays(next, nights) : when.end };
+}
 
 export function normaliseTripFacts(raw) {
   const o = raw ?? {};
@@ -202,7 +224,11 @@ export function normaliseTripFacts(raw) {
       kids_mentioned: Boolean(o.who?.kids_mentioned) || kids.length > 0,
     },
     kids_ages: kids,
-    wants: (Array.isArray(o.wants) ? o.wants : []).filter((w) => s(w?.name)).map((w) => ({ name: s(w.name), kind: w.kind === 'place' ? 'place' : 'type', type: inSet(w.type, THING_KINDS) })),
+    wants: (Array.isArray(o.wants) ? o.wants : [])
+      .filter((w) => s(w?.name))
+      .map((w) => ({ name: s(w.name), kind: w.kind === 'place' ? 'place' : 'type', type: inSet(w.type, THING_KINDS) }))
+      // Food is food and a mood is a mood; neither is a thing to go and see.
+      .filter((w) => !(w.kind === 'type' && !w.type && /\b(lunch|dinner|breakfast|brunch|tea|pub|caf[eé]|restaurant|eat|food|drink|meal|fun|relax|cultur|active|somewhere|something)\b/i.test(w.name))),
     vibe: inSet(o.vibe, VIBES),
     vibe_no_preference: Boolean(o.vibe_no_preference),
     several_things: b(o.several_things),
@@ -305,6 +331,7 @@ const nextSaturday = (today) => {
  */
 export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'first', household, members = [], profile = {}, today, timezone = 'Europe/London' }) {
   const f = applyOverrides(facts, { ...answers, ...overrides });
+  f.when = holdWeekday(f.when, today);
   const home = household?.home_lat != null ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng } : null;
   const children = members.filter((m) => m.isMinor || (m.age != null && m.age < 18));
   const adults = members.filter((m) => !children.includes(m));
@@ -387,7 +414,10 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   // all (owner, 9 Sep 2026: "it now knows the whole family"). A kids chip is
   // drawn only for what the profile cannot know: ages said this time, or more
   // children than the household has — "2 other kids", tappable for their ages.
-  const saidAges = f.kids_ages.filter((k) => k.age != null || k.band);
+  // An entry that is one of the household's own children — by name, or an
+  // exact age with no name — is the profile talking, however it arrived.
+  const saidAges = f.kids_ages.filter((k) => (k.age != null || k.band)
+    && !children.some((c) => (k.name && c.name.toLowerCase().startsWith(k.name.toLowerCase())) || (!k.name && k.age != null && c.age === k.age)));
   const saidCount = f.who.children ?? (f.who.kids_mentioned && !children.length ? 1 : 0);
   const extra = Math.max(0, saidCount - children.length);
   if (saidAges.length) {
@@ -411,8 +441,8 @@ export function resolveIntake({ facts, overrides = {}, answers = {}, flow = 'fir
   if (f.vibe) said('vibe', VIBE_LABEL[f.vibe], VIBE_ICON[f.vibe], f.vibe);
   else if (f.vibe_no_preference) said('vibe', 'Anything', 'inspire', 'any');
   else if (asking && !f.wants.length) gap('vibe', 'Mood?');
-  if (f.several_things === true) said('several_things', 'A few things', 'list', true);
-  else if (f.several_things === false) said('several_things', 'One thing', 'list', false);
+  // "A few things" is a reading of the list, not a thing they asked for; it
+  // stays in the facts and off the card (owner, 9 Sep 2026).
   if (f.indoors === true) said('indoors', 'Indoors', 'home', true);
   else if (f.indoors === false) said('indoors', 'Outdoors', 'outdoors', false);
 
@@ -606,8 +636,9 @@ export function harvestOffer({ facts, members = [], profile = {} }) {
 /** The input stage two reads for a trip request. */
 export function tripFactsInput({ transcript, today, timezone, home, members, page = null, previous = null }) {
   const people = members.map((m) => `${m.name}${m.age != null ? ` (${m.age})` : m.isMinor ? ' (child)' : ''}`);
+  const week = Array.from({ length: 8 }, (_, i) => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + i); return `${d.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })} ${d.toISOString().slice(0, 10)}`; });
   const lines = [
-    `Today is ${today} (${timezone}).`,
+    `Today is ${week[0]} (${timezone}). The coming days: ${week.slice(1).join(', ')}.`,
     home ? `The household's home is ${home}.` : 'No home address is set.',
     people.length ? `The household: ${people.join(', ')}.` : 'Nobody in the household is named yet.',
     page ? `This is page ${page.n} of 3 of a short wizard; the question asked was "${page.question}". Fill only what was said; other slots stay null.` : null,

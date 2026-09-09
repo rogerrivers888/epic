@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TRIP_FACTS_SCHEMA, applyOverrides, harvestOffer, mergeTripFacts, normaliseTripFacts, resolveIntake, resultsHref, tripDraft,
+  TRIP_FACTS_SCHEMA, applyOverrides, harvestOffer, holdWeekday, mergeTripFacts, normaliseTripFacts, resolveIntake, resultsHref, tripDraft,
 } from '../src/domain/voiceFacts.js';
 import { schemaIsStrict } from '../src/domain/voiceIntent.js';
 import { FOOD_SCHEMA, LIKES_SCHEMA, WHO_SCHEMA, normaliseLikes, normaliseWho } from '../src/domain/voiceHousehold.js';
@@ -216,4 +216,23 @@ test('more children than the household has is "N other kids", tappable, never a 
   assert.equal(kids.label, '1 other kid');
   assert.equal(kids.source, 'said');
   assert.deepEqual(out.questions, []);
+});
+
+test('"on Saturday" is the next Saturday whatever date the model wrote, and a range keeps its length', () => {
+  assert.equal(holdWeekday({ start: '2026-09-11', end: null, as_said: 'on Saturday' }, '2026-09-09').start, '2026-09-12');
+  assert.equal(holdWeekday({ start: '2026-09-12', end: null, as_said: 'on Saturday' }, '2026-09-09').start, '2026-09-12', 'right already');
+  assert.deepEqual(holdWeekday({ start: '2026-09-10', end: '2026-09-11', as_said: 'Friday to Saturday' }, '2026-09-09'), { start: '2026-09-11', end: '2026-09-12', as_said: 'Friday to Saturday' });
+  assert.equal(holdWeekday({ start: '2026-09-11', end: null, as_said: 'tomorrow' }, '2026-09-09').start, '2026-09-11', 'no weekday, no change');
+});
+
+test('the household’s own children are not "said" ages, and food or a mood is not a want', () => {
+  const f = normaliseTripFacts({
+    ...heard,
+    kids_ages: [{ name: 'Priya', age: 9, band: null }, { name: null, age: 6, band: null }],
+    wants: [{ name: 'Windsor Castle', kind: 'place', type: 'castle' }, { name: 'pub lunch', kind: 'type', type: null }, { name: 'somewhere fun', kind: 'type', type: null }],
+  });
+  assert.deepEqual(f.wants.map((w) => w.name), ['Windsor Castle']);
+  const out = resolveIntake({ facts: f, flow: 'returning', household, members, today });
+  assert.equal(out.slots.find((x) => x.key === 'kids_ages'), undefined, 'Priya 9 and the 6 are the household; nothing to say');
+  assert.equal(out.slots.find((x) => x.key === 'several_things'), undefined);
 });
