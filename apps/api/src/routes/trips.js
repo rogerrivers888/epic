@@ -165,6 +165,8 @@ export async function tripPayload(tripId) {
       travelMode: virtual.travel_mode,
       startTime: virtual.depart_at,
       endTime: virtual.return_at,
+      /** The journey there for this day's own mode (Codex, 9 Sep 2026). */
+      journey: journeyOf(trip, virtual.travel_mode ?? null),
       notes: d.notes,
       slots: SLOTS.map((slot) => ({
         slot,

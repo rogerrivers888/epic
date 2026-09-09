@@ -548,10 +548,18 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * destination's own name, at its place, on a day out. One stop, never
    * everything near it (Codex, 9 Sep 2026).
    */
-  const isSeededDestination = (s: { name?: string | null; lat: number | null; lng: number | null }) =>
-    !isTrip && trip.destination?.lat != null && s.lat != null && s.lng != null
-    && (s.name ?? '').trim().toLowerCase() === (trip.destination.label ?? '').trim().toLowerCase()
-    && kmApart({ lat: s.lat, lng: s.lng }, { lat: trip.destination.lat as number, lng: trip.destination.lng as number }) < 0.4;
+  const seededRef = useMemo(() => {
+    if (isTrip || trip.destination?.lat == null) return null;
+    const looksSeeded = (s: { name?: string | null; lat: number | null; lng: number | null }) =>
+      s.lat != null && s.lng != null
+      && (s.name ?? '').trim().toLowerCase() === (trip.destination!.label ?? '').trim().toLowerCase()
+      && kmApart({ lat: s.lat, lng: s.lng }, { lat: trip.destination!.lat as number, lng: trip.destination!.lng as number }) < 0.4;
+    // One stop: the first on the day that looks like it, never a namesake beside it.
+    return (day?.slots ?? []).flatMap((sl) => sl.stops).find(looksSeeded)?.venueRef ?? null;
+  }, [isTrip, trip.destination?.lat, trip.destination?.lng, trip.destination?.label, day]);
+  const isSeededDestination = (s: { venueRef: string }) => seededRef != null && s.venueRef === seededRef;
+  /** The journey there, for the day being looked at; the trip's where a day has none. */
+  const journey = day?.journey ?? trip.journey ?? null;
   const home = household?.household?.home ?? null;
   const startsAtHome = home?.lat != null && start?.lat != null
     ? kmApart({ lat: start.lat, lng: start.lng as number }, { lat: home.lat, lng: home.lng as number }) < 0.3
@@ -566,7 +574,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     // home or a typed starting point (routes/trips.js), so Home is decided by
     // where home actually is: within 300m of the household's address.
     const fromHome = !(isTrip && base) && startsAtHome;
-    const there = trip.journey?.minutes
+    const there = journey?.minutes
       ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
     if (start?.lat != null) {
       out.push({
@@ -692,7 +700,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       }
     }
     return out;
-  }, [start?.lat, dest?.lat, pill, shownAlong, places, selected, isTrip, base?.label, wantsStay, stayChosen, stays.results, stays.anchors, startsAtHome]);
+  }, [start?.lat, dest?.lat, pill, shownAlong, places, selected, isTrip, base?.label, wantsStay, stayChosen, stays.results, stays.anchors, startsAtHome, seededRef, journey?.minutes]);
 
   const routes: MapRoute[] = useMemo(() => {
     if (start?.lat == null || dest?.lat == null || dest === start) return [];
@@ -1056,13 +1064,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
                   </Text>
                 );
               }
-              const there = trip.journey?.minutes ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
+              const there = journey?.minutes ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
               return (
                 <View style={styles.metaRow}>
                   <Text style={type.small}>{`${fmtDate(trip.startDate ?? trip.departAt)} ·`}</Text>
                   {there ? (
                     <>
-                      <Icon name={modeIcon(trip.journey?.minutes ? trip.journey.mode : 'driving')} size={14} color={colors.inkMuted} strokeWidth={2} />
+                      <Icon name={modeIcon(journey?.minutes ? journey.mode : 'driving')} size={14} color={colors.inkMuted} strokeWidth={2} />
                       <Text style={type.small}>{`${mins(there)} each way ·`}</Text>
                     </>
                   ) : base ? <Text style={type.small}>{`from ${base.label.split(',')[0]} ·`}</Text> : null}
@@ -1652,6 +1660,8 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
    */
   /** Somewhere they are actually sleeping — not the middle of the city Epic searches from. */
   const sleepingAt = isTrip && trip.base && trip.base.kind !== 'centre' && trip.base.kind !== 'home' ? trip.base.label : null;
+  /** The journey there for the day being looked at, else the trip's. */
+  const journey = day?.journey ?? trip.journey ?? null;
   /** The journey there, in minutes — the API's, else the screen's own estimate; null when there is none to make. */
   const journeyMinutes = (() => {
     const from = fromName(trip);
@@ -1661,7 +1671,7 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
     // A holiday's day starts where it is: the stay is the destination, and a
     // journey from a place to itself is the estimator's overhead, not a drive.
     if (startAt?.lat != null && dest?.lat != null && kmApart({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }) < 0.3) return null;
-    return trip.journey?.minutes
+    return journey?.minutes
       ?? (startAt?.lat != null && dest?.lat != null ? Math.max(1, Math.round(estimateMinutes({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
   })();
   /**
@@ -1669,7 +1679,7 @@ function TheDay({ d, day, fromHome, onAdd, onOpenStop, onFirstRows }: {
    * day's own mode (routes/trips.js `journeyOf`); the screen's fallback is a
    * drive, and says so (Codex, 9 Sep 2026).
    */
-  const travelMode = trip.journey?.minutes ? trip.journey.mode : 'driving';
+  const travelMode = journey?.minutes ? journey.mode : 'driving';
   /** When you get there: leaving home plus the journey (a day out; a holiday's day starts where it is). */
   const arriveAt = !isTrip && journeyMinutes ? addMinutesToClock(clock(trip.departAt), journeyMinutes) : null;
 

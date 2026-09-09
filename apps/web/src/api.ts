@@ -556,7 +556,9 @@ export type TripOption = {
 
 export type TripKind = 'outing' | 'trip';
 export type DayStop = { id: string; position: number; venueRef: string; name: string; lat: number | null; lng: number | null; dwellMinutes: number; startTime: string | null; visit: Visit | null; bookingStatus?: ShortlistStatus | null; bookingRef?: string | null; legMode?: LegMode | null };
-export type TripDay = { id: string; date: string; intensity: 'relaxed' | 'balanced' | 'packed'; travelMode: 'walking' | 'cycling' | 'driving' | 'transit'; startTime: string; endTime: string; notes: string | null; slots: { slot: 'morning' | 'afternoon' | 'evening'; stops: DayStop[] }[]; budget: Budget };
+export type TripDay = { id: string; date: string; intensity: 'relaxed' | 'balanced' | 'packed'; travelMode: 'walking' | 'cycling' | 'driving' | 'transit'; startTime: string; endTime: string; notes: string | null;
+  /** The journey there, worked out for this day's own mode. */
+  journey?: { minutes: number; mode: string; estimated: boolean } | null; slots: { slot: 'morning' | 'afternoon' | 'evening'; stops: DayStop[] }[]; budget: Budget };
 export type ShortlistStatus = 'to_call' | 'booked' | 'no_booking' | 'full' | 'set_aside';
 export type LegMode = 'walking' | 'transit' | 'driving' | 'taxi';
 export type ShortlistItem = {
