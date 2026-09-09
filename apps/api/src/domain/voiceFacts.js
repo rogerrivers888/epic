@@ -199,9 +199,10 @@ export function holdWeekday(when, today) {
   // A weekday that names the way back ("this weekend, coming back Sunday",
   // "until Monday") is not the start; leave a range like that alone.
   const before = words.slice(0, m.index);
-  // "coming back Sunday", "home on Monday", "until Tuesday" name the end;
-  // "this coming Saturday" names the start (Codex, 9 Sep 2026).
-  if (/\b(back|returning|return|home|until|till|through)\b/.test(before)) return when;
+  // "coming back Sunday", "home on Monday", "until Tuesday", "this weekend to
+  // Monday" name the end; "this coming Saturday" names the start (Codex,
+  // 9 Sep 2026, twice).
+  if (/\b(back|returning|return|home|until|till|through)\b/.test(before) || /\bto\s+(the\s+)?(next\s+)?$/.test(before)) return when;
   const wanted = WEEKDAYS.indexOf(m[1]);
   const d = new Date(`${today}T12:00:00Z`);
   const add = (wanted - d.getUTCDay() + 7) % 7 || 7;
