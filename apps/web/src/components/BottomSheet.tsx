@@ -46,7 +46,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Animated, PanResponder, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { colors, spacing, BORDER } from '../theme';
+import { colors, spacing } from '../theme';
 import { useKeyboardInset } from '../hooks/useKeyboardInset';
 import { detentHeights, type Detent } from './detents';
 
@@ -62,8 +62,15 @@ const FLICK_VELOCITY = 0.4;
 
 const isWeb = Platform.OS === 'web';
 
-export function BottomSheet({ detent, onDetent, header, children, screenHeight, insetBottom = 0, cover = false, listRef }: {
+export function BottomSheet({ detent, onDetent, header, children, screenHeight, insetBottom = 0, cover = false, listRef, peekHeight }: {
   detent: Detent;
+  /**
+   * How tall `peek` is, when the screen knows better than the handoff's number:
+   * on a trip's first load the drawer is "just tall enough for title, meta and
+   * the two rows" (Epic Map Chips 6a, signed off 9 Sep 2026), which is a
+   * measured height rather than a fixed one.
+   */
+  peekHeight?: number;
   onDetent: (d: Detent) => void;
   /** Always visible, at every detent, and the place a drag always moves the sheet. */
   header: React.ReactNode;
@@ -89,8 +96,12 @@ export function BottomSheet({ detent, onDetent, header, children, screenHeight, 
 }) {
   const keyboard = useKeyboardInset();
   const heights = useMemo(
-    () => (cover ? { peek: screenHeight, half: screenHeight, full: screenHeight } : detentHeights(screenHeight, insetBottom)),
-    [cover, screenHeight, insetBottom],
+    () => {
+      if (cover) return { peek: screenHeight, half: screenHeight, full: screenHeight };
+      const h = detentHeights(screenHeight, insetBottom);
+      return peekHeight ? { ...h, peek: Math.min(h.half, Math.max(120, Math.round(peekHeight))) } : h;
+    },
+    [cover, screenHeight, insetBottom, peekHeight],
   );
   const height = heights.full;
 
@@ -123,7 +134,7 @@ export function BottomSheet({ detent, onDetent, header, children, screenHeight, 
   // The address, or anything else, moved the detent: follow it.
   useEffect(() => { settle(detent); }, [detent, settle]);
   // The window resized (the Web / Mobile toggle): the same detent, a new offset.
-  useEffect(() => { y.setValue(offsetFor(at.current)); }, [height, heights.half, offsetFor, y]);
+  useEffect(() => { y.setValue(offsetFor(at.current)); }, [height, heights.half, heights.peek, offsetFor, y]);
 
   /** Which detent a released drag lands on. One step at a time, never two. */
   const nearest = useCallback((dy: number, vy: number): Detent => {
@@ -367,9 +378,10 @@ const styles = StyleSheet.create({
   sheet: {
     position: 'absolute', left: 0, right: 0,
     backgroundColor: colors.surface,
-    // Square, like everything else (Epic pack §07), and separated from the map
-    // by the 2px ink rule rather than by a shadow — Epic has none.
-    borderTopWidth: BORDER, borderTopColor: colors.line,
+    // Square, like everything else (Epic pack §07). No rule along the top: the
+    // drawer "rises from the bottom, no top rule, 40×4 grab handle" (trip page
+    // handoff 5c), and the owner read the ink rule as "a black bar that goes
+    // across the top of the bottom drawer" (9 Sep 2026).
     zIndex: 2,
     overflow: 'hidden',
   },
@@ -379,5 +391,6 @@ const styles = StyleSheet.create({
   headerZoneCover: { paddingTop: (isWeb ? 'calc(8px + var(--epic-sat))' : 8) as any },
   // The grabber is 40×4, and its hit area is the 44 the rest of the app uses.
   grabHit: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 24 },
-  grab: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.line },
+  // Soft grey, never ink: the handle is the one thing on the drawer's edge.
+  grab: { width: 40, height: 4, backgroundColor: colors.lineSoft },
 });

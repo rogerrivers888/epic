@@ -133,17 +133,35 @@ function lensFeatures(centre: Point, km: number) {
   } as any;
 }
 
-/** Each kind's shape, from the handoff's design tokens. */
-const KIND: Record<MapMarker['kind'], { size: number; bg: string; border: string; borderWidth: number; dashed?: boolean; fg: string; halo?: boolean }> = {
-  home: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D' },
-  base: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D' },
-  // Where we are going is the brand moment, so it is the lime one — it used to
-  // be the brand red, which Epic retires (pack §04). Ink on lime, never cream.
-  dest: { size: 30, bg: '#C8F542', border: '#201E1D', borderWidth: 2.5, fg: '#201E1D', halo: true },
-  browse: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2, fg: '#201E1D' },
-  added: { size: 28, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, fg: '#FFFDF9' },
-  saved: { size: 22, bg: '#FFFDF9', border: '#201E1D', borderWidth: BORDER, dashed: true, fg: '#201E1D' },
+/**
+ * Each kind's shape, from the signed-off trip map (Epic Map Chips 6a/6b,
+ * 9 Sep 2026, and the v7 browse spec):
+ *
+ *   home     26px ink tile, 8px radius, 2px cream border, cream house glyph —
+ *            only when the trip leaves from home
+ *   origin   14px ink dot — a day that starts somewhere else
+ *   base     the home tile with a bed in it: where you are sleeping
+ *   dest     the Epic pin, ink with a lime hole, 40px tall, its tip on the point
+ *   browse   26px cream square, 2px ink border — a candidate you are looking at
+ *   added    28px ink square — something on the day
+ *   saved    22px cream square, dashed ink — on the shortlist, not on the day
+ *
+ * Squares and the pin, not circles: the owner does not want "black circles
+ * around stuff" (9 Sep 2026), and the handoff never drew any.
+ */
+const KIND: Record<MapMarker['kind'], { size: number; bg: string; border: string; borderWidth: number; radius: number; dashed?: boolean; fg: string; glyph: boolean }> = {
+  home: { size: 26, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, radius: 8, fg: '#FFFDF9', glyph: true },
+  origin: { size: 14, bg: '#201E1D', border: '#201E1D', borderWidth: 0, radius: 999, fg: '#FFFDF9', glyph: false },
+  base: { size: 26, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, radius: 8, fg: '#FFFDF9', glyph: true },
+  dest: { size: 40, bg: '#201E1D', border: '#201E1D', borderWidth: 0, radius: 0, fg: '#C8F542', glyph: false },
+  browse: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2, radius: 0, fg: '#201E1D', glyph: true },
+  added: { size: 28, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, radius: 0, fg: '#FFFDF9', glyph: true },
+  saved: { size: 22, bg: '#FFFDF9', border: '#201E1D', borderWidth: BORDER, radius: 0, dashed: true, fg: '#201E1D', glyph: true },
 };
+
+/** The Epic pin (brand pack): ink, with the hole in lime, drawn at `height` px with its tip at the bottom. */
+const pinSvg = (height: number, selected: boolean) =>
+  `<svg width="${Math.round(height * 0.84)}" height="${height}" viewBox="0 0 84 100" style="display:block${selected ? ';filter:drop-shadow(0 0 3px #C8F542)' : ''}"><path d="M42 0 C18 0 0 18 0 42 C0 68 42 100 42 100 C42 100 84 68 84 42 C84 18 66 0 42 0 Z" fill="#201E1D"/><circle cx="42" cy="40" r="15" fill="#C8F542"/></svg>`;
 
 function markerEl(m: MapMarker): HTMLElement {
   const k = KIND[m.kind];
@@ -174,38 +192,54 @@ function markerEl(m: MapMarker): HTMLElement {
   */
   inner.style.cssText = `position:relative;display:flex;align-items:center;justify-content:center${m.dim ? ';opacity:0.3' : ''}`;
   wrap.appendChild(inner);
-  const size = m.selected ? k.size + 4 : k.size;
+  const size = m.selected && k.glyph ? k.size + 4 : k.size;
   const glyph = GLYPH[m.icon ?? ''] ?? GLYPH.place;
   const dot = document.createElement('div');
-  dot.style.cssText = [
-    `width:${size}px`, `height:${size}px`, 'border-radius:999px',
-    `background:${k.bg}`, `border:${k.borderWidth}px ${k.dashed ? 'dashed' : 'solid'} ${k.border}`,
-    'display:flex', 'align-items:center', 'justify-content:center',
-    // The destination's ink halo, and a lime ring on whatever is selected. No
-    // drop shadow: Epic has none, and a 2px ink border already lifts a marker
-    // off the map (pack §07).
-    k.halo ? 'box-shadow:0 0 0 1.5px #201E1D' : '',
-    m.selected ? 'outline:3px solid #C8F542;outline-offset:2px' : '',
-    'transition:width 120ms ease-out,height 120ms ease-out',
-  ].join(';');
-  // A numbered pin shows its number; everything else shows what it is.
-  dot.innerHTML = m.badge
-    ? `<span style="font:700 ${Math.round(size * 0.45)}px/1 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif;color:${k.fg}">${m.badge}</span>`
-    : `<svg width="${Math.round(size * 0.55)}" height="${Math.round(size * 0.55)}" viewBox="0 0 24 24" fill="none" stroke="${k.fg}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${glyph}</svg>`;
+  if (m.kind === 'dest' && !m.badge) {
+    // The destination is the Epic pin itself, the brand's mark on the map.
+    dot.style.cssText = 'display:flex;align-items:flex-end;justify-content:center';
+    dot.innerHTML = pinSvg(size, !!m.selected);
+  } else {
+    dot.style.cssText = [
+      `width:${size}px`, `height:${size}px`, `border-radius:${k.radius}px`,
+      `background:${k.bg}`, k.borderWidth ? `border:${k.borderWidth}px ${k.dashed ? 'dashed' : 'solid'} ${k.border}` : '',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      // Selected is lime (browse squares fill lime; the rest take a lime ring).
+      // No drop shadow: Epic has none, and a 2px ink border already lifts a
+      // marker off the map (pack §07).
+      m.selected && m.kind === 'browse' ? 'background:#C8F542' : m.selected ? 'outline:3px solid #C8F542;outline-offset:2px' : '',
+      'transition:width 120ms ease-out,height 120ms ease-out',
+    ].join(';');
+    // A numbered pin shows its number; everything else shows what it is.
+    dot.innerHTML = m.badge
+      ? `<span style="font:700 ${Math.round(size * 0.45)}px/1 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif;color:${k.fg}">${m.badge}</span>`
+      : k.glyph
+        ? `<svg width="${Math.round(size * 0.55)}" height="${Math.round(size * 0.55)}" viewBox="0 0 24 24" fill="none" stroke="${k.fg}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${glyph}</svg>`
+        : '';
+  }
   inner.appendChild(dot);
   if (m.label) {
     const tag = document.createElement('div');
-    // An added stop's label is ink on cream; everything else is cream on ink,
-    // which is what the handoff draws and what stays readable over the map.
-    const onInk = m.kind !== 'home' && m.kind !== 'base';
-    tag.textContent = m.label;
+    /*
+      One label for every marker (Epic Map Chips 6a): cream, 8px radius, a soft
+      shadow, 12px/700 ink — and where there is a time, a small tile inside it,
+      grey on Home and lime on the destination, "so the destination still
+      reads as the plan". No ink pills: the owner does not want black bars
+      around things (9 Sep 2026).
+    */
+    const time = m.tag
+      ? `<span style="background:${m.kind === 'dest' ? '#C8F542' : '#F3F1EC'};padding:1px 5px;border-radius:4px;font-size:11px;margin-right:6px">${m.tag}</span>`
+      : '';
+    tag.innerHTML = `${time}<span></span>`;
+    (tag.lastChild as HTMLElement).textContent = m.label;
     tag.style.cssText = [
       'position:absolute', 'top:100%', 'left:50%', 'transform:translate(-50%,4px)',
-      'padding:3px 7px', 'border-radius:999px',
-      onInk ? 'background:#201E1D;color:#FFFDF9' : 'background:#FFFDF9;color:#201E1D;border:2px solid #201E1D',
-      'font:700 11px/1.1 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif',
+      'display:flex', 'align-items:center',
+      'padding:4px 9px', 'border-radius:8px',
+      'background:#FFFDF9', 'color:#201E1D',
+      'font:700 12px/1.15 Archivo,-apple-system,Segoe UI,Helvetica,sans-serif',
       'white-space:nowrap', 'pointer-events:none',
-      'box-shadow:0 1px 4px rgba(32,30,29,0.18)',
+      'box-shadow:0 1px 3px rgba(32,30,29,0.15)',
     ].join(';');
     inner.appendChild(tag);
     // Kept on the element so the de-collision pass below can find it without
@@ -366,18 +400,20 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       const src = m.getSource('epic-route') as maplibregl.GeoJSONSource | undefined;
       if (src) { src.setData(data); return; }
       m.addSource('epic-route', { type: 'geojson', data });
+      // The route from Home is lime, 5px, with an ink 2px dashed centre (trip
+      // page handoff 5c; Epic Map Chips 6a). An estimated leg is dashed finer.
       m.addLayer({
         id: 'epic-route-casing', type: 'line', source: 'epic-route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#FFFDF9', 'line-width': 7, 'line-opacity': 0.9 },
+        paint: { 'line-color': '#C8F542', 'line-width': 5, 'line-opacity': 1 },
       });
       m.addLayer({
         id: 'epic-route-line', type: 'line', source: 'epic-route',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: {
           'line-color': '#201E1D',
-          'line-width': 3,
-          'line-dasharray': ['case', ['==', ['get', 'dashed'], 1], ['literal', [2, 2]], ['literal', [1, 0]]] as any,
+          'line-width': 2,
+          'line-dasharray': ['case', ['==', ['get', 'dashed'], 1], ['literal', [1.5, 2]], ['literal', [3, 2.5]]] as any,
         },
       });
     };
@@ -548,7 +584,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
    * that is arithmetic on projected points. Reading the DOM on every frame of a
    * pan is what makes a map feel cheap.
    */
-  const RANK: Record<string, number> = { dest: 0, added: 1, base: 2, home: 3, saved: 4, browse: 5 };
+  const RANK: Record<string, number> = { dest: 0, added: 1, base: 2, home: 3, origin: 3, saved: 4, browse: 5 };
   const layout = useRef<() => void>(() => {});
   layout.current = () => {
     const m = map.current;
@@ -596,7 +632,8 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     for (const spec of markers) {
       const existing = drawn.current.get(spec.id);
       if (existing) existing.remove();
-      const marker = new maplibregl.Marker({ element: markerEl(spec), anchor: 'center' })
+      // The pin stands on its point; everything else sits on it.
+      const marker = new maplibregl.Marker({ element: markerEl(spec), anchor: spec.kind === 'dest' && !spec.badge ? 'bottom' : 'center' })
         .setLngLat([spec.lng, spec.lat])
         .addTo(m);
       drawn.current.set(spec.id, marker);

@@ -31,6 +31,9 @@ import { fillPhotos, photosKept } from '../sources/rentedPhoto.js';
 import { claimPlace } from '../sources/own.js';
 import { matchOsm } from '../sources/openMatch.js';
 import { mirrorHealth as overpassHealth } from '../sources/overpass.js';
+import { shelvesForVenue } from '../domain/moods.js';
+import { rules as shelfRules } from '../repositories/shelfRules.js';
+import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
 
 const router = Router();
 
@@ -72,6 +75,16 @@ async function loadTrip(tripId) {
   return trip;
 }
 
+/** From where the day starts (the bed, else home) to where it is for. Null without both, or when they are the same place. */
+function journeyOf(t) {
+  const from = t.base_lat != null ? { lat: t.base_lat, lng: t.base_lng } : t.origin_lat != null ? { lat: t.origin_lat, lng: t.origin_lng } : null;
+  const to = t.destination_lat != null ? { lat: t.destination_lat, lng: t.destination_lng } : null;
+  if (!from || !to) return null;
+  if (kmBetween(from, to) < 0.3) return null;
+  const mode = isTravelMode(t.travel_mode) ? t.travel_mode : 'driving';
+  return { minutes: Math.max(1, Math.round(estimateTravelMinutes(from, to, mode))), mode, estimated: true };
+}
+
 export function publicTrip(t) {
   return {
     id: t.id,
@@ -91,6 +104,14 @@ export function publicTrip(t) {
     departAt: t.depart_at,
     returnAt: t.return_at,
     travelMode: t.travel_mode,
+    /**
+     * How long the journey there is — the one number the day's first beat
+     * shows (owner, 9 Sep 2026: "it should say travelling time, so 5-minute
+     * drive or however long the drive is"). The same arithmetic the voice card
+     * uses, so the trip never disagrees with the reading it was made from.
+     * Straight-line, ours, never a routing call; flagged estimated.
+     */
+    journey: journeyOf(t),
     intensity: t.intensity,
     country: t.country,
     countryCode: t.country_code,
@@ -1029,8 +1050,17 @@ router.get('/:id/along', async (req, res, next) => {
       return m <= (kind === 'food' ? 150 : 600);
     };
 
+    /**
+     * Which shelf each place sits on — Fun, Culture, Outdoors… — the same
+     * reading Inspire and Places draw, so the Activities browse can be lanes
+     * with the spoken mood first (owner, 9 Sep 2026: "fun should be the first
+     * swim lane. You should still show the other swim lanes"). One small read,
+     * cached in the process; no provider call.
+     */
+    const [taught, tax] = await Promise.all([shelfRules().catch(() => null), shelfTaxonomy().catch(() => null)]);
     const rows = venues.map((v) => {
       const venueRef = `${v.source}:${v.sourcePlaceId}`;
+      const shelf = shelvesForVenue(v, taught ?? undefined, tax?.vocab ?? undefined);
       // Straight-line arithmetic, ours, free and instant. Never a routing call.
       // Anchored, the number is simply how far it is from the place you tapped.
       // Unanchored, it is what the stop adds to the day.
@@ -1047,6 +1077,7 @@ router.get('/:id/along', async (req, res, next) => {
         _inside: insideDestination(v),
         lat: v.lat, lng: v.lng,
         cuisines: v.cuisines ?? [], experiences: v.experiences ?? [],
+        moods: shelf.shelves, subcategory: shelf.subcategory ?? null,
         rating: v.rating ?? null, ratingCount: v.ratingCount ?? null, priceLevel: v.priceLevel ?? null,
         openingHours: v.openingHours ?? null, phone: v.phone ?? null, website: v.website ?? null,
         address: typeof v.address === 'string' ? v.address : v.address?.line1 ?? null,

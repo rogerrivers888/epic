@@ -31,15 +31,17 @@ export type Point = { lat: number; lng: number };
  *   added     28px ink — something on the day
  *   saved     22px white, 1.5px dashed ink — on the shortlist, not on the day
  */
-export type MarkerKind = 'home' | 'base' | 'dest' | 'browse' | 'added' | 'saved';
+export type MarkerKind = 'home' | 'origin' | 'base' | 'dest' | 'browse' | 'added' | 'saved';
 
 export type MapMarker = {
   id: string;
   lat: number;
   lng: number;
   kind: MarkerKind;
-  /** Drawn beside the marker in an ink pill. Left off where there would be too many to read. */
+  /** Drawn under the marker on a cream label. Left off where there would be too many to read. */
   label?: string | null;
+  /** A time inside the label, on its own small tile: grey on Home, lime on the destination (Epic Map Chips 6a). */
+  tag?: string | null;
   /** A rank drawn inside the pin — the stay results are numbered (handoff §18). */
   badge?: string | null;
   /** A Lucide name from the app's own set, drawn inside the marker. */

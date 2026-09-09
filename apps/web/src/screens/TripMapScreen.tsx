@@ -35,7 +35,8 @@ import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
 import { Icon, IconName, Rating, Stars } from '../components/Icon';
-import { IdeasCard } from '../components/voice/IdeasCard';
+import { lanesFor } from './tripLanes';
+import { LANE_VOCAB } from '../moods';
 import type { Intake } from '../api';
 import { VenueThumb } from '../components/VenueThumb';
 import { Avatar } from '../components/Faces';
@@ -51,6 +52,13 @@ import { fromName, shortPlaceName, tripName } from './tripName';
 
 const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
 const clock = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+/** "09:19" + 41 → "10:00". */
+const addMinutesToClock = (hhmm: string, add: number) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
+  const t = ((h * 60 + m + Math.round(add)) % 1440 + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
 const mins = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ''}`.trim());
 /**
  * What it costs, in the only words we actually have (owner, 8 Sep 2026: "we
@@ -72,15 +80,17 @@ type Pill = 'activities' | 'food' | 'stay' | 'shortlist';
  * a day out has nowhere to sleep by definition. With four across a 390px phone
  * the food label shortens to "Food", which is what the handoff draws (§15).
  */
-const pillsFor = (withStay: boolean, saved: number): { key: Pill; label: string; icon: IconName }[] => [
-  { key: 'activities', label: 'Activities', icon: 'inspire' },
+/**
+ * The tiles on the map (Epic Map Chips 6a/6b, signed off 9 Sep 2026): ticket =
+ * activity, fork = food, bed = stay, heart = shortlist. Shortlist keeps its
+ * name and carries its count as a badge — the count is the point of a
+ * shortlist (owner, 6 Sep 2026: "just so I know it's building").
+ */
+const pillsFor = (withStay: boolean): { key: Pill; label: string; icon: IconName }[] => [
+  { key: 'activities', label: 'Activities', icon: 'ticket' },
   { key: 'food', label: 'Food', icon: 'restaurant' },
   ...(withStay ? [{ key: 'stay' as Pill, label: 'Stays', icon: 'hotel' as IconName }] : []),
-  // The count is the point of a shortlist: it is the one pill whose job is to
-  // fill up, and without a number nothing on the map says it is (owner,
-  // 6 Sep 2026: "I need a bracketed number of items that are in the shortlist,
-  // just so I know it's building").
-  { key: 'shortlist', label: saved ? `Shortlist · ${saved}` : 'Shortlist', icon: 'shortlist' },
+  { key: 'shortlist', label: 'Shortlist', icon: 'shortlist' },
 ];
 
 /**
@@ -233,6 +243,17 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const maxDetourMin = Number(detour) || 15;
 
   const [detent, setDetent] = useState<Detent>('half');
+  /**
+   * The welcome state (Epic Map Chips 6a, signed off 9 Sep 2026): on a trip's
+   * first load — nothing on the day beyond the destination — the map takes the
+   * screen and the drawer is "just tall enough for title, meta and the two
+   * rows". It ends the moment a stop is added or the drawer is dragged, and
+   * the tiles compact at that point. The two heights are measured, not guessed:
+   * the header's and the first two rows'.
+   */
+  const [touched, setTouched] = useState(false);
+  const [headH, setHeadH] = useState(0);
+  const [rowsH, setRowsH] = useState(0);
   /** The group has handed the screen to a page of its own, which draws its own way back. */
   const [groupPage, setGroupPage] = useState(false);
   /**
@@ -328,7 +349,17 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * arrive wearing the recipient's habits instead of the sender's search.
    */
   const forKind = pill === 'food' ? 'food' : 'things';
-  const kind = kindOf ?? browseDefaults?.[forKind]?.type ?? null;
+  /**
+   * What was said about eating opens the Food browse already narrowed (owner,
+   * 9 Sep 2026: "if I told you I want a pub lunch, then pub lunch should be
+   * filtered. Should still be able to get back to the main list"). It sits
+   * between the address and the household's standing default: a link says
+   * what it says, `any` is still the way back to everything, and a trip made
+   * without a word about food opens as it always did. Activities are not
+   * narrowed — what was said leads its lanes instead.
+   */
+  const saidFoodKind = forKind === 'food' ? voiceIntake?.resolved.leadFoodKinds.find((k) => FOOD_KINDS.includes(k)) ?? null : null;
+  const kind = kindOf ?? saidFoodKind ?? browseDefaults?.[forKind]?.type ?? null;
   const kitchenOf = cuisine ?? (forKind === 'food' ? browseDefaults?.food?.cuisine ?? null : null);
   const kindNow = kind === 'any' ? null : kind;
   const cuisineNow = kitchenOf === 'any' ? null : kitchenOf;
@@ -514,16 +545,24 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
   const markers: MapMarker[] = useMemo(() => {
     const out: MapMarker[] = [];
+    // Home is the ink tile with the house; a day that starts somewhere else is
+    // a plain dot. Both labels carry the time — leaving, and arriving — on a
+    // day out (Epic Map Chips 6a).
+    const fromHome = !(isTrip && base) && (!trip.base || trip.base.kind === 'home' || trip.base.kind == null);
+    const there = trip.journey?.minutes
+      ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
     if (start?.lat != null) {
       out.push({
-        id: 'start', lat: start.lat as number, lng: start.lng as number, kind: isTrip && base ? 'base' : 'home',
+        id: 'start', lat: start.lat as number, lng: start.lng as number, kind: isTrip && base ? 'base' : fromHome ? 'home' : 'origin',
         icon: isTrip && base ? 'bed' : 'home',
-        label: isTrip && base ? `${base.label.split(',')[0]} · base` : `Home · ${trip.origin.label.split(',')[0]}`,
+        label: isTrip && base ? `${base.label.split(',')[0]} · base` : fromHome ? 'Home' : trip.origin.label.split(',')[0],
+        tag: isTrip ? null : clock(trip.departAt),
       });
     }
     if (dest?.lat != null && dest !== start) {
       out.push({
         id: 'dest', lat: dest.lat as number, lng: dest.lng as number, kind: 'dest', icon: 'flag', label: tripName(trip),
+        tag: !isTrip && there ? addMinutesToClock(clock(trip.departAt), there) : null,
         selected: around === `${(dest.lat as number).toFixed(5)},${(dest.lng as number).toFixed(5)}`,
         // Tap where you are going, then pick a pill, and the search happens
         // there instead of all along the way.
@@ -677,20 +716,6 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   }, [pill, trip.base?.lat, trip.base?.lng, trip.origin?.lat, trip.origin?.lng, trip.destination?.lat, trip.destination?.lng, trip.travelMode, around, maxDetourMin, along.corridorKm]);
 
   /**
-   * What the chip on the map says. Browsing, it is what came back; on the trip
-   * itself it is the drive there and what the stops have added to it.
-   */
-  const driveChip = (() => {
-    if (pill === 'stay') return stays.results.length ? `${stays.results.length} to stay` : null;
-    if (pill === 'shortlist') return `${(places?.places ?? []).filter(stillSaved).length} saved`;
-    if (pill) return along.loading ? null : `${shownAlong.length} ${along.hasRoute ? 'on the route' : 'nearby'}`;
-    if (!dest || !start || dest === start) return null;
-    const there = Math.max(1, Math.round(estimateMinutes(start, dest)));
-    const added = (places?.places ?? []).filter((x) => x.scheduled && x.venueRef !== 'base').length;
-    return added ? `${mins(there)} + ${added} stop${added === 1 ? '' : 's'}` : mins(there);
-  })();
-
-  /**
    * Configuring the group is not a thing to do through a letterbox (owner,
    * 6 Sep 2026: "it should expand the bottom drawer to be almost full page. I
    * don't need the map at this point… You've got the menu in the bottom:
@@ -706,7 +731,16 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * bar that is not there leaves the sheet floating off the bottom edge.
    */
   const bar = wide || covering || pill ? 0 : TABBAR;
-  const heights = detentHeights(height, bar);
+  const dayStopCount = (day?.slots ?? []).reduce((n, sl) => n + sl.stops.length, 0);
+  const welcome = !wide && !pill && section === 'itinerary' && !selected && !covering && dayStopCount === 0 && !touched;
+  // Grab zone (10 + 4 + 10) over the header and the two rows, less the second
+  // row's own trailing padding, plus a little air under the last line.
+  const welcomeH = headH && rowsH ? 24 + headH + rowsH - 16 + 8 : 0;
+  const detentNow: Detent = welcome ? 'peek' : detent;
+  const heights = (() => {
+    const h = detentHeights(height, bar);
+    return welcome && welcomeH ? { ...h, peek: Math.min(h.half, welcomeH) } : h;
+  })();
   /**
    * Two different numbers, deliberately.
    *
@@ -717,10 +751,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * is why home had a label and the destination did not — a few pixels either
    * side of the same edge (owner, 7 Sep 2026).
    */
-  const covered = heights[detent] + bar + 48;
+  const covered = heights[detentNow] + bar + 48;
   const mapPadding = wide
     ? { top: 40, bottom: 40, left: 40, right: 460 }
-    : { top: 96, bottom: covered + 36, left: 28, right: 28 };
+    // Wide enough at the sides for a label centred under a marker at the edge
+    // ("09:19 Home" was cut off at the left of the frame).
+    : { top: 96, bottom: covered + 36, left: 64, right: 64 };
 
 
   // ---- adding -------------------------------------------------------------
@@ -897,7 +933,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       </Press>
     </View>
   ) : (
-    <View style={styles.header}>
+    <View style={styles.header} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
       {/*
         No boxes in the drawer (5h). The back arrow is a plain 20px glyph in a
         32px hit area — outlined, the header read as three buttons competing
@@ -921,7 +957,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         accessibilityRole="button"
         accessibilityLabel={selected ? 'Back to the list' : pill || section === 'group' ? 'Back to the trip' : 'Trips'}
       >
-        <Icon name={pill && !selected ? 'trips' : 'back'} size={20} color={colors.ink} strokeWidth={2} />
+        {/* Always the arrow. The "routes" glyph that stood here inside a browse
+            read as nothing to anybody (handoff change log, 9 Sep 2026: "Remove
+            the routes icon on production — nobody reads it as back"). */}
+        <Icon name="back" size={20} color={colors.ink} strokeWidth={2} />
       </Press>
 
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
@@ -940,14 +979,25 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
               {pill === 'shortlist' ? 'Shortlist' : pill === 'food' ? 'Food nearby' : pill === 'stay' ? 'Stays nearby' : 'Activities nearby'}
             </Text>
             {/* What was said leads the list (voice intake): named here so the
-                order reads as a choice, and a tap narrows to just that kind. */}
-            {(pill === 'activities' || pill === 'food') && !kindNow && (pill === 'food' ? voiceIntake?.resolved.leadFoodKinds : voiceIntake?.resolved.leadKinds)?.length ? (
+                order reads as a choice. In Activities the mood and the kinds
+                named lead the lanes; in Food the kind asked for is already the
+                filter, and the way back to everything is one tap here. */}
+            {pill === 'activities' && !kindNow && (voiceIntake?.resolved.vibe || voiceIntake?.resolved.leadKinds.length) ? (
               <Text style={type.small} numberOfLines={1}>
                 {'You said: '}
-                {(pill === 'food' ? voiceIntake!.resolved.leadFoodKinds : voiceIntake!.resolved.leadKinds).map((k, i) => (
-                  <Text key={k} onPress={() => setKindOf(k)} style={{ color: colors.accent, fontWeight: '600' }}>{i ? ' · ' : ''}{k === 'pub' && pill === 'food' ? 'pubs with food' : `${k}s`}</Text>
+                {[
+                  ...(voiceIntake!.resolved.vibe && voiceIntake!.resolved.vibe !== 'any' ? [{ key: `vibe:${voiceIntake!.resolved.vibe}`, word: `something ${voiceIntake!.resolved.vibe === 'mixed' ? 'of everything' : voiceIntake!.resolved.vibe}`, kind: null }] : []),
+                  ...voiceIntake!.resolved.leadKinds.map((k) => ({ key: k, word: `${k}s`, kind: k })),
+                ].map((x, i) => (
+                  <Text key={x.key} onPress={x.kind ? () => setKindOf(x.kind!) : undefined} style={{ color: colors.accent, fontWeight: '600' }}>{i ? ' · ' : ''}{x.word}</Text>
                 ))}
                 {' — first'}
+              </Text>
+            ) : null}
+            {pill === 'food' && saidFoodKind && kindNow === saidFoodKind ? (
+              <Text style={type.small} numberOfLines={1}>
+                {`You said: ${saidFoodKind === 'pub' ? 'a pub' : saidFoodKind === 'ice cream' ? 'ice cream' : `a ${saidFoodKind}`} — showing those · `}
+                <Text onPress={() => setKindOf('any')} style={{ color: colors.accent, fontWeight: '600' }}>Everything</Text>
               </Text>
             ) : null}
           </>
@@ -961,17 +1011,32 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             >
               <Text style={styles.title} numberOfLines={1}>{tripName(trip)}</Text>
             </Press>
-            <Text style={type.small} numberOfLines={1}>
-              {(() => {
-                const range = isTrip && trip.startDate && trip.endDate && trip.startDate !== trip.endDate;
-                return [
-                  range
-                    ? `${fmtDate(trip.startDate!).replace(/ \w+$/, '')} – ${fmtDate(trip.endDate!)}`
-                    : fmtDate(trip.startDate ?? trip.departAt),
-                  range ? `${nights + 1} days` : base ? `from ${base.label.split(',')[0]}` : 'from home',
-                ].filter(Boolean).join(' · ');
-              })()}
-            </Text>
+            {/* The meta line (Epic Map Chips 6a): "Sat 12 Sep · [car] 5 min each
+                way · 4 people" — the travel time with the mode's glyph before it,
+                and who is coming. A trip with days says its dates and days. */}
+            {(() => {
+              const range = isTrip && trip.startDate && trip.endDate && trip.startDate !== trip.endDate;
+              if (range) {
+                return (
+                  <Text style={type.small} numberOfLines={1}>
+                    {`${fmtDate(trip.startDate!).replace(/ \w+$/, '')} – ${fmtDate(trip.endDate!)} · ${nights + 1} days`}
+                  </Text>
+                );
+              }
+              const there = trip.journey?.minutes ?? (start?.lat != null && dest?.lat != null && dest !== start ? Math.max(1, Math.round(estimateMinutes({ lat: start.lat, lng: start.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
+              return (
+                <View style={styles.metaRow}>
+                  <Text style={type.small} numberOfLines={1}>{`${fmtDate(trip.startDate ?? trip.departAt)} ·`}</Text>
+                  {there ? (
+                    <>
+                      <Icon name={trip.travelMode === 'transit' ? 'transit' : trip.travelMode === 'walking' ? 'walking' : 'driving'} size={14} color={colors.inkMuted} strokeWidth={2} />
+                      <Text style={type.small} numberOfLines={1}>{`${mins(there)} each way ·`}</Text>
+                    </>
+                  ) : base ? <Text style={type.small} numberOfLines={1}>{`from ${base.label.split(',')[0]} ·`}</Text> : null}
+                  <Text style={type.small} numberOfLines={1}>{`${party || 1} ${(party || 1) === 1 ? 'person' : 'people'}`}</Text>
+                </View>
+              );
+            })()}
           </>
         )}
       </View>
@@ -985,7 +1050,9 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         {onPeople && !pill ? (
           <Press onPress={onPeople} style={styles.peopleBare} accessibilityRole="button" accessibilityLabel="Who's coming, and sharing">
             <Icon name="household" size={20} color={colors.ink} strokeWidth={2} />
-            <Text style={styles.peopleCount}>{party || 1}</Text>
+            {/* The number sits in the meta line on a day out; on a trip with days
+                the meta is the dates, so the count stays on the icon (5h). */}
+            {isTrip ? <Text style={styles.peopleCount}>{party || 1}</Text> : null}
           </Press>
         ) : null}
         {onChat && !pill ? (
@@ -1045,6 +1112,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       selected={selected}
       onSelect={(ref) => setSelected(ref)}
       onOpen={openPlace}
+      said={voiceIntake ? { vibe: voiceIntake.resolved.vibe, kinds: voiceIntake.resolved.leadKinds } : null}
       kindOf={kindNow}
       onKind={(k) => setKindOf(k ?? 'any')}
       sort={sort}
@@ -1108,35 +1176,30 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         </View>
       ) : (
       <>
-        <SheetHead
-          days={days}
-          dayId={day?.id ?? null}
-          stops={(day?.slots ?? []).reduce((n, sl) => n + sl.stops.length, 0)}
-          places={places?.counts.all ?? 0}
-          multi={days.length > 1}
-          onDay={(id) => setDayId(id)}
-          onPlaces={() => onSection('places')}
-          onMap={() => setDetent('peek')}
-        />
+        {/* The welcome state is the title, the meta and the two rows, nothing
+            between them (Epic Map Chips 6a). */}
+        {welcome ? null : (
+          <SheetHead
+            days={days}
+            dayId={day?.id ?? null}
+            stops={dayStopCount}
+            places={places?.counts.all ?? 0}
+            multi={days.length > 1}
+            onDay={(id) => setDayId(id)}
+            onPlaces={() => onSection('places')}
+            onMap={() => setDetent('peek')}
+          />
+        )}
         {/* Somewhere to sleep, while there is nowhere (5h). A shelf where an
             ink banner used to be: a thing to do, not an advertisement. */}
         {wantsStay && !stayChosen ? (
           <FindYourStay onPress={() => { setCriteriaStep(1); setCriteria(true); }} />
         ) : null}
-        {/* A trip made by voice carries its reading: three ideas from what was
-            said, each a tap to add, and a mic to say what you'd rather (R4). */}
-        {voiceIntake && d.trip.destination ? (
-          <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.sm }}>
-            <IdeasCard
-              intake={voiceIntake}
-              place={{ lat: d.trip.destination.lat, lng: d.trip.destination.lng, label: d.trip.destination.label }}
-              added={new Set((places?.places ?? []).map((x) => x.venueRef))}
-              onAdd={(item) => { if (!day) return; void api.addStopToDay(d.trip.id, day.id, { venueRef: item.venueRef, name: item.name, lat: item.lat, lng: item.lng, category: item.category }).then(() => onChanged()).catch(() => {}); }}
-              onRefine={() => onSection('chat')}
-            />
-          </View>
-        ) : null}
-        <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} />
+        {/* No ideas card. A trip made by voice used to carry "Three ideas for
+            the kids" in a lime-tint box here (R4); the owner does not want it
+            (9 Sep 2026). What was said still leads the Activities and Food
+            browses, which is where the ideas are. */}
+        <TheDay d={d} day={day} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} onFirstRows={setRowsH} />
       </>
     )
     )
@@ -1171,34 +1234,51 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     Animated.sequence([step(2, 180), step(1.6, 140), step(1, 280)]).start(() => setBeating(false));
   }, [savedCount, beat]);
 
+  /*
+    The tiles on the map (Epic Map Chips 6a/6b, signed off 9 Sep 2026): four
+    equal, 8px radius, cream with a soft shadow, the icon over an 11px label —
+    large on a trip's first load (24px icon, 13px label) and compact once the
+    day has something on it. Nothing selected on arrival; selected is lime fill
+    with ink text, and the Shortlist badge inverts to ink. On the map, not in
+    the drawer, and cream rather than lime tint so they read as a control
+    row rather than four chips.
+  */
+  const large = welcome;
   const pills = (
-    <View style={[styles.pills, wantsStay && styles.pillsFour, wide && { left: 24, right: undefined }]}>
-      {pillsFor(wantsStay, savedCount).map((p) => {
+    <View style={[styles.mapTiles, wide && { left: 24, right: undefined, width: 360 }]}>
+      {pillsFor(wantsStay).map((p) => {
         const on = pill === p.key;
         // Shortlist is exclusive with the other two, and dims them (handoff §7).
         const dim = pill === 'shortlist' && p.key !== 'shortlist';
+        const iconSize = large ? 24 : 18;
         return (
           <Press
             key={p.key}
             onPress={() => { setPill(on ? null : p.key); setSelected(null); setDetent('half'); }}
-            style={[styles.pill, wantsStay && styles.pillFour, on && styles.pillOn, dim && { opacity: 0.45 }]}
+            style={[styles.mapTile, large ? styles.mapTileLarge : styles.mapTileCompact, on && styles.mapTileOn, dim && { opacity: 0.45 }]}
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
+            accessibilityLabel={p.key === 'shortlist' ? `Shortlist, ${savedCount} saved` : p.label}
           >
             {p.key === 'shortlist' ? (
               /*
                 An outline, not a solid (owner, 8 Sep 2026: "it's supposed to
                 be just a white heart icon, not with a black centre"), and it
                 beats in lime — the colour of the thing that just happened,
-                rather than the ink the rest of the chip is drawn in.
+                rather than the ink the rest of the tile is drawn in.
               */
               <Animated.View style={{ transform: [{ scale: beat }] }}>
-                <Icon name="shortlist" size={17} color={beating ? colors.selected : on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+                <Icon name="shortlist" size={iconSize} color={beating ? colors.selected : colors.ink} strokeWidth={2} />
               </Animated.View>
             ) : (
-              <Icon name={p.icon} size={17} color={on ? colors.selectedFg : colors.ink} strokeWidth={2.2} />
+              <Icon name={p.icon} size={iconSize} color={colors.ink} strokeWidth={2} />
             )}
-            <Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{p.label}</Text>
+            <Text style={[styles.mapTileText, large && styles.mapTileTextLarge]} numberOfLines={1}>{p.label}</Text>
+            {p.key === 'shortlist' ? (
+              <View style={[styles.mapTileBadge, on && styles.mapTileBadgeOn]}>
+                <Text style={[styles.mapTileBadgeText, on && { color: colors.surface }]}>{savedCount}</Text>
+              </View>
+            ) : null}
           </Press>
         );
       })}
@@ -1224,16 +1304,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         onMapPress={() => setSelected(null)}
       />
 
-      {/* The drive chip (handoff §01): how long the day's driving is, and what
-          the stops added to it. Top right, clear of the status bar. */}
-      {!wide && driveChip ? (
-        <View style={styles.chipWrap} pointerEvents="none">
-          <View style={styles.driveChip}>
-            <Icon name={trip.travelMode === 'transit' ? 'transit' : 'driving'} size={13} color={colors.ink} />
-            <Text style={styles.driveChipText}>{driveChip}</Text>
-          </View>
-        </View>
-      ) : null}
+      {/* No chip over the map. The handoff's drive chip (§01) sat top right
+          with the day's driving time; the owner asked for it to go (9 Sep
+          2026: "We do not need the white square… you can remove that
+          entirely"). The journey time is on the day's first beat instead. */}
 
       {/*
         No search pill and no caliper over the map.
@@ -1249,9 +1323,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           the pills go with it (owner, 6 Sep 2026: "When I'm in full bottom
           drawer mode… I should not see the activities, food, and drink pills").
           The sheet's own header carries the way back. */}
-      {!wide && !covering && detent !== 'full' ? (
-        <View style={{ position: 'absolute', left: 0, right: 0, bottom: heights[detent] + bar + 10, zIndex: 2 }} pointerEvents="box-none">
-          {!pill && detent === 'peek' ? <Text style={styles.nudge}>Pick one — we'll search along the route</Text> : null}
+      {!wide && !covering && detentNow !== 'full' ? (
+        <View style={{ position: 'absolute', left: 0, right: 0, bottom: heights[detentNow] + bar + 12, zIndex: 2 }} pointerEvents="box-none">
           {pills}
         </View>
       ) : null}
@@ -1269,7 +1342,17 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           </View>
         </View>
       ) : (
-        <BottomSheet detent={covering ? 'full' : detent} onDetent={setDetent} header={header} screenHeight={height} insetBottom={bar} cover={covering} listRef={listRef}>
+        <BottomSheet
+          detent={covering ? 'full' : detentNow}
+          // A drag ends the welcome state and the drawer goes where it was put.
+          onDetent={(dd) => { if (welcome) setTouched(true); setDetent(dd); }}
+          peekHeight={welcome ? heights.peek : undefined}
+          header={header}
+          screenHeight={height}
+          insetBottom={bar}
+          cover={covering}
+          listRef={listRef}
+        >
           {body}
         </BottomSheet>
       )}
@@ -1309,7 +1392,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         whole card opens the place; the × puts it away.
       */}
       {pins === 'card' && cardFor && !drawer ? (
-        <View style={[styles.cardWrap, { bottom: heights[detent] + bar + 62 }]} pointerEvents="box-none">
+        <View style={[styles.cardWrap, { bottom: heights[detentNow] + bar + 62 }]} pointerEvents="box-none">
           <Press onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
             <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={83} height={83} rounded={6} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
@@ -1396,7 +1479,11 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   );
 }
 
-/** The straight-line minutes the header shows before anything is routed. */
+/** "36 min drive", "20 min by train": the journey in the mode's own word. */
+const journeyWord = (mode: string | null | undefined) =>
+  (mode === 'transit' ? 'by train' : mode === 'walking' ? 'walk' : mode === 'cycling' ? 'ride' : 'drive');
+
+/** The straight-line minutes the day's first beat shows before anything is routed. */
 function estimateMinutes(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371;
   const toRad = (x: number) => (x * Math.PI) / 180;
@@ -1487,10 +1574,12 @@ function FindYourStay({ onPress }: { onPress: () => void }) {
   );
 }
 
-function TheDay({ d, day, onAdd, onOpenStop }: {
+function TheDay({ d, day, onAdd, onOpenStop, onFirstRows }: {
   d: TripDetail; day: TripDay | null; onAdd: () => void;
   /** A stop opens its own page, where the Ask thread lives (3d). */
   onOpenStop?: (venueRef: string) => void;
+  /** How tall the rows down to the destination are — what the welcome drawer is sized to. */
+  onFirstRows?: (height: number) => void;
 }) {
   const { trip, days } = d;
   const isTrip = trip.kind === 'trip';
@@ -1515,6 +1604,17 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
    */
   /** Somewhere they are actually sleeping — not the middle of the city Epic searches from. */
   const sleepingAt = isTrip && trip.base && trip.base.kind !== 'centre' && trip.base.kind !== 'home' ? trip.base.label : null;
+  /** The journey there, in minutes — the API's, else the screen's own estimate; null when there is none to make. */
+  const journeyMinutes = (() => {
+    const from = fromName(trip);
+    const to = dest ? tripName(trip) : null;
+    if (!to || to === from) return null;
+    const startAt = trip.base?.lat != null ? trip.base : trip.origin;
+    return trip.journey?.minutes
+      ?? (startAt?.lat != null && dest?.lat != null ? Math.max(1, Math.round(estimateMinutes({ lat: startAt.lat, lng: startAt.lng as number }, { lat: dest.lat, lng: dest.lng as number }))) : null);
+  })();
+  /** When you get there: leaving home plus the journey (a day out; a holiday's day starts where it is). */
+  const arriveAt = !isTrip && journeyMinutes ? addMinutesToClock(clock(trip.departAt), journeyMinutes) : null;
 
   const anchorAt = (() => {
     if (!dest || tripName(trip) === fromName(trip)) return -1;
@@ -1554,21 +1654,30 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
       {/* On a holiday the day starts where you are sleeping, so there is no
           journey to draw — "Legoland Windsor (centre) → Legoland Windsor" is
           the same place twice with an arrow between it. */}
+      {/* The rows down to the destination are measured together: on a first
+          load they are the two rows the welcome drawer shows (6a). */}
+      <View onLayout={(e) => onFirstRows?.(e.nativeEvent.layout.height)}>
+      {/*
+        "Leave home" with the house, and the travelling time under it with the
+        mode's glyph (Epic Map Chips 6a) — not the two place names (owner,
+        9 Sep 2026: "It should not say 'Fairways to Chessington'. It should say
+        travelling time, so 5-minute drive"). The API works the minutes out the
+        same way the voice card did; where an older answer has none, the
+        screen's own estimate stands in. A day that starts somewhere other than
+        home says "Start the day"; a day with no journey says where you are.
+      */}
       <Beat
         time={isTrip ? trip.dayStart ?? null : clock(trip.departAt)}
-        icon="driving"
+        icon={sleepingAt ? 'driving' : 'home'}
         /* "Start day 3" on a trip with days in it, so the timeline says which
            one you are looking at without a kicker repeating the strip (5h). */
-        title={days.length > 1 && dayIndex >= 0 ? `Start day ${dayIndex + 1}` : 'Start the day'}
-        detail={(() => {
-          const from = fromName(trip);
-          const to = dest ? tripName(trip) : null;
-          return to && to !== from ? `${from} → ${to}` : from;
-        })()}
+        title={days.length > 1 && dayIndex >= 0 ? `Start day ${dayIndex + 1}` : sleepingAt ? 'Start the day' : 'Leave home'}
+        detail={journeyMinutes ? `${mins(journeyMinutes)} ${journeyWord(trip.travelMode)}` : fromName(trip)}
+        detailIcon={journeyMinutes ? (trip.travelMode === 'transit' ? 'transit' : trip.travelMode === 'walking' ? 'walking' : 'driving') : undefined}
       />
       {stops.map((s, i) => (
         <Fragment key={s.id}>
-          {i === anchorAt ? <Beat time={null} icon="pinned" title={tripName(trip)} detail={isTrip ? null : 'All day'} /> : null}
+          {i === anchorAt ? <Beat time={arriveAt} icon="place" title={tripName(trip)} detail={isTrip ? null : 'All day'} on /> : null}
           <Beat
           time={s.startTime}
           icon="place"
@@ -1579,10 +1688,12 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
         />
         </Fragment>
       ))}
-      {/* The one thing the day is for, where the day has not got it as a stop.
-          On a holiday whose base *is* the place, that row is the same word
-          again, so it is not drawn. */}
-      {anchorAt >= stops.length ? <Beat time={null} icon="pinned" title={tripName(trip)} detail={isTrip ? null : 'All day'} /> : null}
+      {/* The one thing the day is for, where the day has not got it as a stop:
+          the lime pin node, at the time you get there (6a). On a holiday whose
+          base *is* the place, that row is the same word again, so it is not
+          drawn. */}
+      {anchorAt >= stops.length ? <Beat time={arriveAt} icon="place" title={tripName(trip)} detail={isTrip ? null : 'All day'} on /> : null}
+      </View>
 
       {/*
         Adding something is a gap in the day, not a button under it (5c, and
@@ -1622,8 +1733,10 @@ function TheDay({ d, day, onAdd, onOpenStop }: {
  * where leaving home and heading home are outlined; `onPress` opens that stop's
  * own page and its Ask thread (3d).
  */
-function Beat({ time, icon, title, detail, last, on, dashed, onPress }: {
+function Beat({ time, icon, title, detail, detailIcon, last, on, dashed, onPress }: {
   time: string | null; icon: IconName; title: string; detail: string | null;
+  /** A glyph before the detail — the car before "5 min drive" (6a). */
+  detailIcon?: IconName;
   last?: boolean; on?: boolean;
   /** The opening in the day: a dashed node and quieter type, not a filled beat. */
   dashed?: boolean;
@@ -1640,7 +1753,12 @@ function Beat({ time, icon, title, detail, last, on, dashed, onPress }: {
       </View>
       <View style={{ flex: 1, minWidth: 0, paddingTop: 5, paddingBottom: last ? 0 : 16, gap: 2 }}>
         <Text style={[styles.beatTitle, dashed && styles.beatTitleAdd]} numberOfLines={2}>{title}</Text>
-        {detail ? <Text style={[type.small, dashed && styles.beatDetailAdd]} numberOfLines={1}>{detail}</Text> : null}
+        {detail ? (
+          <View style={styles.beatDetailRow}>
+            {detailIcon ? <Icon name={detailIcon} size={14} color={colors.inkMuted} strokeWidth={2} /> : null}
+            <Text style={[type.small, dashed && styles.beatDetailAdd]} numberOfLines={1}>{detail}</Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -1980,8 +2098,10 @@ function HeartButton({ on, onPress, bare, onPhoto }: {
   );
 }
 
-function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, onAdd, onShortlist, kindOf, onKind, sort, onSort, minRating, onMinRating, priceBand, onPriceBand, saveFilter, onSaveFilter, menusRef }: {
+function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefault, onRowLayout, pins, shortlisted, onUnshortlist, onOpenSaved, onAddSaved, anchorLabel, onClearAnchor, maxDetourMin, onDetour, selected, onSelect, onOpen, said, onAdd, onShortlist, kindOf, onKind, sort, onSort, minRating, onMinRating, priceBand, onPriceBand, saveFilter, onSaveFilter, menusRef }: {
   pill: Pill;
+  /** What was asked for by voice, which lane leads with (null on a trip made by hand). */
+  said: { vibe: string | null; kinds: string[] } | null;
   along: { loading: boolean; places: TripAlongPlace[]; counts: { route: number }; error: string | null; degraded: { source: string; error: string }[]; hasRoute: boolean; beyond: number };
   shortlisted: TripPlace[];
   onUnshortlist: (p: TripPlace) => Promise<void>;
@@ -2119,6 +2239,18 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
     minRating ? `★ ${minRating}+` : null,
   ].filter(Boolean).join(' · ');
   const narrowed = Boolean(filterWords);
+
+  /**
+   * What the list is made of: in Activities, lanes — every shelf with anything
+   * along the route, the one that was asked for first (owner, 9 Sep 2026: "fun
+   * should be the first swim lane. You should still show the other swim
+   * lanes") — and elsewhere the places as they come. Flattened to one run of
+   * heads and cards so every card is still a direct child of the list.
+   */
+  const sequence = useMemo<({ lane: ReturnType<typeof lanesFor<TripAlongPlace>>[number] } | { place: TripAlongPlace })[]>(() => {
+    if (pill !== 'activities') return shown.map((place) => ({ place }));
+    return lanesFor(shown, said, (x) => primaryKind(x, THING_KINDS), LANE_VOCAB).flatMap((lane) => [{ lane }, ...lane.items.map((place) => ({ place }))]);
+  }, [pill, shown, said]);
 
   if (pill === 'shortlist') {
     /**
@@ -2603,7 +2735,22 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
             onShortlist={() => { void onShortlist(chosen); }}
             onAdd={() => onAdd(chosen)}
           />
-        ) : shown.map((p) => (
+        ) : sequence.map((entry) => {
+          if ('lane' in entry) {
+            /* A lane's head: the shelf's name and how many, and a word on the
+               one that was asked for. Drawn flat among the cards rather than
+               wrapping them, so each card's measured `y` stays what the
+               pin-to-row scroll expects. */
+            return (
+              <View key={`lane:${entry.lane.key}`} style={styles.laneHead}>
+                <Text style={styles.laneTitle}>{entry.lane.label}</Text>
+                <Text style={styles.laneCount}>{entry.lane.items.length}</Text>
+                {entry.lane.led ? <Text style={styles.laneLed}>What you asked for</Text> : null}
+              </View>
+            );
+          }
+          const p = entry.place;
+          return (
           pill === 'food'
             ? (
               /*
@@ -2715,7 +2862,8 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                 {p.summary ? <Text style={styles.cardBlurb} numberOfLines={2}>{p.summary}</Text> : null}
               </Press>
             )
-        ))}
+          );
+        })}
 
         {/* What the corridor left out, and the one tap that brings it back. A
             tight corridor is right and a silently short list is not: 17 places
@@ -3777,36 +3925,27 @@ const styles = StyleSheet.create({
    * fixed. Two rows over the map costs room the owner has already said he will
    * pay ("even if that's going to use up more real estate").
    */
-  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, rowGap: 8, paddingHorizontal: 20 },
-  pillsFour: { gap: 8, paddingHorizontal: 16 },
-  pillFour: {},
-  /**
-   * The chips along the bottom of the map (5c).
-   *
-   * A quarter bigger than they were (owner, 8 Sep 2026: "people are not
-   * noticing them at all… increase the size, probably about 20-25% bigger, and
-   * we may need to colour them so they stand out more"), and the one you are
-   * not in takes the lime tint rather than cream — which is the pack's own
-   * colour for an inactive tab, and turns four pale boxes lost on a pale map
-   * into one lime strip along it.
-   *
-   * Still no outline and no radius. The border I gave these once was
-   * compensating for a basemap they could not be seen against, and he was
-   * right about it (owner, 7 Sep 2026: "I don't want black circles or a black
-   * border around them… it just makes it very, very buttony"). Size and fill
-   * do the work instead.
-   */
-  pill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10,
-    minHeight: 42, backgroundColor: colors.accentSoft,
+  // The tiles over the map (Epic Map Chips 6a/6b): four equal, 8px radius,
+  // cream, the handoff's own shadow — one of the few rounded, shadowed things
+  // in Epic, by the owner's sign-off rather than by habit.
+  mapTiles: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  mapTile: {
+    flex: 1, alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 8,
+    boxShadow: '0 1px 0 rgba(32,30,29,0.18), 0 4px 12px rgba(32,30,29,0.12)',
+  } as any,
+  mapTileLarge: { paddingTop: 14, paddingBottom: 12 },
+  mapTileCompact: { paddingTop: 9, paddingBottom: 7 },
+  mapTileOn: { backgroundColor: colors.selected },
+  mapTileText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.ink },
+  mapTileTextLarge: { fontSize: 13 },
+  mapTileBadge: {
+    position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9,
+    backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center',
   },
-  pillOn: { backgroundColor: colors.selected },
-  pillText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.ink },
-  nudge: {
-    alignSelf: 'flex-start', marginLeft: 20, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: radius.pill, backgroundColor: colors.primary, color: colors.primaryFg, overflow: 'hidden',
-    fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700',
-  },
+  mapTileBadgeOn: { backgroundColor: colors.ink },
+  mapTileBadgeText: { fontFamily: fonts.heading, fontSize: 11, fontWeight: '800', color: colors.ink },
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'nowrap', gap: 5 },
+  beatDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 
   // The app draws under the clock now, so anything floating at the top of the
   // map puts the inset back on for itself.
@@ -3920,6 +4059,12 @@ const styles = StyleSheet.create({
   // A card per row, ruled off from the next. No box around it: the picture is
   // the edge, which is what stops a list of cards reading as a list of boxes.
   card2: { gap: 8, paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  // A lane's head on the Activities tab: the shelf's name, its count, and a
+  // word on the one that was asked for. An ink rule over it, as every rule is.
+  laneHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingTop: 18, paddingBottom: 4, borderTopWidth: BORDER, borderTopColor: colors.ink, marginTop: 6 },
+  laneTitle: { fontFamily: fonts.heading, fontWeight: '800', fontSize: 17, color: colors.ink },
+  laneCount: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  laneLed: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.accent, marginLeft: 'auto' },
   // A 3:2 hole, kept open while the frame measures itself: at zero height
   // it would report zero width and never fill.
   cardMedia: { alignSelf: 'stretch', aspectRatio: 1.5, backgroundColor: colors.surfaceMuted, borderRadius: 12, overflow: 'hidden' },
@@ -4020,12 +4165,6 @@ const styles = StyleSheet.create({
   // What it serves, said once, in the row's own words.
   tagPill: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.ink, backgroundColor: colors.surfaceMuted, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   phone: { width: 34, height: 34, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  chipWrap: { position: 'absolute', right: 16, top: ('calc(16px + var(--epic-sat))' as any) },
-  driveChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 28, borderRadius: radius.pill,
-    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
-  },
-  driveChipText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.ink },
   callBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   bookmark: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   rowOn: { backgroundColor: colors.accentSoft },

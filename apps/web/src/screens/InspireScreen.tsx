@@ -6,8 +6,7 @@ import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
-/** A spoken mood → the shelf it leads with (the same words the API's VIBE_TO_CATEGORY uses). */
-const VIBE_MOOD: Record<string, string> = { fun: 'fun', cultural: 'culture', active: 'activity', relaxed: 'relaxing' };
+import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
@@ -59,15 +58,6 @@ const ACROSS = 12;
 const BATCH = 24;
 /** The How far the screen opens on. */
 const HOW_FAR_DEFAULT = 60;
-
-const MOOD_LABEL: Record<string, string> = {
-  fun: 'Fun', food: 'Food', culture: 'Culture',
-  // Sport is the ticket and the membership; Active is what you turn up and do
-  // (owner, 5 Sep 2026). The key is `activity` because the atlas already has a
-  // category called `active` that means something else.
-  sport: 'Sport', activity: 'Active',
-  adrenaline: 'Adrenaline', relaxing: 'Relaxing', outdoors: 'Outdoors',
-};
 
 /** Where a drawer says "it depends", the place's own words decide whether it keeps the rain off, or suits children. */
 const INDOOR_WORDS = /\b(museum|gallery|galleries|cinema|bowling|arcade|soft play|play ?centre|trampoline|climbing|bouldering|swimming|pool|leisure centre|aquarium|theatre|library|escape room|ice rink|skating|laser|indoor|shopping|market hall|cathedral|abbey|church|castle|palace|house|hall)\b/i;
