@@ -170,7 +170,7 @@ function BrowseRow({ item, isPinned, isShortlisted, busy, addLabel, addedLabel, 
   return (
     <View style={styles.row}>
       <Press onPress={onOpen} style={{ flexDirection: 'row', gap: spacing.md, flex: 1 }} accessibilityRole="button" accessibilityLabel={`Open ${item.name}`}>
-        <VenuePhoto photos={item.photos} size={72} credit={false} />
+        <VenuePhoto photos={item.photos} size={108} height={72} credit={false} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{item.name}{item.chain ? <Text style={[type.tiny, { color: colors.dislike }]}>  chain</Text> : null}</Text>
           <Text style={type.small}>

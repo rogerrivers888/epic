@@ -437,7 +437,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
           return (
             <Press key={v.venueRef} onPress={() => setOpen(asItem(v))} style={[styles.card, i === 0 && { borderTopWidth: 0, paddingTop: 4 }]} accessibilityRole="button">
               <View style={[styles.photo, i % 2 === 1 && { backgroundColor: colors.surfaceMuted }]}>
-                <VenuePhoto photos={v.photos} size={88} credit={false} />
+                <VenuePhoto photos={v.photos} size={132} height={88} credit={false} />
                 {loved ? <View style={styles.heart}><Icon name="keep" size={11} color="#fff" fill /></View> : null}
               </View>
               <View style={{ flex: 1, gap: 3, minWidth: 0 }}>

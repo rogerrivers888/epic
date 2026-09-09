@@ -6,6 +6,7 @@ import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from './ui';
 import { CategoryIcon, Icon, IconText } from './Icon';
 import { VenuePhoto } from './VenuePhoto';
+import { MEDIA_RADIUS } from './VenueThumb';
 import { FaceRow } from './Faces';
 import { TakePicker, TakeRow } from './TakePicker';
 
@@ -21,7 +22,7 @@ export function VenueRow({ venue, onPress, action, stack }: { venue: Venue; onPr
     <Press onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined}>
       <Card style={{ gap: 4 }}>
         <Row>
-          {venue.photos?.length ? <VenuePhoto photos={venue.photos} size={56} credit={false} /> : <View style={{ width: 56, height: 56, borderRadius: radius.md, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' }}><CategoryIcon category={venue.category} size={22} /></View>}
+          {venue.photos?.length ? <VenuePhoto photos={venue.photos} size={84} height={56} credit={false} /> : <View style={{ width: 84, height: 56, borderRadius: MEDIA_RADIUS, backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' }}><CategoryIcon category={venue.category} size={22} /></View>}
           <View style={{ flex: 1 }}>
             <Text style={type.h3}>{venue.name}</Text>
             <Text style={type.small}>

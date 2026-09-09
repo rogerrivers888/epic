@@ -73,6 +73,23 @@ test('every photograph drawn at a fixed size is 3:2', () => {
   assert.deepEqual(offenders, [], 'a fixed-size photograph is width × 2/3');
 });
 
+test('a rented photograph is drawn 3:2 as well, not as a square', () => {
+  // VenuePhoto takes `size` (the width) and an optional `height`. With no
+  // height it draws a square, which is how six row thumbs stayed square after
+  // everything else had moved.
+  const offenders: string[] = [];
+  for (const [rel, src] of files) {
+    for (const tag of src.matchAll(/<VenuePhoto\b[\s\S]*?\/>/g)) {
+      const w = /\bsize=\{(\d+)\}/.exec(tag[0]);
+      const h = /\bheight=\{(\d+)\}/.exec(tag[0]);
+      if (!w) continue;
+      if (!h) { offenders.push(`${rel}: size={${w[1]}} with no height (a square)`); continue; }
+      if (Math.abs(Number(h[1]) - Math.round(Number(w[1]) / 1.5)) > 1) offenders.push(`${rel}: ${w[1]}×${h[1]}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test('the known exceptions are still exceptions, not habit', () => {
   // When a file on the list stops needing it, this fails, and the entry goes.
   for (const [rel] of KNOWN) {

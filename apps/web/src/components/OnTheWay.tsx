@@ -98,7 +98,7 @@ function WayRow({ stop, busy, onOpen, onPress }: { stop: RouteStop; busy: boolea
   return (
     <View style={styles.row}>
       <Press onPress={onOpen} style={{ flexDirection: 'row', gap: spacing.md, flex: 1 }} accessibilityRole="button" accessibilityLabel={`Open ${stop.name}`}>
-        <VenuePhoto photos={stop.photos} size={64} credit={false} />
+        <VenuePhoto photos={stop.photos} size={96} height={64} credit={false} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{stop.name}</Text>
           <Text style={type.small}>{typeLine(stop)}{price ? ` · ${price}` : ''}{stop.rating != null ? ` · ${stop.rating.toFixed(1)}${stop.ratingCount ? ` (${stop.ratingCount.toLocaleString()})` : ''}` : ''}</Text>

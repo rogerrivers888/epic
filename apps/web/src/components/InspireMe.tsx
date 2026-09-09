@@ -718,7 +718,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
                   accessibilityRole="button"
                   accessibilityLabel={`${idea.title}. Open the details`}
                 >
-                  {head?.photos?.length ? <VenuePhoto photos={head.photos} size={84} credit={false} />
+                  {head?.photos?.length ? <VenuePhoto photos={head.photos} size={126} height={84} credit={false} />
                     : <View style={styles.tile}><CategoryIcon category={head?.category ?? 'attraction'} size={22} color={colors.accent} /></View>}
                   <View style={{ flex: 1, gap: 2 }}>
                     <Text style={type.h3} numberOfLines={2}>{idea.title}</Text>

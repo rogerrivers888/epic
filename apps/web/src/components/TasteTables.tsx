@@ -145,7 +145,7 @@ function Place({ table, place, open, onToggle, sessionId, attendingIds, onOpenTr
   return (
     <View style={styles.place}>
       <Press onPress={onToggle} accessibilityRole="button" accessibilityState={{ expanded: open }} style={styles.placeHead}>
-        <VenuePhoto photos={place.photos} size={56} credit={false} />
+        <VenuePhoto photos={place.photos} size={84} height={56} credit={false} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{place.name}</Text>
           <Row style={{ flexWrap: 'wrap', gap: 10 }}>
