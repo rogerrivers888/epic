@@ -202,7 +202,10 @@ export function holdWeekday(when, today) {
   // "coming back Sunday", "home on Monday", "until Tuesday", "this weekend to
   // Monday" name the end; "this coming Saturday" names the start (Codex,
   // 9 Sep 2026, twice).
-  if (/\b(back|returning|return|home|until|till|through)\b/.test(before) || /\bto\s+(the\s+)?(next\s+)?$/.test(before)) return when;
+  // "to Monday" ends a range only when something earlier in the words began
+  // one ("this weekend to Monday"); "move it to next Monday" is a start.
+  const toEnd = /\bto\s+(the\s+)?(next\s+)?$/.test(before) && /\b(weekend|week|from|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d)/.test(before.replace(/\bto\s+(the\s+)?(next\s+)?$/, ''));
+  if (/\b(back|returning|return|home|until|till|through)\b/.test(before) || toEnd) return when;
   const wanted = WEEKDAYS.indexOf(m[1]);
   const d = new Date(`${today}T12:00:00Z`);
   const add = (wanted - d.getUTCDay() + 7) % 7 || 7;

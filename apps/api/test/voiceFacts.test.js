@@ -258,6 +258,7 @@ test('a weekday that names the way back is left alone; the guard is not re-run o
   assert.equal(holdWeekday({ start: '2026-09-11', end: null, as_said: 'this coming Saturday' }, '2026-09-09').start, '2026-09-12', '"coming Saturday" is a start');
   assert.deepEqual(holdWeekday({ start: '2026-09-12', end: '2026-09-14', as_said: 'away this weekend to Monday' }, '2026-09-09'), { start: '2026-09-12', end: '2026-09-14', as_said: 'away this weekend to Monday' }, '"to Monday" is the way back');
   assert.equal(holdWeekday({ start: '2026-09-10', end: '2026-09-13', as_said: 'Thursday to Sunday' }, '2026-09-09').start, '2026-09-10', 'the first weekday is the start');
+  assert.equal(holdWeekday({ start: '2026-09-21', end: null, as_said: 'move it to next Monday' }, '2026-09-09').start, '2026-09-14', '"to next Monday" with nothing before it is a start, held to the next Monday');
   // Stored on the 9th as the 12th; read back on the 12th, it is still the 12th.
   const f = normaliseTripFacts({ ...heard, when: { start: '2026-09-12', end: null, as_said: 'on Saturday' } });
   const later = resolveIntake({ facts: f, flow: 'returning', household, members, today: '2026-09-12' });
