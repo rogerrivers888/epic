@@ -255,6 +255,7 @@ test('a row saved before wants existed still resolves, a correction replaces a w
 test('a weekday that names the way back is left alone; the guard is not re-run on a later load; an extra six keeps its age', () => {
   assert.deepEqual(holdWeekday({ start: '2026-09-12', end: '2026-09-13', as_said: 'this weekend, coming back Sunday' }, '2026-09-09'), { start: '2026-09-12', end: '2026-09-13', as_said: 'this weekend, coming back Sunday' });
   assert.equal(holdWeekday({ start: '2026-09-12', end: '2026-09-14', as_said: 'Saturday until Monday' }, '2026-09-09').start, '2026-09-12');
+  assert.equal(holdWeekday({ start: '2026-09-11', end: null, as_said: 'this coming Saturday' }, '2026-09-09').start, '2026-09-12', '"coming Saturday" is a start');
   // Stored on the 9th as the 12th; read back on the 12th, it is still the 12th.
   const f = normaliseTripFacts({ ...heard, when: { start: '2026-09-12', end: null, as_said: 'on Saturday' } });
   const later = resolveIntake({ facts: f, flow: 'returning', household, members, today: '2026-09-12' });

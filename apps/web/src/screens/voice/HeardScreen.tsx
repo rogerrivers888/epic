@@ -76,7 +76,9 @@ export function HeardScreen({ intakeId, household, onOpenTrip }: { intakeId: str
           // "Windsor Castle" is not any place in Windsor, and a name nothing
           // answers to is not added (Codex, 9 Sep 2026).
           const words = w.name.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 2 && !['the', 'and'].includes(x));
-          const hit = found.results.find((r) => { const n = r.name.toLowerCase(); return words.length > 0 && words.every((x) => n.includes(x)); });
+          const whole = w.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+          // Every meaningful word, or — for a name made of short ones ("The O2") — the whole name.
+          const hit = found.results.find((r) => { const n = r.name.toLowerCase().replace(/[^a-z0-9]+/g, ' '); return words.length ? words.every((x) => n.includes(x)) : n.includes(whole); });
           if (hit && hit.lat != null && hit.lng != null) await api.addToShortlist(id, { venueRef: `${hit.source}:${hit.sourcePlaceId}`, venueLabel: hit.name, kind: 'do', category: hit.category ?? null, lat: hit.lat, lng: hit.lng, mustDo: true });
         } catch { /* not found: the list still opens */ }
       }
@@ -132,6 +134,7 @@ export function HeardScreen({ intakeId, household, onOpenTrip }: { intakeId: str
         heard={picking ? heardFor(picking) : null}
         household={household}
         wants={intake?.resolved.wants ?? []}
+        food={intake?.facts.food ?? null}
         onSet={(slot, value) => { void setSlot(slot, value); }}
         onClose={() => setPicking(null)}
       />

@@ -47,10 +47,12 @@ const dayOffsets = () => {
   ];
 };
 
-export function ChipPicker({ slot, current, heard, household, onSet, onClose, wants = [] }: {
+export function ChipPicker({ slot, current, heard, household, onSet, onClose, wants = [], food = null }: {
   slot: PickerSlot | null;
   /** Every want on the card, for the want picker (one chip is one of them). */
   wants?: { name: string; kind: 'place' | 'type'; type: string | null }[];
+  /** Everything food already says, so editing one chip keeps the rest (Codex, 9 Sep 2026). */
+  food?: { diets: string[]; kinds: string[]; must_haves: string[]; avoids: string[] } | null;
   /** The slot as it stands, for the tick. */
   current: IntakeSlot | null;
   /** The words, when this slot was said ("We heard 'Sunningdale'"). */
@@ -125,11 +127,11 @@ export function ChipPicker({ slot, current, heard, household, onSet, onClose, wa
         </View>
       );
       case 'kids_ages': return <KidsPicker initial={Array.isArray(value) ? value : []} onDone={(kids) => set(kids)} />;
-      case 'food': return <FoodPicker current={current} onDone={(food) => set(food)} />;
+      case 'food': return <FoodPicker current={current} food={food} onDone={(next) => set(next)} />;
       case 'want': return <WantsPicker wants={allWants} onDone={(wants) => set(wants)} />;
       default: return null;
     }
-  }, [base, q, results, value, text, members, home, current, allWants]);
+  }, [base, q, results, value, text, members, home, current, allWants, food]);
 
   if (!slot) return null;
   const frameBox = framed && origin ? { position: 'absolute' as const, left: origin.x, top: origin.y, width, height, borderRadius: radius.lg, overflow: 'hidden' as const } : { position: 'absolute' as const, left: 0, right: 0, top: 0, bottom: 0 };
@@ -199,9 +201,13 @@ export function KidsPicker({ initial, onDone, names = [], inline = false, onChan
 }
 export const bandOf = (age: number) => (age <= 4 ? '0-4' : age <= 8 ? '5-8' : age <= 12 ? '9-12' : '13+');
 
-function FoodPicker({ current, onDone }: { current: IntakeSlot | null; onDone: (food: { diets?: string[]; kinds?: string[]; must_haves?: string[]; avoids?: string[]; no_preference?: boolean }) => void }) {
-  const [diets, setDiets] = useState<string[]>(current?.key === 'food_diet' && typeof current.value === 'string' ? [current.value] : []);
-  const [kinds, setKinds] = useState<string[]>(current?.key === 'food_kind' && typeof current.value === 'string' ? [current.value] : []);
+function FoodPicker({ current, food, onDone }: { current: IntakeSlot | null; food: { diets: string[]; kinds: string[]; must_haves: string[]; avoids: string[] } | null; onDone: (food: { diets?: string[]; kinds?: string[]; must_haves?: string[]; avoids?: string[]; no_preference?: boolean }) => void }) {
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  const [diets, setDiets] = useState<string[]>(() => {
+    const said = (food?.diets ?? []).map(cap);
+    return said.length ? said : current?.key === 'food_diet' && typeof current.value === 'string' ? [current.value] : [];
+  });
+  const [kinds, setKinds] = useState<string[]>(() => (food?.kinds?.length ? food.kinds : current?.key === 'food_kind' && typeof current.value === 'string' ? [current.value] : []));
   const [must, setMust] = useState('');
   const [avoid, setAvoid] = useState('');
   return (
@@ -221,7 +227,7 @@ function FoodPicker({ current, onDone }: { current: IntakeSlot | null; onDone: (
         <TextInput value={avoid} onChangeText={setAvoid} placeholder="Something to avoid · seafood" placeholderTextColor={colors.inkMuted} style={styles.typed} />
       </View>
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        <Pressable onPress={() => onDone({ diets, kinds, must_haves: must.trim() ? [must.trim()] : undefined, avoids: avoid.trim() ? [avoid.trim()] : undefined, no_preference: false })} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use this</Text></Pressable>
+        <Pressable onPress={() => onDone({ diets, kinds, must_haves: must.trim() ? [...(food?.must_haves ?? []), must.trim()] : undefined, avoids: avoid.trim() ? [...(food?.avoids ?? []), avoid.trim()] : undefined, no_preference: false })} accessibilityRole="button" style={styles.use}><Text style={styles.useText}>Use this</Text></Pressable>
         <Pressable onPress={() => onDone({ diets: [], kinds: [], must_haves: [], avoids: [], no_preference: true })} accessibilityRole="button" style={[styles.use, { backgroundColor: colors.warm }]}><Text style={[styles.useText, { color: colors.ink }]}>No preference</Text></Pressable>
       </View>
     </View>
