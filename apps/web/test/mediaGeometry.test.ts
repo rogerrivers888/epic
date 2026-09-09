@@ -24,9 +24,9 @@ const THUMB = readFileSync(path.join(SRC, 'components/VenueThumb.tsx'), 'utf8');
  * for the person whose change it is.
  */
 const KNOWN = new Map<string, string>([
-  // Uncommitted work by another session was in this file on the day; its 6/10
-  // radii and 83/64/102 squares were left for the owner of that change.
-  ['screens/TripMapScreen.tsx', 'another session\'s uncommitted work, 9 Sep 2026'],
+  // Empty on the day it was written. TripMapScreen was on it for an hour —
+  // another session had uncommitted work there — until that landed and the
+  // file could be brought into line like the rest.
 ]);
 /** A business's mark is not a photograph: contained on its ground, and square. */
 const SQUARE_OK = new Set(['components/VenueDrawer.tsx:140x140']);

@@ -38,7 +38,7 @@ import { Icon, IconName, Rating, Stars } from '../components/Icon';
 import { lanesFor } from './tripLanes';
 import { LANE_VOCAB } from '../moods';
 import type { Intake } from '../api';
-import { VenueThumb } from '../components/VenueThumb';
+import { VenueThumb, mediaHeight } from '../components/VenueThumb';
 import { Avatar } from '../components/Faces';
 import { BottomSheet, Detent, detentHeights } from '../components/BottomSheet';
 import { MapGL, MapMarker, MapRoute } from '../components/MapGL';
@@ -110,9 +110,8 @@ const TABBAR = 70;
  * bigger he asked for the day before — just no longer square.
  */
 const THUMB_W = 142;
-const THUMB_H = 98;
+const THUMB_H = mediaHeight(THUMB_W);   // 3:2, like every photograph (9 Sep 2026)
 /** Airbnb's corner, near enough: generous, and the only radius in the app. */
-const THUMB_RADIUS = 14;
 
 export function TripMapScreen({ d, section, household, onBack, onChanged, onSection, onDelete, onMenu, onChat, onPeople, onOpenStop, chatUnread = 0 }: {
   d: TripDetail;
@@ -1394,7 +1393,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       {pins === 'card' && cardFor && !drawer ? (
         <View style={[styles.cardWrap, { bottom: heights[detentNow] + bar + 62 }]} pointerEvents="box-none">
           <Press onPress={() => openPlace(cardFor)} style={styles.card} accessibilityRole="button" accessibilityLabel={`Open ${cardFor.name}`}>
-            <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={83} height={83} rounded={6} credit={false} />
+            <VenueThumb name={cardFor.name} photos={cardFor.photos} category={cardFor.category} experiences={cardFor.experiences} width={96} height={64} credit={false} />
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
               <Text style={styles.rowName} numberOfLines={1}>{cardFor.name}</Text>
               <View style={styles.rowMeta}>
@@ -1786,7 +1785,7 @@ function TripPlacesList({ data, onSelect, onDelete }: {
         <Press key={p.venueRef} onPress={() => onSelect(p.venueRef)} style={styles.row} accessibilityRole="button">
           {/* Ours first, then the provider's — which is why a list of places
               nobody has researched yet is no longer a column of blank tiles. */}
-          <VenueThumb name={p.name} image={p.image} photos={p.photos} category={p.category} width={THUMB_W} height={THUMB_H} rounded={THUMB_RADIUS} credit={false} />
+          <VenueThumb name={p.name} image={p.image} photos={p.photos} category={p.category} width={THUMB_W} height={THUMB_H} credit={false} />
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <Text style={styles.rowName} numberOfLines={1}>{p.name ?? 'A place'}</Text>
             <Text style={type.small} numberOfLines={1}>
@@ -1992,7 +1991,7 @@ function PlaceHalf({ place, onShortlist, onAdd, onMore, addLabel }: {
         >
           {w ? (
             <Press onPress={onMore} accessibilityRole="button" accessibilityLabel={`Open ${place.name}`}>
-              <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={w} height={Math.round(w / 1.5)} rounded={12} credit={false}>
+              <VenueThumb name={place.name} photos={place.photos} category={place.category} experiences={place.experiences} width={w} height={mediaHeight(w)} credit={false}>
                 <View style={styles.mediaHeart}><HeartButton on={place.onShortlist} onPress={onShortlist} onPhoto /></View>
               </VenueThumb>
             </Press>
@@ -2319,7 +2318,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
               of restaurants looks intentional rather than broken.
             */}
             {p.image ? (
-              <VenueThumb name={p.name} image={p.image} category={p.category} width={64} height={64} rounded={10} credit={false} />
+              <VenueThumb name={p.name} image={p.image} category={p.category} width={96} height={64} credit={false} />
             ) : (
               <View style={styles.savedTileBox}>
                 <View style={styles.savedTile}>
@@ -2817,7 +2816,7 @@ function BrowseList({ pill, along, shown, cuisine, onCuisine, onAlways, isDefaul
                     left every card showing its category icon.
                   */}
                   {cardW ? (
-                  <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={cardW} height={Math.round(cardW / 1.5)} rounded={12} credit={false}>
+                  <VenueThumb name={p.name} photos={p.photos} category={p.category} experiences={p.experiences} width={cardW} height={mediaHeight(cardW)} credit={false}>
                     <Press
                       onPress={() => onShortlist(p)}
                       hitSlop={8}
@@ -3695,7 +3694,7 @@ function StayList({ stays, placement, onPlacement, mode, onMode, onCriteria, nig
         {stays.results.map((st) => (
           <Press key={st.venueRef} onPress={() => onOpen(st)} style={[styles.row, selected === st.venueRef && styles.rowOn]} accessibilityRole="button">
             <View>
-              <VenueThumb name={st.name} photos={st.photos} category="hotel" width={102} height={102} rounded={6} credit={false} />
+              <VenueThumb name={st.name} photos={st.photos} category="hotel" width={126} height={84} credit={false} />
               {/* The top pick is the brand moment: a lime fill with ink type
                   (Epic pack §07). Cream on lime is never allowed, so the
                   numeral flips to ink with the fill. */}
