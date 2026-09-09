@@ -30,28 +30,31 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
   // is tracked here from the same events and handed to it unchanged.
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const animate = effect !== 'none' && !reducedMotion();
+  // Read at the moment of the press, not at render: Reduce Motion can be
+  // switched on while a row is mounted, and a native answer arrives after it.
+  const animate = () => effect !== 'none' && !reducedMotion();
 
   const down = useCallback((e: any) => {
     setPressed(true);
     onPressIn?.(e);
-    if (!animate) return;
+    if (!animate()) return;
     v.stopAnimation();
     Animated.timing(v, { toValue: 1, duration: effect === 'pop' ? POP.downMs : SINK.downMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
-  }, [animate, effect, onPressIn, v]);
+  }, [effect, onPressIn, v]);
 
   const up = useCallback((e: any) => {
     setPressed(false);
     onPressOut?.(e);
-    if (!animate) return;
+    if (!animate()) return;
     v.stopAnimation();
     if (effect === 'pop') Animated.spring(v, { toValue: 0, ...POP.spring, useNativeDriver: NATIVE }).start();
     else Animated.timing(v, { toValue: 0, duration: SINK.upMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
-  }, [animate, effect, onPressOut, v]);
+  }, [effect, onPressOut, v]);
 
   const resolved = typeof style === 'function' ? style({ pressed, hovered, focused } as PressableStateCallbackType) : style;
   const flat = (StyleSheet.flatten(resolved) ?? {}) as ViewStyle;
-  const own = animate ? transformFor(effect, v) : [];
+  // The transform is always wired; with motion off the driver never leaves 0, so it is the identity.
+  const own = effect !== 'none' ? transformFor(effect, v) : [];
   const transform = own.length ? [...((flat.transform as any[]) ?? []), ...own] : flat.transform;
 
   return (
