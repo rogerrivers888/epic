@@ -88,7 +88,8 @@ async function withLabels(rules) {
 /** The Q-numbers a naming call is already out for, so a busy screen asks Wikidata once. */
 const naming = new Set();
 function nameLater(qids) {
-  const fresh = qids.filter((q) => !naming.has(q)).slice(0, 300);
+  // All of them: kindLabels batches by three hundred itself (Codex, 12 Sep 2026).
+  const fresh = qids.filter((q) => !naming.has(q));
   if (!fresh.length) return;
   for (const q of fresh) naming.add(q);
   kindLabels(fresh)
