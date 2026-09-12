@@ -414,7 +414,13 @@ router.get('/compare', requires('view_library'), async (req, res, next) => {
         try {
           id = await googleRefFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id, strict: true });
           how = id ? 'matched' : 'none';
-        } catch (err) { unreachable = whySourceFailed('google', err); }
+        } catch (err) {
+          // Only the provider's own failure is said in plain words; anything
+          // else — the database refusing the remembered match — is a fault of
+          // ours and reaches the error handler (Codex, 12 Sep 2026).
+          if (err?.provider !== 'google') throw err;
+          unreachable = whySourceFailed('google', err);
+        }
       }
       if (unreachable) {
         theirs = { id: null, how: 'none', fields: null, why: unreachable };

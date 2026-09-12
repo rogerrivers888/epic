@@ -113,7 +113,7 @@ export async function googleRefFor({ venueRef, name, lat, lng, householdId = nul
   let failure = null;
   const found = await googleSource.search({
     center: { lat, lng }, radiusKm: 3, query: name, limit: 8,
-  }).catch((err) => { failure = err; return []; });
+  }).catch((err) => { failure = Object.assign(err instanceof Error ? err : new Error(String(err)), { provider: 'google' }); return []; });
   await providerCalls.record(householdId, 'google', 'atlas.match', JSON.stringify({ google: 1 })).catch(() => null);
   if (failure) {
     if (strict) throw failure;
