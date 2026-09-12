@@ -35,7 +35,7 @@ import { Press } from '../../components/press';
 import { api, SourceBenchDecision, SourceBenchIndex, SourceBenchResult, SourceBenchRow, SourceBenchRun, Keep, OwnedFact, SourceField, SourceProvider, SourceService, SourcesReport } from '../../api';
 import { colors, radius, spacing, type } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, Row, Segmented, Stepper, Wrap } from '../../components/ui';
+import { Button, Row, Stepper, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
 import { asText, useQueryState } from '../../router';
 import { AdminPage, Banner, DataTable, Dropdown, PageHead, Panel, Pill, Tile, TileRow, Toggle, ago, count, day } from '../kit';
@@ -519,11 +519,20 @@ function BenchTable({ run, rows, problems, live, labelOf, onDecide, note }: {
             <View style={wide ? { flex: 3, minWidth: 0 } : undefined}><Text style={type.tiny}>{!wide ? 'Google: ' : ''}{live ? (r.theirs ?? '—') : 'not kept'}</Text></View>
             <View style={wide ? { flex: 1.2 } : undefined}><Pill label={VERDICT_WORD[r.verdict]} tone={VERDICT_TONE[r.verdict]} /><Text style={type.tiny}>{r.note}</Text></View>
             <View style={wide ? { flex: 2.4 } : undefined}>
-              <Segmented<'ours' | 'theirs' | 'both' | 'none'>
-                value={r.decision ?? 'none'}
-                options={[{ value: 'ours', label: 'Ours' }, { value: 'theirs', label: 'Theirs' }, { value: 'both', label: 'Both' }, { value: 'none', label: '—' }]}
-                onChange={(v) => onDecide(run.id, i, v === 'none' ? null : v)}
-              />
+              {/* Nothing lit until you choose; tap the lit one again to clear it. */}
+              <Row style={{ gap: 4 }}>
+                {(['ours', 'theirs', 'both'] as SourceBenchDecision[]).map((d) => (
+                  <Press
+                    key={d}
+                    onPress={() => onDecide(run.id, i, r.decision === d ? null : d)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: r.decision === d }}
+                    style={[styles.callBtn, r.decision === d && styles.callBtnOn]}
+                  >
+                    <Text style={[type.tiny, { color: r.decision === d ? colors.primaryFg : colors.ink }]}>{d === 'ours' ? 'Ours' : d === 'theirs' ? 'Theirs' : 'Both fine'}</Text>
+                  </Press>
+                ))}
+              </Row>
             </View>
           </View>
         ))}
@@ -612,6 +621,8 @@ const styles = StyleSheet.create({
   benchHead: { flexDirection: 'row', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: HAIR, borderBottomColor: colors.line },
   benchRow: { gap: 4, paddingVertical: spacing.sm, borderBottomWidth: HAIR, borderBottomColor: colors.line },
   benchRowWide: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  callBtn: { borderWidth: HAIR, borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.surface },
+  callBtnOn: { backgroundColor: colors.ink, borderColor: colors.ink },
 
   card: { flexGrow: 1, flexBasis: 320, minWidth: 280, maxWidth: 520, borderWidth: HAIR, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, gap: 6, backgroundColor: colors.surface },
   link: { flexDirection: 'row', alignItems: 'center', gap: 3 },
