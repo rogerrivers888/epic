@@ -20,7 +20,7 @@ export type { PressEffect } from './pressMotion';
  * motion. Someone who has asked their system for less motion gets none.
  */
 export const Press = React.forwardRef<View, PressableProps & { effect?: PressEffect; children?: React.ReactNode | ((s: PressableStateCallbackType) => React.ReactNode) }>(function Press(
-  { effect = 'sink', style, onPressIn, onPressOut, onHoverIn, onHoverOut, onFocus, onBlur, disabled, ...rest },
+  { effect = 'sink', style, onPress, onLongPress, onPressIn, onPressOut, onHoverIn, onHoverOut, onFocus, onBlur, delayLongPress, disabled, ...rest },
   ref,
 ) {
   const v = useRef(new Animated.Value(0)).current;
@@ -39,11 +39,20 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (pending.current) clearTimeout(pending.current); }, []);
 
+  // Whether the press that just ended was a press: `onPress` (or a long
+  // press) follows `onPressOut` in the same turn when it was, and never comes
+  // when the finger slid away or a scroll took the gesture (Codex, 12 Sep
+  // 2026). Only a press plays through; a cancelled one lets go at once.
+  const landed = useRef(false);
+  const press = useCallback((e: any) => { landed.current = true; onPress?.(e); }, [onPress]);
+  const longPress = useCallback((e: any) => { landed.current = true; onLongPress?.(e); }, [onLongPress]);
+
   const down = useCallback((e: any) => {
     setPressed(true);
     onPressIn?.(e);
     if (!animate()) return;
     if (pending.current) { clearTimeout(pending.current); pending.current = null; }
+    landed.current = false;
     since.current = Date.now();
     v.stopAnimation();
     Animated.timing(v, { toValue: 1, duration: effect === 'pop' ? POP.downMs : SINK.downMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
@@ -62,12 +71,16 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
     // Motion switched off between the press and the release: the driver must
     // not be left where the press put it, or the control stays sunk.
     if (!animate()) { v.stopAnimation(); v.setValue(0); return; }
-    // A tap is shorter than the way down. The press plays through to the
-    // bottom before it comes back up, so a quick tap is still seen.
-    const hold = effect === 'pop' ? POP.holdMs : SINK.holdMs;
-    const left = hold - (Date.now() - since.current);
-    if (left > 0) pending.current = setTimeout(release, left);
-    else release();
+    const began = since.current;
+    pending.current = setTimeout(() => {
+      if (!landed.current) { release(); return; }
+      // A tap is shorter than the way down. A press plays through to the
+      // bottom before it comes back up, so a quick tap is still seen.
+      const hold = effect === 'pop' ? POP.holdMs : SINK.holdMs;
+      const left = hold - (Date.now() - began);
+      if (left > 0) pending.current = setTimeout(release, left);
+      else release();
+    }, 0);
   }, [effect, onPressOut, release, v]);
 
   const resolved = typeof style === 'function' ? style({ pressed, hovered, focused } as PressableStateCallbackType) : style;
@@ -80,11 +93,16 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
     <AnimatedPressable
       ref={ref}
       disabled={disabled}
+      onPress={onPress ? press : undefined}
+      onLongPress={onLongPress ? longPress : undefined}
       // react-native-web waits 50ms before it says a press has started, which
       // is half of a tap. The press starts when the finger lands. (The web
-      // reads `delayPressIn`, which the native types do not declare.)
+      // reads `delayPressIn`, which the native types do not declare.) Its long
+      // press is counted from that delay, so the threshold is restated to keep
+      // it at the 500ms it was, and the 500ms native has.
       unstable_pressDelay={0}
       {...NO_DELAY}
+      delayLongPress={delayLongPress ?? LONG_PRESS_MS}
       onPressIn={down}
       onPressOut={up}
       onHoverIn={(e) => { setHovered(true); onHoverIn?.(e); }}
@@ -99,6 +117,7 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
 
 const NATIVE = Platform.OS !== 'web';
 const NO_DELAY = { delayPressIn: 0 } as unknown as Record<string, never>;
+const LONG_PRESS_MS = 500;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function transformFor(effect: PressEffect, v: Animated.Value) {
