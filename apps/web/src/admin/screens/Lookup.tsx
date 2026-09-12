@@ -595,7 +595,7 @@ const isBlank = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.
   || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0);
 
 function Value({ v }: { v: unknown }) {
-  if (v === null || v === undefined) return <Text style={[styles.fieldValue, styles.blank]}>{v === null ? 'null' : 'undefined'}</Text>;
+  if (v === null || v === undefined) return <Text style={[styles.fieldValue, styles.blank]}>{v === null ? 'null' : '—'}</Text>;
   if (typeof v === 'string') {
     if (v === '') return <Text style={[styles.fieldValue, styles.blank]}>""</Text>;
     if (/^https?:\/\//.test(v)) {

@@ -388,7 +388,13 @@ router.get('/compare', requires('view_library'), async (req, res, next) => {
         } else {
           const meter = {};
           try {
-            const detail = await googleSource.get(id, { meter });
+            const raw = await googleSource.get(id, { meter });
+            // A photo is a signed proxy reference here, not a picture: what
+            // the comparison wants is that there are three and who took them.
+            const detail = {
+              ...raw,
+              photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })),
+            };
             await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.compare', meter);
             details.set(id, { at: Date.now(), detail });
             while (details.size > 300) details.delete(details.keys().next().value);
