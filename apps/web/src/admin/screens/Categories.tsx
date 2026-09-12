@@ -308,7 +308,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {tax && view === 'google' ? (
-        <GoogleView tax={tax} wide={wide} by={by} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
+        <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
       ) : null}
 
       {tax && view === 'words' ? (
@@ -691,8 +691,8 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
  * subcategory yet. The owner, 12 Sep 2026: "do we not just have mapped or
  * unmapped?" — so those are the two columns, and a total at the bottom.
  */
-function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }: {
-  tax: Taxonomy; wide: boolean; by: 'google' | 'ours';
+function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onChanged }: {
+  tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours';
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; onChanged: (said: string) => Promise<void>;
 }) {
@@ -789,7 +789,11 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
 
   if (!rows) return <Text style={type.small}>Reading Google's list…</Text>;
 
-  const COL = wide ? 132 : 58;
+  // Four number columns, the last column and the padding have to leave the
+  // name room from the 900px breakpoint up, not only on a big screen (Codex, 12 Sep 2026).
+  const COL = roomy ? 132 : wide ? 88 : 58;
+  const LAST = roomy ? 320 : 200;
+  const MAP = roomy ? 380 : 300;
   const COLS = wide ? ['Subcategories', 'Places', 'Mapped', 'Unmapped'] : ['Subs', 'Mapped', 'Unmapped'];
   const cells = (g: { types: TaxonomyLabel[]; places: number; mapped: number; unmapped: number }) => (wide ? [g.types.length, g.places, g.mapped, g.unmapped] : [g.types.length, g.mapped, g.unmapped]);
   const cellsTotal = wide ? [total.types, total.places, total.mapped, total.unmapped] : [total.types, total.mapped, total.unmapped];
@@ -802,7 +806,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
       <View style={[styles.tRow, styles.tHead, styles.gRow]}>
         <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker} numberOfLines={1}>{first}</Text></View>
         {COLS.map((h) => <View key={h} style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
-        {wide ? <View style={[styles.tCell, styles.gLast]}><Text style={styles.kicker} numberOfLines={1}>{last}</Text></View> : null}
+        {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]}><Text style={styles.kicker} numberOfLines={1}>{last}</Text></View> : null}
       </View>
       {groups.map((g) => {
         const on = chosen?.key === g.key;
@@ -813,14 +817,17 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
           <Press effect="none" onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
-              {!wide ? <Text style={type.tiny} numberOfLines={1}>{[`${count(g.places)} places`, g.aside !== '—' ? g.aside : null].filter(Boolean).join(' · ')}</Text> : null}
+              {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
             </View>
             {cells(g).map((n, i) => (
               <View key={i} style={[styles.tCell, { width: COL }]}>
-                <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: (i === unmappedAt || i === placesAt) && !n ? colors.inkMuted : colors.ink, fontWeight: i === unmappedAt && n ? '700' : '400' }]}>{i === placesAt ? count(n) : n}</Text>
+                {/* No sum of places over a category: one place carries several of
+                    Google's words, so the sum would count it more than once. The
+                    number is exact on each subcategory row below. */}
+                <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: (i === unmappedAt && !n) || i === placesAt ? colors.inkMuted : colors.ink, fontWeight: i === unmappedAt && n ? '700' : '400' }]}>{i === placesAt ? '—' : n}</Text>
               </View>
             ))}
-            {wide ? <View style={[styles.tCell, styles.gLast]}><Text style={[type.tiny, { lineHeight: 17 }]} numberOfLines={2}>{g.aside}</Text></View> : null}
+            {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]}><Text style={[type.tiny, { lineHeight: 17 }]} numberOfLines={2}>{g.aside}</Text></View> : null}
           </Press>
           {/* The group's subcategories, right under its row — never below the fold. */}
           {on ? (
@@ -842,7 +849,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                 <View style={[styles.tRow, { borderBottomWidth: BORDER, borderBottomColor: colors.line }]}>
                   <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker}>Google's subcategory</Text></View>
                   {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]}>Places</Text></View> : null}
-                  {wide ? <View style={[styles.tCell, { width: 380 }]}><Text style={[styles.kicker, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
+                  {wide ? <View style={[styles.tCell, { width: MAP }]}><Text style={[styles.kicker, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
                 </View>
               ) : null}
               {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing unmapped here.</Text> : null}
@@ -873,7 +880,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                       </View>
                     ) : null}
                     {canManage ? (
-                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, flexWrap: wide ? 'nowrap' : 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? 380 : undefined }}>
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, flexWrap: wide ? 'nowrap' : 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? MAP : undefined }}>
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]}
@@ -889,7 +896,9 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                         ) : null}
                       </View>
                     ) : (
-                      <Text style={[type.small, { fontWeight: '600', textAlign: 'right', maxWidth: '40%' }]} numberOfLines={2}>{ctlValue}</Text>
+                      <View style={{ width: wide ? MAP : undefined, alignSelf: wide ? 'center' : 'flex-end' }}>
+                        <Text style={[type.small, { fontWeight: '600', textAlign: 'right' }]} numberOfLines={2}>{ctlValue}</Text>
+                      </View>
                     )}
                   </View>
                   </View>
@@ -904,9 +913,9 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
       <View style={[styles.tRow, styles.tTotal, styles.gRow]}>
         <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={[type.small, { fontWeight: '700' }]}>Total</Text></View>
         {cellsTotal.map((n, i) => (
-          <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'center', fontWeight: '700', fontVariant: ['tabular-nums'] }]}>{count(n)}</Text></View>
+          <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'center', fontWeight: '700', fontVariant: ['tabular-nums'], color: i === placesAt ? colors.inkMuted : colors.ink }]}>{i === placesAt ? '—' : count(n)}</Text></View>
         ))}
-        {wide ? <View style={[styles.tCell, styles.gLast]} /> : null}
+        {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]} /> : null}
       </View>
     </View>
   );
@@ -1054,7 +1063,7 @@ const styles = StyleSheet.create({
   inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.md, paddingRight: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
   /** The Google table's rows: padded from the edge, a little taller. */
   gRow: { paddingHorizontal: spacing.sm, minHeight: 44 },
-  gLast: { width: 320, paddingLeft: spacing.md },
+  gLast: { paddingLeft: spacing.md },
   /** The opened group's controls: one height, room above and below. */
   groupBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm, flexWrap: 'wrap', paddingVertical: spacing.md },
   barControl: { height: 36, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surfaceMuted },
