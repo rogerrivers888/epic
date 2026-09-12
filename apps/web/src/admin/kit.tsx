@@ -379,8 +379,41 @@ const styles = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
-// the dropdown
+// the plain grammar (owner, 12 Sep 2026: "I hate this design… these big
+// white boxes, the buttons with white boxes around them"). A section is an
+// uppercase kicker over one ink rule; an action is an underlined word; a
+// choice among a few is a flat lime word when chosen; a control is plain text
+// with a chevron and opens a panel under itself. Lifted from Categories.tsx.
 // ---------------------------------------------------------------------------
+
+export function Section({ title, right, children, style }: { title: string; right?: React.ReactNode; children: React.ReactNode; style?: object }) {
+  return (
+    <View style={style}>
+      <View style={plain.sectionHead}>
+        <Text style={plain.kicker}>{title}</Text>
+        <View style={{ flex: 1 }} />
+        {right}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+export function TextAction({ label, onPress, disabled, tone = 'ink' }: { label: string; onPress: () => void; disabled?: boolean; tone?: 'ink' | 'muted' }) {
+  return (
+    <Press onPress={onPress} disabled={disabled} accessibilityRole="button" hitSlop={6} style={{ opacity: disabled ? 0.4 : 1 }}>
+      <Text style={[plain.action, tone === 'muted' && { color: colors.inkMuted }]}>{label}</Text>
+    </Press>
+  );
+}
+
+export function Choice({ label, on, onPress }: { label: string; on: boolean; onPress?: () => void }) {
+  return (
+    <Press onPress={onPress} disabled={!onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[plain.choice, on && plain.choiceOn]}>
+      <Text style={[type.small, { color: on ? colors.selectedFg : colors.inkMuted, fontWeight: on ? '700' : '500' }]}>{label}</Text>
+    </Press>
+  );
+}
 
 export type DropdownOption = { key: string; label: string; on: boolean; count?: number | string | null; group?: string };
 
@@ -388,25 +421,22 @@ export type DropdownOption = { key: string; label: string; on: boolean; count?: 
  * A control that opens a panel of choices under itself — the owner's ask for
  * the Sources filters (12 Sep 2026): "just a dropdown with tick boxes for me
  * to be able to tick the one I want. The dropdown should appear below the
- * dropdown box. In light mode, it should appear in white."
+ * dropdown box. In light mode, it should appear in white." The control itself
+ * is plain text with a chevron, never a box (handover v8; Categories).
  *
- * `multi` draws tick boxes and keeps the panel open; a single-choice panel
- * closes on the pick. The panel is the page's surface colour over a 1px rule,
- * and a transparent scrim behind it closes it. It positions itself under the
- * control, so it must sit in a parent that does not clip (`overflow: visible`).
+ * `multi` draws tick marks and keeps the panel open; a single-choice panel
+ * closes on the pick. The panel is the surface colour over a 1px rule with a
+ * transparent scrim behind it.
  */
 export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick, soft = false }: {
-  /** What the control is for: "Domain". */
   label: string;
-  /** What it is set to, printed after the label: "All domains". */
   value: string;
   options: DropdownOption[];
   onPick: (key: string) => void;
   multi?: boolean;
   width?: number;
-  /** Shortcut rows above the list, for multi: All · None · Own for good … */
   quick?: { key: string; label: string }[];
-  /** A light grey, rounded control at 40px — the owner's ask for Lookup's control line (12 Sep 2026: "I don't like the black squares"). */
+  /** Lookup's softer panel: a rounded corner and the soft rule. The control is plain text either way. */
   soft?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -420,50 +450,44 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
     return out;
   }, [options]);
   return (
-    <View style={[dd.ddWrap, open && dd.ddWrapOpen]}>
+    <View style={[dd.wrap, open && dd.wrapOpen]}>
       <Press
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`${label}: ${value}`}
-        style={[dd.dd, soft && dd.ddSoft, open && dd.ddOpen]}
+        style={dd.ctl}
+        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
       >
-        <Text style={dd.ddLabel}>{label}</Text>
-        <Text style={dd.ddValue} numberOfLines={1}>{value}</Text>
-        <Icon name={open ? 'collapse' : 'expand'} size={13} color={colors.ink} strokeWidth={2.4} />
+        <Text style={dd.ctlLabel}>{label}</Text>
+        <Text style={dd.ctlValue} numberOfLines={1}>{value}</Text>
+        <Icon name={open ? 'collapse' : 'expand'} size={12} color={colors.ink} strokeWidth={2.6} />
       </Press>
       {open ? (
         <>
-          <Press style={dd.ddScrim} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={[dd.ddPanel, soft && dd.ddPanelSoft, { width }]} accessibilityRole="menu">
+          <Press style={dd.scrim} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={[dd.panel, soft && dd.panelSoft, { width }]} accessibilityRole="menu">
             {quick?.length ? (
-              <Row style={dd.ddQuick}>
-                {quick.map((q) => (
-                  <Press key={q.key} onPress={() => onPick(q.key)} accessibilityRole="button" style={dd.ddQuickItem}>
-                    <Text style={[type.tiny, { color: colors.ink, textDecorationLine: 'underline' }]}>{q.label}</Text>
-                  </Press>
-                ))}
+              <Row style={dd.quick}>
+                {quick.map((q) => <TextAction key={q.key} label={q.label} onPress={() => onPick(q.key)} />)}
               </Row>
             ) : null}
             <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
               {groups.map((g) => (
                 <View key={g.title ?? '_'}>
-                  {g.title ? <Text style={dd.ddGroup}>{g.title}</Text> : null}
+                  {g.title ? <Text style={dd.group}>{g.title}</Text> : null}
                   {g.items.map((o) => (
                     <Press
                       key={o.key}
                       onPress={() => { onPick(o.key); if (!multi) setOpen(false); }}
                       accessibilityRole={multi ? 'checkbox' : 'menuitem'}
                       accessibilityState={multi ? { checked: o.on } : { selected: o.on }}
-                      style={({ hovered }: any) => [dd.ddItem, hovered && dd.ddItemHover, !multi && o.on && dd.ddItemOn]}
+                      style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, !multi && o.on && dd.itemOn]}
                     >
-                      {!multi ? <View style={{ width: 14, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.6} /> : null}</View> : null}
-                      {multi ? (
-                        <View style={[dd.ddBox, o.on && dd.ddBoxOn]}>
-                          {o.on ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}
-                        </View>
-                      ) : null}
-                      <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{o.label}</Text>
+                      <View style={{ width: 16, alignItems: 'center' }}>
+                        {o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}
+                      </View>
+                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
                       {o.count != null && o.count !== '' ? <Text style={type.tiny}>{String(o.count)}</Text> : null}
                     </Press>
                   ))}
@@ -477,44 +501,31 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
   );
 }
 
-/** A small on/off with its label — the "hide providers with nothing here" switch. */
-export function Toggle({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
-  return (
-    <Press onPress={onPress} accessibilityRole="switch" accessibilityState={{ checked: on }} style={dd.toggle}>
-      <View style={[dd.ddBox, on && dd.ddBoxOn]}>
-        {on ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}
-      </View>
-      <Text style={[type.small, { color: colors.ink }]}>{label}</Text>
-    </Press>
-  );
-}
+const plain = StyleSheet.create({
+  kicker: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: 32 },
+  action: { ...type.small, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline' },
+  choice: { paddingHorizontal: 8, paddingVertical: 3 },
+  choiceOn: { backgroundColor: colors.selected },
+});
 
 const dd = StyleSheet.create({
-  ddWrap: { position: 'relative', zIndex: 20 },
+  wrap: { position: 'relative', zIndex: 20 },
   /** Open, it must sit over the controls beside it as well as the table below. */
-  ddWrapOpen: { zIndex: 60 },
-  dd: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
-    paddingHorizontal: spacing.sm, paddingVertical: 7, backgroundColor: colors.surface, minHeight: 36,
-  },
-  ddSoft: { borderColor: colors.lineSoft, borderRadius: 8, minHeight: 40, paddingHorizontal: 12 },
-  ddPanelSoft: { borderColor: colors.lineSoft, borderRadius: 8 },
-  ddOpen: { borderColor: colors.ink },
-  ddLabel: { ...type.tiny, color: colors.inkMuted },
-  ddValue: { ...type.small, color: colors.ink, fontWeight: '700', maxWidth: 220 },
-  ddScrim: { position: 'fixed' as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 25 } as any,
-  ddPanel: {
+  wrapOpen: { zIndex: 60 },
+  ctl: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32, flexShrink: 1, minWidth: 0 },
+  ctlLabel: { ...type.small, color: colors.inkMuted },
+  ctlValue: { ...type.small, color: colors.ink, fontWeight: '700', maxWidth: 220 },
+  scrim: { position: 'fixed' as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 25 } as any,
+  panel: {
     position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
     paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
   },
-  ddQuick: { gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.line, flexWrap: 'wrap' },
-  ddQuickItem: { paddingVertical: 2 },
-  ddGroup: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
-  ddItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },
-  ddItemHover: { backgroundColor: colors.well },
-  ddItemOn: { backgroundColor: colors.well },
-  ddBox: { width: 16, height: 16, borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  ddBoxOn: { backgroundColor: colors.ink },
-  toggle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  panelSoft: { borderColor: colors.lineSoft, borderRadius: 8 },
+  quick: { gap: spacing.md, paddingHorizontal: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, flexWrap: 'wrap' },
+  group: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
+  item: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },
+  itemHover: { backgroundColor: colors.well },
+  itemOn: { backgroundColor: colors.well },
 });
