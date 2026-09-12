@@ -150,27 +150,38 @@ export async function one(namespace, key) {
 
 /** Give a label its English name, or switch it off. Wikidata's names come from "Name the types". */
 export async function save({ namespace, key, label, note, active, decision }) {
+  // A decision is one of three: 'aside' (not a day out; active goes false),
+  // 'nearby' (useful beside one), or 'none' to clear it. Left out, it keeps.
+  // The two fields stay in step both ways: a decision sets `active`, and an
+  // explicit `active` clears or sets an aside decision (Codex, 13 Sep 2026).
+  const d = decision === undefined ? null : decision === null || decision === 'none' ? 'none' : String(decision);
+  const a = active == null ? null : Boolean(active);
   if (namespace === 'wikidata') {
+    // A Wikidata type has one switch, `admit`; a decision is the same switch.
+    const admit = d === 'aside' ? false : d === 'nearby' || d === 'none' ? true : a;
     const { rows } = await query(
       `update place_kinds set label = coalesce($2, label), admit = coalesce($3, admit), updated_at = now()
         where qid = $1 returning 'wikidata' as namespace, qid as key, label, category as note, seen_count, admit as active`,
-      [key, label ?? null, active == null ? null : Boolean(active)]);
+      [key, label ?? null, admit]);
     return rows[0] ?? null;
   }
-  // A decision is one of three: 'aside' (not a day out; active goes false),
-  // 'nearby' (useful beside one), or 'none' to clear it. Left out, it keeps.
-  const d = decision === undefined ? null : decision === null || decision === 'none' ? 'none' : String(decision);
   const { rows } = await query(
     `insert into taxonomy_labels (namespace, key, label, note, active, decision)
-     values ($1, $2, $3, $4, coalesce($5, true), case when $6::text is null or $6 = 'none' then null else $6 end)
+     values ($1, $2, $3, $4,
+             case when $6::text = 'aside' then false when $6::text is not null and $6 <> 'none' then true else coalesce($5, true) end,
+             case when $6::text is null or $6 = 'none' then (case when $5 = false then 'aside' else null end) else $6 end)
      on conflict (namespace, key) do update
         set label = coalesce($3, taxonomy_labels.label),
             note = coalesce($4, taxonomy_labels.note),
             active = case when $6::text = 'aside' then false when $6::text is not null then true else coalesce($5, taxonomy_labels.active) end,
-            decision = case when $6::text is null then taxonomy_labels.decision when $6 = 'none' then null else $6 end,
+            decision = case
+              when $6::text is not null then (case when $6 = 'none' then null else $6 end)
+              when $5 = false then 'aside'
+              when $5 = true and taxonomy_labels.decision = 'aside' then null
+              else taxonomy_labels.decision end,
             updated_at = now()
      returning *`,
-    [namespace, key, label ?? null, note ?? null, active == null ? null : Boolean(active), d]);
+    [namespace, key, label ?? null, note ?? null, a, d]);
   return rows[0];
 }
 
