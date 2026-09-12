@@ -1977,7 +1977,7 @@ export const api = {
   // --- the taxonomy: categories, every provider's words, and the rules between --
   taxonomy: () => request<Taxonomy>('/api/admin/taxonomy/'),
   taxonomyLabels: (p: { namespace?: string | null; q?: string; all?: boolean; limit?: number; offset?: number } = {}) =>
-    request<{ namespace: string | null; labels: TaxonomyLabel[] }>(`/api/admin/taxonomy/labels${qs({ ...p, all: p.all ? 1 : undefined })}`),
+    request<{ namespace: string | null; labels: TaxonomyLabel[]; offset: number; more: boolean }>(`/api/admin/taxonomy/labels${qs({ ...p, all: p.all ? 1 : undefined })}`),
   taxonomyMatrix: (all = false) => request<TaxonomyMatrix>(`/api/admin/taxonomy/matrix${qs({ all: all ? 1 : undefined })}`),
   taxonomyRules: (subcategory: string) => request<{ subcategory: string; rules: TaxonomyRule[] }>(`/api/admin/taxonomy/rules${qs({ subcategory })}`),
   /** These labels → this subcategory. One type/atlas/experience label is written at that level; anything else is a labels rule. */

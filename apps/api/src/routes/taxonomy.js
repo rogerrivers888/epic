@@ -120,7 +120,7 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
         ? { category: null, subcategory: null, how: 'none', via: null, derived: [] }
         : landingOf({ namespace: r.namespace, key: r.key, kindCategory: r.namespace === 'wikidata' ? r.note : null }, rules, tax.vocab),
     }));
-    res.json({ namespace, q, all, labels, subcategories: tax.subcategories, categories: tax.categories });
+    res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
   } catch (err) { next(err); }
 });
 
@@ -138,7 +138,8 @@ taxonomyRoutes.get('/matrix', requires('view_library'), async (req, res, next) =
     await ready();
     const all = req.query.all === '1';
     const [rows, rules, tax] = await Promise.all([
-      labelRepo.list({ seenOnly: false, limit: 5000 }), shelfRules.rules(), taxonomy.taxonomy(),
+      // The whole vocabulary, Wikidata's eight thousand included when `all` is asked for.
+      labelRepo.list({ seenOnly: false, limit: 20000 }), shelfRules.rules(), taxonomy.taxonomy(),
     ]);
     const cells = {};
     const unfiled = {};

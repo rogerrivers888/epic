@@ -213,6 +213,9 @@ export function resolveVenues(rawRecords) {
     if (!candidate.address && record.address) candidate.address = record.address;
     if (record.cuisines?.length) candidate.cuisines = [...new Set([...(candidate.cuisines || []), ...record.cuisines])];
     if (record.experiences?.length) candidate.experiences = [...new Set([...(candidate.experiences || []), ...record.experiences])];
+    // Every provider's own words survive the merge, so a rule against
+    // `google:ice_cream_shop` fires when the map's record won the row (Codex, 12 Sep 2026).
+    if (record.labels?.length) candidate.labels = [...new Set([...(candidate.labels || []), ...record.labels])];
     candidate.attributionText = [...new Set([candidate.attributionText || candidate.attribution?.text || candidate.attributionLabel, record.attribution].filter(Boolean))].join(' · ');
 
     // Disagreements are retained rather than discarded — they are signal

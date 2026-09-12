@@ -105,7 +105,7 @@ export async function list({ namespace = null, q = null, seenOnly = false, limit
   if (namespace) { args.push(namespace); where.push(`namespace = $${args.length}`); }
   if (q) { args.push(`%${q}%`); where.push(`(key ilike $${args.length} or label ilike $${args.length})`); }
   if (seenOnly) where.push('seen_count > 0');
-  args.push(Math.min(5000, Math.max(1, limit)));
+  args.push(Math.min(20000, Math.max(1, limit)));
   const lim = args.length;
   args.push(Math.max(0, offset));
   const off = args.length;

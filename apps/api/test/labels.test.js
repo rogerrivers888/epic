@@ -134,3 +134,16 @@ test('one label about a type, an atlas word or an experience is the old scope; a
   assert.deepEqual(labelsOfRule({ scope: 'kind', subject: 'Q1' }), ['wikidata:Q1']);
   assert.deepEqual(labelsOfRule({ scope: 'labels', labels: ['a:1', 'b:2'] }), ['a:1', 'b:2']);
 });
+
+test('a place two providers both returned keeps every provider\'s words after the merge', async () => {
+  // The map's record usually wins the row, and it used to drop Google's words
+  // with it — so a rule against `google:ice_cream_shop` never fired for the
+  // parlour both sources knew (Codex, 12 Sep 2026).
+  const { resolveVenues } = await import('../src/sources/index.js');
+  const osm = { source: 'osm', sourcePlaceId: 'node/1', name: 'Gelato Corner', category: 'cafe', experiences: [], lat: 51.4, lng: -0.6, labels: ['osm:amenity=ice_cream'], cuisines: [] };
+  const google = { source: 'google', sourcePlaceId: 'abc', name: 'Gelato Corner', category: 'cafe', experiences: [], lat: 51.4, lng: -0.6, labels: ['google:ice_cream_shop', 'google:cafe'], cuisines: [] };
+  const merged = resolveVenues([osm, google]);
+  assert.equal(merged.length, 1);
+  assert.ok(merged[0].labels.includes('google:ice_cream_shop'));
+  assert.ok(merged[0].labels.includes('osm:amenity=ice_cream'));
+});

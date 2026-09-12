@@ -561,6 +561,9 @@ function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, c
   canManage: boolean; onPick: (label: string, subcategory: string | null) => void;
 }) {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE = 400;
   const [typed, setTyped] = useState(q);
   const namespace = ns || tax?.namespaces[0]?.key || 'google';
 
@@ -573,11 +576,23 @@ function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, c
   useEffect(() => {
     let live = true;
     setRows(null);
-    void api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: 400 })
-      .then((d) => { if (live) setRows(d.labels); })
-      .catch(() => { if (live) setRows([]); });
+    void api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: PAGE })
+      .then((d) => { if (live) { setRows(d.labels); setMore(d.more); } })
+      .catch(() => { if (live) { setRows([]); setMore(false); } });
     return () => { live = false; };
   }, [namespace, q, all, tax]);
+
+  // The next page, appended: the vocabulary is thousands long and a list that
+  // silently stopped at four hundred would hide most of it (Codex, 12 Sep 2026).
+  const showMore = async () => {
+    setLoadingMore(true);
+    try {
+      const d = await api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: PAGE, offset: rows?.length ?? 0 });
+      setRows((prev) => [...(prev ?? []), ...d.labels]);
+      setMore(d.more);
+    } catch { setMore(false); }
+    finally { setLoadingMore(false); }
+  };
 
   const here = tax?.namespaces.find((n) => n.key === namespace) ?? null;
 
@@ -639,6 +654,11 @@ function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, c
                 {canManage ? <Icon name="more" size={16} color={colors.inkMuted} /> : null}
               </Press>
             ))}
+        {rows && more ? (
+          <View style={{ padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line }}>
+            <Button label={loadingMore ? 'Loading…' : `Show the next ${PAGE}`} kind="secondary" icon="expand" disabled={loadingMore} onPress={() => void showMore()} />
+          </View>
+        ) : null}
       </Panel>
     </>
   );
