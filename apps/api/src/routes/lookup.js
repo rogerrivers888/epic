@@ -28,7 +28,7 @@ import { requires } from '../access.js';
 import { enabledSources, recordsOf } from '../sources/index.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
-import { googleMatchFor, tripadvisorMatchFor, matchesFor } from '../sources/providerMatch.js';
+import { googleMatchFor, tripadvisorMatchFor, matchesFor, triedFor } from '../sources/providerMatch.js';
 import { curate, band } from '../sources/curate.js';
 import { claimPlace, enrich } from '../sources/own.js';
 import { crowdBand, countBand, score } from '../domain/scoring.js';
@@ -73,7 +73,9 @@ const OWNED_KEYS = new Set(['atlas', 'sweep', 'own']);
  */
 const figures = new Map();
 const FIGURES_TTL_MS = 6 * 3600_000;
-const holdFigures = (ref, f) => { if (f && (f.rating != null || f.ratingCount != null)) figures.set(ref, { ...f, at: Date.now() }); };
+// Held even when Google had no figures for the place: "asked, and there was
+// nothing" is an answer, and a run must not buy it again next page.
+const holdFigures = (ref, f) => { if (f) figures.set(ref, { rating: f.rating ?? null, ratingCount: f.ratingCount ?? null, at: Date.now() }); };
 const heldFigures = (ref) => { const f = figures.get(ref); return f && Date.now() - f.at < FIGURES_TTL_MS ? f : null; };
 
 /** The owner's ceiling for Tripadvisor on this screen: locations billed, this month, for populating a ring. */
@@ -531,7 +533,11 @@ router.post('/rate', requires('view_library'), async (req, res, next) => {
     const limit = Math.min(60, Math.max(1, Number(req.body?.limit) || 30));
     if (!googleSource.enabled()) return res.status(409).json({ error: 'google_off', message: 'Google is not switched on here.' });
     const out = await runLookup(settings, household);
-    const wanting = notOwnedOf(out, kind).filter((i) => i.rating == null).sort((a, b) => a.distanceKm - b.distanceKm);
+    // Never the same place twice: one already asked about — matched or missed,
+    // in the table or in memory — is done with, whatever Google said.
+    const pool = notOwnedOf(out, kind).filter((i) => i.rating == null && !i.sources.includes('google'));
+    const tried = await triedFor(pool.map((i) => i.ref), 'google');
+    const wanting = pool.filter((i) => !tried.has(i.ref) && !heldFigures(i.ref)).sort((a, b) => a.distanceKm - b.distanceKm);
     const page = wanting.slice(0, limit);
     let rated = 0; let matched = 0; let missed = 0; let failed = 0;
     for (const i of page) {
@@ -545,7 +551,8 @@ router.post('/rate', requires('view_library'), async (req, res, next) => {
           try { f = await googleSource.rating(m.id, { meter }); }
           finally { if (Object.keys(meter).length) await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.rate', meter).catch(() => null); }
         }
-        if (f && (f.rating != null || f.ratingCount != null)) { holdFigures(i.ref, f); rated += 1; }
+        holdFigures(i.ref, f ?? { rating: null, ratingCount: null });
+        if (f && (f.rating != null || f.ratingCount != null)) rated += 1;
       } catch (err) {
         if (err?.provider !== 'google') throw err;
         failed += 1;
@@ -571,8 +578,8 @@ router.post('/tripadvisor', requires('view_library'), async (req, res, next) => 
     if (!tripadvisorSource.enabled()) return res.status(409).json({ error: 'tripadvisor_off', message: 'Tripadvisor is not switched on here.' });
     const out = await runLookup(settings, household);
     let used = await tripadvisorUsed(household.id);
-    const joined = await matchesFor(notOwnedOf(out, kind).map((i) => i.ref), 'tripadvisor');
-    const wanting = notOwnedOf(out, kind).filter((i) => !joined.has(i.ref) && !i.sources.includes('tripadvisor')).sort((a, b) => b.priority - a.priority);
+    const tried = await triedFor(notOwnedOf(out, kind).map((i) => i.ref), 'tripadvisor');
+    const wanting = notOwnedOf(out, kind).filter((i) => !tried.has(i.ref) && !i.sources.includes('tripadvisor')).sort((a, b) => b.priority - a.priority);
     const page = wanting.slice(0, limit);
     let matched = 0; let missed = 0; let looked = 0; let stopped = false;
     for (const i of page) {

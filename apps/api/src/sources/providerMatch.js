@@ -77,6 +77,13 @@ export async function matchKept(venueRef, source = 'google') {
   return rows[0] ?? null;
 }
 
+/** Every place we have already asked one provider about, matched or missed — so a run never asks twice. */
+export async function triedFor(refs, source = 'google') {
+  if (!refs?.length) return new Set();
+  const { rows } = await query('select venue_ref from provider_matches where source = $2 and venue_ref = any($1)', [refs, source]);
+  return new Set(rows.map((r) => r.venue_ref));
+}
+
 /** The matches held at one provider for many places, keyed by venue ref. Misses are left out. */
 export async function matchesFor(refs, source = 'google') {
   if (!refs?.length) return new Map();
