@@ -2279,6 +2279,10 @@ export type CoverageRow = {
 export type LookupCounts = { activities: number; food: number; all: number };
 export type LookupSource = {
   key: string; label: string; layer: 'rented' | 'owned'; note: string | null;
+  /** Listed but not asked: an opt-in source that bills per place, which is the owner's to switch on. */
+  asked: boolean;
+  /** How far this source was actually asked to look; `capped` when its own limit is inside the ring. */
+  reachKm: number | null; capped: boolean;
   /** Places carrying this source: everything it handed back, and what is inside the travel time. */
   returned: LookupCounts; kept: LookupCounts;
   failed: { why: string; error: string; slow: boolean } | null;

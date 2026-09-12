@@ -51,8 +51,12 @@ export function reachKm(mode, minutes, { cap = RING_CAP_KM, at = { lat: 51.4, ln
   return Math.max(0.5, Math.floor(lo * 10) / 10);
 }
 
-/** "Windsor Castle" and "windsor-castle" are the same name. */
-export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '');
+/**
+ * "Windsor Castle" and "windsor-castle" are the same name. Letters in any
+ * script count — two Chinese restaurants next door to each other are not one
+ * place because neither name has an ASCII letter in it (Codex, 12 Sep 2026).
+ */
+export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
 
 /**
  * Fold one of our own rows into the list.
@@ -67,8 +71,10 @@ export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD').rep
  */
 export function fold(items, item) {
   const byRef = items.find((i) => i.ref === item.ref);
-  const same = byRef ?? items.find((i) => i.lat != null && item.lat != null
-    && nameKey(i.name) === nameKey(item.name) && kmBetween(i, item) < 0.25);
+  const key = nameKey(item.name);
+  // A name that normalises to nothing matches nothing: an empty key is not a name.
+  const same = byRef ?? (key ? items.find((i) => i.lat != null && item.lat != null
+    && nameKey(i.name) === key && kmBetween(i, item) < 0.25) : null);
   if (!same) { items.push(item); return item; }
   for (const s of item.sources) if (!same.sources.includes(s)) same.sources.push(s);
   same.records.push(...item.records);

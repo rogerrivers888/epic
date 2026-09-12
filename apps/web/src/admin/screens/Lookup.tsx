@@ -289,8 +289,14 @@ export function Lookup() {
                     />
                     {result.sources.map((s) => (
                       <SourceRow
-                        key={s.key} label={s.label} note={s.layer === 'owned' ? s.note : s.failed ? s.failed.why : 'rented — fetched at display, never stored'}
-                        layer={s.layer} failed={Boolean(s.failed)}
+                        key={s.key} label={s.label}
+                        note={!s.asked
+                          ? 'opt-in and billed per place, so not asked here — switching it on is the owner’s call'
+                          : s.layer === 'owned' ? s.note
+                            : s.failed ? s.failed.why
+                              : s.capped ? `asked only up to ${s.reachKm} km of the ${result.radiusKm} km ring — its own limit, not a gap`
+                                : 'rented — fetched at display, never stored'}
+                        layer={s.layer} failed={Boolean(s.failed)} asked={s.asked} capped={s.capped}
                         returned={s.returned[k]} kept={carrying(list, s.key)}
                         on={kind === k && source === s.key} onPress={() => open(k, s.key)}
                       />
@@ -374,8 +380,8 @@ export function Lookup() {
 // one row of the source table
 // ---------------------------------------------------------------------------
 
-function SourceRow({ label, note, layer, failed, returned, kept, on, onPress }: {
-  label: string; note: string | null; layer: LookupSource['layer']; failed?: boolean;
+function SourceRow({ label, note, layer, failed, asked = true, capped, returned, kept, on, onPress }: {
+  label: string; note: string | null; layer: LookupSource['layer']; failed?: boolean; asked?: boolean; capped?: boolean;
   returned: number; kept: number; on: boolean; onPress: () => void;
 }) {
   return (
@@ -389,12 +395,14 @@ function SourceRow({ label, note, layer, failed, returned, kept, on, onPress }: 
         <Row style={{ gap: 6, alignItems: 'center' }}>
           <Text style={[type.small, { color: colors.ink, fontWeight: '700', flexShrink: 1 }]} numberOfLines={2}>{label}</Text>
           {layer === 'owned' ? <Pill label="ours" tone="accent" icon="owned" /> : null}
+          {!asked ? <Pill label="not asked" tone="plain" icon="locked" /> : null}
+          {capped ? <Pill label="own limit" tone="warn" /> : null}
           {failed ? <Pill label="failed" tone="warn" /> : null}
         </Row>
         {note ? <Text style={type.tiny} numberOfLines={2}>{note}</Text> : null}
       </View>
-      <Text style={[styles.sourceNum, styles.right, returned === 0 && { color: colors.inkFaint }]}>{count(returned)}</Text>
-      <Text style={[styles.sourceNum, styles.right, { fontWeight: '800' }, kept === 0 && { color: colors.inkFaint }]}>{count(kept)}</Text>
+      <Text style={[styles.sourceNum, styles.right, (returned === 0 || !asked) && { color: colors.inkFaint }]}>{asked ? count(returned) : '—'}</Text>
+      <Text style={[styles.sourceNum, styles.right, { fontWeight: '800' }, (kept === 0 || !asked) && { color: colors.inkFaint }]}>{asked ? count(kept) : '—'}</Text>
     </Press>
   );
 }

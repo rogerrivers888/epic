@@ -56,6 +56,17 @@ test('our own rows fold into the rented ones by identifier, then by name within 
   assert.equal(items[0].records.length, 4, 'every record travels with the place it folded into');
 });
 
+test('a name in any script is a name, and no name at all matches nothing', () => {
+  const items = [];
+  fold(items, item('osm:1', '金龍', ['osm']));
+  fold(items, item('google:1', '金龍', ['google'], 51.3901, -0.63));
+  fold(items, item('google:2', '福記', ['google'], 51.3902, -0.63));
+  assert.equal(items.length, 2, 'the same Chinese name folds; a different one does not');
+  fold(items, item('osm:2', '···', ['osm'], 51.3903, -0.63));
+  fold(items, item('osm:3', '???', ['osm'], 51.3904, -0.63));
+  assert.equal(items.length, 4, 'two names that normalise to nothing stay two places');
+});
+
 test('the counts say how many places carry each source, per half of the screen', () => {
   const items = [
     item('google:1', 'A', ['google', 'osm']),

@@ -235,6 +235,8 @@ async function overpass(body, meter = null) {
 export const osmSource = {
   key: 'osm',
   label: 'OpenStreetMap',
+  /** The widest ring Overpass is asked for; past this the query times out more often than it answers. */
+  maxRadiusKm: 25,
   /**
    * Overpass is a volunteer service and its mirrors go down. The ladder tries
    * them in turn at twelve seconds each, so two dead mirrors is twenty-four
@@ -290,7 +292,7 @@ export const osmSource = {
     const elements = [];
     for (const group of want) {
       let data = null;
-      let r = Math.min(radiusKm, 25);
+      let r = Math.min(radiusKm, osmSource.maxRadiusKm);
       let lastErr = null;
       // Always try at least once: a 600 m search must not be skipped for being small.
       do {

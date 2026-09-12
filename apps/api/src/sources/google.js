@@ -305,6 +305,8 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
 export const googleSource = {
   key: 'google',
   label: 'Google',
+  /** The furthest a nearby search may look; a wider ring is asked at this width. */
+  maxRadiusKm: 50,
   retention: { placeId: 'indefinite', displayFields: 'none' },
   attribution: { text: GOOGLE_ATTRIBUTION, requiresAuthorCredit: true },
   enabled: () => Boolean(KEY()),
@@ -321,7 +323,7 @@ export const googleSource = {
       if (['attraction', 'event', 'things'].includes(c)) groups.add('things');
     }
     if (!groups.size) { groups.add('food'); groups.add('things'); }
-    const radius = Math.min(radiusKm, 50) * 1000;
+    const radius = Math.min(radiusKm, googleSource.maxRadiusKm) * 1000;
     const out = [];
 
     if (query?.trim()) {

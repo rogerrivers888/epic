@@ -55,8 +55,15 @@ const OWNED = [
 /** How many of one owned pool a ring may hold before the answer has to say it was cut. */
 const POOL_LIMIT = 5000;
 
-/** The rented sources a look-around asks: places, not events, and never the scout, which reads the web for money. */
-const rentedSources = () => enabledSources().filter((s) => !s.events && s.key !== 'scout');
+/**
+ * The rented place sources: not events, and never the scout, which reads the
+ * web for money. Every one that has a key is *listed*, so nothing is silently
+ * absent — but an opt-in source (Tripadvisor bills per place returned) is not
+ * *asked* here: enabling a paid source is the owner's call, not a screen's,
+ * and the row says "not asked" rather than 0.
+ */
+const rentedSources = () => enabledSources({ includeOptIn: true }).filter((s) => !s.events && s.key !== 'scout');
+const asked = (s) => !s.optIn;
 
 /** "51.39,-0.63" → a point, or null. */
 function point(text) {
@@ -190,7 +197,7 @@ async function runLookup({ q, minutes, mode }, household) {
   // screen waiting on a spinner, so OpenStreetMap is waited for properly.
   const r = await searchCached({
     center: centre, radiusKm, categories: [], query: '', includeEvents: false,
-    sources: rented.map((s) => s.key), deadlineMs: null,
+    sources: rented.filter(asked).map((s) => s.key), deadlineMs: null,
   });
   if (r.fetched) await visitsRepo.recordProviderCall(household.id, r.sourcesQueried.join('+') || 'none', 'admin.lookup', r.units);
 
@@ -225,15 +232,24 @@ async function runLookup({ q, minutes, mode }, household) {
     // Distinct places, before and inside the fence: the "Everything" row.
     totals: { returned: total(all), kept: total(kept) },
     sources: [
-      ...rented.map((s) => ({
-        key: s.key, label: s.label, layer: 'rented', note: null,
-        returned: returned[s.key], kept: inReach[s.key],
-        failed: failed.has(s.key)
-          ? { why: whySourceFailed(s.key, failed.get(s.key).error), error: failed.get(s.key).error, slow: Boolean(failed.get(s.key).slow) }
-          : null,
-      })),
+      ...rented.map((s) => {
+        // A source's own reach may be narrower than the ring (OpenStreetMap
+        // stops at 25 km), and a thin count from it is then not a gap in the
+        // data but a ring it was never asked about — said per source.
+        const reach = s.maxRadiusKm != null ? Math.min(radiusKm, s.maxRadiusKm) : radiusKm;
+        return {
+          key: s.key, label: s.label, layer: 'rented', note: null,
+          asked: asked(s), reachKm: reach, capped: reach < radiusKm,
+          returned: returned[s.key], kept: inReach[s.key],
+          failed: failed.has(s.key)
+            ? { why: whySourceFailed(s.key, failed.get(s.key).error), error: failed.get(s.key).error, slow: Boolean(failed.get(s.key).slow) }
+            : null,
+        };
+      }),
       ...OWNED.map((o) => ({
-        key: o.key, label: o.label, layer: 'owned', note: o.note, returned: returned[o.key], kept: inReach[o.key],
+        key: o.key, label: o.label, layer: 'owned', note: o.note,
+        asked: true, reachKm: radiusKm, capped: false,
+        returned: returned[o.key], kept: inReach[o.key],
         failed: truncated[o.key] ? { why: `${o.label} holds more than ${POOL_LIMIT.toLocaleString()} places in this ring; only the nearest ${POOL_LIMIT.toLocaleString()} were read.`, error: 'pool_truncated', slow: false } : null,
       })),
     ],
