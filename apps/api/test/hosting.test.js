@@ -240,9 +240,13 @@ test('stopping hosting takes the host, its offers and its media with it', async 
   const host = await repo.insertHost(household.id, { name: 'Roger', type: 'guide' });
   const offer = await repo.insertOffer(host.id, 'oneoff', { title: 'A draft' });
   const m = await repo.insertMedia({ householdId: household.id, kind: 'video', mime: 'video/webm', bytes: Buffer.from('x'), durationS: 30 });
+  await repo.updateHost(host.id, { introVideoId: m.id });
+  const theirs = await repo.insertMedia({ householdId: household.id, kind: 'photo', mime: 'image/png', bytes: Buffer.from('y') });
+  const withIntro = await repo.hostById(host.id);
+  assert.equal(await repo.deleteMediaOfHost(withIntro, [offer], undefined), 1, 'only the host’s own media, not a review photo of somebody else');
   await repo.deleteHost(host.id, household.id);
-  assert.equal(await repo.deleteMediaOfHousehold(household.id), 1);
   assert.equal(await repo.hostByHousehold(household.id), null);
   assert.equal(await repo.offerById(offer.id), null, 'offers go with the host');
   assert.equal(await repo.mediaMeta(m.id), null);
+  assert.ok(await repo.mediaMeta(theirs.id), 'the review photo survives');
 });

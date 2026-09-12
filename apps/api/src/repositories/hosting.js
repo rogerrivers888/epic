@@ -63,13 +63,31 @@ export async function updateHost(id, patch) {
 }
 
 /** Stop hosting: the host row goes, and its offers and bookings with it (cascade). */
-export async function deleteHost(id, householdId) {
-  await query('delete from hosts where id = $1 and household_id = $2', [id, householdId]);
+export async function deleteHost(id, householdId, client) {
+  await on(client)('delete from hosts where id = $1 and household_id = $2', [id, householdId]);
 }
 
-/** Every video and photograph this household uploaded as a host. */
-export async function deleteMediaOfHousehold(householdId) {
-  const { rowCount } = await query('delete from host_media where household_id = $1', [householdId]);
+/** Every offer of a host, locked, so a booking landing mid-way waits and then finds nothing to book. */
+export async function lockOffersOfHost(hostId, client) {
+  const { rows } = await client.query('select * from host_offers where host_id = $1 for update', [hostId]);
+  return rows;
+}
+
+/**
+ * The videos and photographs that belong to this host and its offers — the
+ * intro, the face, each offer's video, its photos, its featured people — and
+ * nothing else the household uploaded, such as a photo on a review of
+ * somebody else (Codex, 12 Sep 2026).
+ */
+export async function deleteMediaOfHost(host, offers, client) {
+  const ids = new Set([host.intro_video_id, host.photo_id].filter(Boolean));
+  for (const o of offers) {
+    if (o.video_id) ids.add(o.video_id);
+    for (const id of o.photo_ids ?? []) ids.add(id);
+    for (const p of o.featured_people ?? []) if (p.photoId) ids.add(p.photoId);
+  }
+  if (!ids.size) return 0;
+  const { rowCount } = await on(client)('delete from host_media where household_id = $1 and id = any($2::uuid[])', [host.household_id, [...ids]]);
   return rowCount;
 }
 

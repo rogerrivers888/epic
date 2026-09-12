@@ -325,7 +325,7 @@ function StopHosting({ onDone }: { onDone: () => void }) {
   }
   return (
     <View style={{ gap: spacing.sm, padding: spacing.md, borderWidth: BORDER, borderColor: colors.overrun }}>
-      <Text style={type.body}>Your host profile, every offer and every video go. The Host tab starts you again from the beginning. Anyone holding a place on an offer has to be told first — call those off on the offer's page.</Text>
+      <Text style={type.body}>Your host profile, every offer, every video and the record of what has run go. The Host tab starts you again from the beginning. Anyone still holding a place on an offer has to be told first — call those off on the offer's page.</Text>
       {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
       <Row>
         <Button label="Stop hosting" kind="danger" loading={busy} onPress={async () => { setBusy(true); try { await api.stopHosting(); onDone(); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />

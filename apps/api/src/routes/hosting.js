@@ -286,12 +286,20 @@ router.delete('/host', async (req, res, next) => {
   try {
     const { household, host } = await myHost();
     if (!host) throw refuse(404, 'not_a_host', 'You are not hosting.');
-    const offers = await repo.offersOfHost(host.id);
-    const bookings = await repo.bookingsOfOffers(offers.map((o) => o.id));
-    const holding = bookings.filter((b) => !['cancelled'].includes(b.state));
-    if (holding.length) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
-    await repo.deleteHost(host.id, household.id);
-    await repo.deleteMediaOfHousehold(household.id);
+    const today = ymd(new Date());
+    // One transaction with every offer locked: a booking landing meanwhile
+    // waits on the lock and then finds nothing to book, rather than being
+    // confirmed and cascading away a moment later (Codex, 12 Sep 2026).
+    await withTransaction(async (client) => {
+      const offers = await repo.lockOffersOfHost(host.id, client);
+      const bookings = (await Promise.all(offers.map((o) => repo.bookingsOfOffer(o.id, client)))).flat();
+      // Only a place still to come is a hold: what has happened is history and
+      // goes with the host; what was cancelled was never a place.
+      const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state) && (occurrenceDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
+      if (holding.length) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
+      await repo.deleteMediaOfHost(host, offers, client);
+      await repo.deleteHost(host.id, household.id, client);
+    });
     res.status(204).end();
   } catch (err) { next(err); }
 });
