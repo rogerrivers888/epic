@@ -880,7 +880,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       </View>
                     ) : null}
                     {canManage ? (
-                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, flexWrap: wide ? 'nowrap' : 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? MAP : undefined }}>
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? MAP : undefined }}>
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]}
@@ -896,7 +896,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                         ) : null}
                       </View>
                     ) : (
-                      <View style={{ width: wide ? MAP : undefined, alignSelf: wide ? 'center' : 'flex-end' }}>
+                      <View style={{ width: wide ? MAP : undefined, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
                         <Text style={[type.small, { fontWeight: '600', textAlign: 'right' }]} numberOfLines={2}>{ctlValue}</Text>
                       </View>
                     )}
