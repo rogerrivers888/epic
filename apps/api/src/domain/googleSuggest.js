@@ -92,7 +92,7 @@ const ASIDE_TYPES = new Set([
 export function suggestFor(type, group, subcategoryKeys) {
   const has = (k) => subcategoryKeys.includes(k);
   const named = TO_SUBCATEGORY[type];
-  if (named) return has(named) ? { subcategory: named, why: 'the obvious drawer for this word' } : null;
+  if (named) return has(named) ? { subcategory: named, why: 'the obvious subcategory for this word' } : null;
   if (ASIDE_TYPES.has(type)) return { aside: true, why: 'not somewhere a family goes for the day' };
   if (ASIDE_GROUPS.has(group)) return { aside: true, why: `Google files it under ${group}` };
   if (/_restaurant$/.test(type)) return has('restaurants') ? { subcategory: 'restaurants', why: 'a restaurant, whatever the cuisine' } : null;

@@ -501,6 +501,108 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
   );
 }
 
+/**
+ * The same control, two levels deep: the first list is the groups, tapping one
+ * shows its items with a way back. The owner, on the Categories screen (12 Sep
+ * 2026): "it should show all the categories and then the subcategories. If I
+ * click on a subcategory, then I see all the subcategories, and then I should
+ * be able to navigate back to the categories. It should take me a level in."
+ *
+ * `extra` are standalone choices on the first level ("Not a day out"). The
+ * panel hangs directly under the control; `align: 'right'` hangs it from the
+ * control's right edge for a control at the end of a row.
+ */
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange }: {
+  label: string;
+  value: string;
+  groups: { key: string; label: string; items: DropdownOption[] }[];
+  extra?: DropdownOption[];
+  onPick: (key: string) => void;
+  width?: number;
+  align?: 'left' | 'right';
+  /** Set away from its default (a suggestion, a filter): the value reads moss. */
+  set?: boolean;
+  /**
+   * Told when the panel opens or closes. A control inside a list needs this:
+   * the rows after it paint later, so the row holding an open panel has to
+   * lift itself (a zIndex) or the panel is drawn under them.
+   */
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const [open, setOpenState] = useState(false);
+  const [into, setInto] = useState<string | null>(null);
+  const group = groups.find((g) => g.key === into) ?? null;
+  const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
+  const close = () => { setOpen(false); setInto(null); };
+  const pick = (key: string) => { onPick(key); close(); };
+  return (
+    <View style={[dd.wrap, open && dd.wrapOpen]}>
+      <Press
+        onPress={() => (open ? close() : setOpen(true))}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}: ${value}`}
+        style={dd.ctl}
+        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+      >
+        <Text style={dd.ctlLabel}>{label}</Text>
+        <Text style={[dd.ctlValue, set && { color: colors.accent }]} numberOfLines={1}>{value}</Text>
+        <Icon name={open ? 'collapse' : 'expand'} size={12} color={set ? colors.accent : colors.ink} strokeWidth={2.6} />
+      </Press>
+      {open ? (
+        <>
+          <Press style={dd.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={[dd.panel, align === 'right' && dd.panelRight, { width }]} accessibilityRole="menu">
+            <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+              {group ? (
+                <>
+                  <Press onPress={() => setInto(null)} accessibilityRole="button" accessibilityLabel="Back to the categories"
+                         style={({ hovered }: any) => [dd.item, dd.back, hovered && dd.itemHover]}>
+                    <Icon name="back" size={14} color={colors.ink} strokeWidth={2.4} />
+                    <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: '700' }]} numberOfLines={1}>{group.label}</Text>
+                    <Text style={type.tiny}>all categories</Text>
+                  </Press>
+                  {group.items.map((o) => (
+                    <Press key={o.key} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
+                      <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
+                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
+                      {o.count != null && o.count !== '' ? <Text style={type.tiny}>{String(o.count)}</Text> : null}
+                    </Press>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {extra.map((o) => (
+                    <Press key={o.key} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
+                      <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
+                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
+                    </Press>
+                  ))}
+                  {extra.length ? <View style={dd.rule} /> : null}
+                  {groups.map((g) => {
+                    const within = g.items.some((o) => o.on);
+                    return (
+                      <Press key={g.key} onPress={() => setInto(g.key)} accessibilityRole="menuitem" accessibilityState={{ expanded: false }}
+                             style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                        <View style={{ width: 16, alignItems: 'center' }}>{within ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
+                        <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: within ? '600' : '400' }]} numberOfLines={1}>{g.label}</Text>
+                        <Text style={type.tiny}>{g.items.length}</Text>
+                        <Icon name="more" size={14} color={colors.inkMuted} />
+                      </Press>
+                    );
+                  })}
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 const plain = StyleSheet.create({
   kicker: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: 32 },
@@ -523,6 +625,10 @@ const dd = StyleSheet.create({
     paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
   },
   panelSoft: { borderColor: colors.lineSoft, borderRadius: 8 },
+  /** Hung from the control's right edge, for a control at the end of a row. */
+  panelRight: { left: undefined, right: 0 },
+  back: { borderBottomWidth: 1, borderBottomColor: colors.lineSoft, marginBottom: 4 },
+  rule: { height: 1, backgroundColor: colors.lineSoft, marginVertical: 4 },
   quick: { gap: spacing.md, paddingHorizontal: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, flexWrap: 'wrap' },
   group: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
   item: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },

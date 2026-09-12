@@ -46,9 +46,8 @@ import {
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, FoldLine } from '../../components/ui';
-import { ControlButton, ControlRow, Popover, PopoverGroup, PopoverList } from '../../components/ControlRow';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, PageHead, ago, count } from '../kit';
+import { AdminPage, DrillDropdown, Dropdown, PageHead, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 
 const WIDE = 900;
@@ -176,9 +175,8 @@ export function Categories({ canManage }: { canManage: boolean }) {
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Which control's panel is open, and where the panels hang from. */
-  const [open, setOpen] = useState<'category' | 'view' | 'sub' | null>(null);
-  const [foot, setFoot] = useState(40);
+  /** The Google view, read by Google's categories or by ours. */
+  const [by, setBy] = useQueryState<'google' | 'ours'>('by', 'google', asOneOf(['google', 'ours'] as const, 'google'));
   /** A rule being written from a word, outside the subcategory column. */
   const [editing, setEditing] = useState<{ labels: string[]; subcategory: string | null } | null>(null);
 
@@ -209,32 +207,25 @@ export function Categories({ canManage }: { canManage: boolean }) {
     <AdminPage>
       <PageHead title="Categories" sub="One category at a time: its subcategories, the attributes that put a place in each, and every provider's words against them" />
 
-      {/* The controls: plain words with chevrons, and the panels hang under them. */}
-      <View style={{ position: 'relative', zIndex: 20 }}>
-        <View onLayout={(e) => setFoot(e.nativeEvent.layout.height)}>
-          <ControlRow
-            left={<ControlButton label={category ? category.label : 'Category'} icon="filters" open={open === 'category'} onPress={() => setOpen(open === 'category' ? null : 'category')} spoken={`Category: ${category?.label ?? 'none'}`} />}
-            centre={<ControlButton label={(wide ? VIEWS.find((v) => v.key === view)?.label : VIEWS.find((v) => v.key === view)?.short) ?? ''} open={open === 'view'} onPress={() => setOpen(open === 'view' ? null : 'view')} spoken="What to show" />}
-            right={view === 'subcategories' && !wide && subs.length ? (
-              <ControlButton label={chosen?.label ?? 'All subcategories'} set={Boolean(chosen)} open={open === 'sub'} onPress={() => setOpen(open === 'sub' ? null : 'sub')} spoken="Subcategory" />
-            ) : null}
-          />
-        </View>
-        <Popover open={open === 'category'} top={foot} onClose={() => setOpen(null)}>
-          <PopoverList
-            options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
-            onPick={(k) => { setCat(k); setSub(''); setEditing(null); setOpen(null); }}
-          />
-        </Popover>
-        <Popover open={open === 'view'} top={foot} align="centre" onClose={() => setOpen(null)}>
-          <PopoverList options={VIEWS.map((v) => ({ key: v.key, label: v.label, on: v.key === view }))} onPick={(k) => { setView(k as View_); setEditing(null); setOpen(null); }} />
-        </Popover>
-        <Popover open={open === 'sub'} top={foot} align="right" onClose={() => setOpen(null)}>
-          <PopoverList
-            options={[{ key: '', label: 'All subcategories', on: !chosen }, ...subs.map((s) => ({ key: s.key, label: s.label, count: `${s.rules ?? 0}`, on: s.key === chosen?.key }))]}
-            onPick={(k) => { setSub(k); setOpen(null); }}
-          />
-        </Popover>
+      {/* The controls, left-aligned, each panel hanging directly under its own box
+          (owner, 12 Sep 2026: "they should both be left-aligned with the start of the text"). */}
+      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.lg, zIndex: 20 }]}>
+        <Dropdown label="Category" value={category?.label ?? '—'} width={240}
+                  options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
+                  onPick={(k) => { setCat(k); setSub(''); setEditing(null); }} />
+        <Dropdown label="Show" value={VIEWS.find((v) => v.key === view)?.label ?? ''} width={260}
+                  options={VIEWS.map((v) => ({ key: v.key, label: v.label, on: v.key === view }))}
+                  onPick={(k) => { setView(k as View_); setEditing(null); }} />
+        {view === 'subcategories' && !wide && subs.length ? (
+          <Dropdown label="Subcategory" value={chosen?.label ?? 'All'} width={260}
+                    options={[{ key: '', label: 'All subcategories', on: !chosen }, ...subs.map((s) => ({ key: s.key, label: s.label, count: `${s.rules ?? 0}`, on: s.key === chosen?.key }))]}
+                    onPick={(k) => setSub(k)} />
+        ) : null}
+        {view === 'google' ? (
+          <Dropdown label="By" value={by === 'ours' ? 'our categories' : "Google's categories"} width={220}
+                    options={[{ key: 'google', label: "Google's categories", on: by === 'google' }, { key: 'ours', label: 'Our categories', on: by === 'ours' }]}
+                    onPick={(k) => setBy(k as 'google' | 'ours')} />
+        ) : null}
       </View>
 
       {category && (view === 'subcategories' || view === 'providers') ? (
@@ -311,11 +302,11 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {tax && view === 'google' ? (
-        <GoogleView tax={tax} wide={wide} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
+        <GoogleView tax={tax} wide={wide} by={by} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
       ) : null}
 
       {tax && view === 'words' ? (
-        <FindWord tax={tax} catLabel={catLabel} subLabel={subLabel} canManage={canManage} foot={foot}
+        <FindWord tax={tax} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
                   onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
 
@@ -334,6 +325,11 @@ export function Categories({ canManage }: { canManage: boolean }) {
             <Text style={type.small}>
               Rename freely: keys never change. Move a subcategory and every place in it moves. Teach the type, not the place —
               one rule against “castle” answers for every castle. Switch off rather than delete.
+            </Text>
+            <Text style={type.small}>
+              Google's categories: Google has 20 categories and 478 subcategories of its own (its "types"). A Google subcategory
+              is mapped once it has one of our subcategories, or has been marked not a day out; until then it is unmapped. One
+              read into a category of ours but no subcategory yet still counts as unmapped.
             </Text>
           </View>
         </FoldLine>
@@ -673,27 +669,33 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
 // ---------------------------------------------------------------------------
 
 /**
- * Every type Google can give a place — Table A, 478 of them in Google's own
- * nineteen groups — and where each lands in Epic's categories today.
+ * Google's categories against ours.
  *
- * The owner, 12 Sep 2026: "view the Google categories and see how they map to
- * our categories… we always need to have a mapping between theirs and ours, so
- * it's defined and clear." One group at a time, picked from a control; the
- * table above it says, for every group, how many of its types are mapped, how
- * many are marked as not a day out, and how many nobody has decided about.
- * Those last are the discrepancies.
+ * Google has twenty categories and 478 subcategories of its own — Table A of
+ * the Places API — and this is where each of Google's subcategories is mapped
+ * to one of ours, or marked not a day out. Read by Google's categories or by
+ * ours (the `by` control at the top); either way a row is a category, tapping
+ * it opens its subcategories directly under it, and each subcategory carries
+ * its mapping in a dropdown: a suggestion to approve, or any of our
+ * subcategories to pick, two levels deep. A group's suggestions can be
+ * approved in one press.
+ *
+ * Mapped means one of ours, or not a day out. Unmapped is everything else,
+ * including a subcategory the code reads into a category of ours but no
+ * subcategory yet. The owner, 12 Sep 2026: "do we not just have mapped or
+ * unmapped?" — so those are the two columns, and a total at the bottom.
  */
-function GoogleView({ tax, wide, catLabel, subLabel, canManage, onChanged }: {
-  tax: Taxonomy; wide: boolean; catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
+function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }: {
+  tax: Taxonomy; wide: boolean; by: 'google' | 'ours';
+  catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; onChanged: (said: string) => Promise<void>;
 }) {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [group, setGroup] = useQueryState<string>('group', '', asText);
   const [gaps, setGaps] = useQueryState<string>('gaps', '', asText);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  /** Which row's dropdown is open, and how tall each row is, so the panel hangs under it. */
+  /** The row whose dropdown is open, lifted over the rows after it. */
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [rowTop, setRowTop] = useState<Record<string, number>>({});
 
   const reload = useCallback(async () => {
     const d = await api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 });
@@ -707,21 +709,65 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onChanged }: {
     return () => { live = false; };
   }, [tax]);
 
-  /** One type decided, on the fly: a drawer of ours, or set aside. */
+  /** Where a Google subcategory stands: mapped to one of ours, a category only, not a day out, or nothing said. */
+  const standing = (r: TaxonomyLabel): 'mapped' | 'category' | 'aside' | 'undecided' =>
+    r.active === false ? 'aside' : r.landing.subcategory ? 'mapped' : r.landing.how === 'fallback' || !r.landing.category ? 'undecided' : 'category';
+  const decided = (r: TaxonomyLabel) => { const st = standing(r); return st === 'mapped' || st === 'aside'; };
+
+  type Group = { key: string; name: string; types: TaxonomyLabel[]; mapped: number; unmapped: number; aside: string };
+  const groups = useMemo<Group[]>(() => {
+    const out: Group[] = [];
+    const put = (key: string, name: string, r: TaxonomyLabel) => {
+      let g = out.find((x) => x.key === key);
+      if (!g) { g = { key, name, types: [], mapped: 0, unmapped: 0, aside: '' }; out.push(g); }
+      g.types.push(r);
+      if (decided(r)) g.mapped += 1; else g.unmapped += 1;
+    };
+    if (by === 'google') {
+      for (const r of rows ?? []) {
+        const name = r.note && r.note !== 'read by google.js' ? r.note : 'Not in Table A (seen on a place)';
+        put(name, name, r);
+      }
+      out.sort((a, b) => a.name.localeCompare(b.name));
+      // The right-hand column: which of our categories the group's words land in.
+      for (const g of out) {
+        const lands = [...new Set(g.types.filter((r) => r.active !== false && r.landing.category && r.landing.how !== 'fallback').map((r) => r.landing.category as string))];
+        g.aside = lands.map(catLabel).join(', ') || '—';
+      }
+    } else {
+      for (const c of tax.categories) {
+        for (const r of rows ?? []) if (r.active !== false && r.landing.category === c.key && r.landing.how !== 'fallback') put(c.key, c.label, r);
+      }
+      for (const r of rows ?? []) if (standing(r) === 'aside') put('_aside', 'Not a day out', r);
+      for (const r of rows ?? []) if (standing(r) === 'undecided') put('_none', 'Unmapped', r);
+      // The right-hand column: our subcategories the words are in, with counts.
+      for (const g of out) {
+        const per = new Map<string, number>();
+        for (const r of g.types) if (r.landing.subcategory) per.set(r.landing.subcategory, (per.get(r.landing.subcategory) ?? 0) + 1);
+        g.aside = [...per.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${subLabel(k)} ${n}`).join(' · ') || '—';
+      }
+    }
+    return out;
+  }, [rows, by, tax, catLabel, subLabel]);
+
+  const chosen = group === '-' ? null : groups.find((g) => g.key === group) ?? null;
+  const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, mapped: 0, unmapped: 0 });
+
+  /** One Google subcategory decided, on the fly: one of ours, or not a day out. */
   const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean }, why?: string) => {
-    setOpenKey(null); setBusyKey(r.key);
+    setBusyKey(r.key);
     try {
       const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), reason: why ?? null }]);
       if (out.failed.length) throw new Error(out.failed[0].error);
       await reload();
-      await onChanged(choice.aside ? `${r.label ?? r.key} is set aside — not a day out.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`);
+      await onChanged(choice.aside ? `${r.label ?? r.key}: not a day out.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
 
-  /** Every undecided type in a group with a suggestion, approved in one press. */
+  /** Every unmapped subcategory in a group with a suggestion, approved in one press. */
   const approveAll = async (types: TaxonomyLabel[]) => {
-    const items = types.filter((r) => standing(r) === 'undecided' && r.suggestion).map((r) => ({
+    const items = types.filter((r) => !decided(r) && r.suggestion).map((r) => ({
       labels: [`google:${r.key}`], subcategory: r.suggestion?.subcategory ?? null, aside: Boolean(r.suggestion?.aside), reason: `Approved: ${r.suggestion?.why}.`,
     }));
     if (!items.length) return;
@@ -734,129 +780,104 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onChanged }: {
     finally { setBusyKey(null); }
   };
 
-  /** Where a type stands: mapped to a subcategory, into a category only, set aside, or undecided. */
-  const standing = (r: TaxonomyLabel): 'mapped' | 'category' | 'aside' | 'undecided' =>
-    r.active === false ? 'aside' : r.landing.subcategory ? 'mapped' : r.landing.how === 'fallback' || !r.landing.category ? 'undecided' : 'category';
-
-  const groups = useMemo(() => {
-    const out: { name: string; types: TaxonomyLabel[]; mapped: number; category: number; aside: number; undecided: number; lands: string[] }[] = [];
-    for (const r of rows ?? []) {
-      const name = r.note && r.note !== 'read by google.js' ? r.note : 'Not in Table A (read by google.js)';
-      let g = out.find((x) => x.name === name);
-      if (!g) { g = { name, types: [], mapped: 0, category: 0, aside: 0, undecided: 0, lands: [] }; out.push(g); }
-      g.types.push(r);
-      g[standing(r)] += 1;
-      if (r.active !== false && r.landing.category && r.landing.how !== 'fallback' && !g.lands.includes(r.landing.category)) g.lands.push(r.landing.category);
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows]);
-
-  const chosen = group === '-' ? null : groups.find((g) => g.name === group) ?? groups.find((g) => g.name === 'Entertainment and Recreation') ?? null;
-  const shown = (chosen?.types ?? []).filter((r) => gaps !== '1' || standing(r) === 'undecided');
-  const totals = groups.reduce((t, g) => ({ mapped: t.mapped + g.mapped, category: t.category + g.category, aside: t.aside + g.aside, undecided: t.undecided + g.undecided, all: t.all + g.types.length }), { mapped: 0, category: 0, aside: 0, undecided: 0, all: 0 });
-
   if (!rows) return <Text style={type.small}>Reading Google's list…</Text>;
 
-  return (
-    <View style={{ gap: spacing.lg }}>
-      <Section title={`Google's ${groups.length} groups against our categories — ${count(totals.all)} types`}>
-        <Text style={[type.tiny, { paddingVertical: 6 }]}>
-          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out — a decision recorded here, not a filter: a place Google also types that way is still filed by its other words — and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group and its types open under it, each with a suggested home to approve or change.
-        </Text>
-        {wide ? (
-          <View style={[styles.tRow, styles.tHead]}>
-            <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker}>Google's group</Text></View>
-            {['Types', 'Mapped', 'Category only', 'Set aside', 'Undecided'].map((h) => <View key={h} style={[styles.tCell, { width: 100 }]}><Text style={[styles.kicker, { textAlign: 'right' }]} numberOfLines={2}>{h}</Text></View>)}
-            <View style={[styles.tCell, { width: 220 }]}><Text style={styles.kicker}>Lands in</Text></View>
-          </View>
-        ) : null}
-        {groups.map((g) => {
-          const on = chosen?.name === g.name;
-          return (
-            <View key={g.name}>
-            <Press onPress={() => setGroup(on ? '-' : g.name)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, !wide && { alignItems: 'center', gap: spacing.sm }, on && { backgroundColor: colors.well }]}>
-              <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
-                <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
-                {/* On a phone the five columns become one line under the name. */}
-                {!wide ? <Text style={type.tiny} numberOfLines={2}>{g.types.length} types · {g.mapped} mapped{g.category ? ` · ${g.category} category only` : ''}{g.aside ? ` · ${g.aside} set aside` : ''}{g.lands.length ? ` · ${g.lands.map(catLabel).join(', ')}` : ''}</Text> : null}
-              </View>
-              {wide ? [g.types.length, g.mapped, g.category, g.aside, g.undecided].map((n, i) => (
-                <View key={i} style={[styles.tCell, { width: 100 }]}>
-                  <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'], color: i === 4 && !n ? colors.inkMuted : colors.ink, fontWeight: i === 4 && n ? '700' : '400' }]}>{n}</Text>
-                </View>
-              )) : (
-                <Text style={[type.small, { fontWeight: g.undecided ? '700' : '400', color: g.undecided ? colors.ink : colors.inkMuted, paddingRight: 6 }]}>{g.undecided} undecided</Text>
-              )}
-              {wide ? <View style={[styles.tCell, { width: 220 }]}><Text style={type.tiny} numberOfLines={2}>{g.lands.map(catLabel).join(', ') || '—'}</Text></View> : null}
-            </Press>
-            {/* The group's types, right under its row — never below the fold
-                (owner, 12 Sep 2026: "It needs to appear in the same area"). */}
-            {on ? (
-              <View style={styles.inset}>
-                <View style={[styles.line, { flexWrap: 'wrap' }]}>
-                  <Text style={[type.tiny, { flex: 1, minWidth: 120 }]}>{g.types.length} types in {g.name}</Text>
-                  <Choice label="Everything" on={gaps !== '1'} onPress={() => setGaps('')} />
-                  <Choice label={`Undecided only · ${g.undecided}`} on={gaps === '1'} onPress={() => setGaps('1')} />
-                  {canManage && g.types.some((r) => standing(r) === 'undecided' && r.suggestion) ? (
-                    <Button label={busyKey === '*' ? 'Approving…' : `Approve all ${g.types.filter((r) => standing(r) === 'undecided' && r.suggestion).length} suggestions`}
-                            icon="check" disabled={busyKey != null} onPress={() => void approveAll(g.types)} />
-                  ) : null}
-                </View>
-                {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing undecided in this group.</Text> : null}
-                {shown.map((r) => {
-                  const st = standing(r);
-                  const lands = st === 'aside' ? 'set aside — not a day out'
-                    : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
-                      : st === 'category' ? `${catLabel(r.landing.category)} · no subcategory` : 'undecided';
-                  const sug = r.suggestion ?? null;
-                  const sugText = sug?.aside ? 'not a day out' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}` : null;
-                  const isOpen = openKey === r.key;
-                  // What the control says: where it is, or where it could go, or that nobody knows.
-                  const ctl = st === 'aside' ? 'Set aside' : st === 'mapped' || st === 'category' ? lands : sugText ? `Suggested: ${sugText}` : 'Choose…';
-                  return (
-                    <View key={r.key} style={[{ position: 'relative' }, isOpen && { zIndex: 40 }]} onLayout={(e) => { const h = e.nativeEvent.layout.height; setRowTop((prev) => (prev[r.key] === h ? prev : { ...prev, [r.key]: h })); }}>
-                    {/* On a phone the control takes its own line under the name. */}
-                    <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
-                      <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: 1 }}>
-                        <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
-                        <Text style={type.tiny} numberOfLines={1}>
-                          {[r.seen_count ? `seen ${count(r.seen_count)}` : null, st === 'undecided' && sug ? sug.why : st !== 'undecided' && st !== 'aside' ? HOW_WORD[r.landing.how] : null].filter(Boolean).join(' · ') || ' '}
-                        </Text>
-                      </View>
-                      {canManage ? (
-                        <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
-                          <ControlButton label={busyKey === r.key ? 'Saving…' : ctl} set={st === 'undecided' && Boolean(sugText)} open={isOpen}
-                                         onPress={() => setOpenKey(isOpen ? null : r.key)} spoken={`${r.label ?? r.key}: ${ctl}`} />
-                          {st === 'undecided' && sug ? (
-                            <TextAction label="Approve" disabled={busyKey != null} onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)} />
-                          ) : null}
-                        </View>
-                      ) : (
-                        <Text style={[type.small, { fontWeight: '600', textAlign: 'right', maxWidth: '40%' }]} numberOfLines={2}>{lands}</Text>
-                      )}
-                    </View>
-                    {/* The panel hangs off this row, so its own scrim has no room; a
-                        fixed one over the whole window closes it on a tap anywhere else. */}
-                    {isOpen ? <Press style={styles.rowScrim as never} onPress={() => setOpenKey(null)} accessibilityRole="button" accessibilityLabel="Close" /> : null}
-                    <Popover open={isOpen} top={rowTop[r.key] ?? 44} align="right" onClose={() => setOpenKey(null)}>
-                      <PopoverList options={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]} onPick={() => void decide(r, { aside: true })} dense />
-                      {tax.categories.filter((c) => c.active).map((c) => (
-                        <PopoverGroup key={c.key} title={c.label}>
-                          <PopoverList dense options={c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: st !== 'aside' && r.landing.subcategory === sc.key }))}
-                                       onPick={(k) => void decide(r, { subcategory: k })} />
-                        </PopoverGroup>
-                      ))}
-                    </Popover>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : null}
-            </View>
-          );
-        })}
-      </Section>
+  const COL = wide ? 132 : 84;
+  const first = by === 'google' ? "Google's category" : 'Our category';
+  const last = by === 'google' ? 'Lands in' : 'Our subcategories';
 
+  return (
+    <View>
+      <View style={[styles.tRow, styles.tHead]}>
+        <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker} numberOfLines={1}>{first}</Text></View>
+        {['Subcategories', 'Mapped', 'Unmapped'].map((h) => <View key={h} style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'right' }]} numberOfLines={1}>{h}</Text></View>)}
+        {wide ? <View style={[styles.tCell, { width: 300 }]}><Text style={styles.kicker} numberOfLines={1}>{last}</Text></View> : null}
+      </View>
+      {groups.map((g) => {
+        const on = chosen?.key === g.key;
+        const shown = g.types.filter((r) => gaps !== '1' || !decided(r));
+        const suggestible = g.types.filter((r) => !decided(r) && r.suggestion).length;
+        return (
+          <View key={g.key}>
+          <Press onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
+            <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
+              <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
+              {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
+            </View>
+            {[g.types.length, g.mapped, g.unmapped].map((n, i) => (
+              <View key={i} style={[styles.tCell, { width: COL }]}>
+                <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'], color: i === 2 && !n ? colors.inkMuted : colors.ink, fontWeight: i === 2 && n ? '700' : '400' }]}>{n}</Text>
+              </View>
+            ))}
+            {wide ? <View style={[styles.tCell, { width: 300 }]}><Text style={type.tiny} numberOfLines={2}>{g.aside}</Text></View> : null}
+          </Press>
+          {/* The group's subcategories, right under its row — never below the fold. */}
+          {on ? (
+            <View style={styles.inset}>
+              <View style={[styles.line, { flexWrap: 'wrap', justifyContent: 'flex-end' }]}>
+                <Choice label="Everything" on={gaps !== '1'} onPress={() => setGaps('')} />
+                <Choice label={`Unmapped only · ${g.unmapped}`} on={gaps === '1'} onPress={() => setGaps('1')} />
+                {canManage && suggestible ? (
+                  <Button label={busyKey === '*' ? 'Approving…' : `Approve all ${suggestible} suggestions`} icon="check" disabled={busyKey != null} onPress={() => void approveAll(g.types)} />
+                ) : null}
+              </View>
+              {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing unmapped here.</Text> : null}
+              {shown.map((r) => {
+                const st = standing(r);
+                const sug = r.suggestion ?? null;
+                const sugText = sug?.aside ? 'not a day out' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}` : null;
+                // What the control says: where it is, or where it could go, or that nobody knows.
+                const ctlLabel = st === 'aside' || st === 'mapped' ? 'Mapped' : st === 'category' ? 'Category only' : sugText ? 'Suggested' : 'Map to';
+                const ctlValue = busyKey === r.key ? 'Saving…'
+                  : st === 'aside' ? 'not a day out'
+                    : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
+                      : st === 'category' ? `${catLabel(r.landing.category)} · choose a subcategory`
+                        : sugText ?? 'Choose…';
+                return (
+                  <View key={r.key} style={openKey === r.key ? { zIndex: 40 } : undefined}>
+                  <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
+                    <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: 1 }}>
+                      <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
+                      <Text style={type.tiny} numberOfLines={1}>
+                        {[r.seen_count ? `seen ${count(r.seen_count)}` : null, !decided(r) && sug ? sug.why : decided(r) && st !== 'aside' ? HOW_WORD[r.landing.how] : null].filter(Boolean).join(' · ') || ' '}
+                      </Text>
+                    </View>
+                    {canManage ? (
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
+                        <DrillDropdown
+                          label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
+                          extra={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]}
+                          groups={tax.categories.filter((c) => c.active).map((c) => ({
+                            key: c.key, label: c.label,
+                            items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: st !== 'aside' && r.landing.subcategory === sc.key })),
+                          }))}
+                          onPick={(k) => void decide(r, k === '-' ? { aside: true } : { subcategory: k })}
+                          onOpenChange={(o) => setOpenKey(o ? r.key : null)}
+                        />
+                        {!decided(r) && sug ? (
+                          <TextAction label="Approve" disabled={busyKey != null} onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)} />
+                        ) : null}
+                      </View>
+                    ) : (
+                      <Text style={[type.small, { fontWeight: '600', textAlign: 'right', maxWidth: '40%' }]} numberOfLines={2}>{ctlValue}</Text>
+                    )}
+                  </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+          </View>
+        );
+      })}
+      {/* The total, at the bottom, over one ink rule. */}
+      <View style={[styles.tRow, styles.tTotal]}>
+        <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={[type.small, { fontWeight: '700' }]}>Total</Text></View>
+        {[total.types, total.mapped, total.unmapped].map((n, i) => (
+          <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'right', fontWeight: '700', fontVariant: ['tabular-nums'] }]}>{n}</Text></View>
+        ))}
+        {wide ? <View style={[styles.tCell, { width: 300 }]} /> : null}
+      </View>
     </View>
   );
 }
@@ -867,7 +888,7 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onChanged }: {
 
 function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
   tax: Taxonomy; catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
-  canManage: boolean; foot: number; onPick: (label: string, subcategory: string | null) => void;
+  canManage: boolean; onPick: (label: string, subcategory: string | null) => void;
 }) {
   const [ns, setNs] = useQueryState<string>('ns', '', asText);
   const [q, setQ] = useQueryState<string>('q', '', asText);
@@ -875,8 +896,6 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [foot, setFoot] = useState(36);
   const generation = React.useRef(0);
   const PAGE = 50;
   const source = tax.namespaces.find((n) => n.key === ns) ?? null;
@@ -914,17 +933,11 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
 
   return (
     <View style={{ gap: spacing.sm }}>
-      <View style={{ position: 'relative', zIndex: 15 }}>
-        <View style={[styles.line, { flexWrap: 'wrap' }]} onLayout={(e) => setFoot(e.nativeEvent.layout.height)}>
-          <ControlButton label={source ? source.label : 'Any source'} set={Boolean(source)} open={open} onPress={() => setOpen((o) => !o)} spoken="Source" />
-          <Field icon="search" value={typed} onChangeText={setTyped} placeholder="A word: stadium, ice_rink, castle, Q23413" style={{ flex: 1, minWidth: 220 }} />
-        </View>
-        <Popover open={open} top={foot} onClose={() => setOpen(false)}>
-          <PopoverList
-            options={[{ key: '', label: 'Any source', on: !ns }, ...tax.namespaces.map((n) => ({ key: n.key, label: n.label, count: `${count(n.seen)} / ${count(n.total)}`, on: n.key === ns }))]}
-            onPick={(k) => { setNs(k); setOpen(false); }}
-          />
-        </Popover>
+      <View style={[styles.line, { flexWrap: 'wrap', zIndex: 15 }]}>
+        <Dropdown label="Source" value={source ? source.label : 'Any'} width={260}
+                  options={[{ key: '', label: 'Any source', on: !ns }, ...tax.namespaces.map((n) => ({ key: n.key, label: n.label, count: `${count(n.seen)} / ${count(n.total)}`, on: n.key === ns }))]}
+                  onPick={(k) => setNs(k)} />
+        <Field icon="search" value={typed} onChangeText={setTyped} placeholder="A word: stadium, ice_rink, castle, Q23413" style={{ flex: 1, minWidth: 220 }} />
       </View>
       {source ? <Text style={type.tiny}>{source.what}. {count(source.total)} known, {count(source.seen)} seen on a real place, {count(source.taught)} in a rule.</Text> : null}
 
@@ -1007,7 +1020,6 @@ const styles = StyleSheet.create({
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
   tCellOn: { backgroundColor: colors.selected },
-  // Under the panel (the popover's anchor sits at zIndex 6), over everything else.
-  rowScrim: { position: 'fixed' as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
+  tTotal: { borderTopWidth: BORDER, borderTopColor: colors.line, borderBottomWidth: 0 },
   inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
 });
