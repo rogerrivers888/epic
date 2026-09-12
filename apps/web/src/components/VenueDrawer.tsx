@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Linking, Modal, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Press, Ring } from './press';
+import { Press, Pulse } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
 import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
@@ -598,7 +598,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   </Press>
                   {onShortlist ? (
                     <Press onPress={keep} style={[styles.heroTile, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
-                      <Ring pulse={heartPulse} size={28} color={INK} />
+                      <Pulse pulse={heartPulse} size={28} color={INK} />
                       <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
                     </Press>
                   ) : null}
@@ -615,7 +615,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   place with no picture can still be kept (Codex, 8 Sep 2026). */}
               {!hero && onShortlist ? (
                 <Press onPress={keep} style={[styles.heroTile, styles.bareHeart, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
-                  <Ring pulse={heartPulse} size={28} color={INK} />
+                  <Pulse pulse={heartPulse} size={28} color={INK} />
                   <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
                 </Press>
               ) : null}

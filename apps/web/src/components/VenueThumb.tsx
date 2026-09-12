@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { Press } from './press';
+import { Press, Zoom } from './press';
 import { API_URL, OwnedImage, VenuePhotoRef } from '../api';
 import { Icon, IconName, iconFor } from './Icon';
 import { colors, spacing, type } from '../theme';
@@ -161,20 +161,36 @@ export function VenueThumb({
       {/* The photograph's own colours, half a kilobyte, before the network is
           touched. A mark does not get one: blurring a logo up from 20px is a
           smudge, and it is on its ground already. */}
+      {/* Held, the photograph grows a few percent inside this frame, which
+          clips (owner, 12 Sep 2026). A mark does not: a logo is a shape on
+          its ground, not a view into somewhere. */}
+      <Zoom>
       {image?.lqip && !isMark && !loaded && !failed ? (
         <Image source={{ uri: image.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors />
       ) : null}
-      {uri && !failed ? (
+      {uri && !failed && !isMark ? (
         <Image
           source={{ uri }}
-          style={isMark ? [styles.mark, { padding: Math.round(least * 0.16) }] : (StyleSheet.absoluteFill as any)}
-          resizeMode={isMark ? 'contain' : 'cover'}
+          style={StyleSheet.absoluteFill as any}
+          resizeMode="cover"
           onError={() => setFailed(true)}
           onLoad={() => setLoaded(true)}
           accessibilityIgnoresInvertColors
-          accessibilityLabel={name ? (isMark ? `${name} logo` : name) : undefined}
+          accessibilityLabel={name ?? undefined}
         />
-      ) : (
+      ) : null}
+      </Zoom>
+      {uri && !failed && isMark ? (
+        <Image
+          source={{ uri }}
+          style={[styles.mark, { padding: Math.round(least * 0.16) }]}
+          resizeMode="contain"
+          onError={() => setFailed(true)}
+          onLoad={() => setLoaded(true)}
+          accessibilityIgnoresInvertColors
+          accessibilityLabel={name ? `${name} logo` : undefined}
+        />
+      ) : uri && !failed ? null : (
         <View style={styles.empty}>
           <Icon name={icon} size={fill ? 40 : Math.max(18, Math.round(least * 0.28))} color={colors.icon} />
         </View>

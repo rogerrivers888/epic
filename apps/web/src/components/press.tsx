@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, Pressable, PressableProps, PressableStateCallbackType, StyleSheet, View, ViewStyle } from 'react-native';
 import { colors } from '../theme';
-import { at, POP, PressEffect, RING, SINK } from './pressMotion';
+import { at, POP, PressEffect, RING, SINK, ZOOM } from './pressMotion';
+import { Icon, IconName } from './Icon';
 
 export type { PressEffect } from './pressMotion';
 
@@ -20,7 +21,7 @@ export type { PressEffect } from './pressMotion';
  * motion. Someone who has asked their system for less motion gets none.
  */
 export const Press = React.forwardRef<View, PressableProps & { effect?: PressEffect; children?: React.ReactNode | ((s: PressableStateCallbackType) => React.ReactNode) }>(function Press(
-  { effect = 'sink', style, onPress, onLongPress, onPressIn, onPressOut, onHoverIn, onHoverOut, onFocus, onBlur, delayLongPress, disabled, ...rest },
+  { effect = 'sink', style, onPress, onLongPress, onPressIn, onPressOut, onHoverIn, onHoverOut, onFocus, onBlur, delayLongPress, disabled, children, ...rest },
   ref,
 ) {
   const v = useRef(new Animated.Value(0)).current;
@@ -111,9 +112,36 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
       onBlur={(e) => { setFocused(false); onBlur?.(e); }}
       style={transform ? [flat, { transform }] : flat}
       {...rest}
-    />
+    >
+      {typeof children === 'function'
+        ? (state: PressableStateCallbackType) => <Driver.Provider value={v}>{children(state)}</Driver.Provider>
+        : <Driver.Provider value={v}>{children}</Driver.Provider>}
+    </AnimatedPressable>
   );
 });
+
+/**
+ * The press, as a number its children can move with: 0 at rest, 1 held. A
+ * photograph inside a card reads it to grow inside its frame while the card
+ * sinks — see `Zoom`. Null outside any Press.
+ */
+const Driver = React.createContext<Animated.Value | null>(null);
+export const usePressDriver = () => React.useContext(Driver);
+
+/**
+ * The picture that answers the finger: whatever is inside grows a few percent
+ * while the Press around it is held, and the frame around *this* — which
+ * clips — stays where it is. Fills its parent, so it goes inside the frame.
+ */
+export function Zoom({ children }: { children: React.ReactNode }) {
+  const drive = usePressDriver();
+  if (!drive) return <>{children}</>;
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: drive.interpolate(ZOOM.scale) }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
 
 const NATIVE = Platform.OS !== 'web';
 const NO_DELAY = { delayPressIn: 0 } as unknown as Record<string, never>;
@@ -127,20 +155,21 @@ function transformFor(effect: PressEffect, v: Animated.Value) {
 }
 
 /**
- * The ring a heart sends out when it turns on.
+ * The heart a heart sends out when it turns on.
  *
  * Sits absolutely in the centre of whatever holds it (the parent must be
  * `position: relative` or a plain View, which it is by default), and plays
- * once each time `pulse` changes to a value above zero. It is a circle
- * because a ring is — the one round thing Epic draws beside a person's face
- * — and it is ink because everything drawn in Epic is, unless it sits on a
- * photograph, where the caller hands it the colour that shows.
+ * once each time `pulse` changes to a value above zero: an outline of the
+ * same glyph, growing to three times the button and fading as it goes. It
+ * was a ring first; the owner asked for the shape of the thing that was
+ * pressed (12 Sep 2026). Ink, unless it sits on a photograph, where the
+ * caller hands it the colour that shows.
  *
  * Only upwards: the caller bumps `pulse` when the heart goes on, never when it
  * comes off, for the reason the shortlist heartbeat has — taking something off
  * a list is not the moment to celebrate.
  */
-export function Ring({ pulse, size = 40, color = colors.ink }: { pulse: number; size?: number; color?: string }) {
+export function Pulse({ pulse, size = 40, color = colors.ink, icon = 'shortlist' }: { pulse: number; size?: number; color?: string; icon?: IconName }) {
   const v = useRef(new Animated.Value(1)).current;
   const [live, setLive] = useState(false);
   useEffect(() => {
@@ -160,13 +189,14 @@ export function Ring({ pulse, size = 40, color = colors.ink }: { pulse: number; 
         left: '50%', top: '50%',
         width: size, height: size,
         marginLeft: -size / 2, marginTop: -size / 2,
-        borderRadius: size / 2,
-        borderWidth: RING.stroke,
-        borderColor: color,
+        alignItems: 'center', justifyContent: 'center',
         opacity: v.interpolate(RING.opacity),
         transform: [{ scale: v.interpolate(RING.scale) }],
       }}
-    />
+    >
+      {/* The stroke scales with the glyph, so it starts thin to end at the 2px rule. */}
+      <Icon name={icon} size={size * 0.7} color={color} strokeWidth={RING.stroke / 2.5} />
+    </Animated.View>
   );
 }
 

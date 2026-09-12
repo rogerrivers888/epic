@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
-import { Press, Ring } from './press';
+import { Press, Pulse } from './press';
 import { api, OptionStop, Venue } from '../api';
 import { colors, radius, spacing, type, BORDER } from '../theme';
 import { Chip, Row, Wrap, clock, minutes } from './ui';
@@ -102,7 +102,7 @@ export function StopCard({ stop, mode, baseLabel, previousName, dim, pinned, bus
 
       <View style={{ gap: 6 }}>
         <Press onPress={() => { if (!pinned) setPulse((n) => n + 1); onLike(); }} disabled={busy} style={[styles.reactBtn, pinned && styles.reactBtnOn]} accessibilityRole="button" accessibilityLabel={pinned ? `Stop keeping ${stop.name}` : `Keep ${stop.name}`}>
-          <Ring pulse={pulse} size={28} color={colors.ink} />
+          <Pulse pulse={pulse} size={28} color={colors.ink} />
           <View style={styles.reactInner}><Icon name="keep" size={14} color={pinned ? colors.bg : colors.ink} fill={pinned} /><Text style={[styles.reactText, pinned && { color: '#fff' }]}>{pinned ? 'Keeping' : 'Keep'}</Text></View>
         </Press>
         {!isAnchor ? (

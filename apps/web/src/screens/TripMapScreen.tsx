@@ -28,7 +28,7 @@
 
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Press, Ring } from '../components/press';
+import { Press, Pulse } from '../components/press';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
@@ -2149,7 +2149,7 @@ function HeartButton({ on, onPress, bare, onPhoto }: {
       accessibilityState={{ selected: on }}
       accessibilityLabel={on ? 'Take off the shortlist' : 'Keep this for the trip'}
     >
-      <Ring pulse={pulse} size={bare ? 26 : 30} color={onPhoto ? LIME : colors.ink} />
+      <Pulse pulse={pulse} size={bare ? 26 : 30} color={onPhoto ? LIME : colors.ink} />
       <Icon
         name="shortlist"
         size={bare ? 22 : 26}

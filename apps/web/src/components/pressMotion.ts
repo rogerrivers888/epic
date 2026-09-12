@@ -12,8 +12,9 @@
  * - **pop** — a squash on the way down and a spring on the way up that
  *   overshoots before it settles, so adding something reads as a small
  *   celebration rather than a click.
- * - **ring** — not a transform of the control at all: a 2px ring drawn from
- *   the heart's centre that grows and fades, the way a like bursts.
+ * - **pulse** (his "ring") — not a transform of the control at all: a heart
+ *   outline drawn from the heart's centre that grows and fades, the way a
+ *   like bursts. It was a circle first; he asked for the heart (12 Sep 2026).
  */
 export type PressEffect = 'sink' | 'pop' | 'none';
 
@@ -50,6 +51,14 @@ export const POP = {
   holdMs: 110,
   /** The spring home: low friction so it overshoots (~1.08) once and settles. */
   spring: { friction: 3.5, tension: 180 },
+};
+
+/**
+ * A photograph held under the finger grows a few percent inside its own frame
+ * (owner, 12 Sep 2026): the picture answers, the frame stays where it is.
+ */
+export const ZOOM = {
+  scale: { inputRange: [0, 1], outputRange: [1, 1.05] } as Curve,
 };
 
 export const RING = {
