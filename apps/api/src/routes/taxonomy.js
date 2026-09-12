@@ -36,6 +36,7 @@ import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
+import { suggestFor } from '../domain/googleSuggest.js';
 import { SHELF_FLOOR } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
@@ -145,6 +146,7 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       }),
       shelfRules.rules(), taxonomy.taxonomy(),
     ]);
+    const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
     const labels = rows.map((r) => ({
       ...r,
       // A Wikidata type the harvest refuses (`place_kinds.admit` false) never
@@ -152,6 +154,9 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       landing: r.namespace === 'wikidata' && r.active === false
         ? { category: null, subcategory: null, how: 'none', via: null, derived: [] }
         : landingOf({ namespace: r.namespace, key: r.key, kindCategory: r.namespace === 'wikidata' ? r.note : null }, rules, tax.vocab),
+      // Where a Google type could go, for the owner to approve or change
+      // (domain/googleSuggest.js). A suggestion, never a decision.
+      suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
     }));
     res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
   } catch (err) { next(err); }
@@ -244,6 +249,53 @@ taxonomyRoutes.put('/rules', requires('manage_library'), async (req, res, next) 
       [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
        JSON.stringify({ labels, subcategory, weights: rule.weights, reason: rule.reason })]);
     res.json({ rule: (await withLabels([rule]))[0] });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /rules/batch { items: [{ labels, subcategory, aside, reason }] } — the
+ * owner approving a group's suggestions in one press. Each item is either a
+ * rule (labels → subcategory) or a label set aside; one that fails does not
+ * stop the rest, and the answer says which.
+ */
+taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res, next) => {
+  try {
+    await ready();
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 500) : [];
+    if (!items.length) throw bad('Nothing to approve.');
+    const tax = await taxonomy.taxonomy();
+    const known = tax.categories.map((c) => c.key);
+    const done = []; const failed = [];
+    for (const it of items) {
+      const labels = Array.isArray(it?.labels) ? it.labels.map(String).filter(parseLabel) : [];
+      try {
+        if (!labels.length) throw new Error('no label');
+        if (it.aside) {
+          if (labels.length !== 1) throw new Error('set aside one label at a time');
+          const { namespace, key } = parseLabel(labels[0]);
+          await labelRepo.save({ namespace, key, active: false });
+          done.push({ labels, aside: true });
+          continue;
+        }
+        const subcategory = it.subcategory ? String(it.subcategory) : null;
+        if (!subcategory || !tax.subByKey.has(subcategory)) throw new Error(`${subcategory} is not a subcategory`);
+        const { scope, subject } = scopeFor(labels);
+        const names = await namesFor(labels);
+        const rule = await shelfRules.teach({
+          scope, subject, labels, subjectLabel: labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + '),
+          weights: {}, subcategory, reason: it.reason ?? 'Approved from the suggested mapping.', by: actorOf(req), known,
+        });
+        // A label set aside earlier and now mapped is back in the list.
+        for (const l of labels) { const p = parseLabel(l); await labelRepo.save({ namespace: p.namespace, key: p.key, active: true }); }
+        await query(
+          `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+           values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
+          [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
+           JSON.stringify({ labels, subcategory, reason: rule.reason, batch: true })]);
+        done.push({ labels, subcategory, ruleId: rule.id });
+      } catch (err) { failed.push({ labels, error: String(err.message ?? err) }); }
+    }
+    res.json({ done, failed });
   } catch (err) { next(err); }
 });
 

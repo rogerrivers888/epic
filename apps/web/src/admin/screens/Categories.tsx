@@ -46,7 +46,7 @@ import {
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, FoldLine } from '../../components/ui';
-import { ControlButton, ControlRow, Popover, PopoverList } from '../../components/ControlRow';
+import { ControlButton, ControlRow, Popover, PopoverGroup, PopoverList } from '../../components/ControlRow';
 import { useViewport } from '../../hooks/useViewport';
 import { AdminPage, PageHead, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
@@ -311,8 +311,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {tax && view === 'google' ? (
-        <GoogleView tax={tax} wide={wide} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
-                    onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} onChanged={changed} />
+        <GoogleView tax={tax} wide={wide} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
       ) : null}
 
       {tax && view === 'words' ? (
@@ -684,15 +683,22 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
  * many are marked as not a day out, and how many nobody has decided about.
  * Those last are the discrepancies.
  */
-function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChanged }: {
+function GoogleView({ tax, wide, catLabel, subLabel, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
-  canManage: boolean; onPick: (label: string, subcategory: string | null) => void; onChanged: (said: string) => Promise<void>;
+  canManage: boolean; onChanged: (said: string) => Promise<void>;
 }) {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [group, setGroup] = useQueryState<string>('group', '', asText);
   const [gaps, setGaps] = useQueryState<string>('gaps', '', asText);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  /** Which row's dropdown is open, and how tall each row is, so the panel hangs under it. */
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [rowTop, setRowTop] = useState<Record<string, number>>({});
 
+  const reload = useCallback(async () => {
+    const d = await api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 });
+    setRows(d.labels);
+  }, []);
   useEffect(() => {
     let live = true;
     void api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 })
@@ -700,6 +706,33 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
       .catch(() => { if (live) setRows([]); });
     return () => { live = false; };
   }, [tax]);
+
+  /** One type decided, on the fly: a drawer of ours, or set aside. */
+  const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean }, why?: string) => {
+    setOpenKey(null); setBusyKey(r.key);
+    try {
+      const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), reason: why ?? null }]);
+      if (out.failed.length) throw new Error(out.failed[0].error);
+      await reload();
+      await onChanged(choice.aside ? `${r.label ?? r.key} is set aside — not a day out.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusyKey(null); }
+  };
+
+  /** Every undecided type in a group with a suggestion, approved in one press. */
+  const approveAll = async (types: TaxonomyLabel[]) => {
+    const items = types.filter((r) => standing(r) === 'undecided' && r.suggestion).map((r) => ({
+      labels: [`google:${r.key}`], subcategory: r.suggestion?.subcategory ?? null, aside: Boolean(r.suggestion?.aside), reason: `Approved: ${r.suggestion?.why}.`,
+    }));
+    if (!items.length) return;
+    setBusyKey('*');
+    try {
+      const out = await api.taxonomyBatch(items);
+      await reload();
+      await onChanged(`Approved ${out.done.length} of ${items.length}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusyKey(null); }
+  };
 
   /** Where a type stands: mapped to a subcategory, into a category only, set aside, or undecided. */
   const standing = (r: TaxonomyLabel): 'mapped' | 'category' | 'aside' | 'undecided' =>
@@ -722,23 +755,13 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
   const shown = (chosen?.types ?? []).filter((r) => gaps !== '1' || standing(r) === 'undecided');
   const totals = groups.reduce((t, g) => ({ mapped: t.mapped + g.mapped, category: t.category + g.category, aside: t.aside + g.aside, undecided: t.undecided + g.undecided, all: t.all + g.types.length }), { mapped: 0, category: 0, aside: 0, undecided: 0, all: 0 });
 
-  const setAside = async (r: TaxonomyLabel, aside: boolean) => {
-    setBusyKey(r.key);
-    try {
-      await api.taxonomySaveLabel({ namespace: 'google', key: r.key, active: !aside });
-      setRows((prev) => (prev ?? []).map((x) => (x.key === r.key ? { ...x, active: !aside } : x)));
-      await onChanged(aside ? `${r.label ?? r.key} is set aside — not a day out.` : `${r.label ?? r.key} is back in the list.`);
-    } catch (err) { await onChanged(String((err as Error).message)); }
-    finally { setBusyKey(null); }
-  };
-
   if (!rows) return <Text style={type.small}>Reading Google's list…</Text>;
 
   return (
     <View style={{ gap: spacing.lg }}>
       <Section title={`Google's ${groups.length} groups against our categories — ${count(totals.all)} types`}>
         <Text style={[type.tiny, { paddingVertical: 6 }]}>
-          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out — a decision recorded here, not a filter: a place Google also types that way is still filed by its other words — and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group and its types open under it.
+          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out — a decision recorded here, not a filter: a place Google also types that way is still filed by its other words — and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group and its types open under it, each with a suggested home to approve or change.
         </Text>
         {wide ? (
           <View style={[styles.tRow, styles.tHead]}>
@@ -771,9 +794,13 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
             {on ? (
               <View style={styles.inset}>
                 <View style={[styles.line, { flexWrap: 'wrap' }]}>
-                  <Text style={[type.tiny, { flex: 1 }]}>{g.types.length} types in {g.name}</Text>
+                  <Text style={[type.tiny, { flex: 1, minWidth: 120 }]}>{g.types.length} types in {g.name}</Text>
                   <Choice label="Everything" on={gaps !== '1'} onPress={() => setGaps('')} />
                   <Choice label={`Undecided only · ${g.undecided}`} on={gaps === '1'} onPress={() => setGaps('1')} />
+                  {canManage && g.types.some((r) => standing(r) === 'undecided' && r.suggestion) ? (
+                    <Button label={busyKey === '*' ? 'Approving…' : `Approve all ${g.types.filter((r) => standing(r) === 'undecided' && r.suggestion).length} suggestions`}
+                            icon="check" disabled={busyKey != null} onPress={() => void approveAll(g.types)} />
+                  ) : null}
                 </View>
                 {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing undecided in this group.</Text> : null}
                 {shown.map((r) => {
@@ -781,26 +808,42 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
                   const lands = st === 'aside' ? 'set aside — not a day out'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
                       : st === 'category' ? `${catLabel(r.landing.category)} · no subcategory` : 'undecided';
+                  const sug = r.suggestion ?? null;
+                  const sugText = sug?.aside ? 'not a day out' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}` : null;
+                  const isOpen = openKey === r.key;
+                  // What the control says: where it is, or where it could go, or that nobody knows.
+                  const ctl = st === 'aside' ? 'Set aside' : st === 'mapped' || st === 'category' ? lands : sugText ? `Suggested: ${sugText}` : 'Choose…';
                   return (
-                    <View key={r.key} style={[styles.wordRow, st === 'aside' && { opacity: 0.55 }]}>
-                      <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+                    <View key={r.key} style={[{ position: 'relative' }, isOpen && { zIndex: 40 }]} onLayout={(e) => { const h = e.nativeEvent.layout.height; setRowTop((prev) => (prev[r.key] === h ? prev : { ...prev, [r.key]: h })); }}>
+                    {/* On a phone the control takes its own line under the name. */}
+                    <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
+                      <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: 1 }}>
                         <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
                         <Text style={type.tiny} numberOfLines={1}>
-                          {[r.seen_count ? `seen ${count(r.seen_count)}` : null, r.landing.derived.length ? `read as ${r.landing.derived.map(keyOf).join(', ')}` : null].filter(Boolean).join(' · ') || ' '}
+                          {[r.seen_count ? `seen ${count(r.seen_count)}` : null, st === 'undecided' && sug ? sug.why : st !== 'undecided' && st !== 'aside' ? HOW_WORD[r.landing.how] : null].filter(Boolean).join(' · ') || ' '}
                         </Text>
                       </View>
-                      <View style={{ alignItems: 'flex-end', gap: 1, maxWidth: '40%' }}>
-                        <Text style={[type.small, { fontWeight: st === 'undecided' ? '700' : '600', textAlign: 'right' }]} numberOfLines={2}>{lands}</Text>
-                        {st !== 'aside' && st !== 'undecided' ? (
-                          <Text style={[type.tiny, { textAlign: 'right' }]} numberOfLines={1}>{HOW_WORD[r.landing.how]}{r.landing.via && r.landing.via.scope !== 'default' ? ` · ${r.landing.via.subject_label ?? r.landing.via.subject ?? ''}` : ''}</Text>
-                        ) : null}
-                      </View>
                       {canManage ? (
-                        <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-                          <TextAction label="Map" onPress={() => onPick(`google:${r.key}`, r.landing.subcategory)} disabled={busyKey === r.key} />
-                          <TextAction label={st === 'aside' ? 'Bring back' : 'Set aside'} tone="muted" disabled={busyKey === r.key} onPress={() => void setAside(r, st !== 'aside')} />
+                        <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
+                          <ControlButton label={busyKey === r.key ? 'Saving…' : ctl} set={st === 'undecided' && Boolean(sugText)} open={isOpen}
+                                         onPress={() => setOpenKey(isOpen ? null : r.key)} spoken={`${r.label ?? r.key}: ${ctl}`} />
+                          {st === 'undecided' && sug ? (
+                            <TextAction label="Approve" disabled={busyKey != null} onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)} />
+                          ) : null}
                         </View>
-                      ) : null}
+                      ) : (
+                        <Text style={[type.small, { fontWeight: '600', textAlign: 'right', maxWidth: '40%' }]} numberOfLines={2}>{lands}</Text>
+                      )}
+                    </View>
+                    <Popover open={isOpen} top={rowTop[r.key] ?? 44} align="right" onClose={() => setOpenKey(null)}>
+                      <PopoverList options={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]} onPick={() => void decide(r, { aside: true })} dense />
+                      {tax.categories.filter((c) => c.active).map((c) => (
+                        <PopoverGroup key={c.key} title={c.label}>
+                          <PopoverList dense options={c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: st !== 'aside' && r.landing.subcategory === sc.key }))}
+                                       onPick={(k) => void decide(r, { subcategory: k })} />
+                        </PopoverGroup>
+                      ))}
+                    </Popover>
                     </View>
                   );
                 })}
