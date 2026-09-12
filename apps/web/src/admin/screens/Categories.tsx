@@ -687,6 +687,8 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
   // Nothing is listed until there is a word or a source to list: never a huge scroll.
   useEffect(() => {
     generation.current += 1;
+    // A page still on its way for the old filters must not keep the new list's next page disabled (Codex, 12 Sep 2026).
+    setLoadingMore(false);
     if (!q.trim() && !ns) { setRows(null); setMore(false); return; }
     let live = true;
     void api.taxonomyLabels({ namespace: ns || undefined, q: q.trim() || undefined, all: Boolean(q.trim()) || (ns !== 'wikidata' && ns !== ''), limit: PAGE })
@@ -705,7 +707,7 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
       setRows((prev) => [...(prev ?? []), ...d.labels]);
       setMore(d.more);
     } catch { /* the list stands */ }
-    finally { setLoadingMore(false); }
+    finally { if (asked === generation.current) setLoadingMore(false); }
   };
 
   return (
