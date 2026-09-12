@@ -23,7 +23,7 @@
  * screen works inside the shell's phone frame (CLAUDE.md).
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
@@ -428,6 +428,26 @@ export type DropdownOption = { key: string; label: string; on: boolean; count?: 
  * closes on the pick. The panel is the surface colour over a 1px rule with a
  * transparent scrim behind it.
  */
+
+/**
+ * Close on a click anywhere outside the control — a document listener, on
+ * top of the scrim, because a fixed scrim inside a transformed ancestor (the
+ * phone frame) or an odd browser can miss the click (owner, 12 Sep 2026: "if
+ * I click anywhere on the screen, I can't remove the dropdown").
+ */
+function useCloseOutside(open: boolean, ref: React.RefObject<any>, close: () => void) {
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return;
+    const onDown = (e: Event) => {
+      const node = ref.current as any;
+      if (node && typeof node.contains === 'function' && node.contains(e.target as Node)) return;
+      close();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [open, ref, close]);
+}
+
 export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick, soft = false }: {
   label: string;
   value: string;
@@ -440,6 +460,8 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
   soft?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const wrapRef = React.useRef<any>(null);
+  useCloseOutside(open, wrapRef, useCallback(() => setOpen(false), []));
   const groups = useMemo(() => {
     const out: { title: string | null; items: DropdownOption[] }[] = [];
     for (const o of options) {
@@ -450,7 +472,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
     return out;
   }, [options]);
   return (
-    <View style={[dd.wrap, open && dd.wrapOpen]}>
+    <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
       <Press
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
@@ -534,9 +556,11 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const group = groups.find((g) => g.key === into) ?? null;
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
   const close = () => { setOpen(false); setInto(null); };
+  const wrapRef = React.useRef<any>(null);
+  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); onOpenChange?.(false); }, [onOpenChange]));
   const pick = (key: string) => { onPick(key); close(); };
   return (
-    <View style={[dd.wrap, open && dd.wrapOpen]}>
+    <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
       <Press
         onPress={() => (open ? close() : setOpen(true))}
         accessibilityRole="button"

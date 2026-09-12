@@ -53,11 +53,11 @@ import { asOneOf, asText, useQueryState } from '../../router';
 const WIDE = 900;
 
 type View_ = 'subcategories' | 'providers' | 'google' | 'words';
-const VIEWS: { key: View_; label: string; short: string }[] = [
-  { key: 'subcategories', label: 'Subcategories & attributes', short: 'Subcategories' },
-  { key: 'providers', label: 'Provider words', short: 'Providers' },
-  { key: 'google', label: "Google's categories", short: 'Google' },
-  { key: 'words', label: 'Find a word', short: 'Find a word' },
+const VIEWS: { key: View_; label: string; short: string; needsCategory: boolean }[] = [
+  { key: 'subcategories', label: 'Our categories', short: 'Ours', needsCategory: true },
+  { key: 'providers', label: 'Providers\' words, one of ours', short: 'Providers', needsCategory: true },
+  { key: 'google', label: 'Google mapped to ours', short: 'Google', needsCategory: false },
+  { key: 'words', label: 'Find a word', short: 'Find a word', needsCategory: false },
 ];
 
 /** What decided where a word lands, in words. */
@@ -187,7 +187,10 @@ export function Categories({ canManage }: { canManage: boolean }) {
   useEffect(() => { void load(); }, [load]);
 
   const categories = tax?.categories ?? [];
-  const category = categories.find((c) => c.key === cat) ?? categories[0] ?? null;
+  // No category until one is chosen (owner, 12 Sep 2026: "it should probably
+  // be empty when I arrive on the page and I select the category").
+  const category = categories.find((c) => c.key === cat) ?? null;
+  const needsCategory = VIEWS.find((v) => v.key === view)?.needsCategory ?? false;
   const subs = category?.subcategories ?? [];
   const chosen = subs.find((s) => s.key === sub) ?? null;
   const rulesOf = (key: string) => (tax?.rules ?? []).filter((r) => r.subcategory === key);
@@ -210,12 +213,14 @@ export function Categories({ canManage }: { canManage: boolean }) {
       {/* The controls, left-aligned, each panel hanging directly under its own box
           (owner, 12 Sep 2026: "they should both be left-aligned with the start of the text"). */}
       <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.lg, zIndex: 20 }]}>
-        <Dropdown label="Category" value={category?.label ?? '—'} width={240}
-                  options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
-                  onPick={(k) => { setCat(k); setSub(''); setEditing(null); }} />
-        <Dropdown label="Show" value={VIEWS.find((v) => v.key === view)?.label ?? ''} width={260}
+        <Dropdown label="Show" value={VIEWS.find((v) => v.key === view)?.label ?? ''} width={300}
                   options={VIEWS.map((v) => ({ key: v.key, label: v.label, on: v.key === view }))}
                   onPick={(k) => { setView(k as View_); setEditing(null); }} />
+        {needsCategory ? (
+          <Dropdown label="Category" value={category?.label ?? 'Select a category'} width={240}
+                    options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
+                    onPick={(k) => { setCat(k); setSub(''); setEditing(null); }} />
+        ) : null}
         {view === 'subcategories' && !wide && subs.length ? (
           <Dropdown label="Subcategory" value={chosen?.label ?? 'All'} width={260}
                     options={[{ key: '', label: 'All subcategories', on: !chosen }, ...subs.map((s) => ({ key: s.key, label: s.label, count: `${s.rules ?? 0}`, on: s.key === chosen?.key }))]}
@@ -257,6 +262,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {!tax ? <Text style={type.small}>Loading…</Text> : null}
+      {tax && needsCategory && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
 
       {tax && category && view === 'subcategories' ? (
         <View style={[styles.split, wide && styles.splitWide]}>
@@ -825,7 +831,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
               {shown.map((r) => {
                 const st = standing(r);
                 const sug = r.suggestion ?? null;
-                const sugText = sug?.aside ? 'not a day out' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}` : null;
+                const sugText = sug?.aside ? 'not a day out' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
                 // What the control says: where it is, or where it could go, or that nobody knows.
                 const ctlLabel = st === 'aside' || st === 'mapped' ? 'Mapped' : st === 'category' ? 'Category only' : sugText ? 'Suggested' : 'Map to';
                 const ctlValue = busyKey === r.key ? 'Saving…'

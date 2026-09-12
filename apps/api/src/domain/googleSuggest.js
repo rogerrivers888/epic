@@ -64,9 +64,12 @@ const TO_SUBCATEGORY = {
   pizza_delivery: 'fast-food', food_court: 'fast-food', hot_dog_stand: 'fast-food', hot_dog_restaurant: 'fast-food', kebab_shop: 'fast-food',
   sandwich_shop: 'fast-food', snack_bar: 'fast-food', cafeteria: 'fast-food', fish_and_chips_restaurant: 'fast-food', food_delivery: 'fast-food',
   // a table
-  restaurant: 'restaurants', steak_house: 'restaurants', bistro: 'restaurants', bar_and_grill: 'restaurants', diner: 'restaurants', deli: 'cafes',
+  restaurant: 'restaurants', bistro: 'restaurants', diner: 'restaurants', deli: 'cafes',
   noodle_shop: 'restaurants', salad_shop: 'cafes',
 };
+
+/** Words in a `*_restaurant` type that say how you eat, not what: no cuisine to keep. */
+const GENERIC_CUISINE = new Set(['fine dining', 'fast food', 'family', 'buffet', 'brunch', 'breakfast', 'dessert', 'fusion', 'western']);
 
 /** Google's groups that are never a day out: every type in them is suggested aside. */
 const ASIDE_GROUPS = new Set(['Automotive', 'Business', 'Education', 'Facilities', 'Finance', 'Geographical Areas', 'Government', 'Housing', 'Lodging', 'Services', 'Transportation']);
@@ -93,9 +96,21 @@ export function suggestFor(type, group, subcategoryKeys) {
   const has = (k) => subcategoryKeys.includes(k);
   const named = TO_SUBCATEGORY[type];
   if (named) return has(named) ? { subcategory: named, why: 'the obvious subcategory for this word' } : null;
+  // A steakhouse and a bar and grill are restaurants with a cuisine of their own.
+  if (type === 'steak_house') return has('restaurants') ? { subcategory: 'restaurants', cuisine: 'steakhouse', why: 'a restaurant; steakhouse is kept as its cuisine' } : null;
+  if (type === 'bar_and_grill') return has('restaurants') ? { subcategory: 'restaurants', cuisine: 'bar and grill', why: 'a restaurant; bar and grill is kept as its cuisine' } : null;
   if (ASIDE_TYPES.has(type)) return { aside: true, why: 'not somewhere a family goes for the day' };
   if (ASIDE_GROUPS.has(group)) return { aside: true, why: `Google files it under ${group}` };
-  if (/_restaurant$/.test(type)) return has('restaurants') ? { subcategory: 'restaurants', why: 'a restaurant, whatever the cuisine' } : null;
+  if (/_restaurant$/.test(type)) {
+    if (!has('restaurants')) return null;
+    // The cuisine is not a third level under Restaurants: it is a separate
+    // attribute google.js already reads off the type (an Indian restaurant is a
+    // restaurant whose cuisine is Indian), so the suggestion says both.
+    const cuisine = type.replace(/_restaurant$/, '').replace(/_/g, ' ');
+    return GENERIC_CUISINE.has(cuisine)
+      ? { subcategory: 'restaurants', why: 'a restaurant' }
+      : { subcategory: 'restaurants', cuisine, why: `a restaurant; the cuisine, ${cuisine}, is kept as its own attribute` };
+  }
   if (group === 'Shopping') return { aside: true, why: 'a shop, not a browse' };
   return null;
 }

@@ -26,8 +26,11 @@ test('a group that is never a day out is suggested aside, type by type', () => {
   assert.equal(suggestFor('casino', 'Entertainment and Recreation', DRAWERS).aside, true);
 });
 
-test('a cuisine is a restaurant; a counter is not', () => {
+test('a cuisine is a restaurant, and the cuisine rides along; a counter is not', () => {
   assert.equal(suggestFor('thai_restaurant', 'Food and Drink', DRAWERS).subcategory, 'restaurants');
+  assert.equal(suggestFor('thai_restaurant', 'Food and Drink', DRAWERS).cuisine, 'thai');
+  assert.equal(suggestFor('fine_dining_restaurant', 'Food and Drink', DRAWERS).cuisine, undefined);
+  assert.equal(suggestFor('steak_house', 'Food and Drink', DRAWERS).cuisine, 'steakhouse');
   assert.equal(suggestFor('fast_food_restaurant', 'Food and Drink', DRAWERS).subcategory, 'fast-food');
   assert.equal(suggestFor('ice_cream_shop', 'Food and Drink', DRAWERS).subcategory, 'cafes');
 });

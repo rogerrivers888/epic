@@ -2643,7 +2643,7 @@ export type TaxonomyLabel = {
   seen_count: number; active: boolean; seeded: boolean;
   landing: TaxonomyLanding;
   /** For a Google type: where it could go, for the owner to approve or change. */
-  suggestion?: { subcategory?: string; aside?: boolean; why: string } | null;
+  suggestion?: { subcategory?: string; aside?: boolean; cuisine?: string; why: string } | null;
 };
 
 /** A rule as the Categories screen draws it: every rule as the labels it is about. */
