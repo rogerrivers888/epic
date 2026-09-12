@@ -564,6 +564,8 @@ function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, c
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const PAGE = 400;
+  // Which filters a page was asked for; a page that lands after they changed is dropped.
+  const generation = React.useRef(0);
   const [typed, setTyped] = useState(q);
   const namespace = ns || tax?.namespaces[0]?.key || 'google';
 
@@ -575,6 +577,7 @@ function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, c
 
   useEffect(() => {
     let live = true;
+    generation.current += 1;
     setRows(null);
     void api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: PAGE })
       .then((d) => { if (live) { setRows(d.labels); setMore(d.more); } })
@@ -585,12 +588,14 @@ function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, c
   // The next page, appended: the vocabulary is thousands long and a list that
   // silently stopped at four hundred would hide most of it (Codex, 12 Sep 2026).
   const showMore = async () => {
+    const asked = generation.current;
     setLoadingMore(true);
     try {
       const d = await api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: PAGE, offset: rows?.length ?? 0 });
+      if (asked !== generation.current) return;
       setRows((prev) => [...(prev ?? []), ...d.labels]);
       setMore(d.more);
-    } catch { setMore(false); }
+    } catch { if (asked === generation.current) setMore(false); }
     finally { setLoadingMore(false); }
   };
 

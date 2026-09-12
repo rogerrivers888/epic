@@ -117,7 +117,8 @@ export async function list({ namespace = null, q = null, seenOnly = false, limit
      )
      select * from all_labels
      ${where.length ? `where ${where.join(' and ')}` : ''}
-     order by seen_count desc, coalesce(label, key)
+     -- Fully ordered, so a page taken by offset neither repeats nor skips a row (Codex, 12 Sep 2026).
+     order by seen_count desc, coalesce(label, key), namespace, key
      limit $${lim} offset $${off}`, args);
   return rows;
 }
