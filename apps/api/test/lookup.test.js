@@ -12,7 +12,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fold, kindOf, reachKm, tally, total, withinReach, RING_CAP_KM } from '../src/domain/lookup.js';
+import { fold, kindOf, priorityOf, reachKm, tally, topFifth, total, withinReach, RING_CAP_KM } from '../src/domain/lookup.js';
 import { estimateTravelMinutes } from '../src/domain/travel.js';
 import { recordsOf, resolveVenues } from '../src/sources/index.js';
 
@@ -111,4 +111,15 @@ test('the raw provider records survive resolution, one per source, untouched', (
   assert.equal(records[1].rating, null, 'the merge changed the venue, not the record');
   // A venue nobody resolved has nothing behind it, and says so rather than throwing.
   assert.deepEqual(recordsOf({ name: 'stray' }), []);
+});
+
+test('priority is the crowd first and the stars second', () => {
+  assert.ok(priorityOf(4.0, 1000) > priorityOf(4.7, 100), 'ten times the reviews beats a better rating');
+  assert.ok(priorityOf(4.7, 500) > priorityOf(4.1, 500), 'the same crowd is told apart by the stars');
+  assert.equal(priorityOf(null, 0), 0);
+  assert.equal(priorityOf(4.5, null), 0, 'no reviews is no priority, whatever the stars');
+  assert.equal(priorityOf(5, 100), 100);
+  const items = Array.from({ length: 12 }, (_, i) => ({ ref: String(i), priority: i }));
+  assert.deepEqual(topFifth(items).map((i) => i.ref), ['11', '10', '9'], 'a fifth of twelve is three, the best three');
+  assert.equal(topFifth([{ ref: 'a', priority: 0 }]).length, 1, 'never fewer than one');
 });

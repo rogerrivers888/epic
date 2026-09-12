@@ -1883,8 +1883,14 @@ export const api = {
   lookup: (p: { q: string; minutes: number; mode: string }) => request<LookupResult>(`/api/admin/lookup${qs(p)}`),
   /** One place opened: each provider's record as it arrived, and the row Epic resolved from them. */
   lookupPlace: (p: { q: string; minutes: number; mode: string; ref: string }) => request<LookupOpened>(`/api/admin/lookup/place${qs(p)}`),
-  /** Ours beside Google's, field by field — one Place Details call, held in memory a few hours. */
+  /** Ours beside Google's and Tripadvisor's, field by field — one detail call each, held in memory a few hours. */
   lookupCompare: (p: { q: string; minutes: number; mode: string; ref: string }) => request<LookupCompare>(`/api/admin/lookup/compare${qs(p)}`),
+  /** Google's rating and count for the not-owned places that have none, a page at a time. */
+  lookupRate: (p: { q: string; minutes: number; mode: string; kind: 'activities' | 'food'; limit?: number }) => post<LookupRun>('/api/admin/lookup/rate', p),
+  /** Join the not-owned places to Tripadvisor by name, best first, under the month's cap. */
+  lookupTripadvisor: (p: { q: string; minutes: number; mode: string; kind: 'activities' | 'food'; limit?: number }) => post<LookupRun>('/api/admin/lookup/tripadvisor', p),
+  /** Claim, research, read the place's own pages and write our account of it; keep the crowd as bands. */
+  lookupCurate: (p: { q: string; minutes: number; mode: string; ref: string }) => post<LookupCurated>('/api/admin/lookup/curate', p),
 
   // --- correcting a category where the mistake is (routes/library.js) ---
   categoryRead: (id: string, said: string) =>
@@ -2298,11 +2304,20 @@ export type LookupItem = {
   shelf: string | null; subcategory: string | null; sources: string[];
   lat: number; lng: number; rating: number | null; ratingCount: number | null; website: string | null;
   distanceKm: number; travelMinutes: number; recordCount: number;
+  /** Carries the atlas, the sweep or an owned record. */
+  owned: boolean;
+  /** Our own account of it has been written. */
+  curated: boolean;
+  /** Reviews × (rating ÷ 5)²: the crowd first, the stars second. Nought when nobody has counted. */
+  priority: number;
 };
+
 export type LookupResult = {
   place: LookupPlace; mode: string; minutes: number; radiusKm: number; estimated: boolean;
   /** The minutes reach further than any source will answer, so the ring was cut to what they will. */
   capped: boolean;
+  /** The owner's ceiling for Tripadvisor lookups from this screen, and how much of it this month has used. */
+  tripadvisor: { cap: number; used: number };
   /** Distinct places, before and inside the fence — the "Everything" row, which is not the sum of the sources. */
   totals: { returned: LookupCounts; kept: LookupCounts };
   sources: LookupSource[];
@@ -2317,14 +2332,32 @@ export type LookupOpened = {
   records: LookupRecord[];
   resolved: Record<string, unknown> | null;
 };
-export type LookupCompareRow = { key: string; ourKey: string | null; theirKey: string | null; ours: unknown; theirs: unknown; paired: boolean };
+export type LookupCompareColumn = {
+  key: 'ours' | 'google' | 'tripadvisor'; label: string; note: string | null;
+  fields: Record<string, unknown> | null; of: number; filled: number; id?: string | null; how?: string | null;
+};
+/** One field across the columns: which key each column knows it by, and what each holds. A column absent from `keys` does not have the field at all. */
+export type LookupCompareRow = { key: string; keys: Partial<Record<LookupCompareColumn['key'], string | null>>; cells: Partial<Record<LookupCompareColumn['key'], unknown>> };
 export type LookupCompare = {
   place: LookupPlace; mode: string; minutes: number;
   item: Omit<LookupItem, 'recordCount'>;
-  ours: { source: string | null; label: string | null; fields: Record<string, unknown> | null };
-  theirs: { id: string | null; how: 'id' | 'matched' | 'none' | 'off'; fields: Record<string, unknown> | null; why: string | null };
+  columns: LookupCompareColumn[];
   rows: LookupCompareRow[];
-  filled: { ours: number; theirs: number; oursOf: number; theirsOf: number };
+};
+/** One page of a ranking run. `remaining` above nought means call again. */
+export type LookupRun = {
+  kind: 'activities' | 'food'; looked: number; matched: number; missed: number; remaining: number;
+  rated?: number; failed?: number; used?: number; cap?: number; stopped?: boolean;
+};
+export type LookupCuration = { what: string; who: string; why: string; practical: string; kinds: string[]; confidence: 'high' | 'medium' | 'low'; pagesUsed: string[] };
+export type LookupCurated = {
+  ref: string;
+  curation: { curation: LookupCuration; from: string[]; model: string; costUsd: number | null } | null;
+  banded: boolean;
+  record: Record<string, unknown> | null;
+  /** Why no account was written: the budget, no website, an unreadable site. */
+  why: string | null;
+  detail: string | null;
 };
 
 /**

@@ -128,8 +128,17 @@ export function toVenue(loc, fallbackCategory = 'attraction') {
     openingHours: formattedHours(loc.opening_hours),
     attribution: TRIPADVISOR_ATTRIBUTION,
     retention: { placeId: 'indefinite', displayFields: 'none' },
+    // What the full record carries beyond the venue shape — the description,
+    // the awards, the sub-ratings, the trip-type breakdown, the ranking — kept
+    // under Terra's own names so the back office's compare can show how rich
+    // the record is (owner, 12 Sep 2026: "see how rich we can get this data").
+    ...Object.fromEntries(Object.entries(loc).filter(([k, v]) => EXTRA_KEYS.has(k) && v != null && !(Array.isArray(v) && !v.length))
+      .map(([k, v]) => [`ta_${k}`, k === 'description' || k === 'descriptions' ? (Array.isArray(v) ? pickTranslation(v) : v) : v])),
   };
 }
+
+/** Terra's fields that say something about the place beyond the venue shape. Rented, every one. */
+const EXTRA_KEYS = new Set(['description', 'descriptions', 'awards', 'subratings', 'trip_types', 'ranking_data', 'rankings', 'review_rating_count', 'traveler_ratings', 'amenities', 'features', 'styles', 'neighborhood_info', 'ancestors', 'timezone', 'phone', 'email', 'write_review', 'photo_count', 'see_all_photos', 'price_level', 'cuisine', 'groups', 'attributes']);
 
 const tokens = (q) => String(q || '').toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
 
@@ -218,6 +227,25 @@ export const tripadvisorSource = {
       await sleep(150); // Discover: 10 requests/second, and 429s arrive well before that
     }
     return out;
+  },
+
+  /**
+   * One place looked up by name — the same test `enrich` applies, for one
+   * venue, so the back office can join a place it chose rather than the eight
+   * nearest. Two entities at most, both billed; the meter says how many.
+   */
+  async match({ name, lat, lng, category = 'attraction' }, { locality = null, meter = null } = {}) {
+    if (!KEY() || !name || !Number.isFinite(lat)) return null;
+    const params = { query: String(name).slice(0, 200), size: ENRICH_SIZE };
+    if (locality) params.geo_name = locality;
+    const data = await get('/catalog/locations/search', params, meter);
+    for (const item of data.data || []) {
+      const hit = toVenue(item.location ?? item, category);
+      if (!Number.isFinite(hit.lat)) continue;
+      if (norm(hit.name) !== norm(name) || kmBetween(hit, { lat, lng }) > 0.4) continue;
+      return hit;
+    }
+    return null;
   },
 
   /** Full detail plus up to 3 reviews (Discover). Two billable entities per view. */

@@ -32,7 +32,14 @@ const SEARCH_FIELDS = [
   'places.goodForChildren', 'places.menuForChildren', 'places.servesVegetarianFood', 'places.reservable', 'places.editorialSummary',
 ].join(',');
 const TEXT_SEARCH_FIELDS = `${SEARCH_FIELDS},contextualContents.justifications`;
-const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber';
+// `generativeSummary` and `reviewSummary` are Google's AI-written account of
+// a place and of what its reviewers say (owner, 12 Sep 2026: "we absolutely
+// want Google's AI summaries"). They sit in the same Enterprise + Atmosphere
+// tier as `reviews`, which this call already asks for, so they add nothing to
+// the price of it. Rented like everything else here: shown, never stored.
+const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber,generativeSummary,reviewSummary';
+/** The two figures alone — the Pro tier, a fraction of a full detail — for ranking a place we already know Google's id for. */
+const RATING_FIELDS = 'id,rating,userRatingCount';
 
 export const FOOD_TYPES = ['restaurant', 'cafe', 'bar', 'pub', 'bakery', 'ice_cream_shop', 'coffee_shop'];
 /**
@@ -404,7 +411,20 @@ export const googleSource = {
       text: r.text?.text ?? r.originalText?.text ?? '', rating: r.rating ?? null, author: r.authorAttribution?.displayName ?? null,
       authorUri: r.authorAttribution?.uri ?? null, when: r.relativePublishTimeDescription ?? null,
     }));
+    // Google's own AI-written account of the place, and of what its reviewers
+    // say. Each travels with the disclosure Google asks to be shown beside it.
+    v.aiSummary = p.generativeSummary?.overview?.text ?? null;
+    v.aiSummaryDisclosure = p.generativeSummary?.disclosureText?.text ?? null;
+    v.reviewSummary = p.reviewSummary?.text?.text ?? null;
+    v.reviewSummaryDisclosure = p.reviewSummary?.disclosureText?.text ?? null;
     return v;
+  },
+
+  /** The rating and the count for a known id, at the cheap tier. Rented: band it or hold it, never write it. */
+  async rating(id, { meter = null } = {}) {
+    if (!KEY()) return null;
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: RATING_FIELDS, meter });
+    return { rating: p.rating ?? null, ratingCount: p.userRatingCount ?? null };
   },
 
   /**

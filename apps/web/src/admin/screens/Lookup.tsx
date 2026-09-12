@@ -55,14 +55,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, LookupCompare, LookupItem, LookupOpened, LookupResult, LookupSource } from '../../api';
+import { api, LookupCompare, LookupCompareColumn, LookupItem, LookupOpened, LookupResult, LookupSource } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button } from '../../components/ui';
 import { CrumbHead } from '../../components/ControlRow';
 import { useViewport } from '../../hooks/useViewport';
 import { AdminPage, Dropdown, PageHead, Pill, count, plural } from '../kit';
-import { asNumber, asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../../router';
+import { asFlag, asNumber, asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../../router';
 
 const WIDE = 900;
 
@@ -92,11 +92,13 @@ const NO_DRAWER = '_none';
 const NO_CATEGORY = '_none';
 /** `source=all` is the column that counts every source together. */
 const ALL = 'all';
+/** `source=notowned` is the column the whole exercise is about: places none of our pools hold. */
+const NOT_OWNED = 'notowned';
 
 const MONO = Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', default: 'monospace' });
 const OWNED = new Set(['atlas', 'sweep', 'own']);
 /** A source's name as a column heading: short enough to sit over a number. */
-const SHORT: Record<string, string> = { osm: 'OSM', google: 'Google', tripadvisor: 'Tripadvisor', fixtures: 'Fixtures', atlas: 'Atlas', sweep: 'Sweep', own: 'Owned' };
+const SHORT: Record<string, string> = { osm: 'OSM', google: 'Google', tripadvisor: 'Tripadv.', fixtures: 'Fixtures', atlas: 'Atlas', sweep: 'Sweep', own: 'Owned' };
 const shortOf = (s: LookupSource) => SHORT[s.key] ?? s.label;
 
 export function Lookup() {
@@ -114,6 +116,7 @@ export function Lookup() {
   const [sub] = useQueryState<string | null>('sub', null, asText);
   const [source] = useQueryState<string | null>('source', null, asText);
   const [place] = useQueryState<string | null>('place', null, asText);
+  const [top, setTop] = useQueryState<boolean>('top', false, asFlag);
   useStickyQuery('admin.lookup', ['q', 'mins', 'mode']);
   const minutes = mins ?? 30;
 
@@ -130,6 +133,7 @@ export function Lookup() {
   const [result, setResult] = useState<LookupResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [again, setAgain] = useState(0);
   useEffect(() => {
     if (!q) { setResult(null); return; }
     let live = true;
@@ -140,7 +144,27 @@ export function Lookup() {
       .catch((e: any) => { if (live) { setResult(null); setError(e?.body?.message ?? e?.message ?? 'The lookup failed.'); } })
       .finally(() => { if (live) setBusy(false); });
     return () => { live = false; };
-  }, [q, minutes, mode]);
+  }, [q, minutes, mode, again]);
+
+  // The runs: each asks a page at a time until nothing is left, saying where
+  // it is as it goes, and then the list is read again so the numbers move.
+  const [run, setRun] = useState<{ what: string; note: string; busy: boolean } | null>(null);
+  const runPages = async (what: string, page: () => Promise<{ remaining: number; stopped?: boolean; [k: string]: unknown }>, said: (r: any, totals: Record<string, number>) => string) => {
+    if (!q) return;
+    const totals: Record<string, number> = {};
+    setRun({ what, note: 'starting…', busy: true });
+    try {
+      for (let i = 0; i < 40; i += 1) {
+        const r = await page();
+        for (const [k, v] of Object.entries(r)) if (typeof v === 'number' && k !== 'remaining' && k !== 'cap' && k !== 'used') totals[k] = (totals[k] ?? 0) + v;
+        setRun({ what, note: `${said(r, totals)}${r.remaining ? ` · ${r.remaining} to go` : ''}`, busy: Boolean(r.remaining) && !r.stopped });
+        if (!r.remaining || r.stopped) break;
+      }
+    } catch (e: any) {
+      setRun({ what, note: e?.body?.message ?? e?.message ?? 'The run failed.', busy: false });
+    }
+    setAgain((n) => n + 1);
+  };
 
   // One place opened: the second read, and the third — Google's record for
   // it, fetched live so it can sit beside ours.
@@ -167,17 +191,17 @@ export function Lookup() {
   const nameOfCat = (key: string | null) => (key == null || key === NO_CATEGORY ? 'No category' : catLabel.get(key) ?? key);
   const nameOfSub = (key: string | null) => (key == null || key === NO_DRAWER ? 'No drawer' : subLabel.get(key) ?? key);
   const sourceOf = (key: string): LookupSource | undefined => result?.sources.find((s) => s.key === key);
-  const nameOfSource = (key: string | null) => (key == null || key === ALL ? 'Every source' : sourceOf(key)?.label ?? key);
+  const nameOfSource = (key: string | null) => (key == null || key === ALL ? 'Every source' : key === NOT_OWNED ? 'Not owned' : sourceOf(key)?.label ?? key);
 
   // --- the one list, and every number from it -------------------------------
   const items = result?.items ?? [];
   const ofKind = useMemo(() => items.filter((i) => i.kind === kind), [items, kind]);
-  /** Sources drawn as columns: the ones that were asked and hold something in this half. */
+  /** Sources drawn as columns: the ones that hold something in this half — asked in the search, or joined by name since. */
   const columns = useMemo(
-    () => (result?.sources ?? []).filter((s) => s.asked && ofKind.some((i) => i.sources.includes(s.key))),
+    () => (result?.sources ?? []).filter((s) => ofKind.some((i) => i.sources.includes(s.key))),
     [result, ofKind],
   );
-  const carries = (i: LookupItem, key: string) => key === ALL || i.sources.includes(key);
+  const carries = (i: LookupItem, key: string) => key === ALL || (key === NOT_OWNED ? !i.owned : i.sources.includes(key));
   const inCat = (i: LookupItem, c: string | null) => c == null || (c === NO_CATEGORY ? i.shelf == null : i.shelf === c);
   const inSub = (i: LookupItem, s: string | null) => s == null || (s === NO_DRAWER ? i.subcategory == null : i.subcategory === s);
 
@@ -208,14 +232,39 @@ export function Lookup() {
   const closeList = () => setQuery({ cat: null, sub: null, source: null, place: null });
   const closePlace = () => setQuery({ place: null });
 
-  const listed = useMemo(
-    () => (source ? ofKind.filter((i) => carries(i, source) && inCat(i, cat) && inSub(i, sub)) : []),
-    [ofKind, source, cat, sub],
-  );
+  const ranked = source === NOT_OWNED;
+  const listed = useMemo(() => {
+    if (!source) return [];
+    let list = ofKind.filter((i) => carries(i, source) && inCat(i, cat) && inSub(i, sub));
+    if (ranked) {
+      list = [...list].sort((a, b) => b.priority - a.priority || a.travelMinutes - b.travelMinutes);
+      if (top) list = list.slice(0, Math.max(1, Math.ceil(list.length / 5)));
+    }
+    return list;
+  }, [ofKind, source, cat, sub, ranked, top]);
+  const unrated = listed.filter((i) => i.rating == null).length;
+  const uncurated = listed.filter((i) => !i.curated).length;
+  const curateAll = async () => {
+    if (!q) return;
+    const todo = listed.filter((i) => !i.curated);
+    setRun({ what: 'Curating', note: `0 of ${todo.length}`, busy: true });
+    let done = 0; let held = 0; let last = '';
+    for (const i of todo) {
+      try {
+        const r = await api.lookupCurate({ q, minutes, mode, ref: i.ref });
+        if (r.curation) done += 1; else { held += 1; last = r.why ?? ''; }
+        if (r.why && /budget|bound/i.test(r.why)) { setRun({ what: 'Curating', note: `${done} written, then stopped: ${r.why}`, busy: false }); setAgain((n) => n + 1); return; }
+      } catch (e: any) { held += 1; last = e?.body?.message ?? e?.message ?? ''; }
+      setRun({ what: 'Curating', note: `${done} written · ${held} not${last ? ` (${last})` : ''} · ${todo.length - done - held} to go`, busy: true });
+    }
+    setRun({ what: 'Curating', note: `${done} written · ${held} not${last ? ` (${last})` : ''}`, busy: false });
+    setAgain((n) => n + 1);
+  };
   const failed = (result?.sources ?? []).filter((s) => s.failed);
 
   const level: 'matrix' | 'list' | 'place' = place ? 'place' : source ? 'list' : 'matrix';
   const crumb = [cat != null && !flat ? nameOfCat(cat) : null, sub != null ? nameOfSub(sub) : null, source ? nameOfSource(source) : null].filter(Boolean).join(' › ');
+  const taUsed = result ? `${count(result.tripadvisor.used)} of ${count(result.tripadvisor.cap)} Tripadvisor locations used this month` : '';
 
   return (
     <AdminPage>
@@ -269,7 +318,9 @@ export function Lookup() {
             {` · within ${result.minutes} min ${MODE_WORD[mode]}, a ring of about ${result.radiusKm} km`}
             {` · ${result.cached ? 'from the cache' : 'fetched'} in ${(result.tookMs / 1000).toFixed(1)}s`}
             {' · travel time is estimated from the distance'}
+            {` · ${taUsed}`}
           </Text>
+          {run ? <Note tone={run.busy ? 'plain' : 'plain'}><Text style={{ fontWeight: '700' }}>{run.what}:</Text> {run.note}</Note> : null}
           {result.capped ? <Note tone="warn">The ring was cut to {result.radiusKm} km: {result.minutes} minutes {MODE_WORD[mode]} reaches further than any source will answer.</Note> : null}
           {failed.map((s) => (
             <Note key={s.key} tone="warn"><Text style={{ fontWeight: '700' }}>{s.label}:</Text> {s.failed!.why}{s.failed!.slow ? ' It was still looking when the search was answered.' : ''} <Text style={{ fontFamily: MONO }}>{s.failed!.error}</Text></Note>
@@ -301,6 +352,16 @@ export function Lookup() {
               crumb={`${KIND_LABEL[kind]}${crumb ? ` › ${crumb}` : ''}`}
               nameOfCat={nameOfCat} nameOfSub={nameOfSub} nameOfSource={nameOfSource}
               onBack={closePlace}
+              onCurate={async () => {
+                if (!q || !place) return;
+                setRun({ what: 'Curating', note: 'reading their pages…', busy: true });
+                try {
+                  const r = await api.lookupCurate({ q, minutes, mode, ref: place });
+                  setRun({ what: 'Curating', note: r.curation ? `written · ${r.curation.from.length} pages read · $${(r.curation.costUsd ?? 0).toFixed(3)}` : `${r.why}${r.detail ? ` · ${r.detail}` : ''}`, busy: false });
+                } catch (e: any) { setRun({ what: 'Curating', note: e?.body?.message ?? e?.message ?? 'failed', busy: false }); }
+                setAgain((n) => n + 1);
+              }}
+              curating={Boolean(run?.busy && run.what === 'Curating')}
             />
           ) : null}
 
@@ -309,9 +370,19 @@ export function Lookup() {
               <CrumbHead
                 onBack={closeList} backLabel="Back to the numbers"
                 title={crumb}
-                sub={`${KIND_LABEL[kind]} · within ${result.minutes} min ${MODE_WORD[mode]} · nearest first`}
+                sub={`${KIND_LABEL[kind]} · within ${result.minutes} min ${MODE_WORD[mode]} · ${ranked ? `by priority: reviews × (rating ÷ 5)²${top ? ' · the top fifth' : ''}` : 'nearest first'}`}
                 aside={plural(listed.length, 'place')}
+                trailing={ranked ? <Choice label="Top 20%" on={top} onPress={() => setTop(!top)} /> : undefined}
               />
+              {ranked ? (
+                <View style={styles.actions}>
+                  <Button label={`Ask Google for ratings${unrated ? ` · ${unrated} unrated` : ''}`} kind="secondary" disabled={!unrated || Boolean(run?.busy)} style={styles.action}
+                    onPress={() => runPages('Ratings', () => api.lookupRate({ q: q!, minutes, mode, kind, limit: 30 }), (r, t) => `${t.rated ?? 0} rated · ${t.missed ?? 0} not at Google · ${t.failed ?? 0} failed`)} />
+                  <Button label={`Ask Tripadvisor · ${count(result.tripadvisor.used)} of ${count(result.tripadvisor.cap)} used`} kind="secondary" disabled={Boolean(run?.busy) || result.tripadvisor.used >= result.tripadvisor.cap} style={styles.action}
+                    onPress={() => runPages('Tripadvisor', () => api.lookupTripadvisor({ q: q!, minutes, mode, kind, limit: 20 }), (r, t) => `${t.matched ?? 0} joined · ${t.missed ?? 0} not found · ${count(r.used as number)} of ${count(r.cap as number)} used${r.stopped ? ' · stopped at the cap' : ''}`)} />
+                  <Button label={`Curate ${top ? 'these' : 'all'}${uncurated ? ` · ${uncurated} to write` : ' · all written'}`} kind="primary" disabled={!uncurated || Boolean(run?.busy)} style={styles.action} onPress={curateAll} />
+                </View>
+              ) : null}
               {wide ? (
                 <View style={styles.listHead}>
                   <Text style={[styles.headText, { flex: 3 }]}>Place</Text>
@@ -319,6 +390,7 @@ export function Lookup() {
                   <Text style={[styles.headText, styles.num]}>Min</Text>
                   <Text style={[styles.headText, styles.num]}>km</Text>
                   <Text style={[styles.headText, styles.numWide]}>Rating</Text>
+                  {ranked ? <Text style={[styles.headText, styles.numWide]}>Priority</Text> : null}
                   <Text style={[styles.headText, { flex: 2 }]}>Sources</Text>
                 </View>
               ) : null}
@@ -333,12 +405,14 @@ export function Lookup() {
                       <Text style={[styles.cellNum, styles.num]}>{i.travelMinutes}</Text>
                       <Text style={[styles.cellNum, styles.num]}>{i.distanceKm.toFixed(1)}</Text>
                       <Text style={[styles.cellNum, styles.numWide, i.rating == null && { color: colors.inkFaint }]}>{i.rating == null ? '' : `${i.rating} (${count(i.ratingCount)})`}</Text>
+                      {ranked ? <Text style={[styles.cellNum, styles.numWide, { fontWeight: '800' }, !i.priority && { color: colors.inkFaint }]}>{i.priority ? count(i.priority) : ''}</Text> : null}
                     </>
                   ) : (
-                    <Text style={type.tiny}>{i.travelMinutes} min · {i.distanceKm.toFixed(1)} km{i.rating != null ? ` · ${i.rating} (${count(i.ratingCount)})` : ''}</Text>
+                    <Text style={type.tiny}>{i.travelMinutes} min · {i.distanceKm.toFixed(1)} km{i.rating != null ? ` · ${i.rating} (${count(i.ratingCount)})` : ''}{ranked && i.priority ? ` · priority ${count(i.priority)}` : ''}</Text>
                   )}
                   <View style={[styles.pills, wide && { flex: 2 }]}>
                     {i.sources.map((s) => <Pill key={s} label={nameOfSource(s)} tone={OWNED.has(s) ? 'accent' : 'plain'} />)}
+                    {i.curated ? <Pill label="curated" tone="ok" icon="check" /> : null}
                   </View>
                 </Press>
               )) : <Text style={styles.empty}>Nothing here inside {result.minutes} minutes.</Text>}
@@ -347,10 +421,11 @@ export function Lookup() {
 
           {level === 'matrix' && lens === 'category' ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={!wide} contentContainerStyle={{ minWidth: '100%' }}>
-              <View style={{ minWidth: (wide ? 190 : 120) + (columns.length + 1) * (wide ? 84 : 58), flex: 1 }}>
+              <View style={{ minWidth: (wide ? 190 : 120) + (columns.length + 2) * (wide ? 84 : 58), flex: 1 }}>
                 <View style={styles.gridHead}>
                   <Text style={[styles.headText, styles.label, !wide && styles.labelNarrow]}>{flat ? 'Drawer' : 'Category'}</Text>
                   <Text style={[styles.headText, styles.cell, !wide && styles.cellNarrow]}>All</Text>
+                  <Text style={[styles.headText, styles.cell, !wide && styles.cellNarrow, { color: colors.ink }]} numberOfLines={2}>Not owned</Text>
                   {columns.map((s) => <Text key={s.key} style={[styles.headText, styles.cell, !wide && styles.cellNarrow]} numberOfLines={1}>{shortOf(s)}</Text>)}
                 </View>
                 {matrix.map((row) => {
@@ -377,6 +452,7 @@ export function Lookup() {
                         {!flat && r.depth === 0 && wide ? <Text style={type.tiny}>{plural(row.subs.length, 'drawer')}</Text> : null}
                       </Press>
                       <Cell n={r.items.length} strong narrow={!wide} onPress={() => openCell(r.cat, r.sub, ALL)} what={`${r.label}, every source`} />
+                      <Cell n={r.items.filter((i) => !i.owned).length} strong narrow={!wide} onPress={() => openCell(r.cat, r.sub, NOT_OWNED)} what={`${r.label}, not owned`} />
                       {columns.map((s) => (
                         <Cell key={s.key} n={r.items.filter((i) => i.sources.includes(s.key)).length} narrow={!wide} onPress={() => openCell(r.cat, r.sub, s.key)} what={`${r.label}, ${s.label}`} />
                       ))}
@@ -387,7 +463,7 @@ export function Lookup() {
             </ScrollView>
           ) : null}
           {level === 'matrix' && lens === 'category' ? (
-            <Text style={styles.foot}>A place two sources both returned counts once under each, so the columns add up to more than All. Tap a number for the places behind it{flat ? '' : '; tap a category for its drawers'}.</Text>
+            <Text style={styles.foot}>Not owned is what none of our pools hold: not the atlas, not the sweep, not an owned record. A place two sources both returned counts once under each, so the columns add up to more than All. Tap a number for the places behind it{flat ? '' : '; tap a category for its drawers'}.</Text>
           ) : null}
 
           {level === 'matrix' && lens === 'source' ? (
@@ -399,15 +475,16 @@ export function Lookup() {
                 <View style={{ width: 20 }} />
               </View>
               <SourceRow label="Every source" note="each place counted once" returned={result.totals.returned[kind]} kept={ofKind.length} onPress={() => openSource(ALL)} />
+              <SourceRow label="Not owned" note="what none of our pools hold — the ranked list, and the three runs" returned={items.filter((i) => i.kind === kind && !i.owned).length} kept={ofKind.filter((i) => !i.owned).length} onPress={() => openSource(NOT_OWNED)} />
               {result.sources.map((s) => (
                 <SourceRow
                   key={s.key} label={s.label} owned={s.layer === 'owned'} asked={s.asked} failed={Boolean(s.failed)}
-                  note={!s.asked ? 'opt-in and billed per place — switching it on is the owner’s call'
+                  note={!s.asked ? `opt-in and billed per location, so never in the search; joined by name for the places you choose on the not-owned list · ${taUsed}`
                     : s.failed ? s.failed.why
                       : s.capped ? `asked up to ${s.reachKm} km of the ${result.radiusKm} km ring, its own limit`
                         : s.layer === 'owned' ? s.note ?? '' : 'rented — fetched at display, never stored'}
                   returned={s.returned[kind]} kept={ofKind.filter((i) => i.sources.includes(s.key)).length}
-                  onPress={s.asked ? () => openSource(s.key) : undefined}
+                  onPress={s.asked || ofKind.some((i) => i.sources.includes(s.key)) ? () => openSource(s.key) : undefined}
                 />
               ))}
               <Text style={styles.foot}>Returned is everything the source handed back for this half; Within is what sits inside the ring. Tap a source for its places and what each is filed as.</Text>
@@ -478,11 +555,13 @@ function SourceRow({ label, note, owned, asked = true, failed, returned, kept, o
 // one place opened: the records, field by field
 // ---------------------------------------------------------------------------
 
-function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOfSub, nameOfSource, onBack }: {
+function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOfSub, nameOfSource, onBack, onCurate, curating }: {
   opened: LookupOpened | null; error: string | null; compare: LookupCompare | null; compareError: string | null; crumb: string;
   nameOfCat: (k: string | null) => string; nameOfSub: (k: string | null) => string; nameOfSource: (k: string) => string;
-  onBack: () => void;
+  onBack: () => void; onCurate: () => void; curating: boolean;
 }) {
+  const ours = compare?.columns.find((c) => c.key === 'ours')?.fields ?? null;
+  const curation = (ours?.curation ?? null) as null | { what: string; who: string; why: string; practical: string; kinds: string[]; confidence: string; pagesUsed: string[] };
   if (error) return <View><CrumbHead onBack={onBack} title="Could not open it" sub={crumb} /><Note tone="crit">{error}</Note></View>;
   if (!opened) return <View><CrumbHead onBack={onBack} title="Opening…" sub={crumb} /><Note>Fetching the records.</Note></View>;
   const { item, records, resolved } = opened;
@@ -503,6 +582,33 @@ function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOf
           </Press>
         ) : null}
       </View>
+      {/* Our own account of the place, when one has been written. */}
+      {curation ? (
+        <View style={styles.said}>
+          <View style={styles.inline}>
+            <Text style={styles.kicker}>What we say</Text>
+            <Pill label={`${curation.confidence} confidence`} tone={curation.confidence === 'high' ? 'ok' : curation.confidence === 'low' ? 'warn' : 'plain'} />
+            {curation.kinds.map((k) => <Pill key={k} label={k} />)}
+            {typeof ours?.crowd_band === 'string' ? <Pill label={`crowd ${ours.crowd_band}`} tone="accent" /> : null}
+            {typeof ours?.epic_score === 'number' ? <Pill label={`Epic ${(ours.epic_score as number).toFixed(1)}`} tone="accent" /> : null}
+            <View style={{ flex: 1 }} />
+            <Button label={curating ? 'Curating…' : 'Curate again'} kind="ghost" onPress={onCurate} disabled={curating} />
+          </View>
+          {[['What it is', curation.what], ['Who it suits', curation.who], ['Why go', curation.why], ['The practical things', curation.practical]].map(([h, t]) => (
+            <View key={h} style={{ gap: 2 }}>
+              <Text style={[type.tiny, { fontWeight: '700', color: colors.inkMuted }]}>{h}</Text>
+              <Text style={type.body}>{t}</Text>
+            </View>
+          ))}
+          <Text style={type.tiny}>Written from {plural(curation.pagesUsed.length, 'page')} of their own site{typeof ours?.curated_at === 'string' ? ` · ${new Date(ours.curated_at as string).toLocaleDateString([], { day: 'numeric', month: 'short' })}` : ''}. Nothing from a provider's reviews.</Text>
+        </View>
+      ) : (
+        <View style={[styles.inline, { paddingVertical: spacing.xs }]}>
+          <Button label={curating ? 'Curating…' : 'Curate this place'} kind="secondary" onPress={onCurate} disabled={curating} />
+          <Text style={[type.tiny, { flex: 1, minWidth: 200 }]}>Claims it, researches it from the open web, reads its own pages and writes our account — what it is, who it suits, why go, the practical things — and keeps the crowd as a band. One call to Claude.</Text>
+        </View>
+      )}
+
       <Compare compare={compare} error={compareError} />
 
       <Text style={[styles.kicker, { marginTop: spacing.lg, paddingBottom: 6 }]}>Every record as it arrived</Text>
@@ -515,51 +621,51 @@ function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOf
 }
 
 /**
- * Ours on the left, Google's on the right, one field a row. A blank cell is a
- * hole, which is what the owner is looking for (12 Sep 2026: "so I can just
- * compare and see how rich our data is and where the holes in our data are").
+ * Ours on the left, the providers to its right, one field a row. A blank
+ * cell is a hole, which is what the owner is looking for (12 Sep 2026: "so I
+ * can just compare and see how rich our data is and where the holes in our
+ * data are"). Three columns now that Tripadvisor sits beside Google.
  */
 function Compare({ compare, error }: { compare: LookupCompare | null; error: string | null }) {
   const { width } = useViewport();
-  const wide = width >= 700;
+  const wide = width >= 900;
   if (error) return <Note tone="crit">{error}</Note>;
-  if (!compare) return <Note>Asking Google for its record of this place…</Note>;
-  const { ours, theirs, rows, filled } = compare;
-  const how = theirs.how === 'id' ? 'by its Google identifier' : theirs.how === 'matched' ? 'matched by name and distance' : null;
+  if (!compare) return <Note>Asking the providers for their records of this place…</Note>;
+  const { columns, rows } = compare;
+  const has = (c: LookupCompareColumn) => Boolean(c.fields);
   return (
     <View>
       <View style={[styles.compareHead, !wide && styles.compareHeadNarrow]}>
-        <Text style={[styles.headText, wide && { width: 180 }]}>Field</Text>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.headText}>Ours{ours.label ? ` · ${ours.label.toLowerCase()}` : ''}</Text>
-          <Text style={type.tiny}>{ours.fields ? `${filled.ours} of ${filled.oursOf} fields filled` : 'nothing owned for this place yet'}</Text>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.headText}>Google</Text>
-          <Text style={type.tiny}>{theirs.fields ? `${filled.theirs} of ${filled.theirsOf} fields filled · ${how} · fetched live` : theirs.why ?? 'no record'}</Text>
-        </View>
+        <Text style={[styles.headText, wide && { width: 170 }]}>Field</Text>
+        {columns.map((c) => (
+          <View key={c.key} style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.headText}>{c.label}</Text>
+            <Text style={type.tiny}>{has(c) ? `${c.filled} of ${c.of} fields filled${c.note ? ` · ${c.note}` : ''}` : c.note ?? 'no record'}</Text>
+          </View>
+        ))}
       </View>
       {rows.map((r) => {
-        // A hole is a field one side holds and left empty while the other side
-        // has it — only worth marking when both records are actually here.
-        const both = Boolean(ours.fields && theirs.fields);
-        const ourHole = both && Boolean(r.ourKey) && isBlank(r.ours) && Boolean(r.theirKey) && !isBlank(r.theirs);
-        const theirHole = both && Boolean(r.theirKey) && isBlank(r.theirs) && Boolean(r.ourKey) && !isBlank(r.ours);
-        const side = (label: string, key: string | null, have: boolean, v: unknown, hole: boolean, none: string) => (
-          <View style={[styles.compareCell, !wide && styles.compareCellNarrow, !key && styles.compareCellNone, hole && styles.compareCellHole]}>
-            {!wide ? <Text style={styles.sideLabel}>{label}</Text> : null}
-            {!have ? <Text style={[styles.fieldValue, styles.blank]}>—</Text>
-              : key ? <Value v={v} /> : <Text style={[styles.fieldValue, styles.blank]}>{none}</Text>}
-          </View>
-        );
+        // A hole is a field one column holds and left empty while another has it.
+        const filledSomewhere = columns.some((c) => has(c) && r.keys[c.key] && !isBlank(r.cells[c.key]));
         return (
-          <View key={`${r.ourKey ?? ''}|${r.theirKey ?? ''}`} style={[styles.compareRow, !wide && styles.compareRowNarrow]}>
-            <View style={[wide && { width: 180 }]}>
+          <View key={r.key} style={[styles.compareRow, !wide && styles.compareRowNarrow]}>
+            <View style={[wide && { width: 170 }]}>
               <Text style={styles.fieldKey} numberOfLines={wide ? 1 : undefined}>{r.key}</Text>
-              {r.paired && r.theirKey !== r.ourKey ? <Text style={[styles.fieldKey, { color: colors.inkFaint }]} numberOfLines={1}>{r.theirKey}</Text> : null}
+              {columns.filter((c) => r.keys[c.key] && r.keys[c.key] !== r.key).map((c) => (
+                <Text key={c.key} style={[styles.fieldKey, { color: colors.inkFaint }]} numberOfLines={1}>{c.label.toLowerCase()}: {r.keys[c.key]}</Text>
+              ))}
             </View>
-            {side('ours', r.ourKey, Boolean(ours.fields), r.ours, ourHole, 'not a field of ours')}
-            {side('google', r.theirKey, Boolean(theirs.fields), r.theirs, theirHole, 'not a field of theirs')}
+            {columns.map((c) => {
+              const key = r.keys[c.key] ?? null;
+              const hole = has(c) && Boolean(key) && isBlank(r.cells[c.key]) && filledSomewhere;
+              return (
+                <View key={c.key} style={[styles.compareCell, !wide && styles.compareCellNarrow, !key && styles.compareCellNone, hole && styles.compareCellHole]}>
+                  {!wide ? <Text style={styles.sideLabel}>{c.label}</Text> : null}
+                  {!has(c) ? <Text style={[styles.fieldValue, styles.blank]}>—</Text>
+                    : key ? <Value v={r.cells[c.key]} /> : <Text style={[styles.fieldValue, styles.blank]}>not a field of theirs</Text>}
+                </View>
+              );
+            })}
           </View>
         );
       })}
@@ -674,6 +780,9 @@ const styles = StyleSheet.create({
   compareCellNone: { opacity: 0.6 },
   /** A hole: what one side has and the other does not. The tint, not a colour, so it reads without being loud. */
   compareCellHole: { backgroundColor: colors.surfaceMuted, paddingHorizontal: 4 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingVertical: spacing.sm, alignItems: 'center' },
+  action: { minHeight: 36, borderRadius: 8, paddingHorizontal: 14 },
+  said: { gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: BORDER, borderBottomColor: colors.line, marginBottom: spacing.sm },
   fold: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: HAIR, borderBottomColor: colors.line, flexWrap: 'wrap' },
   field: { flexDirection: 'row', gap: spacing.sm, paddingVertical: 5, paddingLeft: 22, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft, alignItems: 'flex-start' },
   fieldNarrow: { flexDirection: 'column', gap: 2 },

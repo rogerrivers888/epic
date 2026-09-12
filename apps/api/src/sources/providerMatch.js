@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { googleSource } from './google.js';
+import { tripadvisorSource } from './tripadvisor.js';
 import { googleSaysPublic } from '../domain/visiting.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { whySourceFailed } from './why.js';
@@ -68,18 +69,28 @@ export const SURE_ENOUGH = 0.6;
 export const isMatch = (name, point, candidate) =>
   likeness(name, candidate.name) >= SURE_ENOUGH && metresBetween(point, candidate) <= NEAR_ENOUGH_M;
 
-export async function matchKept(venueRef) {
+/** The match we hold for this place at one provider — Google unless said otherwise (migration 080: one row per pair). */
+export async function matchKept(venueRef, source = 'google') {
   const { rows } = await query(
-    'select source, source_ref, confidence, missing from provider_matches where venue_ref = $1',
-    [venueRef]);
+    'select source, source_ref, confidence, missing from provider_matches where venue_ref = $1 and source = $2',
+    [venueRef, source]);
   return rows[0] ?? null;
+}
+
+/** The matches held at one provider for many places, keyed by venue ref. Misses are left out. */
+export async function matchesFor(refs, source = 'google') {
+  if (!refs?.length) return new Map();
+  const { rows } = await query(
+    'select venue_ref, source_ref from provider_matches where source = $2 and missing = false and venue_ref = any($1)',
+    [refs, source]);
+  return new Map(rows.map((r) => [r.venue_ref, r.source_ref]));
 }
 
 async function remember(venueRef, match) {
   await query(
     `insert into provider_matches (venue_ref, source, source_ref, confidence, matched_on, metres, missing)
      values ($1, $2, $3, $4, $5, $6, $7)
-     on conflict (venue_ref) do update set
+     on conflict (venue_ref, source) do update set
        source = excluded.source, source_ref = excluded.source_ref, confidence = excluded.confidence,
        matched_on = excluded.matched_on, metres = excluded.metres, missing = excluded.missing,
        matched_at = now()`,
@@ -101,13 +112,24 @@ async function remember(venueRef, match) {
  * miss — a search that timed out has not looked, so the next open must be
  * allowed to (Codex, 12 Sep 2026).
  */
-export async function googleRefFor({ venueRef, name, lat, lng, householdId = null, strict = false }) {
+export async function googleRefFor(args) {
+  return (await googleMatchFor(args))?.id ?? null;
+}
+
+/**
+ * The match, with what the search said about the place at the moment it was
+ * found: the rating and the count. Those two figures are rented — the caller
+ * bands them or holds them in memory, and nothing here writes them down. A
+ * match already held comes back without them, because the search that saw
+ * them is long gone.
+ */
+export async function googleMatchFor({ venueRef, name, lat, lng, householdId = null, strict = false }) {
   if (!venueRef || !name || lat == null || lng == null) return null;
   // Already a provider's own place: nothing to match.
-  if (String(venueRef).startsWith('google:')) return String(venueRef).slice('google:'.length);
+  if (String(venueRef).startsWith('google:')) return { id: String(venueRef).slice('google:'.length), rating: null, ratingCount: null, held: true };
 
   const kept = await matchKept(venueRef);
-  if (kept) return kept.missing ? null : kept.source_ref;
+  if (kept) return kept.missing ? null : { id: kept.source_ref, rating: null, ratingCount: null, held: true };
   if (!googleSource.enabled()) return null;
 
   let failure = null;
@@ -134,7 +156,30 @@ export async function googleRefFor({ venueRef, name, lat, lng, householdId = nul
   const id = String(best.v.sourcePlaceId ?? '');
   if (!id) { await remember(venueRef, { missing: true, matchedOn: name }); return null; }
   await remember(venueRef, { sourceRef: id, confidence: Number(best.like.toFixed(2)), matchedOn: name, metres: best.m });
-  return id;
+  return { id, rating: best.v.rating ?? null, ratingCount: best.v.ratingCount ?? null, held: false };
+}
+
+/**
+ * The same join at Tripadvisor: one name search, the same two guards, only
+ * the identifier remembered. Every location Terra returns is billed, so the
+ * caller passes a meter and watches it (routes/lookup.js keeps to the owner's
+ * cap). A failure is thrown, tagged, and never remembered as a miss.
+ */
+export async function tripadvisorMatchFor({ venueRef, name, lat, lng, category = 'attraction', locality = null, meter = null }) {
+  if (!venueRef || !name || lat == null || lng == null) return null;
+  if (String(venueRef).startsWith('tripadvisor:')) return { id: String(venueRef).slice('tripadvisor:'.length), held: true };
+  const kept = await matchKept(venueRef, 'tripadvisor');
+  if (kept) return kept.missing ? null : { id: kept.source_ref, rating: null, ratingCount: null, held: true };
+  if (!tripadvisorSource.enabled()) return null;
+  let hit;
+  try {
+    hit = await tripadvisorSource.match({ name, lat, lng, category }, { locality, meter });
+  } catch (err) {
+    throw Object.assign(err instanceof Error ? err : new Error(String(err)), { provider: 'tripadvisor' });
+  }
+  if (!hit) { await remember(venueRef, { source: 'tripadvisor', missing: true, matchedOn: name }); return null; }
+  await remember(venueRef, { source: 'tripadvisor', sourceRef: hit.sourcePlaceId, confidence: Number(likeness(name, hit.name).toFixed(2)), matchedOn: name, metres: metresBetween({ lat, lng }, hit) });
+  return { id: hit.sourcePlaceId, rating: hit.rating ?? null, ratingCount: hit.ratingCount ?? null, held: false };
 }
 
 /**

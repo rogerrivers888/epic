@@ -109,6 +109,28 @@ export function tally(items, keys) {
   return out;
 }
 
+/**
+ * How much a place matters, for choosing which to curate first (owner, 12 Sep
+ * 2026: "the 20% is, I think, the number of reviews, which is the biggest
+ * priority, but then we could put a weighting on the quality of the reviews").
+ *
+ * The count leads and the rating weights it: reviews × (rating ÷ 5)². Ten
+ * times the reviews at 4.0 still beats one lot at 4.7 (6.4 against 0.9), and
+ * two places with the same crowd are told apart by the stars. Nothing rented
+ * is kept: the figure is used for the order and thrown away.
+ */
+export function priorityOf(rating, count) {
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  const r = Number.isFinite(rating) && rating > 0 ? Math.min(5, rating) / 5 : 0.8;
+  return Math.round(count * r * r);
+}
+
+/** The top fifth of a list by priority — never fewer than one, never more than the list. */
+export function topFifth(items) {
+  const ranked = [...items].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  return ranked.slice(0, Math.max(1, Math.ceil(ranked.length / 5)));
+}
+
 /** Distinct places, per half and whole — the "Everything" row, which is not the sum of the sources. */
 export function total(items) {
   const out = { activities: 0, food: 0, all: 0 };

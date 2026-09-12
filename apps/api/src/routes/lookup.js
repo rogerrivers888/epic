@@ -27,14 +27,20 @@ import express from 'express';
 import { requires } from '../access.js';
 import { enabledSources, recordsOf } from '../sources/index.js';
 import { googleSource } from '../sources/google.js';
-import { googleRefFor } from '../sources/providerMatch.js';
+import { tripadvisorSource } from '../sources/tripadvisor.js';
+import { googleMatchFor, tripadvisorMatchFor, matchesFor } from '../sources/providerMatch.js';
+import { curate, band } from '../sources/curate.js';
+import { claimPlace, enrich } from '../sources/own.js';
+import { crowdBand, countBand, score } from '../domain/scoring.js';
+import { recordFor } from '../repositories/ownedPlaces.js';
+import * as providerCalls from '../repositories/providerCalls.js';
 import { searchCached } from '../sources/cache.js';
 import { geocode, providerCalls as geocodeCalls } from '../sources/geocode.js';
 import { searchAreas, providerCalls as areaCalls } from '../sources/areas.js';
 import { whySourceFailed, sourceName } from '../sources/why.js';
 import { travelMode } from '../domain/travel.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
-import { fold, kindOf, reachKm, tally, total, withinReach, RING_CAP_KM } from '../domain/lookup.js';
+import { fold, kindOf, priorityOf, reachKm, tally, total, withinReach, RING_CAP_KM } from '../domain/lookup.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { publishedNear } from '../repositories/library.js';
@@ -56,6 +62,23 @@ const OWNED = [
 
 /** How many of one owned pool a ring may hold before the answer has to say it was cut. */
 const POOL_LIMIT = 5000;
+
+/** The pools that are ours, by key. */
+const OWNED_KEYS = new Set(['atlas', 'sweep', 'own']);
+
+/**
+ * Google's two figures for a place we asked about by name, held in memory
+ * for a few hours so the list can be ranked — never written down, because
+ * they are rented. The band is what may be kept, and `curate` keeps it.
+ */
+const figures = new Map();
+const FIGURES_TTL_MS = 6 * 3600_000;
+const holdFigures = (ref, f) => { if (f && (f.rating != null || f.ratingCount != null)) figures.set(ref, { ...f, at: Date.now() }); };
+const heldFigures = (ref) => { const f = figures.get(ref); return f && Date.now() - f.at < FIGURES_TTL_MS ? f : null; };
+
+/** The owner's ceiling for Tripadvisor on this screen: locations billed, this month, for populating a ring. */
+const TRIPADVISOR_CAP = Number(process.env.EPIC_LOOKUP_TRIPADVISOR_CAP || 120);
+const tripadvisorUsed = (householdId) => providerCalls.unitsOfPurpose(householdId, 'tripadvisor', 'admin.lookup.%', 'tripadvisor');
 
 /**
  * The rented place sources: not events, and never the scout, which reads the
@@ -223,6 +246,21 @@ async function runLookup({ q, minutes, mode }, household) {
   for (const f of sweep) if (f.lat != null && f.lng != null) fold(all, itemOfSweep(f));
   for (const o of own) fold(all, itemOfRecord(o, taught, tax));
 
+  // What the joins already hold: a place matched to Google or Tripadvisor by
+  // name carries that source too, so the columns say who *knows* a place and
+  // not only who happened to return it in this search. And the figures held
+  // from a ranking run go back on their places, so the list can be ordered.
+  const refs = all.map((i) => i.ref);
+  const [atGoogle, atTripadvisor] = await Promise.all([matchesFor(refs, 'google'), matchesFor(refs, 'tripadvisor')]);
+  for (const i of all) {
+    if (atGoogle.has(i.ref) && !i.sources.includes('google')) i.sources.push('google');
+    if (atTripadvisor.has(i.ref) && !i.sources.includes('tripadvisor')) i.sources.push('tripadvisor');
+    const f = heldFigures(i.ref);
+    if (f && i.rating == null) { i.rating = f.rating; i.ratingCount = f.ratingCount; }
+    i.owned = i.sources.some((k) => OWNED_KEYS.has(k));
+    i.curated = Boolean(i.records.find((r) => r.source === 'own')?.fields?.curation);
+    i.priority = priorityOf(i.rating, i.ratingCount);
+  }
   const kept = withinReach(all, centre, mode, minutes);
   const keys = [...rented.map((s) => s.key), ...OWNED.map((o) => o.key)];
   const returned = tally(all, keys);
@@ -231,6 +269,7 @@ async function runLookup({ q, minutes, mode }, household) {
 
   return {
     place, mode, minutes, radiusKm, capped, estimated: true,
+    tripadvisor: { cap: TRIPADVISOR_CAP, used: await tripadvisorUsed(household.id) },
     // Distinct places, before and inside the fence: the "Everything" row.
     totals: { returned: total(all), kept: total(kept) },
     sources: [
@@ -307,33 +346,40 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
 });
 
 /**
- * Side by side: what we own for a place, and what Google has for it.
+ * Side by side: what we own for a place, what Google has for it, and what
+ * Tripadvisor has when we hold its join.
  *
  * Owner, 12 Sep 2026: "When I click on something that's owned… what I would
  * like to see is the data that's owned on one side, and then the Google data
  * on the other. You should call the Google API, ask it for the data for this
  * record… so I can just compare and see how rich our data is and where the
- * holes in our data are."
+ * holes in our data are." And later the same day: "I'd like to try out
+ * TripAdvisor as well, just to see how rich we can get this data."
  *
  * Ours is the owned record when there is one, else the atlas row or the
  * sweep row. Google's is one Place Details call for this record — by its own
  * identifier when we hold one, otherwise matched by name and distance the way
  * the atlas matches (`googleRefFor`, which remembers the join and never the
- * content). The detail is held in memory for a few hours so flipping between
- * places does not bill twice, and it is never written down: rented.
+ * content). Tripadvisor's is its detail plus three reviews, only for a place
+ * a ranking run has already joined (two billed locations a view). Every
+ * detail is held in memory for a few hours so flipping between places does
+ * not bill twice, and none of it is written down: rented.
  *
- * The rows pair the fields that mean the same thing under two names, then
- * list what only one side has. A blank cell is a hole, and the point.
+ * The rows line up the fields that mean the same thing under three names,
+ * then list what only one column has. A blank cell is a hole, and the point.
  */
 const PAIRS = [
-  ['name', 'name'], ['category', 'category'], ['address', 'address'], ['lat', 'lat'], ['lng', 'lng'],
-  ['website', 'website'], ['phone', 'phone'], ['opening_hours', 'openingHours'], ['price_range', 'priceLevel'],
-  ['cuisines', 'cuisines'], ['experiences', 'experiences'], ['dietary_options', 'dietaryOptions'],
-  ['good_for_children', 'goodForChildren'], ['summary', 'summary'], ['image_url', 'photos'],
-  ['booking_url', 'reservable'], ['menu_url', null], ['menu_label', null], ['email', null], ['socials', null],
-  ['accessibility', null], ['postcode', null], ['osm_ref', null], ['wikidata_id', null], ['wikipedia_url', null],
-  [null, 'rating'], [null, 'ratingCount'], [null, 'reviews'], [null, 'openNow'], [null, 'mapsUrl'], [null, 'menuForChildren'],
+  ['name', 'name', 'name'], ['category', 'category', 'category'], ['address', 'address', 'address'], ['lat', 'lat', 'lat'], ['lng', 'lng', 'lng'],
+  ['website', 'website', 'website'], ['phone', 'phone', 'ta_phone'], ['opening_hours', 'openingHours', 'openingHours'], ['price_range', 'priceLevel', 'priceLevel'],
+  ['cuisines', 'cuisines', 'cuisines'], ['experiences', 'experiences', 'experiences'], ['dietary_options', 'dietaryOptions', null],
+  ['good_for_children', 'goodForChildren', 'goodForChildren'], ['summary', 'summary', 'ta_description'], ['image_url', 'photos', null],
+  ['booking_url', 'reservable', null], ['menu_url', null, null], ['menu_label', null, null], ['email', null, 'ta_email'], ['socials', null, null],
+  ['accessibility', null, null], ['postcode', null, null], ['osm_ref', null, null], ['wikidata_id', null, null], ['wikipedia_url', null, null],
+  ['curation', null, null], ['crowd_band', 'rating', 'rating'], ['count_band', 'ratingCount', 'ratingCount'], ['epic_score', null, 'ta_ranking_data'],
+  [null, 'aiSummary', null], [null, 'reviewSummary', null], [null, 'reviews', 'reviews'], [null, 'openNow', null], [null, 'mapsUrl', 'externalUrl'], [null, 'menuForChildren', null],
+  [null, null, 'ta_awards'], [null, null, 'ta_subratings'], [null, null, 'ta_trip_types'], [null, null, 'ta_review_rating_count'], [null, null, 'labels'],
 ];
+const COLS = ['ours', 'google', 'tripadvisor'];
 const OUR_LABEL = { own: 'Owned record', atlas: 'The atlas', sweep: 'The sweep' };
 const details = new Map();
 const DETAIL_TTL_MS = 6 * 3600_000;
@@ -341,50 +387,56 @@ const DETAIL_TTL_MS = 6 * 3600_000;
 const detailsInFlight = new Map();
 
 /**
- * One Place Details call for this identifier, whatever is asking. The ledger
- * is written whether or not Google answered: a call that timed out after it
- * reached Google was still a call (Codex, 12 Sep 2026).
+ * One detail call for this identifier at this provider, whatever is asking.
+ * The ledger is written whether or not the provider answered: a call that
+ * timed out after it reached them was still a call (Codex, 12 Sep 2026).
  */
-async function detailFor(id, householdId) {
-  const held = details.get(id);
+async function detailFor(provider, id, householdId) {
+  const key = `${provider}:${id}`;
+  const held = details.get(key);
   if (held && Date.now() - held.at < DETAIL_TTL_MS) return held.detail;
-  if (detailsInFlight.has(id)) return detailsInFlight.get(id);
+  if (detailsInFlight.has(key)) return detailsInFlight.get(key);
   const run = (async () => {
     const meter = {};
     try {
-      const raw = await googleSource.get(id, { meter });
+      const raw = provider === 'google' ? await googleSource.get(id, { meter }) : await tripadvisorSource.get(id, { meter });
       // A photo is a signed proxy reference here, not a picture: what the
       // comparison wants is that there are three and who took them.
       const detail = { ...raw, photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })) };
-      details.set(id, { at: Date.now(), detail });
+      details.set(key, { at: Date.now(), detail });
       while (details.size > 300) details.delete(details.keys().next().value);
       return detail;
     } finally {
-      if (Object.keys(meter).length) await visitsRepo.recordProviderCall(householdId, 'google', 'admin.lookup.compare', meter).catch(() => null);
-      detailsInFlight.delete(id);
+      if (Object.keys(meter).length) await visitsRepo.recordProviderCall(householdId, provider, 'admin.lookup.compare', meter).catch(() => null);
+      detailsInFlight.delete(key);
     }
   })();
-  detailsInFlight.set(id, run);
+  detailsInFlight.set(key, run);
   return run;
 }
 
-function pairUp(ours, theirs) {
+const blank = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+
+/** The rows: the pairs first, then what only one column has, each cell carrying which key it came from. */
+function lineUp(fields) {
   const rows = [];
-  const usedO = new Set();
-  const usedT = new Set();
-  for (const [o, t] of PAIRS) {
-    if ((o && ours && o in ours) || (t && theirs && t in theirs)) {
-      rows.push({ key: o ?? t, theirKey: t, ourKey: o, ours: o && ours ? ours[o] : undefined, theirs: t && theirs ? theirs[t] : undefined, paired: Boolean(o && t) });
-      if (o) usedO.add(o);
-      if (t) usedT.add(t);
+  const used = { ours: new Set(), google: new Set(), tripadvisor: new Set() };
+  for (const trio of PAIRS) {
+    const keys = Object.fromEntries(COLS.map((c, n) => [c, trio[n]]));
+    const present = COLS.some((c) => keys[c] && fields[c] && keys[c] in fields[c]);
+    if (!present) continue;
+    const cells = {};
+    for (const c of COLS) { if (keys[c] && fields[c] && keys[c] in fields[c]) cells[c] = fields[c][keys[c]]; if (keys[c]) used[c].add(keys[c]); }
+    rows.push({ key: trio.find(Boolean), keys, cells });
+  }
+  for (const c of COLS) {
+    for (const k of Object.keys(fields[c] ?? {})) {
+      if (used[c].has(k)) continue;
+      rows.push({ key: k, keys: { [c]: k }, cells: { [c]: fields[c][k] } });
     }
   }
-  for (const k of Object.keys(ours ?? {})) if (!usedO.has(k)) rows.push({ key: k, ourKey: k, theirKey: null, ours: ours[k], theirs: undefined, paired: false });
-  for (const k of Object.keys(theirs ?? {})) if (!usedT.has(k)) rows.push({ key: k, ourKey: null, theirKey: k, ours: undefined, theirs: theirs[k], paired: false });
   return rows;
 }
-
-const blank = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
 
 router.get('/compare', requires('view_library'), async (req, res, next) => {
   try {
@@ -399,21 +451,24 @@ router.get('/compare', requires('view_library'), async (req, res, next) => {
     // Ours: the owned record first, because it is the one researched from the
     // open web; the atlas or the sweep if that is all we hold.
     const mine = ['own', 'atlas', 'sweep'].map((k) => records.find((r) => r.source === k)).find(Boolean) ?? null;
+    const columns = [{ key: 'ours', label: mine ? OUR_LABEL[mine.source] ?? mine.source : 'Ours', note: mine ? null : 'nothing owned for this place yet', fields: mine?.fields ?? null }];
 
-    // Theirs: by identifier when we hold one, else the atlas's own match.
-    let theirs = { id: null, how: 'none', fields: null, why: null };
+    // Google: by identifier when we hold one, else the atlas's own match.
+    let google = { key: 'google', label: 'Google', note: null, fields: null, id: null, how: 'none' };
     if (!googleSource.enabled()) {
-      theirs = { id: null, how: 'off', fields: null, why: 'Google is not switched on here.' };
+      google.note = 'Google is not switched on here.';
     } else {
       let id = ref.startsWith('google:') ? ref.slice('google:'.length) : records.find((r) => r.source === 'google')?.fields?.sourcePlaceId ?? null;
-      let how = id ? 'id' : 'none';
+      let how = id ? 'by its Google identifier' : null;
       let unreachable = null;
       if (!id) {
         // A miss is "Google has no such place"; a failure is "Google could not
         // be asked", and the two must not read the same (Codex, 12 Sep 2026).
         try {
-          id = await googleRefFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id, strict: true });
-          how = id ? 'matched' : 'none';
+          const m = await googleMatchFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id, strict: true });
+          id = m?.id ?? null;
+          if (m && !m.held) holdFigures(ref, m);
+          how = id ? 'matched by name and distance' : null;
         } catch (err) {
           // Only the provider's own failure is said in plain words; anything
           // else — the database refusing the remembered match — is a fault of
@@ -422,33 +477,176 @@ router.get('/compare', requires('view_library'), async (req, res, next) => {
           unreachable = whySourceFailed('google', err);
         }
       }
-      if (unreachable) {
-        theirs = { id: null, how: 'none', fields: null, why: unreachable };
-      } else if (id) {
-        try {
-          theirs = { id, how, fields: await detailFor(id, household.id), why: null };
-        } catch (err) {
-          theirs = { id, how, fields: null, why: whySourceFailed('google', err) };
-        }
-      } else {
-        theirs.why = 'Nothing at Google reads as this place: no name near enough, close enough.';
+      if (unreachable) google.note = unreachable;
+      else if (id) {
+        try { google = { ...google, id, how, fields: await detailFor('google', id, household.id), note: `${how} · fetched live` }; }
+        catch (err) { google = { ...google, id, how, note: whySourceFailed('google', err) }; }
+      } else google.note = 'Nothing at Google reads as this place: no name near enough, close enough.';
+    }
+    columns.push(google);
+
+    // Tripadvisor: only where a ranking run has already made the join. A view
+    // is two billed locations, so it is not made on the off-chance.
+    let ta = { key: 'tripadvisor', label: 'Tripadvisor', note: null, fields: null, id: null, how: 'none' };
+    if (!tripadvisorSource.enabled()) ta.note = 'Tripadvisor is not switched on here.';
+    else {
+      const id = ref.startsWith('tripadvisor:') ? ref.slice('tripadvisor:'.length) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
+      if (!id) ta.note = 'Not joined yet — run "Ask Tripadvisor" on the not-owned list to match it by name.';
+      else {
+        try { ta = { ...ta, id, how: 'matched by name and distance', fields: await detailFor('tripadvisor', id, household.id), note: 'matched by name and distance · fetched live · two locations billed a view' }; }
+        catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
       }
     }
+    columns.push(ta);
 
-    const rows = pairUp(mine?.fields ?? null, theirs.fields);
-    res.json({
-      place: out.place, mode: out.mode, minutes: out.minutes,
-      item: summary,
-      ours: mine ? { source: mine.source, label: OUR_LABEL[mine.source] ?? mine.source, fields: mine.fields } : { source: null, label: null, fields: null },
-      theirs,
-      rows,
-      filled: {
-        ours: rows.filter((r) => r.ourKey && !blank(r.ours)).length,
-        theirs: rows.filter((r) => r.theirKey && !blank(r.theirs)).length,
-        oursOf: rows.filter((r) => r.ourKey).length,
-        theirsOf: rows.filter((r) => r.theirKey).length,
-      },
-    });
+    const rows = lineUp(Object.fromEntries(columns.map((c) => [c.key, c.fields])));
+    for (const c of columns) {
+      c.of = rows.filter((r) => r.keys[c.key]).length;
+      c.filled = rows.filter((r) => r.keys[c.key] && !blank(r.cells[c.key])).length;
+    }
+    res.json({ place: out.place, mode: out.mode, minutes: out.minutes, item: summary, columns, rows });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The runs that make the not-owned list rankable, one page at a time so a
+ * request never outlives the proxy. The screen calls again while `remaining`
+ * is above nought.
+ */
+const notOwnedOf = (out, kind) => out.items.filter((i) => i.kind === kind && !i.owned);
+
+/**
+ * POST /rate — Google's rating and count for the not-owned places that have
+ * none: one name search each, or the cheap two-field detail where we already
+ * hold the identifier. The figures are held in memory for the ranking and
+ * never written; the identifier is remembered (owner, 12 Sep 2026: "using
+ * those two numbers, the number of stars and the number of reviews, we can
+ * prioritise").
+ */
+router.post('/rate', requires('view_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const settings = settingsOf(req.body ?? {});
+    const kind = req.body?.kind === 'food' ? 'food' : 'activities';
+    const limit = Math.min(60, Math.max(1, Number(req.body?.limit) || 30));
+    if (!googleSource.enabled()) return res.status(409).json({ error: 'google_off', message: 'Google is not switched on here.' });
+    const out = await runLookup(settings, household);
+    const wanting = notOwnedOf(out, kind).filter((i) => i.rating == null).sort((a, b) => a.distanceKm - b.distanceKm);
+    const page = wanting.slice(0, limit);
+    let rated = 0; let matched = 0; let missed = 0; let failed = 0;
+    for (const i of page) {
+      try {
+        const m = await googleMatchFor({ venueRef: i.ref, name: i.name, lat: i.lat, lng: i.lng, householdId: household.id, strict: true });
+        if (!m) { missed += 1; continue; }
+        matched += 1;
+        let f = m.held ? null : m;
+        if (!f) {
+          const meter = {};
+          try { f = await googleSource.rating(m.id, { meter }); }
+          finally { if (Object.keys(meter).length) await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.rate', meter).catch(() => null); }
+        }
+        if (f && (f.rating != null || f.ratingCount != null)) { holdFigures(i.ref, f); rated += 1; }
+      } catch (err) {
+        if (err?.provider !== 'google') throw err;
+        failed += 1;
+      }
+    }
+    res.json({ kind, looked: page.length, matched, rated, missed, failed, remaining: Math.max(0, wanting.length - page.length) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /tripadvisor — join the not-owned places to Tripadvisor by name, best
+ * first, under the owner's cap for the month (12 Sep 2026: "make sure you
+ * don't use more than 120 of the TripAdvisor calls just to populate the
+ * Sunningdale data"). Every location Terra returns is billed and counted,
+ * and the run stops before the next lookup could pass the cap.
+ */
+router.post('/tripadvisor', requires('view_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const settings = settingsOf(req.body ?? {});
+    const kind = req.body?.kind === 'food' ? 'food' : 'activities';
+    const limit = Math.min(40, Math.max(1, Number(req.body?.limit) || 20));
+    if (!tripadvisorSource.enabled()) return res.status(409).json({ error: 'tripadvisor_off', message: 'Tripadvisor is not switched on here.' });
+    const out = await runLookup(settings, household);
+    let used = await tripadvisorUsed(household.id);
+    const joined = await matchesFor(notOwnedOf(out, kind).map((i) => i.ref), 'tripadvisor');
+    const wanting = notOwnedOf(out, kind).filter((i) => !joined.has(i.ref) && !i.sources.includes('tripadvisor')).sort((a, b) => b.priority - a.priority);
+    const page = wanting.slice(0, limit);
+    let matched = 0; let missed = 0; let looked = 0; let stopped = false;
+    for (const i of page) {
+      // A lookup may return two locations; never start one the cap cannot pay for.
+      if (used + 2 > TRIPADVISOR_CAP) { stopped = true; break; }
+      const meter = {};
+      try {
+        const m = await tripadvisorMatchFor({ venueRef: i.ref, name: i.name, lat: i.lat, lng: i.lng, category: i.category, locality: out.place.label, meter });
+        looked += 1;
+        if (m) matched += 1; else missed += 1;
+      } catch (err) {
+        if (err?.provider !== 'tripadvisor') throw err;
+        return res.status(502).json({ error: 'tripadvisor_failed', message: whySourceFailed('tripadvisor', err), looked, matched, missed, used, cap: TRIPADVISOR_CAP });
+      } finally {
+        const n = meter.tripadvisor || 0;
+        if (n) { await visitsRepo.recordProviderCall(household.id, 'tripadvisor', 'admin.lookup.tripadvisor', meter).catch(() => null); used += n; }
+      }
+    }
+    res.json({ kind, looked, matched, missed, used, cap: TRIPADVISOR_CAP, stopped, remaining: stopped ? 0 : Math.max(0, wanting.length - page.length) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /curate — claim the place, research it from the open web (the existing
+ * researcher), then read its own pages and write our account of it; and keep
+ * the crowd as bands, so it holds its standing without the signal. One call
+ * to Claude; a spent budget comes back as plain words with the raw line
+ * beside them, because the back office is where the raw words belong.
+ */
+router.post('/curate', requires('view_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const settings = settingsOf(req.body ?? {});
+    const ref = String(req.body?.ref ?? '').trim();
+    if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
+    const out = await runLookup(settings, household);
+    const item = out.items.find((i) => i.ref === ref);
+    if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
+
+    await claimPlace(household.id, ref, 'curated', { name: item.name, lat: item.lat, lng: item.lng, website: item.website ?? null, category: item.category });
+    await enrich(ref, { householdId: household.id, seed: { name: item.name, lat: item.lat, lng: item.lng, website: item.website ?? null, category: item.category }, force: true, replace: false });
+    let record = await recordFor(ref);
+    const website = record?.website ?? item.website ?? null;
+
+    // The crowd, as words. From the figures this search already holds; else
+    // the cheap two-field detail, if Google knows the place.
+    let f = item.rating != null ? { rating: item.rating, ratingCount: item.ratingCount } : heldFigures(ref);
+    if (!f && googleSource.enabled()) {
+      try {
+        const m = await googleMatchFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id });
+        if (m && !m.held) f = m;
+        else if (m) { const meter = {}; try { f = await googleSource.rating(m.id, { meter }); } finally { if (Object.keys(meter).length) await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.rate', meter).catch(() => null); } }
+        if (f) holdFigures(ref, f);
+      } catch { f = null; }
+    }
+
+    let curation = null; let why = null; let detail = null;
+    try {
+      const meta = {};
+      curation = await curate({ venueRef: ref, name: item.name, website, summary: record?.summary ?? null, householdId: household.id, meta });
+      curation.costUsd = meta.costUsd ?? null;
+    } catch (err) {
+      if (err?.code === 'model_budget_reached' || err?.code === 'spend_bound') { why = err.message; detail = err.detail ?? null; }
+      else if (err?.code === 'no_website' || err?.code === 'site_unreadable') why = err.message;
+      else throw err;
+    }
+    if (f) {
+      const crowd = crowdBand(f.rating, f.ratingCount);
+      const count = countBand(f.ratingCount);
+      const { epicScore } = score({ crowd, count, accolades: [], website, summary: curation?.curation?.what ?? record?.summary ?? null, openingHours: record?.opening_hours ?? null });
+      await band(ref, { crowd, count, epicScore });
+    }
+    record = await recordFor(ref);
+    res.status(why ? 202 : 200).json({ ref, curation, banded: Boolean(f), record, why, detail });
   } catch (err) { next(err); }
 });
 
