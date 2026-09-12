@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon } from '../components/Icon';
-import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, TripBrief, Venue, Visit } from '../api';
+import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, PhotoFiled, TripBrief, Venue, Visit } from '../api';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { CARD_H, CARD_W, VenueThumb } from '../components/VenueThumb';
 import { Flag } from '../components/Flag';
@@ -21,6 +21,8 @@ import { CategoryStrip, PairSwitch, TOP_INSET } from '../components/InspireHeade
 import { ControlButton, ControlRow, CrumbHead, Popover, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { Crowd, MediaCard } from '../components/InspireBody';
 import { EMPTY_LIST, LIST_KEYS, LISTS, PLACE_SORTS, PLACE_SORT_KEYS, epicRating, foodType, inList, sortPlaces, whenLabel, type ListKey, type PlaceSort } from './placesRows';
+import { PhotoAdd, type PhotoLanded } from '../components/PhotoAdd';
+import { useHere } from '../hooks/useHere';
 
 // Trips still imports these from here.
 export { VenueRow, VisitForm, VisitSummary } from '../components/Visits';
@@ -200,11 +202,24 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const [landed, setLanded] = useState<{ venueRef: string; kind: Kind } | null>(null);
   /** How tall the head is, so a panel can hang off the bottom of it. */
   const [headH, setHeadH] = useState(0);
-  /** Which panel is open over the list, and whether the add-a-place search is. Reset on every move. */
+  /** Which panel is open over the list. Reset on every move. */
   const [menu, setMenu] = useState<ListMenu>(null);
-  const [adding, setAdding] = useState(false);
+  /**
+   * Adding a place is a way the page is set, so it is in the address:
+   * `?add=search` is the box, `?add=photo` the camera. At every level (owner,
+   * 12 Sep 2026: "I shouldn't have to select my locations and then go into
+   * the nearest area and then click Add a Place. I should just have an Add
+   * Place button") — the server works out where it files.
+   */
+  const [add, setAdd] = useQueryState<AddMode>('add', null, asOneOf(['search', 'photo'] as const, null));
+  const adding = add != null;
+  const setAdding = (v: boolean) => setAdd(v ? 'search' : null, { replace: true });
   const areaName = atHome ? 'home' : country?.city ? `${country.country}.${country.city}` : null;
-  useEffect(() => { setMenu(null); setAdding(false); }, [areaName]);
+  // A move closes the panels — but not the first paint, or a shared `?add=photo` would be thrown away on arrival.
+  const firstArea = useRef(true);
+  useEffect(() => { if (firstArea.current) { firstArea.current = false; return; } setMenu(null); if (add) setAdd(null, { replace: true }); }, [areaName]);
+  // Where the household is standing, if a tap has asked already; the search at the top of Places looks from here.
+  const here = useHere();
   // How this list was last set, per area: coming back to London should not
   // bring Lisbon's "food only, shortlisted" with it — and the address wins.
   useStickyQuery(areaName ? `places.city.${areaName}` : 'places.root', areaName ? CITY_KEYS : []);
@@ -240,7 +255,35 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
 
   const refreshAll = async () => { await loadAtlas(); await loadPlaces(); await refreshHousehold(); };
   const st = useListState(places, viewer);
-  const ui = { menu, setMenu, adding, setAdding };
+  const ui: ListUi = { menu, setMenu, adding, setAdding, mode: add, setMode: (m) => setAdd(m, { replace: true }) };
+
+  /**
+   * A place is in the atlas now. Mark its row — and if this page is not where
+   * it filed, go there (owner, 12 Sep 2026: "If I'm in London and I have a
+   * London location, it should add it in there. If I don't have a London
+   * location, it should create one").
+   */
+  const land = (venueRef: string, kind: Kind, filed?: PhotoFiled | null) => {
+    setLanded({ venueRef, kind });
+    if (!filed?.countryCode || atHome) return;
+    const target = filed.locality ? paths.placesCity(filed.countryCode, filed.locality) : paths.placesCountry(filed.countryCode);
+    const current = country ? (country.city ? paths.placesCity(country.country, country.city) : paths.placesCountry(country.country)) : paths.places();
+    if (target === current) return;
+    setNewVenue(null);
+    navigate(target);
+  };
+  // Where a search at this level looks from: the area itself; a country's
+  // biggest town; at the root, where the household is standing, else home.
+  const searchFrom = (() => {
+    if (home) return { centre: { lat: home.lat, lng: home.lng }, radiusKm: Math.round(home.radiusMiles * 1.60934) };
+    if (city && city.lat != null && city.lng != null) return { centre: { lat: city.lat, lng: city.lng }, radiusKm: 5 };
+    const town = countryRow?.cities.find((c) => c.lat != null && c.lng != null);
+    if (countryRow && town) return { centre: { lat: town.lat!, lng: town.lng! }, radiusKm: 50 };
+    if (here.place && here.place.lat != null && here.place.lng != null) return { centre: { lat: here.place.lat, lng: here.place.lng }, radiusKm: 50 };
+    if (data?.home) return { centre: { lat: data.home.lat, lng: data.home.lng }, radiusKm: 50 };
+    return { centre: null, radiusKm: 50 };
+  })();
+  const addCtx = countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {};
 
   const homeTown = data?.home?.label ? shortTown(data.home.label) : null;
   const homeCode = data?.home?.countryCode ?? null;
@@ -279,21 +322,30 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
           {inArea && (city || home) ? <ListHead st={st} ui={ui} onLandedShown={() => setLanded(null)} /> : null}
         </View>
 
-        {!sel ? (
+        <AddBar ui={ui} />
+
+        {ui.adding ? (
+          <AddPanel
+            ui={ui} household={household} kind={inArea ? st.shown : 'all'} centre={searchFrom.centre} radiusKm={searchFrom.radiusKm} ctx={addCtx}
+            onAdded={refreshAll} onOpen={setNewVenue}
+            onLanded={async (r) => { await refreshAll(); setAdd(null, { replace: true }); land(r.venueRef, r.kind, r.filed); }}
+          />
+        ) : null}
+
+        {!sel && !ui.adding ? (
           <AtlasRoot data={data} error={error} homeTown={homeTown} onGo={(href) => navigate(href)} />
         ) : null}
 
-        {country && !country.city ? (
+        {country && !country.city && !ui.adding ? (
           <CountryCities row={countryRow} data={data} onCity={(name) => navigate(paths.placesCity(country.country, name))} />
         ) : null}
 
-        {inArea && (city || home) ? (
+        {inArea && (city || home) && !ui.adding ? (
           <ListBody
             st={st} ui={ui} places={places} viewer={viewer}
-            country={countryRow} city={city} homeArea={home} household={household}
-            onOpen={setOpen} onOpenVenue={setNewVenue} openRef={open?.venueRef ?? null}
+            city={city} homeArea={home}
+            onOpen={setOpen} openRef={open?.venueRef ?? null}
             landed={landed} onLandedShown={() => setLanded(null)}
-            onChanged={refreshAll}
           />
         ) : null}
 
@@ -315,7 +367,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
           const w = countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {};
           const known = newVenue ? !!newVenue.household?.visits || !!newVenue.household?.ledger : !!open;
           return <CapturePanel venue={v} household={household} ctx={w} been={!!(newVenue ? newVenue.household?.visits : open?.visits)} saved={known} onChanged={refreshAll}
-            onLanded={(venueRef, kind) => setLanded({ venueRef, kind })} />;
+            onLanded={land} />;
         })()}
         ours={newVenue
           ? <NewPlacePanel venue={newVenue} household={household} ctx={countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {}} onChanged={refreshAll} />
@@ -449,7 +501,9 @@ function tripWhen(t: TripBrief): string {
 // ---------------------------------------------------------------------------
 
 type ListMenu = null | 'type' | 'mood' | 'sort';
-type ListUi = { menu: ListMenu; setMenu: (m: ListMenu) => void; adding: boolean; setAdding: (v: boolean) => void };
+/** How a place is being added: by name, or from a photograph. In the address as `?add=`. */
+type AddMode = 'search' | 'photo' | null;
+type ListUi = { menu: ListMenu; setMenu: (m: ListMenu) => void; adding: boolean; setAdding: (v: boolean) => void; mode: AddMode; setMode: (m: AddMode) => void };
 
 /**
  * How the list is set, from the address, and everything counted from it. One
@@ -590,11 +644,49 @@ function ListMenus({ st, ui, top }: { st: ListState; ui: ListUi; top: number }) 
   );
 }
 
-/** The rows, or the add-a-place search in their place. */
-function ListBody({ st, ui, places, viewer, country, city, homeArea, household, onOpen, onOpenVenue, openRef, onChanged, landed, onLandedShown }: {
+/**
+ * The bar at the head of every level: one button, Add a place. It was inside
+ * an area's list only, which meant choosing a country, then a town, before
+ * anything could be added (owner, 12 Sep 2026).
+ */
+function AddBar({ ui }: { ui: ListUi }) {
+  return (
+    <View style={styles.addRow}>
+      <Press onPress={() => { ui.setAdding(!ui.adding); ui.setMenu(null); }} style={styles.addBtn} accessibilityRole="button" accessibilityLabel={ui.adding ? 'Close' : 'Add a place'}>
+        <Icon name={ui.adding ? 'close' : 'add'} size={15} color={colors.ink} strokeWidth={2.2} />
+        <Text style={styles.addText}>{ui.adding ? 'Close' : 'Add a place'}</Text>
+      </Press>
+    </View>
+  );
+}
+
+/** Under the bar: the search box, or the camera, and a way between them. */
+function AddPanel({ ui, household, kind, centre, radiusKm, ctx, onAdded, onOpen, onLanded }: {
+  ui: ListUi; household: HouseholdResponse | null; kind: Kind | 'all'; centre: { lat: number; lng: number } | null; radiusKm: number;
+  ctx: { country?: string; countryCode?: string; locality?: string }; onAdded: () => Promise<void>; onOpen: (v: Venue) => void;
+  onLanded: (r: PhotoLanded) => Promise<void>;
+}) {
+  return (
+    <View style={[styles.gutter, { gap: spacing.sm, paddingBottom: spacing.md }]}>
+      {ui.mode === 'photo' ? (
+        <PhotoAdd household={household} onDone={onLanded} onSearchInstead={() => ui.setMode('search')} />
+      ) : (
+        <>
+          <AddPlace household={household} kind={kind} centre={centre} radiusKm={radiusKm} ctx={ctx} wide={false} onAdded={onAdded} onOpen={onOpen} />
+          <Row>
+            <Button label="From a photo" icon="camera" kind="secondary" onPress={() => ui.setMode('photo')} />
+          </Row>
+        </>
+      )}
+    </View>
+  );
+}
+
+/** The rows. */
+function ListBody({ st, ui, places, viewer, city, homeArea, onOpen, openRef, landed, onLandedShown }: {
   st: ListState; ui: ListUi; places: AtlasPlace[]; viewer: string | null;
-  country: AtlasCountry | null; city: AtlasCity | null; homeArea: AtlasHome | null; household: HouseholdResponse | null;
-  onOpen: (p: AtlasPlace) => void; onOpenVenue: (v: Venue) => void; openRef: string | null; onChanged: () => Promise<void>;
+  city: AtlasCity | null; homeArea: AtlasHome | null;
+  onOpen: (p: AtlasPlace) => void; openRef: string | null;
   landed: { venueRef: string; kind: Kind } | null; onLandedShown: () => void;
 }) {
   const home = !!homeArea;
@@ -611,25 +703,12 @@ function ListBody({ st, ui, places, viewer, country, city, homeArea, household, 
     st.setTypeF(null); st.setMoodF(null);
   }, [landed?.venueRef]);
 
-  const centre = homeArea ? { lat: homeArea.lat, lng: homeArea.lng } : city?.lat != null && city?.lng != null ? { lat: city.lat, lng: city.lng } : null;
-  const searchRadiusKm = homeArea ? Math.round(homeArea.radiusMiles * 1.60934) : 5;
-  const ctx = homeArea || !country || !city ? {} : { country: country.name, countryCode: country.code, locality: city.name };
   const title = home ? 'near home' : city?.name ?? 'here';
   const kindLabel = st.shown === 'eat' ? 'food & drink' : st.shown === 'stay' ? 'stays' : 'activities';
 
   return (
     <View style={styles.listBody}>
-      <View style={styles.addRow}>
-        <Press onPress={() => { ui.setAdding(!ui.adding); ui.setMenu(null); }} style={styles.addBtn} accessibilityRole="button" accessibilityLabel={ui.adding ? 'Close the search' : 'Add a place'}>
-          <Icon name={ui.adding ? 'close' : 'add'} size={15} color={colors.ink} strokeWidth={2.2} />
-          <Text style={styles.addText}>{ui.adding ? 'Close' : 'Add a place'}</Text>
-        </Press>
-      </View>
-      {ui.adding ? (
-        <View style={styles.gutter}>
-          <AddPlace household={household} kind={st.shown} centre={centre} radiusKm={searchRadiusKm} ctx={ctx} wide={false} onAdded={onChanged} onOpen={onOpenVenue} />
-        </View>
-      ) : (
+      {(
         <>
           {st.rows.length ? (
             // Inspire's cards (owner, 9 Sep 2026: "When I click into Places, it
@@ -781,12 +860,14 @@ function GettingThere({ place }: { place: AtlasPlace }) {
  */
 function CapturePanel({ venue, household, ctx: where, been, saved, onChanged, onLanded }: {
   venue: Venue; household: HouseholdResponse | null; ctx: { country?: string; countryCode?: string; locality?: string }; been: boolean; saved: boolean; onChanged: () => Promise<void>;
-  /** It is in the list now: close up and show it there. */
-  onLanded: (venueRef: string, kind: Kind) => void;
+  /** It is in the list now: close up and show it there — and, where it filed, so a page that is not there can go. */
+  onLanded: (venueRef: string, kind: Kind, filed?: PhotoFiled | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Where the visit filed the place, kept from the create for the moment BeenCapture says it is done.
+  const filedRef = useRef<PhotoFiled | null>(null);
   const ctx = { label: venue.name, category: venue.category, lat: venue.lat ?? undefined, lng: venue.lng ?? undefined, venue, ...where };
   if (!household) return null;
   // Saying we have been here saves the place as well; there is no second step
@@ -806,13 +887,13 @@ function CapturePanel({ venue, household, ctx: where, been, saved, onChanged, on
       {!open ? (
         <Row style={{ flexWrap: 'wrap' }}>
           <Button label={here ? 'Been again' : "We've been here"} kind={here ? 'secondary' : 'primary'} onPress={() => setOpen(true)} />
-          {!kept ? <Button label="Save as a place" kind="secondary" loading={busy} onPress={async () => { setBusy(true); try { await api.savePlace(venue.venueRef, 'saved', ctx); setDone('saved'); await onChanged(); onLanded(venue.venueRef, kindOfCategory(venue.category)); } finally { setBusy(false); } }} /> : null}
+          {!kept ? <Button label="Save as a place" kind="secondary" loading={busy} onPress={async () => { setBusy(true); try { const r = await api.savePlace(venue.venueRef, 'saved', ctx); setDone('saved'); await onChanged(); onLanded(venue.venueRef, kindOfCategory(venue.category), r.filed ?? null); } finally { setBusy(false); } }} /> : null}
         </Row>
       ) : (
         <>
           <BeenCapture venue={venue} household={household}
-            onCreate={async (body) => { await api.createVisit({ venueRef: venue.venueRef, venueLabel: venue.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: { experiences: venue.experiences, cuisines: venue.cuisines, category: venue.category }, ...where }); }}
-            onSaved={async () => { setOpen(false); setDone('been'); await onChanged(); onLanded(venue.venueRef, kindOfCategory(venue.category)); }} />
+            onCreate={async (body) => { const r = await api.createVisit({ venueRef: venue.venueRef, venueLabel: venue.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: { experiences: venue.experiences, cuisines: venue.cuisines, category: venue.category }, ...where }); filedRef.current = r.filed ?? null; }}
+            onSaved={async () => { setOpen(false); setDone('been'); await onChanged(); onLanded(venue.venueRef, kindOfCategory(venue.category), filedRef.current); }} />
           <Button label="Close" icon="close" kind="ghost" onPress={() => setOpen(false)} style={{ alignSelf: 'flex-start' }} />
         </>
       )}
@@ -937,7 +1018,8 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
  * radius from home, is where it looks.
  */
 function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpen }: {
-  household: HouseholdResponse | null; kind: Kind; centre: { lat: number; lng: number } | null; radiusKm: number;
+  /** Which list it goes in — or, from the top of Places, any of them. */
+  household: HouseholdResponse | null; kind: Kind | 'all'; centre: { lat: number; lng: number } | null; radiusKm: number;
   ctx: { country?: string; countryCode?: string; locality?: string }; wide: boolean; onAdded: () => Promise<void>;
   /** Open the place in the drawer, where its details, menu and order live. */
   onOpen: (v: Venue) => void;
@@ -983,7 +1065,7 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
   };
 
   const search = async () => {
-    if (!centre) { setMsg('Nowhere to look from yet — set your home address in Settings.'); return; }
+    if (!centre) { setMsg('Nowhere to look from yet — allow your location, or set your home address in Settings.'); return; }
     setSuggestions([]); setBusy(true); setMsg(null);
     try {
       const r = await api.searchPlaces({

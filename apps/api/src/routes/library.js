@@ -142,7 +142,12 @@ const headerSafe = (v) => String(v ?? '')
 imageRouter.get('/:id/:width', async (req, res, next) => {
   try {
     const image = await lib.imageById(req.params.id);
-    if (!image || image.moderation !== 'approved') return res.status(404).end();
+    // A household's own upload waits for a person's look before the library
+    // will draw it for anybody else (migration 036), but it is theirs, and a
+    // card of their own place must not sit blank while it waits. The id is
+    // unguessable and the row says whose it is (migration 082).
+    const theirs = image?.contributor_household_id && image.moderation === 'pending';
+    if (!image || (image.moderation !== 'approved' && !theirs)) return res.status(404).end();
     const variant = await lib.variantFor(image.id, Number(req.params.width));
     if (!variant) return res.status(404).end();
     res.set({

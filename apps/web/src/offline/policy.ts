@@ -18,8 +18,8 @@
  * inherited, which is the only way this stays true as the app grows.
  */
 
-/** Sources whose content we may keep: open data, or our own fixtures. */
-const OPEN = new Set(['osm', 'fixtures']);
+/** Sources whose content we may keep: open data, our own fixtures, and a place the household made from a photograph of their own. */
+const OPEN = new Set(['osm', 'fixtures', 'photo']);
 export const isOpenSource = (venueRef?: string | null) => OPEN.has(String(venueRef ?? '').split(':')[0]);
 
 const path = (full: string) => full.split('?')[0];

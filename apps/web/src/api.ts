@@ -1056,6 +1056,10 @@ export type Mood = {
  * showing the picture without the line is the licence broken, so a card that
  * draws the image must draw the credit too.
  */
+/** Where a photograph was taken, in words, and the location it would file under. */
+export type PhotoFiled = { country: string | null; countryCode: string | null; locality: string | null };
+export type PhotoWhere = PhotoFiled & { label: string | null; how: 'known' | 'nearest' | 'new' | 'unknown' };
+
 export type OwnedImage = {
   id: string;
   /**
@@ -1417,7 +1421,7 @@ export const api = {
   /** Research a place again now (Settings, and "look again" in the drawer). */
   researchPlace: (venueRef: string) => post<{ state: string; fields: number; matched: Record<string, any>; problems: string[]; record: OwnedRecord | null }>('/api/places/record', { ref: venueRef }),
   savePlace: (venueRef: string, status: 'saved' | 'dismissed' | 'special' = 'saved', context?: { label?: string; venue?: Partial<Venue>; category?: string | null; lat?: number; lng?: number; note?: string; country?: string | null; countryCode?: string | null; locality?: string | null }) =>
-    post<{ venueRef: string; status: string }>('/api/places/save', { ref: venueRef, status, ...(context ?? {}) }),
+    post<{ venueRef: string; status: string; filed?: PhotoFiled | null }>('/api/places/save', { ref: venueRef, status, ...(context ?? {}) }),
   /** Predictions as you type: one cheap call, nothing fetched until one is chosen. */
   suggestPlaces: (p: { q: string; near?: string; radiusKm?: number; session?: string; kind?: string }) =>
     request<{ suggestions: { placeId: string | null; venueRef: string; name: string; where: string | null; kind: string | null; mine: boolean; types: string[] }[] }>(`/api/places/suggest${qs(p)}`),
@@ -1428,7 +1432,7 @@ export const api = {
   createAtlasCity: (body: { placeText?: string; place?: Place }) => post<{ city: { name: string; country: string; countryCode: string; lat: number; lng: number } }>('/api/atlas/cities', body),
   deleteAtlasCity: (countryCode: string, locality: string) => del<void>('/api/atlas/cities', { countryCode, locality }),
   createVisit: (body: Omit<Partial<Visit>, 'takes'> & { venueRef: string; venueLabel: string; attendeeIds?: string[]; takes?: VisitTakeInput[]; clientId?: string; venue?: Partial<Venue> }) =>
-    post<{ visit: Visit; deduplicated?: boolean }>('/api/visits', body),
+    post<{ visit: Visit; deduplicated?: boolean; filed?: PhotoFiled | null }>('/api/visits', body),
   visits: (p: { country?: string; q?: string; memberId?: string; take?: Take } = {}) =>
     request<{ visits: Visit[]; countries: { code: string; name: string; visits: number }[] }>(`/api/visits${qs(p)}`),
   visit: (id: string) => request<{ visit: Visit }>(`/api/visits/${id}`),
@@ -1726,6 +1730,16 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, body);
     return body.media as HostMedia;
   },
+  // --- a place from a photograph (12 Sep 2026) ---------------------------------
+  /** The picture and where it was taken. Not queued: a photograph is not a thing to send later. */
+  uploadPlacePhoto: (body: { data: string; mime: string; width: number; height: number; lqip: string | null; lat: number | null; lng: number | null }) =>
+    post<{ image: OwnedImage; point: { lat: number; lng: number } | null; where: PhotoWhere | null }>('/api/places/photo', body),
+  /** It is this place: keep the photo on it for us, and save the place. */
+  attachPlacePhoto: (imageId: string, body: { venueRef: string; label: string; category?: string | null; lat?: number | null; lng?: number | null; venue?: Partial<Venue> }) =>
+    post<{ venueRef: string; filed: PhotoFiled | null }>(`/api/places/photo/${imageId}/attach`, body),
+  /** Nowhere the sources know: a place of our own, named by us. */
+  placeFromPhoto: (imageId: string, body: { name: string; kind: 'do' | 'eat' | 'stay'; lat: number | null; lng: number | null }) =>
+    post<{ venueRef: string; filed: PhotoFiled | null }>(`/api/places/photo/${imageId}/place`, body),
   trimHostMedia: (id: string, trimStartS: number, trimEndS: number | null) => patch<{ media: HostMedia }>(`/api/host/media/${id}`, { trimStartS, trimEndS }),
   deleteHostMedia: (id: string) => del<void>(`/api/host/media/${id}`),
   createOffer: (shape: OfferShape) => post<{ offer: OwnOffer }>('/api/host/offers', { shape }),

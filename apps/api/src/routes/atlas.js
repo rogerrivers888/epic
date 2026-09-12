@@ -25,6 +25,7 @@ import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
 import { fillRatings, needsRating, ratingKept } from '../sources/rentedRating.js';
 import { recordsFor } from '../repositories/ownedPlaces.js';
+import { fileUnder } from '../domain/fileUnder.js';
 
 /**
  * A stored picture in the shape a card draws. `credit` travels with it because
@@ -59,6 +60,24 @@ async function localityFor(lat, lng) {
 }
 
 /**
+ * Where a place files: what was said, or else what the map says, snapped.
+ *
+ * Nothing said where it goes — a save from Inspire, a search from the top of
+ * Places, a photograph, a visit recorded from a trip — so the map is asked,
+ * and its answer is filed under a location the household already has where
+ * there is one close enough (domain/fileUnder.js). A save made *inside* an
+ * area names that area and is left exactly as it was said.
+ */
+export async function fileWhere(householdId, given, lat, lng) {
+  const where = { country: given?.country ?? null, countryCode: given?.countryCode ?? null, locality: given?.locality ?? null };
+  if (where.countryCode) return where;
+  const reverse = await localityFor(lat, lng);
+  if (!reverse) return where;
+  const filed = fileUnder(reverse, await atlasRepo.locationsFor(householdId).catch(() => []), lat != null && lng != null ? { lat, lng } : null);
+  return { country: filed.country, countryCode: filed.countryCode, locality: filed.locality };
+}
+
+/**
  * Record (or refresh) a place in the atlas.
  *
  * The judgement is here and the statement is in the repository. What a snapshot
@@ -73,9 +92,8 @@ export async function upsertHouseholdPlace(client, householdId, p) {
   const category = p.category ?? venue?.category ?? null;
   const lat = p.lat ?? venue?.lat ?? null;
   const lng = p.lng ?? venue?.lng ?? null;
-  let where = { country: p.country ?? null, countryCode: p.countryCode ?? null, locality: p.locality ?? null };
-  if (!where.countryCode) where = (await localityFor(lat, lng)) ?? where;
-  const snapshot = venue && ['osm', 'fixtures'].includes(String(p.venueRef).split(':')[0])
+  const where = await fileWhere(householdId, p, lat, lng);
+  const snapshot = venue && ['osm', 'fixtures', 'photo'].includes(String(p.venueRef).split(':')[0])
     ? { category: venue.category, cuisines: venue.cuisines, experiences: venue.experiences, dietaryOptions: venue.dietaryOptions, address: venue.address, website: venue.website, openingHours: venue.openingHours }
     : null;
   await atlasRepo.upsertHouseholdPlace(client, householdId, {
@@ -269,6 +287,10 @@ atlas.get('/places', async (req, res, next) => {
     // photograph the ladder found (sources/placePicture.js). Never a photograph
     // of somebody's food that we did not take.
     const ourPictures = await heroesForPlaces(places.map((p) => p.venueRef));
+    // Theirs first: a photograph somebody in the house took of the place is the
+    // best picture of it there is for them, and it is kept for this household
+    // alone (migration 082) — never drawn as anybody else's card.
+    const theirPictures = await atlasRepo.householdPhotosFor(household.id, places.map((p) => p.venueRef)).catch(() => new Map());
     // What a day here is like, over the closed set of six (domain/moods.js), so
     // the area screen's Mood dropdown is the same vocabulary as the home
     // screen's shelves. Nothing here fetches: it reads the experiences and the
@@ -277,17 +299,24 @@ atlas.get('/places', async (req, res, next) => {
       shelfRules(), shelfTaxonomy(), atlasRowsFor(places.map((p) => p.venueRef)).catch(() => new Map()),
     ]);
     places = places.map((p) => {
-      const ours = ownedImage(ourPictures.get(p.venueRef) ?? null);
+      const theirs = theirPictures.get(p.venueRef) ?? [];
+      const ours = theirs.length ? ownedImage(theirs[0]) : ownedImage(ourPictures.get(p.venueRef) ?? null);
       return {
         ...p,
         image: ours,
-        // The rung below the ladder's floor. Only where we have nothing of our
-        // own, only what has been fetched since the service started, and never
-        // written down — the same rented-in-memory bargain as the taxonomy
-        // above (sources/rentedPhoto.js). VenueThumb already prefers `image`
-        // over `photos`, so a place the ladder later finds a mark for simply
-        // stops drawing the provider's.
-        photos: ours ? undefined : photosKept(p.venueRef) ?? undefined,
+        // The rung below the ladder's floor. Only where we hold no photograph
+        // of our own, only what has been fetched since the service started,
+        // and never written down — the same rented-in-memory bargain as the
+        // taxonomy above (sources/rentedPhoto.js).
+        //
+        // A mark is not a photograph. Painshill Park had a logo from its own
+        // website and so drew that on lime in Places, while the browse it was
+        // saved from — and the drawer it opened into — showed the photograph
+        // (owner, 12 Sep 2026: "it should actually just have the same picture
+        // that I chose when I added it"). So the provider's photographs travel
+        // beside a mark, and VenueThumb draws the photograph first and keeps
+        // the mark for when there is none, or no signal.
+        photos: ours && ours.source !== 'logo' ? undefined : photosKept(p.venueRef) ?? undefined,
         // The vocabulary has to be passed, not left to default: without it the
         // resolver has no parent for a drawer and can never name one, and the
         // whole point here is the drawer's name (owner, 7 Sep 2026 — a row
@@ -341,7 +370,7 @@ atlas.get('/places', async (req, res, next) => {
     // A row we have no picture for at all — neither ours nor the provider's,
     // yet. Counted with the rest so the screen asks again and the tiles fill in,
     // rather than a household seeing mint squares until they navigate away.
-    const wantPictures = places.filter((p) => needsPhoto(p.venueRef, Boolean(p.image)));
+    const wantPictures = places.filter((p) => needsPhoto(p.venueRef, Boolean(p.image) && p.image.source !== 'logo'));
     // A row with no crowd rating held yet. The household's own score no longer
     // spares a row the question, because the row shows both now (handover v8);
     // the pace is the same eight a read, and a match is kept for good.
@@ -359,7 +388,7 @@ atlas.get('/places', async (req, res, next) => {
         // Last, and deliberately: the ladder is asked for nothing here, but a
         // provider is, and a provider bills. Anything that could have filled a
         // tile for free has already had its turn by now.
-        .then(() => fillPhotos(household.id, wantPictures.map((p) => ({ venueRef: p.venueRef, hasOwn: Boolean(p.image) }))))
+        .then(() => fillPhotos(household.id, wantPictures.map((p) => ({ venueRef: p.venueRef, hasOwn: Boolean(p.image) && p.image.source !== 'logo' }))))
         // Last of all, and for the same reason again: a rating and a review
         // count are the provider's dearest fields, so everything that could
         // have filled a row for nothing has already had its turn.

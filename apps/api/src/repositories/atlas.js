@@ -343,3 +343,67 @@ export async function saveWhere(householdId, venueRef, w) {
       w.station?.distanceM ?? null, w.checkedAt],
   );
 }
+
+// ---------------------------------------------------------------------------
+// where a new place files, and the household's own photographs of a place
+// ---------------------------------------------------------------------------
+
+/**
+ * Every location the household has, with a centre: the ones made on purpose,
+ * the ones their trips went to, and the ones their places gave rise to — so a
+ * new place can be filed under the nearest of them (domain/fileUnder.js).
+ */
+export async function locationsFor(householdId) {
+  const { rows } = await query(
+    `select country, country_code, locality, lat, lng from atlas_cities where household_id = $1 and locality is not null
+     union all
+     select max(country) as country, country_code, locality, avg(lat) as lat, avg(lng) as lng
+       from household_places where household_id = $1 and locality is not null and country_code is not null
+      group by country_code, locality
+     union all
+     select max(country) as country, country_code, locality, max(coalesce(base_lat, origin_lat)) as lat, max(coalesce(base_lng, origin_lng)) as lng
+       from trips where household_id = $1 and locality is not null and country_code is not null
+      group by country_code, locality`,
+    [householdId],
+  );
+  return rows.map((r) => ({ country: r.country, countryCode: r.country_code, locality: r.locality, lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng) }));
+}
+
+/** The household's own photographs of these places, first one first, in the shape a card draws. */
+export async function householdPhotosFor(householdId, venueRefs) {
+  const refs = [...new Set((venueRefs ?? []).filter(Boolean).map(String))];
+  if (!refs.length) return new Map();
+  const { rows } = await query(
+    `select p.venue_ref, i.id, i.source, i.lqip, i.credit_line, i.licence, i.licence_url, i.source_page_url,
+            i.attribution_required, i.width, i.height, p.position
+       from household_place_photos p join image_assets i on i.id = p.image_id
+      where p.household_id = $1 and p.venue_ref = any($2::text[]) and i.moderation <> 'rejected'
+      order by p.venue_ref, p.position, p.created_at`,
+    [householdId, refs],
+  );
+  const out = new Map();
+  for (const r of rows) { if (!out.has(r.venue_ref)) out.set(r.venue_ref, []); out.get(r.venue_ref).push(r); }
+  return out;
+}
+
+export async function addHouseholdPhoto(householdId, venueRef, imageId) {
+  await query(
+    `insert into household_place_photos (household_id, venue_ref, image_id, position)
+     values ($1, $2, $3, coalesce((select max(position) + 1 from household_place_photos where household_id = $1 and venue_ref = $2), 0))
+     on conflict do nothing`,
+    [householdId, venueRef, imageId],
+  );
+}
+
+/** Whose upload this is, so a photo can only ever be attached by the household that took it. */
+export async function photoOwner(imageId) {
+  const { rows } = await query('select contributor_household_id from image_assets where id = $1', [imageId]);
+  return rows[0]?.contributor_household_id ?? null;
+}
+
+/** Where a place ended up filed, so a screen can say so the moment it is saved. */
+export async function whereFiled(householdId, venueRef) {
+  const { rows } = await query('select country, country_code, locality from household_places where household_id = $1 and venue_ref = $2', [householdId, venueRef]);
+  const r = rows[0];
+  return r ? { country: r.country, countryCode: r.country_code, locality: r.locality } : null;
+}

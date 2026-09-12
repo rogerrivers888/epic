@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Image, Linking, Modal, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press, Pulse } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
@@ -409,6 +409,17 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
    */
   const [shared, setShared] = useState(false);
   const [heartPulse, setHeartPulse] = useState(0);
+  // The hero's pages: which is showing, how wide a page is, and the strip itself.
+  const [heroAt, setHeroAt] = useState(0);
+  const [heroW, setHeroW] = useState(0);
+  const strip = useRef<ScrollView | null>(null);
+  useEffect(() => { setHeroAt(0); strip.current?.scrollTo({ x: 0, animated: false }); }, [item?.venueRef]);
+  const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!heroW) return;
+    const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
+    if (i !== heroAt) setHeroAt(i);
+  };
+  const goHero = (i: number) => { strip.current?.scrollTo({ x: i * heroW, animated: true }); setHeroAt(i); };
   const keep = () => { if (!item) return; if (!shortlisted) setHeartPulse((n) => n + 1); onShortlist?.(item); };
   const sharePlace = async () => {
     if (!item) return;
@@ -441,7 +452,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const ratingCount = v?.ratingCount ?? item.ratingCount ?? crowd?.ratingCount ?? null;
   const source = item.source ?? item.venueRef.split(':')[0];
   /** Ours outright: the atlas researched it, and there is no provider behind it. */
-  const ours0wn = source === 'atlas' || item.venueRef.startsWith('wikidata:');
+  // …or the household's own, made from a photograph they took (routes/placePhotos.js).
+  const ours0wn = source === 'atlas' || source === 'photo' || item.venueRef.startsWith('wikidata:');
   // Somewhere this household has actually eaten or been: what the drawer opens
   // with, and where "Been again" belongs, both turn on it.
   const been = (visits?.length ?? 0) > 0;
@@ -506,23 +518,37 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
    * `lqip` so the frame has the photograph's colours before a byte of the real
    * one has arrived. A provider's is fetched at display time and never stored.
    */
-  const hero = (() => {
+  /**
+   * Every picture there is of the place, ours first, as the slides of the hero.
+   *
+   * The counter used to say "1 / 3" over a picture that could not be moved
+   * (owner, 12 Sep 2026: "it says Picture 1 of 3, but I can't actually see the
+   * other pictures even when I click into it"). Now the hero pages: a swipe,
+   * or the arrows on a wide screen, and the counter follows.
+   *
+   * A mark stretched across the hero is a smear; it has its own place below.
+   * A rented reference needs its signature to get through the door, and the
+   * two lists do not always carry one — an unsigned reference in the hero
+   * 401'd, which on screen is a green rectangle with no explanation — so only
+   * the ones that will load are slides, and the same picture from both lists
+   * is one slide.
+   */
+  const slides = (() => {
+    const out: { uri: string; lqip: string | null }[] = [];
     const owned = item.image;
-    // A mark stretched across 220px is a smear; it has its own place below.
-    if (owned && owned.source !== 'logo') return { uri: `${API_URL}/api/images/${owned.id}/960`, lqip: owned.lqip ?? null };
-    /*
-      The first photograph that will actually load, from either list.
-      
-      A rented reference needs its signature to get through the door, and the
-      two lists do not always carry one — preferring whichever list happened to
-      be longer put an unsigned reference in the hero and the picture 401'd,
-      which on screen is a green rectangle with no explanation.
-    */
-    const usable = [...(item.photos ?? []), ...(venue?.photos ?? [])]
-      .find((ph) => ph.url || (ph.ref && ph.sig && ph.exp));
-    const uri = usable ? photoUri(usable) : null;
-    return uri ? { uri, lqip: null } : null;
+    if (owned && owned.source !== 'logo') out.push({ uri: `${API_URL}/api/images/${owned.id}/960`, lqip: owned.lqip ?? null });
+    const seen = new Set<string>(out.map((s) => s.uri));
+    for (const ph of [...(item.photos ?? []), ...(venue?.photos ?? [])]) {
+      if (!(ph.url || (ph.ref && ph.sig && ph.exp))) continue;
+      const uri = photoUri(ph);
+      const key = ph.url ?? ph.ref ?? uri ?? '';
+      if (!uri || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ uri, lqip: null });
+    }
+    return out;
   })();
+  const hero = slides[0] ?? null;
   /**
    * What is worth knowing before you set off, from what we actually hold.
    *
@@ -584,9 +610,39 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
           */}
           <View style={styles.head}>
             {hero ? (
-              <View style={styles.hero}>
-                {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
-                <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
+              <View style={styles.hero} onLayout={(e) => setHeroW(e.nativeEvent.layout.width)}>
+                {/* One page per picture, a swipe apart. The first is drawn on
+                    its own until the frame has measured itself, so the hero
+                    never opens blank. */}
+                {heroW && slides.length > 1 ? (
+                  <ScrollView
+                    ref={strip} horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+                    style={StyleSheet.absoluteFill as any} onScroll={onHeroScroll} onMomentumScrollEnd={onHeroScroll} scrollEventThrottle={32}
+                    accessibilityLabel={`${slides.length} pictures of ${title}`}
+                  >
+                    {slides.map((sl, i) => (
+                      <View key={sl.uri} style={{ width: heroW, height: '100%' }}>
+                        {sl.lqip ? <Image source={{ uri: sl.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
+                        <Image source={{ uri: sl.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors accessibilityLabel={`Picture ${i + 1} of ${slides.length}`} />
+                      </View>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <>
+                    {hero.lqip ? <Image source={{ uri: hero.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors /> : null}
+                    <Image source={{ uri: hero.uri }} style={StyleSheet.absoluteFill as any} resizeMode="cover" accessibilityIgnoresInvertColors />
+                  </>
+                )}
+                {slides.length > 1 && heroAt > 0 ? (
+                  <Press onPress={() => goHero(heroAt - 1)} style={[styles.heroTile, styles.heroPrev]} accessibilityRole="button" accessibilityLabel="Previous picture">
+                    <Icon name="previous" size={18} color={INK} />
+                  </Press>
+                ) : null}
+                {slides.length > 1 && heroAt < slides.length - 1 ? (
+                  <Press onPress={() => goHero(heroAt + 1)} style={[styles.heroTile, styles.heroNext]} accessibilityRole="button" accessibilityLabel="Next picture">
+                    <Icon name="more" size={18} color={INK} />
+                  </Press>
+                ) : null}
                 <Press onPress={onClose} style={[styles.heroTile, styles.heroBack]} accessibilityRole="button" accessibilityLabel="Back">
                   <Icon name="back" size={18} color={INK} />
                 </Press>
@@ -603,8 +659,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     </Press>
                   ) : null}
                 </View>
-                {photos.length > 1 ? (
-                  <View style={styles.heroCount}><Text style={styles.heroCountText}>{`1 / ${photos.length}`}</Text></View>
+                {slides.length > 1 ? (
+                  <View style={styles.heroCount} accessibilityLiveRegion="polite"><Text style={styles.heroCountText}>{`${Math.min(heroAt, slides.length - 1) + 1} / ${slides.length}`}</Text></View>
                 ) : null}
               </View>
             ) : null}
@@ -933,6 +989,9 @@ const styles = StyleSheet.create({
   hero: { width: '100%', aspectRatio: MEDIA_RATIO, borderRadius: MEDIA_RADIUS, marginTop: spacing.md, backgroundColor: colors.accentSoft, overflow: 'hidden' },
   heroTiles: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
   heroBack: { position: 'absolute', top: 12, left: 12 },
+  // The arrows sit at mid-height, where a thumb and a pointer both expect them.
+  heroPrev: { position: 'absolute', left: 12, top: '50%', marginTop: -18 },
+  heroNext: { position: 'absolute', right: 12, top: '50%', marginTop: -18 },
   // Saved says so on the tile itself, not only in the glyph.
   heroTileOn: { backgroundColor: LIME },
   highlights: { gap: 2 },

@@ -26,7 +26,8 @@ import { kmBetween } from '../domain/travel.js';
 import { contentsOf, groundsRadiusKm, researchInside } from '../sources/inside.js';
 import { researchRestrictions, restrictionsEnabled } from '../sources/restrictions.js';
 import { currentHousehold, loadMembers } from './household.js';
-import { upsertHouseholdPlace } from './atlas.js';
+import { fileWhere, upsertHouseholdPlace } from './atlas.js';
+import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
@@ -661,7 +662,10 @@ places.post('/save', async (req, res, next) => {
       claimPlace(household.id, `${source}:${id}`, status === 'special' ? 'special' : 'saved',
         { name: req.body?.label ?? null, category: req.body?.category ?? null, lat: req.body?.lat ?? null, lng: req.body?.lng ?? null, website: req.body?.venue?.website ?? null });
     }
-    res.json({ venueRef: `${source}:${id}`, status });
+    // Where it landed, so a screen that was not inside an area can go there
+    // (owner, 12 Sep 2026: a place added from the top of Places files itself).
+    const filed = status !== 'dismissed' ? await atlasRepo.whereFiled(household.id, `${source}:${id}`).catch(() => null) : null;
+    res.json({ venueRef: `${source}:${id}`, status, filed });
   } catch (err) {
     next(err);
   }
@@ -792,13 +796,9 @@ visits.post('/', async (req, res, next) => {
       if (already) return res.json({ visit: await visitPayload(already.id), deduplicated: true });
     }
 
-    let where = { country: b.country ?? null, countryCode: b.countryCode ?? null, locality: b.locality ?? null };
-    if (!where.countryCode && b.lat != null && b.lng != null) {
-      try {
-        const r = await reverseGeocode(b.lat, b.lng);
-        if (r) where = { country: r.country, countryCode: r.countryCode, locality: r.locality };
-      } catch { /* leave unknown */ }
-    }
+    // Filed the same way as a save: what was said, else the map's answer
+    // snapped to a location the household already has (routes/atlas.js).
+    const where = await fileWhere(household.id, b, b.lat ?? null, b.lng ?? null).catch(() => ({ country: b.country ?? null, countryCode: b.countryCode ?? null, locality: b.locality ?? null }));
 
     const members = await loadMembers(household.id);
     const attendeeIds = (Array.isArray(b.attendeeIds) && b.attendeeIds.length ? b.attendeeIds : members.map((m) => m.id))
@@ -821,7 +821,7 @@ visits.post('/', async (req, res, next) => {
     // it for good, whatever happens to the source's record afterwards.
     claimPlace(household.id, b.venueRef, 'visited', { name: b.venueLabel, category: b.category ?? null, lat: b.lat ?? null, lng: b.lng ?? null, website: b.venue?.website ?? null });
 
-    res.status(201).json({ visit: await visitPayload(visitId) });
+    res.status(201).json({ visit: await visitPayload(visitId), filed: await atlasRepo.whereFiled(household.id, b.venueRef).catch(() => null) });
   } catch (err) {
     next(err);
   }

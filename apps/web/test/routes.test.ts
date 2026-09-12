@@ -245,6 +245,9 @@ test('an address with no page behind it says so rather than pretending', () => {
 
 test('the query is never part of which page it is', () => {
   assert.deepEqual(parseRoute('/places/GB/London?kind=eat&sort=recent'), { name: 'places', scope: { country: 'GB', city: 'London' } });
+  // Adding a place is how the page is set, at every level: the query carries it, the path does not change.
+  assert.deepEqual(parseRoute('/places?add=photo'), { name: 'places', scope: null });
+  assert.deepEqual(parseRoute('/places/GB?add=search'), { name: 'places', scope: { country: 'GB', city: null } });
   assert.deepEqual(parseRoute('/inspire/culture?travel=30'), { name: 'inspire', searching: false, mode: 'activities', pick: 'culture' });
 });
 

@@ -17,7 +17,7 @@ import { CategoryIcon, Icon, IconText, Rating } from './Icon';
  */
 
 const CATEGORY_LABEL: Record<string, string> = { restaurant: 'Restaurant', cafe: 'Café', pub: 'Pub', bar: 'Bar', attraction: 'Attraction', event: 'Event' };
-export const SOURCE_LABEL: Record<string, string> = { google: 'Google', tripadvisor: 'Tripadvisor', osm: 'OpenStreetMap', fixtures: 'sample data', ticketmaster: 'Ticketmaster', seatgeek: 'SeatGeek', predicthq: 'PredictHQ', datathistle: 'Data Thistle', scout: 'the local scout' };
+export const SOURCE_LABEL: Record<string, string> = { google: 'Google', tripadvisor: 'Tripadvisor', osm: 'OpenStreetMap', fixtures: 'sample data', ticketmaster: 'Ticketmaster', seatgeek: 'SeatGeek', predicthq: 'PredictHQ', datathistle: 'Data Thistle', scout: 'the local scout', photo: 'your photograph' };
 const MODE_WORD: Record<string, string> = { walking: 'on foot', cycling: 'by bike', driving: 'by car', transit: 'by public transport' };
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);

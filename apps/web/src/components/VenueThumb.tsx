@@ -119,9 +119,17 @@ export function VenueThumb({
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  // Ours first, always. A provider's photo is only reached when we have nothing
-  // of our own, and it is never stored.
+  // Ours first — with one distinction. A photograph we own is the picture,
+  // full stop. A *mark* we own is the business's logo, and a logo is not a
+  // picture of the place: Painshill Park drew a green square with a wordmark in
+  // Places while the browse it was saved from showed the park (owner, 12 Sep
+  // 2026: "it should actually just have the same picture that I chose when I
+  // added it"). So a rented photograph, where there is one on the network,
+  // comes before a mark; the mark is what is drawn when there is none, or no
+  // signal — the rented reference never reaches the device (offline/policy.ts).
   const photo = photos?.[0];
+  const markOnly = image?.source === 'logo' && !!photo;
+  if (markOnly) image = null;
   /**
    * The provider's photograph, with the key that lets it through the door.
    *

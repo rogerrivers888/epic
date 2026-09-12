@@ -30,6 +30,7 @@ import { router as localityRoutes } from './routes/localities.js';
 import { resumeInterrupted } from './sources/harvest.js';
 import activityRoutes from './routes/activity.js';
 import { places as placeRoutes, visits as visitRoutes } from './routes/places.js';
+import { placePhotos as placePhotoRoutes } from './routes/placePhotos.js';
 import { atlas as atlasRoutes } from './routes/atlas.js';
 import { inspire as inspireRoutes } from './routes/inspire.js';
 import { menu as menuRoutes, orders as orderRoutes, ticket as orderTicketRoutes } from './routes/menus.js';
@@ -196,6 +197,7 @@ app.use('/api/voice', voiceRoutes);
 app.use('/api/concepts', conceptRoutes);
 app.use('/api/prototypes', prototypeRoutes);
 app.use('/api/places', placeRoutes);
+app.use('/api/places', placePhotoRoutes);
 app.use('/api/places', areaRouter);
 app.use('/api/visits', visitRoutes);
 // The gazetteer reads come first: `atlasRoutes` ends in patterns that would
