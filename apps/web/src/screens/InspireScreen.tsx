@@ -17,7 +17,7 @@ import { CategoryStrip, InspireTop, MenuBar, ModeSwitch } from '../components/In
 import { BoxRow, ControlButton, ControlRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
 import { TRAVEL_MODES, type TravelMode } from '../components/TravelSheet';
-import { activeCount, howFarShort, keeps, sortItems, HOW_FAR, PRICE_BANDS, PRICE_KEYS, RATING_FLOORS, SORTS, SORT_KEYS, type Filters, type InspireSort } from './inspireList';
+import { activeCount, howFarShort, keeps, nextWider, sortItems, HOW_FAR, PRICE_BANDS, PRICE_KEYS, RATING_FLOORS, SORTS, SORT_KEYS, type Filters, type InspireSort } from './inspireList';
 import type { OpenTripOptions } from './PlanScreen';
 
 /**
@@ -325,7 +325,13 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
       const r = await api.inspireNear({
         lat: centre.lat, lng: centre.lng,
         label: centre.label, locality: centre.locality ?? null,
-        // How you are getting there is what the travel times are *of*.
+        // How you are getting there is what the travel times are *of* — and
+        // where from. Somebody who has said "Bristol", or is standing in it,
+        // is asking how far things are from Bristol; without this the API
+        // measured every journey from home, and a town two hours away had
+        // nothing "within 1 hr" however much was there (owner, 12 Sep 2026).
+        // From home, nothing is sent and the API measures from home as before.
+        from: chosen ? `${centre.lat},${centre.lng}` : null,
         mode: travelBy,
       });
       setPool(r);
@@ -335,7 +341,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     } finally {
       setLoading(false);
     }
-  }, [centre?.lat, centre?.lng, centre?.label, travelBy]);
+  }, [centre?.lat, centre?.lng, centre?.label, travelBy, Boolean(chosen)]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -648,6 +654,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
 
   /** What an empty list says, and the one tap out of it. */
   const emptyBody = `No places within ${howFarShort(travel)} · ${whereName} match these filters.`;
+  /** The next How far that would show something, when this one shows nothing. */
+  const wider = useMemo(() => nextWider(scope, filters, crowdOf), [scope, filters, crowdOf]);
   const nothingDrawn = !loading && !!pool && (pick ? (layer === 'subs' ? subRows.length === 0 : listed.length === 0) : mode === 'food' ? shown.length === 0 : shelves.length === 0);
 
   return (
@@ -712,6 +720,33 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           ) : null}
 
           {error ? <EmptyMatch title={`Nothing came back for ${placeName}`} body={error} action="Try again" onAction={load} /> : null}
+
+          {/* "Use my location" failing used to close the panel and change
+              nothing (owner, 12 Sep 2026: "the 'Your location' option didn't
+              work"). Now the reason is said here, wherever the screen is,
+              with the one tap that follows it. */}
+          {me.busy ? (
+            <View style={[styles.gutter, styles.notice]}>
+              <ActivityIndicator color={colors.icon} />
+              <Text style={[type.small, { flex: 1, color: colors.ink }]}>Finding where you are…</Text>
+            </View>
+          ) : me.error ? (
+            <View style={[styles.gutter, styles.notice, styles.noticeStack]}>
+              <View style={styles.noticeLine}>
+                <Icon name="info" size={14} color={colors.ink} />
+                <Text style={[type.small, { flex: 1, color: colors.ink }]}>{me.error}</Text>
+              </View>
+              <View style={styles.noticeActions}>
+                <Press onPress={() => void useHereNow()} accessibilityRole="button" style={styles.tryAgain}>
+                  <Icon name="here" size={16} color={colors.primaryFg} strokeWidth={2.2} />
+                  <Text style={styles.tryAgainText}>Try again</Text>
+                </Press>
+                <Press onPress={me.forget} accessibilityRole="button" style={styles.dismiss}>
+                  <Text style={styles.dismissText}>Not now</Text>
+                </Press>
+              </View>
+            </View>
+          ) : null}
 
           {pool && !loading && !unknown ? (
             <>
@@ -808,13 +843,33 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   <EmptyMatch
                     title={mode === 'food' ? `Nothing to eat around ${placeName} yet` : `Nothing to do around ${placeName} yet`}
                     body={mode === 'food'
-                      ? 'The sweep has not reached this area yet, so there is nothing to draw here.'
+                      ? (pool?.pools?.failed
+                        ? `Epic tried to look around ${placeName} and the source would not answer just now. Try again in a little while.`
+                        : pool?.pools?.live
+                          ? `Epic looked around ${placeName} and found nowhere to eat it can show yet.`
+                          : 'The sweep has not reached this area yet, so there is nothing to draw here.')
                       : 'The atlas has nothing illustrated near here yet. Try another town.'}
+                    action={pool?.pools?.failed ? 'Try again' : 'Somewhere else'}
+                    onAction={pool?.pools?.failed ? load : () => setMenu('where')}
+                  />
+                ) : wider ? (
+                  // The reach is what is cutting the list, and the next step
+                  // that has anything is offered by name (Requirements C9).
+                  <EmptyMatch
+                    title={`Nothing within ${howFarShort(travel)} of ${whereName}`}
+                    body={`${wider.count} place${wider.count === 1 ? '' : 's'} within ${howFarShort(wider.minutes)}${active > 0 ? ' match these filters' : ''}.`}
+                    action={`Show within ${howFarShort(wider.minutes)}`}
+                    onAction={() => setTravel(wider.minutes)}
+                  />
+                ) : active > 0 ? (
+                  <EmptyMatch body={emptyBody} action="Clear filters" onAction={clearFilters} />
+                ) : (
+                  <EmptyMatch
+                    title={`Nothing within ${howFarShort(travel)} of ${whereName}`}
+                    body={`Everything Epic knows around ${whereName} is further than ${howFarShort(HOW_FAR[HOW_FAR.length - 1].minutes)} away by ${travelBy === 'walk' ? 'foot' : travelBy === 'transit' ? 'public transport' : 'car'}.`}
                     action="Somewhere else"
                     onAction={() => setMenu('where')}
                   />
-                ) : (
-                  <EmptyMatch body={emptyBody} action="Clear filters" onAction={clearFilters} />
                 )
               ) : null}
             </>
@@ -935,6 +990,11 @@ const styles = StyleSheet.create({
   cards: { gap: 22 },
   waiting: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
   notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  noticeStack: { flexDirection: 'column', alignItems: 'stretch' },
+  noticeLine: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  noticeActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  dismiss: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 2, borderColor: colors.ink },
+  dismissText: { ...type.small, color: colors.ink, fontWeight: '700' },
 
   ways: { flexDirection: 'row', gap: 14, paddingHorizontal: 12, paddingTop: 6, paddingBottom: 8 },
   way: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },

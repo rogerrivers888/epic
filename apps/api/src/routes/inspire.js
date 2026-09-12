@@ -63,6 +63,7 @@ import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { publishedNear, heroesForPlaces } from '../repositories/library.js';
 import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
+import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
 
 /**
  * A stored picture, in the shape a card draws.
@@ -216,13 +217,22 @@ inspire.get('/near', async (req, res, next) => {
     // The atlas alone unless somebody deliberately asks for more. `owned=1` is
     // kept as the older spelling of the same default so a client that still
     // sends it is not surprised.
-    const live = req.query.live === '1' || req.query.live === 'true';
+    const asked = req.query.live === '1' || req.query.live === 'true';
     // How far a day out may be. Capped, because the query is a bounding box and
     // "everywhere" is not a search.
     const reach = Math.min(ATLAS_MAX_KM, Math.max(1, Number(req.query.km) || ATLAS_RADIUS_KM));
-    const { venues, cached } = live
+    // The sweep's answer is read first, because it decides whether anything is
+    // spent: a town the sweep has not reached gets the look-around (owner,
+    // 12 Sep 2026: "when I set my location to Bristol, you should be calling
+    // the Google API… It should work either way"). Judged within the
+    // look-around's own radius, so a swept Bath does not cover Bristol.
+    const food = await foodNear({ lat: centre.lat, lng: centre.lng, km: reach, limit: FOOD_LIMIT });
+    const liveWhy = asked ? 'asked' : needsLookAround(food, THINGS_RADIUS_KM) ? 'unswept' : null;
+    const live = liveWhy != null;
+    const { venues, cached, degraded } = live
       ? await thingsAround({ household, session: null, place: { ...centre, locality } })
-      : { venues: [], cached: true };
+      : { venues: [], cached: true, degraded: [] };
+    const lookAround = lookAroundOutcome({ ran: live, why: liveWhy, degraded });
 
     // Around this place, and only around it. A source is free to answer with
     // whatever its index matched, and the fixture set ignores the point it was
@@ -312,7 +322,6 @@ inspire.get('/near', async (req, res, next) => {
      * No rating and no price travels with them, because we do not hold either
      * as a number we are allowed to keep. The row draws what it has.
      */
-    const food = await foodNear({ lat: centre.lat, lng: centre.lng, km: reach, limit: FOOD_LIMIT });
     for (const f of food) {
       if (f.lat == null || f.lng == null) continue;
       if (seen(f)) continue;
@@ -486,7 +495,10 @@ inspire.get('/near', async (req, res, next) => {
       radiusKm: atlasCount ? reach : THINGS_RADIUS_KM,
       // What is actually in this answer. Said outright, so a screen never has to
       // work out from an empty shelf whether a pool was absent or merely quiet.
-      pools: { atlas: true, live },
+      // `why` says whether the look-around was asked for or ran because the
+      // sweep has not reached this town; `failed` that a source refused, so
+      // an empty Food tab is "could not look" rather than "there is nowhere".
+      pools: { atlas: true, live: lookAround.live, why: lookAround.why, failed: lookAround.failed },
       // The chips, from the table rather than from a list in the bundle, each
       // with its drawers and how many places are in each. A category added or
       // renamed in the back office is on the home screen at the next refresh.

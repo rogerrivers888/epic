@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activeCount, bandOf, howFarShort, keeps, priceMarks, sortItems } from '../src/screens/inspireList.ts';
+import { activeCount, bandOf, howFarShort, keeps, nextWider, priceMarks, sortItems } from '../src/screens/inspireList.ts';
 
 /**
  * The arithmetic under the Inspire tab's Where, Filters and Sort (handover v8,
@@ -75,4 +75,22 @@ test('sorting: unknowns last, ties keep the pool\'s own order', () => {
   assert.deepEqual(sortItems(pool, 'price', crowd, typeOf).map((i) => i.name), ['c', 'd', 'a', 'b'], 'price: the unpriced last');
   assert.deepEqual(sortItems(pool, 'type', crowd, typeOf).map((i) => i.name), ['b', 'c', 'd', 'a'], 'type: Castles before Walks, pool order inside');
   assert.deepEqual(pool.map((i) => i.name), ['a', 'b', 'c', 'd'], 'the pool itself is not reordered');
+});
+
+test('an empty reach offers the next wider How far that has anything in it (C9)', () => {
+  const rows = [item({ name: 'a', travelMinutes: 75 }), item({ name: 'b', travelMinutes: 90 }), item({ name: 'c', travelMinutes: 200 })];
+  const f = { travel: 60, price: 'any', rating: 0 } as any;
+  assert.deepEqual(nextWider(rows, f, none), { minutes: 120, count: 2 });
+  // From 20 minutes, the first step with anything is still 2 hours, not 30 minutes.
+  assert.deepEqual(nextWider(rows, { ...f, travel: 20 }, none), { minutes: 120, count: 2 });
+});
+
+test('when the widest reach is empty too, the reach is not the problem', () => {
+  const rows = [item({ name: 'a', travelMinutes: 121 }), item({ name: 'b', travelMinutes: 266 })];
+  assert.equal(nextWider(rows, { travel: 60, price: 'any', rating: 0 } as any, none), null);
+});
+
+test('the wider step honours the other filters, so it never offers places a £ band will then hide', () => {
+  const rows = [item({ name: 'a', travelMinutes: 75, priceLevel: 4 }), item({ name: 'b', travelMinutes: 75, priceLevel: 1 })];
+  assert.deepEqual(nextWider(rows, { travel: 60, price: String(bandOf(1)), rating: 0 } as any, none), { minutes: 120, count: 1 });
 });

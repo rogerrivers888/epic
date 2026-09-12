@@ -148,3 +148,19 @@ export function sortItems(items: InspireItem[], sort: InspireSort, crowdOf: Crow
 
 /** "3.2k" — the handoff's own abbreviation for a review count. */
 export const briefly = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
+
+/**
+ * The next wider How far that has anything in it, when the current one has
+ * nothing (Requirements C9: "the reason is stated and the user is offered a
+ * wider travel time"). Bristol from Bristol is a full screen at an hour; a
+ * town that is all countryside may need two. Null when even the widest step
+ * is empty — then the reach is not what is cutting the list.
+ */
+export function nextWider(items: InspireItem[], f: Filters, crowdOf: CrowdOf): { minutes: number; count: number } | null {
+  for (const step of HOW_FAR) {
+    if (f.travel != null && step.minutes <= f.travel) continue;
+    const count = items.filter((i) => keeps(i, { ...f, travel: step.minutes }, crowdOf)).length;
+    if (count > 0) return { minutes: step.minutes, count };
+  }
+  return null;
+}

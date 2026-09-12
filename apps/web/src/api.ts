@@ -1116,7 +1116,13 @@ export type InspireNear = {
    * ours, illustrated, and answered in milliseconds — and `live` is only true
    * when somebody deliberately asked to look around beyond it.
    */
-  pools?: { atlas: boolean; live: boolean };
+  pools?: {
+    atlas: boolean; live: boolean;
+    /** Why the look-around ran: asked for, or because the sweep has not reached this town. */
+    why?: 'asked' | 'unswept' | null;
+    /** A source refused, so an empty Food tab means "could not look", not "nowhere to eat". */
+    failed?: boolean;
+  };
   cached: boolean; tookMs: number; attribution: string[];
 };
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, Place } from '../api';
+import { deviceFrom, howToAllow } from './locationHelp';
 
 /**
  * Where the household is standing, when they ask for it (owner, 4 Sep 2026:
@@ -39,10 +40,14 @@ const supported = typeof navigator !== 'undefined' && !!navigator.geolocation;
 function reasonFor(err: any): { state: HereState; message: string } {
   const code = err?.code;
   if (code === 1) {
-    return {
-      state: 'denied',
-      message: 'This browser is set to keep your location private. Turn it back on for this site in the address bar, or just type where you are.',
-    };
+    // Refused, now or earlier. The browser will not ask again for us, so say
+    // that permission is missing and point at the switch for this device
+    // (owner, 12 Sep 2026: "This is where you need to go and what you need to
+    // do"). A home-screen Epic on an iPhone has its own entry in Settings.
+    const nav: any = typeof navigator !== 'undefined' ? navigator : {};
+    const standalone = nav.standalone === true
+      || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
+    return { state: 'denied', message: howToAllow(deviceFrom(nav.userAgent ?? ''), standalone) };
   }
   if (code === 3) return { state: 'failed', message: 'Your device took too long to find you. Try again, or type where you are.' };
   if (code === 2) return { state: 'failed', message: "Your device couldn't work out where it is. Indoors this is common — try again outside, or type where you are." };
@@ -52,9 +57,13 @@ function reasonFor(err: any): { state: HereState; message: string } {
 function fix(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      // Long enough for a cold GPS lock on a phone, short enough that the
-      // button does not sit spinning with nothing to say.
+      // The quick fix, not the GPS one. With high accuracy on, a phone waits
+      // for a satellite lock before answering, and indoors or on a train that
+      // is often longer than any timeout — which was a failure with nothing to
+      // show for it (owner, 12 Sep 2026). The network fix arrives in a second
+      // or two, good to a few hundred metres at worst, and a street name and
+      // the town are all this app ever asks of it.
+      enableHighAccuracy: false,
       timeout: 15_000,
       maximumAge: KEEP_MS,
     });
