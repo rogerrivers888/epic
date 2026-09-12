@@ -29,6 +29,7 @@ import { useViewport } from '../../hooks/useViewport';
 import { asNumber, useQueryState, useRouter } from '../../router';
 import { paths } from '../../routes';
 import { pickPhotoBlob } from '../../components/pickPhoto';
+import { BirthdayPicker } from '../../components/BirthdayPicker';
 import { HostFace, LOCAL_LABEL, TYPE_LABEL, TrustBadge, VideoHero } from '../../components/hosting';
 
 const TYPES: { key: HostType; body: string }[] = [
@@ -144,9 +145,7 @@ function WhatHostingIs({ host, home, error, setError, onNext }: { host: OwnHost 
           </View>
         ) : null}
       </Field>
-      <Field label="Date of birth" hint="Hosts on Epic are eighteen or over. Never shown to guests.">
-        <TextInput value={dob} onChangeText={setDob} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inkFaint} keyboardType="numbers-and-punctuation" style={[styles.input, { width: 180 }]} />
-      </Field>
+      <BirthdayPicker value={dob || null} onChange={(iso) => setDob(iso ?? '')} clearable={false} minAge={18} hint="Hosts on Epic are eighteen or over. Never shown to guests." />
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       <Button label="Start with the video" icon="video" loading={busy} onPress={() => void next()} />
       <Text style={[type.tiny, { textAlign: 'center' }]}>Four steps · profile, video, credentials, payout</Text>

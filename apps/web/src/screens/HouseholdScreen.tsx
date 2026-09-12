@@ -14,6 +14,7 @@ import { Icon, IconText } from '../components/Icon';
 import { PlacePicker } from '../components/PlacePicker';
 import { SuggestInput } from '../components/SuggestInput';
 import { TastePicker } from '../components/TastePicker';
+import { BirthdayPicker } from '../components/BirthdayPicker';
 
 // Everything a person can say about food: a dish, a cuisine, an ingredient
 // (chicken) or a style (healthy food).
@@ -273,10 +274,7 @@ export function AddPerson({ onAdded, onCancel }: { onAdded: (id: string | null) 
       <TextInput value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={colors.inkFaint} style={styles.input} autoFocus />
       <Text style={type.tiny}>Relationship to the household</Text>
       <Wrap>{Object.entries(RELATIONSHIP_LABEL).map(([k, l]) => <Chip key={k} label={l} selected={rel === k} onPress={() => setRel(k)} />)}</Wrap>
-      <Row>
-        <Text style={[type.small, { flex: 1 }]}>Birthday (optional)</Text>
-        <TextInput value={birth} onChangeText={setBirth} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 0, width: 160 }]} />
-      </Row>
+      <BirthdayPicker label="Birthday (optional)" value={birth || null} onChange={(iso) => setBirth(iso ?? '')} />
       <Text style={type.tiny}>A child under 13 gets a full profile owned by an adult — no login, no voice capture.</Text>
       <Row>
         <Button label="Add" disabled={!name.trim()} onPress={async () => {
@@ -750,26 +748,22 @@ function AboutGroup({ member, relationships, refresh }: { member: Member; relati
     if (!t || t === member.name) { setName(member.name); return; }
     await api.updateMember(member.id, { name: t }); await refresh(); flash('Name saved');
   };
-  const saveBirth = async () => {
-    const t = birth.trim();
+  // Picked, not typed (owner, 12 Sep 2026): year, then month, then day — and saved the moment the day is tapped.
+  const saveBirth = async (iso: string | null) => {
+    const t = iso ?? '';
+    setBirth(t);
     if (t === (member.birthDate ?? '')) return;
-    if (t && !DATE.test(t)) { setBirth(member.birthDate ?? ''); return; }
     await api.updateMember(member.id, { birthDate: t || null }); await refresh(); flash(t ? 'Birthday saved' : 'Birthday cleared');
   };
   const ageText = member.age != null ? `${member.age}${member.birthDate ? '' : ' (approx.)'}${member.isMinor ? ' · under 13' : ''}` : null;
 
   return (
     <Group title="About" hint="Saves as you go.">
-      <Row>
-        <View style={{ flex: 1, gap: 4 }}>
-          <Text style={type.tiny}>Name</Text>
-          <TextInput value={name} onChangeText={setName} onBlur={saveName} onSubmitEditing={saveName} returnKeyType="done" style={styles.input} />
-        </View>
-        <View style={{ width: 170, gap: 4 }}>
-          <Text style={type.tiny}>Birthday{ageText ? ` · ${ageText}` : ''}</Text>
-          <TextInput value={birth} onChangeText={setBirth} onBlur={saveBirth} onSubmitEditing={saveBirth} returnKeyType="done" placeholder="YYYY-MM-DD" placeholderTextColor={colors.inkFaint} style={styles.input} />
-        </View>
-      </Row>
+      <View style={{ gap: 4 }}>
+        <Text style={type.tiny}>Name</Text>
+        <TextInput value={name} onChangeText={setName} onBlur={saveName} onSubmitEditing={saveName} returnKeyType="done" style={styles.input} />
+      </View>
+      <BirthdayPicker label={`Birthday${ageText ? ` · ${ageText}` : ''}`} value={birth || null} onChange={(iso) => void saveBirth(iso)} />
       <Text style={type.tiny}>Relationship to the household</Text>
       <Wrap>{relationships.map((r) => <Chip key={r} label={RELATIONSHIP_LABEL[r] ?? r} selected={member.relationship === r} onPress={async () => { await api.updateMember(member.id, { relationship: r }); await refresh(); flash('Relationship saved'); }} />)}</Wrap>
       {saved ? <Text style={[type.tiny, { color: colors.like }]}>{saved}</Text> : null}
