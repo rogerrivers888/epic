@@ -83,6 +83,8 @@ const MINUTES = [15, 30, 45, 60, 90];
 
 /** `sub=none` is the places no drawer has been taught for — a gap, and the one most worth a number. */
 const NO_DRAWER = 'none';
+/** `cat=none` likewise: a word rather than nothing, because the router drops an empty value (Codex, 12 Sep 2026). */
+const NO_CATEGORY = 'none';
 /** `source=all` is the column that counts every source together. */
 const ALL = 'all';
 
@@ -152,7 +154,7 @@ export function Lookup() {
   // --- names ---------------------------------------------------------------
   const catLabel = useMemo(() => new Map((result?.taxonomy.categories ?? []).map((c) => [c.key, c.label])), [result]);
   const subLabel = useMemo(() => new Map((result?.taxonomy.subcategories ?? []).map((s) => [s.key, s.label])), [result]);
-  const nameOfCat = (key: string | null) => (key ? catLabel.get(key) ?? key : 'No category');
+  const nameOfCat = (key: string | null) => (key == null || key === NO_CATEGORY ? 'No category' : catLabel.get(key) ?? key);
   const nameOfSub = (key: string | null) => (key == null || key === NO_DRAWER ? 'No drawer' : subLabel.get(key) ?? key);
   const sourceOf = (key: string): LookupSource | undefined => result?.sources.find((s) => s.key === key);
   const nameOfSource = (key: string | null) => (key == null || key === ALL ? 'Every source' : sourceOf(key)?.label ?? key);
@@ -166,13 +168,13 @@ export function Lookup() {
     [result, ofKind],
   );
   const carries = (i: LookupItem, key: string) => key === ALL || i.sources.includes(key);
-  const inCat = (i: LookupItem, c: string | null) => c == null || (i.shelf ?? '') === c;
+  const inCat = (i: LookupItem, c: string | null) => c == null || (c === NO_CATEGORY ? i.shelf == null : i.shelf === c);
   const inSub = (i: LookupItem, s: string | null) => s == null || (s === NO_DRAWER ? i.subcategory == null : i.subcategory === s);
 
   /** The matrix's rows: categories in taxonomy order, each with its drawers. */
   const matrix = useMemo(() => {
     const order = (result?.taxonomy.categories ?? []).map((c) => c.key);
-    const cats = [...new Set(ofKind.map((i) => i.shelf ?? ''))].sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
+    const cats = [...new Set(ofKind.map((i) => i.shelf ?? NO_CATEGORY))].sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
     return cats.map((c) => {
       const within = ofKind.filter((i) => inCat(i, c));
       const subOrder = (result?.taxonomy.subcategories ?? []).filter((s) => s.category === c).map((s) => s.key);
@@ -181,8 +183,8 @@ export function Lookup() {
       return { key: c, items: within, subs: subs.map((s) => ({ key: s, items: within.filter((i) => inSub(i, s)) })) };
     });
   }, [ofKind, result]);
-  /** Food has one shelf, so its drawers are the rows; Activities has several, so its drawers open out under each. */
-  const flat = matrix.length === 1;
+  /** Food is one shelf, so its drawers are the rows; Activities has several, so its drawers open out under each. By the tab, not by what this ring happened to hold. */
+  const flat = kind === 'food';
 
   const [openCats, setOpenCats] = useState<Set<string>>(new Set());
   const toggleCat = (c: string) => setOpenCats((s) => { const n = new Set(s); if (n.has(c)) n.delete(c); else n.add(c); return n; });
