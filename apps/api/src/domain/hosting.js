@@ -80,8 +80,17 @@ const plusDays = (iso, n) => { const d = dateAt(iso); d.setUTCDate(d.getUTCDate(
 export function seriesDates(offer) {
   if (!offer.first_date || (!offer.sessions && !offer.end_date)) return [];
   const skipped = new Set((offer.skipped_dates ?? []).map(ymd));
+  // Monthly keeps the first session's day of the month, clamped to the last
+  // day of a shorter month: the 31st in January is the 28th in February and
+  // the 31st again in March, never the 3rd (Codex, 13 Sep 2026).
+  const wantDay = dateAt(offer.first_date).getUTCDate();
   const step = (iso) => {
-    if ((offer.repeat_every ?? 'weekly') === 'monthly') { const d = dateAt(iso); d.setUTCMonth(d.getUTCMonth() + 1); return ymd(d); }
+    if ((offer.repeat_every ?? 'weekly') === 'monthly') {
+      const d = dateAt(iso);
+      const y = d.getUTCFullYear(); const m = d.getUTCMonth() + 1;
+      const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      return ymd(new Date(Date.UTC(y, m, Math.min(wantDay, last), 12)));
+    }
     return plusDays(iso, offer.repeat_every === 'fortnightly' ? 14 : 7);
   };
   const out = [];

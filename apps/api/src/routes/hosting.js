@@ -538,7 +538,9 @@ router.post('/host/offers/:id/submit', async (req, res, next) => {
       publishedAt: straightToLive ? new Date() : null,
       reviewChecklist: pitchChecklist(offer),
     });
-    res.json({ offer: await ownOfferPayload(updated, host), inReview: !straightToLive });
+    // Now the invitations go: the page they open is the one the host pressed publish on.
+    const told = updated.state === 'live' ? await sendInvites(host, updated, (await repo.invitesOf(updated.id)).filter((i) => !i.sent_at)) : null;
+    res.json({ offer: await ownOfferPayload(updated, host), inReview: !straightToLive, told });
   } catch (err) { next(err); }
 });
 
@@ -704,7 +706,10 @@ router.post('/host/offers/:id/invites', async (req, res, next) => {
       const inv = await repo.insertInvite({ offerId: offer.id, name, contact, contactKind: kind, heads: Math.max(1, int(r.heads) ?? 1), token: crypto.randomBytes(9).toString('base64url') });
       made.push(inv);
     }
-    if (req.body?.send !== false) await sendInvites(host, offer, made);
+    // A draft is not sent: it may not have its title, date or place yet.
+    // Invitations go out when the host publishes (submit), or at once on an
+    // offer that is already live (Codex, 13 Sep 2026).
+    if (offer.state === 'live' && req.body?.send !== false) await sendInvites(host, offer, made);
     res.status(201).json({ offer: await ownOfferPayload(offer, host) });
   } catch (err) { next(err); }
 });
@@ -748,6 +753,8 @@ publicRouter.get('/invited/:token', async (req, res, next) => {
     const inv = await repo.inviteByToken(req.params.token);
     if (!inv) return res.status(404).json({ error: 'not_found', message: 'That invitation does not open anything.' });
     const o = await repo.offerById(inv.offer_id);
+    // Nothing opens before the host has pressed publish.
+    if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_yet', message: 'This invitation is not ready yet.' });
     const h = await repo.hostById(o.host_id);
     const bookings = await repo.bookingsOfOffer(o.id);
     const answered = (await repo.invitesOf(o.id)).filter((x) => x.rsvp === 'yes');
@@ -765,6 +772,8 @@ publicRouter.post('/invited/:token', async (req, res, next) => {
   try {
     const inv = await repo.inviteByToken(req.params.token);
     if (!inv) return res.status(404).json({ error: 'not_found', message: 'That invitation does not open anything.' });
+    const o = await repo.offerById(inv.offer_id);
+    if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_yet', message: 'This invitation is not ready yet.' });
     const rsvp = oneOf(['yes', 'no'], req.body?.rsvp);
     if (!rsvp) throw refuse(400, 'rsvp_required', 'Yes or no.');
     const heads = rsvp === 'yes' ? Math.max(1, int(req.body?.heads) ?? inv.heads) : 0;

@@ -512,6 +512,7 @@ function MoneyStep({ offer: o, save }: { offer: OwnOffer; save: Save }) {
 function Price({ offer: o, save }: { offer: OwnOffer; save: Save }) {
   const [amount, setAmount] = useState(pnds(o.pricePence));
   const [total, setTotal] = useState(pnds(o.totalPence));
+  const [min, setMin] = useState(str(o.minCount));
   const byNumbers = o.priceMode === 'by_numbers';
   return (
     <View style={{ gap: spacing.md }}>
@@ -534,6 +535,10 @@ function Price({ offer: o, save }: { offer: OwnOffer; save: Save }) {
             : <NumberBox value={amount} onChange={setAmount} onCommit={() => void save({ pricePence: pence(amount), per: 'person' })} prefix="£" width={140} />}
         </Row>
         <Text style={type.tiny}>{byNumbers ? 'The most anyone pays is the total split by the minimum. We work the rest out from how many come and refund the difference.' : 'What every guest pays. A household booking three places pays three times this.'}</Text>
+      </Field>
+      {/* A minimum only exists when money does, and money is asked after the numbers — so it is asked here (Codex, 13 Sep 2026). */}
+      <Field label="Fewest it can run with" hint={num(min) ? `Under ${num(min)} and it is called off — everybody is told and nothing is taken.` : 'Leave it empty and it runs whoever books.'}>
+        <Row><NumberBox value={min} onChange={setMin} onCommit={() => void save({ minCount: num(min) })} width={84} /><Text style={type.small}>people</Text></Row>
       </Field>
       {o.money === 'epic' ? (
         <Field label="If they cancel">

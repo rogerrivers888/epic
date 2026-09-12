@@ -194,14 +194,14 @@ export async function deleteOffer(id, hostId) {
 /** A copy of a one-off on another date: the dashboard's "Add another date". */
 export async function cloneOfferOnDate(offer, startsOn, startsAt) {
   const { rows } = await query(
-    `insert into host_offers (host_id, shape, state, visibility, title, description, why_you, includes, category, photo_ids, video_id,
-        venue, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, duration_min, min_count, expected_count, max_count,
-        party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, starts_on, starts_at, running_order, featured_people,
-        regulated_answer, licence_number, licence_expiry, published_at, submitted_at)
-     select host_id, shape, state, visibility, title, description, why_you, includes, category, photo_ids, video_id,
-        venue, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, duration_min, min_count, expected_count, max_count,
-        party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, $2::date, coalesce($3::time, starts_at), running_order, featured_people,
-        regulated_answer, licence_number, licence_expiry, now(), now()
+    `insert into host_offers (host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, photo_ids, video_id, doc_id, facts, transcript,
+        venue, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
+        min_count, expected_count, max_count, party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, starts_on, starts_at, running_order, featured_people,
+        sub_detail, rules_accepted, checks, regulated_answer, licence_number, licence_expiry, published_at, submitted_at)
+     select host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, photo_ids, video_id, doc_id, facts, transcript,
+        venue, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
+        min_count, expected_count, max_count, party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, $2::date, coalesce($3::time, starts_at), running_order, featured_people,
+        sub_detail, rules_accepted, checks, regulated_answer, licence_number, licence_expiry, now(), now()
        from host_offers where id = $1 returning *`,
     [offer.id, startsOn, startsAt ?? null],
   );
