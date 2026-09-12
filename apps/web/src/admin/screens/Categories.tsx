@@ -37,7 +37,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
   api, MoodKey, ShelfSubcategory, Taxonomy, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
@@ -589,6 +589,8 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
     void api.taxonomyMatrix(false).then((d) => { if (live) setM(d); }).catch(() => { if (live) setM(null); });
     return () => { live = false; };
   }, [tax]);
+  // An opened cell belongs to the category it was opened in (Codex, 12 Sep 2026).
+  useEffect(() => { setOpen(null); }, [category]);
 
   const cat = m?.categories.find((c) => c.key === category) ?? null;
   const nsLabel = (k: string) => tax.namespaces.find((n) => n.key === k)?.label ?? k;
@@ -617,7 +619,7 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
     <View style={{ gap: spacing.md }}>
       <Section title={`Each source's words that land in ${cat.label}`}>
         <Text style={[type.tiny, { paddingVertical: 6 }]}>A number is how many of that source's words land in the row; tap it to read them, and tap a word to write a rule about it. The last rows are the work: words read into {cat.label} with no subcategory, and words nothing read at all.</Text>
-        <View style={styles.tableWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
           <View>
             <View style={[styles.tRow, styles.tHead]}>
               <View style={[styles.tFirst, wide && { width: 220 }]}><Text style={styles.kicker}>Subcategory</Text></View>
@@ -640,7 +642,7 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
               </View>
             ))}
           </View>
-        </View>
+        </ScrollView>
       </Section>
 
       {open && opened.length ? (
@@ -672,6 +674,7 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
   const [typed, setTyped] = useState(q);
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [open, setOpen] = useState(false);
   const [foot, setFoot] = useState(36);
   const generation = React.useRef(0);
@@ -693,13 +696,16 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
   }, [ns, q, tax]);
 
   const showMore = async () => {
+    if (loadingMore) return;
     const asked = generation.current;
+    setLoadingMore(true);
     try {
       const d = await api.taxonomyLabels({ namespace: ns || undefined, q: q.trim() || undefined, all: Boolean(q.trim()) || (ns !== 'wikidata' && ns !== ''), limit: PAGE, offset: rows?.length ?? 0 });
       if (asked !== generation.current) return;
       setRows((prev) => [...(prev ?? []), ...d.labels]);
       setMore(d.more);
     } catch { /* the list stands */ }
+    finally { setLoadingMore(false); }
   };
 
   return (
@@ -746,7 +752,7 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
               </Press>
             );
           })}
-          {more ? <View style={{ paddingVertical: spacing.sm }}><TextAction label={`Show the next ${PAGE}`} onPress={() => void showMore()} /></View> : null}
+          {more ? <View style={{ paddingVertical: spacing.sm }}><TextAction label={loadingMore ? 'Loading…' : `Show the next ${PAGE}`} disabled={loadingMore} onPress={() => void showMore()} /></View> : null}
         </Section>
       )}
     </View>
@@ -788,7 +794,7 @@ const styles = StyleSheet.create({
   fieldInput: { flex: 1, paddingVertical: 6, color: colors.ink, fontSize: 14, outlineStyle: 'none' as never, backgroundColor: 'transparent' },
   landing: { paddingVertical: spacing.sm },
 
-  tableWrap: { overflow: 'scroll' as never, width: '100%' },
+  tableWrap: { width: '100%' },
   tRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   tHead: { borderBottomWidth: BORDER, borderBottomColor: colors.line },
   tWork: { backgroundColor: colors.surfaceMuted },
