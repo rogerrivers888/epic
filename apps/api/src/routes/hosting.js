@@ -535,8 +535,9 @@ async function tellBooked(bookings, text) {
     const a = accounts[0];
     if (!a) continue;
     try {
-      if (a.email && mailConfigured()) { await sendMail({ to: a.email, subject: 'From your Epic host', text }); delivered += 1; }
-      else if (a.mobile && smsConfigured()) { await sendSms({ to: a.mobile, text: `Epic: ${text}` }); delivered += 1; }
+      // The senders answer `{ sent }` rather than throwing; only a delivered one counts.
+      if (a.email && mailConfigured()) { if ((await sendMail({ to: a.email, subject: 'From your Epic host', text })).sent) delivered += 1; }
+      else if (a.mobile && smsConfigured()) { if ((await sendSms({ to: a.mobile, text: `Epic: ${text}` })).sent) delivered += 1; }
     } catch { /* recorded below as not delivered */ }
   }
   return { sentTo: households.length, delivered, channel: mailConfigured() || smsConfigured() ? 'sender' : 'none' };
