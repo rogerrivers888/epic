@@ -342,7 +342,18 @@ export const googleSource = {
       const data = await call('/places:searchNearby', {
         fieldMask: SEARCH_FIELDS, meter,
         body: {
-          includedTypes: group === 'food' ? FOOD_TYPES : THING_TYPES,
+          // By what a place mainly is, not by any type it carries. Asked with
+          // `includedTypes`, the twenty most popular "bars and restaurants" in
+          // central Bristol were mostly hotels — each has a bar, each has
+          // thousands of reviews — and after the lodging filter below seven
+          // eating places were left of the twenty paid for (owner, 12 Sep
+          // 2026: "why are you struggling to get data?"). The primary type is
+          // the honest fence: a hotel's primary type is hotel. Things to do
+          // keep the wider match, because a park is a park under any type,
+          // but lodging is excluded up front for the same reason.
+          ...(group === 'food'
+            ? { includedPrimaryTypes: FOOD_TYPES }
+            : { includedTypes: THING_TYPES, excludedPrimaryTypes: [...LODGING] }),
           maxResultCount: 20,
           rankPreference: 'POPULARITY',
           locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius } },
