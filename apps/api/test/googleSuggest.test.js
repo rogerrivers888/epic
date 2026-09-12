@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { suggestFor } = await import('../src/domain/googleSuggest.js');
+const { suggestFor, sureDecisionFor } = await import('../src/domain/googleSuggest.js');
 const { GOOGLE_TYPES } = await import('../src/sources/googleTypes.js');
 
 const DRAWERS = ['theme-parks', 'zoos-wildlife', 'karting', 'restaurants', 'cafes', 'fast-food', 'pubs-bars', 'churches', 'museums', 'galleries', 'parks', 'arenas'];
@@ -33,6 +33,17 @@ test('a cuisine is a restaurant, and the cuisine rides along; a counter is not',
   assert.equal(suggestFor('steak_house', 'Food and Drink', DRAWERS).cuisine, 'steakhouse');
   assert.equal(suggestFor('fast_food_restaurant', 'Food and Drink', DRAWERS).subcategory, 'fast-food');
   assert.equal(suggestFor('ice_cream_shop', 'Food and Drink', DRAWERS).subcategory, 'cafes');
+});
+
+test('parking and stations are useful nearby, never thrown out; and the sure decisions never touch our subcategories', () => {
+  assert.equal(suggestFor('parking', 'Automotive', DRAWERS).nearby, true);
+  assert.equal(suggestFor('train_station', 'Transportation', DRAWERS).nearby, true);
+  assert.equal(sureDecisionFor('parking', 'Automotive'), 'nearby');
+  assert.equal(sureDecisionFor('car_dealer', 'Automotive'), 'aside');
+  assert.equal(sureDecisionFor('hotel', 'Lodging'), 'aside');
+  assert.equal(sureDecisionFor('amusement_park', 'Entertainment and Recreation'), null);
+  assert.equal(sureDecisionFor('thai_restaurant', 'Food and Drink'), null);
+  assert.equal(sureDecisionFor('paintball_center', 'Entertainment and Recreation'), null);
 });
 
 test('where nothing is obvious, nothing is suggested', () => {

@@ -36,7 +36,7 @@ import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
-import { suggestFor } from '../domain/googleSuggest.js';
+import { suggestFor, sureDecisionFor } from '../domain/googleSuggest.js';
 import { SHELF_FLOOR } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
@@ -44,8 +44,24 @@ export const taxonomyRoutes = Router();
 const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 
-/** The code's vocabulary is in the table before anything reads it. */
-const ready = () => labelRepo.ensureKnown(knownLabels());
+/**
+ * The code's vocabulary is in the table before anything reads it, and the
+ * decisions Epic is sure of are made — once per process, only where nobody
+ * has decided, and never for anything that would land in one of our
+ * subcategories (owner, 13 Sep 2026: "you shouldn't be asking me to approve
+ * those… but only if you're sure").
+ */
+let decided = false;
+async function ready() {
+  await labelRepo.ensureKnown(knownLabels());
+  if (decided) return;
+  decided = true;
+  try {
+    const open = await labelRepo.undecidedGoogle();
+    const sure = open.map((r) => ({ key: r.key, decision: sureDecisionFor(r.key, r.note) })).filter((r) => r.decision);
+    await labelRepo.decideMany(sure);
+  } catch { decided = false; }
+}
 
 /** English names for a list of labels, from whichever table holds each. */
 async function namesFor(labels) {
@@ -274,11 +290,11 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         if (!labels.length) throw new Error('no label');
         const badAt = labels.findIndex((l) => !parseLabel(l));
         if (badAt >= 0) throw new Error(`not a label: ${labels[badAt] || '(empty)'}`);
-        if (it.aside) {
-          if (labels.length !== 1) throw new Error('set aside one label at a time');
+        if (it.aside || it.nearby) {
+          if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
-          await labelRepo.save({ namespace, key, active: false });
-          done.push({ labels, aside: true });
+          await labelRepo.save({ namespace, key, decision: it.aside ? 'aside' : 'nearby' });
+          done.push({ labels, aside: Boolean(it.aside), nearby: Boolean(it.nearby) });
           continue;
         }
         const subcategory = it.subcategory ? String(it.subcategory) : null;
@@ -289,8 +305,8 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           scope, subject, labels, subjectLabel: labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + '),
           weights: {}, subcategory, reason: it.reason ?? 'Approved from the suggested mapping.', by: actorOf(req), known,
         });
-        // A label set aside earlier and now mapped is back in the list.
-        for (const l of labels) { const p = parseLabel(l); await labelRepo.save({ namespace: p.namespace, key: p.key, active: true }); }
+        // A label decided earlier and now mapped is back in the list, its decision cleared.
+        for (const l of labels) { const p = parseLabel(l); await labelRepo.save({ namespace: p.namespace, key: p.key, decision: 'none' }); }
         await query(
           `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,

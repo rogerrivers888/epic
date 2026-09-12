@@ -2093,8 +2093,8 @@ export const api = {
   taxonomySaveRule: (body: { labels: string[]; subcategory?: string | null; weights?: ShelfWeights; reason?: string | null }) =>
     put<{ rule: TaxonomyRule }>('/api/admin/taxonomy/rules', body),
   /** A group's suggestions approved in one press: rules and set-asides together. */
-  taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; reason?: string | null }[]) =>
-    post<{ done: { labels: string[]; subcategory?: string; aside?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
+  taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; nearby?: boolean; reason?: string | null }[]) =>
+    post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
   /** Where a set of labels would land right now, without saving anything. */
   taxonomyTry: (labels: string[]) => post<TaxonomyTry>('/api/admin/taxonomy/try', { labels }),
   taxonomySaveLabel: (body: { namespace: string; key: string; label?: string | null; active?: boolean }) =>
@@ -2641,9 +2641,11 @@ export type TaxonomyLanding = {
 export type TaxonomyLabel = {
   namespace: string; key: string; label: string | null; note: string | null;
   seen_count: number; active: boolean; seeded: boolean;
+  /** Not a day out, or useful beside one (parking, a station); null while undecided. */
+  decision?: 'aside' | 'nearby' | null;
   landing: TaxonomyLanding;
   /** For a Google type: where it could go, for the owner to approve or change. */
-  suggestion?: { subcategory?: string; aside?: boolean; cuisine?: string; why: string } | null;
+  suggestion?: { subcategory?: string; aside?: boolean; nearby?: boolean; cuisine?: string; why: string } | null;
 };
 
 /** A rule as the Categories screen draws it: every rule as the labels it is about. */

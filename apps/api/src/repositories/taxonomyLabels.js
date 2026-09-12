@@ -111,9 +111,9 @@ export async function list({ namespace = null, q = null, seenOnly = false, limit
   const off = args.length;
   const { rows } = await query(
     `with all_labels as (
-       select namespace, key, label, note, seen_count, active, seeded from taxonomy_labels
+       select namespace, key, label, note, seen_count, active, seeded, decision from taxonomy_labels
        union all
-       select 'wikidata', qid, label, category, seen_count, admit, true from place_kinds
+       select 'wikidata', qid, label, category, seen_count, admit, true, null from place_kinds
      )
      select * from all_labels
      ${where.length ? `where ${where.join(' and ')}` : ''}
@@ -149,7 +149,7 @@ export async function one(namespace, key) {
 }
 
 /** Give a label its English name, or switch it off. Wikidata's names come from "Name the types". */
-export async function save({ namespace, key, label, note, active }) {
+export async function save({ namespace, key, label, note, active, decision }) {
   if (namespace === 'wikidata') {
     const { rows } = await query(
       `update place_kinds set label = coalesce($2, label), admit = coalesce($3, admit), updated_at = now()
@@ -157,15 +157,40 @@ export async function save({ namespace, key, label, note, active }) {
       [key, label ?? null, active == null ? null : Boolean(active)]);
     return rows[0] ?? null;
   }
+  // A decision is one of three: 'aside' (not a day out; active goes false),
+  // 'nearby' (useful beside one), or 'none' to clear it. Left out, it keeps.
+  const d = decision === undefined ? null : decision === null || decision === 'none' ? 'none' : String(decision);
   const { rows } = await query(
-    `insert into taxonomy_labels (namespace, key, label, note, active)
-     values ($1, $2, $3, $4, coalesce($5, true))
+    `insert into taxonomy_labels (namespace, key, label, note, active, decision)
+     values ($1, $2, $3, $4, coalesce($5, true), case when $6::text is null or $6 = 'none' then null else $6 end)
      on conflict (namespace, key) do update
         set label = coalesce($3, taxonomy_labels.label),
             note = coalesce($4, taxonomy_labels.note),
-            active = coalesce($5, taxonomy_labels.active),
+            active = case when $6::text = 'aside' then false when $6::text is not null then true else coalesce($5, taxonomy_labels.active) end,
+            decision = case when $6::text is null then taxonomy_labels.decision when $6 = 'none' then null else $6 end,
             updated_at = now()
      returning *`,
-    [namespace, key, label ?? null, note ?? null, active == null ? null : Boolean(active)]);
+    [namespace, key, label ?? null, note ?? null, active == null ? null : Boolean(active), d]);
   return rows[0];
+}
+
+/** Google's words nobody has decided about: no decision, still active, and no rule naming them. */
+export async function undecidedGoogle() {
+  const { rows } = await query(
+    `select l.key, l.note from taxonomy_labels l
+      where l.namespace = 'google' and l.decision is null and l.active
+        and not exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subject = 'google:' || l.key)`);
+  return rows;
+}
+
+/** Decide many at once, as the sure decisions are applied. */
+export async function decideMany(items) {
+  if (!items.length) return 0;
+  const { rowCount } = await query(
+    `update taxonomy_labels l
+        set decision = c.decision, active = (c.decision <> 'aside'), updated_at = now()
+       from (select unnest($1::text[]) as key, unnest($2::text[]) as decision) c
+      where l.namespace = 'google' and l.key = c.key and l.decision is null`,
+    [items.map((i) => i.key), items.map((i) => i.decision)]);
+  return rowCount;
 }

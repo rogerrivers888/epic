@@ -30,7 +30,7 @@ const TO_SUBCATEGORY = {
   hiking_area: 'trails', historical_landmark: 'landmarks', indoor_playground: 'play', karaoke: 'live-music',
   live_music_venue: 'live-music', marina: 'paddling', miniature_golf_course: 'days-out', movie_theater: 'cinema-bowling',
   national_park: 'nature', night_club: 'pubs-bars', observation_deck: 'viewpoints', off_roading_area: 'off-road',
-  opera_house: 'theatre', park: 'parks', philharmonic_hall: 'theatre', picnic_ground: 'parks', planetarium: 'museums',
+  opera_house: 'theatre', park: 'parks', philharmonic_hall: 'theatre', planetarium: 'museums',
   roller_coaster: 'theme-parks', state_park: 'nature', video_arcade: 'cinema-bowling', water_park: 'theme-parks',
   wildlife_park: 'zoos-wildlife', wildlife_refuge: 'nature', zoo: 'zoos-wildlife',
   // Sports
@@ -77,13 +77,26 @@ const TO_SUBCATEGORY = {
  */
 const GENERIC_CUISINE = NOT_A_CUISINE;
 
+/**
+ * Not a day out, but worth knowing about beside one — where to park, a loo,
+ * how to get there (owner, 13 Sep 2026: "parking is actually something we
+ * might want to show in the app"). Kept, as "useful nearby", rather than
+ * thrown out with the car dealers.
+ */
+export const NEARBY_TYPES = new Set([
+  'parking', 'parking_garage', 'parking_lot', 'park_and_ride', 'electric_vehicle_charging_station', 'ebike_charging_station',
+  'public_bathroom', 'tourist_information_center', 'visitor_center', 'rest_stop', 'picnic_ground',
+  'train_station', 'bus_station', 'subway_station', 'light_rail_station', 'tram_stop', 'transit_station', 'ferry_terminal',
+  'airport', 'international_airport', 'bike_sharing_station', 'gas_station',
+]);
+
 /** Google's groups that are never a day out: every type in them is suggested aside. */
 const ASIDE_GROUPS = new Set(['Automotive', 'Business', 'Education', 'Facilities', 'Finance', 'Geographical Areas', 'Government', 'Housing', 'Lodging', 'Services', 'Transportation']);
 
 /** Types in a day-out group that are still not a day out. */
 const ASIDE_TYPES = new Set([
   'banquet_hall', 'casino', 'childrens_camp', 'community_center', 'convention_center', 'internet_cafe', 'movie_rental', 'plaza',
-  'visitor_center', 'wedding_venue', 'sports_coaching', 'sports_school', 'art_studio',
+  'wedding_venue', 'sports_coaching', 'sports_school', 'art_studio',
   'chiropractor', 'dental_clinic', 'dentist', 'doctor', 'drugstore', 'general_hospital', 'hospital', 'massage', 'medical_center', 'medical_clinic',
   'medical_lab', 'pharmacy', 'physiotherapist', 'skin_care_clinic', 'tanning_studio',
 ]);
@@ -100,6 +113,7 @@ const ASIDE_TYPES = new Set([
  */
 export function suggestFor(type, group, subcategoryKeys) {
   const has = (k) => subcategoryKeys.includes(k);
+  if (NEARBY_TYPES.has(type)) return { nearby: true, why: 'useful beside a day out — where to park, a loo, a station' };
   const named = TO_SUBCATEGORY[type];
   if (named) return has(named) ? { subcategory: named, why: 'the obvious subcategory for this word' } : null;
   // A steakhouse and a bar and grill are restaurants with a cuisine of their own.
@@ -118,5 +132,21 @@ export function suggestFor(type, group, subcategoryKeys) {
       : { subcategory: 'restaurants', cuisine, why: `a restaurant; the cuisine, ${cuisine}, is kept as its own attribute` };
   }
   if (group === 'Shopping') return { aside: true, why: 'a shop, not a browse' };
+  return null;
+}
+
+/**
+ * The decisions Epic is sure enough of to make without asking (owner, 13 Sep
+ * 2026: "for stuff you have a high degree of certainty… you shouldn't be
+ * asking me to approve those"): a whole group that is never a day out, the
+ * odd casino in one that is, and the things useful nearby. Anything that
+ * would put a place in one of *our* subcategories is never decided here —
+ * that is his to approve.
+ */
+export function sureDecisionFor(type, group) {
+  if (NEARBY_TYPES.has(type)) return 'nearby';
+  if (TO_SUBCATEGORY[type] || /_restaurant$/.test(type)) return null;
+  if (ASIDE_TYPES.has(type) || ASIDE_GROUPS.has(group)) return 'aside';
+  if (group === 'Shopping') return 'aside';
   return null;
 }
