@@ -377,3 +377,140 @@ const styles = StyleSheet.create({
 
   mono: { fontFamily: Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', default: 'monospace' }) },
 });
+
+// ---------------------------------------------------------------------------
+// the dropdown
+// ---------------------------------------------------------------------------
+
+export type DropdownOption = { key: string; label: string; on: boolean; count?: number | string | null; group?: string };
+
+/**
+ * A control that opens a panel of choices under itself — the owner's ask for
+ * the Sources filters (12 Sep 2026): "just a dropdown with tick boxes for me
+ * to be able to tick the one I want. The dropdown should appear below the
+ * dropdown box. In light mode, it should appear in white."
+ *
+ * `multi` draws tick boxes and keeps the panel open; a single-choice panel
+ * closes on the pick. The panel is the page's surface colour over a 1px rule,
+ * and a transparent scrim behind it closes it. It positions itself under the
+ * control, so it must sit in a parent that does not clip (`overflow: visible`).
+ */
+export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick }: {
+  /** What the control is for: "Domain". */
+  label: string;
+  /** What it is set to, printed after the label: "All domains". */
+  value: string;
+  options: DropdownOption[];
+  onPick: (key: string) => void;
+  multi?: boolean;
+  width?: number;
+  /** Shortcut rows above the list, for multi: All · None · Own for good … */
+  quick?: { key: string; label: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const groups = useMemo(() => {
+    const out: { title: string | null; items: DropdownOption[] }[] = [];
+    for (const o of options) {
+      const title = o.group ?? null;
+      const g = out.find((x) => x.title === title);
+      if (g) g.items.push(o); else out.push({ title, items: [o] });
+    }
+    return out;
+  }, [options]);
+  return (
+    <View style={[dd.ddWrap, open && dd.ddWrapOpen]}>
+      <Press
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}: ${value}`}
+        style={[dd.dd, open && dd.ddOpen]}
+      >
+        <Text style={dd.ddLabel}>{label}</Text>
+        <Text style={dd.ddValue} numberOfLines={1}>{value}</Text>
+        <Icon name={open ? 'collapse' : 'expand'} size={13} color={colors.ink} strokeWidth={2.4} />
+      </Press>
+      {open ? (
+        <>
+          <Press style={dd.ddScrim} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={[dd.ddPanel, { width }]} accessibilityRole="menu">
+            {quick?.length ? (
+              <Row style={dd.ddQuick}>
+                {quick.map((q) => (
+                  <Press key={q.key} onPress={() => onPick(q.key)} accessibilityRole="button" style={dd.ddQuickItem}>
+                    <Text style={[type.tiny, { color: colors.ink, textDecorationLine: 'underline' }]}>{q.label}</Text>
+                  </Press>
+                ))}
+              </Row>
+            ) : null}
+            <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+              {groups.map((g) => (
+                <View key={g.title ?? '_'}>
+                  {g.title ? <Text style={dd.ddGroup}>{g.title}</Text> : null}
+                  {g.items.map((o) => (
+                    <Press
+                      key={o.key}
+                      onPress={() => { onPick(o.key); if (!multi) setOpen(false); }}
+                      accessibilityRole={multi ? 'checkbox' : 'menuitem'}
+                      accessibilityState={multi ? { checked: o.on } : { selected: o.on }}
+                      style={({ hovered }: any) => [dd.ddItem, hovered && dd.ddItemHover, !multi && o.on && dd.ddItemOn]}
+                    >
+                      {!multi ? <View style={{ width: 14, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.6} /> : null}</View> : null}
+                      {multi ? (
+                        <View style={[dd.ddBox, o.on && dd.ddBoxOn]}>
+                          {o.on ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}
+                        </View>
+                      ) : null}
+                      <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{o.label}</Text>
+                      {o.count != null && o.count !== '' ? <Text style={type.tiny}>{String(o.count)}</Text> : null}
+                    </Press>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+/** A small on/off with its label — the "hide providers with nothing here" switch. */
+export function Toggle({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} accessibilityRole="switch" accessibilityState={{ checked: on }} style={dd.toggle}>
+      <View style={[dd.ddBox, on && dd.ddBoxOn]}>
+        {on ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}
+      </View>
+      <Text style={[type.small, { color: colors.ink }]}>{label}</Text>
+    </Press>
+  );
+}
+
+const dd = StyleSheet.create({
+  ddWrap: { position: 'relative', zIndex: 20 },
+  /** Open, it must sit over the controls beside it as well as the table below. */
+  ddWrapOpen: { zIndex: 60 },
+  dd: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: spacing.sm, paddingVertical: 7, backgroundColor: colors.surface, minHeight: 36,
+  },
+  ddOpen: { borderColor: colors.ink },
+  ddLabel: { ...type.tiny, color: colors.inkMuted },
+  ddValue: { ...type.small, color: colors.ink, fontWeight: '700', maxWidth: 220 },
+  ddScrim: { position: 'fixed' as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 25 } as any,
+  ddPanel: {
+    position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
+  },
+  ddQuick: { gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.line, flexWrap: 'wrap' },
+  ddQuickItem: { paddingVertical: 2 },
+  ddGroup: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
+  ddItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },
+  ddItemHover: { backgroundColor: colors.well },
+  ddItemOn: { backgroundColor: colors.well },
+  ddBox: { width: 16, height: 16, borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  ddBoxOn: { backgroundColor: colors.ink },
+  toggle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+});

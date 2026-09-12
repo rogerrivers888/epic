@@ -25,6 +25,11 @@ import { liveSessions } from '../repositories/sessions.js';
 import { CHECKED_ON, DOMAINS, PROVIDERS, SERVICES, cellsOf, matrix } from '../sources/catalogue.js';
 import { callVolume, ownedFacts, ownedLibrary } from '../repositories/sourceStats.js';
 import { sourceHasKey, sourceOff } from '../sources/index.js';
+import { googleSource } from '../sources/google.js';
+import { BENCHABLE, judge, postcodeOf, say, tally } from '../domain/sourceBench.js';
+import * as providerCalls from '../repositories/providerCalls.js';
+import { currentHousehold } from './household.js';
+import { query } from '../db.js';
 
 const router = express.Router();
 
@@ -527,6 +532,115 @@ router.get('/data/sources', requires('view_reporting'), async (_req, res, next) 
       owned: { places: owned.places, done: owned.done, facts: owned.facts, library },
       searchable: Object.fromEntries(PROVIDERS.map((p) => [p.key, sourceHasKey(p.key)])),
     });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// the correctness bench
+// ---------------------------------------------------------------------------
+
+/** master field → the place_facts fields that carry it. */
+const BENCH_FACTS = {
+  name: ['name'], address: ['address'], postcode: ['postcode'], phone: ['phone'], website: ['website'],
+  lat_lng: ['lat', 'lng'], hours_regular: ['opening_hours'], category: ['category'], price_range: ['price_range'],
+};
+const BENCH_SOURCES = { osm: 'osm', site: 'site', nominatim: 'nominatim', wikipedia: 'wikipedia', wikidata: 'wikidata', wikivoyage: 'wikivoyage' };
+const BENCH_MAX = 50;
+const BENCH_CENTS_PER_CALL = 2.5; // Place Details at the Enterprise + Atmosphere tier, list price
+
+const shapeRun = (r) => ({ ...r, ranAt: r.ran_at, ranBy: r.ran_by, costCents: r.cost_cents, ran_at: undefined, ran_by: undefined, cost_cents: undefined });
+
+/** GET /api/admin/data/sources/bench — the runs so far, newest first, and what a run can ask. */
+router.get('/data/sources/bench', requires('view_reporting'), async (_req, res, next) => {
+  try {
+    const { rows } = await query('select * from source_bench_runs order by ran_at desc limit 20');
+    res.json({ runs: rows.map(shapeRun), fields: BENCHABLE, providers: Object.keys(BENCH_SOURCES), max: BENCH_MAX, centsPerCall: BENCH_CENTS_PER_CALL, canRun: sourceHasKey('google') });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /api/admin/data/sources/bench — run one.
+ *
+ * { provider, fields[], sample } → a sample of owned places that hold facts
+ * from that provider and have a Google identifier, each fetched once from
+ * Google Place Details at that moment and judged field by field. Their values
+ * are in this response and nowhere else; the run keeps ours and the verdicts
+ * (migration 078). Every call goes through the ledger.
+ */
+router.post('/data/sources/bench', requires('manage_settings'), async (req, res, next) => {
+  try {
+    const provider = String(req.body?.provider ?? '');
+    const source = BENCH_SOURCES[provider];
+    if (!source) throw bad('Say which owned source to check: ' + Object.keys(BENCH_SOURCES).join(', '));
+    const fields = [].concat(req.body?.fields ?? []).map(String).filter((f) => BENCHABLE.includes(f));
+    if (!fields.length) throw bad('Say which fields to check: ' + BENCHABLE.join(', '));
+    const sample = Math.min(BENCH_MAX, Math.max(1, Number(req.body?.sample) || 10));
+    if (!sourceHasKey('google')) return res.status(409).json({ error: 'no_key', message: 'The Google key is not set on this API, so there is nothing to check against.' });
+
+    const factFields = [...new Set(fields.flatMap((f) => BENCH_FACTS[f]))];
+    const { rows: places } = await query(
+      `select r.venue_ref, coalesce(r.name, r.venue_ref) as name,
+              case when r.venue_ref like 'google:%' then substr(r.venue_ref, 8)
+                   else (select m.source_ref from provider_matches m where m.venue_ref = r.venue_ref and m.source = 'google' and not m.missing limit 1) end as google_id,
+              (select jsonb_object_agg(f.field, f.value) from place_facts f where f.venue_ref = r.venue_ref and f.source = $1 and f.field = any($2) and f.expires_at is null) as ours
+         from place_records r
+        where exists (select 1 from place_facts f where f.venue_ref = r.venue_ref and f.source = $1 and f.field = any($2) and f.expires_at is null)
+        order by random() limit $3`,
+      [source, factFields, sample * 2],
+    );
+    const picked = places.filter((p) => p.google_id).slice(0, sample);
+
+    const meter = {};
+    const problems = [];
+    const rows = [];
+    for (const p of picked) {
+      let v = null;
+      try { v = await googleSource.get(p.google_id, { meter }); } catch (e) { problems.push(`${p.name}: ${e.message.slice(0, 120)}`); continue; }
+      if (!v) { problems.push(`${p.name}: Google returned nothing`); continue; }
+      const theirsOf = {
+        name: v.name || null, address: v.address, postcode: postcodeOf(v.address), phone: v.phone, website: v.website,
+        lat_lng: v.lat != null ? { lat: v.lat, lng: v.lng } : null,
+        hours_regular: v.openingHours ? String(v.openingHours).split(' · ') : null,
+        category: v.category, price_range: v.priceLevel,
+      };
+      const ours = p.ours ?? {};
+      for (const field of fields) {
+        const mine = field === 'lat_lng'
+          ? (ours.lat != null && ours.lng != null ? { lat: Number(ours.lat), lng: Number(ours.lng) } : null)
+          : ours[BENCH_FACTS[field][0]] ?? null;
+        const theirs = theirsOf[field] ?? null;
+        const { verdict, note } = judge(field, mine, theirs);
+        rows.push({ venueRef: p.venue_ref, name: p.name, field, ours: say(mine), theirs: say(theirs), verdict, note, decision: null });
+      }
+    }
+    const t = tally(rows);
+    const calls = meter.google ?? 0;
+    const kept = rows.map(({ theirs, ...r }) => r); // theirs is never written
+    const { rows: [saved] } = await query(
+      `insert into source_bench_runs (provider, against, fields, sample, compared, agreed, differed, unknown, rows, calls, cost_cents, ran_by)
+       values ($1, 'google', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
+      [provider, JSON.stringify(fields), picked.length, t.compared, t.agreed, t.differed, t.unknown + t.oursMissing + t.theirsMissing,
+        JSON.stringify(kept), calls, Math.round(calls * BENCH_CENTS_PER_CALL), actor(req).actorLabel],
+    );
+    await providerCalls.record((await currentHousehold())?.id ?? null, 'google', 'admin.bench.sources', String(calls)).catch(() => null);
+    res.json({ run: shapeRun(saved), rows, tally: t, problems, asked: sample, found: picked.length });
+  } catch (err) { next(err); }
+});
+
+/** PATCH /api/admin/data/sources/bench/:id — the owner's decision on one row: ours | theirs | both | null. */
+router.patch('/data/sources/bench/:id', requires('manage_settings'), async (req, res, next) => {
+  try {
+    const index = Number(req.body?.index);
+    const decision = req.body?.decision == null ? null : String(req.body.decision);
+    if (!Number.isInteger(index) || index < 0) throw bad('Which row?');
+    if (decision != null && !['ours', 'theirs', 'both'].includes(decision)) throw bad('A decision is ours, theirs or both.');
+    const { rows: [run] } = await query('select * from source_bench_runs where id = $1', [req.params.id]);
+    if (!run) return res.status(404).json({ error: 'not_found' });
+    const rows = run.rows;
+    if (!rows[index]) throw bad('No such row.');
+    rows[index] = { ...rows[index], decision };
+    const { rows: [saved] } = await query('update source_bench_runs set rows = $2 where id = $1 returning *', [run.id, JSON.stringify(rows)]);
+    res.json({ run: shapeRun(saved) });
   } catch (err) { next(err); }
 });
 

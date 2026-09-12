@@ -1817,6 +1817,11 @@ export const api = {
   adminOverview: (days = 30) => request<AdminOverview>(`/api/admin/overview?days=${days}`),
   /** Data › Sources: the catalogue of providers and fields, joined to what we hold. */
   adminSources: () => request<SourcesReport>('/api/admin/data/sources'),
+  /** The correctness bench: runs so far, and what one can ask. */
+  sourceBenchRuns: () => request<SourceBenchIndex>('/api/admin/data/sources/bench'),
+  /** Run one: a sample of owned places checked against Google, field by field. Their values come back here and are not kept. */
+  runSourceBench: (body: { provider: string; fields: string[]; sample: number }) => post<SourceBenchResult>('/api/admin/data/sources/bench', body),
+  sourceBenchDecide: (id: string, index: number, decision: SourceBenchDecision | null) => patch<{ run: SourceBenchRun }>(`/api/admin/data/sources/bench/${id}`, { index, decision }),
   adminPeople: (days = 30) => request<AdminPeople>(`/api/admin/people?days=${days}`),
   adminPerson: (id: string, days = 30) => request<PersonRecord>(`/api/admin/people/${id}?days=${days}`),
   adminSetRole: (id: string, roleId: string | null) => patch<{ account: { id: string; role: any } }>(`/api/admin/people/${id}/role`, { roleId }),
@@ -1992,7 +1997,6 @@ export const api = {
   taxonomyTry: (labels: string[]) => post<TaxonomyTry>('/api/admin/taxonomy/try', { labels }),
   taxonomySaveLabel: (body: { namespace: string; key: string; label?: string | null; active?: boolean }) =>
     put<{ label: TaxonomyLabel }>('/api/admin/taxonomy/labels', body),
-
 
   libraryHarvest: (body: { scope?: 'all' | 'never' | 'failed'; regions?: string[]; withImages?: boolean; refreshTypes?: boolean }) =>
     post<{ run: HarvestRun }>('/api/admin/library/harvest', body),
@@ -2724,6 +2728,16 @@ export type SourceService = {
   console: { label: string; url: string } | null; hasKey: boolean; calls: SourceCalls;
 };
 export type OwnedFact = { provider: string; field: string; held: number; facts: number; confidence: number | null; oldest: string; newest: string; of: number; coverage: number | null };
+export type SourceBenchDecision = 'ours' | 'theirs' | 'both';
+export type SourceBenchVerdict = 'agree' | 'differ' | 'unknown' | 'ours_missing' | 'theirs_missing';
+export type SourceBenchRow = { venueRef: string; name: string; field: string; ours: string | null; theirs?: string | null; verdict: SourceBenchVerdict; note: string; decision: SourceBenchDecision | null };
+export type SourceBenchRun = {
+  id: string; provider: string; against: string; fields: string[]; sample: number; compared: number; agreed: number; differed: number; unknown: number;
+  rows: SourceBenchRow[]; calls: number; costCents: number; ranBy: string | null; ranAt: string;
+};
+export type SourceBenchIndex = { runs: SourceBenchRun[]; fields: string[]; providers: string[]; max: number; centsPerCall: number; canRun: boolean };
+export type SourceBenchTally = { compared: number; agreed: number; differed: number; unknown: number; oursMissing: number; theirsMissing: number };
+export type SourceBenchResult = { run: SourceBenchRun; rows: SourceBenchRow[]; tally: SourceBenchTally; problems: string[]; asked: number; found: number };
 export type SourcesReport = {
   checkedOn: string;
   domains: { key: string; label: string; what: string }[];
