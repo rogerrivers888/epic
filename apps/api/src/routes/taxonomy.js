@@ -88,14 +88,21 @@ async function withLabels(rules) {
 /** The Q-numbers a naming call is already out for, so a busy screen asks Wikidata once. */
 const naming = new Set();
 function nameLater(qids) {
-  // All of them: kindLabels batches by three hundred itself (Codex, 12 Sep 2026).
   const fresh = qids.filter((q) => !naming.has(q));
   if (!fresh.length) return;
   for (const q of fresh) naming.add(q);
-  kindLabels(fresh)
-    .then((got) => (got?.size ? nameKinds(got) : 0))
-    .catch(() => null)
-    .finally(() => { for (const q of fresh) naming.delete(q); });
+  // Three hundred at a time, each batch written as soon as it lands, so a
+  // batch Wikidata drops does not cost the ones before it (Codex, 12 Sep 2026).
+  (async () => {
+    for (let i = 0; i < fresh.length; i += 300) {
+      const slice = fresh.slice(i, i + 300);
+      try {
+        const got = await kindLabels(slice);
+        if (got?.size) await nameKinds(got);
+      } catch { /* the next page load asks again for what is still unnamed */ }
+      finally { for (const q of slice) naming.delete(q); }
+    }
+  })();
 }
 
 // ---------------------------------------------------------------------------
