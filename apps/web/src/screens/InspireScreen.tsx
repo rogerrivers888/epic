@@ -882,7 +882,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   // that has anything is offered by name (Requirements C9).
                   <EmptyMatch
                     title={`Nothing within ${howFarShort(travel)} of ${whereName}`}
-                    body={`${wider.count} place${wider.count === 1 ? '' : 's'} within ${howFarShort(wider.minutes)}${active > 0 ? ' match these filters' : ''}.`}
+                    body={`${wider.count} place${wider.count === 1 ? '' : 's'} within ${howFarShort(wider.minutes)}${rating > 0 || price !== 'any' ? ' match these filters' : ''}.`}
                     action={`Show within ${howFarShort(wider.minutes)}`}
                     onAction={() => setTravel(wider.minutes)}
                   />
