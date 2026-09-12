@@ -669,7 +669,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     if (pick) rows = !pickIsCategory ? rows.filter((i) => i.cuisines.includes(pick)) : rows.filter((i) => inCategory(i, pick));
     if (pick && pickIsCategory && within != null && within !== ALL) {
       if (mode === 'food') rows = within === OTHER ? rows.filter((i) => !cuisineOf(i)) : rows.filter((i) => cuisineOf(i) === within);
-      else rows = within === OTHER ? rows.filter((i) => !i.subcategory || !subRows.some((r) => r.key === i.subcategory && r.key !== OTHER)) : rows.filter((i) => i.subcategory === within);
+      else if (within === OTHER) {
+        // Against the category's whole set of drawers, not the ones with
+        // something in reach: a far place in a drawer that is empty today
+        // would otherwise be counted as "everything else" and then leave it
+        // the moment the reach widened (Codex, 12 Sep 2026).
+        const subs = pool?.moods.find((m) => m.key === pick)?.subcategories ?? [];
+        rows = rows.filter((i) => !i.subcategory || !subs.some((sc) => sc.key === i.subcategory));
+      } else rows = rows.filter((i) => i.subcategory === within);
     }
     return rows;
   })();
