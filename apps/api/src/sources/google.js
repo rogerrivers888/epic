@@ -35,6 +35,18 @@ const TEXT_SEARCH_FIELDS = `${SEARCH_FIELDS},contextualContents.justifications`;
 const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber';
 
 export const FOOD_TYPES = ['restaurant', 'cafe', 'bar', 'pub', 'bakery', 'ice_cream_shop', 'coffee_shop'];
+/**
+ * What the nearby search asks for as a *primary* type. The heads of each
+ * family stand for their children (a "restaurant" primary type returns an
+ * italian_restaurant too — Google's own note), and the rest are the base
+ * types that are nobody's child: a takeaway, a deli, a sandwich shop, a tea
+ * house. Google allows fifty per list; this is well inside it.
+ */
+export const FOOD_PRIMARY_TYPES = [
+  ...FOOD_TYPES,
+  'meal_takeaway', 'fast_food_restaurant', 'fine_dining_restaurant', 'gastropub', 'brewpub', 'wine_bar', 'cocktail_bar',
+  'deli', 'sandwich_shop', 'dessert_shop', 'tea_house', 'bistro', 'diner', 'food_court', 'brunch_restaurant', 'breakfast_restaurant',
+];
 export const THING_TYPES = [
   'tourist_attraction', 'museum', 'art_gallery', 'park', 'playground', 'zoo', 'aquarium', 'amusement_park', 'water_park',
   'historical_landmark', 'national_park', 'hiking_area', 'garden', 'bowling_alley', 'marina', 'botanical_garden', 'planetarium',
@@ -344,17 +356,23 @@ export const googleSource = {
       const data = await call('/places:searchNearby', {
         fieldMask: SEARCH_FIELDS, meter,
         body: {
-          // Hotels are kept out of the twenty before Google counts them. Asked
-          // plainly, the twenty most popular "bars and restaurants" in central
-          // Bristol were mostly hotels — each has a bar, each has thousands of
-          // reviews — and after the lodging filter below seven eating places
-          // were left of the twenty paid for (owner, 12 Sep 2026: "why are
-          // you struggling to get data?"). The match stays broad, because an
-          // Italian restaurant's primary type is italian_restaurant and would
-          // not answer to `restaurant` as a primary type (Codex); a hotel's
-          // primary type is hotel, and that is the one thing excluded.
-          includedTypes: group === 'food' ? FOOD_TYPES : THING_TYPES,
-          excludedPrimaryTypes: [...LODGING],
+          // Eating places by what they mainly are. Asked by any type they
+          // carry, the twenty most popular "bars and restaurants" in central
+          // Bristol were hotels with a bar, supermarkets with a bakery counter,
+          // museums and cinemas with a café — each with thousands of reviews —
+          // and seven eating places were left of the twenty paid for (owner,
+          // 12 Sep 2026: "why are you struggling to get data?"). Excluding
+          // lodging alone left nine. The primary type is the honest fence,
+          // and Google's own note on it: "restaurant" as a primary type also
+          // returns a place whose primary type is chinese_restaurant or
+          // italian_restaurant, so the family is covered by its heads
+          // (developers.google.com/maps/documentation/places/web-service/
+          // nearby-search, checked 12 Sep 2026). With it, Bristol answered
+          // with twenty. Things to do keep the wider match — a park is a park
+          // under any type — with lodging kept out up front.
+          ...(group === 'food'
+            ? { includedPrimaryTypes: FOOD_PRIMARY_TYPES }
+            : { includedTypes: THING_TYPES, excludedPrimaryTypes: [...LODGING] }),
           maxResultCount: 20,
           rankPreference: 'POPULARITY',
           locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius } },
