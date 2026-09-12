@@ -451,15 +451,28 @@ export async function joinWaitlist(groupId, contact, contactKind) {
   return rows[0];
 }
 
-/** Claim a row to tell: true for the one caller that got it, false for anyone else. */
+/**
+ * A lease on a row to tell: true for the one caller that got it, false for
+ * anyone else. The lease runs out after ten minutes so a process that died
+ * mid-send does not leave the row claimed for ever; only a delivered send
+ * writes `told_at` (Codex, 12 Sep 2026).
+ */
 export async function claimWaitlistTold(id) {
-  const { rowCount } = await query('update group_waitlist set told_at = now() where id = $1 and told_at is null', [id]);
+  const { rowCount } = await query(
+    "update group_waitlist set claimed_at = now() where id = $1 and told_at is null and (claimed_at is null or claimed_at < now() - interval '10 minutes')",
+    [id],
+  );
   return rowCount === 1;
+}
+
+/** Delivered. */
+export async function markWaitlistTold(id) {
+  await query('update group_waitlist set told_at = now() where id = $1', [id]);
 }
 
 /** The send failed: let the row be tried again next time a place opens. */
 export async function releaseWaitlistTold(id) {
-  await query('update group_waitlist set told_at = null where id = $1', [id]);
+  await query('update group_waitlist set claimed_at = null where id = $1', [id]);
 }
 
 export async function waitlistOf(groupId) {

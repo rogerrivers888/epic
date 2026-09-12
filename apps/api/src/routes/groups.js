@@ -1317,7 +1317,7 @@ router.post('/join/:token/code/again', async (req, res, next) => {
 async function tellWaitlist(group) {
   const fresh = await groupsRepo.groupById(group.id);
   if (!fresh || fresh.cancelled_at || fresh.closed_at) return;
-  const waiting = (await hostingRepo.waitlistOf(group.id)).filter((w) => !w.told_at);
+  const waiting = (await hostingRepo.waitlistOf(group.id)).filter((w) => !w.told_at);   // a live lease is refused by the claim itself
   if (!waiting.length) return;
   const heads = await groupsRepo.headsJoined(group.id);
   if (fresh.maximum_count && heads >= fresh.maximum_count) return;
@@ -1333,6 +1333,7 @@ async function tellWaitlist(group) {
       if (isEmail && mailConfigured()) await sendMail({ to: w.contact, subject: `A place has come up on ${fresh.name ?? 'the trip'}`, text });
       else if (!isEmail && smsConfigured()) await sendSms({ to: w.contact, text });
       else { const r = await sendReminder({ to: w.contact, contactKind: isEmail ? 'email' : 'mobile', body: text, group: fresh.id, participant: null }); if (r.status !== 'sent') throw new Error(r.detail ?? 'not sent'); }
+      await hostingRepo.markWaitlistTold(w.id);
     } catch { await hostingRepo.releaseWaitlistTold(w.id); }
   }
 }

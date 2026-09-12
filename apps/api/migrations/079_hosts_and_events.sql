@@ -286,6 +286,9 @@ create table if not exists group_waitlist (
   contact       text not null,
   contact_kind  text,
   created_at    timestamptz not null default now(),
+  -- A send in progress holds a short lease; only a delivered send writes `told_at`,
+  -- so a process that dies mid-send leaves a row that is tried again.
+  claimed_at    timestamptz,
   told_at       timestamptz,
   unique (group_id, contact)
 );
