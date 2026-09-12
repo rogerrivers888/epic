@@ -87,7 +87,12 @@ export async function deleteMediaOfHost(host, offers, client) {
     for (const p of o.featured_people ?? []) if (p.photoId) ids.add(p.photoId);
   }
   if (!ids.size) return 0;
-  const { rowCount } = await on(client)('delete from host_media where household_id = $1 and id = any($2::uuid[])', [host.household_id, [...ids]]);
+  // A photo that is also on a review of somebody else stays with that review.
+  const { rowCount } = await on(client)(
+    `delete from host_media where household_id = $1 and id = any($2::uuid[])
+        and not exists (select 1 from host_reviews r where r.photo_id = host_media.id and r.host_id <> $3)`,
+    [host.household_id, [...ids], host.id],
+  );
   return rowCount;
 }
 

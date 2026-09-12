@@ -39,7 +39,7 @@ import { sendSms, smsConfigured } from '../sources/sms.js';
 import {
   ADULT_AGE, AGE_LIMITS, DAY_PARTS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
   REGULATED_COUNTRIES, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S,
-  ageGate, anytimeSlots, decideBy, isRegulated, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
+  ageGate, anytimeSlots, decideBy, isRegulated, lastDate, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
   readsLikeCommentary, reviewPublishOn, seriesDates, standing, takingsAt, ymd,
 } from '../domain/hosting.js';
 
@@ -295,7 +295,8 @@ router.delete('/host', async (req, res, next) => {
       const bookings = (await Promise.all(offers.map((o) => repo.bookingsOfOffer(o.id, client)))).flat();
       // Only a place still to come is a hold: what has happened is history and
       // goes with the host; what was cancelled was never a place.
-      const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state) && (occurrenceDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
+      // A whole-run booking is still to come until its last week has been.
+      const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state) && (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
       if (holding.length) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
       await repo.deleteMediaOfHost(host, offers, client);
       await repo.deleteHost(host.id, household.id, client);
@@ -717,7 +718,10 @@ router.post('/experiences/:id/book', async (req, res, next) => {
      * read the same count and each be let in (Codex, 12 Sep 2026).
      */
     const booking = await withTransaction(async (client) => {
-      await repo.lockOffer(o.id, client);
+      // The row read again under the lock: the host may have stopped hosting
+      // or paused it while this request was on its way (Codex, 12 Sep 2026).
+      const locked = await repo.lockOffer(o.id, client);
+      if (!locked || locked.state !== 'live') throw refuse(409, 'not_bookable', 'This experience is not taking bookings any more.');
       const existing = await repo.bookingsOfOffer(o.id, client);
       if (o.shape === 'anytime') {
         const taken = new Set(existing.filter((x) => x.state !== 'cancelled').map((x) => x.occurrence));
