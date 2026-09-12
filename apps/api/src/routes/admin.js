@@ -22,6 +22,9 @@ import * as rolesRepo from '../repositories/roles.js';
 import { accountById, listAccounts, signInsFor } from '../repositories/accounts.js';
 import { householdById, membersWithConstraints } from '../repositories/households.js';
 import { liveSessions } from '../repositories/sessions.js';
+import { CHECKED_ON, DOMAINS, PROVIDERS, SERVICES, cellsOf, matrix } from '../sources/catalogue.js';
+import { callVolume, ownedFacts, ownedLibrary } from '../repositories/sourceStats.js';
+import { sourceHasKey, sourceOff } from '../sources/index.js';
 
 const router = express.Router();
 
@@ -462,6 +465,69 @@ router.patch('/plans/:key', requires('manage_plans'), async (req, res, next) => 
 router.get('/audit', requires('view_audit'), async (req, res, next) => {
   try {
     res.json({ audit: await rolesRepo.listAudit({ limit: Math.min(500, Number(req.query.limit) || 200) }) });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// the sources
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/admin/data/sources — every app and API Epic uses, every field each
+ * one offers, which of those the code reads, and how much of the owned ones we
+ * hold (owner, 12 Sep 2026: "a deduped master list of fields, and then columns
+ * for each one of the providers").
+ *
+ * The catalogue is static and the numbers are live: place_facts for what is
+ * held, provider_calls for how often each source is asked. Key *presence* is
+ * reported and never a value — the same rule /api/keys follows.
+ */
+router.get('/data/sources', requires('view_reporting'), async (_req, res, next) => {
+  try {
+    const [owned, library, volume] = await Promise.all([ownedFacts(), ownedLibrary(), callVolume()]);
+    const sum = (tokens) => tokens.reduce((acc, t) => {
+      const v = volume[t];
+      if (!v) return acc;
+      return { all: acc.all + v.all, days30: acc.days30 + v.days30, last: acc.last && acc.last > v.last ? acc.last : v.last };
+    }, { all: 0, days30: 0, last: null });
+    const factsBy = new Map();
+    for (const f of owned.facts) {
+      const cur = factsBy.get(f.provider) ?? { records: 0, facts: 0, fields: 0, oldest: null };
+      cur.records = Math.max(cur.records, f.held);
+      cur.facts += f.facts;
+      cur.fields += 1;
+      cur.oldest = cur.oldest && cur.oldest < f.oldest ? cur.oldest : f.oldest;
+      factsBy.set(f.provider, cur);
+    }
+    const providers = PROVIDERS.map((p) => {
+      const cells = cellsOf(p);
+      return {
+        key: p.key, label: p.label, short: p.short, keep: p.keep, licence: p.licence, retention: p.retention, attribution: p.attribution,
+        cost: p.cost ?? null, envKey: p.envKey ?? null, file: p.file, docs: p.docs ?? null, console: p.console ?? null, lands: p.lands, note: p.note ?? null,
+        // Presence only. A provider without a key is one we could not ask.
+        hasKey: p.envKey ? Boolean(process.env[p.envKey]) : true,
+        switchedOff: sourceOff(p.key),
+        usedCount: cells.filter((c) => c.status === 'used').length,
+        offeredCount: cells.filter((c) => c.status === 'offered').length,
+        calls: sum(p.calls ?? []),
+        owned: p.keep === 'own' ? {
+          ...(factsBy.get(p.key) ?? { records: 0, facts: 0, fields: 0, oldest: null }),
+          images: library.images[p.key] ?? null,
+        } : null,
+      };
+    });
+    const services = SERVICES.map((s) => ({
+      ...s, hasKey: s.envKey ? Boolean(process.env[s.envKey]) : true, calls: sum(s.calls ?? []),
+    }));
+    res.json({
+      checkedOn: CHECKED_ON,
+      domains: DOMAINS,
+      fields: matrix(),
+      providers,
+      services,
+      owned: { places: owned.places, done: owned.done, facts: owned.facts, library },
+      searchable: Object.fromEntries(PROVIDERS.map((p) => [p.key, sourceHasKey(p.key)])),
+    });
   } catch (err) { next(err); }
 });
 

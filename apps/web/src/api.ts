@@ -1815,6 +1815,8 @@ export const api = {
   // app drawing them at all is a courtesy rather than the security boundary.
 
   adminOverview: (days = 30) => request<AdminOverview>(`/api/admin/overview?days=${days}`),
+  /** Data › Sources: the catalogue of providers and fields, joined to what we hold. */
+  adminSources: () => request<SourcesReport>('/api/admin/data/sources'),
   adminPeople: (days = 30) => request<AdminPeople>(`/api/admin/people?days=${days}`),
   adminPerson: (id: string, days = 30) => request<PersonRecord>(`/api/admin/people/${id}?days=${days}`),
   adminSetRole: (id: string, roleId: string | null) => patch<{ account: { id: string; role: any } }>(`/api/admin/people/${id}/role`, { roleId }),
@@ -2592,6 +2594,44 @@ export type MoneyBlock = {
   costMonthUsd: number;
   basis: string;
 };
+/** The ownership tag: keep for good, keep the identifier only, keep nothing. */
+export type Keep = 'own' | 'id' | 'none';
+export type SourceCell = { status: 'used' | 'offered'; path: string };
+export type SourceField = {
+  key: string; domain: string; label: string; note: string | null;
+  cells: Record<string, SourceCell>; used: boolean; keep: Keep | null; providers: number;
+};
+export type SourceCalls = { all: number; days30: number; last: string | null };
+export type SourceProvider = {
+  key: string; label: string; short: string; keep: Keep; licence: string; retention: string; attribution: string;
+  cost: string | null; envKey: string | null; file: string; docs: string | null; console: { label: string; url: string } | null;
+  lands: string; note: string | null; hasKey: boolean; switchedOff: boolean; usedCount: number; offeredCount: number; calls: SourceCalls;
+  owned: { records: number; facts: number; fields: number; oldest: string | null; images: { n: number; storable: number; oldest: string | null } | null } | null;
+};
+export type SourceService = {
+  key: string; label: string; what: string; unit: string; envKey: string | null; file: string;
+  console: { label: string; url: string } | null; hasKey: boolean; calls: SourceCalls;
+};
+export type OwnedFact = { provider: string; field: string; held: number; facts: number; confidence: number | null; oldest: string; newest: string; of: number; coverage: number | null };
+export type SourcesReport = {
+  checkedOn: string;
+  domains: { key: string; label: string; what: string }[];
+  fields: SourceField[];
+  providers: SourceProvider[];
+  services: SourceService[];
+  owned: {
+    places: number; done: number; facts: OwnedFact[];
+    library: {
+      attractions: { source: string; n: number; with_summary: number; with_website: number }[];
+      images: Record<string, { n: number; storable: number; oldest: string | null }>;
+      localities: Record<string, number>;
+      transitStops: { n: number; networks: number };
+      householdPlaces: { n: number; with_station: number; with_postcode: number };
+    };
+  };
+  searchable: Record<string, boolean>;
+};
+
 export type AdminOverview = {
   window: { days: number };
   totals: EstateTotals;

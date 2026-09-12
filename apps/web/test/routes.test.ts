@@ -201,6 +201,8 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/reporting'), { name: 'admin', screen: 'reporting' });
   // The voice lab: the ways of hearing compared on the same sentences.
   assert.deepEqual(roundTrip('/admin/voice'), { name: 'admin', screen: 'voice' });
+  // Data › Sources: every provider, every field, and which of them we read.
+  assert.deepEqual(roundTrip('/admin/sources'), { name: 'admin', screen: 'sources' });
   assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'overview' });
 });
 

@@ -40,6 +40,7 @@ import { Scout } from './screens/Scout';
 import { Shelves } from './screens/Shelves';
 import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
+import { Sources } from './screens/Sources';
 
 const DESKTOP = 900;
 
@@ -53,7 +54,12 @@ type Screen = AdminScreen;
  * everything, so he sees all of it; a support account sees four items and does
  * not have to wonder what the other four would have said.
  */
-const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: string }[] = [
+/**
+ * `group` puts an item under a heading in the rail. The owner asked for the
+ * sources screen "in a new folder on the menu called Data" (12 Sep 2026); the
+ * atlas, the shelves and the sweep are where they were until he moves them.
+ */
+const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: string; group?: string }[] = [
   { key: 'overview', label: 'Overview', icon: 'plan', sub: 'The estate at a glance' },
   { key: 'accounts', label: 'Accounts', icon: 'accounts', needs: 'view_accounts', sub: 'Invite people and manage their plan' },
   { key: 'households', label: 'Households', icon: 'household', needs: 'view_accounts', sub: 'What each one does, and what it costs' },
@@ -64,6 +70,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'library', label: 'Atlas', icon: 'owned', needs: 'view_library', sub: 'Attractions by county, and the pictures we own' },
   { key: 'shelves', label: 'Shelves', icon: 'themePark', needs: 'view_library', sub: 'What the home screen calls a place, and how to teach it' },
   { key: 'scout', label: 'The sweep', icon: 'search', needs: 'view_library', sub: 'Postcode areas, their best restaurants and their menus' },
+  { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences' },
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities' },
   { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on' },
@@ -107,6 +114,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'library' ? <Library canManage={can('manage_library')} /> : null}
       {screen === 'shelves' ? <Shelves canManage={can('manage_library')} /> : null}
       {screen === 'scout' ? <Scout canManage={can('manage_library')} /> : null}
+      {screen === 'sources' ? <Sources /> : null}
       {screen === 'voice' ? <VoiceLab /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
       {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}
@@ -127,19 +135,21 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
             <Text style={styles.badge}>Back office</Text>
           </View>
 
-          {items.map((n) => (
-            <Press
-              key={n.key}
-              onPress={() => setScreen(n.key)}
-              style={[styles.navItem, screen === n.key && styles.navItemOn]}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: screen === n.key }}
-            >
-              <Icon name={n.icon} size={17} color={screen === n.key ? colors.ink : colors.inkMuted} />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.navLabel, screen === n.key && { color: colors.ink, fontWeight: '700' }]}>{n.label}</Text>
-              </View>
-            </Press>
+          {items.map((n, i) => (
+            <React.Fragment key={n.key}>
+              {n.group && items[i - 1]?.group !== n.group ? <Text style={styles.navGroup}>{n.group}</Text> : null}
+              <Press
+                onPress={() => setScreen(n.key)}
+                style={[styles.navItem, screen === n.key && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: screen === n.key }}
+              >
+                <Icon name={n.icon} size={17} color={screen === n.key ? colors.ink : colors.inkMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.navLabel, screen === n.key && { color: colors.ink, fontWeight: '700' }]}>{n.label}</Text>
+                </View>
+              </Press>
+            </React.Fragment>
           ))}
 
           <View style={{ flex: 1 }} />
@@ -201,6 +211,9 @@ const styles = StyleSheet.create({
   },
   navItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 9, paddingHorizontal: spacing.sm, borderRadius: radius.md },
   navItemOn: { backgroundColor: colors.well },
+  /** A folder in the rail: a small heading, and its items set in a little. */
+  navGroup: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: spacing.md, paddingBottom: 2 },
+  navItemGrouped: { marginLeft: spacing.sm },
   navLabel: { ...type.small, color: colors.inkMuted },
 
   profile: { gap: 2, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
