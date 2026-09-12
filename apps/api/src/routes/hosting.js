@@ -696,7 +696,8 @@ router.post('/experiences/:id/book', async (req, res, next) => {
     const booking = await withTransaction(async (client) => {
       const o = await repo.lockOffer(req.params.id, client);
       if (!o || o.state !== 'live') throw refuse(409, 'not_bookable', o?.state === 'paused' ? `This is paused${o.paused_until ? ` — back ${ymd(o.paused_until)}` : ''}. It is not taking bookings just now.` : 'This experience is not taking bookings.');
-      const host = await repo.hostById(o.host_id);
+      // On the transaction's own connection: a second pooled one per request would starve the pool under a burst.
+      const host = await repo.hostById(o.host_id, client);
       if (!host) throw refuse(409, 'not_bookable', 'This experience is not taking bookings.');
       if (host.household_id === household.id) throw refuse(409, 'own_offer', 'You cannot book your own experience.');
       const gate = ageGate(o, party);

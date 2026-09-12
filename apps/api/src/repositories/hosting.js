@@ -21,8 +21,8 @@ export async function hostByHousehold(householdId) {
   return rows[0] ?? null;
 }
 
-export async function hostById(id) {
-  const { rows } = await query('select * from hosts where id = $1', [id]);
+export async function hostById(id, client) {
+  const { rows } = await on(client)('select * from hosts where id = $1', [id]);
   return rows[0] ?? null;
 }
 
