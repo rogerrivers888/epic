@@ -115,7 +115,7 @@ function TextAction({ label, onPress, disabled, tone = 'ink' }: { label: string;
 /** One of a few choices in a line: the chosen one is a flat lime word. */
 function Choice({ label, on, onPress }: { label: string; on: boolean; onPress?: () => void }) {
   return (
-    <Press onPress={onPress} disabled={!onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.choice, on && styles.choiceOn]}>
+    <Press effect="none" onPress={onPress} disabled={!onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.choice, on && styles.choiceOn]}>
       <Text style={[type.small, { color: on ? colors.selectedFg : colors.inkMuted, fontWeight: on ? '700' : '500' }]}>{label}</Text>
     </Press>
   );
@@ -275,7 +275,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
               const words = rules.flatMap((r) => r.scope === 'place' ? [r.subject_label ?? r.subject] : r.labelList.map((l) => l.name ?? keyOf(l.label)));
               const on = chosen?.key === s.key;
               return (
-                <Press key={s.id} onPress={() => setSub(on ? '' : s.key)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                <Press key={s.id} effect="none" onPress={() => setSub(on ? '' : s.key)} accessibilityRole="button" accessibilityState={{ selected: on }}
                        style={[styles.subRow, !wide && styles.subRowNarrow, on && styles.subRowOn]}>
                   <View style={[styles.subName, wide && { width: 200, flexGrow: 0 }]}>
                     <Text style={[type.small, { fontWeight: '700' }]}>{s.label}</Text>
@@ -805,7 +805,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
         const suggestible = g.types.filter((r) => !decided(r) && r.suggestion).length;
         return (
           <View key={g.key}>
-          <Press onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
+          <Press effect="none" onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
               {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
@@ -820,11 +820,17 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
           {/* The group's subcategories, right under its row — never below the fold. */}
           {on ? (
             <View style={styles.inset}>
-              <View style={[styles.line, { flexWrap: 'wrap', justifyContent: 'flex-end' }]}>
-                <Choice label="Everything" on={gaps !== '1'} onPress={() => setGaps('')} />
-                <Choice label={`Unmapped only · ${g.unmapped}`} on={gaps === '1'} onPress={() => setGaps('1')} />
+              <View style={styles.groupBar}>
+                <Press effect="none" onPress={() => setGaps(gaps === '1' ? '' : '1')} accessibilityRole="switch" accessibilityState={{ checked: gaps === '1' }}
+                       style={[styles.barControl, gaps === '1' && styles.barControlOn]}>
+                  <Text style={[type.small, { fontWeight: '700', color: gaps === '1' ? colors.selectedFg : colors.ink }]}>Unmapped only · {g.unmapped}</Text>
+                </Press>
                 {canManage && suggestible ? (
-                  <Button label={busyKey === '*' ? 'Approving…' : `Approve all ${suggestible} suggestions`} icon="check" disabled={busyKey != null} onPress={() => void approveAll(g.types)} />
+                  <Press effect="none" onPress={() => void approveAll(g.types)} disabled={busyKey != null} accessibilityRole="button"
+                         style={[styles.barControl, styles.barButton, busyKey != null && { opacity: 0.5 }]}>
+                    <Icon name="check" size={14} color={colors.primaryFg} />
+                    <Text style={[type.small, { fontWeight: '700', color: colors.primaryFg }]}>{busyKey === '*' ? 'Approving…' : `Approve all ${suggestible} suggestions`}</Text>
+                  </Press>
                 ) : null}
               </View>
               {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing unmapped here.</Text> : null}
@@ -833,12 +839,11 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                 const sug = r.suggestion ?? null;
                 const sugText = sug?.aside ? 'not a day out' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
                 // What the control says: where it is, or where it could go, or that nobody knows.
-                const ctlLabel = st === 'aside' || st === 'mapped' ? 'Mapped' : st === 'category' ? 'Category only' : sugText ? 'Suggested' : 'Map to';
+                const ctlLabel = st === 'aside' || st === 'mapped' ? 'Mapped' : sugText ? 'Suggested' : 'Choose a subcategory';
                 const ctlValue = busyKey === r.key ? 'Saving…'
                   : st === 'aside' ? 'not a day out'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
-                      : st === 'category' ? `${catLabel(r.landing.category)} · choose a subcategory`
-                        : sugText ?? 'Choose…';
+                      : sugText ?? (st === 'category' ? `${catLabel(r.landing.category)} · …` : '…');
                 return (
                   <View key={r.key} style={openKey === r.key ? { zIndex: 40 } : undefined}>
                   <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
@@ -849,7 +854,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                       </Text>
                     </View>
                     {canManage ? (
-                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, flexWrap: wide ? 'nowrap' : 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]}
@@ -1028,4 +1033,9 @@ const styles = StyleSheet.create({
   tCellOn: { backgroundColor: colors.selected },
   tTotal: { borderTopWidth: BORDER, borderTopColor: colors.line, borderBottomWidth: 0 },
   inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
+  /** The opened group's controls: one height, room above and below. */
+  groupBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm, flexWrap: 'wrap', paddingVertical: spacing.md },
+  barControl: { height: 36, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surfaceMuted },
+  barControlOn: { backgroundColor: colors.selected },
+  barButton: { backgroundColor: colors.primary },
 });

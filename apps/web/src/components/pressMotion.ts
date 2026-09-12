@@ -30,13 +30,14 @@ export type Curve = { inputRange: number[]; outputRange: number[] };
  * 1. **Every press plays through.** The way down always runs to the end
  *    before the way up begins, however brief the tap — `holdMs` is the least
  *    a press is seen for.
- * 2. **Big enough to see.** 4px and 6% for the sink, a 12% squash for the
- *    pop, and a ring that grows to three times the heart.
+ * 2. **Big enough to see, no more.** 2px and 3% for the sink (the owner, 12 Sep
+ *    2026: "the animation is a bit too accentuated… tone it down a bit"), a 12%
+ *    squash for the pop, and a ring that grows to three times the heart.
  */
 export const SINK = {
   /** How far the finger presses it in, in px. */
-  translateY: { inputRange: [0, 1], outputRange: [0, 4] } as Curve,
-  scale: { inputRange: [0, 1], outputRange: [1, 0.94] } as Curve,
+  translateY: { inputRange: [0, 1], outputRange: [0, 2] } as Curve,
+  scale: { inputRange: [0, 1], outputRange: [1, 0.97] } as Curve,
   /** Down fast, up slower: the press should feel instant, the release should be seen. */
   downMs: 90,
   upMs: 220,
