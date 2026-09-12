@@ -42,9 +42,14 @@ export function BirthdayPicker({ value, onChange, label = 'Date of birth', hint,
   minAge?: number;
   maxAge?: number;
 }) {
-  const thisYear = new Date().getFullYear();
-  const latest = thisYear - minAge;
-  const earliest = thisYear - maxAge;
+  // The cutoff is a day, not a year: somebody who turns eighteen in December
+  // cannot be offered a birthday in that November (Codex, 12 Sep 2026).
+  const today = new Date();
+  const cutoff = new Date(today.getFullYear() - minAge, today.getMonth(), today.getDate());
+  const latest = cutoff.getFullYear();
+  const earliest = today.getFullYear() - maxAge;
+  const lastMonth = (y: number) => (y === latest ? cutoff.getMonth() + 1 : 12);
+  const lastDay = (y: number, m: number) => (y === latest && m === cutoff.getMonth() + 1 ? cutoff.getDate() : daysIn(y, m));
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState<number | null>(value ? Number(value.slice(0, 4)) : null);
   const [month, setMonth] = useState<number | null>(value ? Number(value.slice(5, 7)) : null);
@@ -103,7 +108,7 @@ export function BirthdayPicker({ value, onChange, label = 'Date of birth', hint,
             <>
               <Text style={styles.question}>Which month, in {year}?</Text>
               <View style={styles.grid}>
-                {MONTHS.map((m, i) => (
+                {MONTHS.slice(0, lastMonth(year!)).map((m, i) => (
                   <Press key={m} onPress={() => setMonth(i + 1)} accessibilityRole="button" style={styles.box}><Text style={styles.boxText}>{SHORT[i]}</Text></Press>
                 ))}
               </View>
@@ -114,7 +119,7 @@ export function BirthdayPicker({ value, onChange, label = 'Date of birth', hint,
             <>
               <Text style={styles.question}>Which day, in {MONTHS[month! - 1]} {year}?</Text>
               <View style={styles.grid}>
-                {Array.from({ length: daysIn(year!, month!) }, (_, i) => i + 1).map((d) => (
+                {Array.from({ length: lastDay(year!, month!) }, (_, i) => i + 1).map((d) => (
                   <Press key={d} onPress={() => pickDay(d)} accessibilityRole="button" style={styles.dayBox}><Text style={styles.boxText}>{d}</Text></Press>
                 ))}
               </View>
