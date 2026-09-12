@@ -94,7 +94,14 @@ async function remember(venueRef, match) {
  * before and failed, which is remembered so the same empty search is not bought
  * again every time somebody opens the place.
  */
-export async function googleRefFor({ venueRef, name, lat, lng, householdId = null }) {
+/**
+ * `strict` makes a provider failure a thrown error rather than a null: the
+ * back office's compare wants to say "Google could not be reached" and not
+ * "Google has no such place". Either way a failure is never remembered as a
+ * miss — a search that timed out has not looked, so the next open must be
+ * allowed to (Codex, 12 Sep 2026).
+ */
+export async function googleRefFor({ venueRef, name, lat, lng, householdId = null, strict = false }) {
   if (!venueRef || !name || lat == null || lng == null) return null;
   // Already a provider's own place: nothing to match.
   if (String(venueRef).startsWith('google:')) return String(venueRef).slice('google:'.length);
@@ -103,10 +110,15 @@ export async function googleRefFor({ venueRef, name, lat, lng, householdId = nul
   if (kept) return kept.missing ? null : kept.source_ref;
   if (!googleSource.enabled()) return null;
 
+  let failure = null;
   const found = await googleSource.search({
     center: { lat, lng }, radiusKm: 3, query: name, limit: 8,
-  }).catch(() => []);
+  }).catch((err) => { failure = err; return []; });
   await providerCalls.record(householdId, 'google', 'atlas.match', JSON.stringify({ google: 1 })).catch(() => null);
+  if (failure) {
+    if (strict) throw failure;
+    return null;
+  }
 
   let best = null;
   for (const v of found) {

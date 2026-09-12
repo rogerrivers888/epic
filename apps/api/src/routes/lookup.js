@@ -337,6 +337,36 @@ const PAIRS = [
 const OUR_LABEL = { own: 'Owned record', atlas: 'The atlas', sweep: 'The sweep' };
 const details = new Map();
 const DETAIL_TTL_MS = 6 * 3600_000;
+// Two opens of the same place before the first has answered share one call.
+const detailsInFlight = new Map();
+
+/**
+ * One Place Details call for this identifier, whatever is asking. The ledger
+ * is written whether or not Google answered: a call that timed out after it
+ * reached Google was still a call (Codex, 12 Sep 2026).
+ */
+async function detailFor(id, householdId) {
+  const held = details.get(id);
+  if (held && Date.now() - held.at < DETAIL_TTL_MS) return held.detail;
+  if (detailsInFlight.has(id)) return detailsInFlight.get(id);
+  const run = (async () => {
+    const meter = {};
+    try {
+      const raw = await googleSource.get(id, { meter });
+      // A photo is a signed proxy reference here, not a picture: what the
+      // comparison wants is that there are three and who took them.
+      const detail = { ...raw, photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })) };
+      details.set(id, { at: Date.now(), detail });
+      while (details.size > 300) details.delete(details.keys().next().value);
+      return detail;
+    } finally {
+      if (Object.keys(meter).length) await visitsRepo.recordProviderCall(householdId, 'google', 'admin.lookup.compare', meter).catch(() => null);
+      detailsInFlight.delete(id);
+    }
+  })();
+  detailsInFlight.set(id, run);
+  return run;
+}
 
 function pairUp(ours, theirs) {
   const rows = [];
@@ -377,31 +407,22 @@ router.get('/compare', requires('view_library'), async (req, res, next) => {
     } else {
       let id = ref.startsWith('google:') ? ref.slice('google:'.length) : records.find((r) => r.source === 'google')?.fields?.sourcePlaceId ?? null;
       let how = id ? 'id' : 'none';
+      let unreachable = null;
       if (!id) {
-        id = await googleRefFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id });
-        how = id ? 'matched' : 'none';
+        // A miss is "Google has no such place"; a failure is "Google could not
+        // be asked", and the two must not read the same (Codex, 12 Sep 2026).
+        try {
+          id = await googleRefFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id, strict: true });
+          how = id ? 'matched' : 'none';
+        } catch (err) { unreachable = whySourceFailed('google', err); }
       }
-      if (id) {
-        const held = details.get(id);
-        if (held && Date.now() - held.at < DETAIL_TTL_MS) {
-          theirs = { id, how, fields: held.detail, why: null };
-        } else {
-          const meter = {};
-          try {
-            const raw = await googleSource.get(id, { meter });
-            // A photo is a signed proxy reference here, not a picture: what
-            // the comparison wants is that there are three and who took them.
-            const detail = {
-              ...raw,
-              photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })),
-            };
-            await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.compare', meter);
-            details.set(id, { at: Date.now(), detail });
-            while (details.size > 300) details.delete(details.keys().next().value);
-            theirs = { id, how, fields: detail, why: null };
-          } catch (err) {
-            theirs = { id, how, fields: null, why: whySourceFailed('google', err) };
-          }
+      if (unreachable) {
+        theirs = { id: null, how: 'none', fields: null, why: unreachable };
+      } else if (id) {
+        try {
+          theirs = { id, how, fields: await detailFor(id, household.id), why: null };
+        } catch (err) {
+          theirs = { id, how, fields: null, why: whySourceFailed('google', err) };
         }
       } else {
         theirs.why = 'Nothing at Google reads as this place: no name near enough, close enough.';
