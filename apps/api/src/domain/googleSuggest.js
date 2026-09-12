@@ -18,6 +18,8 @@
  * suggested aside, one type at a time, so approving a group is one press.
  */
 
+import { NOT_A_CUISINE } from '../sources/google.js';
+
 /** Google type → our subcategory key. */
 const TO_SUBCATEGORY = {
   // Entertainment and Recreation
@@ -68,8 +70,12 @@ const TO_SUBCATEGORY = {
   noodle_shop: 'restaurants', salad_shop: 'cafes',
 };
 
-/** Words in a `*_restaurant` type that say how you eat, not what: no cuisine to keep. */
-const GENERIC_CUISINE = new Set(['fine dining', 'fast food', 'family', 'buffet', 'brunch', 'breakfast', 'dessert', 'fusion', 'western']);
+/**
+ * Words in a `*_restaurant` type that say how you eat, not what: no cuisine to
+ * keep. The same set google.js drops when it reads cuisines off a place, so
+ * the suggestion describes exactly what a venue will carry (Codex, 12 Sep 2026).
+ */
+const GENERIC_CUISINE = NOT_A_CUISINE;
 
 /** Google's groups that are never a day out: every type in them is suggested aside. */
 const ASIDE_GROUPS = new Set(['Automotive', 'Business', 'Education', 'Facilities', 'Finance', 'Geographical Areas', 'Government', 'Housing', 'Lodging', 'Services', 'Transportation']);

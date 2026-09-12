@@ -143,7 +143,7 @@ export const TYPE_TO_EXPERIENCE = {
 };
 
 // Types that describe the setting, not the food: kept out of the cuisine list.
-const NOT_A_CUISINE = new Set(['fine dining', 'fast food', 'family', 'buffet', 'brunch', 'breakfast', 'dessert', 'restaurant']);
+export const NOT_A_CUISINE = new Set(['fine dining', 'fast food', 'family', 'buffet', 'brunch', 'breakfast', 'dessert', 'restaurant']);
 // Kinds of food place the provider does not spell "…_restaurant": a steakhouse
 // is typed `steak_house`, so the row said nothing about it (owner, 4 Sep 2026).
 const FOOD_TYPE_WORDS = {
