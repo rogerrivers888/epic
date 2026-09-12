@@ -55,7 +55,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, LookupItem, LookupOpened, LookupResult, LookupSource } from '../../api';
+import { api, LookupCompare, LookupItem, LookupOpened, LookupResult, LookupSource } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button } from '../../components/ui';
@@ -78,8 +78,8 @@ const KIND_LABEL: Record<Kind, string> = { activities: 'Activities', food: 'Food
 type Lens = 'category' | 'source';
 const LENSES = ['category', 'source'] as const;
 
-/** The travel times the owner named, and the two either side of them. */
-const MINUTES = [15, 30, 45, 60, 90];
+/** The travel times on offer. A number typed into the address that is not one of these is still shown, as its own row. */
+const MINUTES = [10, 15, 20, 30, 45, 60, 90, 120];
 
 /**
  * `sub=_none` is the places no drawer has been taught for — a gap, and the one
@@ -142,17 +142,22 @@ export function Lookup() {
     return () => { live = false; };
   }, [q, minutes, mode]);
 
-  // One place opened: the second read.
+  // One place opened: the second read, and the third — Google's record for
+  // it, fetched live so it can sit beside ours.
   const [opened, setOpened] = useState<LookupOpened | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [compare, setCompare] = useState<LookupCompare | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
   useEffect(() => {
-    if (!q || !place) { setOpened(null); setOpenError(null); return; }
+    if (!q || !place) { setOpened(null); setOpenError(null); setCompare(null); setCompareError(null); return; }
     let live = true;
-    setOpened(null);
-    setOpenError(null);
+    setOpened(null); setOpenError(null); setCompare(null); setCompareError(null);
     api.lookupPlace({ q, minutes, mode, ref: place })
       .then((r) => { if (live) setOpened(r); })
       .catch((e: any) => { if (live) setOpenError(e?.body?.message ?? e?.message ?? 'Could not open it.'); });
+    api.lookupCompare({ q, minutes, mode, ref: place })
+      .then((r) => { if (live) setCompare(r); })
+      .catch((e: any) => { if (live) setCompareError(e?.body?.message ?? e?.message ?? 'Could not ask Google.'); });
     return () => { live = false; };
   }, [q, minutes, mode, place]);
 
@@ -237,17 +242,16 @@ export function Lookup() {
             </Press>
           ) : null}
         </View>
-        <Button label="Look" kind="primary" onPress={ask} loading={busy} disabled={!typed.trim()} />
+        <Button label="Look" kind="primary" onPress={ask} loading={busy} disabled={!typed.trim()} style={styles.look} />
         <View style={styles.within}>
           <Dropdown
-            label="Within" value={`${minutes} min`} width={180}
-            options={MINUTES.map((m) => ({ key: String(m), label: `${m} minutes`, on: minutes === m }))}
+            soft label="Within" value={`${minutes} min`} width={180}
+            options={[...new Set([...MINUTES, minutes])].sort((a, b) => a - b).map((m) => ({ key: String(m), label: `${m} minutes`, on: minutes === m }))}
             onPick={(k) => setMins(Number(k))}
           />
-          <MinutesBox value={minutes} onChange={(v) => setMins(v)} />
         </View>
         <Dropdown
-          label="Getting there" value={MODE_LABEL[mode]} width={200}
+          soft label="Getting there" value={MODE_LABEL[mode]} width={200}
           options={MODES.map((m) => ({ key: m, label: MODE_LABEL[m], on: mode === m }))}
           onPick={(k) => setMode(k as Mode)}
         />
@@ -293,7 +297,7 @@ export function Lookup() {
           {/* --- one level at a time ------------------------------------------ */}
           {level === 'place' ? (
             <Opened
-              opened={opened} error={openError}
+              opened={opened} error={openError} compare={compare} compareError={compareError}
               crumb={`${KIND_LABEL[kind]}${crumb ? ` › ${crumb}` : ''}`}
               nameOfCat={nameOfCat} nameOfSub={nameOfSub} nameOfSource={nameOfSource}
               onBack={closePlace}
@@ -364,7 +368,11 @@ export function Lookup() {
                         accessibilityState={{ expanded: open }}
                         style={[styles.label, !wide && styles.labelNarrow, styles.labelPress, r.depth === 1 && { paddingLeft: 22 }]}
                       >
-                        {!flat && r.depth === 0 ? <Icon name={open ? 'expand' : 'more'} size={13} color={colors.inkMuted} /> : null}
+                        {!flat && r.depth === 0 ? (
+                          <Press onPress={() => toggleCat(r.cat)} accessibilityRole="button" accessibilityLabel={open ? `Close ${r.label}` : `Open ${r.label}`} hitSlop={8} style={styles.chevron}>
+                            <Icon name={open ? 'expand' : 'more'} size={14} color={colors.ink} strokeWidth={2.4} />
+                          </Press>
+                        ) : null}
                         <Text style={[type.small, { color: colors.ink, fontWeight: r.depth === 0 ? '700' : '500', flexShrink: 1 }]} numberOfLines={1}>{r.label}</Text>
                         {!flat && r.depth === 0 && wide ? <Text style={type.tiny}>{plural(row.subs.length, 'drawer')}</Text> : null}
                       </Press>
@@ -444,29 +452,6 @@ function Cell({ n, onPress, strong, narrow, what }: { n: number; onPress: () => 
   );
 }
 
-/** The minutes, typed: a small box beside the dropdown, committed when you leave it. */
-function MinutesBox({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => { setText(String(value)); }, [value]);
-  const commit = () => {
-    const n = Math.round(Number(text.replace(/[^0-9]/g, '')));
-    if (!Number.isFinite(n) || !text.trim()) { setText(String(value)); return; }
-    const next = Math.min(180, Math.max(5, n));
-    setText(String(next));
-    if (next !== value) onChange(next);
-  };
-  return (
-    <View style={styles.minutes}>
-      <TextInput
-        value={text} onChangeText={setText} onBlur={commit} onSubmitEditing={commit}
-        keyboardType="number-pad" returnKeyType="done" selectTextOnFocus
-        accessibilityLabel="Minutes" style={styles.minutesInput}
-      />
-      <Text style={type.tiny}>min</Text>
-    </View>
-  );
-}
-
 function SourceRow({ label, note, owned, asked = true, failed, returned, kept, onPress }: {
   label: string; note: string; owned?: boolean; asked?: boolean; failed?: boolean; returned: number; kept: number; onPress?: () => void;
 }) {
@@ -493,8 +478,8 @@ function SourceRow({ label, note, owned, asked = true, failed, returned, kept, o
 // one place opened: the records, field by field
 // ---------------------------------------------------------------------------
 
-function Opened({ opened, error, crumb, nameOfCat, nameOfSub, nameOfSource, onBack }: {
-  opened: LookupOpened | null; error: string | null; crumb: string;
+function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOfSub, nameOfSource, onBack }: {
+  opened: LookupOpened | null; error: string | null; compare: LookupCompare | null; compareError: string | null; crumb: string;
   nameOfCat: (k: string | null) => string; nameOfSub: (k: string | null) => string; nameOfSource: (k: string) => string;
   onBack: () => void;
 }) {
@@ -518,10 +503,66 @@ function Opened({ opened, error, crumb, nameOfCat, nameOfSub, nameOfSource, onBa
           </Press>
         ) : null}
       </View>
+      <Compare compare={compare} error={compareError} />
+
+      <Text style={[styles.kicker, { marginTop: spacing.lg, paddingBottom: 6 }]}>Every record as it arrived</Text>
       {records.map((r, i) => (
-        <RecordFold key={`${r.source}:${i}`} title={r.label} fields={r.fields} startOpen={i === 0} />
+        <RecordFold key={`${r.source}:${i}`} title={r.label} fields={r.fields} />
       ))}
       {resolved ? <RecordFold title="As Epic resolved it" note="one row from all of them; provenance says which source each field came from" fields={resolved} /> : null}
+    </View>
+  );
+}
+
+/**
+ * Ours on the left, Google's on the right, one field a row. A blank cell is a
+ * hole, which is what the owner is looking for (12 Sep 2026: "so I can just
+ * compare and see how rich our data is and where the holes in our data are").
+ */
+function Compare({ compare, error }: { compare: LookupCompare | null; error: string | null }) {
+  const { width } = useViewport();
+  const wide = width >= 700;
+  if (error) return <Note tone="crit">{error}</Note>;
+  if (!compare) return <Note>Asking Google for its record of this place…</Note>;
+  const { ours, theirs, rows, filled } = compare;
+  const how = theirs.how === 'id' ? 'by its Google identifier' : theirs.how === 'matched' ? 'matched by name and distance' : null;
+  return (
+    <View>
+      <View style={[styles.compareHead, !wide && styles.compareHeadNarrow]}>
+        <Text style={[styles.headText, wide && { width: 180 }]}>Field</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.headText}>Ours{ours.label ? ` · ${ours.label.toLowerCase()}` : ''}</Text>
+          <Text style={type.tiny}>{ours.fields ? `${filled.ours} of ${filled.oursOf} fields filled` : 'nothing owned for this place yet'}</Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.headText}>Google</Text>
+          <Text style={type.tiny}>{theirs.fields ? `${filled.theirs} of ${filled.theirsOf} fields filled · ${how} · fetched live` : theirs.why ?? 'no record'}</Text>
+        </View>
+      </View>
+      {rows.map((r) => {
+        // A hole is a field one side holds and left empty while the other side
+        // has it — only worth marking when both records are actually here.
+        const both = Boolean(ours.fields && theirs.fields);
+        const ourHole = both && Boolean(r.ourKey) && isBlank(r.ours) && Boolean(r.theirKey) && !isBlank(r.theirs);
+        const theirHole = both && Boolean(r.theirKey) && isBlank(r.theirs) && Boolean(r.ourKey) && !isBlank(r.ours);
+        const side = (label: string, key: string | null, have: boolean, v: unknown, hole: boolean, none: string) => (
+          <View style={[styles.compareCell, !wide && styles.compareCellNarrow, !key && styles.compareCellNone, hole && styles.compareCellHole]}>
+            {!wide ? <Text style={styles.sideLabel}>{label}</Text> : null}
+            {!have ? <Text style={[styles.fieldValue, styles.blank]}>—</Text>
+              : key ? <Value v={v} /> : <Text style={[styles.fieldValue, styles.blank]}>{none}</Text>}
+          </View>
+        );
+        return (
+          <View key={`${r.ourKey ?? ''}|${r.theirKey ?? ''}`} style={[styles.compareRow, !wide && styles.compareRowNarrow]}>
+            <View style={[wide && { width: 180 }]}>
+              <Text style={styles.fieldKey} numberOfLines={wide ? 1 : undefined}>{r.key}</Text>
+              {r.paired && r.theirKey !== r.ourKey ? <Text style={[styles.fieldKey, { color: colors.inkFaint }]} numberOfLines={1}>{r.theirKey}</Text> : null}
+            </View>
+            {side('ours', r.ourKey, Boolean(ours.fields), r.ours, ourHole, 'not a field of ours')}
+            {side('google', r.theirKey, Boolean(theirs.fields), r.theirs, theirHole, 'not a field of theirs')}
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -543,7 +584,7 @@ function RecordFold({ title, note, fields, startOpen = false }: { title: string;
       {open ? keys.map((k) => (
         <View key={k} style={[styles.field, !wide && styles.fieldNarrow]}>
           <Text style={[styles.fieldKey, wide && { width: 180 }]} numberOfLines={wide ? 1 : undefined}>{k}</Text>
-          <View style={{ flex: 1, minWidth: 0 }}><Value v={fields[k]} /></View>
+          <View style={wide ? { flex: 1, minWidth: 0 } : { alignSelf: 'stretch' }}><Value v={fields[k]} /></View>
         </View>
       )) : null}
     </View>
@@ -577,17 +618,16 @@ const HAIR = 1;
 const styles = StyleSheet.create({
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', zIndex: 20, position: 'relative' },
   controlsNarrow: { gap: spacing.xs },
+  // One height, one grey, one corner for everything on the line (owner, 12
+  // Sep 2026: "the dropdowns are a different size… I don't like the black
+  // squares. Maybe they can be light grey. Maybe they can have rounded corners").
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 6, flexGrow: 1, minWidth: 200,
-    borderWidth: 1, borderColor: colors.line, paddingHorizontal: spacing.sm, minHeight: 36, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.lineSoft, borderRadius: 8, paddingHorizontal: 12, minHeight: 40, backgroundColor: colors.surface,
   },
   searchInput: { flex: 1, minWidth: 0, ...type.small, color: colors.ink, paddingVertical: 6, outlineStyle: 'none' as any },
+  look: { minHeight: 40, borderRadius: 8, paddingHorizontal: 18 },
   within: { flexDirection: 'row', alignItems: 'center', gap: 6, zIndex: 30 },
-  minutes: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  minutesInput: {
-    width: 52, minHeight: 36, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
-    textAlign: 'center', ...type.small, color: colors.ink, fontWeight: '700', outlineStyle: 'none' as any,
-  },
 
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingVertical: 2 },
 
@@ -605,6 +645,7 @@ const styles = StyleSheet.create({
   label: { width: 190, flexGrow: 1, flexShrink: 1, minWidth: 0 },
   labelNarrow: { width: 120, flexGrow: 0 },
   labelPress: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 4 },
+  chevron: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   cell: { width: 84, alignItems: 'flex-end', justifyContent: 'center', textAlign: 'right', paddingHorizontal: 6 },
   cellNarrow: { width: 58, paddingHorizontal: 3 },
   cellWide: { width: 96 },
@@ -622,6 +663,17 @@ const styles = StyleSheet.create({
   inline: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   empty: { ...type.small, color: colors.inkMuted, paddingVertical: spacing.md },
 
+  compareHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: HAIR, borderBottomColor: colors.line },
+  compareHeadNarrow: { flexDirection: 'column', alignItems: 'stretch' },
+  compareRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 5, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft },
+  compareRowNarrow: { flexDirection: 'column', alignItems: 'stretch', gap: 4 },
+  compareCell: { flex: 1, minWidth: 0 },
+  /** In a column, `flex: 1` shares the height out and the cells overlap; each takes its own. */
+  compareCellNarrow: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'stretch' },
+  sideLabel: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkFaint, fontSize: 9 },
+  compareCellNone: { opacity: 0.6 },
+  /** A hole: what one side has and the other does not. The tint, not a colour, so it reads without being loud. */
+  compareCellHole: { backgroundColor: colors.surfaceMuted, paddingHorizontal: 4 },
   fold: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: HAIR, borderBottomColor: colors.line, flexWrap: 'wrap' },
   field: { flexDirection: 'row', gap: spacing.sm, paddingVertical: 5, paddingLeft: 22, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft, alignItems: 'flex-start' },
   fieldNarrow: { flexDirection: 'column', gap: 2 },

@@ -395,7 +395,7 @@ export type DropdownOption = { key: string; label: string; on: boolean; count?: 
  * and a transparent scrim behind it closes it. It positions itself under the
  * control, so it must sit in a parent that does not clip (`overflow: visible`).
  */
-export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick }: {
+export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick, soft = false }: {
   /** What the control is for: "Domain". */
   label: string;
   /** What it is set to, printed after the label: "All domains". */
@@ -406,6 +406,8 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
   width?: number;
   /** Shortcut rows above the list, for multi: All · None · Own for good … */
   quick?: { key: string; label: string }[];
+  /** A light grey, rounded control at 40px — the owner's ask for Lookup's control line (12 Sep 2026: "I don't like the black squares"). */
+  soft?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const groups = useMemo(() => {
@@ -424,7 +426,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`${label}: ${value}`}
-        style={[dd.dd, open && dd.ddOpen]}
+        style={[dd.dd, soft && dd.ddSoft, open && dd.ddOpen]}
       >
         <Text style={dd.ddLabel}>{label}</Text>
         <Text style={dd.ddValue} numberOfLines={1}>{value}</Text>
@@ -433,7 +435,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
       {open ? (
         <>
           <Press style={dd.ddScrim} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={[dd.ddPanel, { width }]} accessibilityRole="menu">
+          <View style={[dd.ddPanel, soft && dd.ddPanelSoft, { width }]} accessibilityRole="menu">
             {quick?.length ? (
               <Row style={dd.ddQuick}>
                 {quick.map((q) => (
@@ -495,6 +497,8 @@ const dd = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
     paddingHorizontal: spacing.sm, paddingVertical: 7, backgroundColor: colors.surface, minHeight: 36,
   },
+  ddSoft: { borderColor: colors.lineSoft, borderRadius: 8, minHeight: 40, paddingHorizontal: 12 },
+  ddPanelSoft: { borderColor: colors.lineSoft, borderRadius: 8 },
   ddOpen: { borderColor: colors.ink },
   ddLabel: { ...type.tiny, color: colors.inkMuted },
   ddValue: { ...type.small, color: colors.ink, fontWeight: '700', maxWidth: 220 },

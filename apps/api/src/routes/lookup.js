@@ -26,6 +26,8 @@
 import express from 'express';
 import { requires } from '../access.js';
 import { enabledSources, recordsOf } from '../sources/index.js';
+import { googleSource } from '../sources/google.js';
+import { googleRefFor } from '../sources/providerMatch.js';
 import { searchCached } from '../sources/cache.js';
 import { geocode, providerCalls as geocodeCalls } from '../sources/geocode.js';
 import { searchAreas, providerCalls as areaCalls } from '../sources/areas.js';
@@ -300,6 +302,119 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       item: summary,
       records: records.map((r) => ({ source: r.source, label: OWNED.find((o) => o.key === r.source)?.label ?? sourceName(r.source), fields: r.fields })),
       resolved,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Side by side: what we own for a place, and what Google has for it.
+ *
+ * Owner, 12 Sep 2026: "When I click on something that's owned… what I would
+ * like to see is the data that's owned on one side, and then the Google data
+ * on the other. You should call the Google API, ask it for the data for this
+ * record… so I can just compare and see how rich our data is and where the
+ * holes in our data are."
+ *
+ * Ours is the owned record when there is one, else the atlas row or the
+ * sweep row. Google's is one Place Details call for this record — by its own
+ * identifier when we hold one, otherwise matched by name and distance the way
+ * the atlas matches (`googleRefFor`, which remembers the join and never the
+ * content). The detail is held in memory for a few hours so flipping between
+ * places does not bill twice, and it is never written down: rented.
+ *
+ * The rows pair the fields that mean the same thing under two names, then
+ * list what only one side has. A blank cell is a hole, and the point.
+ */
+const PAIRS = [
+  ['name', 'name'], ['category', 'category'], ['address', 'address'], ['lat', 'lat'], ['lng', 'lng'],
+  ['website', 'website'], ['phone', 'phone'], ['opening_hours', 'openingHours'], ['price_range', 'priceLevel'],
+  ['cuisines', 'cuisines'], ['experiences', 'experiences'], ['dietary_options', 'dietaryOptions'],
+  ['good_for_children', 'goodForChildren'], ['summary', 'summary'], ['image_url', 'photos'],
+  ['booking_url', 'reservable'], ['menu_url', null], ['menu_label', null], ['email', null], ['socials', null],
+  ['accessibility', null], ['postcode', null], ['osm_ref', null], ['wikidata_id', null], ['wikipedia_url', null],
+  [null, 'rating'], [null, 'ratingCount'], [null, 'reviews'], [null, 'openNow'], [null, 'mapsUrl'], [null, 'menuForChildren'],
+];
+const OUR_LABEL = { own: 'Owned record', atlas: 'The atlas', sweep: 'The sweep' };
+const details = new Map();
+const DETAIL_TTL_MS = 6 * 3600_000;
+
+function pairUp(ours, theirs) {
+  const rows = [];
+  const usedO = new Set();
+  const usedT = new Set();
+  for (const [o, t] of PAIRS) {
+    if ((o && ours && o in ours) || (t && theirs && t in theirs)) {
+      rows.push({ key: o ?? t, theirKey: t, ourKey: o, ours: o && ours ? ours[o] : undefined, theirs: t && theirs ? theirs[t] : undefined, paired: Boolean(o && t) });
+      if (o) usedO.add(o);
+      if (t) usedT.add(t);
+    }
+  }
+  for (const k of Object.keys(ours ?? {})) if (!usedO.has(k)) rows.push({ key: k, ourKey: k, theirKey: null, ours: ours[k], theirs: undefined, paired: false });
+  for (const k of Object.keys(theirs ?? {})) if (!usedT.has(k)) rows.push({ key: k, ourKey: null, theirKey: k, ours: undefined, theirs: theirs[k], paired: false });
+  return rows;
+}
+
+const blank = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+
+router.get('/compare', requires('view_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const ref = String(req.query.ref ?? '').trim();
+    if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
+    const out = await runLookup(settingsOf(req.query), household);
+    const item = out.items.find((i) => i.ref === ref);
+    if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
+    const { records, resolved, ...summary } = item;
+
+    // Ours: the owned record first, because it is the one researched from the
+    // open web; the atlas or the sweep if that is all we hold.
+    const mine = ['own', 'atlas', 'sweep'].map((k) => records.find((r) => r.source === k)).find(Boolean) ?? null;
+
+    // Theirs: by identifier when we hold one, else the atlas's own match.
+    let theirs = { id: null, how: 'none', fields: null, why: null };
+    if (!googleSource.enabled()) {
+      theirs = { id: null, how: 'off', fields: null, why: 'Google is not switched on here.' };
+    } else {
+      let id = ref.startsWith('google:') ? ref.slice('google:'.length) : records.find((r) => r.source === 'google')?.fields?.sourcePlaceId ?? null;
+      let how = id ? 'id' : 'none';
+      if (!id) {
+        id = await googleRefFor({ venueRef: ref, name: item.name, lat: item.lat, lng: item.lng, householdId: household.id });
+        how = id ? 'matched' : 'none';
+      }
+      if (id) {
+        const held = details.get(id);
+        if (held && Date.now() - held.at < DETAIL_TTL_MS) {
+          theirs = { id, how, fields: held.detail, why: null };
+        } else {
+          const meter = {};
+          try {
+            const detail = await googleSource.get(id, { meter });
+            await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.compare', meter);
+            details.set(id, { at: Date.now(), detail });
+            while (details.size > 300) details.delete(details.keys().next().value);
+            theirs = { id, how, fields: detail, why: null };
+          } catch (err) {
+            theirs = { id, how, fields: null, why: whySourceFailed('google', err) };
+          }
+        }
+      } else {
+        theirs.why = 'Nothing at Google reads as this place: no name near enough, close enough.';
+      }
+    }
+
+    const rows = pairUp(mine?.fields ?? null, theirs.fields);
+    res.json({
+      place: out.place, mode: out.mode, minutes: out.minutes,
+      item: summary,
+      ours: mine ? { source: mine.source, label: OUR_LABEL[mine.source] ?? mine.source, fields: mine.fields } : { source: null, label: null, fields: null },
+      theirs,
+      rows,
+      filled: {
+        ours: rows.filter((r) => r.ourKey && !blank(r.ours)).length,
+        theirs: rows.filter((r) => r.theirKey && !blank(r.theirs)).length,
+        oursOf: rows.filter((r) => r.ourKey).length,
+        theirsOf: rows.filter((r) => r.theirKey).length,
+      },
     });
   } catch (err) { next(err); }
 });

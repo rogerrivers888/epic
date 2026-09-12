@@ -1883,6 +1883,8 @@ export const api = {
   lookup: (p: { q: string; minutes: number; mode: string }) => request<LookupResult>(`/api/admin/lookup${qs(p)}`),
   /** One place opened: each provider's record as it arrived, and the row Epic resolved from them. */
   lookupPlace: (p: { q: string; minutes: number; mode: string; ref: string }) => request<LookupOpened>(`/api/admin/lookup/place${qs(p)}`),
+  /** Ours beside Google's, field by field — one Place Details call, held in memory a few hours. */
+  lookupCompare: (p: { q: string; minutes: number; mode: string; ref: string }) => request<LookupCompare>(`/api/admin/lookup/compare${qs(p)}`),
 
   // --- correcting a category where the mistake is (routes/library.js) ---
   categoryRead: (id: string, said: string) =>
@@ -2311,6 +2313,15 @@ export type LookupOpened = {
   item: Omit<LookupItem, 'recordCount'>;
   records: LookupRecord[];
   resolved: Record<string, unknown> | null;
+};
+export type LookupCompareRow = { key: string; ourKey: string | null; theirKey: string | null; ours: unknown; theirs: unknown; paired: boolean };
+export type LookupCompare = {
+  place: LookupPlace; mode: string; minutes: number;
+  item: Omit<LookupItem, 'recordCount'>;
+  ours: { source: string | null; label: string | null; fields: Record<string, unknown> | null };
+  theirs: { id: string | null; how: 'id' | 'matched' | 'none' | 'off'; fields: Record<string, unknown> | null; why: string | null };
+  rows: LookupCompareRow[];
+  filled: { ours: number; theirs: number; oursOf: number; theirsOf: number };
 };
 
 /**
