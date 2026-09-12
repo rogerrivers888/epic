@@ -229,8 +229,9 @@ inspire.get('/near', async (req, res, next) => {
     const food = await foodNear({ lat: centre.lat, lng: centre.lng, km: reach, limit: FOOD_LIMIT });
     const liveWhy = asked ? 'asked' : needsLookAround(food, THINGS_RADIUS_KM) ? 'unswept' : null;
     const live = liveWhy != null;
+    const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
     const { venues, cached, degraded } = live
-      ? await thingsAround({ household, session: null, place: { ...centre, locality } })
+      ? await thingsAround({ household, session: null, place: { ...centre, locality }, refresh })
       : { venues: [], cached: true, degraded: [] };
     const lookAround = lookAroundOutcome({ ran: live, why: liveWhy, degraded });
 

@@ -1990,7 +1990,7 @@ export const api = {
    * The home screen's one read: everything around a point, already sorted into
    * the six moods, with the journey and the stay worked out per place.
    */
-  inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; live?: 1 }) =>
+  inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; live?: 1; refresh?: 1 }) =>
     request<InspireNear>(`/api/inspire/near${qs(q)}`),
 
   imageUrl: (id: string, width = 500) => `${API_URL}/api/images/${id}/${width}`,

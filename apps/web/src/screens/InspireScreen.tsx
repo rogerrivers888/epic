@@ -317,7 +317,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // Where somebody said, which wins over home: the most deliberate answer to
   // "where" is the one on screen, and it is in the address so it travels.
   const centre = unknown ? null : chosen ?? home;
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
     if (!centre) { setPool(null); setLoading(false); return; }
     setLoading(true);
     setError(null);
@@ -333,6 +333,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         // From home, nothing is sent and the API measures from home as before.
         from: chosen ? `${centre.lat},${centre.lng}` : null,
         mode: travelBy,
+        // "Try again" after a source refused must ask the source again, not
+        // read the refusal back out of the search cache (Codex, 12 Sep 2026).
+        refresh: refresh ? 1 : undefined,
       });
       setPool(r);
     } catch (e: any) {
@@ -654,8 +657,23 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
 
   /** What an empty list says, and the one tap out of it. */
   const emptyBody = `No places within ${howFarShort(travel)} · ${whereName} match these filters.`;
-  /** The next How far that would show something, when this one shows nothing. */
-  const wider = useMemo(() => nextWider(scope, filters, crowdOf), [scope, filters, crowdOf]);
+  /**
+   * The next How far that would show something, when this one shows nothing.
+   * Counted over the very rows the empty list would have drawn — the pick and
+   * the drawer inside it — before the reach was applied; `listed` and `inPick`
+   * are already cut by it, so they cannot say what lies beyond (Codex,
+   * 12 Sep 2026). Not a hook: this sits below the search screen's return.
+   */
+  const beyondReach = (() => {
+    let rows = inMode;
+    if (pick) rows = !pickIsCategory ? rows.filter((i) => i.cuisines.includes(pick)) : rows.filter((i) => inCategory(i, pick));
+    if (pick && pickIsCategory && within != null && within !== ALL) {
+      if (mode === 'food') rows = within === OTHER ? rows.filter((i) => !cuisineOf(i)) : rows.filter((i) => cuisineOf(i) === within);
+      else rows = within === OTHER ? rows.filter((i) => !i.subcategory || !subRows.some((r) => r.key === i.subcategory && r.key !== OTHER)) : rows.filter((i) => i.subcategory === within);
+    }
+    return rows;
+  })();
+  const wider = nextWider(beyondReach, filters, crowdOf);
   const nothingDrawn = !loading && !!pool && (pick ? (layer === 'subs' ? subRows.length === 0 : listed.length === 0) : mode === 'food' ? shown.length === 0 : shelves.length === 0);
 
   return (
@@ -850,7 +868,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                           : 'The sweep has not reached this area yet, so there is nothing to draw here.')
                       : 'The atlas has nothing illustrated near here yet. Try another town.'}
                     action={pool?.pools?.failed ? 'Try again' : 'Somewhere else'}
-                    onAction={pool?.pools?.failed ? load : () => setMenu('where')}
+                    onAction={pool?.pools?.failed ? () => void load(true) : () => setMenu('where')}
                   />
                 ) : wider ? (
                   // The reach is what is cutting the list, and the next step

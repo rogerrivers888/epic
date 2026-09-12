@@ -1528,8 +1528,10 @@ const placeSourceKeys = () => enabledSources().filter((src) => !src.events && sr
 // waiting for them bought nothing and cost the picture (owner, 4 Sep 2026).
 const THINGS_DEADLINE_MS = Number(process.env.EPIC_THINGS_DEADLINE_MS || 8000);
 const thingsSearch = (place) => ({ center: { lat: place.lat, lng: place.lng }, radiusKm: THINGS_RADIUS_KM, categories: [], query: '', includeEvents: false, sources: placeSourceKeys(), locality: place.locality ?? null, deadlineMs: THINGS_DEADLINE_MS });
-export async function thingsAround({ household, session, place }) {
-  const r = await searchCached(thingsSearch(place));
+export async function thingsAround({ household, session, place, refresh = false }) {
+  // `refresh` is "Try again" after a source refused: the cache holds a
+  // degraded answer for ten minutes, and reading it back would be no retry.
+  const r = await searchCached(thingsSearch(place), { refresh });
   if (r.fetched) await planSessions.recordSessionCall(household.id, session?.id ?? null, r.sourcesQueried.join('+') || 'none', 'plan.inspire.things', r.units);
   return r;
 }
