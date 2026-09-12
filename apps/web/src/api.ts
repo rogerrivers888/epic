@@ -1713,6 +1713,8 @@ export const api = {
   becomeHost: (body: HostInput) => post<{ host: OwnHost }>('/api/host', body),
   updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected' }) =>
     patch<{ host: OwnHost }>('/api/host', body),
+  /** Stop hosting: the host, its offers and its videos go, and the Host tab is the invitation again. */
+  stopHosting: () => del<void>('/api/host'),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
   uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo', durationS?: number | null): Promise<HostMedia> => {
     const token = sessionToken();

@@ -244,6 +244,7 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
             <LinkRow label="Host on Epic" value={[hosting.host.checks === 'running' ? 'Checks running' : TRUST_LABEL[hosting.host.trust], `${hosting.stats?.live ?? 0} live`, hosting.stats?.nextPayoutOn ? `next ${dateOnly(hosting.stats.nextPayoutOn)}` : null].filter(Boolean).join(' · ')} onPress={() => navigate(paths.host())} icon="host" />
             <LinkRow label="Payouts" value={hosting.host.payoutStatus === 'connected' ? hosting.host.payoutLabel ?? 'Connected' : 'Not connected'} onPress={() => navigate(paths.hostStart(4))} icon="payout" />
             <LinkRow label="Your host profile" value="Public" onPress={() => navigate(paths.hostProfile(hosting.host!.id))} icon="guest" />
+            <StopHosting onDone={() => { setHosting(null); navigate(paths.host()); }} />
           </View>
         </>
       ) : null}
@@ -301,6 +302,36 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
         </View>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Stop hosting (owner, 12 Sep 2026: "reset me so that I get to see those
+ * screens again"). Two taps: the host, every offer and every video go, and the
+ * Host tab is the invitation again. Refused by the API while anybody holds a
+ * place, and the refusal is shown in its own words.
+ */
+function StopHosting({ onDone }: { onDone: () => void }) {
+  const [arm, setArm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  if (!arm) {
+    return (
+      <Press onPress={() => setArm(true)} accessibilityRole="button" style={styles.linkRow}>
+        <Icon name="delete" size={14} color={colors.overrun} />
+        <Text style={[type.small, { color: colors.overrun, fontWeight: '700' }]}>Stop hosting</Text>
+      </Press>
+    );
+  }
+  return (
+    <View style={{ gap: spacing.sm, padding: spacing.md, borderWidth: BORDER, borderColor: colors.overrun }}>
+      <Text style={type.body}>Your host profile, every offer and every video go. The Host tab starts you again from the beginning. Anyone holding a place on an offer has to be told first — call those off on the offer's page.</Text>
+      {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
+      <Row>
+        <Button label="Stop hosting" kind="danger" loading={busy} onPress={async () => { setBusy(true); try { await api.stopHosting(); onDone(); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />
+        <Button label="Keep it" kind="ghost" onPress={() => setArm(false)} />
+      </Row>
+    </View>
   );
 }
 

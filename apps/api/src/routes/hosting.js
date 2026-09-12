@@ -274,6 +274,28 @@ router.patch('/host', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * DELETE /api/host — stop hosting (owner, 12 Sep 2026: "I went partway through
+ * creating my user. I'd like you to reset me so that I get to see those
+ * screens again"). The host, every offer, every draft and every video and
+ * photograph go, and the Host tab is the invitation again. Refused while
+ * anybody holds a place on one of the offers: they are told and refunded by
+ * calling each one off first, never by a row quietly disappearing.
+ */
+router.delete('/host', async (req, res, next) => {
+  try {
+    const { household, host } = await myHost();
+    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting.');
+    const offers = await repo.offersOfHost(host.id);
+    const bookings = await repo.bookingsOfOffers(offers.map((o) => o.id));
+    const holding = bookings.filter((b) => !['cancelled'].includes(b.state));
+    if (holding.length) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
+    await repo.deleteHost(host.id, household.id);
+    await repo.deleteMediaOfHousehold(household.id);
+    res.status(204).end();
+  } catch (err) { next(err); }
+});
+
 /** A media id is only usable by the household that uploaded it, and only for what it is. */
 async function ownMedia(householdId, id, kind) {
   const m = await repo.mediaMeta(id);

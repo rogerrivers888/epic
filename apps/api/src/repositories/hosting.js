@@ -62,6 +62,17 @@ export async function updateHost(id, patch) {
   return rows[0];
 }
 
+/** Stop hosting: the host row goes, and its offers and bookings with it (cascade). */
+export async function deleteHost(id, householdId) {
+  await query('delete from hosts where id = $1 and household_id = $2', [id, householdId]);
+}
+
+/** Every video and photograph this household uploaded as a host. */
+export async function deleteMediaOfHousehold(householdId) {
+  const { rowCount } = await query('delete from host_media where household_id = $1', [householdId]);
+  return rowCount;
+}
+
 /**
  * Hosts with something live near a point, nearest first. Distance is done in
  * SQL with the flat-earth approximation that is fine at the scale of a day

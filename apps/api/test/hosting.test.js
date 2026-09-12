@@ -234,3 +234,15 @@ test('a held booking is decided on its day: confirmed at the minimum, otherwise 
   assert.equal((await repo.bookingById(held.id)).state, 'confirmed', 'five in on the day: it runs');
   assert.equal((await repo.bookingById(other.id)).state, 'confirmed');
 });
+
+test('stopping hosting takes the host, its offers and its media with it', async () => {
+  const { household } = await aHousehold(query, 'a host who stops');
+  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'guide' });
+  const offer = await repo.insertOffer(host.id, 'oneoff', { title: 'A draft' });
+  const m = await repo.insertMedia({ householdId: household.id, kind: 'video', mime: 'video/webm', bytes: Buffer.from('x'), durationS: 30 });
+  await repo.deleteHost(host.id, household.id);
+  assert.equal(await repo.deleteMediaOfHousehold(household.id), 1);
+  assert.equal(await repo.hostByHousehold(household.id), null);
+  assert.equal(await repo.offerById(offer.id), null, 'offers go with the host');
+  assert.equal(await repo.mediaMeta(m.id), null);
+});
