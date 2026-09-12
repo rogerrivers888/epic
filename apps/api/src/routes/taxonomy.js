@@ -267,9 +267,13 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
     const known = tax.categories.map((c) => c.key);
     const done = []; const failed = [];
     for (const it of items) {
-      const labels = Array.isArray(it?.labels) ? it.labels.map(String).filter(parseLabel) : [];
+      const labels = Array.isArray(it?.labels) ? it.labels.map(String) : [];
       try {
+        // Every label must parse: dropping a bad one would write a broader rule
+        // than was asked for (Codex, 12 Sep 2026).
         if (!labels.length) throw new Error('no label');
+        const badOne = labels.find((l) => !parseLabel(l));
+        if (badOne) throw new Error(`not a label: ${badOne}`);
         if (it.aside) {
           if (labels.length !== 1) throw new Error('set aside one label at a time');
           const { namespace, key } = parseLabel(labels[0]);

@@ -835,6 +835,9 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onChanged }: {
                         <Text style={[type.small, { fontWeight: '600', textAlign: 'right', maxWidth: '40%' }]} numberOfLines={2}>{lands}</Text>
                       )}
                     </View>
+                    {/* The panel hangs off this row, so its own scrim has no room; a
+                        fixed one over the whole window closes it on a tap anywhere else. */}
+                    {isOpen ? <Press style={styles.rowScrim as never} onPress={() => setOpenKey(null)} accessibilityRole="button" accessibilityLabel="Close" /> : null}
                     <Popover open={isOpen} top={rowTop[r.key] ?? 44} align="right" onClose={() => setOpenKey(null)}>
                       <PopoverList options={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]} onPick={() => void decide(r, { aside: true })} dense />
                       {tax.categories.filter((c) => c.active).map((c) => (
@@ -1004,5 +1007,6 @@ const styles = StyleSheet.create({
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
   tCellOn: { backgroundColor: colors.selected },
+  rowScrim: { position: 'fixed' as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 },
   inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
 });
