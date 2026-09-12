@@ -45,7 +45,8 @@ export function BirthdayPicker({ value, onChange, label = 'Date of birth', hint,
   // The cutoff is a day, not a year: somebody who turns eighteen in December
   // cannot be offered a birthday in that November (Codex, 12 Sep 2026).
   const today = new Date();
-  const cutoff = new Date(today.getFullYear() - minAge, today.getMonth(), today.getDate());
+  // Clamped to the month's last day, so a leap day does not roll into March in a year that has none.
+  const cutoff = new Date(today.getFullYear() - minAge, today.getMonth(), Math.min(today.getDate(), daysIn(today.getFullYear() - minAge, today.getMonth() + 1)));
   const latest = cutoff.getFullYear();
   const earliest = today.getFullYear() - maxAge;
   const lastMonth = (y: number) => (y === latest ? cutoff.getMonth() + 1 : 12);
