@@ -375,7 +375,7 @@ export async function householdPhotosFor(householdId, venueRefs) {
   if (!refs.length) return new Map();
   const { rows } = await query(
     `select p.venue_ref, i.id, i.source, i.lqip, i.credit_line, i.licence, i.licence_url, i.source_page_url,
-            i.attribution_required, i.width, i.height, p.position
+            i.attribution_required, i.width, i.height, i.contributor_household_id, i.moderation, p.position
        from household_place_photos p join image_assets i on i.id = p.image_id
       where p.household_id = $1 and p.venue_ref = any($2::text[]) and i.moderation <> 'rejected'
       order by p.venue_ref, p.position, p.created_at`,

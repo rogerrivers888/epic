@@ -100,11 +100,3 @@ async function measure(blob: Blob): Promise<{ width: number; height: number; lqi
     return { width: 0, height: 0, lqip: null };
   }
 }
-
-/** Bytes as base64, for a JSON body. */
-export async function toBase64(blob: Blob): Promise<string> {
-  const buf = new Uint8Array(await blob.arrayBuffer());
-  let s = '';
-  for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + 0x8000)));
-  return btoa(s);
-}

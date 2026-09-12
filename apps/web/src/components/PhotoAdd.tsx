@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, HouseholdResponse, OwnedImage, PhotoFiled, PhotoWhere, Venue } from '../api';
 import { useHere, accuracyWords } from '../hooks/useHere';
-import { pickPlacePhoto, toBase64, type PlacePhoto } from './pickPhoto';
+import { pickPlacePhoto, type PlacePhoto } from './pickPhoto';
 import { Button, Row, Segmented, StatusLine } from './ui';
 import { VenueRow } from './Visits';
 import { MEDIA_RADIUS, MEDIA_RATIO } from './VenueThumb';
@@ -79,8 +79,7 @@ export function PhotoAdd({ household, onDone, onSearchInstead }: {
   const place = async (p: PlacePhoto, at: { lat: number; lng: number; how: 'photo' | 'device' }) => {
     setStage('uploading');
     try {
-      const data = await toBase64(p.blob);
-      const up = await api.uploadPlacePhoto({ data, mime: p.blob.type || 'image/jpeg', width: p.width, height: p.height, lqip: p.lqip, lat: at.lat, lng: at.lng });
+      const up = await api.uploadPlacePhoto(p.blob, { width: p.width, height: p.height, lqip: p.lqip, lat: at.lat, lng: at.lng });
       if (!alive.current) return;
       setImage(up.image); setWhere(up.where);
       // What the sources know is at that spot, a few hundred metres round it.

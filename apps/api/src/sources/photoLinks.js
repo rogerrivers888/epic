@@ -84,3 +84,21 @@ export function photoLinkValid(query) {
   }
   return crypto.timingSafeEqual(expected, given);
 }
+
+/**
+ * The same door, for a picture of our own that is not yet public.
+ *
+ * A household's photograph of a place waits in the library pending a look
+ * (migration 036) and is drawn for that household alone (migration 082). The
+ * bytes still have to reach an `<img>`, which cannot prove who it is — so the
+ * link proves it instead, signed over the image id the way a rented reference
+ * is signed over its name. Anyone else with the bare id gets a 404.
+ */
+export function stampImage(image) {
+  if (!image?.id) return image;
+  const expiry = Date.now() + LIFETIME_MS;
+  return { ...image, exp: expiry, sig: sign(`image:${image.id}`, expiry) };
+}
+
+/** Whether this request carries a good link for the image it is asking for. */
+export const imageLinkValid = (id, query) => photoLinkValid({ name: `image:${id}`, s: query?.s ?? query?.sig, e: query?.e ?? query?.exp });

@@ -45,6 +45,7 @@ import { sweepRegion, sweepCost, rematchRegion, ACTIVITY_QUERIES } from '../sour
 import { portraitsForApp, setPortrait } from '../sources/portraits.js';
 import { sweepPictures, PICTURE_VERSION } from '../sources/placePicture.js';
 import { mapillaryReady, mapillaryTrouble } from '../sources/streetLevel.js';
+import { imageLinkValid } from '../sources/photoLinks.js';
 import { query } from '../db.js';
 
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -144,17 +145,20 @@ imageRouter.get('/:id/:width', async (req, res, next) => {
     const image = await lib.imageById(req.params.id);
     // A household's own upload waits for a person's look before the library
     // will draw it for anybody else (migration 036), but it is theirs, and a
-    // card of their own place must not sit blank while it waits. The id is
-    // unguessable and the row says whose it is (migration 082).
-    const theirs = image?.contributor_household_id && image.moderation === 'pending';
+    // card of their own place must not sit blank while it waits. It is served
+    // only on the signed link the atlas hands that household (photoLinks.js
+    // `stampImage`) — the bare id gets the same 404 as any other pending row —
+    // and it is not cached in public (Codex, 12 Sep 2026).
+    const theirs = !!image?.contributor_household_id && image.moderation === 'pending' && imageLinkValid(image.id, req.query);
     if (!image || (image.moderation !== 'approved' && !theirs)) return res.status(404).end();
     const variant = await lib.variantFor(image.id, Number(req.params.width));
     if (!variant) return res.status(404).end();
     res.set({
       'content-type': variant.mime,
       // An id addresses one photograph for ever; a different picture is a
-      // different row. So this may be cached as hard as the web allows.
-      'cache-control': 'public, max-age=31536000, immutable',
+      // different row. So this may be cached as hard as the web allows — on
+      // the household's own device only, while it is theirs alone.
+      'cache-control': theirs ? 'private, max-age=21600' : 'public, max-age=31536000, immutable',
       etag: `"${image.id}-${variant.width}"`,
       // The licence, on the response itself, so it is attached to the bytes
       // wherever they end up and not only to the JSON that pointed at them.

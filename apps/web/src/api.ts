@@ -7,6 +7,14 @@ import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCop
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
+/**
+ * The bytes of a picture we own, at a width. One builder, because a household's
+ * own photograph carries a signature that has to go on the URL, and a card
+ * that forgot it would draw a 404 (api/sources/photoLinks.js).
+ */
+export const ownedImageUrl = (image: { id: string; sig?: string; exp?: number }, width: number) =>
+  `${API_URL}/api/images/${image.id}/${width}` + (image.sig && image.exp ? `?s=${encodeURIComponent(image.sig)}&e=${image.exp}` : '');
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -1063,6 +1071,12 @@ export type PhotoWhere = PhotoFiled & { label: string | null; how: 'known' | 'ne
 export type OwnedImage = {
   id: string;
   /**
+   * The signed link for a household's own photograph while it waits for the
+   * library's look (api/sources/photoLinks.js `stampImage`). Absent on every
+   * public picture; present, it must travel on the URL or the bytes are a 404.
+   */
+  sig?: string; exp?: number;
+  /**
    * Which rung of the ladder found it (sources/placePicture.js), because a card
    * must not draw all of them the same way. A photograph fills its tile; a
    * `logo` is a business's mark and is contained on the lime ground with room
@@ -1731,9 +1745,17 @@ export const api = {
     return body.media as HostMedia;
   },
   // --- a place from a photograph (12 Sep 2026) ---------------------------------
-  /** The picture and where it was taken. Not queued: a photograph is not a thing to send later. */
-  uploadPlacePhoto: (body: { data: string; mime: string; width: number; height: number; lqip: string | null; lat: number | null; lng: number | null }) =>
-    post<{ image: OwnedImage; point: { lat: number; lng: number } | null; where: PhotoWhere | null }>('/api/places/photo', body),
+  /** The picture and where it was taken. Raw bytes, not `request`: a photograph is neither JSON nor a thing to send later. */
+  uploadPlacePhoto: async (blob: Blob, meta: { width: number; height: number; lqip: string | null; lat: number | null; lng: number | null }) => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/places/photo${qs({ lat: meta.lat ?? undefined, lng: meta.lng ?? undefined, w: meta.width || undefined, h: meta.height || undefined })}`, {
+      method: 'POST', credentials: 'include', body: blob,
+      headers: { 'content-type': blob.type || 'image/jpeg', ...(meta.lqip ? { 'x-lqip': meta.lqip } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body as { image: OwnedImage; point: { lat: number; lng: number } | null; where: PhotoWhere | null };
+  },
   /** It is this place: keep the photo on it for us, and save the place. */
   attachPlacePhoto: (imageId: string, body: { venueRef: string; label: string; category?: string | null; lat?: number | null; lng?: number | null; venue?: Partial<Venue> }) =>
     post<{ venueRef: string; filed: PhotoFiled | null }>(`/api/places/photo/${imageId}/attach`, body),

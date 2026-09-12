@@ -36,31 +36,32 @@ const CATEGORY_OF_KIND = { do: 'attraction', eat: 'restaurant', stay: 'hotel' };
 const refuse = (status, code, message) => { const e = new Error(message); e.status = status; e.code = code; return e; };
 const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 
-/** A JSON body big enough for one photograph, on these routes only: the app's default is 1mb. */
-placePhotos.use('/photo', express.json({ limit: '12mb' }));
-
 /**
- * POST /api/places/photo { data, mime, width, height, lqip, lat, lng }
+ * POST /api/places/photo?lat=&lng=&w=&h= — the bytes, raw, with the picture's
+ * 20px self in an `x-lqip` header.
  *
- * `data` is the photograph, base64. `lat`/`lng` is where it was taken: from
- * the picture's own EXIF where the phone left it in, else from the device's
- * fix at the moment it was chosen. Answers with the stored picture and where
- * the point is in words, so the screen can say "Painshill Park?" and "Filed
- * under Elmbridge" before anything is saved.
+ * Raw rather than JSON, as `/api/host/media` is: the app's own JSON parser
+ * runs first and stops at a megabyte, which a base64 photograph passes at
+ * 750 KB (Codex, 12 Sep 2026). `lat`/`lng` is where it was taken — from the
+ * picture's own EXIF where the phone left it in, else from the device's fix at
+ * the moment it was chosen. Answers with the stored picture and where the point
+ * is in words, so the screen can say "Painshill Park?" and "Filed under
+ * Elmbridge" before anything is saved.
  */
-placePhotos.post('/photo', async (req, res, next) => {
+placePhotos.post('/photo', express.raw({ type: () => true, limit: MAX_BYTES }), async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const b = req.body || {};
-    const bytes = typeof b.data === 'string' ? Buffer.from(b.data.replace(/^data:[^,]*,/, ''), 'base64') : null;
+    const q = req.query || {};
+    const bytes = Buffer.isBuffer(req.body) ? req.body : null;
     if (!bytes?.length) throw refuse(400, 'empty', 'No photograph arrived.');
     if (bytes.length > MAX_BYTES) throw refuse(413, 'too_big', 'That photograph is too big.');
     const mime = sniff(bytes);
     if (!mime) throw refuse(400, 'bad_type', 'That is not a picture.');
-    const dims = dimensions(bytes, mime) ?? { width: num(b.width), height: num(b.height) };
-    const lat = num(b.lat);
-    const lng = num(b.lng);
-    const lqip = typeof b.lqip === 'string' && /^data:image\/(jpeg|webp|png);base64,/.test(b.lqip) && b.lqip.length < 4000 ? b.lqip : null;
+    const dims = dimensions(bytes, mime) ?? { width: num(q.w), height: num(q.h) };
+    const lat = num(q.lat);
+    const lng = num(q.lng);
+    const said = String(req.headers['x-lqip'] || '');
+    const lqip = /^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/.test(said) && said.length < 4000 ? said : null;
 
     const image = await lib.saveImage({
       source: 'household', sourceRef: null, sourcePageUrl: null,

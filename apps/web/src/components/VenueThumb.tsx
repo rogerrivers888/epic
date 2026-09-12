@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Press, Zoom } from './press';
-import { API_URL, OwnedImage, VenuePhotoRef } from '../api';
+import { API_URL, OwnedImage, VenuePhotoRef, ownedImageUrl } from '../api';
 import { Icon, IconName, iconFor } from './Icon';
 import { colors, spacing, type } from '../theme';
 
@@ -128,8 +128,6 @@ export function VenueThumb({
   // comes before a mark; the mark is what is drawn when there is none, or no
   // signal — the rented reference never reaches the device (offline/policy.ts).
   const photo = photos?.[0];
-  const markOnly = image?.source === 'logo' && !!photo;
-  if (markOnly) image = null;
   /**
    * The provider's photograph, with the key that lets it through the door.
    *
@@ -138,16 +136,26 @@ export function VenueThumb({
    * cookies — which is Safari, and soon Chrome — where the session cookie the
    * route used to rely on never arrives and every tile fell back to its icon.
    */
-  const rented = !image && (photo?.url ?? (photo?.ref
+  const rentedUri = photo?.url ?? (photo?.ref
     ? `${API_URL}/api/photos/google?name=${encodeURIComponent(photo.ref)}&w=${PHOTO_W}`
       + (photo.sig && photo.exp ? `&s=${encodeURIComponent(photo.sig)}&e=${photo.exp}` : '')
-    : null));
+    : null) ?? null;
+  // A rented photograph that would not load is remembered on its own, so the
+  // mark behind it gets its turn rather than the icon (Codex, 12 Sep 2026).
+  const [rentedFailed, setRentedFailed] = useState(false);
+  useEffect(() => { setRentedFailed(false); }, [rentedUri]);
+  // The photograph first: ours if we own one, else the provider's; and only
+  // then a mark — the mark is what is drawn when there is no photograph, when
+  // the rented one fails, or when there is no signal (the rented reference
+  // never reaches the device, offline/policy.ts).
+  const showRented = !!rentedUri && !rentedFailed && (!image || image.source === 'logo');
+  const shown = showRented ? null : image;
   // A mark is small by nature; asking for 960 of a 180px PNG just serves the
   // same bytes back under a different name.
   // 960 for a card or a hero, 500 for a row thumb — the same line Inspire drew
   // at 200px, kept so the bytes a card fetches do not change with this move.
-  const ourWidth = image?.source === 'logo' ? 500 : fill || w > 200 ? 960 : 500;
-  const uri = image ? `${API_URL}/api/images/${image.id}/${ourWidth}` : rented || null;
+  const ourWidth = shown?.source === 'logo' ? 500 : fill || w > 200 ? 960 : 500;
+  const uri = showRented ? rentedUri : shown ? ownedImageUrl(shown, ourWidth) : null;
 
   /**
    * A new picture gets a fresh chance.
@@ -160,8 +168,9 @@ export function VenueThumb({
    */
   useEffect(() => { setFailed(false); setLoaded(false); }, [uri]);
 
-  const isMark = image?.source === 'logo';
-  const line = image?.creditRequired ? image.credit : photo?.attribution ?? null;
+  const isMark = shown?.source === 'logo';
+  const line = shown?.creditRequired ? shown.credit : showRented ? photo?.attribution ?? null : null;
+  const onError = () => { if (showRented) setRentedFailed(true); else setFailed(true); };
   const icon: IconName = iconFor({ category, experiences, atlasCategory });
 
   const tile = (
@@ -173,15 +182,15 @@ export function VenueThumb({
           clips (owner, 12 Sep 2026). A mark does not: a logo is a shape on
           its ground, not a view into somewhere. */}
       <Zoom>
-      {image?.lqip && !isMark && !loaded && !failed ? (
-        <Image source={{ uri: image.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors />
+      {shown?.lqip && !isMark && !loaded && !failed ? (
+        <Image source={{ uri: shown.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors />
       ) : null}
       {uri && !failed && !isMark ? (
         <Image
           source={{ uri }}
           style={StyleSheet.absoluteFill as any}
           resizeMode="cover"
-          onError={() => setFailed(true)}
+          onError={onError}
           onLoad={() => setLoaded(true)}
           accessibilityIgnoresInvertColors
           accessibilityLabel={name ?? undefined}
@@ -193,7 +202,7 @@ export function VenueThumb({
           source={{ uri }}
           style={[styles.mark, { padding: Math.round(least * 0.16) }]}
           resizeMode="contain"
-          onError={() => setFailed(true)}
+          onError={onError}
           onLoad={() => setLoaded(true)}
           accessibilityIgnoresInvertColors
           accessibilityLabel={name ? `${name} logo` : undefined}

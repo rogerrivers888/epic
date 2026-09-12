@@ -26,6 +26,7 @@ import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
 import { fillRatings, needsRating, ratingKept } from '../sources/rentedRating.js';
 import { recordsFor } from '../repositories/ownedPlaces.js';
 import { fileUnder } from '../domain/fileUnder.js';
+import { stampImage } from '../sources/photoLinks.js';
 
 /**
  * A stored picture in the shape a card draws. `credit` travels with it because
@@ -33,11 +34,11 @@ import { fileUnder } from '../domain/fileUnder.js';
  * the licence broken; `source` travels with it because a mark is not a
  * photograph and must not be drawn like one.
  */
-export const ownedImage = (row) => (row ? {
+export const ownedImage = (row) => (row ? (row.contributor_household_id && row.moderation !== 'approved' ? stampImage : (x) => x)({
   id: row.id, source: row.source, lqip: row.lqip, credit: row.credit_line,
   licence: row.licence, licenceUrl: row.licence_url, sourceUrl: row.source_page_url,
   creditRequired: row.attribution_required,
-} : null);
+}) : null);
 
 export const atlas = Router();
 

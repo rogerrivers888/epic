@@ -155,6 +155,9 @@ function atlasToBrowseItem(p: AtlasPlace): BrowseItem {
     id: p.venueRef, venueRef: p.venueRef, name: p.name, category: p.category ?? v.category ?? 'attraction', lat: p.lat ?? 0, lng: p.lng ?? 0,
     dwellMinutes: 0, reasons: [], justification: null, startsAt: null, endsAt: null, pinned: false, source,
     cuisines: v.cuisines ?? [], experiences: v.experiences ?? [], address: (v.address as any)?.line1 ?? (typeof v.address === 'string' ? v.address : null), website: v.website ?? null, openingHours: v.openingHours ?? null,
+    // The row's picture is the drawer's hero: ours — the household's own
+    // photograph first — and, beside a mark, the provider's.
+    image: p.image ?? null, photos: p.photos ?? undefined,
   };
 }
 

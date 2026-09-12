@@ -3,7 +3,7 @@ import { Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Platfor
 import { Press, Pulse } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
-import { API_URL, api, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
+import { API_URL, api, ownedImageUrl, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER, CREAM, INK, LIME } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
 import { MenuPanel, OrderPanel, PastMeals, StaffSheet, useMenuOrder } from './MenuOrder';
@@ -536,7 +536,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const slides = (() => {
     const out: { uri: string; lqip: string | null }[] = [];
     const owned = item.image;
-    if (owned && owned.source !== 'logo') out.push({ uri: `${API_URL}/api/images/${owned.id}/960`, lqip: owned.lqip ?? null });
+    if (owned && owned.source !== 'logo') out.push({ uri: ownedImageUrl(owned, 960), lqip: owned.lqip ?? null });
     const seen = new Set<string>(out.map((s) => s.uri));
     for (const ph of [...(item.photos ?? []), ...(venue?.photos ?? [])]) {
       if (!(ph.url || (ph.ref && ph.sig && ph.exp))) continue;
