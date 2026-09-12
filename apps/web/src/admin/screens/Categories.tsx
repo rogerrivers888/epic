@@ -740,7 +740,7 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
     <View style={{ gap: spacing.lg }}>
       <Section title={`Google's ${groups.length} groups against our categories — ${count(totals.all)} types`}>
         <Text style={[type.tiny, { paddingVertical: 6 }]}>
-          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out, and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group to see its types.
+          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out — a decision recorded here, not a filter: a place Google also types that way is still filed by its other words — and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group to see its types.
         </Text>
         {wide ? (
           <View style={[styles.tRow, styles.tHead]}>

@@ -73,18 +73,28 @@ async function namesFor(labels) {
  */
 async function withLabels(rules) {
   const all = rules.flatMap((r) => labelsOfRule(r));
-  let names = await namesFor(all);
+  const names = await namesFor(all);
   const unnamed = [...new Set(all.filter((l) => l.startsWith('wikidata:') && !names.get(l)).map((l) => l.slice('wikidata:'.length)))];
-  if (unnamed.length) {
-    try {
-      const got = await kindLabels(unnamed.slice(0, 300));
-      if (got?.size) { await nameKinds(got); names = await namesFor(all); }
-    } catch { /* Wikidata not answering: the rule's own label stands in */ }
-  }
+  // Named in the background — Wikidata can take a minute to say no (Codex, 12
+  // Sep 2026) — so this answer carries the rule's own label and the next one
+  // carries Wikidata's.
+  if (unnamed.length) nameLater(unnamed);
   return rules.map((r) => ({
     ...r,
     labelList: labelsOfRule(r).map((l) => ({ label: l, name: names.get(l) ?? (r.scope === 'kind' ? r.subject_label ?? null : null) })),
   }));
+}
+
+/** The Q-numbers a naming call is already out for, so a busy screen asks Wikidata once. */
+const naming = new Set();
+function nameLater(qids) {
+  const fresh = qids.filter((q) => !naming.has(q)).slice(0, 300);
+  if (!fresh.length) return;
+  for (const q of fresh) naming.add(q);
+  kindLabels(fresh)
+    .then((got) => (got?.size ? nameKinds(got) : 0))
+    .catch(() => null)
+    .finally(() => { for (const q of fresh) naming.delete(q); });
 }
 
 // ---------------------------------------------------------------------------
