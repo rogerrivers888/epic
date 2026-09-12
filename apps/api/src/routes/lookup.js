@@ -28,7 +28,7 @@ import { requires } from '../access.js';
 import { enabledSources, recordsOf } from '../sources/index.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
-import { googleMatchFor, tripadvisorMatchFor, matchesFor, triedFor } from '../sources/providerMatch.js';
+import { googleMatchFor, tripadvisorMatchFor, matchesFor, triedFor, forgetMisses } from '../sources/providerMatch.js';
 import { curate, band } from '../sources/curate.js';
 import { claimPlace, enrich } from '../sources/own.js';
 import { crowdBand, countBand, score } from '../domain/scoring.js';
@@ -525,7 +525,7 @@ const notOwnedOf = (out, kind) => out.items.filter((i) => i.kind === kind && !i.
  * those two numbers, the number of stars and the number of reviews, we can
  * prioritise").
  */
-router.post('/rate', requires('view_library'), async (req, res, next) => {
+router.post('/rate', requires('manage_library'), async (req, res, next) => {
   try {
     const household = await currentHousehold();
     const settings = settingsOf(req.body ?? {});
@@ -533,30 +533,37 @@ router.post('/rate', requires('view_library'), async (req, res, next) => {
     const limit = Math.min(60, Math.max(1, Number(req.body?.limit) || 30));
     if (!googleSource.enabled()) return res.status(409).json({ error: 'google_off', message: 'Google is not switched on here.' });
     const out = await runLookup(settings, household);
-    // Never the same place twice: one already asked about — matched or missed,
-    // in the table or in memory — is done with, whatever Google said.
-    const pool = notOwnedOf(out, kind).filter((i) => i.rating == null && !i.sources.includes('google'));
-    const tried = await triedFor(pool.map((i) => i.ref), 'google');
-    const wanting = pool.filter((i) => !tried.has(i.ref) && !heldFigures(i.ref)).sort((a, b) => a.distanceKm - b.distanceKm);
+    // Never the same place twice in a run: a remembered miss is done with, and
+    // an answer held in memory — figures or none — is done with. A match on
+    // record whose figures have gone (six hours, or a restart) is asked again
+    // for the two cheap fields, because the id is the whole point of keeping
+    // it (Codex, 12 Sep 2026).
+    const pool = notOwnedOf(out, kind).filter((i) => i.rating == null && !heldFigures(i.ref));
+    const refs = pool.map((i) => i.ref);
+    const [tried, held] = await Promise.all([triedFor(refs, 'google'), matchesFor(refs, 'google')]);
+    const wanting = pool.filter((i) => !tried.has(i.ref) || held.has(i.ref)).sort((a, b) => a.distanceKm - b.distanceKm);
     const page = wanting.slice(0, limit);
     let rated = 0; let matched = 0; let missed = 0; let failed = 0;
     for (const i of page) {
+      let m = null;
       try {
-        const m = await googleMatchFor({ venueRef: i.ref, name: i.name, lat: i.lat, lng: i.lng, householdId: household.id, strict: true });
-        if (!m) { missed += 1; continue; }
-        matched += 1;
-        let f = m.held ? null : m;
-        if (!f) {
-          const meter = {};
-          try { f = await googleSource.rating(m.id, { meter }); }
-          finally { if (Object.keys(meter).length) await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.rate', meter).catch(() => null); }
-        }
-        holdFigures(i.ref, f ?? { rating: null, ratingCount: null });
-        if (f && (f.rating != null || f.ratingCount != null)) rated += 1;
+        m = await googleMatchFor({ venueRef: i.ref, name: i.name, lat: i.lat, lng: i.lng, householdId: household.id, strict: true });
       } catch (err) {
         if (err?.provider !== 'google') throw err;
         failed += 1;
+        continue;
       }
+      if (!m) { missed += 1; continue; }
+      matched += 1;
+      let f = m.held ? null : m;
+      if (!f) {
+        const meter = {};
+        try { f = await googleSource.rating(m.id, { meter }); }
+        catch { failed += 1; continue; }
+        finally { if (Object.keys(meter).length) await visitsRepo.recordProviderCall(household.id, 'google', 'admin.lookup.rate', meter).catch(() => null); }
+      }
+      holdFigures(i.ref, f ?? { rating: null, ratingCount: null });
+      if (f && (f.rating != null || f.ratingCount != null)) rated += 1;
     }
     res.json({ kind, looked: page.length, matched, rated, missed, failed, remaining: Math.max(0, wanting.length - page.length) });
   } catch (err) { next(err); }
@@ -569,17 +576,28 @@ router.post('/rate', requires('view_library'), async (req, res, next) => {
  * Sunningdale data"). Every location Terra returns is billed and counted,
  * and the run stops before the next lookup could pass the cap.
  */
-router.post('/tripadvisor', requires('view_library'), async (req, res, next) => {
-  try {
-    const household = await currentHousehold();
+// One Tripadvisor run at a time per household, so two cannot both read the
+// same headroom under the cap and together pass it (Codex, 12 Sep 2026).
+const tripadvisorRuns = new Map();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+router.post('/tripadvisor', requires('manage_library'), async (req, res, next) => {
+  let household;
+  try { household = await currentHousehold(); } catch (err) { return next(err); }
+  const previous = tripadvisorRuns.get(household.id) ?? Promise.resolve();
+  const mine = previous.catch(() => null).then(async () => {
     const settings = settingsOf(req.body ?? {});
     const kind = req.body?.kind === 'food' ? 'food' : 'activities';
     const limit = Math.min(40, Math.max(1, Number(req.body?.limit) || 20));
     if (!tripadvisorSource.enabled()) return res.status(409).json({ error: 'tripadvisor_off', message: 'Tripadvisor is not switched on here.' });
     const out = await runLookup(settings, household);
     let used = await tripadvisorUsed(household.id);
-    const tried = await triedFor(notOwnedOf(out, kind).map((i) => i.ref), 'tripadvisor');
-    const wanting = notOwnedOf(out, kind).filter((i) => !tried.has(i.ref) && !i.sources.includes('tripadvisor')).sort((a, b) => b.priority - a.priority);
+    const pool = notOwnedOf(out, kind);
+    // A search asked wrongly remembers misses that are not misses; the owner
+    // may ask for them to be forgotten and tried again.
+    if (req.body?.retryMissed === true) await forgetMisses(pool.map((i) => i.ref), 'tripadvisor');
+    const tried = await triedFor(pool.map((i) => i.ref), 'tripadvisor');
+    const wanting = pool.filter((i) => !tried.has(i.ref) && !i.sources.includes('tripadvisor')).sort((a, b) => b.priority - a.priority);
     const page = wanting.slice(0, limit);
     let matched = 0; let missed = 0; let looked = 0; let stopped = false;
     for (const i of page) {
@@ -587,19 +605,24 @@ router.post('/tripadvisor', requires('view_library'), async (req, res, next) => 
       if (used + 2 > TRIPADVISOR_CAP) { stopped = true; break; }
       const meter = {};
       try {
-        const m = await tripadvisorMatchFor({ venueRef: i.ref, name: i.name, lat: i.lat, lng: i.lng, category: i.category, locality: out.place.label, meter });
+        // No locality pinned: Terra's `geo_name` would keep a Windsor place
+        // out of a Sunningdale ring. The distance test does the fencing.
+        const m = await tripadvisorMatchFor({ venueRef: i.ref, name: i.name, lat: i.lat, lng: i.lng, category: i.category, meter });
         looked += 1;
         if (m) matched += 1; else missed += 1;
       } catch (err) {
         if (err?.provider !== 'tripadvisor') throw err;
-        return res.status(502).json({ error: 'tripadvisor_failed', message: whySourceFailed('tripadvisor', err), looked, matched, missed, used, cap: TRIPADVISOR_CAP });
+        return res.status(502).json({ error: 'tripadvisor_failed', message: whySourceFailed('tripadvisor', err), error_detail: String(err.message).slice(0, 300), looked, matched, missed, used, cap: TRIPADVISOR_CAP });
       } finally {
         const n = meter.tripadvisor || 0;
         if (n) { await visitsRepo.recordProviderCall(household.id, 'tripadvisor', 'admin.lookup.tripadvisor', meter).catch(() => null); used += n; }
       }
+      // Discover's limit arrives well before ten a second (sources/tripadvisor.js).
+      await sleep(250);
     }
     res.json({ kind, looked, matched, missed, used, cap: TRIPADVISOR_CAP, stopped, remaining: stopped ? 0 : Math.max(0, wanting.length - page.length) });
-  } catch (err) { next(err); }
+  }).catch(next).finally(() => { if (tripadvisorRuns.get(household.id) === mine) tripadvisorRuns.delete(household.id); });
+  tripadvisorRuns.set(household.id, mine);
 });
 
 /**
@@ -609,7 +632,7 @@ router.post('/tripadvisor', requires('view_library'), async (req, res, next) => 
  * to Claude; a spent budget comes back as plain words with the raw line
  * beside them, because the back office is where the raw words belong.
  */
-router.post('/curate', requires('view_library'), async (req, res, next) => {
+router.post('/curate', requires('manage_library'), async (req, res, next) => {
   try {
     const household = await currentHousehold();
     const settings = settingsOf(req.body ?? {});

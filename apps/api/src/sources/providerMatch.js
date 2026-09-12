@@ -84,6 +84,13 @@ export async function triedFor(refs, source = 'google') {
   return new Set(rows.map((r) => r.venue_ref));
 }
 
+/** Forget one provider's remembered misses for these places, so a run can ask again — after a search that was asked wrongly, for instance. */
+export async function forgetMisses(refs, source) {
+  if (!refs?.length) return 0;
+  const { rowCount } = await query('delete from provider_matches where source = $2 and missing = true and venue_ref = any($1)', [refs, source]);
+  return rowCount;
+}
+
 /** The matches held at one provider for many places, keyed by venue ref. Misses are left out. */
 export async function matchesFor(refs, source = 'google') {
   if (!refs?.length) return new Map();

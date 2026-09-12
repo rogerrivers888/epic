@@ -183,7 +183,8 @@ export function Lookup() {
       .then((r) => { if (live) setCompare(r); })
       .catch((e: any) => { if (live) setCompareError(e?.body?.message ?? e?.message ?? 'Could not ask Google.'); });
     return () => { live = false; };
-  }, [q, minutes, mode, place]);
+    // `again` is on the list so a curation just written is read back at once.
+  }, [q, minutes, mode, place, again]);
 
   // --- names ---------------------------------------------------------------
   const catLabel = useMemo(() => new Map((result?.taxonomy.categories ?? []).map((c) => [c.key, c.label])), [result]);

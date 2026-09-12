@@ -238,7 +238,14 @@ export const tripadvisorSource = {
     if (!KEY() || !name || !Number.isFinite(lat)) return null;
     const params = { query: String(name).slice(0, 200), size: ENRICH_SIZE };
     if (locality) params.geo_name = locality;
-    const data = await get('/catalog/locations/search', params, meter);
+    let data;
+    try { data = await get('/catalog/locations/search', params, meter); }
+    catch (err) {
+      // Discover answers 429 well before its stated ten a second; one breath, one more try.
+      if (!/429/.test(err.message)) throw err;
+      await sleep(1500);
+      data = await get('/catalog/locations/search', params, meter);
+    }
     for (const item of data.data || []) {
       const hit = toVenue(item.location ?? item, category);
       if (!Number.isFinite(hit.lat)) continue;

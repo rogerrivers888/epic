@@ -27,6 +27,8 @@ import { parseStructured, MODEL } from '../claude.js';
 import { visibleText } from './menuRead.js';
 import { userAgent } from '../origins.js';
 import { query } from '../db.js';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 
 /** Pages worth reading beyond the front page, by what their path says. */
 const WORTH = /about|visit|plan|what|experience|attraction|things|families|family|kids|children|open|price|ticket|admission|explore|discover|our-story|history|facilities/i;
@@ -57,10 +59,47 @@ const Curation = z.object({
   pagesUsed: z.array(z.string()),
 });
 
+/**
+ * A venue's website comes from a provider or the open map, which is to say
+ * from anybody. Only a public web address is fetched — never localhost, a
+ * private range or a link-local one — and every redirect is checked the same
+ * way before it is followed (Codex, 12 Sep 2026).
+ */
+const PRIVATE = [
+  /^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^169\.254\./, /^0\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+  /^::1$/, /^fc/i, /^fd/i, /^fe80:/i, /^::ffff:(127|10|192\.168|169\.254)\./i,
+];
+const isPrivate = (ip) => PRIVATE.some((re) => re.test(ip));
+
+async function publicUrl(raw) {
+  let u;
+  try { u = new URL(raw); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol)) return null;
+  const host = u.hostname.toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return null;
+  if (net.isIP(host) && isPrivate(host)) return null;
+  if (!net.isIP(host)) {
+    let addresses;
+    try { addresses = await dns.lookup(host, { all: true }); } catch { return null; }
+    if (!addresses.length || addresses.some((a) => isPrivate(a.address))) return null;
+  }
+  return u.toString();
+}
+
 async function fetchPage(url) {
-  const res = await fetch(url, { headers: { 'user-agent': userAgent(), accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(12_000) });
-  if (!res.ok || !/text\/html/i.test(res.headers.get('content-type') || '')) return null;
-  return await res.text();
+  let at = await publicUrl(url);
+  for (let hop = 0; at && hop < 5; hop += 1) {
+    const res = await fetch(at, { headers: { 'user-agent': userAgent(), accept: 'text/html' }, redirect: 'manual', signal: AbortSignal.timeout(12_000) });
+    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+      let next;
+      try { next = new URL(res.headers.get('location'), at).toString(); } catch { return null; }
+      at = await publicUrl(next);
+      continue;
+    }
+    if (!res.ok || !/text\/html/i.test(res.headers.get('content-type') || '')) return null;
+    return await res.text();
+  }
+  return null;
 }
 
 /** The front page's own links that look like they say what the place is. Same host only. */
