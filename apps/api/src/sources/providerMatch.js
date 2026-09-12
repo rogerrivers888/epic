@@ -85,9 +85,13 @@ export async function triedFor(refs, source = 'google') {
 }
 
 /** Forget one provider's remembered misses for these places, so a run can ask again — after a search that was asked wrongly, for instance. */
-export async function forgetMisses(refs, source) {
+export async function forgetMisses(refs, source, { olderThanMinutes = 60 } = {}) {
   if (!refs?.length) return 0;
-  const { rowCount } = await query('delete from provider_matches where source = $2 and missing = true and venue_ref = any($1)', [refs, source]);
+  // Not the misses a run has just written: a caller passing the flag on every
+  // page would otherwise buy the same misses again each time (Codex, 12 Sep 2026).
+  const { rowCount } = await query(
+    `delete from provider_matches where source = $2 and missing = true and venue_ref = any($1) and matched_at < now() - ($3 || ' minutes')::interval`,
+    [refs, source, String(olderThanMinutes)]);
   return rowCount;
 }
 
@@ -185,14 +189,26 @@ export async function tripadvisorMatchFor({ venueRef, name, lat, lng, category =
   const kept = await matchKept(venueRef, 'tripadvisor');
   if (kept) return kept.missing ? null : { id: kept.source_ref, rating: null, ratingCount: null, held: true };
   if (!tripadvisorSource.enabled()) return null;
-  let hit;
+  let found;
   try {
-    hit = await tripadvisorSource.match({ name, lat, lng, category }, { locality, meter });
+    found = await tripadvisorSource.candidates({ name, category }, { locality, meter });
   } catch (err) {
     throw Object.assign(err instanceof Error ? err : new Error(String(err)), { provider: 'tripadvisor' });
   }
-  if (!hit) { await remember(venueRef, { source: 'tripadvisor', missing: true, matchedOn: name }); return null; }
-  await remember(venueRef, { source: 'tripadvisor', sourceRef: hit.sourcePlaceId, confidence: Number(likeness(name, hit.name).toFixed(2)), matchedOn: name, metres: metresBetween({ lat, lng }, hit) });
+  // The same two guards as Google's join: the name has to read as the same
+  // name and the pin has to be near enough. Not the sweep's four hundred
+  // metres — a park's pin and its centroid can be a kilometre apart.
+  let best = null;
+  for (const v of found) {
+    if (!Number.isFinite(v.lat) || !Number.isFinite(v.lng)) continue;
+    const like = likeness(name, v.name);
+    const m = metresBetween({ lat, lng }, v);
+    if (like < SURE_ENOUGH || m > NEAR_ENOUGH_M) continue;
+    if (!best || like > best.like || (like === best.like && m < best.m)) best = { v, like, m };
+  }
+  if (!best) { await remember(venueRef, { source: 'tripadvisor', missing: true, matchedOn: name }); return null; }
+  const hit = best.v;
+  await remember(venueRef, { source: 'tripadvisor', sourceRef: hit.sourcePlaceId, confidence: Number(best.like.toFixed(2)), matchedOn: name, metres: best.m });
   return { id: hit.sourcePlaceId, rating: hit.rating ?? null, ratingCount: hit.ratingCount ?? null, held: false };
 }
 

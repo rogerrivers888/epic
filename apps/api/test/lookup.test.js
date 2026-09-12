@@ -42,13 +42,13 @@ test('somewhere to eat is food; everything else, an event included, is something
 const item = (ref, name, sources, lat = 51.39, lng = -0.63, kind = 'activities') =>
   ({ ref, name, kind, sources: [...sources], records: sources.map((s) => ({ source: s, fields: { name } })), lat, lng, website: null });
 
-test('our own rows fold into the rented ones by identifier, then by name within 250 m', () => {
+test('our own rows fold into the rented ones by identifier, then by name within a kilometre', () => {
   const items = [];
   fold(items, item('google:1', 'Windsor Castle', ['google', 'osm']));
   // The sweep keys on the Google identifier: same place, one more source.
   fold(items, item('google:1', 'Windsor Castle', ['sweep']));
-  // The atlas keys on Wikidata and sits 100 m away: same place by name.
-  fold(items, item('wikidata:Q42', 'Windsor Castle', ['atlas'], 51.3909, -0.63));
+  // The atlas keys on Wikidata and sits 600 m away, at the centroid: same place by name.
+  fold(items, item('wikidata:Q42', 'Windsor Castle', ['atlas'], 51.3954, -0.63));
   // Same name, a town away: a different place.
   fold(items, item('wikidata:Q43', 'Windsor Castle', ['atlas'], 51.5, -0.63));
   assert.equal(items.length, 2);

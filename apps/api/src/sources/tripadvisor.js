@@ -230,12 +230,12 @@ export const tripadvisorSource = {
   },
 
   /**
-   * One place looked up by name — the same test `enrich` applies, for one
-   * venue, so the back office can join a place it chose rather than the eight
-   * nearest. Two entities at most, both billed; the meter says how many.
+   * What Terra returns for one name — two entities at most, both billed; the
+   * meter says how many. The caller decides which, if any, is the place
+   * (sources/providerMatch.js applies the atlas's two guards).
    */
-  async match({ name, lat, lng, category = 'attraction' }, { locality = null, meter = null } = {}) {
-    if (!KEY() || !name || !Number.isFinite(lat)) return null;
+  async candidates({ name, category = 'attraction' }, { locality = null, meter = null } = {}) {
+    if (!KEY() || !name) return [];
     const params = { query: String(name).slice(0, 200), size: ENRICH_SIZE };
     if (locality) params.geo_name = locality;
     let data;
@@ -246,13 +246,7 @@ export const tripadvisorSource = {
       await sleep(1500);
       data = await get('/catalog/locations/search', params, meter);
     }
-    for (const item of data.data || []) {
-      const hit = toVenue(item.location ?? item, category);
-      if (!Number.isFinite(hit.lat)) continue;
-      if (norm(hit.name) !== norm(name) || kmBetween(hit, { lat, lng }) > 0.4) continue;
-      return hit;
-    }
-    return null;
+    return (data.data || []).map((item) => toVenue(item.location ?? item, category));
   },
 
   /** Full detail plus up to 3 reviews (Discover). Two billable entities per view. */

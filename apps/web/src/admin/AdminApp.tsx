@@ -113,7 +113,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'households' ? <People canManageRoles={can('manage_roles')} /> : null}
       {screen === 'activity' ? <Activity /> : null}
       {screen === 'reporting' ? <Reporting canSeeMoney={can('view_financials')} /> : null}
-      {screen === 'lookup' ? <Lookup /> : null}
+      {screen === 'lookup' ? <Lookup canManage={can('manage_library')} /> : null}
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}
       {screen === 'library' ? <Library canManage={can('manage_library')} /> : null}

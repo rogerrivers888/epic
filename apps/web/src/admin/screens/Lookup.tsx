@@ -101,7 +101,7 @@ const OWNED = new Set(['atlas', 'sweep', 'own']);
 const SHORT: Record<string, string> = { osm: 'OSM', google: 'Google', tripadvisor: 'Tripadv.', fixtures: 'Fixtures', atlas: 'Atlas', sweep: 'Sweep', own: 'Owned' };
 const shortOf = (s: LookupSource) => SHORT[s.key] ?? s.label;
 
-export function Lookup() {
+export function Lookup({ canManage = false }: { canManage?: boolean }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
   const { setQuery } = useRouter();
@@ -363,6 +363,7 @@ export function Lookup() {
                 setAgain((n) => n + 1);
               }}
               curating={Boolean(run?.busy && run.what === 'Curating')}
+              canManage={canManage}
             />
           ) : null}
 
@@ -377,11 +378,12 @@ export function Lookup() {
               />
               {ranked ? (
                 <View style={styles.actions}>
-                  <Button label={`Ask Google for ratings${unrated ? ` · ${unrated} unrated` : ''}`} kind="secondary" disabled={!unrated || Boolean(run?.busy)} style={styles.action}
+                  <Button label={`Ask Google for ratings${unrated ? ` · ${unrated} unrated` : ''}`} kind="secondary" disabled={!canManage || !unrated || Boolean(run?.busy)} style={styles.action}
                     onPress={() => runPages('Ratings', () => api.lookupRate({ q: q!, minutes, mode, kind, limit: 30 }), (r, t) => `${t.rated ?? 0} rated · ${t.missed ?? 0} not at Google · ${t.failed ?? 0} failed`)} />
-                  <Button label={`Ask Tripadvisor · ${count(result.tripadvisor.used)} of ${count(result.tripadvisor.cap)} used`} kind="secondary" disabled={Boolean(run?.busy) || result.tripadvisor.used >= result.tripadvisor.cap} style={styles.action}
+                  <Button label={`Ask Tripadvisor · ${count(result.tripadvisor.used)} of ${count(result.tripadvisor.cap)} used`} kind="secondary" disabled={!canManage || Boolean(run?.busy) || result.tripadvisor.used >= result.tripadvisor.cap} style={styles.action}
                     onPress={() => runPages('Tripadvisor', () => api.lookupTripadvisor({ q: q!, minutes, mode, kind, limit: 20 }), (r, t) => `${t.matched ?? 0} joined · ${t.missed ?? 0} not found · ${count(r.used as number)} of ${count(r.cap as number)} used${r.stopped ? ' · stopped at the cap' : ''}`)} />
-                  <Button label={`Curate ${top ? 'these' : 'all'}${uncurated ? ` · ${uncurated} to write` : ' · all written'}`} kind="primary" disabled={!uncurated || Boolean(run?.busy)} style={styles.action} onPress={curateAll} />
+                  <Button label={`Curate ${top ? 'these' : 'all'}${uncurated ? ` · ${uncurated} to write` : ' · all written'}`} kind="primary" disabled={!canManage || !uncurated || Boolean(run?.busy)} style={styles.action} onPress={curateAll} />
+                  {!canManage ? <Text style={type.tiny}>Running these needs the manage-the-atlas capability.</Text> : null}
                 </View>
               ) : null}
               {wide ? (
@@ -556,10 +558,10 @@ function SourceRow({ label, note, owned, asked = true, failed, returned, kept, o
 // one place opened: the records, field by field
 // ---------------------------------------------------------------------------
 
-function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOfSub, nameOfSource, onBack, onCurate, curating }: {
+function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOfSub, nameOfSource, onBack, onCurate, curating, canManage }: {
   opened: LookupOpened | null; error: string | null; compare: LookupCompare | null; compareError: string | null; crumb: string;
   nameOfCat: (k: string | null) => string; nameOfSub: (k: string | null) => string; nameOfSource: (k: string) => string;
-  onBack: () => void; onCurate: () => void; curating: boolean;
+  onBack: () => void; onCurate: () => void; curating: boolean; canManage: boolean;
 }) {
   const ours = compare?.columns.find((c) => c.key === 'ours')?.fields ?? null;
   const curation = (ours?.curation ?? null) as null | { what: string; who: string; why: string; practical: string; kinds: string[]; confidence: string; pagesUsed: string[] };
@@ -593,7 +595,7 @@ function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOf
             {typeof ours?.crowd_band === 'string' ? <Pill label={`crowd ${ours.crowd_band}`} tone="accent" /> : null}
             {typeof ours?.epic_score === 'number' ? <Pill label={`Epic ${(ours.epic_score as number).toFixed(1)}`} tone="accent" /> : null}
             <View style={{ flex: 1 }} />
-            <Button label={curating ? 'Curating…' : 'Curate again'} kind="ghost" onPress={onCurate} disabled={curating} />
+            <Button label={curating ? 'Curating…' : 'Curate again'} kind="ghost" onPress={onCurate} disabled={curating || !canManage} />
           </View>
           {[['What it is', curation.what], ['Who it suits', curation.who], ['Why go', curation.why], ['The practical things', curation.practical]].map(([h, t]) => (
             <View key={h} style={{ gap: 2 }}>
@@ -605,7 +607,7 @@ function Opened({ opened, error, compare, compareError, crumb, nameOfCat, nameOf
         </View>
       ) : (
         <View style={[styles.inline, { paddingVertical: spacing.xs }]}>
-          <Button label={curating ? 'Curating…' : 'Curate this place'} kind="secondary" onPress={onCurate} disabled={curating} />
+          <Button label={curating ? 'Curating…' : 'Curate this place'} kind="secondary" onPress={onCurate} disabled={curating || !canManage} />
           <Text style={[type.tiny, { flex: 1, minWidth: 200 }]}>Claims it, researches it from the open web, reads its own pages and writes our account — what it is, who it suits, why go, the practical things — and keeps the crowd as a band. One call to Claude.</Text>
         </View>
       )}

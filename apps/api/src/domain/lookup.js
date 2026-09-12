@@ -77,12 +77,21 @@ export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD')
  * own, which is exactly the case the screen exists to show ("10 coming from our
  * own data").
  */
+/**
+ * How far apart two pins for the same name may be. A kilometre, not the home
+ * screen's 250 m: Google pins Wentworth Club at its gate and the atlas at its
+ * centroid, half a kilometre apart, and the Lookup showed it twice — once
+ * owned, once not (12 Sep 2026). A second place of the same name inside a
+ * kilometre is rarer than a large site with two pins.
+ */
+export const SAME_PLACE_KM = 1;
+
 export function fold(items, item) {
   const byRef = items.find((i) => i.ref === item.ref);
   const key = nameKey(item.name);
   // A name that normalises to nothing matches nothing: an empty key is not a name.
   const same = byRef ?? (key ? items.find((i) => i.lat != null && item.lat != null
-    && nameKey(i.name) === key && kmBetween(i, item) < 0.25) : null);
+    && nameKey(i.name) === key && kmBetween(i, item) < SAME_PLACE_KM) : null);
   if (!same) { items.push(item); return item; }
   for (const s of item.sources) if (!same.sources.includes(s)) same.sources.push(s);
   same.records.push(...item.records);

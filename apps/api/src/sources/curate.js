@@ -29,6 +29,8 @@ import { userAgent } from '../origins.js';
 import { query } from '../db.js';
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
 
 /** Pages worth reading beyond the front page, by what their path says. */
 const WORTH = /about|visit|plan|what|experience|attraction|things|families|family|kids|children|open|price|ticket|admission|explore|discover|our-story|history|facilities/i;
@@ -71,33 +73,61 @@ const PRIVATE = [
 ];
 const isPrivate = (ip) => PRIVATE.some((re) => re.test(ip));
 
-async function publicUrl(raw) {
+/** The address, resolved once and checked — and then the one the request is made to, so a second answer cannot differ (DNS rebinding; Codex, 12 Sep 2026). */
+async function publicAddress(raw) {
   let u;
   try { u = new URL(raw); } catch { return null; }
   if (!/^https?:$/.test(u.protocol)) return null;
   const host = u.hostname.toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return null;
-  if (net.isIP(host) && isPrivate(host)) return null;
-  if (!net.isIP(host)) {
+  let address = host;
+  let family = net.isIP(host);
+  if (!family) {
     let addresses;
     try { addresses = await dns.lookup(host, { all: true }); } catch { return null; }
     if (!addresses.length || addresses.some((a) => isPrivate(a.address))) return null;
-  }
-  return u.toString();
+    address = addresses[0].address;
+    family = addresses[0].family;
+  } else if (isPrivate(host)) return null;
+  return { url: u, address, family };
+}
+
+const BODY_MAX = 1_500_000;
+
+/** One request to the checked address, with the site's own name kept for TLS and the Host header. */
+function requestPinned({ url, address, family }) {
+  return new Promise((resolve, reject) => {
+    const mod = url.protocol === 'https:' ? https : http;
+    const req = mod.request({
+      host: address, family, port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      servername: url.protocol === 'https:' ? url.hostname : undefined,
+      path: `${url.pathname}${url.search}`, method: 'GET',
+      headers: { host: url.host, 'user-agent': userAgent(), accept: 'text/html' },
+      timeout: 12_000,
+    }, (res) => {
+      const chunks = []; let size = 0;
+      res.on('data', (c) => { size += c.length; if (size <= BODY_MAX) chunks.push(c); });
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, location: res.headers.location ?? null, type: String(res.headers['content-type'] ?? ''), body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 async function fetchPage(url) {
-  let at = await publicUrl(url);
+  let at = await publicAddress(url);
   for (let hop = 0; at && hop < 5; hop += 1) {
-    const res = await fetch(at, { headers: { 'user-agent': userAgent(), accept: 'text/html' }, redirect: 'manual', signal: AbortSignal.timeout(12_000) });
-    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+    const res = await requestPinned(at);
+    if (res.status >= 300 && res.status < 400 && res.location) {
       let next;
-      try { next = new URL(res.headers.get('location'), at).toString(); } catch { return null; }
-      at = await publicUrl(next);
+      try { next = new URL(res.location, at.url).toString(); } catch { return null; }
+      at = await publicAddress(next);
       continue;
     }
-    if (!res.ok || !/text\/html/i.test(res.headers.get('content-type') || '')) return null;
-    return await res.text();
+    if (res.status < 200 || res.status >= 300 || !/text\/html/i.test(res.type)) return null;
+    return res.body;
   }
   return null;
 }
