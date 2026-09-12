@@ -818,7 +818,7 @@ export async function searchImages({
     select i.id, i.source, i.source_ref, i.source_page_url, i.licence, i.licence_url,
            i.attribution_required, i.creator, i.creator_url, i.credit_line, i.title, i.caption,
            i.tags, i.width, i.height, i.bytes, i.lqip, i.moderation, i.moderation_note,
-           i.reward_points, i.fetched_at, i.contributor_account_id,
+           i.reward_points, i.fetched_at, i.contributor_account_id, i.contributor_household_id,
            ${rank} as relevance,
            (select array_agg(v.width order by v.width) from image_variants v where v.image_id = i.id) as widths,
            (select coalesce(sum(v.bytes), 0) from image_variants v where v.image_id = i.id) as held_bytes,
