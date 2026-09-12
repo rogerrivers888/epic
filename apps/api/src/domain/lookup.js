@@ -54,9 +54,12 @@ export function reachKm(mode, minutes, { cap = RING_CAP_KM, at = { lat: 51.4, ln
 /**
  * "Windsor Castle" and "windsor-castle" are the same name. Letters in any
  * script count — two Chinese restaurants next door to each other are not one
- * place because neither name has an ASCII letter in it (Codex, 12 Sep 2026).
+ * place because neither name has an ASCII letter in it — and so do the marks
+ * that are letters in theirs: a Devanagari vowel sign is not an accent, and
+ * dropping it turned कि and कु into the same word (Codex, 12 Sep 2026). Only
+ * the Latin accents (U+0300–U+036F) are folded away.
  */
-export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\p{M}]+/gu, '');
 
 /**
  * Fold one of our own rows into the list.

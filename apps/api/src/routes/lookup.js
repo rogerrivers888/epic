@@ -236,6 +236,11 @@ async function runLookup({ q, minutes, mode }, household) {
         // A source's own reach may be narrower than the ring (OpenStreetMap
         // stops at 25 km), and a thin count from it is then not a gap in the
         // data but a ring it was never asked about — said per source.
+        // The reach the source was asked for. OpenStreetMap may answer from
+        // less: its adapter halves the ring and tries again when Overpass
+        // times out, and which ring finally answered is not reported back
+        // through the fan-out — so its note says so rather than this
+        // figure pretending to be exact.
         const reach = s.maxRadiusKm != null ? Math.min(radiusKm, s.maxRadiusKm) : radiusKm;
         return {
           key: s.key, label: s.label, layer: 'rented', note: null,

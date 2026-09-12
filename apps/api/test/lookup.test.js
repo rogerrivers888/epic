@@ -65,6 +65,13 @@ test('a name in any script is a name, and no name at all matches nothing', () =>
   fold(items, item('osm:2', '···', ['osm'], 51.3903, -0.63));
   fold(items, item('osm:3', '???', ['osm'], 51.3904, -0.63));
   assert.equal(items.length, 4, 'two names that normalise to nothing stay two places');
+  // A vowel sign is a letter in Devanagari, not an accent to fold away.
+  fold(items, item('osm:4', 'कि', ['osm'], 51.3905, -0.63));
+  fold(items, item('osm:5', 'कु', ['osm'], 51.3906, -0.63));
+  assert.equal(items.length, 6, 'कि and कु are two words');
+  fold(items, item('google:6', 'Café Rouge', ['google'], 51.3907, -0.63));
+  fold(items, item('osm:7', 'Cafe Rouge', ['osm'], 51.3908, -0.63));
+  assert.equal(items.length, 7, 'and a Latin accent still folds');
 });
 
 test('the counts say how many places carry each source, per half of the screen', () => {

@@ -149,6 +149,7 @@ export function Lookup() {
   };
 
   const failed = (result?.sources ?? []).filter((s) => s.failed);
+  const askedSources = (result?.sources ?? []).filter((s) => s.asked);
   const sourceLabel = (key: string) => result?.sources.find((s) => s.key === key)?.label ?? key;
 
   /** A number opened: which half, which source. */
@@ -266,7 +267,7 @@ export function Lookup() {
             <Tile label={`Places within ${result.minutes} min`} value={count(narrowed.length)} sub={sub ? `in ${nameOfSub(sub === NO_DRAWER ? null : sub)}` : 'activities and food together'} />
             <Tile label="Activities" value={count(ofKind('activities').length)} sub="somewhere to go" tone="accent" onPress={() => open('activities', 'all')} />
             <Tile label="Food & drink" value={count(ofKind('food').length)} sub="somewhere to eat" tone="accent" onPress={() => open('food', 'all')} />
-            <Tile label="Sources asked" value={count(result.sources.length)} sub={failed.length ? `${plural(failed.length, 'source')} failed` : 'every one answered'} tone={failed.length ? 'warn' : 'ok'} />
+            <Tile label="Sources asked" value={count(askedSources.length)} sub={failed.length ? `${plural(failed.length, 'source')} failed` : askedSources.length < result.sources.length ? `every one answered · ${plural(result.sources.length - askedSources.length, 'opt-in source')} not asked` : 'every one answered'} tone={failed.length ? 'warn' : 'ok'} />
           </TileRow>
 
           {/* --- the numbers, by source, per half ---------------------------- */}
@@ -294,8 +295,9 @@ export function Lookup() {
                           ? 'opt-in and billed per place, so not asked here — switching it on is the owner’s call'
                           : s.layer === 'owned' ? s.note
                             : s.failed ? s.failed.why
-                              : s.capped ? `asked only up to ${s.reachKm} km of the ${result.radiusKm} km ring — its own limit, not a gap`
-                                : 'rented — fetched at display, never stored'}
+                              : s.capped ? `asked only up to ${s.reachKm} km of the ${result.radiusKm} km ring — its own limit, not a gap${s.key === 'osm' ? '; and when Overpass times out it is asked again at half the ring' : ''}`
+                                : s.key === 'osm' ? 'rented — and when Overpass times out it is asked again at half the ring, so a thin count may be that'
+                                  : 'rented — fetched at display, never stored'}
                         layer={s.layer} failed={Boolean(s.failed)} asked={s.asked} capped={s.capped}
                         returned={s.returned[k]} kept={carrying(list, s.key)}
                         on={kind === k && source === s.key} onPress={() => open(k, s.key)}
