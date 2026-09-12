@@ -8,7 +8,7 @@ const KEY = () => process.env.TICKETMASTER_API_KEY?.trim();
 const BASE = 'https://app.ticketmaster.com/discovery/v2';
 export const TICKETMASTER_ATTRIBUTION = 'Events by Ticketmaster';
 
-const SEGMENT_EXPERIENCE = { Music: 'live-music', Sports: 'sports-game', 'Arts & Theatre': 'theatre', Film: 'cinema', Miscellaneous: 'festival', Family: 'festival' };
+export const SEGMENT_EXPERIENCE = { Music: 'live-music', Sports: 'sports-game', 'Arts & Theatre': 'theatre', Film: 'cinema', Miscellaneous: 'festival', Family: 'festival' };
 
 export const ticketmasterSource = {
   key: 'ticketmaster',
@@ -50,6 +50,7 @@ export const ticketmasterSource = {
         category: 'event',
         cuisines: [],
         experiences: [SEGMENT_EXPERIENCE[seg] ?? 'festival', ...(family ? ['festival'] : [])],
+        labels: seg ? [`ticketmaster:${seg}`] : [],
         allergens: [],
         dietaryOptions: undefined,
         priceLevel: price ? (price.min < 15 ? 1 : price.min < 40 ? 2 : 3) : null,

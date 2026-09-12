@@ -11,7 +11,7 @@ const KEY = () => process.env.DATATHISTLE_API_KEY?.trim();
 const BASE = 'https://api.datathistle.com/v1';
 export const DATATHISTLE_ATTRIBUTION = 'Listings by Data Thistle';
 
-const TAG_EXPERIENCE = [
+export const TAG_EXPERIENCE = [
   [/^(music|live music|gigs?|jazz|folk|classical)$/, 'live-music'], [/theatre|drama|musicals?|dance|pantomime|opera/, 'theatre'], [/comedy/, 'comedy'], [/film|cinema/, 'cinema'],
   [/^sport/, 'sports-game'], [/walks?|hiking/, 'walk'], [/history|heritage|traditional/, 'history'], [/markets?/, 'market'], [/festivals?|fairs?|fete|carnival|days out|seasonal|easter|christmas|halloween/, 'festival'],
   [/museums?/, 'museum'], [/art|exhibitions?|galler/, 'art-gallery'], [/books|spoken word|storytime|library/, 'bookshop'], [/nature|outdoors|wildlife|parks?|gardens?/, 'park'], [/farm/, 'farm'],
@@ -68,6 +68,7 @@ export const datathistleSource = {
           category: 'event',
           cuisines: [],
           experiences: experiences.length ? experiences : ['festival'],
+          labels: tags.slice(0, 12).map((t) => `datathistle:${t}`),
           allergens: [],
           dietaryOptions: undefined,
           priceLevel: /free/i.test(s.ticket_summary || '') ? 0 : null,

@@ -41,6 +41,7 @@ import { Shelves } from './screens/Shelves';
 import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
 import { Sources } from './screens/Sources';
+import { Categories } from './screens/Categories';
 
 const DESKTOP = 900;
 
@@ -71,6 +72,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'shelves', label: 'Shelves', icon: 'themePark', needs: 'view_library', sub: 'What the home screen calls a place, and how to teach it' },
   { key: 'scout', label: 'The sweep', icon: 'search', needs: 'view_library', sub: 'Postcode areas, their best restaurants and their menus' },
   { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
+  { key: 'categories', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Categories and subcategories, every provider\'s words, and the rules that map one onto the other', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences' },
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities' },
   { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on' },
@@ -115,6 +117,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'shelves' ? <Shelves canManage={can('manage_library')} /> : null}
       {screen === 'scout' ? <Scout canManage={can('manage_library')} /> : null}
       {screen === 'sources' ? <Sources /> : null}
+      {screen === 'categories' ? <Categories canManage={can('manage_library')} /> : null}
       {screen === 'voice' ? <VoiceLab /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
       {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}

@@ -55,10 +55,10 @@ async function get(path, params = {}, meter = null) {
 const pickTranslation = (list = [], lang = 'en') =>
   list.find((t) => t.primary)?.value ?? list.find((t) => t.language === lang)?.value ?? list[0]?.value ?? null;
 
-const TOP_LEVEL = { 'Eat & Drink': 'restaurant', Attraction: 'attraction', Experience: 'attraction', Accommodation: 'other' };
+export const TOP_LEVEL = { 'Eat & Drink': 'restaurant', Attraction: 'attraction', Experience: 'attraction', Accommodation: 'other' };
 const PRICE = { 'cheap eats': 1, 'mid range': 2, 'fine dining': 3 };
 
-function experiencesFrom(labels) {
+export function experiencesFrom(labels) {
   const out = new Set();
   for (const raw of labels) {
     const s = raw.toLowerCase();
@@ -108,6 +108,9 @@ export function toVenue(loc, fallbackCategory = 'attraction') {
     category: top ?? fallbackCategory,
     cuisines,
     experiences: experiencesFrom(labels),
+    // Tripadvisor's own category words — the top level and every display name
+    // under it — in the label vocabulary (domain/labels.js).
+    labels: [...new Set(cats.flatMap((c) => [c.top_level_category, ...labels]).filter(Boolean))].map((x) => `tripadvisor:${x}`),
     allergens: [],
     dietaryOptions: undefined,
     priceLevel: PRICE[String(loc.price_level || '').toLowerCase()] ?? null,

@@ -203,6 +203,8 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/voice'), { name: 'admin', screen: 'voice' });
   // Data › Sources: every provider, every field, and which of them we read.
   assert.deepEqual(roundTrip('/admin/sources'), { name: 'admin', screen: 'sources' });
+  // Data › Categories: the two levels, every provider's words, and the rules between (12 Sep 2026).
+  assert.deepEqual(roundTrip('/admin/categories'), { name: 'admin', screen: 'categories' });
   assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'overview' });
 });
 

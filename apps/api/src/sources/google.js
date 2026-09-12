@@ -34,8 +34,8 @@ const SEARCH_FIELDS = [
 const TEXT_SEARCH_FIELDS = `${SEARCH_FIELDS},contextualContents.justifications`;
 const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber';
 
-const FOOD_TYPES = ['restaurant', 'cafe', 'bar', 'pub', 'bakery', 'ice_cream_shop', 'coffee_shop'];
-const THING_TYPES = [
+export const FOOD_TYPES = ['restaurant', 'cafe', 'bar', 'pub', 'bakery', 'ice_cream_shop', 'coffee_shop'];
+export const THING_TYPES = [
   'tourist_attraction', 'museum', 'art_gallery', 'park', 'playground', 'zoo', 'aquarium', 'amusement_park', 'water_park',
   'historical_landmark', 'national_park', 'hiking_area', 'garden', 'bowling_alley', 'marina', 'botanical_garden', 'planetarium',
   'observation_deck', 'cultural_landmark', 'monument', 'beach', 'ice_skating_rink', 'adventure_sports_center', 'roller_coaster',
@@ -50,7 +50,7 @@ const THING_TYPES = [
  * counter came back on the same row as somewhere you book a table. They get
  * their own category now: still food, still findable, not a restaurant.
  */
-const TYPE_TO_CATEGORY = {
+export const TYPE_TO_CATEGORY = {
   restaurant: 'restaurant', bakery: 'bakery', cafe: 'cafe', coffee_shop: 'cafe', ice_cream_shop: 'cafe',
   meal_takeaway: 'takeaway', meal_delivery: 'takeaway', fast_food_restaurant: 'takeaway',
   bar: 'bar', wine_bar: 'bar', night_club: 'bar', pub: 'pub',
@@ -64,7 +64,7 @@ const TYPE_TO_CATEGORY = {
  * the food leaves the building, and the shop types below are counters rather
  * than kitchens. Any of them is enough to keep a place out of Restaurants.
  */
-const FAST_TYPES = new Set([
+export const FAST_TYPES = new Set([
   'fast_food_restaurant', 'hamburger_restaurant',
   'sandwich_shop', 'bagel_shop', 'donut_shop', 'juice_shop',
 ]);
@@ -73,7 +73,7 @@ const FAST_TYPES = new Set([
  * How the food leaves the building. Not the same question as whether it is fast
  * food, and the difference cost a first draft of this.
  */
-const SERVICE_TYPES = new Set(['meal_takeaway', 'meal_delivery', 'food_delivery']);
+export const SERVICE_TYPES = new Set(['meal_takeaway', 'meal_delivery', 'food_delivery']);
 
 /**
  * Why the secondary types have to be read, not just the primary one.
@@ -106,7 +106,7 @@ const SERVICE_TYPES = new Set(['meal_takeaway', 'meal_delivery', 'food_delivery'
  */
 const isFast = (types) => types.some((t) => FAST_TYPES.has(t));
 const isTakeawayFirst = (primary) => SERVICE_TYPES.has(primary);
-const TYPE_TO_EXPERIENCE = {
+export const TYPE_TO_EXPERIENCE = {
   museum: 'museum', art_gallery: 'art-gallery', park: 'park', garden: 'park', botanical_garden: 'park', playground: 'playground', zoo: 'zoo', aquarium: 'aquarium',
   amusement_park: 'theme-park', roller_coaster: 'theme-park', water_park: 'swimming', swimming_pool: 'swimming', historical_landmark: 'history', monument: 'history',
   cultural_landmark: 'history', hiking_area: 'walk', national_park: 'walk', bowling_alley: 'bowling', marina: 'boat-trip', beach: 'beach', ice_skating_rink: 'ice-skating',
@@ -135,9 +135,9 @@ function cuisineFromTypes(types = []) {
   return kept.map((c, i) => ({ c, i })).sort((a, b) => cuisineRank(a.c) - cuisineRank(b.c) || a.i - b.i).map((x) => x.c);
 }
 
-const LODGING = new Set(['hotel', 'lodging', 'motel', 'resort_hotel', 'extended_stay_hotel', 'bed_and_breakfast', 'guest_house', 'hostel', 'inn']);
+export const LODGING = new Set(['hotel', 'lodging', 'motel', 'resort_hotel', 'extended_stay_hotel', 'bed_and_breakfast', 'guest_house', 'hostel', 'inn']);
 // Somewhere you go to look, shop or do — even when Google also lists a café inside it.
-const THING_FIRST = new Set([...THING_TYPES, 'department_store', 'shopping_mall', 'market', 'book_store', 'performing_arts_theater', 'movie_theater', 'stadium', 'concert_hall', 'church', 'place_of_worship', 'library', 'visitor_center']);
+export const THING_FIRST = new Set([...THING_TYPES, 'department_store', 'shopping_mall', 'market', 'book_store', 'performing_arts_theater', 'movie_theater', 'stadium', 'concert_hall', 'church', 'place_of_worship', 'library', 'visitor_center']);
 
 /**
  * A shop is not a restaurant because it has a café in it.
@@ -153,7 +153,7 @@ const THING_FIRST = new Set([...THING_TYPES, 'department_store', 'shopping_mall'
  * These are the primary types where the *primary* type is the answer and the
  * secondary ones must not get a say.
  */
-const SHOP_FIRST = new Set([
+export const SHOP_FIRST = new Set([
   'supermarket', 'grocery_store', 'convenience_store', 'liquor_store', 'wholesaler',
   'gas_station', 'electric_vehicle_charging_station', 'car_wash', 'parking',
   'pharmacy', 'drugstore', 'hardware_store', 'home_goods_store', 'furniture_store',
@@ -275,6 +275,10 @@ export function toVenue(place, justification = null) {
     // that asks for it needs no cookie — see sources/photoLinks.js.
     photos: stampPhotos((place.photos || []).slice(0, 3).map((p) => ({ ref: p.name, attribution: (p.authorAttributions || []).map((a) => a.displayName).join(', ') }))),
     ticketed: ['movie_theater', 'performing_arts_theater', 'stadium', 'concert_hall'].includes(primary),
+    // Every type Google gave, in the label vocabulary (domain/labels.js), so a
+    // rule can be taught against Google's own word rather than only against
+    // the experience it was read into. The session's copy, like the rest.
+    labels: [...new Set([primary, ...types].filter(Boolean))].map((t) => `google:${t}`),
     attribution: GOOGLE_ATTRIBUTION,
     // Per-field retention per Google's terms: ids indefinite, coordinates 30 days, the rest not stored at all.
     retention: { placeId: 'indefinite', coordinates: '30d', displayFields: 'none' },

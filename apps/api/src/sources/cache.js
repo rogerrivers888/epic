@@ -5,6 +5,16 @@
 // database (Technical Constraints: rented content is never stored).
 
 import { searchAllSources, optInFrom } from './index.js';
+import { observe } from '../repositories/taxonomyLabels.js';
+import { labelsOf } from '../domain/labels.js';
+
+/**
+ * The vocabulary counts what it sees. Every venue a fetch returns adds one to
+ * each label it carries (repositories/taxonomyLabels.js, batched), so a
+ * provider's word nobody wrote down still turns up on the Categories screen
+ * the first time a real place carries it. A cache hit counts nothing twice.
+ */
+const seen = (venues) => { try { for (const v of venues ?? []) observe(labelsOf(v)); } catch { /* a count, not the search */ } };
 
 const TTL_MS = 12 * 3600_000;
 // A search a source did not answer (Overpass timing out) is kept only briefly,
@@ -99,6 +109,7 @@ export async function searchCached(params, { refresh = false, onProgress = null 
   const run = searchAllSources(params, { onProgress })
     .then((result) => {
       hold(result);
+      seen(result.venues);
       // A source too slow to hold the screen for was still running when this
       // answered (sources/index.js). Nobody is waiting on it, but when it lands
       // the fuller answer replaces the one held here — so the second look at
@@ -109,6 +120,8 @@ export async function searchCached(params, { refresh = false, onProgress = null 
         // Only if this is still the answer being held. A `refresh` may have
         // overwritten it in the meantime, and a straggler must not undo that.
         if (kept.get(key)?.result === result) hold({ ...full, cached: true, latecomers: true });
+        const already = new Set((result.venues ?? []).map((v) => `${v.source}:${v.sourcePlaceId}`));
+        seen((full.venues ?? []).filter((v) => !already.has(`${v.source}:${v.sourcePlaceId}`)));
       }).catch(() => null);
       return result;
     })

@@ -1974,6 +1974,20 @@ export const api = {
   shelfRead: (body: { said: string; subject?: string | null; subjectLabel?: string | null; scope?: ShelfRule['scope'] | null; current?: ShelfWeights | null }) =>
     post<{ proposal: ShelfProposal }>('/api/admin/shelves/read', body),
   shelfNameKinds: (limit = 400) => post<{ named: number; asked: number; remaining: number }>('/api/admin/shelves/kinds/name', { limit }),
+  // --- the taxonomy: categories, every provider's words, and the rules between --
+  taxonomy: () => request<Taxonomy>('/api/admin/taxonomy/'),
+  taxonomyLabels: (p: { namespace?: string | null; q?: string; all?: boolean; limit?: number; offset?: number } = {}) =>
+    request<{ namespace: string | null; labels: TaxonomyLabel[] }>(`/api/admin/taxonomy/labels${qs({ ...p, all: p.all ? 1 : undefined })}`),
+  taxonomyMatrix: (all = false) => request<TaxonomyMatrix>(`/api/admin/taxonomy/matrix${qs({ all: all ? 1 : undefined })}`),
+  taxonomyRules: (subcategory: string) => request<{ subcategory: string; rules: TaxonomyRule[] }>(`/api/admin/taxonomy/rules${qs({ subcategory })}`),
+  /** These labels → this subcategory. One type/atlas/experience label is written at that level; anything else is a labels rule. */
+  taxonomySaveRule: (body: { labels: string[]; subcategory?: string | null; weights?: ShelfWeights; reason?: string | null }) =>
+    put<{ rule: TaxonomyRule }>('/api/admin/taxonomy/rules', body),
+  /** Where a set of labels would land right now, without saving anything. */
+  taxonomyTry: (labels: string[]) => post<TaxonomyTry>('/api/admin/taxonomy/try', { labels }),
+  taxonomySaveLabel: (body: { namespace: string; key: string; label?: string | null; active?: boolean }) =>
+    put<{ label: TaxonomyLabel }>('/api/admin/taxonomy/labels', body),
+
 
   libraryHarvest: (body: { scope?: 'all' | 'never' | 'failed'; regions?: string[]; withImages?: boolean; refreshTypes?: boolean }) =>
     post<{ run: HarvestRun }>('/api/admin/library/harvest', body),
@@ -2337,8 +2351,10 @@ export type ShelfWeights = Partial<Record<MoodKey, number>>;
 
 export type ShelfRule = {
   id: string;
-  scope: 'place' | 'kind' | 'category' | 'experience';
+  /** `labels` fires only when a place carries every label in `labels` (migration 077). */
+  scope: 'place' | 'labels' | 'kind' | 'category' | 'experience';
   subject: string;
+  labels?: string[] | null;
   subject_label: string | null;
   weights: ShelfWeights;
   /** The drawer this rule files things in, if it names one. */
@@ -2413,6 +2429,57 @@ export type ShelfVocabulary = {
   defaults: { category: Record<string, ShelfWeights>; experience: Record<string, ShelfWeights> };
   rules: ShelfRule[];
   counts: Record<string, number>;
+};
+
+/** A source of labels, with how much of its vocabulary Epic has seen and taught. */
+export type TaxonomyNamespace = {
+  key: string; label: string; provider: string; own: boolean; what: string;
+  total: number; seen: number; taught: number;
+};
+
+/** Where one label lands today, and what decided it. */
+export type TaxonomyLanding = {
+  category: MoodKey | null;
+  subcategory: string | null;
+  how: 'taught' | 'default' | 'fallback' | 'none';
+  via: { id: string | null; scope: string; subject: string | null; subject_label: string | null; labels: string[] | null } | null;
+  /** What Epic read the word into on the way: the experience, the venue category, the styles. */
+  derived: string[];
+};
+
+export type TaxonomyLabel = {
+  namespace: string; key: string; label: string | null; note: string | null;
+  seen_count: number; active: boolean; seeded: boolean;
+  landing: TaxonomyLanding;
+};
+
+/** A rule as the Categories screen draws it: every rule as the labels it is about. */
+export type TaxonomyRule = ShelfRule & { labelList: { label: string; name: string | null }[] };
+
+export type Taxonomy = {
+  categories: (ShelfCategory & { subcategories: ShelfSubcategory[] })[];
+  subcategories: ShelfSubcategory[];
+  namespaces: TaxonomyNamespace[];
+  rules: TaxonomyRule[];
+  floor: number;
+};
+
+export type TaxonomyMatrixEntry = { key: string; label: string | null; seen: number; how: TaxonomyLanding['how'] };
+export type TaxonomyMatrix = {
+  namespaces: string[];
+  categories: (ShelfCategory & { subcategories: ShelfSubcategory[] })[];
+  /** subcategory key → namespace → the words that land there. */
+  cells: Record<string, Record<string, TaxonomyMatrixEntry[]>>;
+  /** category key → namespace → words filed in the category with no drawer. */
+  unfiled: Record<string, Record<string, TaxonomyMatrixEntry[]>>;
+  /** category key → namespace → words nothing knows, fallen to the broadest shelf. */
+  nowhere: Record<string, Record<string, TaxonomyMatrixEntry[]>>;
+  all: boolean;
+};
+
+export type TaxonomyTry = {
+  labels: string[]; category: MoodKey | null; subcategory: string | null;
+  weights: ShelfWeights; because: ShelfBecause[]; confident: boolean;
 };
 
 export type ShelfProposal = {

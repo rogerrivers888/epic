@@ -35,6 +35,8 @@
  * adrenaline."
  */
 
+import { labelHits, labelsOf, labelsOfAtlas } from './labels.js';
+
 /** The chips, in the order they are drawn. */
 export const MOODS = [
   { key: 'fun', label: 'Fun' },
@@ -219,7 +221,7 @@ const ATLAS_DRAWER = {
 };
 
 /** The shape `rulesFor` hands over, and what an empty teaching table looks like. */
-export const NO_RULES = { place: new Map(), kind: new Map(), category: new Map(), experience: new Map() };
+export const NO_RULES = { place: new Map(), labels: new Map(), kind: new Map(), category: new Map(), experience: new Map() };
 
 /**
  * Several rules, one set of weights: the strongest claim on each shelf wins.
@@ -361,11 +363,17 @@ function place(chain, rules, vocab, fallback) {
  * `kinds` is the raw list of Wikidata types the harvest kept on the row, which
  * is the whole reason it was kept: it is the only signal fine enough to tell a
  * motorsport circuit from a football ground, and both arrive here as `active`.
+ *
+ * `labels` is anything else known about the place in the label vocabulary
+ * (domain/labels.js); the `labels` scope — a rule naming several labels at
+ * once, or a provider's own word — sits between the place rule and the type
+ * rules, so "castle and museum" can say something neither type says alone.
  */
-export function shelvesForAtlas({ ref, category, kinds = [] } = {}, rules = NO_RULES, vocab = NO_VOCAB) {
+export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {}, rules = NO_RULES, vocab = NO_VOCAB) {
   const weights = BY_ATLAS_CATEGORY[category] ?? ATLAS_UNKNOWN;
+  const hits = labelHits(rules?.labels, labelsOfAtlas({ category, kinds, labels }));
   return place(
-    [['place', [ref]], ['kind', kinds], ['category', [category]]],
+    [['place', [ref]], ['labels', hits], ['kind', kinds], ['category', [category]]],
     rules,
     vocab,
     {
@@ -395,9 +403,15 @@ export function shelvesForAtlas({ ref, category, kinds = [] } = {}, rules = NO_R
  */
 export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   const ref = venue?.source && venue?.sourcePlaceId ? `${venue.source}:${venue.sourcePlaceId}` : null;
-  const chain = [['place', [ref]], ['experience', venue?.experiences ?? []]];
+  // The label rules that fire for this place: a provider's own word, or several
+  // words at once. Narrower than an experience, broader than the one place.
+  const hits = labelHits(rules?.labels, labelsOf(venue));
+  const chain = [['place', [ref]], ['labels', hits], ['experience', venue?.experiences ?? []]];
 
-  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]]])) {
+  // Somewhere to eat is Food unless somebody has said otherwise about this
+  // place or about its labels — an ice-cream parlour typed as a cafe can be
+  // taught into a drawer of its own without touching every cafe.
+  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['labels', hits]])) {
     const weights = { food: 1 };
     const fast = (venue?.styles ?? []).some((s) => s === 'fast-food' || s === 'takeaway');
     const drawer = fast ? 'fast-food' : FOOD_DRAWER[venue.category] ?? null;

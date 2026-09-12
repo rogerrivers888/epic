@@ -8,8 +8,8 @@ const KEY = () => process.env.PREDICTHQ_API_KEY?.trim();
 const BASE = 'https://api.predicthq.com/v1';
 export const PREDICTHQ_ATTRIBUTION = 'Events by PredictHQ';
 
-const CATEGORIES = ['community', 'festivals', 'performing-arts', 'concerts', 'sports', 'expos'];
-const CATEGORY_EXPERIENCE = { community: 'festival', festivals: 'festival', 'performing-arts': 'theatre', concerts: 'live-music', sports: 'sports-game', expos: 'festival' };
+export const CATEGORIES = ['community', 'festivals', 'performing-arts', 'concerts', 'sports', 'expos'];
+export const CATEGORY_EXPERIENCE = { community: 'festival', festivals: 'festival', 'performing-arts': 'theatre', concerts: 'live-music', sports: 'sports-game', expos: 'festival' };
 const TICKETED = new Set(['performing-arts', 'concerts', 'sports', 'expos']);
 const LABEL_EXPERIENCE = [
   [/market/, 'market'], [/comedy/, 'comedy'], [/film|cinema|movie/, 'cinema'], [/museum|exhibition/, 'museum'], [/parade|carnival|fair|fete|fête|festival/, 'festival'],
@@ -56,6 +56,7 @@ export const predicthqSource = {
         category: 'event',
         cuisines: [],
         experiences: [...new Set([CATEGORY_EXPERIENCE[e.category] ?? 'festival', ...fromLabels])],
+        labels: e.category ? [`predicthq:${e.category}`] : [],
         allergens: [],
         dietaryOptions: undefined,
         priceLevel: null,

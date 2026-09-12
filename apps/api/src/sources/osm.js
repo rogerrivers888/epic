@@ -11,7 +11,7 @@ import { mirrorsInOrder, mirrorAnswered, mirrorFailed, UA } from './overpass.js'
 // Mirrors, and which of them are answering today: sources/overpass.js.
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 
-const AMENITY_TO_CATEGORY = {
+export const AMENITY_TO_CATEGORY = {
   // A chip shop is not a restaurant (owner, 5 Sep 2026: "I don't really want
   // fast food appearing in restaurants"). OpenStreetMap draws the line itself
   // and always has: `amenity=fast_food` is its own tag, and Roam was throwing
@@ -27,14 +27,14 @@ const AMENITY_TO_CATEGORY = {
  * category above and every one of them came back an attraction. Read after the
  * amenity, because a café that also sells bread is a café.
  */
-const SHOP_TO_CATEGORY = { bakery: 'bakery', pastry: 'bakery', confectionery: 'bakery', deli: 'bakery' };
-const AMENITY_EXPERIENCE = { cinema: 'cinema', theatre: 'theatre', arts_centre: 'art-gallery' };
+export const SHOP_TO_CATEGORY = { bakery: 'bakery', pastry: 'bakery', confectionery: 'bakery', deli: 'bakery' };
+export const AMENITY_EXPERIENCE = { cinema: 'cinema', theatre: 'theatre', arts_centre: 'art-gallery' };
 const NOT_FOR_CHILDREN = /comedy|nightclub|casino|strip|adult/i;
-const TOURISM_EXPERIENCE = {
+export const TOURISM_EXPERIENCE = {
   museum: 'museum', gallery: 'art-gallery', attraction: null, zoo: 'zoo', aquarium: 'aquarium',
   theme_park: 'theme-park', viewpoint: 'viewpoint', artwork: 'art-gallery',
 };
-const LEISURE_EXPERIENCE = {
+export const LEISURE_EXPERIENCE = {
   park: 'park', garden: 'park', nature_reserve: 'walk', playground: 'playground',
   water_park: 'swimming', swimming_pool: 'swimming', ice_rink: 'ice-skating',
   bowling_alley: 'bowling', miniature_golf: 'mini-golf', escape_game: 'escape-room',
@@ -43,7 +43,7 @@ const LEISURE_EXPERIENCE = {
 
 // Somewhere to sleep. Asked for on its own — never in the default set — so a
 // search for somewhere to eat never comes back with hotels.
-const TOURISM_TO_CATEGORY = {
+export const TOURISM_TO_CATEGORY = {
   hotel: 'hotel', guest_house: 'hotel', hostel: 'hotel', motel: 'hotel',
   apartment: 'hotel', chalet: 'hotel', alpine_hut: 'hotel',
 };
@@ -78,7 +78,7 @@ export function stayAmenities(t) {
   return out;
 }
 
-const CATEGORY_FILTERS = {
+export const CATEGORY_FILTERS = {
   food: `nwr["amenity"~"^(restaurant|cafe|pub|bar|fast_food|ice_cream|biergarten)$"]["name"]`,
   stay: `nwr["tourism"~"^(hotel|guest_house|hostel|motel|apartment|chalet|alpine_hut)$"]["name"]`,
   things: `nwr["tourism"~"^(museum|gallery|attraction|zoo|aquarium|theme_park|viewpoint)$"]["name"];
@@ -86,6 +86,9 @@ const CATEGORY_FILTERS = {
   nwr["amenity"~"^(cinema|theatre|arts_centre)$"]["name"];
   nwr["historic"~"^(castle|ruins|fort|manor|archaeological_site|palace|abbey)$"]["name"]`,
 };
+
+/** The tag keys that say what a thing is, and so become labels. */
+export const LABEL_KEYS = ['amenity', 'tourism', 'leisure', 'historic', 'shop', 'sport', 'natural', 'attraction', 'club', 'craft'];
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -187,6 +190,10 @@ export function venueFromOsmElement(el) {
     rooms: t.rooms ? Number(t.rooms) || null : null,
     // A sight you look at rather than go into (a bath house, a statue, a
     // viewpoint) gets a short allowance, not an afternoon.
+    // The map's own words, as key=value, in the label vocabulary
+    // (domain/labels.js): a rule can be taught against `osm:leisure=ice_rink`
+    // directly. Only the keys that say what a thing is; an address is not a label.
+    labels: LABEL_KEYS.filter((k) => t[k]).map((k) => `osm:${k}=${String(t[k]).slice(0, 60)}`),
     quickLook: ['viewpoint', 'artwork'].includes(t.tourism) || ['ruins', 'archaeological_site', 'bath', 'wayside_shrine', 'city_gate', 'memorial'].includes(t.historic)
       || (t.tourism === 'attraction' && !t.opening_hours && !t.website && !t.fee),
     attribution: OSM_ATTRIBUTION,

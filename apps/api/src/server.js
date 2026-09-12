@@ -35,6 +35,7 @@ import { offline as offlineRoutes } from './routes/offline.js';
 import { startOwnLoop } from './sources/own.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
+import taxonomyRoutes from './routes/taxonomy.js';
 import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
@@ -154,6 +155,8 @@ app.use('/api/admin', requireDoor('admin'), adminRoutes);
 app.use('/api/admin/scout', requireDoor('admin'), scoutRoutes);
 app.use('/api/admin/library', requireDoor('admin'), libraryAdminRoutes);
 app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);
+// The taxonomy: categories, subcategories, every provider's words and the rules between (routes/taxonomy.js).
+app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
 app.use('/api/admin/places', requireDoor('admin'), localityRoutes);
 // The voice lab: the modes compared on the same sentences (routes/voice.js).
 app.use('/api/admin/voice', requireDoor('admin'), voiceLabRoutes);

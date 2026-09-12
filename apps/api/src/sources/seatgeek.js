@@ -8,7 +8,7 @@ const KEY = () => process.env.SEATGEEK_CLIENT_ID?.trim();
 const BASE = 'https://api.seatgeek.com/2';
 export const SEATGEEK_ATTRIBUTION = 'Events by SeatGeek';
 
-const TAXONOMY_EXPERIENCE = { concert: 'live-music', music_festival: 'festival', classical: 'live-music', theater: 'theatre', broadway_tickets_national: 'theatre', dance_performance_tour: 'theatre', comedy: 'comedy', film: 'cinema', sports: 'sports-game', family: 'festival' };
+export const TAXONOMY_EXPERIENCE = { concert: 'live-music', music_festival: 'festival', classical: 'live-music', theater: 'theatre', broadway_tickets_national: 'theatre', dance_performance_tour: 'theatre', comedy: 'comedy', film: 'cinema', sports: 'sports-game', family: 'festival' };
 
 const stamp = (s) => (s ? new Date(/Z$|[+-]\d\d:\d\d$/.test(s) ? s : `${s}Z`).toISOString() : null);
 
@@ -51,6 +51,7 @@ export const seatgeekSource = {
         category: 'event',
         cuisines: [],
         experiences: [...new Set([experience, ...(family ? ['festival'] : [])])],
+        labels: [...new Set([...taxonomies, e.type].filter(Boolean))].map((t) => `seatgeek:${t}`),
         allergens: [],
         dietaryOptions: undefined,
         priceLevel: price != null ? (price < 15 ? 1 : price < 40 ? 2 : 3) : null,

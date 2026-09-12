@@ -72,6 +72,7 @@ const SHELF_ICON: Record<MoodKey, IconName> = {
 /** What a rule is about, said in words rather than in the column name. */
 const SCOPE_WORD: Record<ShelfRule['scope'], string> = {
   place: 'this place',
+  labels: 'every place carrying these labels',
   kind: 'every place of this type',
   category: 'every place the atlas calls this',
   experience: 'every place tagged this on the map',

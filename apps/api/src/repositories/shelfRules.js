@@ -13,8 +13,14 @@
 
 import { query } from '../db.js';
 import { MOOD_KEYS } from '../domain/moods.js';
+import { canonical } from '../domain/labels.js';
 
-export const SCOPES = ['place', 'kind', 'category', 'experience'];
+/**
+ * Narrowest first. `labels` — a rule that fires when a place carries every
+ * label it names (migration 077) — sits above the type rules, because a rule
+ * that names two things has said more than one that names one.
+ */
+export const SCOPES = ['place', 'labels', 'kind', 'category', 'experience'];
 
 /**
  * Keep only real shelves and real numbers, and drop a shelf claimed at zero.
@@ -67,9 +73,18 @@ export async function list({ scope = null, q = null } = {}) {
  * second rule, so it replaces what was there — including the reason, which is
  * what makes the row auditable at all.
  */
-export async function teach({ scope, subject, subjectLabel, weights, subcategory, reason, by, known }) {
+export async function teach({ scope, subject, subjectLabel, weights, subcategory, reason, by, known, labels = null }) {
   if (!SCOPES.includes(scope)) throw Object.assign(new Error(`unknown scope ${scope}`), { status: 400 });
   const clean = cleanWeights(weights, known);
+  // A labels rule is known by the labels it names, in one spelling, so that
+  // "castle + museum" and "museum + castle" are one rule and not two.
+  let need = null;
+  if (scope === 'labels') {
+    const c = canonical(labels);
+    if (!c.labels.length) throw Object.assign(new Error('A labels rule has to name at least one label.'), { status: 400 });
+    need = c.labels;
+    subject = c.subject;
+  }
   // A rule may say the drawer, the shelf, or both. A drawer on its own is a
   // complete answer, because a drawer belongs to exactly one cabinet — that is
   // how most of the atlas is filed (migration 054). A rule that says neither
@@ -78,8 +93,8 @@ export async function teach({ scope, subject, subjectLabel, weights, subcategory
     throw Object.assign(new Error('A rule has to say something: a category, a subcategory, or both.'), { status: 400 });
   }
   const { rows } = await query(
-    `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded)
-     values ($1,$2,$3,$4,$5,$6,$7,false)
+    `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded, labels)
+     values ($1,$2,$3,$4,$5,$6,$7,false,$8)
      on conflict (scope, subject) do update
         set subject_label = coalesce(excluded.subject_label, shelf_rules.subject_label),
             weights = excluded.weights,
@@ -87,10 +102,11 @@ export async function teach({ scope, subject, subjectLabel, weights, subcategory
             reason = excluded.reason,
             taught_by = excluded.taught_by,
             seeded = false,
+            labels = excluded.labels,
             updated_at = now()
      returning *`,
     [scope, String(subject), subjectLabel ?? null, JSON.stringify(clean),
-     subcategory ? String(subcategory) : null, reason ?? null, by ?? null]);
+     subcategory ? String(subcategory) : null, reason ?? null, by ?? null, need]);
   forget();
   return rows[0];
 }
