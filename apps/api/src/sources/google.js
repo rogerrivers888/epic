@@ -66,6 +66,15 @@ export const TYPE_TO_CATEGORY = {
   restaurant: 'restaurant', bakery: 'bakery', cafe: 'cafe', coffee_shop: 'cafe', ice_cream_shop: 'cafe',
   meal_takeaway: 'takeaway', meal_delivery: 'takeaway', fast_food_restaurant: 'takeaway',
   bar: 'bar', wine_bar: 'bar', night_club: 'bar', pub: 'pub',
+  // The base types the nearby search asks for by name (FOOD_PRIMARY_TYPES),
+  // each of which is nobody's child and so carries no `restaurant` or `cafe`
+  // beside it to fall back on. Without a row here a deli or a tea house would
+  // file as an attraction (Codex, 12 Sep 2026).
+  fine_dining_restaurant: 'restaurant', bistro: 'restaurant', diner: 'restaurant',
+  brunch_restaurant: 'restaurant', breakfast_restaurant: 'restaurant',
+  gastropub: 'pub', brewpub: 'pub', cocktail_bar: 'bar',
+  deli: 'cafe', dessert_shop: 'cafe', tea_house: 'cafe',
+  sandwich_shop: 'takeaway', food_court: 'takeaway',
 };
 
 /**
