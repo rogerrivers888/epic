@@ -81,10 +81,15 @@ const LENSES = ['category', 'source'] as const;
 /** The travel times the owner named, and the two either side of them. */
 const MINUTES = [15, 30, 45, 60, 90];
 
-/** `sub=none` is the places no drawer has been taught for — a gap, and the one most worth a number. */
-const NO_DRAWER = 'none';
-/** `cat=none` likewise: a word rather than nothing, because the router drops an empty value (Codex, 12 Sep 2026). */
-const NO_CATEGORY = 'none';
+/**
+ * `sub=_none` is the places no drawer has been taught for — a gap, and the one
+ * most worth a number — and `cat=_none` likewise. A word rather than nothing,
+ * because the router drops an empty value; an underscore because a taxonomy
+ * key is slugged to letters, digits and hyphens, so a category somebody names
+ * "None" can never be mistaken for the absence of one (Codex, 12 Sep 2026).
+ */
+const NO_DRAWER = '_none';
+const NO_CATEGORY = '_none';
 /** `source=all` is the column that counts every source together. */
 const ALL = 'all';
 
