@@ -72,6 +72,8 @@ test('a name in any script is a name, and no name at all matches nothing', () =>
   fold(items, item('google:6', 'Café Rouge', ['google'], 51.3907, -0.63));
   fold(items, item('osm:7', 'Cafe Rouge', ['osm'], 51.3908, -0.63));
   assert.equal(items.length, 7, 'and a Latin accent still folds');
+  fold(items, item('google:8', '❤️ Cafe Rouge', ['google'], 51.3907, -0.63));
+  assert.equal(items.length, 7, 'a decorative emoji, selector and all, is not part of the name');
 });
 
 test('the counts say how many places carry each source, per half of the screen', () => {

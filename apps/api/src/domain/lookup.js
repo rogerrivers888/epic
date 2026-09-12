@@ -59,7 +59,12 @@ export function reachKm(mode, minutes, { cap = RING_CAP_KM, at = { lat: 51.4, ln
  * dropping it turned कि and कु into the same word (Codex, 12 Sep 2026). Only
  * the Latin accents (U+0300–U+036F) are folded away.
  */
-export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\p{M}]+/gu, '');
+export const nameKey = (t) => String(t || '').toLowerCase().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  // A mark only counts when it sits on a letter: the variation selector on a
+  // decorative "❤️" is a symbol's, and would otherwise outlive the symbol.
+  .replace(/(?<![\p{L}\p{N}\p{M}])\p{M}+/gu, '')
+  .replace(/[^\p{L}\p{N}\p{M}]+/gu, '');
 
 /**
  * Fold one of our own rows into the list.
