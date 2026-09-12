@@ -36,6 +36,7 @@ import { Audit, Plans, Roles } from './screens/Governance';
 import { Library } from './screens/Library';
 import { Places } from './screens/Places';
 import { Coverage } from './screens/Coverage';
+import { Lookup } from './screens/Lookup';
 import { Scout } from './screens/Scout';
 import { Shelves } from './screens/Shelves';
 import { HowItWorks } from './screens/HowItWorks';
@@ -66,6 +67,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'households', label: 'Households', icon: 'household', needs: 'view_accounts', sub: 'What each one does, and what it costs' },
   { key: 'activity', label: 'Activity', icon: 'list', needs: 'view_activity', sub: 'Everything that has happened' },
   { key: 'reporting', label: 'Reporting', icon: 'places', needs: 'view_reporting', sub: 'Engagement, revenue and usage' },
+  { key: 'lookup', label: 'Lookup', icon: 'search', needs: 'view_library', sub: 'One place, one travel time, and what every source has inside it' },
   { key: 'coverage', label: 'Coverage', icon: 'plan', needs: 'view_library', sub: 'Where the holes are, and a way into each one' },
   { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'A county, a town or a postcode district, and everything in it' },
   { key: 'library', label: 'Atlas', icon: 'owned', needs: 'view_library', sub: 'Attractions by county, and the pictures we own' },
@@ -111,6 +113,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'households' ? <People canManageRoles={can('manage_roles')} /> : null}
       {screen === 'activity' ? <Activity /> : null}
       {screen === 'reporting' ? <Reporting canSeeMoney={can('view_financials')} /> : null}
+      {screen === 'lookup' ? <Lookup /> : null}
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}
       {screen === 'library' ? <Library canManage={can('manage_library')} /> : null}

@@ -24,6 +24,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
+import lookupRoutes from './routes/lookup.js';
 import { router as localityRoutes } from './routes/localities.js';
 import { resumeInterrupted } from './sources/harvest.js';
 import activityRoutes from './routes/activity.js';
@@ -158,6 +159,8 @@ app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);
 // The taxonomy: categories, subcategories, every provider's words and the rules between (routes/taxonomy.js).
 app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
 app.use('/api/admin/places', requireDoor('admin'), localityRoutes);
+// Lookup: what every source has for one place, and what each record holds (routes/lookup.js).
+app.use('/api/admin/lookup', requireDoor('admin'), lookupRoutes);
 // The voice lab: the modes compared on the same sentences (routes/voice.js).
 app.use('/api/admin/voice', requireDoor('admin'), voiceLabRoutes);
 

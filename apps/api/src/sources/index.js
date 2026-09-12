@@ -171,6 +171,23 @@ export const MERGE_THRESHOLD = Number(process.env.EPIC_MERGE_THRESHOLD || 0.75);
  * two cards for one restaurant is an annoyance, merging two restaurants into one
  * card sends a family to the wrong place.
  */
+/**
+ * The provider records a resolved venue was folded from, exactly as each
+ * source handed them over.
+ *
+ * A resolved venue is one shape for every screen, which is the point of it —
+ * and it is also why nobody can see what Google actually said about a place
+ * once OpenStreetMap's record has been merged in (owner, 12 Sep 2026: the
+ * back office's Lookup wants "literally the fields that we get for that data").
+ * So the untouched records are kept beside the venue, keyed on the venue
+ * object itself: a WeakMap, so the venue's shape does not change, nothing
+ * extra is serialised to a household, and the records live exactly as long as
+ * the search that holds the venue does (sources/cache.js) and not a moment
+ * longer. Rented content is not made any more retained by this than it was.
+ */
+const rawOf = new WeakMap();
+export const recordsOf = (venue) => rawOf.get(venue) ?? [];
+
 export function resolveVenues(rawRecords) {
   const resolved = [];
 
@@ -178,7 +195,7 @@ export function resolveVenues(rawRecords) {
     const candidate = resolved.find((r) => matchConfidence(r, record) >= MERGE_THRESHOLD);
 
     if (!candidate) {
-      resolved.push({
+      const made = {
         key: `${record.source}:${record.sourcePlaceId}`,
         ...record,
         ...detectChain(record),
@@ -193,9 +210,12 @@ export function resolveVenues(rawRecords) {
         ),
         conflicts: [],
         attribution: [record.source],
-      });
+      };
+      rawOf.set(made, [record]);
+      resolved.push(made);
       continue;
     }
+    rawOf.get(candidate)?.push(record);
 
     // Per-field precedence (Technical Constraints §5): a licensed source that
     // carries ratings, photos, hours or family flags wins those fields; the

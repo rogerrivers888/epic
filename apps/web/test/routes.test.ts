@@ -201,6 +201,12 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/reporting'), { name: 'admin', screen: 'reporting' });
   // The voice lab: the ways of hearing compared on the same sentences.
   assert.deepEqual(roundTrip('/admin/voice'), { name: 'admin', screen: 'voice' });
+  // Lookup: one place, one travel time, and what every source has inside it.
+  // The place, the minutes, the mode and the opened record all travel in the
+  // query, so a look somebody took can be sent to somebody else.
+  assert.deepEqual(roundTrip('/admin/lookup'), { name: 'admin', screen: 'lookup' });
+  assert.deepEqual(parseRoute('/admin/lookup?q=Sunningdale&mins=30&mode=drive&kind=activities&source=google&place=google%3Aabc'), { name: 'admin', screen: 'lookup' });
+  assert.equal(splitHref('/admin/lookup?q=Sunningdale&place=google%3Aabc').query.get('place'), 'google:abc');
   // Data › Sources: every provider, every field, and which of them we read.
   assert.deepEqual(roundTrip('/admin/sources'), { name: 'admin', screen: 'sources' });
   // Data › Categories: the two levels, every provider's words, and the rules between (12 Sep 2026).

@@ -313,3 +313,30 @@ export async function ownedNear(householdId, lat, lng, radiusKm, limit = 60) {
   );
   return rows;
 }
+
+/**
+ * Every owned record around a point, whoever claimed it.
+ *
+ * `ownedNear` above is one household's: it joins `household_places`, because a
+ * household's offline fallback may only hold what that household has claimed.
+ * The back office asks a different question — what does Epic itself hold
+ * around here — and that is the whole table, which is small and entirely ours
+ * (§13.10). Nothing rented is in it by construction.
+ */
+export async function recordsNear(lat, lng, radiusKm, limit = 500) {
+  const { rows } = await query(
+    `select * from (
+       select r.*,
+              6371 * acos(least(1, greatest(-1,
+                sin(radians($1)) * sin(radians(r.lat)) +
+                cos(radians($1)) * cos(radians(r.lat)) * cos(radians(r.lng) - radians($2))))) as km
+         from place_records r
+        where r.lat is not null and r.lng is not null and r.name is not null
+     ) near
+      where km <= $3
+      order by km
+      limit $4`,
+    [lat, lng, radiusKm, limit],
+  );
+  return rows;
+}

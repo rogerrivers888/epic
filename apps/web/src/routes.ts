@@ -186,9 +186,9 @@ export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips'
 
 export type AdminScreen =
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
-  | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'roles' | 'plans' | 'audit' | 'how';
+  | 'lookup' | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'roles' | 'plans' | 'audit' | 'how';
 export const ADMIN_SCREENS: AdminScreen[] = [
-  'overview', 'accounts', 'households', 'activity', 'reporting', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'roles', 'plans', 'audit', 'how',
+  'overview', 'accounts', 'households', 'activity', 'reporting', 'lookup', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'roles', 'plans', 'audit', 'how',
 ];
 
 /**

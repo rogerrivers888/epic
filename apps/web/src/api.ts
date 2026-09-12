@@ -1874,6 +1874,11 @@ export const api = {
     post<{ started: string; limit: number; region: string | null }>('/api/admin/places/pass', { which, ...p }),
   placeRecount: () => post<{ ok: boolean }>('/api/admin/places/recount', {}),
 
+  // --- lookup: one place, one travel time, and what every source has inside it (routes/lookup.js) ---
+  lookup: (p: { q: string; minutes: number; mode: string }) => request<LookupResult>(`/api/admin/lookup${qs(p)}`),
+  /** One place opened: each provider's record as it arrived, and the row Epic resolved from them. */
+  lookupPlace: (p: { q: string; minutes: number; mode: string; ref: string }) => request<LookupOpened>(`/api/admin/lookup/place${qs(p)}`),
+
   // --- correcting a category where the mistake is (routes/library.js) ---
   categoryRead: (id: string, said: string) =>
     post<{ proposal: CategoryProposal }>(`/api/admin/library/attractions/${id}/category/read`, { said }),
@@ -2259,6 +2264,45 @@ export type PlaceTree = {
 export type CoverageRow = {
   slug: string; name: string; kind: Locality['kind'];
   toGo: number; toEat: number; facts: Record<FactKey, FactCoverage>;
+};
+
+/**
+ * The back office's Lookup (12 Sep 2026): one place, one travel time, and
+ * what every source has inside it. The screen makes every number from
+ * `items`; `sources` says what was asked, what each answered with, and what
+ * failed — in plain words and, this being the back office, the raw error too.
+ */
+export type LookupCounts = { activities: number; food: number; all: number };
+export type LookupSource = {
+  key: string; label: string; layer: 'rented' | 'owned'; note: string | null;
+  /** Places carrying this source: everything it handed back, and what is inside the travel time. */
+  returned: LookupCounts; kept: LookupCounts;
+  failed: { why: string; error: string; slow: boolean } | null;
+};
+export type LookupPlace = { label: string; where: string | null; kind: string | null; lat: number; lng: number; how: 'point' | 'area' | 'address' };
+export type LookupItem = {
+  ref: string; name: string; kind: 'activities' | 'food'; category: string;
+  shelf: string | null; subcategory: string | null; sources: string[];
+  lat: number; lng: number; rating: number | null; ratingCount: number | null; website: string | null;
+  distanceKm: number; travelMinutes: number; recordCount: number;
+};
+export type LookupResult = {
+  place: LookupPlace; mode: string; minutes: number; radiusKm: number; estimated: boolean;
+  /** The minutes reach further than any source will answer, so the ring was cut to what they will. */
+  capped: boolean;
+  /** Distinct places, before and inside the fence — the "Everything" row, which is not the sum of the sources. */
+  totals: { returned: LookupCounts; kept: LookupCounts };
+  sources: LookupSource[];
+  taxonomy: { categories: { key: string; label: string }[]; subcategories: { key: string; label: string; category: string }[] };
+  items: LookupItem[];
+  cached: boolean; fetchedAt: string | null; tookMs: number;
+};
+export type LookupRecord = { source: string; label: string; fields: Record<string, unknown> };
+export type LookupOpened = {
+  place: LookupPlace; mode: string; minutes: number;
+  item: Omit<LookupItem, 'recordCount'>;
+  records: LookupRecord[];
+  resolved: Record<string, unknown> | null;
 };
 
 /**
