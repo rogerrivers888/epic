@@ -32,7 +32,8 @@ import { query } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
-import { kindsByQid } from '../repositories/library.js';
+import { kindsByQid, nameKinds } from '../repositories/library.js';
+import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
 import { SHELF_FLOOR } from '../domain/moods.js';
@@ -62,13 +63,27 @@ async function namesFor(labels) {
   return out;
 }
 
-/** A rule as the screen draws it: the labels it is about, each with a name. */
+/**
+ * A rule as the screen draws it: the labels it is about, each with a name.
+ *
+ * A Wikidata type the harvest has not named yet is named here, from Wikidata,
+ * keyless, before the answer goes out — the owner saw "Q18674739" on a rule
+ * and called it what it was, a bug (12 Sep 2026). The rule's own
+ * `subject_label` is the fallback if Wikidata is not answering.
+ */
 async function withLabels(rules) {
   const all = rules.flatMap((r) => labelsOfRule(r));
-  const names = await namesFor(all);
+  let names = await namesFor(all);
+  const unnamed = [...new Set(all.filter((l) => l.startsWith('wikidata:') && !names.get(l)).map((l) => l.slice('wikidata:'.length)))];
+  if (unnamed.length) {
+    try {
+      const got = await kindLabels(unnamed.slice(0, 300));
+      if (got?.size) { await nameKinds(got); names = await namesFor(all); }
+    } catch { /* Wikidata not answering: the rule's own label stands in */ }
+  }
   return rules.map((r) => ({
     ...r,
-    labelList: labelsOfRule(r).map((l) => ({ label: l, name: names.get(l) ?? null })),
+    labelList: labelsOfRule(r).map((l) => ({ label: l, name: names.get(l) ?? (r.scope === 'kind' ? r.subject_label ?? null : null) })),
   }));
 }
 
