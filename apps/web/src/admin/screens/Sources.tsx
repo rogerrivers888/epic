@@ -243,13 +243,14 @@ export function Sources() {
       <Section title="Services">
         <Text style={[type.tiny, styles.guide]}>What we pay for that yields no field about a place.</Text>
         {(data?.services ?? []).map((s) => (
-          <View key={s.key} style={[styles.row, wide && { alignItems: 'flex-start' }]}>
-            <View style={wide ? { width: 170 } : { width: '100%' }}>
+          // A row on a wide screen; on a phone the same three parts stack (Codex, 12 Sep 2026).
+          <View key={s.key} style={[styles.row, wide ? { alignItems: 'flex-start' } : { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
+            <View style={wide ? { width: 170 } : undefined}>
               <Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>{s.label}</Text>
               <Text style={type.tiny}>{s.unit} · key {s.hasKey ? 'present' : 'absent'}</Text>
             </View>
-            <Text style={[type.small, { flex: 1, minWidth: 0 }]}>{s.what}</Text>
-            <View style={{ width: 130, alignItems: 'flex-end' }}>
+            <Text style={[type.small, wide && { flex: 1, minWidth: 0 }]}>{s.what}</Text>
+            <View style={wide ? { width: 130, alignItems: 'flex-end' } : { alignItems: 'flex-start' }}>
               <Text style={type.tiny}>{count(s.calls.days30)} in 30 days · {count(s.calls.all)} all time</Text>
               {s.console ? <Link label={s.console.label} url={s.console.url} /> : null}
             </View>
