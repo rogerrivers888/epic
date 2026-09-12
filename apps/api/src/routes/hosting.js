@@ -681,47 +681,47 @@ router.get('/experiences/near', async (req, res, next) => {
 router.post('/experiences/:id/book', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const o = await repo.offerById(req.params.id);
-    if (!o || o.state !== 'live') throw refuse(409, 'not_bookable', o?.state === 'paused' ? `This is paused${o.paused_until ? ` — back ${ymd(o.paused_until)}` : ''}. It is not taking bookings just now.` : 'This experience is not taking bookings.');
-    const host = await repo.hostById(o.host_id);
-    if (host.household_id === household.id) throw refuse(409, 'own_offer', 'You cannot book your own experience.');
     const b = req.body ?? {};
     const party = list(b.party, 12).map((p) => ({ name: str(p.name, 80), age: p.age == null ? null : int(p.age), child: Boolean(p.child) })).filter((p) => p.name);
     if (!party.length) throw refuse(400, 'party_required', 'Say who is coming.');
-    const gate = ageGate(o, party);
-    if (gate.blocked.length) throw refuse(400, 'age_limit', `Over ${gate.limit} only — ${gate.blocked.map((p) => p.name).join(', ')} cannot come to this one.`);
-    // Guests booking alone are 18+; under-18s come as named party members with an adult.
-    if (!gate.hasAdult) throw refuse(400, 'adult_required', 'A booking needs an adult in the party.');
-    if (o.party_max && party.length > o.party_max) throw refuse(400, 'party_too_big', `The most one booking can bring is ${o.party_max}.`);
-    if (o.venue === 'your_place' && !str(b.address, 300)) throw refuse(400, 'address_required', `${host.name} comes to you, so we need the address and how to get in.`);
-
     const today = ymd(new Date());
-    // Which instance. Nothing in the past is bookable, whatever the page still shows.
-    let occurrence = null;
-    if (o.shape === 'oneoff') {
-      occurrence = ymd(o.starts_on);
-      if (!occurrence || occurrence < today) throw refuse(409, 'past', 'This one has already happened.');
-    } else if (o.shape === 'series') {
-      const dates = seriesDates(o);
-      occurrence = b.occurrence === 'whole' || !b.occurrence ? 'whole' : ymd(b.occurrence);
-      if (occurrence === 'whole' && o.join_mode === 'drop_in') throw refuse(400, 'drop_in_only', 'This series is drop-in only: pick a session.');
-      if (occurrence !== 'whole' && (o.join_mode === 'whole' || !dates.includes(occurrence))) throw refuse(400, 'whole_only', 'This series is booked as a whole run.');
-      if (occurrence === 'whole' ? !dates.some((d) => d >= today) : occurrence < today) throw refuse(409, 'past', 'That session has already happened.');
-    } else {
-      occurrence = String(b.occurrence ?? '');
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(occurrence)) throw refuse(400, 'slot_required', 'Pick a time.');
-    }
 
     /**
-     * The count, the decision and the row are one transaction with the offer
-     * locked: two guests booking the last places at once would otherwise each
-     * read the same count and each be let in (Codex, 12 Sep 2026).
+     * Everything about the offer is read under its lock and decided there —
+     * whether it is live, the age limit, the party size, which instance, the
+     * count, the price, the row. A host editing the offer or stopping hosting
+     * while this request is on its way waits on the same lock, so the booking
+     * is made against the offer as it is, never as it was (Codex, 12 Sep 2026).
      */
     const booking = await withTransaction(async (client) => {
-      // The row read again under the lock: the host may have stopped hosting
-      // or paused it while this request was on its way (Codex, 12 Sep 2026).
-      const locked = await repo.lockOffer(o.id, client);
-      if (!locked || locked.state !== 'live') throw refuse(409, 'not_bookable', 'This experience is not taking bookings any more.');
+      const o = await repo.lockOffer(req.params.id, client);
+      if (!o || o.state !== 'live') throw refuse(409, 'not_bookable', o?.state === 'paused' ? `This is paused${o.paused_until ? ` — back ${ymd(o.paused_until)}` : ''}. It is not taking bookings just now.` : 'This experience is not taking bookings.');
+      const host = await repo.hostById(o.host_id);
+      if (!host) throw refuse(409, 'not_bookable', 'This experience is not taking bookings.');
+      if (host.household_id === household.id) throw refuse(409, 'own_offer', 'You cannot book your own experience.');
+      const gate = ageGate(o, party);
+      if (gate.blocked.length) throw refuse(400, 'age_limit', `Over ${gate.limit} only — ${gate.blocked.map((p) => p.name).join(', ')} cannot come to this one.`);
+      // Guests booking alone are 18+; under-18s come as named party members with an adult.
+      if (!gate.hasAdult) throw refuse(400, 'adult_required', 'A booking needs an adult in the party.');
+      if (o.party_max && party.length > o.party_max) throw refuse(400, 'party_too_big', `The most one booking can bring is ${o.party_max}.`);
+      if (o.venue === 'your_place' && !str(b.address, 300)) throw refuse(400, 'address_required', `${host.name} comes to you, so we need the address and how to get in.`);
+
+      // Which instance. Nothing in the past is bookable, whatever the page still shows.
+      let occurrence = null;
+      if (o.shape === 'oneoff') {
+        occurrence = ymd(o.starts_on);
+        if (!occurrence || occurrence < today) throw refuse(409, 'past', 'This one has already happened.');
+      } else if (o.shape === 'series') {
+        const dates = seriesDates(o);
+        occurrence = b.occurrence === 'whole' || !b.occurrence ? 'whole' : ymd(b.occurrence);
+        if (occurrence === 'whole' && o.join_mode === 'drop_in') throw refuse(400, 'drop_in_only', 'This series is drop-in only: pick a session.');
+        if (occurrence !== 'whole' && (o.join_mode === 'whole' || !dates.includes(occurrence))) throw refuse(400, 'whole_only', 'This series is booked as a whole run.');
+        if (occurrence === 'whole' ? !dates.some((d) => d >= today) : occurrence < today) throw refuse(409, 'past', 'That session has already happened.');
+      } else {
+        occurrence = String(b.occurrence ?? '');
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(occurrence)) throw refuse(400, 'slot_required', 'Pick a time.');
+      }
+
       const existing = await repo.bookingsOfOffer(o.id, client);
       if (o.shape === 'anytime') {
         const taken = new Set(existing.filter((x) => x.state !== 'cancelled').map((x) => x.occurrence));
