@@ -93,6 +93,7 @@ async function publicAddress(raw) {
 }
 
 const BODY_MAX = 1_500_000;
+const DEADLINE_MS = 15_000;
 
 /** One request to the checked address, with the site's own name kept for TLS and the Host header. */
 function requestPinned({ url, address, family }) {
@@ -106,12 +107,17 @@ function requestPinned({ url, address, family }) {
       timeout: 12_000,
     }, (res) => {
       const chunks = []; let size = 0;
-      res.on('data', (c) => { size += c.length; if (size <= BODY_MAX) chunks.push(c); });
+      res.on('data', (c) => { size += c.length; if (size > BODY_MAX) req.destroy(new Error('page too large')); else chunks.push(c); });
       res.on('end', () => resolve({ status: res.statusCode ?? 0, location: res.headers.location ?? null, type: String(res.headers['content-type'] ?? ''), body: Buffer.concat(chunks).toString('utf8') }));
       res.on('error', reject);
     });
+    // `timeout` above is socket inactivity; this is the clock on the whole
+    // request, so a site trickling a byte at a time cannot hold it open
+    // (Codex, 12 Sep 2026).
+    const deadline = setTimeout(() => req.destroy(new Error('timed out')), DEADLINE_MS);
     req.on('timeout', () => req.destroy(new Error('timed out')));
     req.on('error', reject);
+    req.on('close', () => clearTimeout(deadline));
     req.end();
   });
 }
