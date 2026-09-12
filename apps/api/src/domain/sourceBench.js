@@ -32,6 +32,26 @@ function metres(a, b) {
   return Math.round(2 * R * Math.asin(Math.sqrt(h)));
 }
 
+const WEEK = ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'];
+
+/**
+ * The days an OSM opening_hours string says are closed: every clause that
+ * ends in "off", with "Mo-We", "Mo,Tu" and "Mo-Tu,Sa" expanded to the days
+ * they name (Codex, 12 Sep 2026: a range was being read as its first day).
+ */
+export function closedDaysOsm(hours) {
+  const out = new Set();
+  // Not `fold`: that strips the dashes and commas the grammar is made of.
+  for (const clause of String(hours ?? '').toLowerCase().split(';')) {
+    if (!/\boff\b/.test(clause)) continue;
+    for (const m of clause.matchAll(/\b(mo|tu|we|th|fr|sa|su)(?:\s*-\s*(mo|tu|we|th|fr|sa|su))?\b/g)) {
+      const a = WEEK.indexOf(m[1]); const b = m[2] ? WEEK.indexOf(m[2]) : a;
+      for (let i = a; ; i = (i + 1) % 7) { out.add(WEEK[i]); if (i === b) break; }
+    }
+  }
+  return out;
+}
+
 const missing = (v) => v == null || v === '' || (Array.isArray(v) && !v.length);
 
 /** Say a value the way the table prints it. */
@@ -75,10 +95,11 @@ const RULES = {
     return ['differ', `${m} m apart`];
   },
   hours_regular: (ours, theirs) => {
-    // Two grammars: OSM's "Mo-Fr 09:00-17:00" and Google's weekday sentences.
-    // A rule can only tell "both say closed on a day" apart; the rest is the
-    // owner's to read. So: agree if the days named as closed match, else unknown.
-    const closedOurs = new Set([...fold(ours).matchAll(/\b(mo|tu|we|th|fr|sa|su)\b[^;]*?\boff\b/g)].map((m) => m[1]));
+    // Two grammars: OSM's "Mo-Fr 09:00-17:00; Su off" and Google's weekday
+    // sentences. A rule can only tell "both say closed on a day" apart; the
+    // rest is the owner's to read. So: agree if the days named as closed match,
+    // else unknown.
+    const closedOurs = closedDaysOsm(ours);
     const closedTheirs = new Set((Array.isArray(theirs) ? theirs : [theirs]).map((l) => fold(l)).filter((l) => /closed/.test(l)).map((l) => l.slice(0, 2)));
     if (!closedOurs.size && !closedTheirs.size) return ['unknown', 'both open every day; the hours themselves are for you to compare'];
     const same = closedOurs.size === closedTheirs.size && [...closedOurs].every((d) => closedTheirs.has(d));
@@ -89,12 +110,6 @@ const RULES = {
     if (!o || !t) return ['unknown', 'no category on one side'];
     if (o === t || o.includes(t) || t.includes(o)) return ['agree', 'same kind of place'];
     return ['unknown', `"${ours}" vs "${theirs}" — different vocabularies`];
-  },
-  price_range: (ours, theirs) => {
-    const pounds = (String(ours).match(/£/g) || []).length;
-    const level = Number(theirs);
-    if (!pounds || !level) return ['unknown', 'one side has no price band'];
-    return Math.abs(pounds - level) <= 1 ? ['agree', 'within a band of each other'] : ['differ', `${'£'.repeat(pounds)} vs level ${level}`];
   },
 };
 

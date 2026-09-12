@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BENCHABLE, judge, tally } from '../src/domain/sourceBench.js';
+import { BENCHABLE, closedDaysOsm, judge, tally } from '../src/domain/sourceBench.js';
 
 /**
  * The correctness bench judges a kept fact against a rented one. These hold
@@ -30,6 +30,15 @@ test('coordinates agree within a door, are unsure within a street, and differ be
   assert.equal(judge('lat_lng', here, { lat: 51.5363, lng: -0.9022 }).verdict, 'agree');
   assert.equal(judge('lat_lng', here, { lat: 51.5375, lng: -0.9021 }).verdict, 'unknown');
   assert.equal(judge('lat_lng', here, { lat: 51.55, lng: -0.9 }).verdict, 'differ');
+});
+
+test('a closed-day range or list names every day in it', () => {
+  assert.deepEqual([...closedDaysOsm('Mo-We off; Th-Su 12:00-22:00')], ['mo', 'tu', 'we']);
+  assert.deepEqual([...closedDaysOsm('Mo,Tu off')], ['mo', 'tu']);
+  assert.deepEqual([...closedDaysOsm('Mo-Tu,Sa off; PH off')], ['mo', 'tu', 'sa']);
+  assert.deepEqual([...closedDaysOsm('Su-Mo off')], ['su', 'mo']);
+  assert.equal(judge('hours_regular', 'Mo-Tu off; We-Su 12:00-22:00', ['Monday: Closed', 'Tuesday: Closed', 'Wednesday: 12:00 – 10:00 PM']).verdict, 'unknown');
+  assert.ok(!BENCHABLE.includes('price_range'), "a price band and a price range are not the same fact");
 });
 
 test('hours are only judged on which days are closed; the rest is for the owner', () => {

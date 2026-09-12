@@ -542,7 +542,7 @@ router.get('/data/sources', requires('view_reporting'), async (_req, res, next) 
 /** master field → the place_facts fields that carry it. */
 const BENCH_FACTS = {
   name: ['name'], address: ['address'], postcode: ['postcode'], phone: ['phone'], website: ['website'],
-  lat_lng: ['lat', 'lng'], hours_regular: ['opening_hours'], category: ['category'], price_range: ['price_range'],
+  lat_lng: ['lat', 'lng'], hours_regular: ['opening_hours'], category: ['category'],
 };
 const BENCH_SOURCES = { osm: 'osm', site: 'site', nominatim: 'nominatim', wikipedia: 'wikipedia', wikidata: 'wikidata', wikivoyage: 'wikivoyage' };
 const BENCH_MAX = 50;
@@ -578,17 +578,19 @@ router.post('/data/sources/bench', requires('manage_settings'), async (req, res,
     if (!sourceHasKey('google')) return res.status(409).json({ error: 'no_key', message: 'The Google key is not set on this API, so there is nothing to check against.' });
 
     const factFields = [...new Set(fields.flatMap((f) => BENCH_FACTS[f]))];
-    const { rows: places } = await query(
-      `select r.venue_ref, coalesce(r.name, r.venue_ref) as name,
-              case when r.venue_ref like 'google:%' then substr(r.venue_ref, 8)
-                   else (select m.source_ref from provider_matches m where m.venue_ref = r.venue_ref and m.source = 'google' and not m.missing limit 1) end as google_id,
-              (select jsonb_object_agg(f.field, f.value) from place_facts f where f.venue_ref = r.venue_ref and f.source = $1 and f.field = any($2) and f.expires_at is null) as ours
-         from place_records r
-        where exists (select 1 from place_facts f where f.venue_ref = r.venue_ref and f.source = $1 and f.field = any($2) and f.expires_at is null)
-        order by random() limit $3`,
-      [source, factFields, sample * 2],
+    // Eligibility — facts from the source, and a Google identifier — is decided
+    // in the query, so the limit counts places that can actually be checked.
+    const { rows: picked } = await query(
+      `with candidates as (
+         select r.venue_ref, coalesce(r.name, r.venue_ref) as name,
+                case when r.venue_ref like 'google:%' then substr(r.venue_ref, 8)
+                     else (select m.source_ref from provider_matches m where m.venue_ref = r.venue_ref and m.source = 'google' and not m.missing limit 1) end as google_id,
+                (select jsonb_object_agg(f.field, f.value) from place_facts f where f.venue_ref = r.venue_ref and f.source = $1 and f.field = any($2) and f.expires_at is null) as ours
+           from place_records r
+          where exists (select 1 from place_facts f where f.venue_ref = r.venue_ref and f.source = $1 and f.field = any($2) and f.expires_at is null))
+       select * from candidates where google_id is not null order by random() limit $3`,
+      [source, factFields, sample],
     );
-    const picked = places.filter((p) => p.google_id).slice(0, sample);
 
     const meter = {};
     const problems = [];
@@ -601,7 +603,7 @@ router.post('/data/sources/bench', requires('manage_settings'), async (req, res,
         name: v.name || null, address: v.address, postcode: postcodeOf(v.address), phone: v.phone, website: v.website,
         lat_lng: v.lat != null ? { lat: v.lat, lng: v.lng } : null,
         hours_regular: v.openingHours ? String(v.openingHours).split(' · ') : null,
-        category: v.category, price_range: v.priceLevel,
+        category: v.category,
       };
       const ours = p.ours ?? {};
       for (const field of fields) {
@@ -634,12 +636,16 @@ router.patch('/data/sources/bench/:id', requires('manage_settings'), async (req,
     const decision = req.body?.decision == null ? null : String(req.body.decision);
     if (!Number.isInteger(index) || index < 0) throw bad('Which row?');
     if (decision != null && !['ours', 'theirs', 'both'].includes(decision)) throw bad('A decision is ours, theirs or both.');
-    const { rows: [run] } = await query('select * from source_bench_runs where id = $1', [req.params.id]);
-    if (!run) return res.status(404).json({ error: 'not_found' });
-    const rows = run.rows;
-    if (!rows[index]) throw bad('No such row.');
-    rows[index] = { ...rows[index], decision };
-    const { rows: [saved] } = await query('update source_bench_runs set rows = $2 where id = $1 returning *', [run.id, JSON.stringify(rows)]);
+    // One element set in place, so two calls landing together each keep the
+    // other's decision rather than the last writer replacing the whole array.
+    const { rows: [saved] } = await query(
+      `update source_bench_runs
+          set rows = jsonb_set(rows, array[$2::text], (rows -> $2::int) || jsonb_build_object('decision', $3::jsonb))
+        where id = $1 and jsonb_array_length(rows) > $2
+        returning *`,
+      [req.params.id, index, JSON.stringify(decision)],
+    );
+    if (!saved) return res.status(404).json({ error: 'not_found', message: 'No such run, or no such row in it.' });
     res.json({ run: shapeRun(saved) });
   } catch (err) { next(err); }
 });
