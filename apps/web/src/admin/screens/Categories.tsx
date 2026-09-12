@@ -691,8 +691,6 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [group, setGroup] = useQueryState<string>('group', '', asText);
   const [gaps, setGaps] = useQueryState<string>('gaps', '', asText);
-  const [open, setOpen] = useState(false);
-  const [foot, setFoot] = useState(36);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -720,7 +718,7 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }, [rows]);
 
-  const chosen = groups.find((g) => g.name === group) ?? groups.find((g) => g.name === 'Entertainment and Recreation') ?? groups[0] ?? null;
+  const chosen = group === '-' ? null : groups.find((g) => g.name === group) ?? groups.find((g) => g.name === 'Entertainment and Recreation') ?? null;
   const shown = (chosen?.types ?? []).filter((r) => gaps !== '1' || standing(r) === 'undecided');
   const totals = groups.reduce((t, g) => ({ mapped: t.mapped + g.mapped, category: t.category + g.category, aside: t.aside + g.aside, undecided: t.undecided + g.undecided, all: t.all + g.types.length }), { mapped: 0, category: 0, aside: 0, undecided: 0, all: 0 });
 
@@ -740,7 +738,7 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
     <View style={{ gap: spacing.lg }}>
       <Section title={`Google's ${groups.length} groups against our categories — ${count(totals.all)} types`}>
         <Text style={[type.tiny, { paddingVertical: 6 }]}>
-          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out — a decision recorded here, not a filter: a place Google also types that way is still filed by its other words — and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group to see its types.
+          Google's list is Table A of the Places API, read on 12 Sep 2026. A type is <Text style={{ fontWeight: '700' }}>mapped</Text> when a rule or the code's own map puts it in one of our subcategories, <Text style={{ fontWeight: '700' }}>set aside</Text> when somebody has said it is not a day out — a decision recorded here, not a filter: a place Google also types that way is still filed by its other words — and <Text style={{ fontWeight: '700' }}>undecided</Text> when nothing has been said — those are the discrepancies. Tap a group and its types open under it.
         </Text>
         {wide ? (
           <View style={[styles.tRow, styles.tHead]}>
@@ -752,7 +750,8 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
         {groups.map((g) => {
           const on = chosen?.name === g.name;
           return (
-            <Press key={g.name} onPress={() => setGroup(g.name)} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.tRow, !wide && { alignItems: 'center', gap: spacing.sm }, on && { backgroundColor: colors.well }]}>
+            <View key={g.name}>
+            <Press onPress={() => setGroup(on ? '-' : g.name)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, !wide && { alignItems: 'center', gap: spacing.sm }, on && { backgroundColor: colors.well }]}>
               <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
                 <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
                 {/* On a phone the five columns become one line under the name. */}
@@ -767,53 +766,51 @@ function GoogleView({ tax, wide, catLabel, subLabel, canManage, onPick, onChange
               )}
               {wide ? <View style={[styles.tCell, { width: 220 }]}><Text style={type.tiny} numberOfLines={2}>{g.lands.map(catLabel).join(', ') || '—'}</Text></View> : null}
             </Press>
+            {/* The group's types, right under its row — never below the fold
+                (owner, 12 Sep 2026: "It needs to appear in the same area"). */}
+            {on ? (
+              <View style={styles.inset}>
+                <View style={[styles.line, { flexWrap: 'wrap' }]}>
+                  <Text style={[type.tiny, { flex: 1 }]}>{g.types.length} types in {g.name}</Text>
+                  <Choice label="Everything" on={gaps !== '1'} onPress={() => setGaps('')} />
+                  <Choice label={`Undecided only · ${g.undecided}`} on={gaps === '1'} onPress={() => setGaps('1')} />
+                </View>
+                {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing undecided in this group.</Text> : null}
+                {shown.map((r) => {
+                  const st = standing(r);
+                  const lands = st === 'aside' ? 'set aside — not a day out'
+                    : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
+                      : st === 'category' ? `${catLabel(r.landing.category)} · no subcategory` : 'undecided';
+                  return (
+                    <View key={r.key} style={[styles.wordRow, st === 'aside' && { opacity: 0.55 }]}>
+                      <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+                        <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
+                        <Text style={type.tiny} numberOfLines={1}>
+                          {[r.seen_count ? `seen ${count(r.seen_count)}` : null, r.landing.derived.length ? `read as ${r.landing.derived.map(keyOf).join(', ')}` : null].filter(Boolean).join(' · ') || ' '}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end', gap: 1, maxWidth: '40%' }}>
+                        <Text style={[type.small, { fontWeight: st === 'undecided' ? '700' : '600', textAlign: 'right' }]} numberOfLines={2}>{lands}</Text>
+                        {st !== 'aside' && st !== 'undecided' ? (
+                          <Text style={[type.tiny, { textAlign: 'right' }]} numberOfLines={1}>{HOW_WORD[r.landing.how]}{r.landing.via && r.landing.via.scope !== 'default' ? ` · ${r.landing.via.subject_label ?? r.landing.via.subject ?? ''}` : ''}</Text>
+                        ) : null}
+                      </View>
+                      {canManage ? (
+                        <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+                          <TextAction label="Map" onPress={() => onPick(`google:${r.key}`, r.landing.subcategory)} disabled={busyKey === r.key} />
+                          <TextAction label={st === 'aside' ? 'Bring back' : 'Set aside'} tone="muted" disabled={busyKey === r.key} onPress={() => void setAside(r, st !== 'aside')} />
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+            </View>
           );
         })}
       </Section>
 
-      {chosen ? (
-        <View style={{ position: 'relative', zIndex: 15 }}>
-          <View style={[styles.sectionHead, { flexWrap: 'wrap' }]} onLayout={(e) => setFoot(e.nativeEvent.layout.height)}>
-            <ControlButton label={chosen.name} open={open} onPress={() => setOpen((o) => !o)} spoken="Google's group" />
-            <View style={{ flex: 1 }} />
-            <Choice label="Everything" on={gaps !== '1'} onPress={() => setGaps('')} />
-            <Choice label={`Undecided only · ${chosen.undecided}`} on={gaps === '1'} onPress={() => setGaps('1')} />
-          </View>
-          <Popover open={open} top={foot} onClose={() => setOpen(false)}>
-            <PopoverList options={groups.map((g) => ({ key: g.name, label: g.name, count: g.undecided ? `${g.undecided} undecided` : `${g.types.length}`, on: g.name === chosen.name }))}
-                         onPick={(k) => { setGroup(k); setOpen(false); }} />
-          </Popover>
-          {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing undecided in this group.</Text> : null}
-          {shown.map((r) => {
-            const st = standing(r);
-            const lands = st === 'aside' ? 'set aside — not a day out'
-              : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
-                : st === 'category' ? `${catLabel(r.landing.category)} · no subcategory` : 'undecided';
-            return (
-              <View key={r.key} style={[styles.wordRow, st === 'aside' && { opacity: 0.55 }]}>
-                <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-                  <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
-                  <Text style={type.tiny} numberOfLines={1}>
-                    {[r.seen_count ? `seen ${count(r.seen_count)}` : null, r.landing.derived.length ? `read as ${r.landing.derived.map(keyOf).join(', ')}` : null].filter(Boolean).join(' · ') || ' '}
-                  </Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 1, maxWidth: '40%' }}>
-                  <Text style={[type.small, { fontWeight: st === 'undecided' ? '700' : '600', textAlign: 'right' }]} numberOfLines={2}>{lands}</Text>
-                  {st !== 'aside' && st !== 'undecided' ? (
-                    <Text style={[type.tiny, { textAlign: 'right' }]} numberOfLines={1}>{HOW_WORD[r.landing.how]}{r.landing.via && r.landing.via.scope !== 'default' ? ` · ${r.landing.via.subject_label ?? r.landing.via.subject ?? ''}` : ''}</Text>
-                  ) : null}
-                </View>
-                {canManage ? (
-                  <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-                    <TextAction label="Map" onPress={() => onPick(`google:${r.key}`, r.landing.subcategory)} disabled={busyKey === r.key} />
-                    <TextAction label={st === 'aside' ? 'Bring back' : 'Set aside'} tone="muted" disabled={busyKey === r.key} onPress={() => void setAside(r, st !== 'aside')} />
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -964,4 +961,5 @@ const styles = StyleSheet.create({
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
   tCellOn: { backgroundColor: colors.selected },
+  inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
 });
