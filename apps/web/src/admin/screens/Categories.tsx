@@ -687,9 +687,11 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
   // Nothing is listed until there is a word or a source to list: never a huge scroll.
   useEffect(() => {
     generation.current += 1;
-    // A page still on its way for the old filters must not keep the new list's next page disabled (Codex, 12 Sep 2026).
-    setLoadingMore(false);
-    if (!q.trim() && !ns) { setRows(null); setMore(false); return; }
+    // The old list goes at once, so its "next page" cannot be asked for with the
+    // new filters, and a page still on its way for the old ones cannot hold the
+    // new list's next page (Codex, 12 Sep 2026).
+    setRows(null); setMore(false); setLoadingMore(false);
+    if (!q.trim() && !ns) return;
     let live = true;
     void api.taxonomyLabels({ namespace: ns || undefined, q: q.trim() || undefined, all: Boolean(q.trim()) || (ns !== 'wikidata' && ns !== ''), limit: PAGE })
       .then((d) => { if (live) { setRows(d.labels); setMore(d.more); } })
