@@ -158,8 +158,17 @@ export function payoutOf(pence) {
  * not in.
  */
 export function standing(offer, bookings, occurrence = null) {
-  const relevant = bookings.filter((b) => !['cancelled'].includes(b.state) && (occurrence == null || b.occurrence === occurrence || (offer.shape === 'series' && b.occurrence === 'whole')));
-  const inNow = relevant.filter((b) => b.state !== 'waitlisted').reduce((n, b) => n + b.heads, 0);
+  const live = bookings.filter((b) => b.state !== 'cancelled');
+  const onDate = (d) => live.filter((b) => b.occurrence === d || (offer.shape === 'series' && b.occurrence === 'whole'));
+  /**
+   * A whole-run booking sits in every session, so its room is the fullest
+   * session's room: a series that allows drop-ins can have a Thursday that is
+   * full while the run as a whole is not (Codex, 12 Sep 2026).
+   */
+  const relevant = offer.shape === 'series' && (occurrence == null || occurrence === 'whole')
+    ? seriesDates(offer).map(onDate).sort((a, b) => heads(b) - heads(a))[0] ?? live.filter((b) => b.occurrence === 'whole')
+    : live.filter((b) => occurrence == null || b.occurrence === occurrence || (offer.shape === 'series' && b.occurrence === 'whole'));
+  const inNow = heads(relevant);
   const bookingsIn = relevant.filter((b) => b.state !== 'waitlisted').length;
   const min = offer.min_count ?? 0;
   const max = offer.max_count ?? null;
@@ -175,6 +184,8 @@ export function standing(offer, bookings, occurrence = null) {
     full: Boolean(max && inNow >= max),
   };
 }
+
+const heads = (rows) => rows.filter((b) => b.state !== 'waitlisted').reduce((n, b) => n + b.heads, 0);
 
 /** The day a held booking is decided on: two days before it runs, never in the past. */
 export function decideBy(offer, occurrence) {

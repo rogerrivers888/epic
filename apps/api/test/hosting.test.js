@@ -200,3 +200,37 @@ test('a waiting list holds one row per contact and nothing else', async () => {
   await repo.joinWaitlist(group.id, '+447700900812', 'mobile');
   assert.equal((await repo.waitlistOf(group.id)).length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// what Codex found (12 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('a whole-run booking needs room in every session, drop-ins included', () => {
+  const offer = { shape: 'series', first_date: '2026-09-24', sessions: 3, skipped_dates: [], max_count: 4, min_count: null };
+  const bookings = [
+    { heads: 2, state: 'confirmed', occurrence: 'whole' },
+    { heads: 2, state: 'confirmed', occurrence: '2026-10-01' },   // one Thursday is full
+  ];
+  assert.equal(standing(offer, bookings, 'whole').heads, 4, 'the fullest session decides the whole run');
+  assert.equal(standing(offer, bookings, '2026-09-24').heads, 2, 'another Thursday still has room');
+  assert.equal(standing(offer, bookings, '2026-10-01').full, true);
+});
+
+test('a held booking is decided on its day: confirmed at the minimum, otherwise cancelled and told', async () => {
+  const { settleHeldBookings } = await import('../src/routes/hosting.js');
+  const { household } = await aHousehold(query, 'Marco’s household');
+  const host = await repo.insertHost(household.id, { name: 'Marco', type: 'local', localKind: 'something_you_do' });
+  const offer = await repo.insertOffer(host.id, 'oneoff', { title: 'I paint every Sunday', startsOn: '2027-10-13', minCount: 5, priceMode: 'free' });
+  await repo.updateOffer(offer.id, { state: 'live' });
+  const guest = await aHousehold(query, 'a guest household');
+  const short = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: guest.household.id, occurrence: '2027-10-13', party: [{ name: 'A' }], heads: 3, state: 'pending', decideBy: '2020-01-01' });
+  const first = await settleHeldBookings();
+  assert.ok(first.cancelled >= 1);
+  assert.equal((await repo.bookingById(short.id)).state, 'cancelled', 'three of five on the day is off, and nothing was taken');
+
+  const other = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: guest.household.id, occurrence: '2027-10-13', party: [{ name: 'B' }], heads: 3, state: 'confirmed' });
+  const held = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: guest.household.id, occurrence: '2027-10-13', party: [{ name: 'C' }], heads: 2, state: 'pending', decideBy: '2020-01-01' });
+  await settleHeldBookings();
+  assert.equal((await repo.bookingById(held.id)).state, 'confirmed', 'five in on the day: it runs');
+  assert.equal((await repo.bookingById(other.id)).state, 'confirmed');
+});

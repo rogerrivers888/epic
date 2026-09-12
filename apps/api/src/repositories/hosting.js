@@ -209,8 +209,26 @@ export async function offersInReview() {
 // bookings
 // ---------------------------------------------------------------------------
 
-export async function bookingsOfOffer(offerId) {
-  const { rows } = await query('select * from experience_bookings where offer_id = $1 order by created_at', [offerId]);
+export async function bookingsOfOffer(offerId, client) {
+  const { rows } = await on(client)('select * from experience_bookings where offer_id = $1 order by created_at', [offerId]);
+  return rows;
+}
+
+/**
+ * The offer row, locked for the rest of the transaction. Two guests booking
+ * the last places at once each read the same count and each fit; the lock
+ * makes the second wait and read the first's row (Codex, 12 Sep 2026).
+ */
+export async function lockOffer(id, client) {
+  const { rows } = await client.query('select * from host_offers where id = $1 for update', [id]);
+  return rows[0] ?? null;
+}
+
+/** Held bookings whose decide-by day has come, with their offer, oldest first. */
+export async function heldBookingsDue() {
+  const { rows } = await query(
+    `select b.* from experience_bookings b where b.state = 'pending' and b.decide_by is not null and b.decide_by <= current_date order by b.decide_by, b.created_at`,
+  );
   return rows;
 }
 
@@ -431,6 +449,10 @@ export async function joinWaitlist(groupId, contact, contactKind) {
     [groupId, contact, contactKind ?? null],
   );
   return rows[0];
+}
+
+export async function markWaitlistTold(id) {
+  await query('update group_waitlist set told_at = now() where id = $1', [id]);
 }
 
 export async function waitlistOf(groupId) {

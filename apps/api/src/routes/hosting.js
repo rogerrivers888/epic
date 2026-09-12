@@ -29,6 +29,8 @@ import express, { Router } from 'express';
 import crypto from 'node:crypto';
 import * as repo from '../repositories/hosting.js';
 import * as accountsRepo from '../repositories/accounts.js';
+import { withTransaction } from '../db.js';
+import { runOutsideRequest } from '../context.js';
 import { currentHousehold, loadMembers } from './household.js';
 import { currentAccount } from '../context.js';
 import { requires } from '../access.js';
@@ -235,9 +237,10 @@ router.post('/host', async (req, res, next) => {
     if (!b.name) throw refuse(400, 'name_required', 'Say who you are.');
     if (!b.type) throw refuse(400, 'type_required', 'Pick what kind of host you are.');
     if (b.type === 'local' && !b.localKind) throw refuse(400, 'local_kind_required', 'Say what kind of Local you are.');
-    // Hosts are 18+ (brief §9). Without a date of birth we ask; with one under 18 we refuse.
+    // Hosts are 18+ (brief §9), and the form is not the boundary: no date of birth, no host.
+    if (!b.dateOfBirth) throw refuse(400, 'dob_required', 'Your date of birth — hosts on Epic are eighteen or over.');
     const age = ageFromDob(b.dateOfBirth);
-    if (age != null && age < ADULT_AGE) throw refuse(400, 'too_young', 'Hosts on Epic are eighteen or over.');
+    if (age == null || age < ADULT_AGE) throw refuse(400, 'too_young', 'Hosts on Epic are eighteen or over.');
     const account = currentAccount();
     const created = await repo.insertHost(household.id, { ...b, accountId: account?.id ?? null });
     res.status(201).json({ host: ownHost(created) });
@@ -660,41 +663,59 @@ router.post('/experiences/:id/book', async (req, res, next) => {
     if (o.party_max && party.length > o.party_max) throw refuse(400, 'party_too_big', `The most one booking can bring is ${o.party_max}.`);
     if (o.venue === 'your_place' && !str(b.address, 300)) throw refuse(400, 'address_required', `${host.name} comes to you, so we need the address and how to get in.`);
 
-    // Which instance.
+    const today = ymd(new Date());
+    // Which instance. Nothing in the past is bookable, whatever the page still shows.
     let occurrence = null;
-    if (o.shape === 'oneoff') occurrence = ymd(o.starts_on);
-    else if (o.shape === 'series') {
+    if (o.shape === 'oneoff') {
+      occurrence = ymd(o.starts_on);
+      if (!occurrence || occurrence < today) throw refuse(409, 'past', 'This one has already happened.');
+    } else if (o.shape === 'series') {
       const dates = seriesDates(o);
       occurrence = b.occurrence === 'whole' || !b.occurrence ? 'whole' : ymd(b.occurrence);
       if (occurrence === 'whole' && o.join_mode === 'drop_in') throw refuse(400, 'drop_in_only', 'This series is drop-in only: pick a session.');
       if (occurrence !== 'whole' && (o.join_mode === 'whole' || !dates.includes(occurrence))) throw refuse(400, 'whole_only', 'This series is booked as a whole run.');
+      if (occurrence === 'whole' ? !dates.some((d) => d >= today) : occurrence < today) throw refuse(409, 'past', 'That session has already happened.');
     } else {
-      const slot = String(b.occurrence ?? '');
-      const taken = new Set((await repo.bookingsOfOffer(o.id)).filter((x) => x.state !== 'cancelled').map((x) => x.occurrence));
-      const ok = anytimeSlots(o, { taken }).some((d) => slot.startsWith(d.date) && d.times.includes(slot.slice(11, 16)));
-      if (!ok) throw refuse(409, 'slot_gone', 'That time is not free any more. Pick another.');
-      occurrence = slot;
+      occurrence = String(b.occurrence ?? '');
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(occurrence)) throw refuse(400, 'slot_required', 'Pick a time.');
     }
 
-    const existing = await repo.bookingsOfOffer(o.id);
-    const st = standing(o, existing, occurrence);
-    const heads = party.length;
-    const price = priceFor(o, { heads, occurrence, headsNow: st.heads + heads });
-    const full = Boolean(o.max_count && st.heads + heads > o.max_count);
-    const state = full ? 'waitlisted' : (!o.min_count || st.heads + heads >= o.min_count) ? 'confirmed' : 'pending';
-    const booking = await repo.insertBooking({
-      offerId: o.id, hostId: host.id, householdId: household.id, accountId: currentAccount()?.id ?? null,
-      bookedBy: str(b.bookedBy, 80) ?? currentAccount()?.name ?? party.find((p) => !p.child)?.name ?? null,
-      occurrence, party, heads, state, amountPence: price.pence,
-      address: str(b.address, 300), accessNotes: str(b.accessNotes, 400), noteToHost: str(b.noteToHost, 600),
-      decideBy: state === 'pending' ? decideBy(o, occurrence) : null,
-    });
-    // Reaching the minimum confirms everybody who was held.
-    if (state === 'confirmed' && o.min_count) {
-      for (const held of existing.filter((x) => x.state === 'pending' && (o.shape !== 'series' || x.occurrence === occurrence || x.occurrence === 'whole'))) {
-        await repo.updateBooking(held.id, { state: 'confirmed', decideBy: null });
+    /**
+     * The count, the decision and the row are one transaction with the offer
+     * locked: two guests booking the last places at once would otherwise each
+     * read the same count and each be let in (Codex, 12 Sep 2026).
+     */
+    const booking = await withTransaction(async (client) => {
+      await repo.lockOffer(o.id, client);
+      const existing = await repo.bookingsOfOffer(o.id, client);
+      if (o.shape === 'anytime') {
+        const taken = new Set(existing.filter((x) => x.state !== 'cancelled').map((x) => x.occurrence));
+        const ok = anytimeSlots(o, { taken }).some((d) => occurrence.startsWith(d.date) && d.times.includes(occurrence.slice(11, 16)));
+        if (!ok) throw refuse(409, 'slot_gone', 'That time is not free any more. Pick another.');
       }
-    }
+      const st = standing(o, existing, occurrence);
+      const heads = party.length;
+      const price = priceFor(o, { heads, occurrence, headsNow: st.heads + heads });
+      const full = Boolean(o.max_count && st.heads + heads > o.max_count);
+      const state = full ? 'waitlisted' : (!o.min_count || st.heads + heads >= o.min_count) ? 'confirmed' : 'pending';
+      const made = await repo.insertBooking({
+        offerId: o.id, hostId: host.id, householdId: household.id, accountId: currentAccount()?.id ?? null,
+        bookedBy: str(b.bookedBy, 80) ?? currentAccount()?.name ?? party.find((p) => !p.child)?.name ?? null,
+        occurrence, party, heads, state, amountPence: price.pence,
+        address: str(b.address, 300), accessNotes: str(b.accessNotes, 400), noteToHost: str(b.noteToHost, 600),
+        decideBy: state === 'pending' ? decideBy(o, occurrence) : null,
+      }, client);
+      // Reaching the minimum confirms everybody who was held on the same
+      // instance: the same date, the same session (or the whole run), the
+      // same slot. Never a Monday's booking on the strength of a Tuesday's.
+      if (state === 'confirmed' && o.min_count) {
+        const same = (x) => o.shape === 'oneoff' || x.occurrence === occurrence || (o.shape === 'series' && (x.occurrence === 'whole' || occurrence === 'whole'));
+        for (const held of existing.filter((x) => x.state === 'pending' && same(x))) {
+          await repo.updateBooking(held.id, { state: 'confirmed', decideBy: null }, client);
+        }
+      }
+      return made;
+    });
     const row = await repo.bookingById(booking.id);
     res.status(201).json({ booking: bookingPayload(row), payments: paymentsConfig() });
   } catch (err) { next(err); }
@@ -748,6 +769,9 @@ router.post('/bookings/:id/review', async (req, res, next) => {
     const on = occurrenceDate(booking, booking.occurrence);
     if (!on || on >= ymd(new Date())) throw refuse(409, 'not_yet', 'You can rate it once it has happened.');
     if (booking.state === 'cancelled') throw refuse(409, 'cancelled', 'This one was called off, so there is nothing to rate.');
+    // Only somebody who was in can rate it: a place that was held and never
+    // decided, or on the waiting list, was not there.
+    if (!['confirmed', 'attended'].includes(booking.state)) throw refuse(409, 'not_attended', 'This booking never had a place, so there is nothing to rate.');
     const stars = int(req.body?.stars);
     if (!stars || stars > 5) throw refuse(400, 'stars_required', 'Give it one to five stars.');
     const chips = list(req.body?.chips, 3).filter((c) => REVIEW_CHIPS.includes(c));
@@ -817,6 +841,40 @@ adminRouter.patch('/hosts/:id', requires('manage_hosting'), async (req, res, nex
 adminRouter.post('/reports/:id/resolve', requires('manage_hosting'), async (req, res, next) => {
   try { await repo.resolveReport(req.params.id); res.status(204).end(); } catch (err) { next(err); }
 });
+
+/**
+ * Held bookings are decided on their day (G1: "Decides Fri 11 Oct"). Twice an
+ * hour, every pending booking whose decide-by has come is confirmed if its
+ * instance has reached the minimum by then, and otherwise cancelled — nothing
+ * taken, the guest told — so nothing is left held past the day it ran.
+ */
+export async function settleHeldBookings() {
+  const due = await repo.heldBookingsDue();
+  let confirmed = 0; let cancelled = 0;
+  const offers = new Map();
+  for (const b of due) {
+    const o = offers.get(b.offer_id) ?? (await repo.offerById(b.offer_id));
+    offers.set(b.offer_id, o);
+    if (!o) continue;
+    const all = await repo.bookingsOfOffer(o.id);
+    const st = standing(o, all, b.occurrence);
+    if (o.state === 'live' && st.minimumMet) {
+      await repo.updateBooking(b.id, { state: 'confirmed', decideBy: null });
+      confirmed += 1;
+    } else {
+      await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'epic', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null });
+      await tellBooked([b], `${o.title ?? 'Your booking'} did not reach the ${o.min_count} it needed, so it is not running. Nothing has been taken from you.`);
+      cancelled += 1;
+    }
+  }
+  return { due: due.length, confirmed, cancelled };
+}
+
+export function startHostingLoop() {
+  const run = () => runOutsideRequest(() => settleHeldBookings()).catch((err) => console.error('held bookings sweep failed', err.message));
+  setTimeout(run, 20_000);
+  return setInterval(run, 30 * 60_000);
+}
 
 export const codeHash = sha;
 export default router;

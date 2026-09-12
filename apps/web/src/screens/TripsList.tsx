@@ -192,7 +192,7 @@ function BookingRows({ bookings, onOpen }: { bookings: Booking[]; onOpen: (b: Bo
       : b.state === 'cancelled' ? { text: 'Called off', red: false }
         : b.state === 'pending' ? { text: b.minCount ? `needs ${Math.max(0, b.minCount - b.heads)} more · Held` : 'Held', red: false }
           : b.state === 'waitlisted' ? { text: 'Waiting list', red: false }
-            : b.isPast ? { text: b.reviewed ? 'Went' : `Rate ${first} ›`, red: false, strong: !b.reviewed }
+            : b.isPast ? (['confirmed', 'attended'].includes(b.state) ? { text: b.reviewed ? 'Went' : `Rate ${first} ›`, red: false, strong: !b.reviewed } : { text: 'Not decided in time', red: false })
               : { text: 'Booked', red: false, strong: true };
     return (
       <Press key={b.id} onPress={() => onOpen(b)} accessibilityRole="button" style={styles.row}>

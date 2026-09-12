@@ -99,9 +99,12 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   }
 
   const paused = offer.state === 'paused';
-  const ended = offer.state === 'ended';
+  const today = new Date().toISOString().slice(0, 10);
+  // Nothing in the past is bookable, whatever state the host left it in.
+  const past = offer.shape === 'oneoff' ? Boolean(offer.startsOn && offer.startsOn < today) : offer.shape === 'series' ? offer.dates.length > 0 && !offer.dates.some((d) => d >= today) : false;
+  const ended = offer.state === 'ended' || past;
   const full = offer.standing.full;
-  const cta = ended ? 'This one is off'
+  const cta = past ? 'This has happened' : ended ? 'This one is off'
     : paused ? `Paused${offer.pausedUntil ? ` · back ${dateOnly(offer.pausedUntil)}` : ''}`
       : full ? 'Full · join the waiting list'
         : offer.shape === 'series' ? `Join the ${offer.sessions ?? ''} weeks · ${money(offer.pricePence)}`
@@ -200,7 +203,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
           disabled={ended || paused}
           onPress={() => navigate(paths.experienceBook(offer.id))}
         />
-        <Text style={[type.tiny, { textAlign: 'center' }]}>{ended ? offer.cancelledNote ?? 'Called off.' : paused ? 'Not taking bookings just now.' : payments.ready ? 'Card charged when it is certain.' : 'Nothing is charged yet — a booking is recorded and honoured.'}</Text>
+        <Text style={[type.tiny, { textAlign: 'center' }]}>{ended ? (past ? 'This one has already happened.' : offer.cancelledNote ?? 'Called off.') : paused ? 'Not taking bookings just now.' : payments.ready ? 'Card charged when it is certain.' : 'Nothing is charged yet — a booking is recorded and honoured.'}</Text>
       </View>
     </View>
   );

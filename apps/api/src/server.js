@@ -21,7 +21,7 @@ import tasteRoutes from './routes/tastes.js';
 import conceptRoutes from './routes/concepts.js';
 import prototypeRoutes from './routes/prototypes.js';
 import groupRoutes, { startReminderLoop } from './routes/groups.js';
-import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes } from './routes/hosting.js';
+import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
@@ -458,6 +458,8 @@ startScoutLoop();
 // Epic chases the group, the organiser does not (owner, 4 Sep 2026): any run
 // whose morning has passed is written once, whether or not anyone is looking.
 startReminderLoop();
+// Held bookings are decided on their day (routes/hosting.js).
+startHostingLoop();
 // A harvest of the atlas cannot survive a restart, and this process restarting
 // is exactly what has just happened. Anything the last one left saying
 // "running" is closed out, and — if it had regions still to reach — the work is

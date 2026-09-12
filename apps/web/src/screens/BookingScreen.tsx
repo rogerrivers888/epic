@@ -60,7 +60,7 @@ export function BookingScreen({ route }: { route: Extract<Route, { name: 'bookin
   const title = cancelled ? (b.cancelledBy === 'host' || off ? 'Called off' : 'You cancelled this')
     : waitlisted ? 'On the waiting list'
       : held ? 'Held, not booked yet'
-        : b.isPast ? (b.reviewed ? 'You went' : 'How was it?')
+        : b.isPast ? (b.reviewed ? 'You went' : ['confirmed', 'attended'].includes(b.state) ? 'How was it?' : 'It ran without you')
           : 'You are booked';
 
   return (
@@ -131,7 +131,7 @@ export function BookingScreen({ route }: { route: Extract<Route, { name: 'bookin
         </View>
       ) : null}
 
-      {b.isPast && !cancelled && !b.reviewed ? (
+      {b.isPast && !cancelled && ['confirmed', 'attended'].includes(b.state) && !b.reviewed ? (
         <Button label={`Rate ${first}`} icon="favourite" onPress={() => navigate(paths.bookingRate(b.id))} style={{ marginTop: spacing.lg }} />
       ) : null}
       {b.reviewed ? <StatusLine tone="good">Thank you — your review goes live a fortnight after the day, with {first}'s.</StatusLine> : null}

@@ -204,6 +204,14 @@ export function GroupPanel({ d, onChanged, onPage }: {
         ) : null}
       </Card>
 
+      {g.waiting?.length ? (
+        <Card>
+          <Row><Icon name="hours" size={16} /><Text style={type.h3}>{g.waiting.length} waiting for a place</Text></Row>
+          <Text style={type.small}>Asked to be told if one comes up. {g.waiting.some((w) => !w.told) ? 'Epic tells them when somebody drops out and a sender is connected; until then these are yours to reach.' : 'Everyone has been told.'}</Text>
+          <Text style={type.small}>{g.waiting.map((w) => `${w.contact}${w.told ? ' · told' : ''}`).join(' · ')}</Text>
+        </Card>
+      ) : null}
+
       {notJoined.length ? (
         <Card>
           <Row style={{ justifyContent: 'space-between' }}>

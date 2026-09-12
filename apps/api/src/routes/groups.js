@@ -301,6 +301,8 @@ export async function groupPayload(groupId) {
       missing: joined.filter((p) => byId.get(p.id).outstanding.length).length,
       waitlist: waitlist.length,
     },
+    // Who asked to be told (G24): theirs to reach by hand where no sender is wired.
+    waiting: waitlist.map((w) => ({ id: w.id, contact: w.contact, kind: w.contact_kind, at: w.created_at, told: Boolean(w.told_at) })),
     reminders: {
       on: group.reminders_on,
       cadence: group.reminder_cadence,
@@ -699,6 +701,7 @@ router.patch('/groups/:id/participants/:pid', async (req, res, next) => {
     if (b.withdrawn !== undefined) { put('withdrawn_at', b.withdrawn ? new Date() : null); put('withdrawn_note', b.withdrawn ? (b.withdrawnNote?.trim() || null) : null); }
     if (!sets.length) return res.json(await groupPayload(group.id));
     await groupsRepo.updateParticipant(req.params.pid, group.id, sets, params);
+    await tellWaitlist(group);
     res.json(await groupPayload(group.id));
   } catch (err) { next(err); }
 });
@@ -707,6 +710,7 @@ router.delete('/groups/:id/participants/:pid', async (req, res, next) => {
   try {
     const group = await loadGroup(req.params.id);
     await groupsRepo.deleteParticipant(req.params.pid, group.id);
+    await tellWaitlist(group);
     res.json(await groupPayload(group.id));
   } catch (err) { next(err); }
 });
@@ -1303,6 +1307,33 @@ router.post('/join/:token/code/again', async (req, res, next) => {
     res.json({ codeSent: sent.ok, contact: sent.to, expiresInMinutes: CODE_MINUTES, message: sent.ok ? `Sent again to ${sent.to}.` : sent.message });
   } catch (err) { next(err); }
 });
+
+/**
+ * A place has come up: everyone on the waiting list who has not been told is
+ * told, once, and `told_at` says so. Written by whichever sender is configured;
+ * with none, the row stays untold and the organiser sees the contact on the
+ * group screen to reach by hand.
+ */
+async function tellWaitlist(group) {
+  const fresh = await groupsRepo.groupById(group.id);
+  if (!fresh || fresh.cancelled_at || fresh.closed_at) return;
+  const waiting = (await hostingRepo.waitlistOf(group.id)).filter((w) => !w.told_at);
+  if (!waiting.length) return;
+  const heads = await groupsRepo.headsJoined(group.id);
+  if (fresh.maximum_count && heads >= fresh.maximum_count) return;
+  if (!canSendCode()) return;
+  const url = `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/join/${fresh.invite_token}`;
+  const text = `Epic: a place has come up on ${fresh.name ?? 'the trip'}. ${url}`;
+  for (const w of waiting) {
+    const isEmail = w.contact_kind === 'email' || w.contact.includes('@');
+    try {
+      if (isEmail && mailConfigured()) await sendMail({ to: w.contact, subject: `A place has come up on ${fresh.name ?? 'the trip'}`, text });
+      else if (!isEmail && smsConfigured()) await sendSms({ to: w.contact, text });
+      else { const r = await sendReminder({ to: w.contact, contactKind: isEmail ? 'email' : 'mobile', body: text, group: fresh.id, participant: null }); if (r.status !== 'sent') continue; }
+      await hostingRepo.markWaitlistTold(w.id);
+    } catch { /* stays untold; the organiser sees the contact */ }
+  }
+}
 
 /**
  * POST /api/join/:token/waitlist {contact} — "Tell me if a place comes up"

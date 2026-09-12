@@ -911,7 +911,9 @@ export type TripGroup = {
     invite: { coverKind: 'banner' | 'full'; coverUrl: string | null; coverSource: string | null; title: string | null; summary: string | null; howItWorks: string[] } };
   trip: { id: string; title: string | null; place: string | null; startDate: string | null; endDate: string | null; base: { label: string; kind: string | null } | null };
   items: GroupItem[]; participants: GroupParticipant[];
-  summary: { expected: number | null; joined: number; notJoined: number; withdrawn: number; heads: number; complete: number; missing: number };
+  summary: { expected: number | null; joined: number; notJoined: number; withdrawn: number; heads: number; complete: number; missing: number; waitlist?: number };
+  /** Who asked to be told if a place comes up (G24), and whether they have been. */
+  waiting?: { id: string; contact: string; kind: string | null; at: string; told: boolean }[];
   reminders: GroupReminders;
   warnings: { kind: string; participantId: string; name: string; itemId: string; item: string; said: string; wanted: string }[];
   wrote?: { participant: string; status: string }[];
