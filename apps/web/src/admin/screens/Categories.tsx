@@ -720,13 +720,14 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
     r.active === false ? 'aside' : r.landing.subcategory ? 'mapped' : r.landing.how === 'fallback' || !r.landing.category ? 'undecided' : 'category';
   const decided = (r: TaxonomyLabel) => { const st = standing(r); return st === 'mapped' || st === 'aside'; };
 
-  type Group = { key: string; name: string; types: TaxonomyLabel[]; mapped: number; unmapped: number; aside: string };
+  type Group = { key: string; name: string; types: TaxonomyLabel[]; mapped: number; unmapped: number; places: number; aside: string };
   const groups = useMemo<Group[]>(() => {
     const out: Group[] = [];
     const put = (key: string, name: string, r: TaxonomyLabel) => {
       let g = out.find((x) => x.key === key);
-      if (!g) { g = { key, name, types: [], mapped: 0, unmapped: 0, aside: '' }; out.push(g); }
+      if (!g) { g = { key, name, types: [], mapped: 0, unmapped: 0, places: 0, aside: '' }; out.push(g); }
       g.types.push(r);
+      g.places += r.seen_count ?? 0;
       if (decided(r)) g.mapped += 1; else g.unmapped += 1;
     };
     if (by === 'google') {
@@ -757,7 +758,7 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
   }, [rows, by, tax, catLabel, subLabel]);
 
   const chosen = group === '-' ? null : groups.find((g) => g.key === group) ?? null;
-  const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, mapped: 0, unmapped: 0 });
+  const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, places: t.places + g.places, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, places: 0, mapped: 0, unmapped: 0 });
 
   /** One Google subcategory decided, on the fly: one of ours, or not a day out. */
   const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean }, why?: string) => {
@@ -788,16 +789,20 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
 
   if (!rows) return <Text style={type.small}>Reading Google's list…</Text>;
 
-  const COL = wide ? 132 : 84;
+  const COL = wide ? 132 : 58;
+  const COLS = wide ? ['Subcategories', 'Places', 'Mapped', 'Unmapped'] : ['Subs', 'Mapped', 'Unmapped'];
+  const cells = (g: { types: TaxonomyLabel[]; places: number; mapped: number; unmapped: number }) => (wide ? [g.types.length, g.places, g.mapped, g.unmapped] : [g.types.length, g.mapped, g.unmapped]);
+  const cellsTotal = wide ? [total.types, total.places, total.mapped, total.unmapped] : [total.types, total.mapped, total.unmapped];
+  const placesAt = wide ? 1 : -1; const unmappedAt = wide ? 3 : 2;
   const first = by === 'google' ? "Google's category" : 'Our category';
   const last = by === 'google' ? 'Lands in' : 'Our subcategories';
 
   return (
     <View>
-      <View style={[styles.tRow, styles.tHead]}>
+      <View style={[styles.tRow, styles.tHead, styles.gRow]}>
         <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker} numberOfLines={1}>{first}</Text></View>
-        {['Subcategories', 'Mapped', 'Unmapped'].map((h) => <View key={h} style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'right' }]} numberOfLines={1}>{h}</Text></View>)}
-        {wide ? <View style={[styles.tCell, { width: 300 }]}><Text style={styles.kicker} numberOfLines={1}>{last}</Text></View> : null}
+        {COLS.map((h) => <View key={h} style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
+        {wide ? <View style={[styles.tCell, styles.gLast]}><Text style={styles.kicker} numberOfLines={1}>{last}</Text></View> : null}
       </View>
       {groups.map((g) => {
         const on = chosen?.key === g.key;
@@ -805,17 +810,17 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
         const suggestible = g.types.filter((r) => !decided(r) && r.suggestion).length;
         return (
           <View key={g.key}>
-          <Press effect="none" onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
+          <Press effect="none" onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
-              {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
+              {!wide ? <Text style={type.tiny} numberOfLines={1}>{[`${count(g.places)} places`, g.aside !== '—' ? g.aside : null].filter(Boolean).join(' · ')}</Text> : null}
             </View>
-            {[g.types.length, g.mapped, g.unmapped].map((n, i) => (
+            {cells(g).map((n, i) => (
               <View key={i} style={[styles.tCell, { width: COL }]}>
-                <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'], color: i === 2 && !n ? colors.inkMuted : colors.ink, fontWeight: i === 2 && n ? '700' : '400' }]}>{n}</Text>
+                <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: (i === unmappedAt || i === placesAt) && !n ? colors.inkMuted : colors.ink, fontWeight: i === unmappedAt && n ? '700' : '400' }]}>{i === placesAt ? count(n) : n}</Text>
               </View>
             ))}
-            {wide ? <View style={[styles.tCell, { width: 300 }]}><Text style={type.tiny} numberOfLines={2}>{g.aside}</Text></View> : null}
+            {wide ? <View style={[styles.tCell, styles.gLast]}><Text style={[type.tiny, { lineHeight: 17 }]} numberOfLines={2}>{g.aside}</Text></View> : null}
           </Press>
           {/* The group's subcategories, right under its row — never below the fold. */}
           {on ? (
@@ -833,6 +838,13 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                   </Press>
                 ) : null}
               </View>
+              {shown.length ? (
+                <View style={[styles.tRow, { borderBottomWidth: BORDER, borderBottomColor: colors.line }]}>
+                  <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker}>Google's subcategory</Text></View>
+                  {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]}>Places</Text></View> : null}
+                  {wide ? <View style={[styles.tCell, { width: 380 }]}><Text style={[styles.kicker, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
+                </View>
+              ) : null}
               {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing unmapped here.</Text> : null}
               {shown.map((r) => {
                 const st = standing(r);
@@ -849,12 +861,19 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
                   <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
                     <View style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: 1 }}>
                       <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
-                      <Text style={type.tiny} numberOfLines={1}>
-                        {[r.seen_count ? `seen ${count(r.seen_count)}` : null, !decided(r) && sug ? sug.why : decided(r) && st !== 'aside' ? HOW_WORD[r.landing.how] : null].filter(Boolean).join(' · ') || ' '}
-                      </Text>
+                      {/* A reason only where it says something: the cuisine kept, or the
+                          Google category that makes it not a day out. */}
+                      {!wide || (!decided(r) && sug && !/^the obvious/.test(sug.why)) ? (
+                        <Text style={type.tiny} numberOfLines={1}>{[!wide ? `${count(r.seen_count)} places` : null, !decided(r) && sug && !/^the obvious/.test(sug.why) ? sug.why : null].filter(Boolean).join(' · ')}</Text>
+                      ) : null}
                     </View>
+                    {wide ? (
+                      <View style={[styles.tCell, { width: COL }]}>
+                        <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: r.seen_count ? colors.ink : colors.inkMuted }]}>{count(r.seen_count)}</Text>
+                      </View>
+                    ) : null}
                     {canManage ? (
-                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, flexWrap: wide ? 'nowrap' : 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: wide ? 0 : 1, flexWrap: wide ? 'nowrap' : 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? 380 : undefined }}>
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[{ key: '-', label: 'Not a day out', on: st === 'aside' }]}
@@ -882,12 +901,12 @@ function GoogleView({ tax, wide, by, catLabel, subLabel, canManage, onChanged }:
         );
       })}
       {/* The total, at the bottom, over one ink rule. */}
-      <View style={[styles.tRow, styles.tTotal]}>
+      <View style={[styles.tRow, styles.tTotal, styles.gRow]}>
         <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={[type.small, { fontWeight: '700' }]}>Total</Text></View>
-        {[total.types, total.mapped, total.unmapped].map((n, i) => (
-          <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'right', fontWeight: '700', fontVariant: ['tabular-nums'] }]}>{n}</Text></View>
+        {cellsTotal.map((n, i) => (
+          <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'center', fontWeight: '700', fontVariant: ['tabular-nums'] }]}>{count(n)}</Text></View>
         ))}
-        {wide ? <View style={[styles.tCell, { width: 300 }]} /> : null}
+        {wide ? <View style={[styles.tCell, styles.gLast]} /> : null}
       </View>
     </View>
   );
@@ -1032,7 +1051,10 @@ const styles = StyleSheet.create({
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
   tCellOn: { backgroundColor: colors.selected },
   tTotal: { borderTopWidth: BORDER, borderTopColor: colors.line, borderBottomWidth: 0 },
-  inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
+  inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.md, paddingRight: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
+  /** The Google table's rows: padded from the edge, a little taller. */
+  gRow: { paddingHorizontal: spacing.sm, minHeight: 44 },
+  gLast: { width: 320, paddingLeft: spacing.md },
   /** The opened group's controls: one height, room above and below. */
   groupBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm, flexWrap: 'wrap', paddingVertical: spacing.md },
   barControl: { height: 36, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surfaceMuted },
