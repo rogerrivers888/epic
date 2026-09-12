@@ -62,7 +62,18 @@ export async function ownedFacts() {
     }
   }
   const facts = [...byCell.values()].map((c) => ({ ...c, of: places, coverage: places ? Math.round((c.held / places) * 100) : null }));
-  return { places, done, facts };
+  // How many places a provider has told us anything about — counted directly,
+  // because the largest per-field count is not it: a source that gave one
+  // place its name and another its website has touched two (Codex, 12 Sep 2026).
+  const { rows: perSource } = await query(
+    `select source, count(distinct venue_ref)::int as places from place_facts where expires_at is null group by source`,
+  );
+  const placesBy = {};
+  for (const r of perSource) {
+    const provider = FACT_SOURCES[r.source];
+    if (provider) placesBy[provider] = (placesBy[provider] ?? 0) + r.places;
+  }
+  return { places, done, facts, placesBy };
 }
 
 /** The library the harvest built, by provider: attractions, pictures, areas, stations. */

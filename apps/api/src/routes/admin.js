@@ -492,8 +492,7 @@ router.get('/data/sources', requires('view_reporting'), async (_req, res, next) 
     }, { all: 0, days30: 0, last: null });
     const factsBy = new Map();
     for (const f of owned.facts) {
-      const cur = factsBy.get(f.provider) ?? { records: 0, facts: 0, fields: 0, oldest: null };
-      cur.records = Math.max(cur.records, f.held);
+      const cur = factsBy.get(f.provider) ?? { records: owned.placesBy[f.provider] ?? 0, facts: 0, fields: 0, oldest: null };
       cur.facts += f.facts;
       cur.fields += 1;
       cur.oldest = cur.oldest && cur.oldest < f.oldest ? cur.oldest : f.oldest;
