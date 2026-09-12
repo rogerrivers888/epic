@@ -36,7 +36,7 @@ import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
-import { suggestFor, sureDecisionFor } from '../domain/googleSuggest.js';
+import { suggestFor, sureDecisionFor, sureMappingFor } from '../domain/googleSuggest.js';
 import { SHELF_FLOOR } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
@@ -60,6 +60,19 @@ async function ready() {
     const open = await labelRepo.undecidedGoogle();
     const sure = open.map((r) => ({ key: r.key, decision: sureDecisionFor(r.key, r.note) })).filter((r) => r.decision);
     await labelRepo.decideMany(sure);
+    // The mappings Epic is sure of become rules of its own, signed "Epic", so
+    // the screen can show them as such and the owner can change any of them.
+    const tax = await taxonomy.taxonomy();
+    const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
+    const known = tax.categories.map((c) => c.key);
+    for (const r of open) {
+      if (sure.some((s) => s.key === r.key)) continue;
+      const m = sureMappingFor(r.key, r.note, subKeys);
+      if (!m) continue;
+      const label = `google:${r.key}`;
+      const { scope, subject } = scopeFor([label]);
+      await shelfRules.teach({ scope, subject, labels: [label], subjectLabel: r.key.replace(/_/g, ' '), weights: {}, subcategory: m.subcategory, reason: `Mapped by Epic: ${m.why}.`, by: 'Epic', known });
+    }
   } catch { decided = false; }
 }
 

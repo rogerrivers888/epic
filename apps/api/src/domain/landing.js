@@ -170,7 +170,7 @@ export function landingOf({ namespace, key, kindCategory = null }, rules = NO_RU
     category: filed.category ?? null,
     subcategory: filed.subcategory ?? null,
     how,
-    via: why ? { id: why.id ?? null, scope: why.scope, subject: why.subject ?? null, subject_label: why.subject_label ?? null, labels: why.labels ?? null } : null,
+    via: why ? { id: why.id ?? null, scope: why.scope, subject: why.subject ?? null, subject_label: why.subject_label ?? null, labels: why.labels ?? null, by: why.taught_by ?? null } : null,
     derived: derived.filter((l) => l !== own),
   };
 }

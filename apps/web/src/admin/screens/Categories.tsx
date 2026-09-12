@@ -45,7 +45,7 @@ import {
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, FoldLine } from '../../components/ui';
+import { Button, FoldLine, Segmented } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
 import { AdminPage, DrillDropdown, Dropdown, PageHead, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
@@ -699,7 +699,12 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
 }) {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [group, setGroup] = useQueryState<string>('group', '', asText);
-  const [gaps, setGaps] = useQueryState<string>('gaps', '', asText);
+  /** Mapped, unmapped or all — a tab across the top (owner, 13 Sep 2026). */
+  const [tab, setTab] = useQueryState<'mapped' | 'unmapped' | 'all'>('tab', 'all', asOneOf(['mapped', 'unmapped', 'all'] as const, 'all'));
+  /** "Not a day out" is noise: hidden from every view unless this is on. */
+  const [noise, setNoise] = useQueryState<string>('noise', '', asText);
+  /** Inside one of our categories: only the words mapped to this subcategory. */
+  const [only, setOnly] = useQueryState<string>('only', '', asText);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   /** The row whose dropdown is open, lifted over the rows after it. */
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -725,6 +730,13 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const tick = (key: string, on: boolean) => setTicked((prev) => { const n = new Set(prev); if (on) n.add(key); else n.delete(key); return n; });
 
+  /** The rows every view is built from: without the noise unless asked, and by the tab. */
+  const inView = (r: TaxonomyLabel) => {
+    if (noise !== '1' && standing(r) === 'aside') return false;
+    if (tab === 'mapped') return decided(r);
+    if (tab === 'unmapped') return !decided(r);
+    return true;
+  };
   type Group = { key: string; name: string; types: TaxonomyLabel[]; mapped: number; unmapped: number; places: number; aside: string };
   const groups = useMemo<Group[]>(() => {
     const out: Group[] = [];
@@ -735,8 +747,9 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       g.places += r.seen_count ?? 0;
       if (decided(r)) g.mapped += 1; else g.unmapped += 1;
     };
+    const rowsIn = (rows ?? []).filter(inView);
     if (by === 'google') {
-      for (const r of rows ?? []) {
+      for (const r of rowsIn) {
         const name = r.note && r.note !== 'read by google.js' ? r.note : 'Not in Table A (seen on a place)';
         put(name, name, r);
       }
@@ -748,11 +761,11 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       }
     } else {
       for (const c of tax.categories) {
-        for (const r of rows ?? []) if (r.active !== false && r.decision !== 'nearby' && r.landing.category === c.key && r.landing.how !== 'fallback') put(c.key, c.label, r);
+        for (const r of rowsIn) if (r.active !== false && r.decision !== 'nearby' && r.landing.category === c.key && r.landing.how !== 'fallback') put(c.key, c.label, r);
       }
-      for (const r of rows ?? []) if (standing(r) === 'nearby') put('_nearby', 'Useful nearby', r);
-      for (const r of rows ?? []) if (standing(r) === 'aside') put('_aside', 'Not a day out', r);
-      for (const r of rows ?? []) if (standing(r) === 'undecided') put('_none', 'Unmapped', r);
+      for (const r of rowsIn) if (standing(r) === 'nearby') put('_nearby', 'Useful nearby', r);
+      for (const r of rowsIn) if (standing(r) === 'aside') put('_aside', 'Not a day out', r);
+      for (const r of rowsIn) if (standing(r) === 'undecided') put('_none', 'Unmapped', r);
       // The right-hand column: our subcategories the words are in, with counts.
       for (const g of out) {
         const per = new Map<string, number>();
@@ -760,8 +773,9 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
         g.aside = [...per.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${subLabel(k)} ${n}`).join(' · ') || '—';
       }
     }
-    return out;
-  }, [rows, by, tax, catLabel, subLabel]);
+    // A category with nothing left in it after the switch and the tab is noise too.
+    return out.filter((g) => g.types.length);
+  }, [rows, by, tab, noise, tax, catLabel, subLabel]);
 
   const chosen = group === '-' ? null : groups.find((g) => g.key === group) ?? null;
   const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, places: t.places + g.places, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, places: 0, mapped: 0, unmapped: 0 });
@@ -808,8 +822,19 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const first = by === 'google' ? "Google's category" : 'Our category';
   const last = by === 'google' ? 'Lands in' : 'Our subcategories';
 
+  const asideCount = (rows ?? []).filter((r) => standing(r) === 'aside').length;
   return (
     <View>
+      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md }]}>
+        <View style={{ width: wide ? 360 : '100%' }}>
+          <Segmented value={tab} onChange={(v) => { setTab(v); setGroup('-'); }} options={[{ value: 'mapped', label: 'Mapped' }, { value: 'unmapped', label: 'Unmapped' }, { value: 'all', label: 'All' }]} />
+        </View>
+        <View style={{ flex: 1 }} />
+        <Press effect="none" onPress={() => setNoise(noise === '1' ? '' : '1')} accessibilityRole="switch" accessibilityState={{ checked: noise === '1' }}
+               style={[styles.barControl, noise === '1' && styles.barControlOn]}>
+          <Text style={[type.small, { fontWeight: '700', color: noise === '1' ? colors.selectedFg : colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} not a day out · {asideCount}</Text>
+        </Press>
+      </View>
       <View style={[styles.tRow, styles.tHead, styles.gRow]}>
         <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker} numberOfLines={1}>{first}</Text></View>
         {COLS.map((h) => <View key={h} style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
@@ -817,7 +842,11 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       </View>
       {groups.map((g) => {
         const on = chosen?.key === g.key;
-        const shown = g.types.filter((r) => gaps !== '1' || !decided(r));
+        // Inside one of our categories, one subcategory at a time if asked.
+        const subsHere = by === 'ours' && !g.key.startsWith('_')
+          ? tax.subcategories.filter((sc) => sc.category_key === g.key).map((sc) => ({ ...sc, n: g.types.filter((r) => r.landing.subcategory === sc.key).length })).filter((sc) => sc.n)
+          : [];
+        const shown = g.types.filter((r) => !only || by !== 'ours' || r.landing.subcategory === only);
         const suggestible = g.types.filter((r) => !decided(r) && r.suggestion).length;
         // Ticked rows in this group that have a suggestion to approve.
         const tickable = shown.filter((r) => !decided(r) && r.suggestion);
@@ -825,7 +854,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
         const allTicked = tickable.length > 0 && tickedHere.length === tickable.length;
         return (
           <View key={g.key}>
-          <Press effect="none" onPress={() => setGroup(on ? '-' : g.key)} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
+          <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
               {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
@@ -844,11 +873,12 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           {on ? (
             <View style={styles.inset}>
               <View style={styles.groupBar}>
-                <Press effect="none" onPress={() => setGaps(gaps === '1' ? '' : '1')} accessibilityRole="switch" accessibilityState={{ checked: gaps === '1' }}
-                       style={[styles.barControl, gaps === '1' && styles.barControlOn]}>
-                  <Text style={[type.small, { fontWeight: '700', color: gaps === '1' ? colors.selectedFg : colors.ink }]}>Unmapped only · {g.unmapped}</Text>
-                </Press>
-                <View style={{ flex: 1 }} />
+                {subsHere.length ? (
+                  <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+                    <Choice label={`All · ${g.types.length}`} on={!only} onPress={() => setOnly('')} />
+                    {subsHere.map((sc) => <Choice key={sc.key} label={`${sc.label} · ${sc.n}`} on={only === sc.key} onPress={() => setOnly(only === sc.key ? '' : sc.key)} />)}
+                  </View>
+                ) : <View style={{ flex: 1 }} />}
                 {canManage && suggestible ? (
                   <Press effect="none" onPress={() => void approveAll(tickedHere.length ? tickedHere : g.types)} disabled={busyKey != null} accessibilityRole="button"
                          style={[styles.barControl, styles.barButton, busyKey != null && { opacity: 0.5 }]}>
@@ -872,7 +902,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                   {wide ? <View style={[styles.tCell, { width: MAP }]}><Text style={[styles.kicker, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
                 </View>
               ) : null}
-              {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing unmapped here.</Text> : null}
+              {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing here.</Text> : null}
               {shown.map((r) => {
                 const st = standing(r);
                 const sug = r.suggestion ?? null;
@@ -898,9 +928,14 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
                       {/* A reason only where it says something: the cuisine kept, or the
                           Google category that makes it not a day out. */}
-                      {!wide || (!decided(r) && sug && !/^the obvious/.test(sug.why)) ? (
-                        <Text style={type.tiny} numberOfLines={1}>{[!wide ? `${count(r.seen_count)} places` : null, !decided(r) && sug && !/^the obvious/.test(sug.why) ? sug.why : null].filter(Boolean).join(' · ')}</Text>
-                      ) : null}
+                      {(() => {
+                        const bits = [
+                          !wide ? `${count(r.seen_count)} places` : null,
+                          !decided(r) && sug && !/^the obvious/.test(sug.why) ? sug.why : null,
+                          st === 'mapped' && r.landing.how === 'taught' ? (r.landing.via?.by === 'Epic' ? 'mapped by Epic' : 'mapped by you') : st === 'mapped' ? 'mapped by the code' : null,
+                        ].filter(Boolean);
+                        return bits.length ? <Text style={type.tiny} numberOfLines={1}>{bits.join(' · ')}</Text> : null;
+                      })()}
                     </View>
                     </View>
                     {wide ? (
@@ -919,6 +954,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                           }))}
                           onPick={(k) => void decide(r, k === '-' ? { aside: true } : k === '~' ? { nearby: true } : { subcategory: k })}
                           onOpenChange={(o) => setOpenKey(o ? r.key : null)}
+                          startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
                         {!decided(r) && sug ? (
                           <TextAction label="Approve" disabled={busyKey != null} onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)} />

@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { suggestFor, sureDecisionFor } = await import('../src/domain/googleSuggest.js');
+const { suggestFor, sureDecisionFor, sureMappingFor } = await import('../src/domain/googleSuggest.js');
 const { GOOGLE_TYPES } = await import('../src/sources/googleTypes.js');
 
 const DRAWERS = ['theme-parks', 'zoos-wildlife', 'karting', 'restaurants', 'cafes', 'fast-food', 'pubs-bars', 'churches', 'museums', 'galleries', 'parks', 'arenas'];
@@ -44,6 +44,14 @@ test('parking and stations are useful nearby, never thrown out; and the sure dec
   assert.equal(sureDecisionFor('amusement_park', 'Entertainment and Recreation'), null);
   assert.equal(sureDecisionFor('thai_restaurant', 'Food and Drink'), null);
   assert.equal(sureDecisionFor('paintball_center', 'Entertainment and Recreation'), null);
+});
+
+test('a mapping Epic is sure of is made itself; a judgement stays a suggestion', () => {
+  assert.equal(sureMappingFor('european_restaurant', 'Food and Drink', DRAWERS).subcategory, 'restaurants');
+  assert.equal(sureMappingFor('museum', 'Culture', DRAWERS).subcategory, 'museums');
+  assert.equal(sureMappingFor('marina', 'Entertainment and Recreation', DRAWERS), null);
+  assert.ok(suggestFor('marina', 'Entertainment and Recreation', [...DRAWERS, 'paddling']).subcategory);
+  assert.equal(sureMappingFor('car_dealer', 'Automotive', DRAWERS), null);
 });
 
 test('where nothing is obvious, nothing is suggested', () => {

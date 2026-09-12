@@ -534,7 +534,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * panel hangs directly under the control; `align: 'right'` hangs it from the
  * control's right edge for a control at the end of a row.
  */
-export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange }: {
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null }: {
   label: string;
   value: string;
   groups: { key: string; label: string; items: DropdownOption[] }[];
@@ -550,6 +550,8 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
    * lift itself (a zIndex) or the panel is drawn under them.
    */
   onOpenChange?: (open: boolean) => void;
+  /** Open a level in, at this group — a mapped row opens at its own category (owner, 13 Sep 2026). */
+  startIn?: string | null;
 }) {
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
@@ -562,7 +564,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   return (
     <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
       <Press
-        onPress={() => (open ? close() : setOpen(true))}
+        onPress={() => { if (open) close(); else { setInto(startIn ?? null); setOpen(true); } }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`${label}: ${value}`}

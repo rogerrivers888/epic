@@ -136,6 +136,30 @@ export function suggestFor(type, group, subcategoryKeys) {
 }
 
 /**
+ * The mappings that are a suggestion rather than a certainty: a word whose
+ * home is a judgement (is a marina paddling? is a gym a leisure centre?).
+ * Everything else in TO_SUBCATEGORY, and every `*_restaurant`, is sure enough
+ * to map without asking (owner, 13 Sep 2026: "if it's 90% probability that
+ * you're correct, just map it, and I can view the mappings and pick anything
+ * out that looks wrong").
+ */
+const UNSURE = new Set([
+  'miniature_golf_course', 'adventure_sports_center', 'cultural_center', 'water_park', 'marina', 'gym', 'fitness_center', 'sports_complex',
+  'indoor_golf_course', 'garden_center', 'library', 'dog_park', 'barbecue_area', 'event_venue', 'karaoke', 'dance_hall', 'night_club',
+  'winery', 'vineyard', 'deli', 'salad_shop', 'candy_store', 'chocolate_factory', 'cafeteria', 'diner', 'department_store', 'toy_store', 'thrift_store',
+]);
+
+/**
+ * The mapping Epic makes itself, or null where it is only a suggestion.
+ * Returns the same shape as `suggestFor` so the rule's reason can say why.
+ */
+export function sureMappingFor(type, group, subcategoryKeys) {
+  if (UNSURE.has(type)) return null;
+  const s = suggestFor(type, group, subcategoryKeys);
+  return s?.subcategory ? s : null;
+}
+
+/**
  * The decisions Epic is sure enough of to make without asking (owner, 13 Sep
  * 2026: "for stuff you have a high degree of certainty… you shouldn't be
  * asking me to approve those"): a whole group that is never a day out, the
