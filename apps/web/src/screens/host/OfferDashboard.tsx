@@ -74,7 +74,7 @@ export function OfferDashboard({ offerId, hostName }: { offerId: string; hostNam
           <StateChip state={o.state} pausedUntil={o.pausedUntil} />
           <Text style={type.small}>{SHAPE_LABEL[o.shape]} · {metaLine(o)}</Text>
         </Row>
-        <Text style={type.small}>{priceWords(o)}{o.priceMode !== 'free' ? ' · Epic collects' : ''}</Text>
+        <Text style={type.small}>{priceWords(o)}{o.money === 'epic' ? ' · Epic collects' : o.money === 'direct' ? ' · paid to you directly' : ''}</Text>
 
         {/* In review: what we read, and what we said. */}
         {o.state === 'in_review' ? (
@@ -133,9 +133,9 @@ export function OfferDashboard({ offerId, hostName }: { offerId: string; hostNam
         )}
 
         <Row style={styles.tiles}>
-          <Tile label="collected" value={cash(o.money.collectedPence + o.money.recordedPence)} sub={o.money.recordedPence && !o.money.collectedPence ? 'recorded' : undefined} />
-          <Tile label="refunded" value={cash(o.money.refundedPence)} red={o.money.refundedPence > 0} />
-          <Tile label="paid out" value={o.money.payoutOn ? dateOnly(o.money.payoutOn) : '—'} />
+          <Tile label="collected" value={cash(o.takings.collectedPence + o.takings.recordedPence)} sub={o.takings.recordedPence && !o.takings.collectedPence ? 'recorded' : undefined} />
+          <Tile label="refunded" value={cash(o.takings.refundedPence)} red={o.takings.refundedPence > 0} />
+          <Tile label="paid out" value={o.takings.payoutOn ? dateOnly(o.takings.payoutOn) : '—'} />
         </Row>
 
         {/* Who is coming: people and bookings counted separately. */}
@@ -193,7 +193,7 @@ export function OfferDashboard({ offerId, hostName }: { offerId: string; hostNam
             {panel === 'off' ? (
               <View style={[styles.off]}>
                 <Text style={[type.h3, { color: colors.overrun }]}>Call this one off</Text>
-                <Text style={type.small}>Everyone booked is told and refunded — {live.length} booking{live.length === 1 ? '' : 's'}, {money(o.money.collectedPence + o.money.recordedPence)}. It cannot be undone.</Text>
+                <Text style={type.small}>Everyone booked is told and refunded — {live.length} booking{live.length === 1 ? '' : 's'}, {money(o.takings.collectedPence + o.takings.recordedPence)}. It cannot be undone.</Text>
                 <TextInput value={text} onChangeText={setText} placeholder="A line for them — why, and whether you will try again" placeholderTextColor={colors.inkFaint} style={styles.input} />
                 <Row><Button label="Call it off · everyone is refunded" kind="danger" loading={busy} onPress={() => void run(() => api.cancelOffer(o.id, text.trim() || null), (r) => setSaid(seen(r.told)))} /><Button label="Keep it" kind="ghost" onPress={() => setPanel(null)} /></Row>
               </View>
@@ -202,7 +202,7 @@ export function OfferDashboard({ offerId, hostName }: { offerId: string; hostNam
             )}
           </View>
         ) : null}
-        {o.state === 'ended' ? <View style={styles.block}><Text style={type.h3}>Called off{o.cancelledNote ? ` — ${o.cancelledNote}` : ''}</Text><Text style={type.small}>Everyone was told. {money(o.money.refundedPence)} refunded.</Text></View> : null}
+        {o.state === 'ended' ? <View style={styles.block}><Text style={type.h3}>Called off{o.cancelledNote ? ` — ${o.cancelledNote}` : ''}</Text><Text style={type.small}>Everyone was told. {money(o.takings.refundedPence)} refunded.</Text></View> : null}
         {o.state === 'draft' ? (
           <Press onPress={() => void run(async () => { await api.deleteOffer(o.id); navigate(paths.host(), { replace: true }); return { offer: o }; })} accessibilityRole="button" style={{ paddingVertical: 10 }}><Text style={[type.small, { color: colors.overrun, fontWeight: '700', textAlign: 'center' }]}>Delete this draft</Text></Press>
         ) : null}

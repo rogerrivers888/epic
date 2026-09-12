@@ -471,7 +471,22 @@ test('the Host tab, and every page inside it', () => {
   assert.deepEqual(roundTrip('/host/offers/o1/edit'), { name: 'host', page: 'edit', offerId: 'o1' });
   assert.equal(paths.hostStart(3), '/host/start?step=3');
   assert.equal(paths.hostNewOffer('series'), '/host/offers/new?shape=series');
-  assert.equal(paths.hostOfferEdit('o1', 2), '/host/offers/o1/edit?step=2');
+  assert.equal(paths.hostOfferEdit('o1', 'vis'), '/host/offers/o1/edit?step=vis');
+  assert.equal(paths.hostOfferEdit('o1', 'plan'), '/host/offers/o1/edit', 'the first step is the bare address');
+  // The learn layer (13 Sep 2026): nothing to fill in, and still the tab.
+  assert.deepEqual(roundTrip('/host/learn/series'), { name: 'host', page: 'shape', offerId: null, param: 'series' });
+  assert.deepEqual(roundTrip('/host/learn/examples'), { name: 'host', page: 'examples', offerId: null });
+  assert.deepEqual(roundTrip('/host/learn/examples/skateboarding'), { name: 'host', page: 'example', offerId: null, param: 'skateboarding' });
+  assert.deepEqual(roundTrip('/host/learn/who'), { name: 'host', page: 'who', offerId: null });
+  assert.deepEqual(roundTrip('/host/profile'), { name: 'host', page: 'profile', offerId: null });
+  assert.equal(parseRoute('/host/learn/nonsense').name, 'unknown');
+  assert.equal(isImmersive(parseRoute('/host/learn/series')), false);
+  assert.equal(isTabHome(parseRoute('/host/learn/examples')), true);
+  assert.equal(parentOf(parseRoute('/host/learn/examples/skateboarding')), '/host/learn/examples');
+  // An invitation is outside the app.
+  assert.deepEqual(roundTrip('/invited/tok'), { name: 'invited', token: 'tok' });
+  assert.equal(tabOf(parseRoute('/invited/tok')), null);
+  assert.equal(parseRoute('/invited').name, 'unknown');
   assert.equal(paths.hostVideo('o1'), '/host/video?offer=o1');
   assert.equal(parseRoute('/host/offers').name, 'unknown');
   assert.equal(parseRoute('/host/offers/o1/nonsense').name, 'unknown');

@@ -682,7 +682,19 @@ Collapsed it is one line; opened it is each person's own number and then the mea
 
 Files: `web/src/components/verdict.ts`, `web/src/components/FamilyVerdict.tsx`, `web/src/components/VenueDrawer.tsx`, `web/src/components/MenuOrder.tsx`, `web/test/verdict.test.ts`.
 
-### 13.18 Hosts and events — **built** (owner, 12 Sep 2026; Supporting docs/Groups & events NEW)
+### 13.18 Hosts and events — **built** (owner, 12 Sep 2026; Supporting docs/Groups & events NEW; rebuilt 13 Sep 2026 from "Events tab 130926 new")
+
+> Owner, 13 Sep 2026: "This contains all the new files for the new wizard design for the host tab. Do not build the prototype. This is the real thing. Build it end to end."
+
+**Three independent axes describe every offer** (migration 084): **shape** (one-off · series · anytime — what "when" looks like), **visibility** (invite · link · public — whether identity, a video, evidence and an age gate are needed at all) and **money** (free · direct · epic — whether there is a price, a minimum, a refund rule and a payout). None is derived from another. A wedding is a one-off that is invite-only; a stag weekend is link-only with the costs split directly; a skate jam is public and Epic-collects. Public paid is Epic-collects only. `domain/hosting.js stepsFor()` gives the set-up's step list from the axes — `plan → vis → event → [weeks] → numbers | invite → money → [price] → [basics, kind, [subdetail], video, extract, checks, [evidence]] → done` — and the progress bar counts it, so nothing hard-codes a total. Nothing private is reviewed: invitations and a link go out at once.
+
+**Teach first, then ask.** The Host tab is the learn layer for anyone who is not a host — two kinds of hosting, three ways to host, what people host (static worked examples with the actual words and price, `screens/host/examples.ts`), who can come — and asks for nothing. The set-up is a separate stack, one question per screen, every field saving as it is left, each step opening at the top.
+
+**The settled kinds** (T-REC): *I have a skill* · *Meetups and mini tours* · *Expert guide*, expert defined by depth of knowledge not employment; sub-kinds (our family with yours · something I already do · a night out · round where I live) are children of Meetups and each carries a questionnaire and a rules block the host must accept. Family: children as age bands and interests only, never a name or a photograph, no matching by a child's sex, and free. Night out: 18+, named venues, a minimum group of three, an end time.
+
+**A PDF for guests** seeds the fields (`seedFromText`) and marks each seeded field with a lime edge; guests download the document itself. **The listing is written from the video** (`POST …/extract`: transcription and a strict-schema extraction through the same OpenAI door the voice intake uses) into a title, a short version, a longer one and editable facts — each labelled "from your video". Without the transcription key the host is told in one sentence and types it. **Evidence** has proper fields per kind (a reference is a name, a phone and an email). **Invitations** (`offer_invites`) go by text with a link; `/invited/<token>` is yes or no and how many, no account.
+
+*The first build (12 Sep):*
 
 > "Merge the Household and Settings into 1 tab… insert the new tab called Host, and build everything that's in the folder. I don't want you to build the prototype. I want you to build the full working version."
 

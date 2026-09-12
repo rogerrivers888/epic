@@ -37,11 +37,13 @@ import { requires } from '../access.js';
 import { mailConfigured, sendMail } from '../sources/mail.js';
 import { sendSms, smsConfigured } from '../sources/sms.js';
 import {
-  ADULT_AGE, AGE_LIMITS, DAY_PARTS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
-  REGULATED_COUNTRIES, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S,
+  ADULT_AGE, CHECK_KINDS, DAY_PARTS, EVIDENCE_FIELDS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, MONEY, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
+  REGULATED_COUNTRIES, REPEATS, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S, VISIBILITIES,
   ageGate, anytimeSlots, decideBy, isRegulated, lastDate, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
-  readsLikeCommentary, reviewPublishOn, seriesDates, standing, takingsAt, ymd,
+  readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
 } from '../domain/hosting.js';
+import { pdfText } from '../sources/menuRead.js';
+import { extract as extractWith, openaiEnabled, transcribe } from '../sources/openai.js';
 
 export const router = Router();
 export const publicRouter = Router();
@@ -81,7 +83,7 @@ function publicHost(h, rating = { rating: null, count: 0, guests: 0 }, extra = {
 function ownHost(h) {
   return {
     ...publicHost(h),
-    idDocument: h.id_document, insuranceConfirmed: h.insurance_confirmed,
+    address: h.address, idDocument: h.id_document, insuranceConfirmed: h.insurance_confirmed,
     taxReference: h.tax_reference ? `••••${String(h.tax_reference).slice(-3)}` : null,
     payoutStatus: h.payout_status, payoutLabel: h.payout_label, dateOfBirth: h.date_of_birth,
   };
@@ -96,9 +98,11 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
   const dates = o.shape === 'series' ? seriesDates(o) : [];
   const taken = new Set(bookings.filter((b) => b.state !== 'cancelled').map((b) => b.occurrence));
   return {
-    id: o.id, hostId: o.host_id, shape: o.shape, state: o.state, pausedUntil: ymd(o.paused_until), visibility: o.visibility,
-    title: o.title, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
-    photos: (o.photo_ids ?? []).map(mediaRef), video: mediaRef(o.video_id),
+    id: o.id, hostId: o.host_id, shape: o.shape, state: o.state, pausedUntil: ymd(o.paused_until), visibility: o.visibility, money: o.money ?? 'free',
+    title: o.title, summary: o.summary, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
+    photos: (o.photo_ids ?? []).map(mediaRef), video: mediaRef(o.video_id), doc: mediaRef(o.doc_id),
+    facts: o.facts ?? [], endsAt: o.ends_at?.slice(0, 5) ?? null, repeatEvery: o.repeat_every ?? 'weekly', endDate: ymd(o.end_date), themesDiffer: o.themes_differ !== false,
+    noticeDays: o.notice_days, subDetail: o.sub_detail ?? {},
     venue: o.venue, venueArea: o.venue_area, venueLabel: revealed || o.venue === 'out_about' ? o.venue_label : null,
     venueLat: revealed || o.venue === 'out_about' ? o.venue_lat : null, venueLng: revealed || o.venue === 'out_about' ? o.venue_lng : null,
     venueCountry: o.venue_country, venueNotes: o.venue_notes, travelRadiusMin: o.travel_radius_min, travelChargePence: o.travel_charge_pence, onlinePlatform: o.online_platform,
@@ -108,7 +112,7 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     featuredPeople: (o.featured_people ?? []).map((p) => ({ name: p.name, role: p.role, photo: mediaRef(p.photoId) })),
     weekday: o.weekday, firstDate: ymd(o.first_date), sessions: o.sessions, skippedDates: (o.skipped_dates ?? []).map(ymd), dates,
     outcome: o.outcome, arc: o.arc, weeks: o.weeks ?? [], joinMode: o.join_mode, dropInPence: o.drop_in_pence, missedNote: o.missed_note,
-    availability: o.availability ?? {}, slots: o.shape === 'anytime' ? anytimeSlots(o, { taken }) : [],
+    availability: o.availability ?? {}, slots: o.shape === 'anytime' ? anytimeSlots(o, { taken }) : [], slotMin: o.slot_min,
     standing: st,
     price: priceFor(o, { heads: 1, headsNow: st.heads }),
     regulated: isRegulated(o.venue_country) ? { country: REGULATED_COUNTRIES[o.venue_country.toUpperCase()], answer: o.regulated_answer } : null,
@@ -118,7 +122,7 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
 }
 
 /** The host's own offer adds the roster, the money and what stands between it and Publish. */
-function ownOffer(o, host, bookings, broadcasts = []) {
+function ownOffer(o, host, bookings, broadcasts = [], invites = []) {
   const live = bookings.filter((b) => b.state !== 'cancelled');
   const collected = live.filter((b) => b.payment_status === 'paid').reduce((n, b) => n + b.amount_pence, 0);
   const recorded = live.filter((b) => b.payment_status === 'recorded').reduce((n, b) => n + b.amount_pence, 0);
@@ -129,10 +133,12 @@ function ownOffer(o, host, bookings, broadcasts = []) {
     ...publicOffer(o, bookings, { revealed: true }),
     venueLabel: o.venue_label, venueLat: o.venue_lat, venueLng: o.venue_lng,
     blockers: publishBlockers(o, host),
+    steps: stepsFor(o, host),
+    seeded: o.seeded ?? [], checks: o.checks ?? [], rulesAccepted: o.rules_accepted, transcript: o.transcript,
     checklist: pitchChecklist(o),
     licenceNumber: o.licence_number, licenceExpiry: ymd(o.licence_expiry),
     reviewNote: o.review_note, reviewChecklist: o.review_checklist, reviewedAt: o.reviewed_at, submittedAt: o.submitted_at, publishedAt: o.published_at,
-    money: {
+    takings: {
       collectedPence: collected, recordedPence: recorded, refundedPence: refunded, payoutOn,
       atMinimum: takingsAt(o, o.min_count), atExpected: takingsAt(o, o.expected_count), fee: payoutOf(takingsAt(o, o.expected_count) ?? 0),
     },
@@ -141,8 +147,12 @@ function ownOffer(o, host, bookings, broadcasts = []) {
       amountPence: b.amount_pence, note: b.note_to_host, address: b.address, accessNotes: b.access_notes, bookedAt: b.created_at,
     })),
     broadcasts: broadcasts.map((b) => ({ id: b.id, body: b.body, sentTo: b.sent_to, delivered: b.delivered, at: b.created_at })),
+    invites: invites.map(invitePayload),
   };
 }
+
+const invitePayload = (i) => ({ id: i.id, name: i.name, contact: i.contact, contactKind: i.contact_kind, heads: i.heads, rsvp: i.rsvp, rsvpHeads: i.rsvp_heads, sentAt: i.sent_at, answeredAt: i.answered_at, token: i.token });
+const evidencePayload = (e) => ({ id: e.id, offerId: e.offer_id, kind: e.kind, fields: e.fields ?? {}, media: mediaRef(e.media_id) });
 
 function bookingPayload(b) {
   const offer = { shape: b.shape, starts_on: b.starts_on, first_date: b.first_date, sessions: b.sessions, skipped_dates: b.skipped_dates };
@@ -200,8 +210,11 @@ router.get('/host', async (req, res, next) => {
     const byOffer = (id) => bookings.filter((b) => b.offer_id === id);
     const rating = await repo.ratingOf(host.id);
     const live = bookings.filter((b) => b.state !== 'cancelled');
+    const evidence = await repo.evidenceOf(host.id);
     res.json({
-      host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0 },
+      host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload) },
+      // What guests wrote when they booked: each one is a second offer waiting to be written (S4).
+      asks: live.map((b) => b.note_to_host).filter(Boolean).slice(-6),
       offers: offers.map((o) => ownOffer(o, host, byOffer(o.id))),
       stats: {
         live: offers.filter((o) => o.state === 'live').length,
@@ -235,12 +248,14 @@ router.post('/host', async (req, res, next) => {
     if (host) return res.status(409).json({ error: 'already_host', message: 'This household already hosts on Epic.' });
     const b = hostBody(req.body ?? {});
     if (!b.name) throw refuse(400, 'name_required', 'Say who you are.');
-    if (!b.type) throw refuse(400, 'type_required', 'Pick what kind of host you are.');
-    if (b.type === 'local' && !b.localKind) throw refuse(400, 'local_kind_required', 'Say what kind of Local you are.');
-    // Hosts are 18+ (brief §9), and the form is not the boundary: no date of birth, no host.
-    if (!b.dateOfBirth) throw refuse(400, 'dob_required', 'Your date of birth — hosts on Epic are eighteen or over.');
-    const age = ageFromDob(b.dateOfBirth);
-    if (age == null || age < ADULT_AGE) throw refuse(400, 'too_young', 'Hosts on Epic are eighteen or over.');
+    // The kind and the date of birth are asked in the set-up only when the
+    // offer is public (13 Sep 2026): a private wedding needs neither. Publish
+    // is where a public offer is refused without them (publishBlockers).
+    if (b.dateOfBirth) {
+      const age = ageFromDob(b.dateOfBirth);
+      if (age == null || age < ADULT_AGE) throw refuse(400, 'too_young', 'Hosts on Epic are eighteen or over.');
+    }
+    if (!b.type) b.type = 'skill';
     const account = currentAccount();
     const created = await repo.insertHost(household.id, { ...b, accountId: account?.id ?? null });
     res.status(201).json({ host: ownHost(created) });
@@ -255,6 +270,7 @@ router.patch('/host', async (req, res, next) => {
     const patch = {};
     const fields = hostBody(b);
     for (const k of ['name', 'type', 'localKind', 'introText', 'locationLabel', 'lat', 'lng', 'countryCode', 'dateOfBirth']) if (b[k] !== undefined) patch[k] = fields[k];
+    if (b.address !== undefined) patch.address = str(b.address, 240);
     for (const k of ['credentials', 'languages', 'childrenAges']) if (b[k] !== undefined) patch[k] = fields[k];
     if (b.introVideoId !== undefined) patch.introVideoId = b.introVideoId ? await ownMedia(host.household_id, b.introVideoId, 'video') : null;
     if (b.photoId !== undefined) patch.photoId = b.photoId ? await ownMedia(host.household_id, b.photoId, 'photo') : null;
@@ -324,15 +340,16 @@ const mediaMeta = (m) => ({ id: m.id, url: mediaRef(m.id), kind: m.kind, mime: m
 router.post('/host/media', express.raw({ type: () => true, limit: '41mb' }), async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const kind = oneOf(['video', 'photo'], String(req.query.kind ?? ''));
-    if (!kind) throw refuse(400, 'kind_required', 'Say whether this is a video or a photo.');
+    const kind = oneOf(['video', 'photo', 'doc'], String(req.query.kind ?? ''));
+    if (!kind) throw refuse(400, 'kind_required', 'Say whether this is a video, a photo or a document.');
     const bytes = Buffer.isBuffer(req.body) ? req.body : null;
     if (!bytes?.length) throw refuse(400, 'empty', 'Nothing was uploaded.');
     const cap = kind === 'video' ? MEDIA_MAX_BYTES : PHOTO_MAX_BYTES;
     if (bytes.length > cap) throw refuse(413, 'too_big', kind === 'video' ? 'That video is too big. Thirty to sixty seconds is plenty.' : 'That photo is too big.');
-    const mime = String(req.headers['content-type'] || (kind === 'video' ? 'video/webm' : 'image/jpeg')).split(';')[0].trim();
+    const mime = String(req.headers['content-type'] || (kind === 'video' ? 'video/webm' : kind === 'doc' ? 'application/pdf' : 'image/jpeg')).split(';')[0].trim();
     if (kind === 'video' && !mime.startsWith('video/')) throw refuse(400, 'bad_type', 'That is not a video.');
     if (kind === 'photo' && !mime.startsWith('image/')) throw refuse(400, 'bad_type', 'That is not a picture.');
+    if (kind === 'doc' && mime !== 'application/pdf') throw refuse(400, 'bad_type', 'A document for guests is a PDF.');
     const durationS = int(req.query.duration);
     if (kind === 'video' && durationS && durationS > VIDEO_MAX_S) throw refuse(413, 'too_long', `A video can be up to ${VIDEO_MAX_S} seconds. Thirty to sixty is plenty.`);
     const m = await repo.insertMedia({ householdId: household.id, kind, mime, bytes, durationS });
@@ -364,6 +381,7 @@ publicRouter.get('/media/:id', async (req, res, next) => {
     const m = await repo.mediaById(req.params.id);
     if (!m) return res.status(404).json({ error: 'not_found' });
     res.setHeader('content-type', m.mime);
+    if (m.kind === 'doc') res.setHeader('content-disposition', 'attachment; filename="for-guests.pdf"');
     res.setHeader('cache-control', 'public, max-age=31536000, immutable');
     res.setHeader('accept-ranges', 'bytes');
     // A video element asks for ranges; answer them so it can seek.
@@ -393,18 +411,22 @@ async function myOffer(id) {
 }
 
 async function ownOfferPayload(offer, host) {
-  const [bookings, broadcasts] = await Promise.all([repo.bookingsOfOffer(offer.id), repo.broadcastsOf(offer.id)]);
-  return ownOffer(offer, host, bookings, broadcasts);
+  const [bookings, broadcasts, invites] = await Promise.all([repo.bookingsOfOffer(offer.id), repo.broadcastsOf(offer.id), repo.invitesOf(offer.id)]);
+  return ownOffer(offer, host, bookings, broadcasts, invites);
 }
 
 /** POST /api/host/offers — a draft, of one shape. Step 1 is the fork. */
 router.post('/host/offers', async (req, res, next) => {
   try {
-    const { host } = await myHost();
-    if (!host) throw refuse(404, 'not_a_host', 'Become a host first.');
+    const { household } = await myHost();
+    let host = await repo.hostByHousehold(household.id);
+    // Who you are is asked only when the offer is public, and later in the
+    // flow; the row exists from the first tap so every step has somewhere
+    // to save. The name is filled in at basics.
+    if (!host) host = await repo.insertHost(household.id, { name: currentAccount()?.name ?? household.name ?? 'A host', type: null, accountId: currentAccount()?.id ?? null });
     const shape = oneOf(SHAPES, req.body?.shape);
     if (!shape) throw refuse(400, 'shape_required', 'Pick a shape: one-off, series or anytime.');
-    const offer = await repo.insertOffer(host.id, shape, { ageLimit: host.local_kind === 'night_out' ? 18 : null });
+    const offer = await repo.insertOffer(host.id, shape, { ageLimit: host.local_kind === 'night_out' ? 18 : null, visibility: oneOf(VISIBILITIES, req.body?.visibility) ?? 'public', money: 'free' });
     res.status(201).json({ offer: await ownOfferPayload(offer, host) });
   } catch (err) { next(err); }
 });
@@ -430,7 +452,7 @@ function offerBody(b, current) {
   set('travelRadiusMin', int(b.travelRadiusMin)); set('travelChargePence', int(b.travelChargePence)); set('onlinePlatform', str(b.onlinePlatform, 80));
   set('durationMin', int(b.durationMin));
   set('minCount', int(b.minCount)); set('expectedCount', int(b.expectedCount)); set('maxCount', int(b.maxCount)); set('partyMax', int(b.partyMax));
-  set('ageLimit', b.ageLimit == null ? null : (AGE_LIMITS.includes(Number(b.ageLimit)) ? Number(b.ageLimit) : null));
+
   set('priceMode', oneOf(PRICE_MODES, b.priceMode) ?? current.price_mode); set('pricePence', int(b.pricePence)); set('totalPence', int(b.totalPence));
   set('per', oneOf(['person', 'household'], b.per) ?? current.per); set('refundRule', oneOf(REFUND_RULES, b.refundRule) ?? current.refund_rule);
   set('startsOn', b.startsOn ? ymd(b.startsOn) : null); set('startsAt', b.startsAt ? String(b.startsAt).slice(0, 5) : null);
@@ -445,7 +467,21 @@ function offerBody(b, current) {
   set('availability', { days: list(b.availability?.days, 7).map(Number).filter((n) => n >= 0 && n <= 6), parts: list(b.availability?.parts, 3).filter((x) => DAY_PARTS.includes(x)) });
   set('slotMin', int(b.slotMin));
   set('regulatedAnswer', oneOf(['no_commentary', 'licensed'], b.regulatedAnswer)); set('licenceNumber', str(b.licenceNumber, 60)); set('licenceExpiry', b.licenceExpiry ? ymd(b.licenceExpiry) : null);
-  set('visibility', oneOf(['public', 'link'], b.visibility) ?? current.visibility);
+  set('visibility', oneOf(VISIBILITIES, b.visibility) ?? current.visibility);
+  set('money', oneOf(MONEY, b.money) ?? current.money ?? 'free');
+  set('summary', str(b.summary, 300));
+  set('endsAt', b.endsAt ? String(b.endsAt).slice(0, 5) : null);
+  set('repeatEvery', oneOf(REPEATS, b.repeatEvery) ?? current.repeat_every ?? 'weekly');
+  set('endDate', b.endDate ? ymd(b.endDate) : null);
+  set('themesDiffer', Boolean(b.themesDiffer));
+  set('noticeDays', int(b.noticeDays));
+  set('subDetail', b.subDetail && typeof b.subDetail === 'object' ? b.subDetail : {});
+  set('rulesAccepted', Boolean(b.rulesAccepted));
+  set('checks', list(b.checks, 4).filter((c) => CHECK_KINDS.includes(c)));
+  set('facts', list(b.facts, 12).map((f) => ({ key: str(f.key, 40), value: str(f.value, 120) })).filter((f) => f.key && f.value));
+  set('seeded', list(b.seeded, 20).map((k) => str(k, 30)).filter(Boolean));
+  // Restricted to an age the host names: any whole number of years.
+  if (b.ageLimit !== undefined) p.ageLimit = b.ageLimit == null ? null : int(b.ageLimit);
   return p;
 }
 
@@ -456,8 +492,14 @@ router.patch('/host/offers/:id', async (req, res, next) => {
     const patch = offerBody(b, offer);
     if (b.videoId !== undefined) patch.videoId = b.videoId ? await ownMedia(household.id, b.videoId, 'video') : null;
     if (b.photoIds !== undefined) patch.photoIds = await Promise.all(list(b.photoIds, 8).map((id) => ownMedia(household.id, id, 'photo')));
-    // Free is free: clear the figures rather than leaving a ghost price.
+    if (b.docId !== undefined) patch.docId = b.docId ? await ownMedia(household.id, b.docId, 'doc') : null;
+    // Free is free: clear the figures rather than leaving a ghost price. And a
+    // minimum only exists when money does.
+    if (patch.money === 'free') { patch.priceMode = 'free'; patch.pricePence = null; patch.totalPence = null; patch.minCount = null; }
+    else if (patch.money && patch.priceMode == null && offer.price_mode === 'free') patch.priceMode = 'same_each';
     if (patch.priceMode === 'free') { patch.pricePence = null; patch.totalPence = null; }
+    // Public paid is Epic-collects only.
+    if ((patch.visibility ?? offer.visibility) === 'public' && (patch.money ?? offer.money) === 'direct') patch.money = 'epic';
     // A night out stays 18+ whatever the form sends.
     if (host.local_kind === 'night_out') patch.ageLimit = 18;
     const updated = await repo.updateOffer(offer.id, patch);
@@ -487,7 +529,9 @@ router.post('/host/offers/:id/submit', async (req, res, next) => {
     const blockers = publishBlockers(offer, host);
     if (blockers.length) return res.status(422).json({ error: 'not_ready', message: blockers[0], blockers });
     const offers = await repo.offersOfHost(host.id);
-    const straightToLive = hasBeenRead(offers);
+    // Nothing private is advertised, so nothing private is read: invitations
+    // and a link go out at once. A first public listing is read within 48 hours.
+    const straightToLive = offer.visibility !== 'public' || hasBeenRead(offers);
     const updated = await repo.updateOffer(offer.id, {
       state: straightToLive ? 'live' : 'in_review',
       submittedAt: new Date(),
@@ -538,6 +582,233 @@ router.post('/host/offers/:id/broadcast', async (req, res, next) => {
     const told = await tellBooked(bookings, `${host.name}, about ${offer.title ?? 'your booking'}: ${body}`);
     await repo.insertBroadcast(offer.id, body, told.sentTo, told.delivered);
     res.json({ offer: await ownOfferPayload(offer, host), told });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST …/doc {mediaId} — "Got a PDF for guests? Upload it here." We read it
+ * and seed what we can — the name, the date, where, the notes — and say which
+ * fields came from it (`seeded`), so the host sees the lime edge on each and
+ * can change any of them. Guests can download the document itself.
+ */
+router.post('/host/offers/:id/doc', async (req, res, next) => {
+  try {
+    const { household, host, offer } = await myOffer(req.params.id);
+    if (!req.body?.mediaId) {
+      const updated = await repo.updateOffer(offer.id, { docId: null, seeded: (offer.seeded ?? []).filter((k) => !k.startsWith('doc:')) });
+      return res.json({ offer: await ownOfferPayload(updated, host), seeded: [] });
+    }
+    const docId = await ownMedia(household.id, req.body.mediaId, 'doc');
+    const m = await repo.mediaById(docId);
+    let text = '';
+    try { text = (await pdfText(m.bytes)) ?? ''; } catch { text = ''; }
+    const seeded = seedFromText(offer, text);
+    const patch = { docId, ...seeded.patch, seeded: [...new Set([...(offer.seeded ?? []).filter((k) => !k.startsWith('doc:')), ...seeded.keys.map((k) => `doc:${k}`)])] };
+    const updated = await repo.updateOffer(offer.id, patch);
+    res.json({ offer: await ownOfferPayload(updated, host), seeded: seeded.keys });
+  } catch (err) { next(err); }
+});
+
+/**
+ * What a guest document says, read the plain way: a name from the first
+ * heading-sized line, a date and a time where the page has one, a line with a
+ * postcode for where, and the first paragraph as what they should know. Only
+ * fields the host has not already filled are seeded; the host edits the rest.
+ */
+export function seedFromText(offer, text) {
+  const lines = String(text ?? '').split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const patch = {}; const keys = [];
+  if (!lines.length) return { patch, keys };
+  const body = lines.join(' ');
+  if (!offer.title && lines[0].length <= 90) { patch.title = lines[0]; keys.push('title'); }
+  const MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+  const numeric = body.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\b/);
+  const worded = body.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTHS.join('|')})\\s+(\\d{4})\\b`, 'i'));
+  const dateKey = offer.shape === 'series' ? 'firstDate' : 'startsOn';
+  const have = offer.shape === 'series' ? offer.first_date : offer.starts_on;
+  if (!have) {
+    if (numeric) { patch[dateKey] = `${numeric[3]}-${numeric[2].padStart(2, '0')}-${numeric[1].padStart(2, '0')}`; keys.push(dateKey); }
+    else if (worded) { patch[dateKey] = `${worded[3]}-${String(MONTHS.indexOf(worded[2].toLowerCase()) + 1).padStart(2, '0')}-${worded[1].padStart(2, '0')}`; keys.push(dateKey); }
+  }
+  const time = body.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/);
+  if (!offer.starts_at && time) { patch.startsAt = `${time[1].padStart(2, '0')}:${time[2]}`; keys.push('startsAt'); }
+  const postcode = lines.find((l) => /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(l));
+  if (!offer.venue_label && postcode && postcode.length <= 160) { patch.venueLabel = postcode; keys.push('venueLabel'); }
+  if (!offer.description) {
+    const para = lines.slice(1).find((l) => l.length >= 40) ?? '';
+    if (para) { patch.description = para.slice(0, 600); keys.push('description'); }
+  }
+  return { patch, keys };
+}
+
+/**
+ * POST …/extract — "Here is what we heard". The video is transcribed and the
+ * listing written from it: the title, the short version, the longer one, and
+ * the facts (Category · Area · Length) as editable rows. Each is marked as
+ * from the video. Needs the transcription key (the owner's); without it the
+ * host types the listing and is told so in one sentence.
+ */
+router.post('/host/offers/:id/extract', async (req, res, next) => {
+  try {
+    const { host, offer } = await myOffer(req.params.id);
+    if (!offer.video_id) throw refuse(409, 'no_video', 'Record the video first — the listing is written from what you say.');
+    if (!openaiEnabled()) throw refuse(503, 'no_listener', "Epic can't listen to the video yet — the owner adds the transcription key. Write the listing yourself below.");
+    const m = await repo.mediaById(offer.video_id);
+    const heard = await transcribe({ audio: m.bytes, mime: m.mime, filename: 'offer.webm', hint: `${host.name}, ${host.location_label ?? ''}` });
+    const transcriptText = heard.text ?? '';
+    const schema = {
+      type: 'object', additionalProperties: false,
+      required: ['title', 'summary', 'description', 'category', 'area', 'lengthMinutes'],
+      properties: {
+        title: { type: 'string' }, summary: { type: 'string' }, description: { type: 'string' },
+        category: { type: ['string', 'null'] }, area: { type: ['string', 'null'] }, lengthMinutes: { type: ['integer', 'null'] },
+      },
+    };
+    const system = 'You write a listing for one thing a host offers, from the transcript of them describing it. Title: at most 60 characters, the thing itself, no quotation marks. Summary: one sentence a guest reads first. Description: two to four sentences in the host\'s own voice, first person, plain British English, nothing invented. Category: one word for what it is about (painting, cooking, running, history…), or null. Area: the town or place named, or null. lengthMinutes: how long it lasts if said, else null.';
+    const out = await extractWith({ system, input: transcriptText, schema, name: 'listing' });
+    const p = out.parsed;
+    const patch = { transcript: transcriptText };
+    const keys = [];
+    const force = Boolean(req.body?.force);
+    if (p.title && (force || !offer.title)) { patch.title = p.title.slice(0, 120); keys.push('title'); }
+    if (p.summary && (force || !offer.summary)) { patch.summary = p.summary.slice(0, 300); keys.push('summary'); }
+    if (p.description && (force || !offer.description)) { patch.description = p.description.slice(0, 4000); keys.push('description'); }
+    const facts = [];
+    if (p.category) facts.push({ key: 'Category', value: p.category });
+    if (p.area) facts.push({ key: 'Area', value: p.area });
+    if (p.lengthMinutes) facts.push({ key: 'Length', value: `${p.lengthMinutes} minutes` });
+    patch.facts = facts;
+    if (p.category && !offer.category) patch.category = String(p.category).toLowerCase().replace(/\s+/g, '-').slice(0, 40);
+    if (p.lengthMinutes && !offer.duration_min) patch.durationMin = p.lengthMinutes;
+    patch.seeded = [...new Set([...(offer.seeded ?? []).filter((k) => !k.startsWith('video:')), ...keys.map((k) => `video:${k}`)])];
+    const updated = await repo.updateOffer(offer.id, patch);
+    res.json({ offer: await ownOfferPayload(updated, host), seeded: keys, transcript: transcriptText });
+  } catch (err) { next(err); }
+});
+
+// --- invitations -----------------------------------------------------------
+
+const inviteUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/invited/${token}`;
+
+/** POST …/invites [{name, contact, heads}] — who is invited. A text with a link goes when a sender exists. */
+router.post('/host/offers/:id/invites', async (req, res, next) => {
+  try {
+    const { host, offer } = await myOffer(req.params.id);
+    const rows = list(req.body?.invites ?? [req.body], 200);
+    const made = [];
+    for (const r of rows) {
+      const name = str(r.name, 80);
+      if (!name) continue;
+      const contact = str(r.contact, 120);
+      const kind = contact ? (contact.includes('@') ? 'email' : 'mobile') : null;
+      const inv = await repo.insertInvite({ offerId: offer.id, name, contact, contactKind: kind, heads: Math.max(1, int(r.heads) ?? 1), token: crypto.randomBytes(9).toString('base64url') });
+      made.push(inv);
+    }
+    if (req.body?.send !== false) await sendInvites(host, offer, made);
+    res.status(201).json({ offer: await ownOfferPayload(offer, host) });
+  } catch (err) { next(err); }
+});
+
+router.post('/host/offers/:id/invites/send', async (req, res, next) => {
+  try {
+    const { host, offer } = await myOffer(req.params.id);
+    const pending = (await repo.invitesOf(offer.id)).filter((i) => !i.sent_at);
+    const told = await sendInvites(host, offer, pending);
+    res.json({ offer: await ownOfferPayload(offer, host), told });
+  } catch (err) { next(err); }
+});
+
+router.delete('/host/offers/:id/invites/:iid', async (req, res, next) => {
+  try {
+    const { host, offer } = await myOffer(req.params.id);
+    await repo.deleteInvite(req.params.iid, offer.id);
+    res.json({ offer: await ownOfferPayload(offer, host) });
+  } catch (err) { next(err); }
+});
+
+/** Only a delivered send is marked sent; a refusal leaves the row to be tried again. */
+async function sendInvites(host, offer, invites) {
+  let delivered = 0;
+  for (const i of invites) {
+    if (!i.contact) continue;
+    const text = `${host.name} has invited you to ${offer.title ?? 'something'}${offer.starts_on ? ` on ${ymd(offer.starts_on)}` : ''}. Say yes or no here: ${inviteUrl(i.token)}`;
+    try {
+      let sent = false;
+      if (i.contact_kind === 'email' && mailConfigured()) sent = (await sendMail({ to: i.contact, subject: `${host.name} has invited you`, text })).sent;
+      else if (i.contact_kind === 'mobile' && smsConfigured()) sent = (await sendSms({ to: i.contact, text })).sent;
+      if (sent) { await repo.markInviteSent(i.id); delivered += 1; }
+    } catch { /* stays unsent; the host sees it */ }
+  }
+  return { sentTo: invites.length, delivered, channel: mailConfigured() || smsConfigured() ? 'sender' : 'none' };
+}
+
+/** GET /api/invited/:token — what an invitation opens. Public: the token is the credential. */
+publicRouter.get('/invited/:token', async (req, res, next) => {
+  try {
+    const inv = await repo.inviteByToken(req.params.token);
+    if (!inv) return res.status(404).json({ error: 'not_found', message: 'That invitation does not open anything.' });
+    const o = await repo.offerById(inv.offer_id);
+    const h = await repo.hostById(o.host_id);
+    const bookings = await repo.bookingsOfOffer(o.id);
+    const answered = (await repo.invitesOf(o.id)).filter((x) => x.rsvp === 'yes');
+    res.json({
+      invite: invitePayload(inv),
+      offer: { ...publicOffer(o, bookings, { revealed: true, host: publicHost(h) }), venueLabel: o.venue_label, venueLat: o.venue_lat, venueLng: o.venue_lng, doc: mediaRef(o.doc_id) },
+      going: answered.reduce((n, x) => n + (x.rsvp_heads ?? x.heads), 0),
+      payments: paymentsConfig(),
+    });
+  } catch (err) { next(err); }
+});
+
+/** POST /api/invited/:token {rsvp: 'yes' | 'no', heads} — yes or no, and how many they are bringing. */
+publicRouter.post('/invited/:token', async (req, res, next) => {
+  try {
+    const inv = await repo.inviteByToken(req.params.token);
+    if (!inv) return res.status(404).json({ error: 'not_found', message: 'That invitation does not open anything.' });
+    const rsvp = oneOf(['yes', 'no'], req.body?.rsvp);
+    if (!rsvp) throw refuse(400, 'rsvp_required', 'Yes or no.');
+    const heads = rsvp === 'yes' ? Math.max(1, int(req.body?.heads) ?? inv.heads) : 0;
+    const updated = await repo.answerInvite(inv.id, rsvp, heads);
+    res.json({ invite: invitePayload(updated) });
+  } catch (err) { next(err); }
+});
+
+// --- evidence --------------------------------------------------------------
+
+/** POST /api/host/evidence {kind, offerId?, fields, mediaId?} — what backs it up, with proper fields per kind. */
+router.post('/host/evidence', async (req, res, next) => {
+  try {
+    const { household, host } = await myHost();
+    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
+    const kind = oneOf(CHECK_KINDS, req.body?.kind);
+    if (!kind) throw refuse(400, 'kind_required', 'Which kind of evidence.');
+    const fields = {};
+    for (const f of EVIDENCE_FIELDS[kind]) fields[f] = str(req.body?.fields?.[f], 200);
+    const mediaId = req.body?.mediaId ? await ownMedia(household.id, req.body.mediaId) : null;
+    const offer = req.body?.offerId ? await repo.offerOfHost(req.body.offerId, host.id) : null;
+    const e = await repo.insertEvidence({ hostId: host.id, offerId: offer?.id ?? null, kind, fields, mediaId });
+    res.status(201).json({ evidence: evidencePayload(e) });
+  } catch (err) { next(err); }
+});
+
+router.patch('/host/evidence/:id', async (req, res, next) => {
+  try {
+    const { household, host } = await myHost();
+    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
+    const fields = req.body?.fields && typeof req.body.fields === 'object' ? Object.fromEntries(Object.entries(req.body.fields).map(([k, v]) => [k, str(v, 200)])) : null;
+    const mediaId = req.body?.mediaId ? await ownMedia(household.id, req.body.mediaId) : null;
+    const e = await repo.updateEvidence(req.params.id, host.id, { fields, mediaId });
+    if (!e) throw refuse(404, 'not_found', 'Not one of yours.');
+    res.json({ evidence: evidencePayload(e) });
+  } catch (err) { next(err); }
+});
+
+router.delete('/host/evidence/:id', async (req, res, next) => {
+  try {
+    const { host } = await myHost();
+    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
+    await repo.deleteEvidence(req.params.id, host.id);
+    res.status(204).end();
   } catch (err) { next(err); }
 });
 
@@ -619,6 +890,11 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
   try {
     const o = await repo.offerById(req.params.id);
     if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_found', message: 'There is no experience at that address yet.' });
+    // Only the people named can open an invite-only offer, even with the link.
+    if (o.visibility === 'invite') {
+      const inv = req.query.i ? await repo.inviteByToken(String(req.query.i)) : null;
+      if (!inv || inv.offer_id !== o.id) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
+    }
     const h = await repo.hostById(o.host_id);
     const [bookings, rating] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id)]);
     const others = (await repo.offersOfHost(h.id)).filter((x) => x.id !== o.id && x.state === 'live' && x.visibility === 'public').length;

@@ -1734,11 +1734,11 @@ export const api = {
   /** Stop hosting: the host, its offers and its videos go, and the Host tab is the invitation again. */
   stopHosting: () => del<void>('/api/host'),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
-  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo', durationS?: number | null): Promise<HostMedia> => {
+  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo' | 'doc', durationS?: number | null): Promise<HostMedia> => {
     const token = sessionToken();
     const res = await fetch(`${API_URL}/api/host/media${qs({ kind, duration: durationS ?? undefined })}`, {
       method: 'POST', credentials: 'include', body: blob,
-      headers: { 'content-type': blob.type || (kind === 'video' ? 'video/webm' : 'image/jpeg'), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: { 'content-type': blob.type || (kind === 'video' ? 'video/webm' : kind === 'doc' ? 'application/pdf' : 'image/jpeg'), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(res.status, body);
@@ -1764,7 +1764,20 @@ export const api = {
     post<{ venueRef: string; filed: PhotoFiled | null }>(`/api/places/photo/${imageId}/place`, body),
   trimHostMedia: (id: string, trimStartS: number, trimEndS: number | null) => patch<{ media: HostMedia }>(`/api/host/media/${id}`, { trimStartS, trimEndS }),
   deleteHostMedia: (id: string) => del<void>(`/api/host/media/${id}`),
-  createOffer: (shape: OfferShape) => post<{ offer: OwnOffer }>('/api/host/offers', { shape }),
+  createOffer: (shape: OfferShape, visibility?: Visibility) => post<{ offer: OwnOffer }>('/api/host/offers', { shape, visibility }),
+  /** A PDF for guests, read and seeded into the fields; null takes it off again. */
+  seedOfferDoc: (id: string, mediaId: string | null) => post<{ offer: OwnOffer; seeded: string[] }>(`/api/host/offers/${id}/doc`, { mediaId }),
+  /** The listing written from the video. `force` overwrites what the host typed. */
+  extractOffer: (id: string, force = false) => post<{ offer: OwnOffer; seeded: string[]; transcript: string }>(`/api/host/offers/${id}/extract`, { force }),
+  addInvites: (id: string, invites: { name: string; contact?: string | null; heads?: number }[], send = true) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/invites`, { invites, send }),
+  sendInvites: (id: string) => post<{ offer: OwnOffer; told: Told }>(`/api/host/offers/${id}/invites/send`, {}),
+  removeInvite: (id: string, inviteId: string) => del<{ offer: OwnOffer }>(`/api/host/offers/${id}/invites/${inviteId}`),
+  addEvidence: (body: { kind: CheckKind; offerId?: string | null; fields: Record<string, string | null>; mediaId?: string | null }) => post<{ evidence: Evidence }>('/api/host/evidence', body),
+  updateEvidence: (id: string, body: { fields?: Record<string, string | null>; mediaId?: string | null }) => patch<{ evidence: Evidence }>(`/api/host/evidence/${id}`, body),
+  removeEvidence: (id: string) => del<void>(`/api/host/evidence/${id}`),
+  /** An invitation to a private offer: what it opens, and the answer. Public. */
+  invited: (token: string) => request<InvitedView>(`/api/invited/${token}`),
+  answerInvite: (token: string, rsvp: 'yes' | 'no', heads?: number | null) => post<{ invite: OfferInvite }>(`/api/invited/${token}`, { rsvp, heads }),
   hostOffer: (id: string) => request<{ offer: OwnOffer }>(`/api/host/offers/${id}`),
   updateOffer: (id: string, body: OfferInput) => patch<{ offer: OwnOffer }>(`/api/host/offers/${id}`, body),
   deleteOffer: (id: string) => del<void>(`/api/host/offers/${id}`),
@@ -1775,7 +1788,7 @@ export const api = {
   broadcastOffer: (id: string, body: string) => post<{ offer: OwnOffer; told: Told }>(`/api/host/offers/${id}/broadcast`, { body }),
   addOfferDate: (id: string, startsOn: string, startsAt: string | null) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/dates`, { startsOn, startsAt }),
   /** The guest's side. The page and the profile are public; the rest need a session. */
-  experience: (id: string) => request<{ offer: Experience; payments: PaymentsConfig }>(`/api/experiences/${id}`),
+  experience: (id: string, inviteToken?: string | null) => request<{ offer: Experience; payments: PaymentsConfig }>(`/api/experiences/${id}${inviteToken ? `?i=${encodeURIComponent(inviteToken)}` : ''}`),
   experienceMine: (id: string) => request<{ bookings: Booking[]; party: PartyMember[]; you: string | null }>(`/api/experiences/${id}/mine`),
   experiencesNear: (q: { lat: number; lng: number; km?: number; love?: string | null }) => request<ExperiencesNear>(`/api/experiences/near${qs(q)}`),
   bookExperience: (id: string, body: BookingInput) => post<{ booking: Booking; payments: PaymentsConfig }>(`/api/experiences/${id}/book`, body),
@@ -2633,7 +2646,7 @@ export type TaxonomyLanding = {
   category: MoodKey | null;
   subcategory: string | null;
   how: 'taught' | 'default' | 'fallback' | 'none';
-  via: { id: string | null; scope: string; subject: string | null; subject_label: string | null; labels: string[] | null } | null;
+  via: { id: string | null; scope: string; subject: string | null; subject_label: string | null; labels: string[] | null; by?: string | null } | null;
   /** What Epic read the word into on the way: the experience, the venue category, the styles. */
   derived: string[];
 };
@@ -3098,8 +3111,24 @@ export type SpokenLike = { kind: 'love' | 'avoid'; phrase: string; label?: strin
 // Hosting (Events & Hosts, 12 Sep 2026)
 // ---------------------------------------------------------------------------
 
-export type HostType = 'practitioner' | 'local' | 'guide';
-export type LocalKind = 'family' | 'something_you_do' | 'night_out' | 'neighbourhood';
+/** The settled kinds (T-REC, 13 Sep 2026): I have a skill · Meetups and mini tours · Expert guide. */
+export type HostType = 'skill' | 'meetups' | 'expert';
+export type LocalKind = 'family' | 'already_do' | 'night_out' | 'neighbourhood';
+/** Who can come. It decides whether identity, a video, evidence and an age gate are needed at all. */
+export type Visibility = 'invite' | 'link' | 'public';
+/** Whether anyone is paying, and who takes it. Public paid is Epic-collects only. */
+export type Money = 'free' | 'direct' | 'epic';
+export type RepeatEvery = 'weekly' | 'fortnightly' | 'monthly';
+export type CheckKind = 'pub' | 'qual' | 'years' | 'lic';
+export type Evidence = { id: string; offerId: string | null; kind: CheckKind; fields: Record<string, string | null>; media: string | null };
+export type OfferInvite = { id: string; name: string; contact: string | null; contactKind: 'mobile' | 'email' | null; heads: number; rsvp: 'yes' | 'no' | null; rsvpHeads: number | null; sentAt: string | null; answeredAt: string | null; token: string };
+/** The sub-kind questionnaire, kept as the host answered it. */
+export type SubDetail = {
+  family?: { ageBands?: string[]; interests?: string[]; matchAges?: string | null; notes?: string | null };
+  night?: { kinds?: string[]; venues?: string | null; minGroup?: number | null; endTime?: string | null };
+  already?: { what?: string[]; route?: string | null; difficulty?: string | null; bring?: string | null };
+  neighbourhood?: { what?: string[]; route?: string | null; stops?: string | null; gettingAround?: string[]; access?: string | null };
+};
 export type TrustLevel = 'verified' | 'checked' | 'trusted';
 export type OfferShape = 'oneoff' | 'series' | 'anytime';
 export type OfferState = 'draft' | 'in_review' | 'live' | 'paused' | 'ended';
@@ -3110,11 +3139,11 @@ export type RefundRule = '24h' | '7d' | 'none';
 export type PaymentsConfig = { provider: string | null; ready: boolean; note: string };
 export type Told = { sentTo: number; delivered: number; channel: 'sender' | 'none' };
 
-export type HostMedia = { id: string; url: string; kind: 'video' | 'photo'; mime: string; size: number; durationS: number | null; trimStartS: number | null; trimEndS: number | null; madeBy: 'self' | 'epic' };
+export type HostMedia = { id: string; url: string; kind: 'video' | 'photo' | 'doc'; mime: string; size: number; durationS: number | null; trimStartS: number | null; trimEndS: number | null; madeBy: 'self' | 'epic' };
 
 /** A host as a guest sees them: the person, then the trust level. */
 export type PublicHost = {
-  id: string; name: string; type: HostType; localKind: LocalKind | null; trust: TrustLevel; checks: 'running' | 'passed';
+  id: string; name: string; type: HostType | null; localKind: LocalKind | null; trust: TrustLevel; checks: 'running' | 'passed';
   introText: string | null; introVideo: string | null; photo: string | null;
   location: string | null; lat: number | null; lng: number | null; countryCode: string | null;
   credentials: string[]; languages: string[]; childrenAges: number[];
@@ -3122,11 +3151,12 @@ export type PublicHost = {
   otherOffers?: number; km?: number; liveOffers?: number;
 };
 export type OwnHost = PublicHost & {
-  idDocument: 'passport' | 'driving_licence' | null; insuranceConfirmed: boolean; taxReference: string | null;
+  address: string | null; idDocument: 'passport' | 'driving_licence' | null; insuranceConfirmed: boolean; taxReference: string | null;
   payoutStatus: 'not_connected' | 'connected'; payoutLabel: string | null; dateOfBirth: string | null;
+  evidence?: Evidence[];
 };
 export type HostInput = {
-  name: string; type: HostType; localKind?: LocalKind | null; introText?: string | null;
+  name: string; type?: HostType | null; localKind?: LocalKind | null; introText?: string | null; address?: string | null;
   locationLabel?: string | null; lat?: number | null; lng?: number | null; countryCode?: string | null;
   credentials?: string[]; languages?: string[]; childrenAges?: number[]; dateOfBirth?: string | null;
 };
@@ -3140,9 +3170,11 @@ export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' |
 
 /** One experience, as a guest sees it. The exact address arrives only once booked. */
 export type Experience = {
-  id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: 'public' | 'link';
-  title: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
-  photos: string[]; video: string | null;
+  id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: Visibility; money: Money;
+  title: string | null; summary: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
+  photos: string[]; video: string | null; doc: string | null;
+  facts: { key: string; value: string }[]; endsAt: string | null; repeatEvery: RepeatEvery; endDate: string | null; themesDiffer: boolean;
+  noticeDays: number | null; subDetail: SubDetail;
   venue: OfferVenue; venueArea: string | null; venueLabel: string | null; venueLat: number | null; venueLng: number | null; venueCountry: string | null;
   venueNotes: string | null; travelRadiusMin: number | null; travelChargePence: number | null; onlinePlatform: string | null;
   durationMin: number | null; minCount: number | null; expectedCount: number | null; maxCount: number | null; partyMax: number | null; ageLimit: number | null;
@@ -3150,7 +3182,7 @@ export type Experience = {
   startsOn: string | null; startsAt: string | null; runningOrder: RunningOrderRow[]; featuredPeople: FeaturedPerson[];
   weekday: number | null; firstDate: string | null; sessions: number | null; skippedDates: string[]; dates: string[];
   outcome: string | null; arc: string | null; weeks: Week[]; joinMode: 'whole' | 'drop_in' | 'both' | null; dropInPence: number | null; missedNote: string | null;
-  availability: Availability; slots: { date: string; times: string[] }[];
+  availability: Availability; slots: { date: string; times: string[] }[]; slotMin: number | null;
   standing: Standing; price: OfferPrice;
   regulated: { country: string; answer: string | null } | null;
   cancelledNote: string | null;
@@ -3165,8 +3197,12 @@ export type PitchChecklist = { what: string; home: string; suits: string; notSui
 /** The host's own offer: the guest's view, plus the roster, the money and what stands between it and Publish. */
 export type OwnOffer = Experience & {
   blockers: string[]; checklist: PitchChecklist; licenceNumber: string | null; licenceExpiry: string | null;
+  /** The steps this offer's set-up walks, derived from its three axes. The progress bar counts these. */
+  steps: string[];
+  seeded: string[]; checks: CheckKind[]; rulesAccepted: boolean; transcript: string | null;
+  invites: OfferInvite[];
   reviewNote: string | null; reviewChecklist: Record<string, string> | null; reviewedAt: string | null; submittedAt: string | null; publishedAt: string | null;
-  money: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; fee: { fee: number; net: number; percent: number } };
+  takings: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; fee: { fee: number; net: number; percent: number } };
   bookings: ExperienceBooking[];
   broadcasts: { id: string; body: string; sentTo: number; delivered: number; at: string }[];
 };
@@ -3182,7 +3218,9 @@ export type OfferInput = Partial<{
   joinMode: 'whole' | 'drop_in' | 'both' | null; dropInPence: number | null; missedNote: string | null;
   availability: Availability; slotMin: number | null;
   regulatedAnswer: 'no_commentary' | 'licensed' | null; licenceNumber: string | null; licenceExpiry: string | null;
-  visibility: 'public' | 'link';
+  visibility: Visibility; money: Money; summary: string | null; endsAt: string | null; repeatEvery: RepeatEvery; endDate: string | null;
+  themesDiffer: boolean; noticeDays: number | null; subDetail: SubDetail; rulesAccepted: boolean; checks: CheckKind[];
+  facts: { key: string; value: string }[]; seeded: string[]; docId: string | null;
 }>;
 
 export type HostHome = {
@@ -3190,6 +3228,8 @@ export type HostHome = {
   offers: OwnOffer[];
   stats: { live: number; booked: number; toComePence: number; joinedThisWeek: number; nextPayoutOn: string | null } | null;
   nearby: PublicHost[];
+  /** What guests wrote when they booked: each one a second offer waiting to be written. */
+  asks?: string[];
   config: { payments: PaymentsConfig; passions: { key: string; label: string }[]; regulated: Record<string, string>; videoMaxSeconds: number };
   you?: { name: string | null; email: string | null };
   firstListingRead?: boolean;
@@ -3210,8 +3250,9 @@ export type Booking = {
   host: { id: string; name: string; type: HostType; trust: TrustLevel | null; photo: string | null; location: string | null };
   isPast: boolean; reviewed: boolean; bookedAt: string;
 };
+export type InvitedView = { invite: OfferInvite; offer: Experience; going: number; payments: PaymentsConfig };
 export type AdminHosting = {
-  inReview: (Experience & { hostName: string; hostType: HostType; hostTrust: TrustLevel; submittedAt: string | null; checklist: PitchChecklist; commentary: boolean })[];
+  inReview: (Experience & { hostName: string; hostType: HostType | null; hostTrust: TrustLevel; submittedAt: string | null; checklist: PitchChecklist; commentary: boolean })[];
   hosts: (OwnHost & { liveOffers: number; inReview: number; openReports: number })[];
   reports: { id: string; hostId: string; hostName: string; offerId: string | null; title: string | null; reason: string; at: string }[];
   trustLevels: TrustLevel[];

@@ -34,6 +34,32 @@ test('a series skips the dates the host tapped out and still runs its sessions',
   const dates = seriesDates({ first_date: '2026-09-23', sessions: 6, skipped_dates: ['2026-10-28'] });
   assert.equal(dates.length, 6);
   assert.deepEqual(dates, ['2026-09-23', '2026-09-30', '2026-10-07', '2026-10-14', '2026-10-21', '2026-11-04']);
+  // An end date instead of a count, and a fortnight or a month between them.
+  assert.deepEqual(seriesDates({ first_date: '2026-09-23', end_date: '2026-10-08', skipped_dates: [] }), ['2026-09-23', '2026-09-30', '2026-10-07']);
+  assert.deepEqual(seriesDates({ first_date: '2026-09-23', sessions: 2, repeat_every: 'fortnightly', skipped_dates: [] }), ['2026-09-23', '2026-10-07']);
+  assert.deepEqual(seriesDates({ first_date: '2026-01-31', sessions: 2, repeat_every: 'monthly', skipped_dates: [] })[0], '2026-01-31');
+});
+
+test('the set-up walks only the steps the three axes call for', async () => {
+  const { stepsFor } = await import('../src/domain/hosting.js');
+  assert.deepEqual(stepsFor({ shape: 'oneoff', visibility: 'invite', money: 'free' }, {}), ['plan', 'vis', 'event', 'invite', 'money', 'done'], 'a free private wedding is two steps and an invitation');
+  assert.deepEqual(stepsFor({ shape: 'series', visibility: 'link', money: 'direct' }, {}), ['plan', 'vis', 'event', 'weeks', 'invite', 'money', 'price', 'done']);
+  assert.deepEqual(stepsFor({ shape: 'anytime', visibility: 'public', money: 'epic', checks: ['qual'] }, { type: 'meetups' }),
+    ['plan', 'vis', 'event', 'numbers', 'money', 'price', 'basics', 'kind', 'subdetail', 'video', 'extract', 'checks', 'evidence', 'done']);
+});
+
+test('a guest document seeds only what the host has not filled, and says which', async () => {
+  const { seedFromText } = await import('../src/routes/hosting.js');
+  const text = 'Rachel and Jay, at Hyde Barn\nSaturday 14 June 2027 from 13:00\nHyde Barn, Cirencester GL7 5PZ\nCeremony at one, food at three, carriages at midnight. Parking in the field behind.';
+  const r = seedFromText({ shape: 'oneoff' }, text);
+  assert.equal(r.patch.title, 'Rachel and Jay, at Hyde Barn');
+  assert.equal(r.patch.startsOn, '2027-06-14');
+  assert.equal(r.patch.startsAt, '13:00');
+  assert.match(r.patch.venueLabel, /GL7 5PZ/);
+  assert.match(r.patch.description, /Ceremony at one/);
+  assert.deepEqual(r.keys, ['title', 'startsOn', 'startsAt', 'venueLabel', 'description']);
+  const kept = seedFromText({ shape: 'oneoff', title: 'Our wedding', starts_on: '2027-06-14' }, text);
+  assert.ok(!kept.keys.includes('title') && !kept.keys.includes('startsOn'), 'what the host wrote stands');
 });
 
 test('a price is the offer’s arithmetic, per person or per household', () => {
@@ -75,6 +101,7 @@ test('an anytime offer is booked into the host’s days and parts, a fortnight a
   const from = new Date('2026-09-14T09:00:00Z'); // a Monday
   const slots = anytimeSlots(offer, { from, taken: new Set(['2026-09-15T18:00']) });
   assert.equal(slots.length, 2, 'two Tuesdays in fourteen days');
+  assert.equal(anytimeSlots({ availability: { days: [2], parts: ['evening'] }, notice_days: 3 }, { from })[0].date, '2026-09-22', 'three days\' notice skips tomorrow\'s Tuesday');
   assert.equal(slots[0].date, '2026-09-15');
   assert.deepEqual(slots[0].times, ['19:00', '20:00']);
   assert.deepEqual(anytimeSlots({ availability: {} }), []);
@@ -91,16 +118,22 @@ test('a held booking is decided two days before it runs; reviews publish a fortn
 // ---------------------------------------------------------------------------
 
 test('what stops an offer publishing follows the brief', () => {
-  const host = { type: 'practitioner', trust: 'verified', payout_status: 'connected' };
-  const ok = { shape: 'oneoff', title: 'Supper', description: 'Three courses from the garden.', starts_on: '2026-10-01', price_mode: 'free', venue: 'out_about' };
+  const host = { type: 'skill', trust: 'verified', payout_status: 'connected', date_of_birth: '1980-01-01' };
+  const ok = { shape: 'oneoff', visibility: 'public', money: 'free', title: 'Supper', description: 'Three courses from the garden.', starts_on: '2026-10-01', price_mode: 'free', venue: 'out_about', video_id: 'v' };
   assert.deepEqual(publishBlockers(ok, host), []);
   assert.match(publishBlockers({ ...ok, venue: 'their_place' }, host).join(' '), /Checked/);
-  assert.match(publishBlockers({ ...ok, price_mode: 'same_each', price_pence: 12000 }, host).join(' '), /above £100/);
-  assert.deepEqual(publishBlockers({ ...ok, price_mode: 'same_each', price_pence: 12000 }, { ...host, trust: 'checked' }), []);
-  assert.match(publishBlockers({ ...ok, price_mode: 'same_each', price_pence: 1800 }, { ...host, payout_status: 'not_connected' }).join(' '), /payouts/);
-  const night = publishBlockers({ ...ok, age_limit: null, min_count: 1 }, { type: 'local', local_kind: 'night_out', trust: 'verified', payout_status: 'connected' });
+  assert.match(publishBlockers({ ...ok, money: 'epic', price_mode: 'same_each', price_pence: 12000 }, host).join(' '), /above £100/);
+  assert.deepEqual(publishBlockers({ ...ok, money: 'epic', price_mode: 'same_each', price_pence: 12000 }, { ...host, trust: 'checked' }), []);
+  assert.match(publishBlockers({ ...ok, money: 'epic', price_mode: 'same_each', price_pence: 1800 }, { ...host, payout_status: 'not_connected' }).join(' '), /payouts/);
+  // Public paid is Epic-collects only.
+  assert.match(publishBlockers({ ...ok, money: 'direct', price_mode: 'same_each', price_pence: 1800 }, host).join(' '), /through Epic/);
+  // Private needs no video, no date of birth, no kind: a wedding is a one-off that happens to be invite-only.
+  assert.deepEqual(publishBlockers({ ...ok, visibility: 'invite', video_id: null }, { type: null, trust: 'verified', payout_status: 'not_connected', date_of_birth: null }), []);
+  assert.deepEqual(publishBlockers({ ...ok, visibility: 'link', money: 'direct', price_mode: 'same_each', price_pence: 15000, video_id: null }, { type: null, trust: 'verified', payout_status: 'not_connected' }), []);
+  const night = publishBlockers({ ...ok, age_limit: null, min_count: 1, rules_accepted: true, sub_detail: {} }, { ...host, type: 'meetups', local_kind: 'night_out' });
   assert.match(night.join(' '), /over-18s/);
-  assert.match(night.join(' '), /minimum party of three/);
+  assert.match(night.join(' '), /minimum group of three/);
+  assert.match(night.join(' '), /Name the venues/);
 });
 
 test('a regulated city asks its one question and flags listing copy that reads like a tour', () => {
@@ -108,8 +141,8 @@ test('a regulated city asks its one question and flags listing copy that reads l
   assert.equal(isRegulated('GB'), false);
   assert.equal(readsLikeCommentary('A tour of the Duomo'), true);
   assert.equal(readsLikeCommentary('A morning cooking together'), false);
-  const host = { type: 'practitioner', trust: 'checked', payout_status: 'connected' };
-  const florence = { shape: 'anytime', title: 'A morning cooking together', why_you: 'Twenty years in a trattoria kitchen.', venue_country: 'IT', venue: 'their_place', price_mode: 'free', availability: { days: [1], parts: ['morning'] } };
+  const host = { type: 'skill', trust: 'checked', payout_status: 'connected', date_of_birth: '1980-01-01' };
+  const florence = { shape: 'anytime', visibility: 'public', money: 'free', video_id: 'v', title: 'A morning cooking together', why_you: 'Twenty years in a trattoria kitchen.', venue_country: 'IT', venue: 'their_place', price_mode: 'free', availability: { days: [1], parts: ['morning'] } };
   assert.match(publishBlockers(florence, host).join(' '), /Italy/);
   assert.deepEqual(publishBlockers({ ...florence, regulated_answer: 'no_commentary' }, host), []);
   assert.match(publishBlockers({ ...florence, title: 'A tour of the Duomo', regulated_answer: 'no_commentary' }, host).join(' '), /reads like a guided tour/);
@@ -130,10 +163,10 @@ test('the pitch checklist reads the words the reviewer will', () => {
 
 test('one host per household, many offers, and calling one off refunds everybody', async () => {
   const { household } = await aHousehold(query, 'Maria’s household');
-  const host = await repo.insertHost(household.id, { name: 'Maria Okafor', type: 'practitioner', credentials: ['Slade, 2009'], languages: ['English', 'Igbo'] });
+  const host = await repo.insertHost(household.id, { name: 'Maria Okafor', type: 'skill', credentials: ['Slade, 2009'], languages: ['English', 'Igbo'] });
   assert.equal(host.trust, 'verified');
   assert.equal(host.checks, 'running');
-  await assert.rejects(repo.insertHost(household.id, { name: 'Again', type: 'guide' }), /unique/i, 'a household hosts once');
+  await assert.rejects(repo.insertHost(household.id, { name: 'Again', type: 'expert' }), /unique/i, 'a household hosts once');
 
   const offer = await repo.insertOffer(host.id, 'oneoff', { title: 'A supper from the garden', startsOn: '2026-10-02', minCount: 6, maxCount: 12, priceMode: 'same_each', pricePence: 4200 });
   assert.equal(offer.state, 'draft');
@@ -160,7 +193,7 @@ test('one host per household, many offers, and calling one off refunds everybody
 
 test('a guest review publishes on the date given, and the rating counts only what is published', async () => {
   const { household } = await aHousehold(query, 'Tom’s household');
-  const host = await repo.insertHost(household.id, { name: 'Tom Brennan', type: 'practitioner' });
+  const host = await repo.insertHost(household.id, { name: 'Tom Brennan', type: 'skill' });
   const offer = await repo.insertOffer(host.id, 'anytime', { title: 'A sourdough morning' });
   const guest = await aHousehold(query, 'a guest');
   const booking = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: guest.household.id, occurrence: '2026-08-30T09:00', party: [{ name: 'A' }], heads: 1, state: 'attended' });
@@ -219,7 +252,7 @@ test('a whole-run booking needs room in every session, drop-ins included', () =>
 test('a held booking is decided on its day: confirmed at the minimum, otherwise cancelled and told', async () => {
   const { settleHeldBookings } = await import('../src/routes/hosting.js');
   const { household } = await aHousehold(query, 'Marco’s household');
-  const host = await repo.insertHost(household.id, { name: 'Marco', type: 'local', localKind: 'something_you_do' });
+  const host = await repo.insertHost(household.id, { name: 'Marco', type: 'meetups', localKind: 'already_do' });
   const offer = await repo.insertOffer(host.id, 'oneoff', { title: 'I paint every Sunday', startsOn: '2027-10-13', minCount: 5, priceMode: 'free' });
   await repo.updateOffer(offer.id, { state: 'live' });
   const guest = await aHousehold(query, 'a guest household');
@@ -237,7 +270,7 @@ test('a held booking is decided on its day: confirmed at the minimum, otherwise 
 
 test('stopping hosting takes the host, its offers and its media with it', async () => {
   const { household } = await aHousehold(query, 'a host who stops');
-  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'guide' });
+  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'expert' });
   const offer = await repo.insertOffer(host.id, 'oneoff', { title: 'A draft' });
   const m = await repo.insertMedia({ householdId: household.id, kind: 'video', mime: 'video/webm', bytes: Buffer.from('x'), durationS: 30 });
   await repo.updateHost(host.id, { introVideoId: m.id });

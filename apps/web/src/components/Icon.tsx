@@ -24,10 +24,11 @@ const ICONS = {
   // navigation
   inspire: Sparkles, plan: Sparkles, places: Compass, trips: Route, household: Users, settings: Settings,
   /**
-   * The fifth tab (Events & Hosts, 12 Sep 2026): hosting is offering something
-   * of your own to strangers, so the glyph is a hand holding a plate out.
+   * The fifth tab. The open door (Hosts and Events, 13 Sep 2026: "you let
+   * people in — closest to the actual act"; unique in the bar, and it survives
+   * at 22px). The plate it replaced read as serving; the megaphone as shouting.
    */
-  host: HandPlatter,
+  host: DoorOpen,
   /**
    * Hosts and events. The trust ladder is three shields: `verified` the plain
    * outline, `checked` the ticked one, `trusted` the same tick on an ink

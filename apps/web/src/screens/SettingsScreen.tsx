@@ -242,7 +242,7 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
           <Text style={styles.kicker}>Hosting</Text>
           <View style={styles.rows}>
             <LinkRow label="Host on Epic" value={[hosting.host.checks === 'running' ? 'Checks running' : TRUST_LABEL[hosting.host.trust], `${hosting.stats?.live ?? 0} live`, hosting.stats?.nextPayoutOn ? `next ${dateOnly(hosting.stats.nextPayoutOn)}` : null].filter(Boolean).join(' · ')} onPress={() => navigate(paths.host())} icon="host" />
-            <LinkRow label="Payouts" value={hosting.host.payoutStatus === 'connected' ? hosting.host.payoutLabel ?? 'Connected' : 'Not connected'} onPress={() => navigate(paths.hostStart(4))} icon="payout" />
+            <LinkRow label="Payouts" value={hosting.host.payoutStatus === 'connected' ? hosting.host.payoutLabel ?? 'Connected' : 'Not connected'} onPress={() => navigate(`${paths.hostMe()}?at=payouts`)} icon="payout" />
             <LinkRow label="Your host profile" value="Public" onPress={() => navigate(paths.hostProfile(hosting.host!.id))} icon="guest" />
             <StopHosting onDone={() => { setHosting(null); navigate(paths.host()); }} />
           </View>

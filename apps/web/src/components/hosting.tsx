@@ -30,7 +30,8 @@ import { Icon, IconName } from './Icon';
 
 export const money = (p?: number | null) => (p == null ? '—' : p === 0 ? 'Free' : `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: p % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`);
 export const dayShort = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '');
-export const dayLong = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) : '');
+/** The year is said only when it is not this one: "Monday 14 June 2027" for a wedding, "Saturday 20 September" for this month. */
+export const dayLong = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', ...(iso.slice(0, 4) !== String(new Date().getFullYear()) ? { year: 'numeric' } : {}) }) : '');
 export const dateOnly = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
 export const weekdayName = (n: number) => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][n] ?? '';
 export const durationWords = (min?: number | null) => {
@@ -41,8 +42,14 @@ export const durationWords = (min?: number | null) => {
 /** A stored media address becomes an absolute one: the API is on another origin. */
 export const mediaUrl = (path?: string | null) => (path ? (path.startsWith('http') ? path : `${API_URL}${path}`) : null);
 
-export const TYPE_LABEL: Record<HostType, string> = { practitioner: 'Practitioner', local: 'Local', guide: 'Guide' };
-export const LOCAL_LABEL: Record<LocalKind, string> = { family: 'Family', something_you_do: 'Something you do', night_out: 'Night out', neighbourhood: 'Neighbourhood' };
+export const TYPE_LABEL: Record<HostType, string> = { skill: 'I have a skill', meetups: 'Meetups and mini tours', expert: 'Expert guide' };
+/** The short form for a chip: the kind in two words. */
+export const TYPE_CHIP: Record<HostType, string> = { skill: 'Skill', meetups: 'Meetup', expert: 'Expert guide' };
+export const LOCAL_LABEL: Record<LocalKind, string> = { family: 'Our family, with yours', already_do: 'Something I already do', night_out: 'A night out', neighbourhood: 'Round where I live' };
+export const LOCAL_CHIP: Record<LocalKind, string> = { family: 'Family', already_do: 'Something I do', night_out: 'Night out', neighbourhood: 'Neighbourhood' };
+export const VISIBILITY_LABEL = { invite: 'Only people I invite', link: 'Anyone with the link', public: 'Anyone on Epic' } as const;
+export const VISIBILITY_CHIP = { invite: 'Invite-only', link: 'Unlisted', public: 'Public' } as const;
+export const MONEY_LABEL = { free: 'Free', direct: 'They pay you directly', epic: 'Epic collects, pays you out' } as const;
 export const SHAPE_LABEL: Record<OfferShape, string> = { oneoff: 'One-off', series: 'Series', anytime: 'Anytime' };
 export const SHAPE_ICON: Record<OfferShape, IconName> = { oneoff: 'oneoff', series: 'series', anytime: 'anytime' };
 export const STATE_LABEL: Record<OfferState, string> = { draft: 'Draft', in_review: 'In review', live: 'Live', paused: 'Paused', ended: 'Ended' };
@@ -69,7 +76,7 @@ export function metaLine(o: Experience): string {
 
 /** "£42 each" · "£150 the run" · "£80" · "Free". */
 export function priceWords(o: Experience): string {
-  if (o.priceMode === 'free' || o.price.pence === 0) return 'Free';
+  if (o.money === 'free' || o.priceMode === 'free' || o.price.pence === 0) return 'Free';
   if (o.shape === 'series') return `${money(o.pricePence)} the run`;
   if (o.priceMode === 'by_numbers') return `about ${money(o.price.each)} each`;
   return `${money(o.pricePence)}${o.per === 'household' ? ' a household' : ' each'}`;
@@ -89,9 +96,10 @@ export function inWords(o: Experience): string {
 // ---------------------------------------------------------------------------
 
 /** A host's type: words on a coloured square, never ranked. Ink on lime, deep green on tint, cream on ink. */
-export function TypeChip({ type, localKind, small }: { type: HostType; localKind?: LocalKind | null; small?: boolean }) {
-  const look = type === 'practitioner' ? { bg: LIME, fg: INK } : type === 'local' ? { bg: LIME_TINT, fg: MOSS } : { bg: INK, fg: CREAM };
-  const label = type === 'local' && localKind ? `${TYPE_LABEL.local} · ${LOCAL_LABEL[localKind]}` : TYPE_LABEL[type];
+export function TypeChip({ type, localKind, small }: { type: HostType | null; localKind?: LocalKind | null; small?: boolean }) {
+  if (!type) return null;
+  const look = type === 'skill' ? { bg: LIME, fg: INK } : type === 'meetups' ? { bg: LIME_TINT, fg: MOSS } : { bg: INK, fg: CREAM };
+  const label = type === 'meetups' && localKind ? `${TYPE_CHIP.meetups} · ${LOCAL_CHIP[localKind]}` : TYPE_CHIP[type];
   return (
     <View style={[styles.chip, { backgroundColor: look.bg }, small && styles.chipSmall]}>
       <Text style={[styles.chipText, { color: look.fg }, small && styles.chipTextSmall]}>{label.toUpperCase()}</Text>
@@ -344,7 +352,7 @@ export function ExperienceCard({ item, onOpen, width }: { item: Experience; onOp
 }
 
 /** A row in a host's offer menu (B1): the card as a line, with its own play badge and state. */
-export function OfferRow({ item, onPress, own }: { item: Experience & { state: OfferState; pausedUntil: string | null }; onPress: () => void; own?: { booked?: number; inReview?: boolean } }) {
+export function OfferRow({ item, onPress, own }: { item: Experience & { state: OfferState; pausedUntil: string | null }; onPress: () => void; own?: { booked?: number; inReview?: boolean; visibility?: string } }) {
   const dim = item.state === 'paused';
   return (
     <Press onPress={onPress} accessibilityRole="button" style={[styles.offerRow, dim && { opacity: 0.7 }]}>
@@ -356,6 +364,7 @@ export function OfferRow({ item, onPress, own }: { item: Experience & { state: O
         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
           <ShapeChip shape={item.shape} small />
           {own ? <StateChip state={item.state} pausedUntil={item.pausedUntil} /> : null}
+          {own?.visibility ? <View style={[styles.chip, styles.chipOutlineSoft]}><Text style={[styles.chipText, { color: colors.inkMuted }]}>{own.visibility.toUpperCase()}</Text></View> : null}
         </View>
         <Text style={[type.h3, { fontWeight: '600' }]} numberOfLines={2}>{item.title ?? 'Untitled'}</Text>
         <Text style={type.small} numberOfLines={1}>{item.whyYou && !own ? item.whyYou : metaLine(item)}</Text>

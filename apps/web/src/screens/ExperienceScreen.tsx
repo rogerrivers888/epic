@@ -32,7 +32,7 @@ import { signedIn } from '../session';
 import { LockScreen } from './LockScreen';
 import {
   HostFace, Kicker, NewOnEpic, RatingLine, REFUND_WORDS, ShapeChip, TRUST_LABEL, TrustBadge, TypeChip, VENUE_ICON, VENUE_LABEL, VideoHero,
-  dateOnly, dayLong, dayShort, durationWords, money, needsLine, priceWords, venueWords,
+  dateOnly, dayLong, dayShort, durationWords, mediaUrl, money, needsLine, priceWords, venueWords,
 } from '../components/hosting';
 
 const WIDE = 900;
@@ -40,7 +40,9 @@ const WIDE = 900;
 export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'experience' }> }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
-  const { navigate, back } = useRouter();
+  const { navigate, back, query } = useRouter();
+  // An invite-only offer opens only with the invitation's token (`?i=`).
+  const inviteToken = query.get('i');
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
   const [mine, setMine] = useState<{ bookings: Booking[]; party: PartyMember[]; you: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,11 +50,11 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
 
   const load = useCallback(async () => {
     try {
-      setData(await api.experience(route.id));
+      setData(await api.experience(route.id, inviteToken));
       setError(null);
       if (signedIn()) api.experienceMine(route.id).then(setMine).catch(() => setMine(null));
     } catch (e: any) { setError(e.message); }
-  }, [route.id]);
+  }, [route.id, inviteToken]);
   useEffect(() => { void load(); }, [load]);
 
   if (error && !data) {
@@ -129,6 +131,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
         <View style={styles.gutter}>
           <Text style={type.title}>{offer.title}</Text>
           <Text style={[type.small, { marginTop: 4 }]}>{headline(offer)}</Text>
+          {offer.summary ? <Text style={[type.body, { marginTop: spacing.sm, fontWeight: '600' }]}>{offer.summary}</Text> : null}
 
           {/* The host block: person first, trust level beside them. */}
           <Press onPress={() => navigate(paths.hostProfile(host.id))} accessibilityRole="button" style={styles.hostRow}>
@@ -163,6 +166,18 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
           {offer.includes ? (
             <View style={styles.block}><Kicker>WHAT IS INCLUDED</Kicker><Text style={type.body}>{offer.includes}</Text></View>
           ) : null}
+          {offer.facts.length ? (
+            <View style={styles.block}>
+              {offer.facts.map((f) => <Row key={f.key} style={{ justifyContent: 'space-between' }}><Text style={type.small}>{f.key}</Text><Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>{f.value}</Text></Row>)}
+            </View>
+          ) : null}
+          {offer.doc ? (
+            <Press onPress={() => { const u = mediaUrl(offer.doc); if (u && typeof window !== 'undefined') window.open(u, '_blank'); }} accessibilityRole="link" style={styles.mineRow}>
+              <Icon name="download" size={16} color={colors.ink} />
+              <Text style={[type.small, { flex: 1, color: colors.ink }]}>Everything for the day, as a PDF</Text>
+              <Text style={styles.link}>Download</Text>
+            </Press>
+          ) : null}
 
           {/* The money and the minimum, in one plain block. */}
           <View style={styles.priceBlock}>
@@ -174,7 +189,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
             {offer.priceMode === 'by_numbers' ? <Text style={type.small}>Depends on numbers: never more than {money(offer.price.ceilingPence)} each.</Text> : null}
             {needsLine(offer) ? <Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>{needsLine(offer)}</Text> : null}
             <Text style={type.small}>
-              {REFUND_WORDS[offer.refundRule]}.{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
+              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : `${REFUND_WORDS[offer.refundRule]}.`}{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
             </Text>
             {offer.ageLimit ? <Text style={type.small}>Over {offer.ageLimit}s only. We ask for the age of everyone in the party when you book.</Text> : null}
           </View>

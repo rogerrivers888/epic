@@ -1,147 +1,503 @@
 /**
- * Add an offer: the five steps, in the group set-up's clothes (Hosts and
- * Events W1–W5; Events v4 C0–C3, D2).
+ * Setting an offer up: one question per screen (Host prototype, 13 Sep 2026 —
+ * "the behaviour spec"; README §2–3).
  *
- *   1  What shape is it?     the fork. One-off · Series · Anytime — and it
- *                            visibly changes what is asked next.
- *   2  What is it?           title, what happens, photos, where — then the
- *                            shape's own questions: a running order and who
- *                            else is there (one-off); the outcome first, then
- *                            the arc, then the weeks, then joining (series);
- *                            one line, why you for this, the four formats and
- *                            when you are free (anytime). Its own video.
- *   3  Who, and how many     minimum · expecting · maximum, typed never nudged,
- *                            the three-line panel beneath, party size, age limit.
- *   4  Price                 Free / Same each / Depends on numbers, Person /
- *                            Household, what it includes, the refund rule.
- *                            Epic collects, pays you out — the only way here.
- *   5  Publish               the card as a guest sees it, the checklist of
- *                            what has to be true first, live or link only.
+ * Three independent axes decide which questions are asked:
  *
- * Every field saves as it is left (`PATCH /api/host/offers/<id>`), so the
- * draft is never lost and the wizard is the same screen for editing later.
- * `?step=n` is the page's address. The regulated-city question appears only
- * when the venue is in one.
+ *   shape       oneoff · series · anytime    what "when" looks like
+ *   visibility  invite · link · public       whether we need identity, a video,
+ *                                             evidence and an age gate
+ *   money       free · direct · epic         whether there is a price, a
+ *                                             minimum, a refund rule, a payout
+ *
+ *   plan → vis → event → [weeks] → numbers | invite → money → [price]
+ *        → [basics, kind, [subdetail], video, extract, checks, [evidence]] → done
+ *
+ * The sequence comes from the API (`offer.steps`), so the progress bar is
+ * honest for every combination and nothing hard-codes a total. The primary
+ * button reads "Next · <the next step>" and "Make it epic" only when nothing
+ * follows. Every field saves as it is left. Each step opens at the top.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, Availability, OfferInput, OfferShape, OwnOffer, Place, PriceMode, RefundRule, RunningOrderRow, OfferVenue, Week } from '../../api';
-import { colors, fonts, spacing, TARGET, type, BORDER } from '../../theme';
+import { api, CheckKind, Evidence, HostHome, LocalKind, Money, OfferInput, OfferInvite, OfferShape, OwnOffer, Place, Visibility } from '../../api';
+import { colors, fonts, spacing, TARGET, type, BORDER, INK, LIME } from '../../theme';
 import { Button, Row, Segmented, StatusLine, Wrap } from '../../components/ui';
 import { Icon, IconName } from '../../components/Icon';
 import { PlacePicker } from '../../components/PlacePicker';
 import { DateRangePicker } from '../../components/DateRangePicker';
 import { TimeField } from '../../components/TimePicker';
+import { BirthdayPicker } from '../../components/BirthdayPicker';
 import { useViewport } from '../../hooks/useViewport';
-import { asNumber, useQueryState, useRouter } from '../../router';
+import { useQueryState, useRouter } from '../../router';
 import { paths } from '../../routes';
 import { pickPhotoBlob } from '../../components/pickPhoto';
-import {
-  ExperienceCard, Kicker, NumberBox, SHAPE_ICON, SHAPE_LABEL, SizePanel, VENUE_ICON, VENUE_LABEL, dayLong, mediaUrl, money, weekdayName,
-} from '../../components/hosting';
+import { ExperienceCard, NumberBox, SHAPE_ICON, SHAPE_LABEL, VISIBILITY_CHIP, VISIBILITY_LABEL, dayLong, dayShort, money as pounds, weekdayName } from '../../components/hosting';
+import { KindChooser } from './ProfileScreen';
 
-const STEPS = ['What shape is it?', 'What you are offering', 'Who, and how many', 'Price', 'How it will look'];
-const NEXT = ['Next · what you are offering', 'Next · who and how many', 'Next · price', 'Next · see it as a guest', 'Publish it'];
-const DAYS = [{ n: 1, l: 'Mon' }, { n: 2, l: 'Tue' }, { n: 3, l: 'Wed' }, { n: 4, l: 'Thu' }, { n: 5, l: 'Fri' }, { n: 6, l: 'Sat' }, { n: 0, l: 'Sun' }];
-const PARTS = [{ k: 'morning', l: 'Mornings' }, { k: 'afternoon', l: 'Afternoons' }, { k: 'evening', l: 'Evenings' }] as const;
+/** What each step is called on the button that leads to it, and in the progress line. */
+const LABEL: Record<string, string> = { plan: 'what we need', vis: 'who can come', event: 'what it is', weeks: 'the run', invite: 'who is invited', numbers: 'how many', money: 'money', price: 'price', basics: 'about you', kind: 'what kind of host', subdetail: 'the detail', video: 'tell us what you do', extract: 'your listing', checks: 'what backs it up', evidence: 'the details', done: 'done' };
+const TITLE: Record<string, string> = { basics: 'About you', kind: 'What kind of host', vis: 'Who can come', video: 'Tell us what you do', extract: 'Your listing', checks: 'What backs it up', evidence: 'The details', subdetail: 'The detail', weeks: 'The run', event: 'What it is, and when', invite: 'Who is invited', numbers: 'How many', price: 'Price', money: 'Money' };
+const DAYS = [{ n: 1, l: 'M' }, { n: 2, l: 'T' }, { n: 3, l: 'W' }, { n: 4, l: 'T' }, { n: 5, l: 'F' }, { n: 6, l: 'S' }, { n: 0, l: 'S' }];
 const pence = (t: string) => (t.trim() === '' ? null : Math.round(Number(t.replace(/[^0-9.]/g, '')) * 100) || null);
 const num = (t: string) => (t.trim() === '' ? null : Math.max(0, Math.round(Number(t.replace(/[^0-9]/g, '')))) || null);
 const str = (n?: number | null) => (n == null ? '' : String(n));
-const pounds = (p?: number | null) => (p == null ? '' : String(p / 100));
+const pnds = (p?: number | null) => (p == null ? '' : String(p / 100));
+const dmy = (iso?: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 
-export function OfferWizard({ offerId, onDone }: { offerId: string; onDone: (offer: OwnOffer, inReview: boolean) => void }) {
+type Save = (b: OfferInput) => Promise<OwnOffer | null>;
+
+export function OfferWizard({ offerId, home, onChanged }: { offerId: string; home: HostHome | null; onChanged: () => Promise<void> }) {
   const { width } = useViewport();
   const wide = width >= 900;
   const { navigate, back } = useRouter();
-  const [stepN, setStepN] = useQueryState<number | null>('step', 1, asNumber(1));
-  const step = Math.min(5, Math.max(1, stepN ?? 1));
+  const [stepQ, setStepQ] = useQueryState<string | null>('step', null, { read: (r) => r || null, write: (v) => v || null });
   const [offer, setOffer] = useState<OwnOffer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const scroller = useRef<ScrollView>(null);
 
-  useEffect(() => { api.hostOffer(offerId).then((r) => setOffer(r.offer)).catch((e) => setError(e.message)); }, [offerId]);
+  const load = useCallback(async () => {
+    try { setOffer((await api.hostOffer(offerId)).offer); setError(null); } catch (e: any) { setError(e.message); }
+  }, [offerId]);
+  useEffect(() => { void load(); }, [load]);
 
-  /** Every change is a PATCH; the answer is the whole offer, so the screen never guesses. */
-  const save = useCallback(async (body: OfferInput) => {
+  /** Every change is a PATCH; the answer is the whole offer, sequence included. */
+  const save: Save = useCallback(async (body) => {
     try { const r = await api.updateOffer(offerId, body); setOffer(r.offer); setError(null); return r.offer; }
     catch (e: any) { setError(e.message); return null; }
   }, [offerId]);
 
-  const go = (n: number) => { setError(null); setStepN(n); };
+  const steps = offer?.steps ?? ['plan'];
+  const step = stepQ && steps.includes(stepQ) ? stepQ : 'plan';
+  // Each step opens at the top: set the container, never scrollIntoView (fault 2).
+  useEffect(() => { scroller.current?.scrollTo({ y: 0, animated: false }); }, [step]);
+  const go = (s: string) => { setError(null); setStepQ(s === 'plan' ? null : s, { replace: false }); };
+  const at = steps.indexOf(step);
+  const nextStep = steps[at + 1] ?? null;
+  const flow = steps.filter((s) => s !== 'plan' && s !== 'done');
+  const cur = flow.indexOf(step) + 1;
+
   if (error && !offer) return <View style={styles.page}><Text style={type.h2}>Not one of yours</Text><Text style={type.small}>{error}</Text><Button label="Back to hosting" kind="secondary" onPress={() => navigate(paths.host(), { replace: true })} /></View>;
   if (!offer) return <View style={styles.page}><Text style={type.small}>Opening…</Text></View>;
+  const o = offer;
+  const pub = o.visibility === 'public';
 
   const publish = async () => {
     setBusy(true); setError(null);
-    try { const r = await api.submitOffer(offerId); onDone(r.offer, r.inReview); }
+    try { const r = await api.submitOffer(offerId); setOffer(r.offer); await onChanged(); go('done'); }
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
-
-  const heading = step === 1 ? 'What shape is it?'
-    : step === 2 ? (offer.shape === 'oneoff' ? 'What is going to happen?' : offer.shape === 'series' ? 'Across the weeks' : 'What are you offering?')
-      : step === 3 ? 'Who, and how many' : step === 4 ? 'Price' : 'How it will look';
-  const kicker = step === 2 ? (offer.shape === 'oneoff' ? 'One-off' : offer.shape === 'series' ? 'Series' : 'Anytime offer') : offer.state === 'draft' ? 'New offer' : 'Your offer';
+  const forward = () => {
+    if (!nextStep) return;
+    if (nextStep === 'done') { if (o.state === 'draft') void publish(); else go('done'); return; }
+    go(nextStep);
+  };
+  const cta = step === 'done' ? null : !nextStep || nextStep === 'done' ? (o.state === 'draft' ? 'Make it epic' : 'Save') : `Next · ${LABEL[nextStep] ?? nextStep}`;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView contentContainerStyle={[styles.scroll, wide && styles.wide]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroller} contentContainerStyle={[styles.scroll, wide && styles.wide]} keyboardShouldPersistTaps="handled">
         <Row style={{ justifyContent: 'space-between' }}>
-          <Press onPress={() => (step > 1 ? go(step - 1) : back(paths.host()))} accessibilityRole="button" hitSlop={8}><Row><Icon name="back" size={18} /><Text style={type.h3}>{kicker}</Text></Row></Press>
-          <Text style={type.small}>{heading} · {step} of 5</Text>
+          <Press onPress={() => (at > 0 ? go(steps[at - 1]) : back(paths.host()))} accessibilityRole="button" hitSlop={8}><Row><Icon name="back" size={18} /><Text style={type.h3}>{step === 'done' ? 'All set' : 'Host on Epic'}</Text></Row></Press>
+          {cur > 0 ? <Text style={type.small}>{TITLE[step]} · {cur} of {flow.length}</Text> : null}
         </Row>
-        <View style={styles.progress}>{STEPS.map((s, i) => <View key={s} style={[styles.bar, i < step && styles.barOn]} />)}</View>
-        <Text style={type.title}>{heading}</Text>
+        {cur > 0 ? <View style={styles.progress}>{flow.map((s, i) => <View key={s} style={[styles.bar, i < cur && styles.barOn]} />)}</View> : null}
 
-        {step === 1 ? <ShapeStep offer={offer} onPick={(shape) => void save({ shape })} /> : null}
-        {step === 2 ? <WhatStep offer={offer} save={save} onVideo={() => navigate(paths.hostVideo(offer.id))} /> : null}
-        {step === 3 ? <WhoStep offer={offer} save={save} /> : null}
-        {step === 4 ? <PriceStep offer={offer} save={save} /> : null}
-        {step === 5 ? <PublishStep offer={offer} save={save} onEdit={(n) => go(n)} /> : null}
+        {step === 'plan' ? <Plan offer={o} /> : null}
+        {step === 'vis' ? <Vis offer={o} save={save} /> : null}
+        {step === 'event' ? <EventStep offer={o} save={save} onSeeded={setOffer} /> : null}
+        {step === 'weeks' ? <Weeks offer={o} save={save} /> : null}
+        {step === 'numbers' ? <Numbers offer={o} save={save} /> : null}
+        {step === 'invite' ? <Invite offer={o} setOffer={setOffer} setError={setError} /> : null}
+        {step === 'money' ? <MoneyStep offer={o} save={save} /> : null}
+        {step === 'price' ? <Price offer={o} save={save} /> : null}
+        {step === 'basics' ? <Basics home={home} onChanged={onChanged} /> : null}
+        {step === 'kind' ? <Kind home={home} onChanged={onChanged} offer={o} save={save} /> : null}
+        {step === 'subdetail' ? <SubDetail offer={o} save={save} sub={home?.host?.localKind ?? 'already_do'} /> : null}
+        {step === 'video' ? <VideoStep offer={o} onRecord={() => navigate(paths.hostVideo(o.id))} /> : null}
+        {step === 'extract' ? <Extract offer={o} save={save} setOffer={setOffer} setError={setError} /> : null}
+        {step === 'checks' ? <Checks offer={o} save={save} kind={home?.host?.type ?? 'skill'} town={home?.host?.location ?? null} /> : null}
+        {step === 'evidence' ? <EvidenceStep offer={o} home={home} onChanged={onChanged} /> : null}
+        {step === 'done' ? <Done offer={o} home={home} /> : null}
 
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       </ScrollView>
-      <View style={[styles.footer, wide && styles.wide]}>
-        {step < 5 ? (
-          <>
-            <Button label={NEXT[step - 1]} icon="forward" onPress={() => go(step + 1)} />
-            <Text style={[type.tiny, { textAlign: 'center' }]}>{step === 1 ? 'Most hosts end up with several offers of different shapes. You can add another as soon as this one is done.' : 'Saved as a draft — nothing is public yet'}</Text>
-          </>
-        ) : (
-          <>
-            <Button label={offer.state === 'live' ? 'Save changes' : 'Publish it'} icon="check" loading={busy} disabled={offer.blockers.length > 0 && offer.state !== 'live'} onPress={offer.state === 'live' ? () => navigate(paths.hostOffer(offer.id), { replace: true }) : publish} />
-            <Text style={[type.tiny, { textAlign: 'center' }]}>{offer.blockers.length && offer.state !== 'live' ? offer.blockers[0] : 'Take it down any time — bookings are honoured'}</Text>
-          </>
-        )}
+      {cta ? (
+        <View style={[styles.footer, wide && styles.wide]}>
+          <Button label={cta} icon={cta === 'Make it epic' ? 'check' : 'forward'} loading={busy} onPress={forward} />
+          {step === 'plan' ? <Text style={[type.tiny, { textAlign: 'center' }]}>Save and come back whenever. Nothing is public until you press publish.</Text> : null}
+          {cta === 'Make it epic' && o.blockers.length ? <Text style={[type.tiny, { textAlign: 'center', color: colors.overrun }]}>{o.blockers[0]}</Text> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// plan — "Here is what we need"
+// ---------------------------------------------------------------------------
+
+function Plan({ offer: o }: { offer: OwnOffer }) {
+  const groups = [
+    { h: 'EVERYONE', lime: false, rows: [['1', 'Who can come', '30 sec'], ['2', 'What it is, and when', '2 min'], ['3', 'Who is coming', '1 min'], ['4', 'Is anyone paying', '1 min']] },
+    { h: 'IF IT IS PUBLIC', lime: true, rows: [['5', 'You and what you do', '4 min'], ['6', 'What backs it up', '2 min']] },
+  ];
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <Row style={{ gap: 6 }}><View style={styles.shapeTag}><Icon name={SHAPE_ICON[o.shape]} size={11} color={colors.ink} /><Text style={styles.shapeTagText}>{SHAPE_LABEL[o.shape].toUpperCase()}</Text></View></Row>
+      <Text style={styles.title}>Here is what we need</Text>
+      {groups.map((g) => (
+        <View key={g.h}>
+          <Text style={[styles.groupHead, g.lime && { color: colors.accent }]}>{g.h}</Text>
+          {g.rows.map(([n, t, m]) => (
+            <Row key={n} style={styles.planRow}>
+              <View style={[styles.numTile, g.lime && { backgroundColor: LIME }]}><Text style={styles.numText}>{n}</Text></View>
+              <Text style={[type.body, { flex: 1 }]}>{t}</Text>
+              <Text style={type.tiny}>{m}</Text>
+            </Row>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// vis — who can come
+// ---------------------------------------------------------------------------
+
+function Vis({ offer: o, save }: { offer: OwnOffer; save: Save }) {
+  const opts: { k: Visibility; icon: IconName; t: string; s: string; money: string }[] = [
+    { k: 'invite', icon: 'locked', t: 'Only people I invite', s: 'Add names now or later. Hidden from everyone else.', money: 'No video, no ID check, no payout set-up' },
+    { k: 'link', icon: 'share', t: 'Anyone with the link', s: 'One link, passed around. Not listed on Epic.', money: 'No video needed — you are splitting costs' },
+    { k: 'public', icon: 'web', t: 'Anyone on Epic', s: 'In Inspire and Places, near people whose trip fits.', money: 'A video and an ID check · we pay you out' },
+  ];
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <Text style={styles.title}>Who can come?</Text>
+      {opts.map((v) => {
+        const on = o.visibility === v.k;
+        return (
+          <Press key={v.k} onPress={() => void save({ visibility: v.k })} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.choice, on && styles.choiceOn]}>
+            <Row style={{ alignItems: 'flex-start' }}>
+              <View style={[styles.iconTile, on && { backgroundColor: LIME }]}><Icon name={v.icon} size={16} color={colors.ink} /></View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={type.h3}>{v.t}</Text>
+                <Text style={type.small}>{v.s}</Text>
+                <Text style={[type.tiny, { color: colors.accent, fontWeight: '600' }]}>{v.money}</Text>
+              </View>
+              {on ? <View style={styles.tick}><Icon name="check" size={14} color={colors.selectedFg} strokeWidth={3} /></View> : null}
+            </Row>
+          </Press>
+        );
+      })}
+      <View style={[styles.note, o.visibility === 'public' && { backgroundColor: colors.surfaceMuted }]}>
+        <Text style={[type.small, { color: o.visibility === 'public' ? colors.accent : colors.inkMuted }]}>
+          {o.visibility === 'public' ? 'It will be listed publicly, so we need a video and something that backs you up.' : 'No video and no checks. You will still say what it is, who is invited and whether anyone is paying.'}
+        </Text>
       </View>
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 1 · the fork
+// event — what it is, and when
 // ---------------------------------------------------------------------------
 
-function ShapeStep({ offer, onPick }: { offer: OwnOffer; onPick: (s: OfferShape) => void }) {
-  const shapes: { key: OfferShape; title: string; body: string }[] = [
-    { key: 'oneoff', title: 'One-off', body: 'One date, one start time. You will list the running order and who else is there.' },
-    { key: 'series', title: 'Series', body: 'A fixed run of sessions. You will write the arc, the weeks and what people leave knowing.' },
-    { key: 'anytime', title: 'Anytime', body: 'No date — people book your time. You will describe what you offer and when you are free.' },
-  ];
+function EventStep({ offer: o, save, onSeeded }: { offer: OwnOffer; save: Save; onSeeded: (o: OwnOffer) => void }) {
+  const pub = o.visibility === 'public';
+  const [title, setTitle] = useState(o.title ?? '');
+  const [notes, setNotes] = useState(o.description ?? '');
+  const [place, setPlace] = useState<Place | null>(o.venueLabel ? { label: o.venueLabel, lat: o.venueLat ?? 0, lng: o.venueLng ?? 0 } : null);
+  const [openDate, setOpenDate] = useState(false);
+  const [endMode, setEndMode] = useState<'end' | 'dur'>(o.endsAt ? 'end' : 'dur');
+  const [dur, setDur] = useState(str(o.durationMin));
+  const [endKind, setEndKind] = useState<'count' | 'date'>(o.endDate && !o.sessions ? 'date' : 'count');
+  const [sessions, setSessions] = useState(str(o.sessions));
+  const [openEnd, setOpenEnd] = useState(false);
+  const [notice, setNotice] = useState(str(o.noticeDays ?? 2));
+  const [slot, setSlot] = useState(str(o.slotMin ?? o.durationMin ?? 90));
+  const [docBusy, setDocBusy] = useState(false);
+  useEffect(() => { setTitle(o.title ?? ''); setNotes(o.description ?? ''); if (o.venueLabel) setPlace({ label: o.venueLabel, lat: o.venueLat ?? 0, lng: o.venueLng ?? 0 }); }, [o.seeded.join(',')]);
+  const seeded = (k: string) => o.seeded.some((s) => s.endsWith(`:${k}`));
+  const edge = (k: string) => (seeded(k) ? styles.seeded : null);
+
+  const pickDoc = async () => {
+    if (Platform.OS !== 'web') return;
+    const input = document.createElement('input'); input.type = 'file'; input.accept = 'application/pdf';
+    input.onchange = async () => {
+      const f = input.files?.[0]; if (!f) return;
+      setDocBusy(true);
+      try { const m = await api.uploadHostMedia(f, 'doc'); const r = await api.seedOfferDoc(o.id, m.id); onSeeded(r.offer); } catch (e: any) { /* said by the footer */ } finally { setDocBusy(false); }
+    };
+    input.click();
+  };
+  const dropDoc = async () => { const r = await api.seedOfferDoc(o.id, null); onSeeded(r.offer); };
+
   return (
-    <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
-      <Text style={type.small}>This changes what we ask you next — describing a single evening is nothing like describing a ten-week course.</Text>
-      {shapes.map((s) => {
-        const on = offer.shape === s.key;
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>{o.shape === 'series' ? 'What is it, and when does it run?' : pub ? 'What is it, and when?' : 'What is the day?'}</Text>
+
+      {/* The document sits at the top: what it says seeds the fields, each marked. */}
+      <Press onPress={() => (o.doc ? void dropDoc() : void pickDoc())} accessibilityRole="button" style={[styles.docRow, o.doc && { backgroundColor: colors.surfaceMuted }]}>
+        <View style={[styles.iconTile, o.doc && { backgroundColor: LIME }]}><Icon name={o.doc ? 'check' : 'upload'} size={16} color={colors.ink} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={type.h3}>{docBusy ? 'Reading it…' : o.doc ? 'Your PDF is attached' : 'Got a PDF for guests?'}</Text>
+          <Text style={type.small}>{o.doc ? 'Guests can download it. Tap to take it off.' : 'Upload it here — guests can download it, and we fill in what we can from it.'}</Text>
+        </View>
+      </Press>
+
+      <Field label="What is it called">
+        <TextInput value={title} onChangeText={setTitle} onBlur={() => void save({ title })} placeholder={o.shape === 'series' ? 'Six Thursdays, learning to see' : pub ? 'Reading, as it actually was' : 'Our wedding at the barn'} placeholderTextColor={colors.inkFaint} style={[styles.input, edge('title')]} />
+      </Field>
+
+      {o.shape === 'oneoff' ? (
+        <>
+          <Field label="Date">
+            <Press onPress={() => setOpenDate(!openDate)} accessibilityRole="button" style={[styles.input, styles.inputRow, edge('startsOn')]}><Icon name="calendar" size={16} /><Text style={[type.body, !o.startsOn && { color: colors.inkMuted }]}>{o.startsOn ? dayLong(o.startsOn) : 'Tap to choose'}</Text></Press>
+            {openDate ? <DateRangePicker single inline start={o.startsOn} end={o.startsOn} onApply={(d) => { void save({ startsOn: d }); setOpenDate(false); }} /> : null}
+          </Field>
+          <Field label="Time" right={<Press onPress={() => setEndMode(endMode === 'end' ? 'dur' : 'end')} accessibilityRole="button"><Text style={styles.link}>{endMode === 'end' ? 'Give a duration instead' : 'Give an end time instead'}</Text></Press>}>
+            <Row>
+              <View style={[{ flex: 1 }, edge('startsAt')]}><TimeField value={o.startsAt ?? ''} onChange={(t) => void save({ startsAt: t || null })} step={15} placeholder="Starts" label="Starts" /></View>
+              {endMode === 'end'
+                ? <View style={{ flex: 1 }}><TimeField value={o.endsAt ?? ''} onChange={(t) => void save({ endsAt: t || null, durationMin: null })} step={15} placeholder="Ends" label="Ends" /></View>
+                : <Row style={{ flex: 1 }}><NumberBox value={dur} onChange={setDur} onCommit={() => void save({ durationMin: num(dur), endsAt: null })} width={84} /><Text style={type.small}>min</Text></Row>}
+            </Row>
+            <Text style={type.tiny}>{endMode === 'end' ? 'Guests see both — we work the duration out.' : 'Guests see both — we work the end time out.'}</Text>
+          </Field>
+        </>
+      ) : null}
+
+      {o.shape === 'series' ? (
+        <>
+          <Field label="How often">
+            <Segmented value={o.repeatEvery} options={[{ value: 'weekly', label: 'Weekly' }, { value: 'fortnightly', label: 'Fortnightly' }, { value: 'monthly', label: 'Monthly' }]} onChange={(v) => void save({ repeatEvery: v })} />
+          </Field>
+          <Field label="On a">
+            <Row style={{ gap: 6 }}>
+              {DAYS.map((d) => { const on = (o.weekday ?? (o.firstDate ? new Date(`${o.firstDate}T12:00:00`).getDay() : 4)) === d.n; return <Press key={d.n} onPress={() => void save({ weekday: d.n })} accessibilityRole="button" style={[styles.dayChip, on && styles.dayOn]}><Text style={[styles.dayText, on && { color: colors.selectedFg }]}>{d.l}</Text></Press>; })}
+            </Row>
+          </Field>
+          <Field label="First one">
+            <Press onPress={() => setOpenDate(!openDate)} accessibilityRole="button" style={[styles.input, styles.inputRow, edge('firstDate')]}><Icon name="calendar" size={16} /><Text style={[type.body, !o.firstDate && { color: colors.inkMuted }]}>{o.firstDate ? dayLong(o.firstDate) : 'Tap to choose'}</Text></Press>
+            {openDate ? <DateRangePicker single inline start={o.firstDate} end={o.firstDate} onApply={(d) => { void save({ firstDate: d, weekday: new Date(`${d}T12:00:00`).getDay() }); setOpenDate(false); }} /> : null}
+            <TimeField value={o.startsAt ?? ''} onChange={(t) => void save({ startsAt: t || null })} step={15} placeholder="Starts at" label="Starts at" />
+          </Field>
+          <Field label="Until" right={<Press onPress={() => setEndKind(endKind === 'count' ? 'date' : 'count')} accessibilityRole="button"><Text style={styles.link}>{endKind === 'count' ? 'Give an end date instead' : 'Give a number instead'}</Text></Press>}>
+            {endKind === 'count' ? (
+              <Row><NumberBox value={sessions} onChange={setSessions} onCommit={() => void save({ sessions: num(sessions), endDate: null })} width={84} /><Text style={type.small}>sessions</Text></Row>
+            ) : (
+              <>
+                <Press onPress={() => setOpenEnd(!openEnd)} accessibilityRole="button" style={[styles.input, styles.inputRow]}><Icon name="calendar" size={16} /><Text style={[type.body, !o.endDate && { color: colors.inkMuted }]}>{o.endDate ? dayLong(o.endDate) : 'Tap to choose'}</Text></Press>
+                {openEnd ? <DateRangePicker single inline start={o.endDate} end={o.endDate} onApply={(d) => { void save({ endDate: d, sessions: null }); setOpenEnd(false); }} /> : null}
+              </>
+            )}
+            <Text style={type.tiny}>{o.dates.length ? `${o.dates.length} ${weekdayName(new Date(`${o.dates[0]}T12:00:00`).getDay())}s from ${dayShort(o.dates[0])} — the last is ${dayShort(o.dates[o.dates.length - 1])}.` : 'Give the first date and a number or an end date, and we work the other out.'}</Text>
+          </Field>
+          <Field label="Each one lasts">
+            <Row><NumberBox value={dur} onChange={setDur} onCommit={() => void save({ durationMin: num(dur) })} width={84} /><Text style={type.small}>minutes</Text></Row>
+          </Field>
+        </>
+      ) : null}
+
+      {o.shape === 'anytime' ? (
+        <>
+          <Field label="Days you are free">
+            <Row style={{ gap: 6 }}>
+              {DAYS.map((d) => { const days = new Set(o.availability.days ?? []); const on = days.has(d.n); return <Press key={d.n} onPress={() => { if (on) days.delete(d.n); else days.add(d.n); void save({ availability: { days: [...days], parts: o.availability.parts ?? [] } }); }} accessibilityRole="button" style={[styles.dayChip, on && styles.dayOn]}><Text style={[styles.dayText, on && { color: colors.selectedFg }]}>{d.l}</Text></Press>; })}
+            </Row>
+          </Field>
+          <Field label="When in the day">
+            <Row style={{ gap: 6 }}>
+              {(['morning', 'afternoon', 'evening'] as const).map((p) => { const parts = new Set(o.availability.parts ?? []); const on = parts.has(p); return <Press key={p} onPress={() => { if (on) parts.delete(p); else parts.add(p); void save({ availability: { days: o.availability.days ?? [], parts: [...parts] } }); }} accessibilityRole="button" style={[styles.pill, on && styles.pillOn]}><Text style={[styles.pillText, on && { color: colors.primaryFg }]}>{p[0].toUpperCase() + p.slice(1)}s</Text></Press>; })}
+            </Row>
+          </Field>
+          <Field label="Each booking lasts">
+            <Row><NumberBox value={slot} onChange={setSlot} onCommit={() => void save({ slotMin: num(slot), durationMin: num(slot) })} width={84} /><Text style={type.small}>minutes</Text></Row>
+          </Field>
+          <Field label="How much notice you need" hint="Nobody can book a slot closer than this. You confirm or decline each one.">
+            <Row><NumberBox value={notice} onChange={setNotice} onCommit={() => void save({ noticeDays: num(notice) })} width={84} /><Text style={type.small}>days</Text></Row>
+          </Field>
+        </>
+      ) : null}
+
+      <Field label="Where">
+        <View style={edge('venueLabel')}>
+          <PlacePicker value={place} onPick={(p) => { setPlace(p); if (p) void save({ venueLabel: p.formatted ?? p.label, venueLat: p.lat, venueLng: p.lng, venueCountry: p.countryCode ?? null, venueArea: p.locality ?? p.address?.town ?? null }); }} placeholder="Abbey ruins, Reading" />
+        </View>
+      </Field>
+      <Field label="Anything they should know">
+        <TextInput value={notes} onChangeText={setNotes} onBlur={() => void save({ description: notes })} multiline placeholder="Flat walking, about ninety minutes, nothing strenuous." placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi, edge('description')]} />
+      </Field>
+      {o.seeded.some((s) => s.startsWith('doc:')) ? <Text style={type.tiny}>Fields with a lime edge came from your document. Change any of them.</Text> : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// weeks — series only: outcome first
+// ---------------------------------------------------------------------------
+
+function Weeks({ offer: o, save }: { offer: OwnOffer; save: Save }) {
+  const [outcome, setOutcome] = useState(o.outcome ?? '');
+  const [weeks, setWeeks] = useState(() => o.dates.map((_, i) => ({ n: i + 1, title: o.weeks.find((w) => w.n === i + 1)?.title ?? '' })));
+  const commit = (next: typeof weeks) => { setWeeks(next); void save({ weeks: next.filter((w) => w.title.trim()) }); };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>What do they leave with?</Text>
+      <Text style={type.small}>This is what sells a ten-week commitment, not the weekly detail.</Text>
+      <Field label="By the end they can…">
+        <TextInput value={outcome} onChangeText={setOutcome} onBlur={() => void save({ outcome })} multiline placeholder="Paint a landscape from life in one sitting, and know when to stop." placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi]} />
+      </Field>
+      <Field label="Do the weeks differ?">
+        <Segmented value={o.themesDiffer ? 'differ' : 'same'} options={[{ value: 'same', label: 'The same each week' }, { value: 'differ', label: 'Each week is different' }]} onChange={(v) => void save({ themesDiffer: v === 'differ' })} />
+        <Text style={type.tiny}>{o.themesDiffer ? 'Name them below so people can see the arc. It also lets us say what they missed.' : 'Good for a run club or a weekly swim — no week list needed.'}</Text>
+      </Field>
+      {o.themesDiffer ? (
+        <Field label="The weeks" hint="Leave any of them blank — guests just see the date.">
+          {weeks.map((w, i) => (
+            <Row key={w.n}>
+              <Text style={styles.weekN}>WEEK {w.n}</Text>
+              <TextInput value={w.title} onChangeText={(t) => setWeeks(weeks.map((x, j) => (j === i ? { ...x, title: t } : x)))} onBlur={() => commit(weeks)} placeholder={o.dates[i] ? dayShort(o.dates[i]) : 'Add a theme'} placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} />
+            </Row>
+          ))}
+          {!weeks.length ? <Text style={type.small}>Give the run its dates first.</Text> : null}
+        </Field>
+      ) : null}
+      <Field label="Can people join for one week?">
+        <Segmented value={o.joinMode === 'whole' || !o.joinMode ? 'run' : 'drop'} options={[{ value: 'run', label: 'The whole run only' }, { value: 'drop', label: 'One week is fine too' }]} onChange={(v) => void save({ joinMode: v === 'run' ? 'whole' : 'both' })} />
+      </Field>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// numbers — public only: min only when money does
+// ---------------------------------------------------------------------------
+
+function Numbers({ offer: o, save }: { offer: OwnOffer; save: Save }) {
+  const paid = o.money !== 'free';
+  const [focus, setFocus] = useState<'min' | 'expect' | 'max'>(paid ? 'min' : 'expect');
+  const [min, setMin] = useState(str(o.minCount));
+  const [exp, setExp] = useState(str(o.expectedCount));
+  const [max, setMax] = useState(str(o.maxCount));
+  const [age, setAge] = useState(str(o.ageLimit ?? 18));
+  const commit = () => void save({ minCount: paid ? num(min) : null, expectedCount: num(exp), maxCount: num(max) });
+  const hint = focus === 'min' ? `Under ${num(min) ?? '…'} and it is called off — everybody is told and nothing is taken.` : focus === 'expect' ? 'Just your best guess. It is not shown to anyone.' : `At ${num(max) ?? '…'} it is full and the page stops taking bookings.`;
+  const boxes = [...(paid ? [{ k: 'min' as const, l: 'Minimum', v: min, s: setMin }] : []), { k: 'expect' as const, l: 'Expecting', v: exp, s: setExp }, { k: 'max' as const, l: 'Maximum', v: max, s: setMax }];
+  const restricted = o.ageLimit != null;
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>Who, and how many</Text>
+      <Row style={{ gap: spacing.md }}>
+        {boxes.map((b) => (
+          <View key={b.k} style={{ flex: 1 }}>
+            <Text style={[styles.fieldLabel, focus === b.k && { color: colors.ink }]}>{b.l}</Text>
+            <NumberBox value={b.v} onChange={b.s} onCommit={commit} onFocus={() => setFocus(b.k)} width={undefined as any} />
+          </View>
+        ))}
+      </Row>
+      <Text style={type.small}>{hint}</Text>
+      <Field label="Age limit">
+        <Segmented value={restricted ? 'min' : 'any'} options={[{ value: 'any', label: 'Anyone' }, { value: 'min', label: 'Age restricted' }]} onChange={(v) => void save({ ageLimit: v === 'any' ? null : num(age) ?? 18 })} />
+        {restricted ? <Row style={{ justifyContent: 'flex-end' }}><NumberBox value={age} onChange={setAge} onCommit={() => void save({ ageLimit: num(age) ?? 18 })} width={72} /><Text style={type.small}>and over</Text></Row> : null}
+        <Text style={type.tiny}>{restricted ? 'We ask the age of everyone in the party at booking, and turn away anyone under it.' : 'Children welcome. Nobody is asked their age.'}</Text>
+      </Field>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// invite — private only
+// ---------------------------------------------------------------------------
+
+function Invite({ offer: o, setOffer, setError }: { offer: OwnOffer; setOffer: (o: OwnOffer) => void; setError: (e: string | null) => void }) {
+  const [mode, setMode] = useState<'contacts' | 'typed'>('typed');
+  const [name, setName] = useState('');
+  const [contact, setContact] = useState('');
+  const [heads, setHeads] = useState('1');
+  const [busy, setBusy] = useState(false);
+  const total = o.invites.reduce((n, i) => n + (i.rsvp === 'no' ? 0 : i.rsvpHeads ?? i.heads), 0);
+  const add = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try { const r = await api.addInvites(o.id, [{ name: name.trim(), contact: contact.trim() || null, heads: num(heads) ?? 1 }]); setOffer(r.offer); setName(''); setContact(''); setHeads('1'); setError(null); }
+    catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  };
+  const pickContacts = async () => {
+    const nav: any = (globalThis as any).navigator;
+    if (!nav?.contacts?.select) { setMode('typed'); setError('This browser cannot open your contacts. Type the names instead.'); return; }
+    try {
+      const picked = await nav.contacts.select(['name', 'tel', 'email'], { multiple: true });
+      const rows = picked.map((c: any) => ({ name: c.name?.[0] ?? '', contact: c.tel?.[0] ?? c.email?.[0] ?? null, heads: 1 })).filter((c: any) => c.name);
+      if (rows.length) { const r = await api.addInvites(o.id, rows); setOffer(r.offer); }
+    } catch (e: any) { setError(e.message); }
+  };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>Who is invited?</Text>
+      <Text style={type.small}>Only these people can open it.</Text>
+      <Row style={{ gap: 6 }}>
+        <Press onPress={() => { setMode('contacts'); void pickContacts(); }} accessibilityRole="button" style={[styles.pill, mode === 'contacts' && styles.pillLime]}><Text style={styles.pillText}>From my contacts</Text></Press>
+        <Press onPress={() => setMode('typed')} accessibilityRole="button" style={[styles.pill, mode === 'typed' && styles.pillLime]}><Text style={styles.pillText}>Type names</Text></Press>
+      </Row>
+      {mode === 'typed' ? (
+        <View style={{ gap: spacing.sm }}>
+          <TextInput value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={colors.inkFaint} style={styles.input} />
+          <Row>
+            <TextInput value={contact} onChangeText={setContact} placeholder="Mobile or email" placeholderTextColor={colors.inkFaint} autoCapitalize="none" style={[styles.input, { flex: 1 }]} />
+            <NumberBox value={heads} onChange={setHeads} width={64} />
+          </Row>
+          <Button label="Add them" kind="secondary" icon="addPerson" loading={busy} disabled={!name.trim()} onPress={() => void add()} />
+        </View>
+      ) : null}
+      {o.invites.map((i) => (
+        <Row key={i.id} style={styles.guest}>
+          <View style={styles.avatar}><Text style={styles.avatarText}>{i.name[0]?.toUpperCase()}</Text></View>
+          <View style={{ flex: 1 }}>
+            <Text style={type.h3}>{i.name}</Text>
+            <Text style={type.small}>{[i.contact, i.heads > 1 ? `${i.heads} people` : null, i.rsvp === 'yes' ? `yes · ${i.rsvpHeads ?? i.heads} coming` : i.rsvp === 'no' ? 'no' : i.sentAt ? 'asked' : 'not sent yet'].filter(Boolean).join(' · ')}</Text>
+          </View>
+          <Press onPress={async () => { const r = await api.removeInvite(o.id, i.id); setOffer(r.offer); }} accessibilityRole="button" accessibilityLabel={`Remove ${i.name}`} hitSlop={8}><Icon name="close" size={16} color={colors.inkMuted} /></Press>
+        </Row>
+      ))}
+      <View style={styles.note}>
+        <Text style={[type.h3, { color: colors.ink }]}>Inviting {total} {total === 1 ? 'person' : 'people'}</Text>
+        <Text style={type.small}>They get a text with a link — no account, no password. They tap yes or no and say how many they are bringing.{o.invites.some((i) => !i.sentAt && i.contact) ? ' Invitations go out when you publish.' : ''}</Text>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// money — both paths
+// ---------------------------------------------------------------------------
+
+function MoneyStep({ offer: o, save }: { offer: OwnOffer; save: Save }) {
+  const pub = o.visibility === 'public';
+  const opts: { k: Money; t: string; s: string; note: string }[] = pub
+    ? [{ k: 'free', t: 'No, it is free', s: 'Nothing to collect, nothing to pay out.', note: 'No bank details needed' }, { k: 'epic', t: 'Yes — Epic collects', s: 'We charge the guest and pay you three days after it runs.', note: 'Stripe set-up, once' }]
+    : [{ k: 'free', t: 'No, it is free', s: 'A wedding, a christening, a day out with friends.', note: 'Nothing else to set up' }, { k: 'direct', t: 'They pay me directly', s: 'However you normally do it. We chase who has not paid.', note: 'No bank details needed' }, { k: 'epic', t: 'Epic collects and pays me out', s: 'For anything you are out of pocket on up front.', note: 'Stripe set-up, once' }];
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <Text style={styles.title}>Is anyone paying?</Text>
+      <Text style={type.small}>{pub ? 'Public things are always paid through Epic, so we can hold the money until it runs.' : 'Private things can be free, or split between whoever is coming.'}</Text>
+      {opts.map((m) => {
+        const on = o.money === m.k;
         return (
-          <Press key={s.key} onPress={() => onPick(s.key)} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.shape, on && styles.shapeOn]}>
-            <View style={[styles.shapeIcon, on && { backgroundColor: colors.ink }]}><Icon name={SHAPE_ICON[s.key]} size={18} color={on ? colors.primaryFg : colors.ink} /></View>
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={type.h3}>{s.title}</Text>
-              <Text style={type.small}>{s.body}</Text>
-            </View>
-            {on ? <Icon name="check" size={18} color={colors.ink} strokeWidth={2.4} /> : null}
+          <Press key={m.k} onPress={() => void save({ money: m.k })} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.choice, on && styles.choiceOn]}>
+            <Row style={{ alignItems: 'flex-start' }}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={type.h3}>{m.t}</Text>
+                <Text style={type.small}>{m.s}</Text>
+                <Text style={[type.tiny, { color: colors.accent, fontWeight: '600' }]}>{m.note}</Text>
+              </View>
+              {on ? <View style={styles.tick}><Icon name="check" size={14} color={colors.selectedFg} strokeWidth={3} /></View> : null}
+            </Row>
           </Press>
         );
       })}
@@ -150,477 +506,359 @@ function ShapeStep({ offer, onPick }: { offer: OwnOffer; onPick: (s: OfferShape)
 }
 
 // ---------------------------------------------------------------------------
-// 2 · what it is, then the shape's own questions
+// price — only when money ≠ free. Per person only.
 // ---------------------------------------------------------------------------
 
-function WhatStep({ offer: o, save, onVideo }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null>; onVideo: () => void }) {
-  const [title, setTitle] = useState(o.title ?? '');
-  const [description, setDescription] = useState(o.description ?? '');
-  const [whyYou, setWhyYou] = useState(o.whyYou ?? '');
-  const [category, setCategory] = useState(o.category ?? '');
-  const [duration, setDuration] = useState(str(o.durationMin));
-  const [passions, setPassions] = useState<{ key: string; label: string }[]>([]);
-  useEffect(() => { api.hostHome().then((h) => setPassions(h.config.passions)).catch(() => {}); }, []);
-
-  const addPhoto = async () => {
-    const blob = await pickPhotoBlob();
-    if (!blob) return;
-    const m = await api.uploadHostMedia(blob, 'photo');
-    const ids = [...o.photos.map(idOf), m.id].filter(Boolean) as string[];
-    await save({ photoIds: ids });
-  };
-  const removePhoto = (url: string) => save({ photoIds: o.photos.filter((p) => p !== url).map(idOf).filter(Boolean) as string[] });
-
+function Price({ offer: o, save }: { offer: OwnOffer; save: Save }) {
+  const [amount, setAmount] = useState(pnds(o.pricePence));
+  const [total, setTotal] = useState(pnds(o.totalPence));
+  const byNumbers = o.priceMode === 'by_numbers';
   return (
-    <View style={{ gap: spacing.lg, marginTop: spacing.sm }}>
-      {o.shape === 'oneoff' ? <Text style={type.small}>Add it as a running order, not a paragraph. Guests read this before anything else.</Text> : null}
-
-      <Field label={o.shape === 'anytime' ? 'In one line' : 'Title'}>
-        <TextInput value={title} onChangeText={setTitle} onBlur={() => void save({ title })} placeholder={o.shape === 'anytime' ? 'An hour on getting the best out of AI' : o.shape === 'series' ? 'Six Thursdays, learning to see' : 'Windsor back streets, the bits the tours miss'} placeholderTextColor={colors.inkFaint} style={styles.input} />
-      </Field>
-
-      {o.shape === 'anytime' ? (
-        <Field label="Why you, for this one" hint="The credentials and story for this specific offer, not a general bio.">
-          <TextInput value={whyYou} onChangeText={setWhyYou} onBlur={() => void save({ whyYou })} multiline placeholder="Founder of a 100-person business. We rebuilt how the whole company writes and plans around it in eighteen months." placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi]} />
-        </Field>
-      ) : null}
-
-      <Field label={o.shape === 'anytime' ? 'What happens, and what to bring' : 'What happens'}>
-        <TextInput value={description} onChangeText={setDescription} onBlur={() => void save({ description })} multiline placeholder={o.shape === 'series' ? 'What each session is like, and what to bring.' : 'Two hours on foot. The yards behind the high street, the bridge nobody photographs, and a pint in the pub the guides walk past.'} placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi]} />
-        <Text style={type.tiny}>Say what you will actually do, what they go home with, who it suits — and who it does not. That last one sells.</Text>
-      </Field>
-
-      <Field label="What it is about" hint="One word guests pick when they look for people who do what they love.">
-        <Wrap>
-          {passions.map((p) => <Press key={p.key} onPress={() => { setCategory(p.key); void save({ category: p.key }); }} accessibilityRole="button" accessibilityState={{ selected: category === p.key }} style={[styles.pill, category === p.key && styles.pillOn]}><Text style={[styles.pillText, category === p.key && { color: colors.selectedFg }]}>{p.label}</Text></Press>)}
-        </Wrap>
-      </Field>
-
-      <Field label="Runs for">
-        <Row>
-          <NumberBox value={duration} onChange={setDuration} onCommit={() => void save({ durationMin: num(duration) })} width={96} />
-          <Text style={type.small}>minutes{num(duration) && num(duration)! >= 60 ? ` · ${Math.floor(num(duration)! / 60)} h${num(duration)! % 60 ? ` ${num(duration)! % 60}` : ''}` : ''}</Text>
-        </Row>
-      </Field>
-
-      <Field label={`Photos · ${o.photos.length} of 8`}>
-        <Row style={{ flexWrap: 'wrap' }}>
-          {o.photos.map((p) => (
-            <View key={p} style={styles.photo}>
-              <Image source={{ uri: mediaUrl(p)! }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-              <Press onPress={() => void removePhoto(p)} accessibilityRole="button" accessibilityLabel="Remove photo" style={styles.photoX}><Icon name="close" size={12} color={colors.ink} /></Press>
-            </View>
-          ))}
-          {o.photos.length < 8 ? <Press onPress={() => void addPhoto()} accessibilityRole="button" style={[styles.photo, styles.photoAdd]}><Icon name="camera" size={18} color={colors.inkMuted} /><Text style={type.tiny}>Add</Text></Press> : null}
-        </Row>
-      </Field>
-
-      {/* One video per offer, separate from the profile intro. */}
-      <Press onPress={onVideo} accessibilityRole="button" style={styles.videoRow}>
-        <View style={styles.videoIcon}><Icon name="video" size={18} color={colors.selectedFg} /></View>
-        <View style={{ flex: 1 }}>
-          <Text style={type.h3}>{o.video ? 'Your video for this offer is up' : 'Record a video for this offer'}</Text>
-          <Text style={type.small}>Separate from your profile intro. {o.video ? 'Tap to re-record.' : 'Thirty to sixty seconds.'}</Text>
-        </View>
-        <Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>{o.video ? 'Redo' : 'Record'}</Text>
-      </Press>
-
-      <WhereBlock offer={o} save={save} />
-
-      {o.shape === 'oneoff' ? <OneOffQuestions offer={o} save={save} /> : null}
-      {o.shape === 'series' ? <SeriesQuestions offer={o} save={save} /> : null}
-      {o.shape === 'anytime' ? <AnytimeQuestions offer={o} save={save} /> : null}
-    </View>
-  );
-}
-
-const idOf = (url: string) => url.split('/').pop() ?? null;
-
-/** Where it happens: the four formats, and what each asks for (brief §7). */
-function WhereBlock({ offer: o, save }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null> }) {
-  const [place, setPlace] = useState<Place | null>(o.venueLabel ? { label: o.venueLabel, lat: o.venueLat ?? 0, lng: o.venueLng ?? 0 } : null);
-  const [area, setArea] = useState(o.venueArea ?? '');
-  const [notes, setNotes] = useState(o.venueNotes ?? '');
-  const [radius, setRadius] = useState(str(o.travelRadiusMin));
-  const [charge, setCharge] = useState(pounds(o.travelChargePence));
-  const [platform, setPlatform] = useState(o.onlinePlatform ?? '');
-  const venues: { key: OfferVenue; body: string }[] = [
-    { key: 'their_place', body: 'Your home or studio' }, { key: 'your_place', body: 'You go to them' }, { key: 'out_about', body: 'A meeting point' }, { key: 'online', body: 'A call' },
-  ];
-  const pick = (p: Place | null) => {
-    setPlace(p);
-    if (!p) return;
-    const town = p.locality ?? p.address?.town ?? p.label.split(',').slice(-2)[0]?.trim() ?? null;
-    if (!area) setArea(town ? (o.venue === 'their_place' ? `central ${town}` : town) : '');
-    void save({ venueLabel: p.formatted ?? p.label, venueLat: p.lat, venueLng: p.lng, venueCountry: p.countryCode ?? null, venueArea: area || (town ?? null) });
-  };
-  return (
-    <Field label="Where it happens">
-      <View style={styles.grid}>
-        {venues.map((v) => {
-          const on = o.venue === v.key;
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>How much, per person</Text>
+      <Row style={{ gap: spacing.sm }}>
+        {[{ k: 'same_each' as const, t: 'Same each', s: 'One price, whoever comes' }, { k: 'by_numbers' as const, t: 'Depends on numbers', s: 'Cheaper the more there are' }].map((p) => {
+          const on = o.priceMode === p.k;
           return (
-            <Press key={v.key} onPress={() => void save({ venue: v.key })} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.venue, on && styles.venueOn]}>
-              <Icon name={VENUE_ICON[v.key]} size={18} color={colors.ink} />
-              <Text style={type.h3}>{VENUE_LABEL[v.key]}</Text>
-              <Text style={type.tiny}>{v.body}</Text>
+            <Press key={p.k} onPress={() => void save({ priceMode: p.k })} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.modeTile, on && { backgroundColor: INK }]}>
+              <Text style={[type.h3, on && { color: colors.primaryFg }]}>{p.t}</Text>
+              <Text style={[type.tiny, on && { color: colors.primaryFg, opacity: 0.8 }]}>{p.s}</Text>
             </Press>
           );
         })}
-      </View>
-      {o.venue !== 'online' ? (
-        <>
-          <PlacePicker value={place} onPick={pick} placeholder={o.venue === 'their_place' ? 'Your address — shown only once they have booked' : o.venue === 'your_place' ? 'Where you are based, so we can say how far you go' : 'The exact spot: a door, a bench, a café'} />
-          <Row>
-            <Text style={[type.small, { width: 118 }]}>Shown before booking</Text>
-            <TextInput value={area} onChangeText={setArea} onBlur={() => void save({ venueArea: area || null })} placeholder="central Windsor" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} />
-          </Row>
-        </>
-      ) : null}
-      {o.venue === 'their_place' ? (
-        <>
-          <TextInput value={notes} onChangeText={setNotes} onBlur={() => void save({ venueNotes: notes || null })} multiline placeholder="Who else is in the house, stairs, a dog — what to expect" placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi]} />
-          <Text style={type.tiny}>Guests see the exact address once they have booked; before that it shows as "{area || 'the area'}". Hosting at your place needs the Checked level.</Text>
-        </>
-      ) : null}
-      {o.venue === 'your_place' ? (
-        <Row style={{ flexWrap: 'wrap' }}>
-          <Text style={type.small}>Within</Text><NumberBox value={radius} onChange={setRadius} onCommit={() => void save({ travelRadiusMin: num(radius) })} width={72} /><Text style={type.small}>min ·</Text>
-          <NumberBox value={charge} onChange={setCharge} onCommit={() => void save({ travelChargePence: pence(charge) })} prefix="£" width={84} /><Text style={type.small}>beyond that</Text>
-        </Row>
-      ) : null}
-      {o.venue === 'out_about' ? (
-        <TextInput value={notes} onChangeText={setNotes} onBlur={() => void save({ venueNotes: notes || null })} placeholder="Meet outside, by the crooked door" placeholderTextColor={colors.inkFaint} style={styles.input} />
-      ) : null}
-      {o.venue === 'online' ? (
-        <>
-          <TextInput value={platform} onChangeText={setPlatform} onBlur={() => void save({ onlinePlatform: platform || null })} placeholder="A video call — Zoom, FaceTime, Meet" placeholderTextColor={colors.inkFaint} style={styles.input} />
-          <Text style={type.tiny}>Marked clearly as a call, never an outing. The link goes out when they book.</Text>
-        </>
-      ) : null}
-    </Field>
-  );
-}
-
-/** One-off: a running order and who else will be there. */
-function OneOffQuestions({ offer: o, save }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null> }) {
-  const [rows, setRows] = useState<RunningOrderRow[]>(o.runningOrder);
-  const [people, setPeople] = useState(o.featuredPeople.map((p) => ({ name: p.name, role: p.role ?? '' })));
-  const [openDate, setOpenDate] = useState(false);
-  const commitRows = (next: RunningOrderRow[]) => { setRows(next); void save({ runningOrder: next.filter((r) => r.title.trim()) }); };
-  const commitPeople = (next: { name: string; role: string }[]) => { setPeople(next); void save({ featuredPeople: next.filter((p) => p.name.trim()).map((p) => ({ name: p.name, role: p.role || null })) }); };
-  return (
-    <>
-      <Field label="When">
-        <Press onPress={() => setOpenDate(!openDate)} accessibilityRole="button"><Row><Icon name="calendar" size={16} /><Text style={type.h3}>{o.startsOn ? dayLong(o.startsOn) : 'Pick the date'}</Text><Icon name={openDate ? 'collapse' : 'expand'} size={14} /></Row></Press>
-        {openDate ? <DateRangePicker single start={o.startsOn} end={o.startsOn} onApply={(d) => { void save({ startsOn: d }); setOpenDate(false); }} /> : null}
-        <Row><Text style={[type.small, { width: 64 }]}>Starts</Text><View style={{ flex: 1 }}><TimeField value={o.startsAt ?? ''} onChange={(t) => void save({ startsAt: t || null })} step={15} placeholder="14:00" label="Starts" /></View></Row>
-      </Field>
-      <Field label="The running order" hint="Guests read this as a programme.">
-        {rows.map((r, i) => (
-          <Row key={i} style={{ alignItems: 'flex-start' }}>
-            <TextInput value={r.time ?? ''} onChangeText={(t) => setRows(rows.map((x, j) => (j === i ? { ...x, time: t } : x)))} onBlur={() => commitRows(rows)} placeholder="19:00" placeholderTextColor={colors.inkFaint} style={[styles.input, { width: 72, textAlign: 'center' }]} />
-            <View style={{ flex: 1, gap: 4 }}>
-              <TextInput value={r.title} onChangeText={(t) => setRows(rows.map((x, j) => (j === i ? { ...x, title: t } : x)))} onBlur={() => commitRows(rows)} placeholder="Arrival and a drink" placeholderTextColor={colors.inkFaint} style={styles.input} />
-              <TextInput value={r.detail ?? ''} onChangeText={(t) => setRows(rows.map((x, j) => (j === i ? { ...x, detail: t } : x)))} onBlur={() => commitRows(rows)} placeholder="In the studio · 30 min" placeholderTextColor={colors.inkFaint} style={[styles.input, { minHeight: 36, fontSize: 13 }]} />
-            </View>
-            <Press onPress={() => commitRows(rows.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel="Remove" hitSlop={8} style={{ paddingTop: 12 }}><Icon name="close" size={16} color={colors.inkMuted} /></Press>
-          </Row>
-        ))}
-        <AddRow label="Add to the running order" onPress={() => setRows([...rows, { time: '', title: '', detail: '' }])} />
-      </Field>
-      <Field label="Who else will be there" hint='Guests see this as "who you’ll meet".'>
-        {people.map((p, i) => (
-          <Row key={i}>
-            <TextInput value={p.name} onChangeText={(t) => setPeople(people.map((x, j) => (j === i ? { ...x, name: t } : x)))} onBlur={() => commitPeople(people)} placeholder="Ollie Hart" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} />
-            <TextInput value={p.role} onChangeText={(t) => setPeople(people.map((x, j) => (j === i ? { ...x, role: t } : x)))} onBlur={() => commitPeople(people)} placeholder="Forager · 20 years in these woods" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1.4 }]} />
-            <Press onPress={() => commitPeople(people.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel="Remove" hitSlop={8}><Icon name="close" size={16} color={colors.inkMuted} /></Press>
-          </Row>
-        ))}
-        <AddRow label="Add someone" onPress={() => setPeople([...people, { name: '', role: '' }])} />
-      </Field>
-    </>
-  );
-}
-
-/** Series: the outcome first, then the arc, then the weeks, then joining. */
-function SeriesQuestions({ offer: o, save }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null> }) {
-  const [outcome, setOutcome] = useState(o.outcome ?? '');
-  const [arc, setArc] = useState(o.arc ?? '');
-  const [weeks, setWeeks] = useState<Week[]>(o.weeks);
-  const [sessions, setSessions] = useState(str(o.sessions));
-  const [dropIn, setDropIn] = useState(pounds(o.dropInPence));
-  const [missed, setMissed] = useState(o.missedNote ?? '');
-  const [openDate, setOpenDate] = useState(false);
-  const commitWeeks = (next: Week[]) => { setWeeks(next); void save({ weeks: next.filter((w) => w.title.trim()).map((w, i) => ({ n: i + 1, title: w.title })) }); };
-  const dates = o.dates;
-  return (
-    <>
-      <Field label="What they will be able to do by the end" hint="This is what sells a ten-week commitment.">
-        <TextInput value={outcome} onChangeText={setOutcome} onBlur={() => void save({ outcome })} multiline placeholder="Paint a landscape from life in one sitting, and know when to stop." placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi]} />
-      </Field>
-      <Field label="How it develops">
-        <TextInput value={arc} onChangeText={setArc} onBlur={() => void save({ arc })} multiline placeholder="We start with tone and shape, then colour, then out into the park for the last three." placeholderTextColor={colors.inkFaint} style={[styles.input, styles.multi]} />
-      </Field>
-      <Field label="Your series">
-        <Row style={{ flexWrap: 'wrap' }}>
-          <Text style={type.small}>Every</Text>
-          <View style={{ flex: 1, minWidth: 160 }}>
-            <Segmented value={String(o.weekday ?? (o.firstDate ? new Date(`${o.firstDate}T12:00:00`).getDay() : 4))} options={DAYS.map((d) => ({ value: String(d.n), label: d.l }))} onChange={(v) => void save({ weekday: Number(v) })} />
-          </View>
-        </Row>
-        <Row><Text style={[type.small, { width: 64 }]}>At</Text><View style={{ flex: 1 }}><TimeField value={o.startsAt ?? ''} onChange={(t) => void save({ startsAt: t || null })} step={15} placeholder="19:00" label="At" /></View></Row>
-        <Press onPress={() => setOpenDate(!openDate)} accessibilityRole="button"><Row><Text style={[type.small, { width: 64 }]}>Starting</Text><Icon name="calendar" size={16} /><Text style={type.h3}>{o.firstDate ? dayLong(o.firstDate) : 'Pick the first date'}</Text></Row></Press>
-        {openDate ? <DateRangePicker single start={o.firstDate} end={o.firstDate} onApply={(d) => { void save({ firstDate: d, weekday: new Date(`${d}T12:00:00`).getDay() }); setOpenDate(false); }} /> : null}
-        <Row><Text style={[type.small, { width: 64 }]}>Sessions</Text><NumberBox value={sessions} onChange={setSessions} onCommit={() => void save({ sessions: num(sessions) })} width={72} /></Row>
-        {dates.length ? (
-          <>
-            <Text style={type.small}>The {dates.length} {weekdayName(new Date(`${dates[0]}T12:00:00`).getDay())}s. Tap a date to skip it — half term, in this case.</Text>
-            <Wrap>
-              {allDates(o).map((d) => {
-                const skipped = o.skippedDates.includes(d);
-                return <Press key={d} onPress={() => void save({ skippedDates: skipped ? o.skippedDates.filter((x) => x !== d) : [...o.skippedDates, d] })} accessibilityRole="button" accessibilityState={{ selected: !skipped }} style={[styles.pill, skipped && { opacity: 0.4 }]}><Text style={[styles.pillText, skipped && { textDecorationLine: 'line-through' }]}>{new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</Text></Press>;
-              })}
-            </Wrap>
-          </>
-        ) : null}
-      </Field>
-      <Field label={`The ${o.sessions ?? ''} weeks`} hint="Keep it light if you like.">
-        {weeks.map((w, i) => (
-          <Row key={i}>
-            <Text style={[type.tiny, { width: 56, fontWeight: '700' }]}>WEEK {i + 1}</Text>
-            <TextInput value={w.title} onChangeText={(t) => setWeeks(weeks.map((x, j) => (j === i ? { ...x, title: t } : x)))} onBlur={() => commitWeeks(weeks)} placeholder="Seeing tone, not things" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} />
-            <Press onPress={() => commitWeeks(weeks.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel="Remove" hitSlop={8}><Icon name="close" size={16} color={colors.inkMuted} /></Press>
-          </Row>
-        ))}
-        <AddRow label={`Add week ${weeks.length + 1}`} onPress={() => setWeeks([...weeks, { n: weeks.length + 1, title: '' }])} />
-      </Field>
-      <Field label="How people join">
-        <Segmented value={o.joinMode ?? 'whole'} options={[{ value: 'whole', label: 'The whole series' }, { value: 'drop_in', label: 'Drop in' }, { value: 'both', label: 'Both' }]} onChange={(v) => void save({ joinMode: v as any })} />
-        <Text style={type.small}>{o.joinMode === 'drop_in' ? 'Pay per session, come when they can.' : o.joinMode === 'both' ? 'One booking for the run, or a session at a time.' : 'One booking, all the sessions.'}</Text>
-        {o.joinMode && o.joinMode !== 'whole' ? <Row><NumberBox value={dropIn} onChange={setDropIn} onCommit={() => void save({ dropInPence: pence(dropIn) })} prefix="£" width={96} /><Text style={type.small}>a session, to drop in</Text></Row> : null}
-        <TextInput value={missed} onChangeText={setMissed} onBlur={() => void save({ missedNote: missed || null })} placeholder="Miss a week and we tell you what you missed — no refund for single sessions." placeholderTextColor={colors.inkFaint} style={styles.input} />
-      </Field>
-    </>
-  );
-}
-
-/** Every candidate date including the skipped ones, so a skipped one can be put back. */
-function allDates(o: OwnOffer): string[] {
-  if (!o.firstDate || !o.sessions) return [];
-  const out: string[] = [];
-  const d = new Date(`${o.firstDate}T12:00:00`);
-  const wanted = o.sessions + o.skippedDates.length;
-  for (let i = 0; i < wanted && i < 60; i++) { out.push(d.toISOString().slice(0, 10)); d.setDate(d.getDate() + 7); }
-  return out;
-}
-
-/** Anytime: a simple availability pattern — days and parts of the day. */
-function AnytimeQuestions({ offer: o, save }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null> }) {
-  const a: Availability = o.availability ?? {};
-  const days = new Set(a.days ?? []);
-  const parts = new Set(a.parts ?? []);
-  const set = (next: Availability) => void save({ availability: next });
-  return (
-    <Field label="When you are free" hint="A simple pattern, not a diary. Guests pick a time from the next fortnight.">
-      <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-        {DAYS.map((d) => {
-          const on = days.has(d.n);
-          return <Press key={d.n} onPress={() => { const n = new Set(days); if (on) n.delete(d.n); else n.add(d.n); set({ days: [...n], parts: [...parts] }); }} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.dayChip, on && styles.pillOn]}><Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{d.l}</Text></Press>;
-        })}
       </Row>
-      <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-        {PARTS.map((p) => {
-          const on = parts.has(p.k);
-          return <Press key={p.k} onPress={() => { const n = new Set(parts); if (on) n.delete(p.k); else n.add(p.k); set({ days: [...days], parts: [...n] as any }); }} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.pill, on && styles.pillOn]}><Text style={[styles.pillText, on && { color: colors.selectedFg }]}>{p.l}</Text></Press>;
-        })}
-      </Row>
-    </Field>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 3 · who, and how many — the group set-up's numbers, verbatim
-// ---------------------------------------------------------------------------
-
-function WhoStep({ offer: o, save }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null> }) {
-  const [at, setAt] = useState<'minimum' | 'expecting' | 'maximum' | null>(null);
-  const [min, setMin] = useState(str(o.minCount));
-  const [exp, setExp] = useState(str(o.expectedCount));
-  const [max, setMax] = useState(str(o.maxCount));
-  const commit = () => void save({ minCount: num(min), expectedCount: num(exp), maxCount: num(max) });
-  const party = o.partyMax == null ? 'any' : String(o.partyMax);
-  return (
-    <View style={{ gap: spacing.lg, marginTop: spacing.sm }}>
-      <Row style={{ gap: spacing.lg }}>
-        {[{ k: 'minimum', l: 'Minimum', v: min, s: setMin }, { k: 'expecting', l: 'Expecting', v: exp, s: setExp }, { k: 'maximum', l: 'Maximum', v: max, s: setMax }].map((f) => (
-          <View key={f.k} style={{ flex: 1 }}>
-            <Text style={type.label}>{f.l}</Text>
-            <NumberBox value={f.v} onChange={f.s} onCommit={commit} onFocus={() => setAt(f.k as any)} width={undefined as any} />
-          </View>
-        ))}
-      </Row>
-      <SizePanel min={num(min)} expected={num(exp)} max={num(max)} priceMode={o.priceMode} pricePence={o.pricePence} totalPence={o.totalPence} at={at} />
-      <Field label="Party size" hint="The most one booking can bring.">
-        <Segmented value={party} options={[{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '4', label: '4' }, { value: '6', label: '6' }, { value: 'any', label: 'Any' }]} onChange={(v) => void save({ partyMax: v === 'any' ? null : Number(v) })} />
-      </Field>
-      <Field label="Age limit" hint="Set a limit and we ask for the age of everyone in the party at booking.">
-        <Segmented value={o.ageLimit == null ? 'any' : String(o.ageLimit)} options={[{ value: 'any', label: 'Anyone' }, { value: '12', label: 'Over 12' }, { value: '16', label: 'Over 16' }, { value: '18', label: 'Over 18' }]} onChange={(v) => void save({ ageLimit: v === 'any' ? null : Number(v) })} />
-      </Field>
-    </View>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 4 · price — Free / Same each / Depends on numbers, then Person / Household
-// ---------------------------------------------------------------------------
-
-function PriceStep({ offer: o, save }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null> }) {
-  const [amount, setAmount] = useState(pounds(o.pricePence));
-  const [total, setTotal] = useState(pounds(o.totalPence));
-  const [includes, setIncludes] = useState(o.includes ?? '');
-  const refunds: { key: RefundRule; title: string; body: string }[] = [
-    { key: '24h', title: 'Full refund up to 24 hours before', body: 'Most hosts pick this' },
-    { key: '7d', title: 'Full refund up to 7 days before', body: 'For things you buy in for' },
-    { key: 'none', title: 'No refunds', body: 'Only for tickets you cannot return' },
-  ];
-  return (
-    <View style={{ gap: spacing.lg, marginTop: spacing.sm }}>
-      <Segmented value={o.priceMode} options={[{ value: 'free' as PriceMode, label: 'Free' }, { value: 'same_each' as PriceMode, label: 'Same each' }, { value: 'by_numbers' as PriceMode, label: 'Depends on numbers' }]} onChange={(v) => void save({ priceMode: v })} />
-      {o.priceMode === 'same_each' ? (
-        <Row style={{ flexWrap: 'wrap' }}>
-          <NumberBox value={amount} onChange={setAmount} onCommit={() => void save({ pricePence: pence(amount) })} prefix="£" width={110} />
-          <Text style={type.small}>each ·</Text>
-          <View style={{ width: 190 }}><Segmented value={o.per} options={[{ value: 'person', label: 'Person' }, { value: 'household', label: 'Household' }]} onChange={(v) => void save({ per: v })} /></View>
+      <Field label={byNumbers ? 'The whole thing costs' : 'Each person pays'}>
+        <Row>
+          {byNumbers
+            ? <NumberBox value={total} onChange={setTotal} onCommit={() => void save({ totalPence: pence(total), per: 'person' })} prefix="£" width={140} />
+            : <NumberBox value={amount} onChange={setAmount} onCommit={() => void save({ pricePence: pence(amount), per: 'person' })} prefix="£" width={140} />}
         </Row>
-      ) : null}
-      {o.priceMode === 'by_numbers' ? (
-        <>
-          <Row><NumberBox value={total} onChange={setTotal} onCommit={() => void save({ totalPence: pence(total) })} prefix="£" width={120} /><Text style={[type.small, { flex: 1 }]}>in total, split between whoever comes</Text></Row>
-          <SizePanel min={o.minCount} expected={o.expectedCount} max={o.maxCount} priceMode={o.priceMode} pricePence={o.pricePence} totalPence={pence(total)} />
-        </>
-      ) : null}
-      {o.priceMode === 'free' ? <Text style={type.small}>Free. The page says you are not doing this for money.</Text> : null}
-
-      <Field label="What that includes">
-        <TextInput value={includes} onChangeText={setIncludes} onBlur={() => void save({ includes: includes || null })} placeholder="The walk, the stories and the first round." placeholderTextColor={colors.inkFaint} style={styles.input} />
+        <Text style={type.tiny}>{byNumbers ? 'The most anyone pays is the total split by the minimum. We work the rest out from how many come and refund the difference.' : 'What every guest pays. A household booking three places pays three times this.'}</Text>
       </Field>
-
-      {o.priceMode !== 'free' ? (
+      {o.money === 'epic' ? (
         <Field label="If they cancel">
-          {refunds.map((r) => {
-            const on = o.refundRule === r.key;
-            return (
-              <Press key={r.key} onPress={() => void save({ refundRule: r.key })} accessibilityRole="radio" accessibilityState={{ checked: on }} style={styles.radioRow}>
-                <View style={[styles.radio, on && styles.radioOn]}>{on ? <View style={styles.radioDot} /> : null}</View>
-                <View style={{ flex: 1 }}><Text style={type.h3}>{r.title}</Text><Text style={type.small}>{r.body}</Text></View>
-              </Press>
-            );
+          {([['24h', 'Full refund up to 24 hours before'], ['7d', 'Full refund up to 7 days before'], ['none', 'No refunds']] as const).map(([k, t]) => {
+            const on = o.refundRule === k;
+            return <Press key={k} onPress={() => void save({ refundRule: k })} accessibilityRole="radio" accessibilityState={{ checked: on }} style={styles.radioRow}><View style={[styles.radio, on && styles.radioOn]}>{on ? <View style={styles.radioDot} /> : null}</View><Text style={type.body}>{t}</Text></Press>;
           })}
         </Field>
       ) : null}
-
-      <View style={styles.collects}>
-        <Icon name="payout" size={16} color={colors.ink} />
-        <Text style={[type.small, { flex: 1, color: colors.ink }]}>
-          Epic collects, pays you out. {o.priceMode !== 'free' && o.pricePence ? `Guests see ${money(o.pricePence)} all in — no fee bolted on at the end. ` : ''}Your payout is shown before you publish.
-        </Text>
+      <View style={styles.note}>
+        <Text style={type.small}>{o.money === 'epic' ? <><Text style={{ fontWeight: '700', color: colors.ink }}>Epic collects, pays you out</Text> three working days after it runs. Guests see one all-in price.</> : 'You collect it however you normally do. We show everyone what they owe and tick them off as you confirm.'}</Text>
       </View>
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 5 · publish — the card as a guest sees it, then what has to be true first
+// basics / kind / subdetail — public only
 // ---------------------------------------------------------------------------
 
-function PublishStep({ offer: o, save, onEdit }: { offer: OwnOffer; save: (b: OfferInput) => Promise<OwnOffer | null>; onEdit: (step: number) => void }) {
-  const { navigate } = useRouter();
-  const [licence, setLicence] = useState(o.licenceNumber ?? '');
-  const checks: { ok: boolean; title: string; body: string; step?: number }[] = [
-    { ok: Boolean(o.video), title: o.video ? 'Your video is up' : 'No video for this yet', body: o.video ? 'Plays on the page' : 'People book the person. Record one from step 2.', step: 2 },
-    { ok: o.priceMode === 'free' || o.money.fee.percent >= 0, title: "Epic's fee", body: o.money.fee.percent ? `${o.money.fee.percent}% — you keep ${money(o.money.fee.net)} at ${o.expectedCount ?? o.minCount ?? 1}` : 'TBC — you will see it here before it applies' },
-  ];
-  const regulated = o.regulated;
-  const flagged = regulated && o.regulated?.answer === 'no_commentary' && /tour of|guided|monument|museum|duomo|colosseum|cathedral|heritage/i.test(`${o.title} ${o.description}`);
+function Basics({ home, onChanged }: { home: HostHome | null; onChanged: () => Promise<void> }) {
+  const h = home?.host ?? null;
+  const [name, setName] = useState(h?.name ?? home?.you?.name ?? '');
+  const [place, setPlace] = useState<Place | null>(h?.location ? { label: h.location, lat: h.lat ?? 0, lng: h.lng ?? 0 } : null);
+  const [address, setAddress] = useState(h?.address ?? '');
+  const [showAddr, setShowAddr] = useState(Boolean(h?.address));
+  const [said, setSaid] = useState<string | null>(null);
+  const save = async (patch: Parameters<typeof api.updateHost>[0]) => { try { await api.updateHost(patch); await onChanged(); setSaid(null); } catch (e: any) { setSaid(e.message); } };
   return (
-    <View style={{ gap: spacing.lg, marginTop: spacing.sm }}>
-      <Row style={{ justifyContent: 'space-between' }}>
-        <Text style={type.small}>Exactly what a stranger sees.</Text>
-        <Press onPress={() => onEdit(2)} accessibilityRole="button"><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Edit</Text></Press>
-      </Row>
-      <ExperienceCard item={o} onOpen={() => (o.state === 'live' ? navigate(paths.experience(o.id)) : onEdit(2))} />
-      <Text style={type.tiny}>{o.state === 'live' ? 'Tap to see the full page.' : 'The full page opens once it is live.'}</Text>
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>About you</Text>
+      <Field label="Your name, as they will see it"><TextInput value={name} onChangeText={setName} onBlur={() => void save({ name: name.trim() })} placeholder="Jay Alderton" placeholderTextColor={colors.inkFaint} style={styles.input} /></Field>
+      <Field label="Where you host">
+        <PlacePicker value={place} onPick={(p) => { setPlace(p); if (p) void save({ locationLabel: p.locality ?? p.label, lat: p.lat, lng: p.lng, countryCode: p.countryCode ?? null }); }} kind="area" placeholder="Reading" />
+        {showAddr ? <TextInput value={address} onChangeText={setAddress} onBlur={() => void save({ address: address.trim() || null })} placeholder="Street and number, or the park gate" placeholderTextColor={colors.inkFaint} style={styles.input} /> : null}
+        <Press onPress={() => setShowAddr(!showAddr)} accessibilityRole="button"><Text style={styles.link}>{showAddr ? 'It is just the town' : 'It happens at a particular address ›'}</Text></Press>
+      </Field>
+      <BirthdayPicker value={h?.dateOfBirth ?? null} onChange={(iso) => void save({ dateOfBirth: iso })} clearable={false} minAge={18} hint="Hosts are eighteen or over. Never shown to guests." />
+      {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
+    </View>
+  );
+}
 
-      {/* The regulated-city step (D2), only where guiding is a licensed profession. */}
-      {regulated ? (
-        <View style={styles.regulated}>
-          <Kicker>PUBLISH IN {regulated.country.toUpperCase()}</Kicker>
-          <Text style={type.h3}>One thing about hosting in {regulated.country}</Text>
-          <Text style={type.small}>{regulated.country} reserves talking about historic and artistic sites for licensed guides — even one-to-one. Nothing stops you sharing a skill or taking someone to where you eat; it is commentary on monuments and museums that needs a licence.</Text>
-          {[{ k: 'no_commentary', t: 'My offer includes no guided commentary on monuments, museums or heritage sites', b: 'Most Practitioner and Local offers' }, { k: 'licensed', t: 'I hold a licence to guide in this region', b: 'We will ask for the number and expiry' }].map((r) => {
-            const on = o.regulated?.answer === r.k;
-            return (
-              <Press key={r.k} onPress={() => void save({ regulatedAnswer: r.k as any })} accessibilityRole="radio" accessibilityState={{ checked: on }} style={styles.radioRow}>
-                <View style={[styles.radio, on && styles.radioOn]}>{on ? <View style={styles.radioDot} /> : null}</View>
-                <View style={{ flex: 1 }}><Text style={type.h3}>{r.t}</Text><Text style={type.small}>{r.b}</Text></View>
-              </Press>
-            );
-          })}
-          {o.regulated?.answer === 'licensed' ? <TextInput value={licence} onChangeText={setLicence} onBlur={() => void save({ licenceNumber: licence || null })} placeholder="Licence number" placeholderTextColor={colors.inkFaint} style={styles.input} /> : null}
-          <Text style={type.tiny}>Wording that helps. "A morning cooking together" is fine. "A tour of the Duomo" is not.{flagged ? ' Your listing reads like the second — change the words before publishing.' : ' We flag anything in your listing that reads like the second.'}</Text>
-        </View>
-      ) : null}
+function Kind({ home, onChanged, offer: o, save }: { home: HostHome | null; onChanged: () => Promise<void>; offer: OwnOffer; save: Save }) {
+  const h = home?.host ?? null;
+  const set = async (patch: Parameters<typeof api.updateHost>[0]) => { await api.updateHost(patch); await onChanged(); await save({}); };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>Which sounds most like you?</Text>
+      <KindChooser kind={h?.type ?? null} sub={h?.localKind ?? null} onKind={(k) => void set({ type: k, localKind: k === 'meetups' ? h?.localKind ?? null : null })} onSub={(s) => void set({ type: 'meetups', localKind: s })} />
+      <Text style={type.tiny}>Sub-kinds only appear once you pick Meetups and mini tours.</Text>
+      {o ? null : null}
+    </View>
+  );
+}
 
-      <Field label="Before you publish">
-        {checks.map((c, i) => (
-          <Row key={i} style={{ alignItems: 'flex-start', paddingVertical: 6 }}>
-            <Icon name={c.ok ? 'check' : 'alert'} size={16} color={c.ok ? colors.accent : colors.inkMuted} />
-            <View style={{ flex: 1 }}><Text style={type.h3}>{c.title}</Text><Text style={type.small}>{c.body}</Text></View>
-            {c.step && !c.ok ? <Press onPress={() => onEdit(c.step!)} accessibilityRole="button"><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Fix</Text></Press> : null}
+type Group = { h: string; chips?: string[]; field?: string; note?: string; key: string; multi?: boolean };
+const SUBS: Record<LocalKind, { t: string; s: string; bucket: 'family' | 'night' | 'already' | 'neighbourhood'; g: Group[]; rt: string; r: string[] }> = {
+  family: {
+    t: 'About your family', s: 'Families are matched to families — never an adult to somebody else’s child.', bucket: 'family',
+    g: [{ key: 'ageBands', h: 'How old are your children', chips: ['Under 5', '5–8', '9–12', '13+'], multi: true, note: 'Ages only. We never show a child’s name or photograph.' },
+      { key: 'interests', h: 'What they are into', chips: ['Playgrounds', 'Animals', 'Swimming', 'Building things', 'Football', 'Museums'], multi: true },
+      { key: 'matchAges', h: 'Ages you are happy to meet', chips: ['Within a year', 'Within two years', 'Any age'], note: 'We match on age and interests. We do not offer matching by a child’s sex, and we do not let anyone search for it.' },
+      { key: 'notes', h: 'Anything else worth knowing', field: 'Buggy-friendly, one of ours is autistic, we are usually out by three…' }],
+    rt: 'How family hosting works',
+    r: ['Daytime only, and always in a public place — a park, a beach, soft play, a café.', 'Both families are there the whole time. Never one adult and another family’s child.', 'Both adults are ID-checked before anything is listed.', 'Messages stay between the adults, in Epic. No contact with a child.', 'It is free. Anyone charging for time with children is not doing this.'],
+  },
+  night_out: {
+    t: 'About the night', s: 'Over-18s, named venues, and never one-to-one.', bucket: 'night',
+    g: [{ key: 'kinds', h: 'What kind of night', chips: ['Pubs', 'Live music', 'Comedy', 'Clubbing', 'Food and drinks', 'Quiz'], multi: true },
+      { key: 'venues', h: 'Which venues, by name', field: 'The Retreat, then Purple Turtle — we finish at the kebab place', note: 'Guests see the list before they book, and we post it publicly.' },
+      { key: 'minGroup', h: 'Smallest group you will run it with', chips: ['3', '4', '6'], note: 'Below three it does not run. This is not a one-to-one.' },
+      { key: 'endTime', h: 'What time it ends', field: '23:30' }],
+    rt: 'How nights out work',
+    r: ['Everyone is 18 or over, checked at booking.', 'Minimum of three guests. A night out never runs one-to-one.', 'Named public venues only — no private addresses.', 'A published end time, and a “we have finished” tap that tells us it went fine.', 'Report anything from any screen. We read every one.'],
+  },
+  already_do: {
+    t: 'What are they joining?', s: 'Say the actual thing, so nobody turns up expecting something else.', bucket: 'already',
+    g: [{ key: 'what', h: 'What it is', chips: ['A run', 'A swim', 'A skate', 'A market trip', 'A cycle', 'A walk'], multi: true },
+      { key: 'route', h: 'Where you meet, and where you finish', field: 'Meet at the Abbey gate, finish at the lock café' },
+      { key: 'difficulty', h: 'How hard is it', chips: ['Anyone can do it', 'Reasonably fit', 'You need to know how'], note: 'This is the one people get wrong. Be honest.' },
+      { key: 'bring', h: 'What they need to bring', field: 'Your own board and a helmet. Nothing else.' }],
+    rt: 'The rules',
+    r: ['You are not teaching it, so do not describe it as a lesson.', 'Public places, and a meeting point anyone can find.', 'Say plainly if it is not for beginners.'],
+  },
+  neighbourhood: {
+    t: 'What is the route?', s: 'A walk round a neighbourhood is still a plan — say where it goes.', bucket: 'neighbourhood',
+    g: [{ key: 'what', h: 'What it is', chips: ['A walk', 'A food crawl', 'A market', 'The parks', 'Shops and makers'], multi: true },
+      { key: 'route', h: 'Where it starts and ends', field: 'Start at the station, finish at the Saturday market' },
+      { key: 'stops', h: 'Three or four stops on the way', field: 'The old prison wall, the bakery on Union St, the canal bridge' },
+      { key: 'gettingAround', h: 'Getting around', chips: ['On foot', 'On bikes', 'Bus and walk'], multi: true, note: 'Say if there are steps, hills or no loos.' },
+      { key: 'access', h: 'Access notes', field: 'Two flights of steps at the bridge; loos at the market only' }],
+    rt: 'The rules',
+    r: ['No commentary on monuments or museums in cities that reserve it for licensed guides — we will tell you if yours is one.', 'Public routes only.', 'Give a real finish time.'],
+  },
+};
+
+function SubDetail({ offer: o, save, sub }: { offer: OwnOffer; save: Save; sub: LocalKind }) {
+  const d = SUBS[sub];
+  const held: Record<string, any> = (o.subDetail as any)[d.bucket] ?? {};
+  const [local, setLocal] = useState<Record<string, any>>(held);
+  const write = (next: Record<string, any>) => { setLocal(next); void save({ subDetail: { ...o.subDetail, [d.bucket]: next } as any }); };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>{d.t}</Text>
+      <Text style={type.small}>{d.s}</Text>
+      {d.g.map((g) => (
+        <Field key={g.key} label={g.h} hint={g.note}>
+          {g.chips ? (
+            <Wrap>
+              {g.chips.map((c) => {
+                const val = g.key === 'minGroup' ? Number(c) : c;
+                const on = g.multi ? (local[g.key] ?? []).includes(c) : local[g.key] === val;
+                return <Press key={c} onPress={() => write({ ...local, [g.key]: g.multi ? (on ? (local[g.key] ?? []).filter((x: string) => x !== c) : [...(local[g.key] ?? []), c]) : val })} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.pill, on && styles.pillLime]}><Text style={styles.pillText}>{c}</Text></Press>;
+              })}
+            </Wrap>
+          ) : (
+            <TextInput value={local[g.key] ?? ''} onChangeText={(t) => setLocal({ ...local, [g.key]: t })} onBlur={() => write(local)} placeholder={g.field} placeholderTextColor={colors.inkFaint} style={styles.input} />
+          )}
+        </Field>
+      ))}
+      <View style={styles.rules}>
+        <Text style={type.h3}>{d.rt}</Text>
+        {d.r.map((r) => <Row key={r} style={{ alignItems: 'flex-start' }}><View style={styles.dot} /><Text style={[type.small, { flex: 1, color: colors.ink }]}>{r}</Text></Row>)}
+        <Press onPress={() => void save({ rulesAccepted: !o.rulesAccepted })} accessibilityRole="checkbox" accessibilityState={{ checked: o.rulesAccepted }} style={styles.checkRow}>
+          <View style={[styles.box, o.rulesAccepted && styles.boxOn]}>{o.rulesAccepted ? <Icon name="check" size={14} color={colors.selectedFg} strokeWidth={3} /> : null}</View>
+          <Text style={[type.small, { flex: 1, color: colors.ink, fontWeight: '600' }]}>I have read these and they are how I will host</Text>
+        </Press>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// video → extract → checks → evidence
+// ---------------------------------------------------------------------------
+
+function VideoStep({ offer: o, onRecord }: { offer: OwnOffer; onRecord: () => void }) {
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>Tell us what you do</Text>
+      <Text style={type.small}>Because this is public, we need to show people who you are.</Text>
+      <Press onPress={onRecord} accessibilityRole="button" style={styles.recordTile}>
+        <View style={styles.playRing}><Icon name={o.video ? 'refresh' : 'video'} size={24} color={INK} /></View>
+        <Text style={[type.h3, { color: colors.bg }]}>{o.video ? 'Recorded · tap to redo' : 'Tap to record'}</Text>
+      </Press>
+      <View style={styles.script}>
+        <Text style={styles.scriptKicker}>READ THIS, IN YOUR OWN WORDS</Text>
+        {['Say your name and where you are', 'Say what you will do together, and how long', 'Say why you know this — and who it suits'].map((t, i) => (
+          <Row key={t}><View style={[styles.scriptBox, o.video && { backgroundColor: LIME }]}>{o.video ? <Icon name="check" size={12} color={INK} strokeWidth={3} /> : <Text style={styles.scriptN}>{i + 1}</Text>}</View><Text style={[type.body, { flex: 1 }]}>{t}</Text></Row>
+        ))}
+      </View>
+      <Text style={type.small}>Thirty to sixty seconds. Re-record as often as you like — only the one you keep is uploaded.</Text>
+      <Text style={type.tiny}>We turn what you say into a title, a summary and a description. Nothing is published until you have read them.</Text>
+    </View>
+  );
+}
+
+function Extract({ offer: o, save, setOffer, setError }: { offer: OwnOffer; save: Save; setOffer: (o: OwnOffer) => void; setError: (e: string | null) => void }) {
+  const [title, setTitle] = useState(o.title ?? '');
+  const [summary, setSummary] = useState(o.summary ?? '');
+  const [description, setDescription] = useState(o.description ?? '');
+  const [facts, setFacts] = useState(o.facts);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const tried = useRef(false);
+  useEffect(() => { setTitle(o.title ?? ''); setSummary(o.summary ?? ''); setDescription(o.description ?? ''); setFacts(o.facts); }, [o.seeded.join(','), o.facts.length]);
+  const run = async (force = false) => {
+    if (!o.video) { setNote('Record the video first — the listing is written from what you say.'); return; }
+    setBusy(true);
+    try { const r = await api.extractOffer(o.id, force); setOffer(r.offer); setNote(r.seeded.length ? null : 'Nothing new to add — what you wrote stands.'); setError(null); }
+    catch (e: any) { setNote(e.message); } finally { setBusy(false); }
+  };
+  useEffect(() => { if (!tried.current && o.video && !o.transcript) { tried.current = true; void run(false); } }, [o.video]);
+  const from = (k: string) => (o.seeded.includes(`video:${k}`) ? ' FROM YOUR VIDEO' : '');
+  const commitFacts = (next: typeof facts) => { setFacts(next); void save({ facts: next }); };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>Here is what we heard</Text>
+      <Text style={type.small}>{busy ? 'Listening to your video…' : 'Pulled from your video and tidied up. Change anything — guests read this, not the transcript.'}</Text>
+      {note ? <View style={styles.note}><Text style={type.small}>{note}</Text></View> : null}
+      <Field label={`Your skill${from('title')}`}><TextInput value={title} onChangeText={setTitle} onBlur={() => void save({ title })} style={[styles.input, { fontWeight: '700' }, o.seeded.includes('video:title') && styles.seeded]} placeholder="Reading, as it actually was" placeholderTextColor={colors.inkFaint} /></Field>
+      <Field label={`The short version${from('summary')}`}><TextInput value={summary} onChangeText={setSummary} onBlur={() => void save({ summary })} multiline style={[styles.input, { minHeight: 64, paddingTop: 10 }, o.seeded.includes('video:summary') && styles.seeded]} placeholder="Ninety minutes round the old town with a historian who has taught it for twenty years." placeholderTextColor={colors.inkFaint} /></Field>
+      <Field label={`The longer one${from('description')}`}><TextInput value={description} onChangeText={setDescription} onBlur={() => void save({ description })} multiline style={[styles.input, styles.multi, o.seeded.includes('video:description') && styles.seeded]} placeholder="We start at the abbey ruins and end where the Kennet meets the Thames…" placeholderTextColor={colors.inkFaint} /></Field>
+      <Field label="Facts from your video">
+        {facts.map((f, i) => (
+          <Row key={i}>
+            <TextInput value={f.key} onChangeText={(t) => setFacts(facts.map((x, j) => (j === i ? { ...x, key: t } : x)))} onBlur={() => commitFacts(facts)} style={[styles.input, { width: 110 }]} />
+            <TextInput value={f.value} onChangeText={(t) => setFacts(facts.map((x, j) => (j === i ? { ...x, value: t } : x)))} onBlur={() => commitFacts(facts)} style={[styles.input, { flex: 1 }]} />
+            <Press onPress={() => commitFacts(facts.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel="Delete" hitSlop={8}><Icon name="delete" size={16} color={colors.inkMuted} /></Press>
           </Row>
         ))}
-        {o.blockers.map((b) => (
-          <Row key={b} style={{ alignItems: 'flex-start', paddingVertical: 6 }}>
-            <Icon name="alert" size={16} color={colors.overrun} />
-            <Text style={[type.small, { flex: 1, color: colors.ink }]}>{b}</Text>
-          </Row>
-        ))}
+        <Press onPress={() => setFacts([...facts, { key: '', value: '' }])} accessibilityRole="button" style={{ paddingVertical: 6 }}><Row><Icon name="add" size={14} color={colors.accent} /><Text style={styles.link}>Add a fact</Text></Row></Press>
       </Field>
+      <Row><Button label={busy ? 'Listening…' : 'Listen again and rewrite'} kind="ghost" icon="refresh" disabled={busy || !o.video} onPress={() => void run(true)} /></Row>
+    </View>
+  );
+}
 
-      <Field label="Who can find it">
-        <Segmented value={o.visibility} options={[{ value: 'public', label: 'Live · anyone can find it' }, { value: 'link', label: 'Link only' }]} onChange={(v) => void save({ visibility: v })} />
-      </Field>
+const CHECK_ROWS: { k: CheckKind; t: string; s: string }[] = [
+  { k: 'pub', t: 'Published on the subject', s: 'A book, a paper, a column. Link or upload.' },
+  { k: 'qual', t: 'A qualification', s: 'A degree, a post, a certificate in the subject.' },
+  { k: 'years', t: 'Years of doing it', s: 'Tell us how long and where; we may ask for a reference.' },
+  { k: 'lic', t: 'A guiding licence', s: 'Only where the city requires one.' },
+];
 
-      {o.state === 'draft' && o.reviewNote ? (
-        <View style={styles.reviewNote}>
-          <Kicker>WHAT WE SAID LAST TIME</Kicker>
-          <Text style={type.body}>{o.reviewNote}</Text>
+function Checks({ offer: o, save, kind, town }: { offer: OwnOffer; save: Save; kind: string; town: string | null }) {
+  const sub = kind === 'expert' ? 'You said expert guide, so we ask to see something. It need not be a licence.' : kind === 'skill' ? 'Anything that shows you can do this. Tick what you have — none of it is required.' : 'Optional for meetups and mini tours. Tick anything you have.';
+  const toggle = (k: CheckKind) => { const set = new Set(o.checks); if (set.has(k)) set.delete(k); else set.add(k); void save({ checks: [...set] }); };
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <Text style={styles.title}>What backs it up?</Text>
+      <Text style={type.small}>{sub}</Text>
+      {CHECK_ROWS.map((c) => {
+        const on = o.checks.includes(c.k);
+        return (
+          <Press key={c.k} onPress={() => toggle(c.k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} style={[styles.choice, on && styles.choiceOn]}>
+            <Row style={{ alignItems: 'flex-start' }}>
+              <View style={[styles.box, on && styles.boxOn, { marginTop: 2 }]}>{on ? <Icon name="check" size={14} color={colors.selectedFg} strokeWidth={3} /> : null}</View>
+              <View style={{ flex: 1 }}><Text style={type.h3}>{c.t}</Text><Text style={type.small}>{c.s}</Text></View>
+            </Row>
+          </Press>
+        );
+      })}
+      <Text style={type.tiny}>A licence is only asked for where the city legally requires one.{o.regulated ? ` ${o.regulated.country} does.` : town ? ` ${town} does not.` : ''}</Text>
+    </View>
+  );
+}
+
+const EVD: Record<CheckKind, { h: string; fields: [string, string, string][]; upload: string | null }> = {
+  pub: { h: 'Published on the subject', fields: [['title', 'Title', 'The name of the book, paper or column'], ['where', 'Where it appeared', 'Publisher, journal or masthead'], ['link', 'Link', 'A URL, if there is one']], upload: 'Upload a copy or a scan' },
+  qual: { h: 'A qualification', fields: [['what', 'What it is', 'BA History, PGCE, Mountain Leader…'], ['awardedBy', 'Awarded by', 'University, board or institute'], ['year', 'Year', 'e.g. 2009']], upload: 'Upload the certificate' },
+  years: { h: 'Years of doing it', fields: [['howLong', 'How long', 'e.g. 17 years'], ['where', 'Where, and for whom', 'Museums, schools, your own tours…'], ['refName', 'Reference · name', 'Their full name'], ['refPhone', 'Reference · phone', '07700 900000'], ['refEmail', 'Reference · email', 'name@example.com']], upload: null },
+  lic: { h: 'A guiding licence', fields: [['number', 'Licence number', 'As printed on the badge'], ['issuer', 'Issued by', 'City or regional authority'], ['expires', 'Expires', 'MM/YYYY']], upload: 'Upload the licence' },
+};
+
+function EvidenceStep({ offer: o, home, onChanged }: { offer: OwnOffer; home: HostHome | null; onChanged: () => Promise<void> }) {
+  const existing = home?.host?.evidence ?? [];
+  const picked = o.checks;
+  const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>(() => Object.fromEntries(picked.map((k) => [k, Object.fromEntries(Object.entries(existing.find((e) => e.kind === k)?.fields ?? {}).map(([a, b]) => [a, b ?? '']))])));
+  const [said, setSaid] = useState<string | null>(null);
+  const commit = async (k: CheckKind) => {
+    const fields = drafts[k] ?? {};
+    const have = existing.find((e) => e.kind === k);
+    try { if (have) await api.updateEvidence(have.id, { fields }); else await api.addEvidence({ kind: k, offerId: o.id, fields }); await onChanged(); setSaid(null); } catch (e: any) { setSaid(e.message); }
+  };
+  const upload = async (k: CheckKind) => {
+    const blob = await pickPhotoBlob();
+    if (!blob) return;
+    try { const m = await api.uploadHostMedia(blob, 'photo'); const have = existing.find((e) => e.kind === k); if (have) await api.updateEvidence(have.id, { mediaId: m.id }); else await api.addEvidence({ kind: k, offerId: o.id, fields: drafts[k] ?? {}, mediaId: m.id }); await onChanged(); } catch (e: any) { setSaid(e.message); }
+  };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>{picked.length > 1 ? 'Tell us about each one' : picked.length === 1 ? 'Tell us about it' : 'Nothing to add'}</Text>
+      <Text style={type.small}>{picked.length > 1 ? 'For each thing you ticked. Nothing here is shown to guests.' : 'Nothing here is shown to guests — only the badge that comes from it.'}</Text>
+      {picked.map((k) => {
+        const d = EVD[k];
+        const have = existing.find((e) => e.kind === k);
+        return (
+          <View key={k} style={styles.evGroup}>
+            <Text style={type.h3}>{d.h}</Text>
+            {d.fields.map(([key, label, ph]) => (
+              <Field key={key} label={label}>
+                <TextInput value={drafts[k]?.[key] ?? ''} onChangeText={(t) => setDrafts({ ...drafts, [k]: { ...(drafts[k] ?? {}), [key]: t } })} onBlur={() => void commit(k)} placeholder={ph} placeholderTextColor={colors.inkFaint} autoCapitalize={key.includes('mail') || key === 'link' ? 'none' : 'sentences'} style={styles.input} />
+              </Field>
+            ))}
+            {d.upload ? <Row><Button label={have?.media ? 'Uploaded · change it' : d.upload} kind="secondary" icon="upload" onPress={() => void upload(k)} />{have?.media ? <Icon name="check" size={16} color={colors.accent} /> : null}</Row> : null}
+          </View>
+        );
+      })}
+      {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// done
+// ---------------------------------------------------------------------------
+
+function Done({ offer: o, home }: { offer: OwnOffer; home: HostHome | null }) {
+  const { navigate } = useRouter();
+  const pub = o.visibility === 'public';
+  const each = o.money === 'free' ? null : pounds(o.price.each);
+  const rows: { icon: IconName; t: string; s: string }[] = pub
+    ? [{ icon: 'verified', t: 'We are checking what you sent', s: o.state === 'in_review' ? 'Your listing is read within 48 hours; your Checked badge appears when the checks clear.' : 'Your Checked badge appears when it clears — usually a day.' }, { icon: 'share', t: 'Share the link', s: 'Most first sessions fill from your own contacts.' }]
+    : [{ icon: 'household', t: 'Send the invitations', s: 'By name, by text or by link — only they can open it.' }, { icon: 'calendar', t: 'RSVPs come back with numbers', s: 'Yes, no, and how many they are bringing. Chased for you.' },
+      ...(each ? [{ icon: 'payout' as IconName, t: o.money === 'epic' ? `We collect ${each} each` : `You collect ${each} each`, s: o.money === 'epic' ? 'Charged when they say yes, paid out to you three days after.' : 'We show everyone what they owe and chase them; you tick them off as it arrives.' }] : []),
+      { icon: 'trips', t: 'It sits in Trips', s: 'With the travel, the stay and the rest of the weekend.' }];
+  const share = async () => {
+    const nav: any = (globalThis as any).navigator;
+    const url = typeof window !== 'undefined' ? `${window.location.origin}${paths.experience(o.id)}` : paths.experience(o.id);
+    try { if (nav?.share) await nav.share({ title: o.title ?? 'On Epic', url }); else if (nav?.clipboard) await nav.clipboard.writeText(url); } catch { /* closed */ }
+  };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Text style={styles.title}>{pub ? (o.state === 'live' ? 'You are live' : 'It is on its way') : 'Invitations ready'}</Text>
+      <Text style={type.small}>{pub ? `${o.title ?? 'Your offer'} · anyone on Epic${each ? ` · ${each} each` : ''}` : o.money === 'free' ? 'Only the people you name can see this' : `Only the people you name · ${each} each`}</Text>
+      <ExperienceCard item={o} onOpen={() => (o.state === 'live' ? navigate(paths.experience(o.id)) : undefined)} />
+      <Text style={styles.kicker}>{pub ? 'GET THE FIRST FEW IN' : 'WHAT HAPPENS NOW'}</Text>
+      {rows.map((r) => <Row key={r.t} style={{ alignItems: 'flex-start' }}><View style={styles.iconTile}><Icon name={r.icon} size={16} color={colors.ink} /></View><View style={{ flex: 1 }}><Text style={type.h3}>{r.t}</Text><Text style={type.small}>{r.s}</Text></View></Row>)}
+      {pub ? <Button label="Share the link" kind="secondary" icon="share" onPress={() => void share()} /> : <Button label={o.invites.some((i) => !i.sentAt && i.contact) ? 'Send the invitations' : 'Add people to invite'} kind="secondary" icon="send" onPress={() => navigate(paths.hostOfferEdit(o.id, 'invite'))} />}
+      {pub ? (
+        <View style={styles.multi}>
+          <Text style={type.h3}>That is one of your skills</Text>
+          <Text style={type.small}>People book the thing, not the profile — so each skill is its own listing, with its own video, its own price and its own reason you are good at it.</Text>
+          {[{ t: 'A sourdough morning', s: 'Anytime · 3 h · £45' }, { t: 'An hour on getting the best out of AI', s: 'Anytime · online · £80' }].map((e) => <Row key={e.t}><Icon name="anytime" size={14} color={colors.inkMuted} /><View style={{ flex: 1 }}><Text style={type.body}>{e.t}</Text><Text style={type.tiny}>{e.s}</Text></View></Row>)}
+          <Text style={type.tiny}>Tom hosts both. Same person, two audiences.</Text>
+          <Button label="Add another skill" icon="add" onPress={() => navigate(paths.hostNewOffer())} />
         </View>
       ) : null}
-      <Text style={type.small}>{o.state === 'live' ? 'This is live. Changes show the moment you save.' : 'A first listing is read by somebody at Epic — back within 48 hours. After that yours go live as you publish them.'}</Text>
+      <Button label="Back to hosting" kind="ghost" onPress={() => navigate(paths.host(), { replace: true })} />
+      {home ? null : null}
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({ label, hint, right, children }: { label: string; hint?: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <View style={{ gap: spacing.sm }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Row style={{ justifyContent: 'space-between' }}><Text style={styles.fieldLabel}>{label}</Text>{right}</Row>
       {children}
       {hint ? <Text style={type.tiny}>{hint}</Text> : null}
     </View>
-  );
-}
-
-function AddRow({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Press onPress={onPress} accessibilityRole="button" style={styles.addRow}>
-      <Icon name="add" size={16} color={colors.accent} />
-      <Text style={[type.h3, { color: colors.accent }]}>{label}</Text>
-    </Press>
   );
 }
 
@@ -628,34 +866,56 @@ const styles = StyleSheet.create({
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20, paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any, paddingBottom: 150, gap: spacing.sm },
   wide: { maxWidth: 720, alignSelf: 'center', width: '100%' },
-  progress: { flexDirection: 'row', gap: 4, marginTop: spacing.sm, marginBottom: spacing.sm },
+  progress: { flexDirection: 'row', gap: 4, marginBottom: spacing.sm },
   bar: { flex: 1, height: 4, backgroundColor: colors.lineSoft },
   barOn: { backgroundColor: colors.selected },
-  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: spacing.md, paddingBottom: (spacing.md + 8) as any, gap: 6, backgroundColor: colors.surface, borderTopWidth: BORDER, borderTopColor: colors.line },
-  shape: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderWidth: BORDER, borderColor: colors.ruleSoft, backgroundColor: colors.surface },
-  shapeOn: { borderColor: colors.ink, backgroundColor: colors.surfaceMuted },
-  shapeIcon: { width: 40, height: 40, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' },
+  title: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.9, lineHeight: 30, color: colors.ink },
+  kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, color: colors.inkMuted },
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: spacing.md, paddingBottom: (Platform.OS === 'web' ? 'max(14px, var(--epic-sab))' : 14) as any, gap: 6, backgroundColor: colors.surface, borderTopWidth: BORDER, borderTopColor: colors.line },
+  shapeTag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, height: 20, borderWidth: 1, borderColor: colors.ink },
+  shapeTagText: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.6, color: colors.ink },
+  groupHead: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, color: colors.inkMuted, marginTop: 28, marginBottom: 0 },
+  planRow: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  numTile: { width: 26, height: 26, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  numText: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: INK },
+  choice: { padding: spacing.md, gap: spacing.sm, borderWidth: 1, borderColor: colors.ruleSoft, backgroundColor: colors.surface },
+  choiceOn: { borderWidth: BORDER, borderColor: colors.ink, backgroundColor: colors.surfaceMuted },
+  iconTile: { width: 34, height: 34, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' },
+  tick: { width: 24, height: 24, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
+  note: { backgroundColor: colors.warm, padding: spacing.md, gap: 4 },
   fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.ink },
-  input: { minHeight: TARGET, paddingHorizontal: spacing.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, fontFamily: fonts.body },
-  multi: { minHeight: 88, paddingTop: 10 },
-  pill: { paddingHorizontal: 12, height: 34, justifyContent: 'center', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
-  pillOn: { backgroundColor: colors.selected },
+  input: { minHeight: TARGET, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.ruleSoft, backgroundColor: colors.surface, fontSize: 16, color: colors.ink, fontFamily: fonts.body },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  multi: { minHeight: 96, paddingTop: 10, gap: spacing.sm },
+  seeded: { borderLeftWidth: 3, borderLeftColor: LIME },
+  link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
+  docRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.ruleSoft, backgroundColor: colors.surface },
+  dayChip: { flex: 1, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.warm },
+  dayOn: { backgroundColor: colors.selected },
+  dayText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.inkMuted },
+  pill: { paddingHorizontal: 12, height: 36, justifyContent: 'center', backgroundColor: colors.surfaceMuted },
+  pillOn: { backgroundColor: INK },
+  pillLime: { backgroundColor: LIME },
   pillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
-  dayChip: { width: 44, height: 40, alignItems: 'center', justifyContent: 'center', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
-  photo: { width: 84, height: 84, borderRadius: 8, overflow: 'hidden', backgroundColor: colors.warm, position: 'relative', alignItems: 'center', justifyContent: 'center' },
-  photoAdd: { borderWidth: BORDER, borderStyle: 'dashed', borderColor: colors.ruleSoft, gap: 2 },
-  photoX: { position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  videoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, backgroundColor: colors.surfaceMuted },
-  videoIcon: { width: 40, height: 40, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  venue: { width: '48%', flexGrow: 1, padding: spacing.md, gap: 4, borderWidth: BORDER, borderColor: colors.ruleSoft, backgroundColor: colors.surface },
-  venueOn: { borderColor: colors.ink, backgroundColor: colors.surfaceMuted },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  radioRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: 8 },
-  radio: { width: 22, height: 22, borderRadius: 11, borderWidth: BORDER, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-  radioOn: { borderColor: colors.ink },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.ink },
-  collects: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, padding: spacing.md, backgroundColor: colors.surfaceMuted },
-  regulated: { padding: spacing.md, gap: spacing.sm, borderWidth: BORDER, borderColor: colors.ink },
-  reviewNote: { padding: spacing.md, gap: 4, backgroundColor: colors.warm },
+  weekN: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, color: colors.inkMuted, width: 60 },
+  guest: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.ink },
+  modeTile: { flex: 1, padding: spacing.md, gap: 2, backgroundColor: colors.surfaceMuted, minHeight: 72 },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 8 },
+  radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: colors.ruleSoft, alignItems: 'center', justifyContent: 'center' },
+  radioOn: { borderWidth: 6, borderColor: INK },
+  radioDot: { width: 0, height: 0 },
+  rules: { padding: spacing.md, gap: spacing.sm, backgroundColor: colors.warm },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink, marginTop: 6 },
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: 4 },
+  box: { width: 22, height: 22, borderWidth: 1, borderColor: colors.ruleSoft, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  boxOn: { backgroundColor: colors.selected, borderColor: colors.selected },
+  recordTile: { backgroundColor: INK, minHeight: 180, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  playRing: { width: 64, height: 64, borderRadius: 32, backgroundColor: LIME, alignItems: 'center', justifyContent: 'center' },
+  script: { backgroundColor: INK, padding: spacing.md, gap: spacing.sm },
+  scriptKicker: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.6, color: colors.bg, opacity: 0.8 },
+  scriptBox: { width: 22, height: 22, backgroundColor: 'rgba(255,253,249,0.22)', alignItems: 'center', justifyContent: 'center' },
+  scriptN: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: '#FFFDF9' },
+  evGroup: { padding: spacing.md, gap: spacing.sm, borderWidth: 1, borderColor: colors.ruleSoft },
 });

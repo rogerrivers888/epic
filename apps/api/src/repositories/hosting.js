@@ -31,7 +31,7 @@ export async function insertHost(householdId, h) {
     `insert into hosts (household_id, account_id, name, type, local_kind, intro_text, location_label, lat, lng, country_code,
                         credentials, languages, children_ages, date_of_birth)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`,
-    [householdId, h.accountId ?? null, h.name, h.type, h.localKind ?? null, h.introText ?? null, h.locationLabel ?? null,
+    [householdId, h.accountId ?? null, h.name, h.type ?? null, h.localKind ?? null, h.introText ?? null, h.locationLabel ?? null,
       h.lat ?? null, h.lng ?? null, h.countryCode ?? null, JSON.stringify(h.credentials ?? []), JSON.stringify(h.languages ?? []),
       JSON.stringify(h.childrenAges ?? []), h.dateOfBirth ?? null],
   );
@@ -39,7 +39,7 @@ export async function insertHost(householdId, h) {
 }
 
 const HOST_COLUMNS = {
-  name: 'name', type: 'type', localKind: 'local_kind', introText: 'intro_text', introVideoId: 'intro_video_id', photoId: 'photo_id',
+  name: 'name', type: 'type', localKind: 'local_kind', address: 'address', introText: 'intro_text', introVideoId: 'intro_video_id', photoId: 'photo_id',
   locationLabel: 'location_label', lat: 'lat', lng: 'lng', countryCode: 'country_code', idDocument: 'id_document',
   insuranceConfirmed: 'insurance_confirmed', taxReference: 'tax_reference', payoutStatus: 'payout_status', payoutLabel: 'payout_label',
   dateOfBirth: 'date_of_birth', trust: 'trust', checks: 'checks',
@@ -161,11 +161,15 @@ const OFFER_COLUMNS = {
   startsOn: 'starts_on', startsAt: 'starts_at', weekday: 'weekday', firstDate: 'first_date', sessions: 'sessions', outcome: 'outcome', arc: 'arc',
   joinMode: 'join_mode', dropInPence: 'drop_in_pence', missedNote: 'missed_note', slotMin: 'slot_min',
   regulatedAnswer: 'regulated_answer', licenceNumber: 'licence_number', licenceExpiry: 'licence_expiry',
+  // The host journey (13 Sep 2026): the money axis, the listing we wrote, the document, the series' shape, the notice.
+  money: 'money', summary: 'summary', transcript: 'transcript', docId: 'doc_id', endsAt: 'ends_at', repeatEvery: 'repeat_every', endDate: 'end_date',
+  themesDiffer: 'themes_differ', noticeDays: 'notice_days', rulesAccepted: 'rules_accepted',
   reviewNote: 'review_note', reviewedAt: 'reviewed_at', submittedAt: 'submitted_at', publishedAt: 'published_at', cancelledAt: 'cancelled_at', cancelledNote: 'cancelled_note',
 };
 const OFFER_JSON = {
   photoIds: 'photo_ids', runningOrder: 'running_order', featuredPeople: 'featured_people', skippedDates: 'skipped_dates', weeks: 'weeks',
   availability: 'availability', reviewChecklist: 'review_checklist',
+  facts: 'facts', seeded: 'seeded', subDetail: 'sub_detail', checks: 'checks',
 };
 
 export async function updateOffer(id, patch, client) {
@@ -413,6 +417,73 @@ export async function openReports() {
 
 export async function resolveReport(id) {
   await query('update host_reports set resolved_at = now() where id = $1', [id]);
+}
+
+// ---------------------------------------------------------------------------
+// evidence: what backs a claim up. Never shown to guests.
+// ---------------------------------------------------------------------------
+
+export async function evidenceOf(hostId) {
+  const { rows } = await query('select * from host_evidence where host_id = $1 order by created_at', [hostId]);
+  return rows;
+}
+
+export async function insertEvidence({ hostId, offerId, kind, fields, mediaId }) {
+  const { rows } = await query(
+    'insert into host_evidence (host_id, offer_id, kind, fields, media_id) values ($1,$2,$3,$4,$5) returning *',
+    [hostId, offerId ?? null, kind, JSON.stringify(fields ?? {}), mediaId ?? null],
+  );
+  return rows[0];
+}
+
+export async function updateEvidence(id, hostId, { fields, mediaId }) {
+  const { rows } = await query(
+    'update host_evidence set fields = coalesce($3::jsonb, fields), media_id = coalesce($4, media_id) where id = $1 and host_id = $2 returning *',
+    [id, hostId, fields ? JSON.stringify(fields) : null, mediaId ?? null],
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteEvidence(id, hostId) {
+  await query('delete from host_evidence where id = $1 and host_id = $2', [id, hostId]);
+}
+
+// ---------------------------------------------------------------------------
+// invitations: a private offer's guests, and their answers
+// ---------------------------------------------------------------------------
+
+export async function invitesOf(offerId) {
+  const { rows } = await query('select * from offer_invites where offer_id = $1 order by created_at', [offerId]);
+  return rows;
+}
+
+export async function insertInvite({ offerId, name, contact, contactKind, heads, token }) {
+  const { rows } = await query(
+    'insert into offer_invites (offer_id, name, contact, contact_kind, heads, token) values ($1,$2,$3,$4,$5,$6) returning *',
+    [offerId, name, contact ?? null, contactKind ?? null, heads ?? 1, token],
+  );
+  return rows[0];
+}
+
+export async function markInviteSent(id) {
+  await query('update offer_invites set sent_at = now() where id = $1', [id]);
+}
+
+export async function deleteInvite(id, offerId) {
+  await query('delete from offer_invites where id = $1 and offer_id = $2', [id, offerId]);
+}
+
+export async function inviteByToken(token) {
+  const { rows } = await query('select * from offer_invites where token = $1', [token]);
+  return rows[0] ?? null;
+}
+
+export async function answerInvite(id, rsvp, heads) {
+  const { rows } = await query(
+    'update offer_invites set rsvp = $2, rsvp_heads = $3, answered_at = now() where id = $1 returning *',
+    [id, rsvp, heads ?? null],
+  );
+  return rows[0];
 }
 
 // ---------------------------------------------------------------------------

@@ -75,7 +75,7 @@ export function Hosting({ canManage }: { canManage: boolean }) {
                   <View style={{ flex: 1, gap: 2 }}>
                     <Row style={{ gap: 6, flexWrap: 'wrap' }}>
                       <Pill label={SHAPE_LABEL[o.shape]} />
-                      <Pill label={TYPE_LABEL[o.hostType]} tone="accent" />
+                      {o.hostType ? <Pill label={TYPE_LABEL[o.hostType]} tone="accent" /> : null}
                       <Pill label={TRUST_LABEL[o.hostTrust]} />
                       {o.commentary ? <Pill label="Reads like a tour" tone="crit" /> : null}
                     </Row>
@@ -123,7 +123,7 @@ export function Hosting({ canManage }: { canManage: boolean }) {
             <View style={{ flex: 1, gap: 2 }}>
               <Row style={{ gap: 6, flexWrap: 'wrap' }}>
                 <Text style={type.h3}>{h.name}</Text>
-                <Pill label={TYPE_LABEL[h.type]} tone="accent" />
+                {h.type ? <Pill label={TYPE_LABEL[h.type]} tone="accent" /> : null}
                 {h.openReports ? <Pill label={`${h.openReports} report${h.openReports === 1 ? '' : 's'}`} tone="crit" /> : null}
               </Row>
               <Text style={type.small}>{[h.location, `${h.liveOffers} live`, h.inReview ? `${h.inReview} in review` : null, h.payoutStatus === 'connected' ? 'payouts on' : 'no payouts', h.taxReference ? `tax ${h.taxReference}` : 'no tax ref', h.idDocument ? `ID: ${h.idDocument.replace('_', ' ')}` : 'no ID named', h.insuranceConfirmed ? 'insurance confirmed' : null].filter(Boolean).join(' · ')}</Text>

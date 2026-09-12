@@ -58,7 +58,7 @@ export function HostProfileScreen({ route }: { route: Extract<Route, { name: 'ho
 
   if (route.layer === 'trust') return <TrustLadder host={host} wide={wide} onBack={() => back(paths.hostProfile(host.id))} />;
 
-  const sub = [host.type === 'guide' ? host.credentials[0] : host.type === 'local' && host.localKind ? LOCAL_LABEL[host.localKind] : host.credentials[0] ?? null, host.location].filter(Boolean).join(' · ');
+  const sub = [host.type === 'expert' ? host.credentials[0] : host.type === 'meetups' && host.localKind ? LOCAL_LABEL[host.localKind] : host.credentials[0] ?? null, host.location].filter(Boolean).join(' · ');
   const running = host.checks === 'running';
 
   return (
@@ -96,18 +96,18 @@ export function HostProfileScreen({ route }: { route: Extract<Route, { name: 'ho
             {host.childrenAges.length ? <Tag>Kids {host.childrenAges.join(' and ')}</Tag> : null}
             {host.credentials.map((c) => <Tag key={c}>{c}</Tag>)}
             {host.languages.length ? <Tag>{host.languages.join(' · ')}</Tag> : null}
-            {host.type === 'local' && host.localKind === 'family' ? <><Tag>Daytime only</Tag><Tag>Public places</Tag></> : null}
+            {host.type === 'meetups' && host.localKind === 'family' ? <><Tag>Daytime only</Tag><Tag>Public places</Tag></> : null}
           </Wrap>
         ) : null}
 
         {/* Local · Family carries its own safety line, always visible. */}
-        {host.type === 'local' && host.localKind === 'family' ? (
+        {host.type === 'meetups' && host.localKind === 'family' ? (
           <View style={styles.safety}>
             <Icon name="family" size={16} color={colors.ink} />
             <Text style={[type.small, { flex: 1, color: colors.ink }]}>Family hosting is daytime, in public, with both families together. Never one adult and someone else's child.</Text>
           </View>
         ) : null}
-        {host.type === 'local' && host.localKind === 'night_out' ? (
+        {host.type === 'meetups' && host.localKind === 'night_out' ? (
           <View style={styles.safety}>
             <Icon name="info" size={16} color={colors.ink} />
             <Text style={[type.small, { flex: 1, color: colors.ink }]}>A night out is over-18s, named public venues, a minimum party, a visible end time and a way to reach us.</Text>
@@ -117,7 +117,7 @@ export function HostProfileScreen({ route }: { route: Extract<Route, { name: 'ho
         {/* A new host reads as new, not as untrusted: money is held by Epic either way. */}
         {running ? (
           <View style={styles.checks}>
-            <Text style={type.small}>We are checking {first}'s ID{host.credentials.length ? ` and ${host.type === 'guide' ? 'their licence' : 'their qualification'}` : ''}. Until that finishes there is no verified badge — your money is still held by Epic and returned if it does not run.</Text>
+            <Text style={type.small}>We are checking {first}'s ID{host.credentials.length ? ` and ${host.type === 'expert' ? 'their licence' : 'their qualification'}` : ''}. Until that finishes there is no verified badge — your money is still held by Epic and returned if it does not run.</Text>
           </View>
         ) : host.trust !== 'verified' ? (
           <Press onPress={() => navigate(paths.hostTrust(host.id))} accessibilityRole="button" style={styles.checks}>
@@ -152,7 +152,7 @@ export function HostProfileScreen({ route }: { route: Extract<Route, { name: 'ho
         {offers.length ? (
           <View style={{ marginTop: spacing.xl, gap: 6 }}>
             <Button label={offers.length === 1 ? `See ${offers[0].title ?? 'it'}` : `See what ${first} offers`} icon="forward" onPress={() => navigate(paths.experience(offers[0].id))} />
-            <Text style={[type.tiny, { textAlign: 'center' }]}>{host.type === 'guide' ? 'Professional rate · licence on file' : host.type === 'local' && offers.every((o) => o.priceMode === 'free') ? `Free · ${host.localKind === 'family' ? 'they are' : `${first} is`} not doing this for money` : 'Free to cancel up to 24 hours before'}</Text>
+            <Text style={[type.tiny, { textAlign: 'center' }]}>{host.type === 'expert' ? 'Professional rate · licence on file' : host.type === 'meetups' && offers.every((o) => o.priceMode === 'free') ? `Free · ${host.localKind === 'family' ? 'they are' : `${first} is`} not doing this for money` : 'Free to cancel up to 24 hours before'}</Text>
           </View>
         ) : null}
 

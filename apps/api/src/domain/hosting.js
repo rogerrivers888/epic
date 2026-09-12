@@ -12,8 +12,27 @@
  * regulated cities where guiding is a licensed profession.
  */
 
-export const HOST_TYPES = ['practitioner', 'local', 'guide'];
-export const LOCAL_KINDS = ['family', 'something_you_do', 'night_out', 'neighbourhood'];
+/**
+ * The settled kinds (T-REC, 13 Sep 2026): "I have a skill" · "Meetups and mini
+ * tours" · "Expert guide". Expert is defined by depth of knowledge, not by
+ * employment; a licence is a local legal matter asked at publish, not the
+ * definition of the kind.
+ */
+export const HOST_TYPES = ['skill', 'meetups', 'expert'];
+export const LOCAL_KINDS = ['family', 'already_do', 'night_out', 'neighbourhood'];
+/** Who can come. It decides whether identity, a video, evidence and an age gate are needed at all. */
+export const VISIBILITIES = ['invite', 'link', 'public'];
+/** Whether anyone is paying, and who takes it. Public paid is Epic-collects only. */
+export const MONEY = ['free', 'direct', 'epic'];
+export const REPEATS = ['weekly', 'fortnightly', 'monthly'];
+export const CHECK_KINDS = ['pub', 'qual', 'years', 'lic'];
+/** The evidence each check asks for: proper fields, never one line. */
+export const EVIDENCE_FIELDS = {
+  pub: ['title', 'where', 'link'],
+  qual: ['what', 'awardedBy', 'year'],
+  years: ['howLong', 'where', 'refName', 'refPhone', 'refEmail'],
+  lic: ['number', 'issuer', 'expires'],
+};
 export const TRUST_LEVELS = ['verified', 'checked', 'trusted'];
 export const SHAPES = ['oneoff', 'series', 'anytime'];
 export const OFFER_STATES = ['draft', 'in_review', 'live', 'paused', 'ended'];
@@ -59,14 +78,22 @@ const plusDays = (iso, n) => { const d = dateAt(iso); d.setUTCDate(d.getUTCDate(
  * up at the end so the run is still the number of sessions promised.
  */
 export function seriesDates(offer) {
-  if (!offer.first_date || !offer.sessions) return [];
+  if (!offer.first_date || (!offer.sessions && !offer.end_date)) return [];
   const skipped = new Set((offer.skipped_dates ?? []).map(ymd));
+  const step = (iso) => {
+    if ((offer.repeat_every ?? 'weekly') === 'monthly') { const d = dateAt(iso); d.setUTCMonth(d.getUTCMonth() + 1); return ymd(d); }
+    return plusDays(iso, offer.repeat_every === 'fortnightly' ? 14 : 7);
+  };
   const out = [];
   let d = ymd(offer.first_date);
   let guard = 0;
-  while (out.length < offer.sessions && guard++ < 200) {
+  // A count, or an end date — the host gives one and we compute the other.
+  const wanted = offer.sessions || 200;
+  const until = offer.end_date ? ymd(offer.end_date) : null;
+  while (out.length < wanted && guard++ < 200) {
+    if (until && d > until) break;
     if (!skipped.has(d)) out.push(d);
-    d = plusDays(d, 7);
+    d = step(d);
   }
   return out;
 }
@@ -85,7 +112,9 @@ export function anytimeSlots(offer, { from = new Date(), days = 14, taken = new 
   const out = [];
   const start = new Date(from);
   start.setUTCHours(12, 0, 0, 0);
-  for (let i = 1; i <= days; i++) {
+  // Nobody can book a slot closer than the notice the host asked for.
+  const notice = Math.max(1, Number(offer.notice_days) || 1);
+  for (let i = notice; i <= days + notice - 1; i++) {
     const d = new Date(start); d.setUTCDate(d.getUTCDate() + i);
     if (!wanted.has(d.getUTCDay())) continue;
     const day = ymd(d);
@@ -227,28 +256,67 @@ export function ageGate(offer, party) {
  */
 export function publishBlockers(offer, host) {
   const out = [];
-  if (!offer.title?.trim()) out.push('Give it a title.');
-  if (!offer.description?.trim() && offer.shape !== 'anytime') out.push('Say what happens.');
-  if (offer.shape === 'anytime' && !offer.why_you?.trim()) out.push('Say why you, for this one.');
+  const pub = offer.visibility === 'public';
+  const paid = (offer.money ?? 'free') !== 'free';
+  if (!offer.title?.trim()) out.push('Give it a name.');
   if (offer.shape === 'oneoff' && !offer.starts_on) out.push('Pick the date.');
-  if (offer.shape === 'series' && (!offer.first_date || !offer.sessions)) out.push('Say when the series starts and how many sessions it runs.');
+  if (offer.shape === 'series' && (!offer.first_date || !(offer.sessions || offer.end_date))) out.push('Say when the series starts and how many there are, or when it ends.');
   if (offer.shape === 'anytime' && !(offer.availability?.days?.length && offer.availability?.parts?.length)) out.push('Say when you are free.');
-  if (offer.price_mode === 'same_each' && !offer.price_pence) out.push('Say what it costs each, or make it free.');
-  if (offer.price_mode === 'by_numbers' && !offer.total_pence) out.push('Say what the whole thing costs.');
-  if (offer.price_mode !== 'free' && host.payout_status !== 'connected') out.push('Connect payouts before charging — you can publish a free one now.');
-  if (offer.venue === 'their_place' && host.trust === 'verified') out.push('Hosting at your place needs the Checked level. Ask for it from your profile.');
-  if (host.type === 'practitioner' && (offer.price_pence ?? 0) > CHECKED_ABOVE_PENCE && host.trust === 'verified') out.push('A Practitioner offer above £100 needs the Checked level.');
-  if (host.type === 'local' && host.local_kind === 'family' && host.trust === 'verified') out.push('Family hosting needs the Checked level.');
-  if (host.type === 'local' && host.local_kind === 'night_out') {
-    if (offer.age_limit !== 18) out.push('A night out is over-18s only.');
-    if (!offer.min_count || offer.min_count < 3) out.push('A night out needs a minimum party of three, so it is never one guest and one host.');
-  }
-  if (isRegulated(offer.venue_country) && !offer.regulated_answer) out.push(`Hosting in ${REGULATED_COUNTRIES[offer.venue_country.toUpperCase()]} asks one more question.`);
-  if (offer.regulated_answer === 'licensed' && !offer.licence_number) out.push('Give the licence number.');
-  if (isRegulated(offer.venue_country) && offer.regulated_answer === 'no_commentary' && readsLikeCommentary(`${offer.title} ${offer.description}`)) {
-    out.push('Your listing reads like a guided tour of a monument or museum. "A morning cooking together" is fine; "A tour of the Duomo" is not.');
+  // Money.
+  if (paid && offer.price_mode === 'free') out.push('Say what it costs.');
+  if (paid && offer.price_mode === 'same_each' && !offer.price_pence) out.push('Say what each person pays.');
+  if (paid && offer.price_mode === 'by_numbers' && !offer.total_pence) out.push('Say what the whole thing costs.');
+  if (pub && offer.money === 'direct') out.push('Public things are always paid through Epic.');
+  if (offer.money === 'epic' && host.payout_status !== 'connected') out.push('Connect payouts before charging — you can publish a free one now.');
+  // Public means we advertise a person: identity, a video, and what backs it up.
+  if (pub) {
+    if (!host.date_of_birth) out.push('Your date of birth — hosts are eighteen or over.');
+    if (!host.type) out.push('Say what kind of host you are.');
+    if (!offer.video_id) out.push('A video for this offer — people book the person.');
+    if (host.type === 'meetups' && !host.local_kind) out.push('Say what you are taking them to.');
+    if (host.type === 'meetups' && !offer.rules_accepted) out.push('Read the rules for this kind of hosting and say they are how you will host.');
+    if (host.type === 'meetups' && host.local_kind === 'family') {
+      if (paid) out.push('Family hosting is free. Anyone charging for time with children is not doing this.');
+      if (host.trust === 'verified') out.push('Family hosting needs both adults ID-checked — the Checked level.');
+    }
+    if (host.type === 'meetups' && host.local_kind === 'night_out') {
+      if (offer.age_limit !== 18) out.push('A night out is over-18s only.');
+      const night = offer.sub_detail?.night ?? {};
+      if (!(Number(night.minGroup) >= 3)) out.push('A night out needs a minimum group of three — never one-to-one.');
+      if (!night.venues?.trim()) out.push('Name the venues. Guests see them before they book.');
+      if (!night.endTime) out.push('Give the night an end time.');
+    }
+    if (offer.venue === 'their_place' && host.trust === 'verified') out.push('Hosting at your place needs the Checked level. Ask for it from your profile.');
+    if (host.type === 'skill' && (offer.price_pence ?? 0) > CHECKED_ABOVE_PENCE && host.trust === 'verified') out.push('A skill offer above £100 needs the Checked level.');
+    if (isRegulated(offer.venue_country) && !offer.regulated_answer) out.push(`Hosting in ${REGULATED_COUNTRIES[offer.venue_country.toUpperCase()]} asks one more question.`);
+    if (offer.regulated_answer === 'licensed' && !offer.licence_number) out.push('Give the licence number.');
+    if (isRegulated(offer.venue_country) && offer.regulated_answer === 'no_commentary' && readsLikeCommentary(`${offer.title} ${offer.description}`)) {
+      out.push('Your listing reads like a guided tour of a monument or museum. "A morning cooking together" is fine; "A tour of the Duomo" is not.');
+    }
   }
   return out;
+}
+
+/**
+ * The steps this offer's set-up walks, in order (the prototype's `seq`). The
+ * progress bar is derived from it so it is honest for every combination;
+ * nothing hard-codes a total.
+ */
+export function stepsFor(offer, host) {
+  const pub = offer.visibility === 'public';
+  const paid = (offer.money ?? 'free') !== 'free';
+  const steps = ['plan', 'vis', 'event'];
+  if (offer.shape === 'series') steps.push('weeks');
+  steps.push(pub ? 'numbers' : 'invite', 'money');
+  if (paid) steps.push('price');
+  if (pub) {
+    steps.push('basics', 'kind');
+    if (host?.type === 'meetups') steps.push('subdetail');
+    steps.push('video', 'extract', 'checks');
+    if ((offer.checks ?? []).length) steps.push('evidence');
+  }
+  steps.push('done');
+  return steps;
 }
 
 /**
