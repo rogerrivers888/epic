@@ -451,8 +451,15 @@ export async function joinWaitlist(groupId, contact, contactKind) {
   return rows[0];
 }
 
-export async function markWaitlistTold(id) {
-  await query('update group_waitlist set told_at = now() where id = $1', [id]);
+/** Claim a row to tell: true for the one caller that got it, false for anyone else. */
+export async function claimWaitlistTold(id) {
+  const { rowCount } = await query('update group_waitlist set told_at = now() where id = $1 and told_at is null', [id]);
+  return rowCount === 1;
+}
+
+/** The send failed: let the row be tried again next time a place opens. */
+export async function releaseWaitlistTold(id) {
+  await query('update group_waitlist set told_at = null where id = $1', [id]);
 }
 
 export async function waitlistOf(groupId) {

@@ -705,13 +705,14 @@ router.post('/experiences/:id/book', async (req, res, next) => {
         address: str(b.address, 300), accessNotes: str(b.accessNotes, 400), noteToHost: str(b.noteToHost, 600),
         decideBy: state === 'pending' ? decideBy(o, occurrence) : null,
       }, client);
-      // Reaching the minimum confirms everybody who was held on the same
-      // instance: the same date, the same session (or the whole run), the
-      // same slot. Never a Monday's booking on the strength of a Tuesday's.
+      // Reaching the minimum confirms whoever was held — each on their own
+      // instance's count, now that this booking is in. A whole-run booking
+      // sits in every session, so it can tip a Thursday over the line; it
+      // cannot confirm a drop-in on a Thursday that is still short.
       if (state === 'confirmed' && o.min_count) {
-        const same = (x) => o.shape === 'oneoff' || x.occurrence === occurrence || (o.shape === 'series' && (x.occurrence === 'whole' || occurrence === 'whole'));
-        for (const held of existing.filter((x) => x.state === 'pending' && same(x))) {
-          await repo.updateBooking(held.id, { state: 'confirmed', decideBy: null }, client);
+        const now = [...existing, made];
+        for (const held of existing.filter((x) => x.state === 'pending')) {
+          if (standing(o, now, held.occurrence).minimumMet) await repo.updateBooking(held.id, { state: 'confirmed', decideBy: null }, client);
         }
       }
       return made;
@@ -852,21 +853,32 @@ export async function settleHeldBookings() {
   const due = await repo.heldBookingsDue();
   let confirmed = 0; let cancelled = 0;
   const offers = new Map();
-  for (const b of due) {
-    const o = offers.get(b.offer_id) ?? (await repo.offerById(b.offer_id));
-    offers.set(b.offer_id, o);
-    if (!o) continue;
-    const all = await repo.bookingsOfOffer(o.id);
-    const st = standing(o, all, b.occurrence);
-    if (o.state === 'live' && st.minimumMet) {
-      await repo.updateBooking(b.id, { state: 'confirmed', decideBy: null });
-      confirmed += 1;
-    } else {
-      await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'epic', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null });
-      await tellBooked([b], `${o.title ?? 'Your booking'} did not reach the ${o.min_count} it needed, so it is not running. Nothing has been taken from you.`);
+  for (const due_ of due) {
+    // The same lock a booking takes, and the row read again under it: a
+    // booking landing at the same moment may already have confirmed this one
+    // (Codex, 12 Sep 2026).
+    const outcome = await withTransaction(async (client) => {
+      const o = await repo.lockOffer(due_.offer_id, client);
+      if (!o) return null;
+      const all = await repo.bookingsOfOffer(o.id, client);
+      const b = all.find((x) => x.id === due_.id);
+      if (!b || b.state !== 'pending') return null;
+      const st = standing(o, all, b.occurrence);
+      if (o.state === 'live' && st.minimumMet) {
+        await repo.updateBooking(b.id, { state: 'confirmed', decideBy: null }, client);
+        return { o, b, confirmed: true };
+      }
+      await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'epic', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null }, client);
+      return { o, b, confirmed: false };
+    });
+    if (!outcome) continue;
+    if (outcome.confirmed) confirmed += 1;
+    else {
+      await tellBooked([outcome.b], `${outcome.o.title ?? 'Your booking'} did not reach the ${outcome.o.min_count} it needed, so it is not running. Nothing has been taken from you.`);
       cancelled += 1;
     }
   }
+  void offers;
   return { due: due.length, confirmed, cancelled };
 }
 

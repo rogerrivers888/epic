@@ -1325,13 +1325,15 @@ async function tellWaitlist(group) {
   const url = `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/join/${fresh.invite_token}`;
   const text = `Epic: a place has come up on ${fresh.name ?? 'the trip'}. ${url}`;
   for (const w of waiting) {
+    // Claimed before it is sent, so two places opening at once send once;
+    // let go again if the send fails, so it is tried next time.
+    if (!(await hostingRepo.claimWaitlistTold(w.id))) continue;
     const isEmail = w.contact_kind === 'email' || w.contact.includes('@');
     try {
       if (isEmail && mailConfigured()) await sendMail({ to: w.contact, subject: `A place has come up on ${fresh.name ?? 'the trip'}`, text });
       else if (!isEmail && smsConfigured()) await sendSms({ to: w.contact, text });
-      else { const r = await sendReminder({ to: w.contact, contactKind: isEmail ? 'email' : 'mobile', body: text, group: fresh.id, participant: null }); if (r.status !== 'sent') continue; }
-      await hostingRepo.markWaitlistTold(w.id);
-    } catch { /* stays untold; the organiser sees the contact */ }
+      else { const r = await sendReminder({ to: w.contact, contactKind: isEmail ? 'email' : 'mobile', body: text, group: fresh.id, participant: null }); if (r.status !== 'sent') throw new Error(r.detail ?? 'not sent'); }
+    } catch { await hostingRepo.releaseWaitlistTold(w.id); }
   }
 }
 
