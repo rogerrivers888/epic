@@ -20,29 +20,44 @@ export type PressEffect = 'sink' | 'pop' | 'none';
 /** A linear map from the driver to one style value, in Animated's own shape. */
 export type Curve = { inputRange: number[]; outputRange: number[] };
 
+/**
+ * A tap lasts about a tenth of a second. The first cut of these (2px, 3%,
+ * 70ms, released the instant the finger lifted) measured correctly in a
+ * headless browser and was invisible on a phone (owner, 12 Sep 2026: "I
+ * don't see any of the effects live"). So two rules now:
+ *
+ * 1. **Every press plays through.** The way down always runs to the end
+ *    before the way up begins, however brief the tap — `holdMs` is the least
+ *    a press is seen for.
+ * 2. **Big enough to see.** 4px and 6% for the sink, a 12% squash for the
+ *    pop, and a ring that grows to three times the heart.
+ */
 export const SINK = {
   /** How far the finger presses it in, in px. */
-  translateY: { inputRange: [0, 1], outputRange: [0, 2] } as Curve,
-  scale: { inputRange: [0, 1], outputRange: [1, 0.97] } as Curve,
-  /** Down fast, up a little slower: the press should feel instant, the release should feel smooth. */
-  downMs: 70,
-  upMs: 160,
+  translateY: { inputRange: [0, 1], outputRange: [0, 4] } as Curve,
+  scale: { inputRange: [0, 1], outputRange: [1, 0.94] } as Curve,
+  /** Down fast, up slower: the press should feel instant, the release should be seen. */
+  downMs: 90,
+  upMs: 220,
+  /** The least a press is shown for before the release plays. */
+  holdMs: 110,
 };
 
 export const POP = {
   /** The squash while held. */
-  scaleDown: 0.94,
-  downMs: 70,
-  /** The spring home: low friction so it overshoots (~1.06) once and settles. */
-  spring: { friction: 4, tension: 160 },
+  scaleDown: 0.88,
+  downMs: 90,
+  holdMs: 110,
+  /** The spring home: low friction so it overshoots (~1.08) once and settles. */
+  spring: { friction: 3.5, tension: 180 },
 };
 
 export const RING = {
-  /** Grows from half the heart's box to just over twice it. */
-  scale: { inputRange: [0, 1], outputRange: [0.5, 2.2] } as Curve,
+  /** Grows from half the heart's box to three times it. */
+  scale: { inputRange: [0, 1], outputRange: [0.5, 3] } as Curve,
   /** Bright at birth, gone by the end — front-loaded so the ring is seen leaving, not arriving. */
-  opacity: { inputRange: [0, 0.15, 1], outputRange: [0.9, 0.9, 0] } as Curve,
-  ms: 480,
+  opacity: { inputRange: [0, 0.2, 1], outputRange: [1, 0.9, 0] } as Curve,
+  ms: 600,
   /** The rule weight everything else in Epic is drawn with. */
   stroke: 2,
 };

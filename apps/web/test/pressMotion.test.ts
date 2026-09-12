@@ -6,7 +6,8 @@ test('sink rests at identity and pushes in, never out', () => {
   assert.equal(at(SINK.translateY, 0), 0);
   assert.equal(at(SINK.scale, 0), 1);
   assert.ok(at(SINK.translateY, 1) > 0, 'held: moves down into the page');
-  assert.ok(at(SINK.scale, 1) < 1 && at(SINK.scale, 1) > 0.9, 'held: shrinks a touch, not a lot');
+  assert.ok(at(SINK.scale, 1) < 1 && at(SINK.scale, 1) > 0.9, "held: shrinks enough to see, not enough to shift the layout");
+  assert.ok(SINK.holdMs >= SINK.downMs, "a press is shown for at least the whole way down");
   assert.ok(SINK.downMs < SINK.upMs, 'the press is instant, the release is smooth');
 });
 
@@ -20,7 +21,7 @@ test('ring is born bright and small and dies faded and large', () => {
   assert.ok(at(RING.opacity, 0) > 0.8);
   assert.equal(at(RING.opacity, 1), 0);
   assert.ok(at(RING.scale, 0) < 1);
-  assert.ok(at(RING.scale, 1) > 2);
+  assert.ok(at(RING.scale, 1) >= 2.5);
   assert.equal(RING.stroke, 2, 'the 2px ink rule the rest of Epic is drawn with');
 });
 

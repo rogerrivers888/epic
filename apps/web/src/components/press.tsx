@@ -34,24 +34,41 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
   // switched on while a row is mounted, and a native answer arrives after it.
   const animate = () => effect !== 'none' && !reducedMotion();
 
+  // When the press began, and a release waiting for the way down to finish.
+  const since = useRef(0);
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (pending.current) clearTimeout(pending.current); }, []);
+
   const down = useCallback((e: any) => {
     setPressed(true);
     onPressIn?.(e);
     if (!animate()) return;
+    if (pending.current) { clearTimeout(pending.current); pending.current = null; }
+    since.current = Date.now();
     v.stopAnimation();
     Animated.timing(v, { toValue: 1, duration: effect === 'pop' ? POP.downMs : SINK.downMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
   }, [effect, onPressIn, v]);
 
+  const release = useCallback(() => {
+    pending.current = null;
+    v.stopAnimation();
+    if (effect === 'pop') Animated.spring(v, { toValue: 0, ...POP.spring, useNativeDriver: NATIVE }).start();
+    else Animated.timing(v, { toValue: 0, duration: SINK.upMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
+  }, [effect, v]);
+
   const up = useCallback((e: any) => {
     setPressed(false);
     onPressOut?.(e);
-    v.stopAnimation();
     // Motion switched off between the press and the release: the driver must
     // not be left where the press put it, or the control stays sunk.
-    if (!animate()) { v.setValue(0); return; }
-    if (effect === 'pop') Animated.spring(v, { toValue: 0, ...POP.spring, useNativeDriver: NATIVE }).start();
-    else Animated.timing(v, { toValue: 0, duration: SINK.upMs, easing: Easing.out(Easing.quad), useNativeDriver: NATIVE }).start();
-  }, [effect, onPressOut, v]);
+    if (!animate()) { v.stopAnimation(); v.setValue(0); return; }
+    // A tap is shorter than the way down. The press plays through to the
+    // bottom before it comes back up, so a quick tap is still seen.
+    const hold = effect === 'pop' ? POP.holdMs : SINK.holdMs;
+    const left = hold - (Date.now() - since.current);
+    if (left > 0) pending.current = setTimeout(release, left);
+    else release();
+  }, [effect, onPressOut, release, v]);
 
   const resolved = typeof style === 'function' ? style({ pressed, hovered, focused } as PressableStateCallbackType) : style;
   const flat = (StyleSheet.flatten(resolved) ?? {}) as ViewStyle;
@@ -63,6 +80,11 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
     <AnimatedPressable
       ref={ref}
       disabled={disabled}
+      // react-native-web waits 50ms before it says a press has started, which
+      // is half of a tap. The press starts when the finger lands. (The web
+      // reads `delayPressIn`, which the native types do not declare.)
+      unstable_pressDelay={0}
+      {...NO_DELAY}
       onPressIn={down}
       onPressOut={up}
       onHoverIn={(e) => { setHovered(true); onHoverIn?.(e); }}
@@ -76,6 +98,7 @@ export const Press = React.forwardRef<View, PressableProps & { effect?: PressEff
 });
 
 const NATIVE = Platform.OS !== 'web';
+const NO_DELAY = { delayPressIn: 0 } as unknown as Record<string, never>;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function transformFor(effect: PressEffect, v: Animated.Value) {
