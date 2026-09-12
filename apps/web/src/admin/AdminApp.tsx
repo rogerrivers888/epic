@@ -41,6 +41,7 @@ import { Scout } from './screens/Scout';
 import { Shelves } from './screens/Shelves';
 import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
+import { Hosting } from './screens/Hosting';
 import { Sources } from './screens/Sources';
 import { Categories } from './screens/Categories';
 
@@ -76,6 +77,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
   { key: 'categories', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Categories and subcategories, every provider\'s words, and the rules that map one onto the other', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences' },
+  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports' },
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities' },
   { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on' },
   { key: 'audit', label: 'Audit', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom' },
@@ -122,6 +124,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'sources' ? <Sources /> : null}
       {screen === 'categories' ? <Categories canManage={can('manage_library')} /> : null}
       {screen === 'voice' ? <VoiceLab /> : null}
+      {screen === 'hosting' ? <Hosting canManage={can('manage_hosting')} /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
       {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}
       {screen === 'audit' ? <Audit /> : null}

@@ -45,6 +45,9 @@ Place data comes from two sources behind one interface (`apps/api/src/sources/`)
 |---|---|
 | `GET /health` | liveness + DB |
 | `GET/PATCH /api/household`, `…/members`, `…/constraints` | household, members, allergens / dislikes / likes |
+| `GET/POST/PATCH /api/host`, `…/offers`, `…/media` | hosting: the host's profile, their offers (draft → in review → live / paused), their videos |
+| `GET /api/experiences/:id`, `GET /api/hosts/:id` (public) · `POST /api/experiences/:id/book`, `GET /api/bookings` | the guest's side: an experience page, a host's profile, a booking recorded (no payment provider yet) |
+| `GET /api/admin/hosting`, `…/offers/:id/decide`, `…/hosts/:id` | pitch review and the trust ladder, behind the admin door |
 | `POST /api/discover` | time-bounded discovery with constraints applied and attribution logged |
 | `POST /api/plan/start` | a sentence → intent → one candidate pool → several trip options |
 | `POST /api/plan/refine` | "I like this, not that" in words, mapped onto the stops on screen |
@@ -184,7 +187,7 @@ Two different acts create an account, and confusing them is the mistake to avoid
 
 - **Giving Epic to somebody else** — the Accounts tab in the back office. They get a household
   of their own, empty, and see nothing of anybody else's.
-- **Inviting somebody you live with** — the Household tab (below). They get a way in to the
+- **Inviting somebody you live with** — a person's page under Settings › You and yours (below). They get a way in to the
   household they are already in, and see all of it.
 
 - **Accounts** (owner-only tab, and `/api/accounts`) lists everybody with Epic, how long they
@@ -208,7 +211,7 @@ Two different acts create an account, and confusing them is the mistake to avoid
 
 ### Inviting your own household
 
-On the **Household** tab, each adult has a *Epic on their own phone* panel: a mobile number, an
+On a person's page (Settings › **You and yours** › the person), each adult has a *Epic on their own phone* panel: a mobile number, an
 e-mail address, and a button for each. Epic mints one single-use link that expires in a week and
 sends it however you asked — one link even when it goes out both ways, because the first tap
 spends it.
@@ -250,7 +253,7 @@ spends it.
 | `EPIC_PASSCODE` | **yes, deployed** | The household's passcode (Doppler, owner-set). **Without it the deployed API answers 503 to every `/api` request and serves nothing** — see "The door" above. Locally, unset falls back to `epic-dev`. |
 | `RESEND_API_KEY` | optional | Mail sender (Doppler, owner-set) used for account invitations and sign-in links. Unset, Epic still makes the link and the Accounts screen shows it to be sent by hand. |
 | `EPIC_MAIL_FROM` | with the above | The address invitations come from, on a domain verified with the sender, e.g. `Epic <hello@example.com>`. Non-secret, but a sender is not configured until both this and the key are set. |
-| `TWILIO_ACCOUNT_SID` | optional | Twilio **Account** SID — the `AC…` string under Account Info (Doppler, owner-set). It is the URL every request is sent to, not merely a username, so an `SK…` API key here produces a 404; Epic checks the shape and says so. With the two below, Household-tab invitations go out by text. Unset, Epic still makes the link and the screen shows it to be sent by hand. |
+| `TWILIO_ACCOUNT_SID` | optional | Twilio **Account** SID — the `AC…` string under Account Info (Doppler, owner-set). It is the URL every request is sent to, not merely a username, so an `SK…` API key here produces a 404; Epic checks the shape and says so. With the two below, household invitations go out by text. Unset, Epic still makes the link and the screen shows it to be sent by hand. |
 | `TWILIO_AUTH_TOKEN` | with the above | The secret to sign with: the account's Auth Token, or an API key's secret when `TWILIO_API_KEY_SID` is set. Doppler only. |
 | `TWILIO_FROM` | with the above | The number texts come from, or a messaging service SID (`MG…`), which is what Twilio wants for UK traffic. Non-secret, but no text sender exists until all three are set. |
 | `TWILIO_API_KEY_SID` | optional | An API key (`SK…`) to sign as, instead of the account itself — revocable without changing the account's token. The account SID above is still required: a key signs a request, it does not address one. |

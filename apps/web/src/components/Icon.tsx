@@ -9,6 +9,8 @@ import {
   Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet, Pause, Play, Keyboard,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
+  HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap,
+  Share2, CircleAlert, UserRound, Award, Presentation, HandHeart,
 } from 'lucide-react-native';
 import { colors, spacing, type } from '../theme';
 
@@ -21,6 +23,21 @@ import { colors, spacing, type } from '../theme';
 const ICONS = {
   // navigation
   inspire: Sparkles, plan: Sparkles, places: Compass, trips: Route, household: Users, settings: Settings,
+  /**
+   * The fifth tab (Events & Hosts, 12 Sep 2026): hosting is offering something
+   * of your own to strangers, so the glyph is a hand holding a plate out.
+   */
+  host: HandPlatter,
+  /**
+   * Hosts and events. The trust ladder is three shields: `verified` the plain
+   * outline, `checked` the ticked one, `trusted` the same tick on an ink
+   * ground (drawn by the badge, not by a fourth glyph). A host's type is a chip
+   * of words, never an icon — the brief forbids anything that reads as a rank.
+   */
+  verified: Shield, checked: ShieldCheck, trusted: BadgeCheck,
+  video: Video, broadcast: Megaphone, series: Repeat, oneoff: CalendarCheck, anytime: Clock, payout: Banknote,
+  online: Laptop, theirPlace: DoorOpen, yourPlace: House, outAbout: MapPin, handshake: Handshake, credential: GraduationCap,
+  share: Share2, alert: CircleAlert, guest: UserRound, award: Award, pitch: Presentation, family: HandHeart,
   web: Monitor, mobile: Smartphone, person: User,
   // Light and dark mode, on the theme switch
   light: Sun, dark: Moon,

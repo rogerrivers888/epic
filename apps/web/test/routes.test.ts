@@ -185,8 +185,17 @@ test('a trip tab nobody has heard of is not a page', () => {
 });
 
 test('Household, Settings, Prototypes and the back office', () => {
-  assert.deepEqual(roundTrip('/household'), { name: 'household', memberId: null, voice: null });
+  // The household list is Settings now ("You and yours", 12 Sep 2026): the
+  // bare address is a legacy one and lands there; a person keeps their page,
+  // and that page lights the Settings tab up.
+  assert.equal(legacyHref('/household', new URLSearchParams()), '/settings');
+  assert.equal(legacyHref('/', new URLSearchParams('tab=household')), '/settings');
+  assert.equal(paths.household(), '/settings');
+  assert.equal(paths.household('m1'), '/household/m1');
   assert.deepEqual(roundTrip('/household/m1'), { name: 'household', memberId: 'm1', voice: null });
+  assert.equal(tabOf(parseRoute('/household/m1')), 'settings');
+  assert.equal(isTabHome(parseRoute('/household/m1')), false, 'a person is a record, not where the tab is left');
+  assert.equal(parentOf(parseRoute('/household/m1')), '/settings');
   // Inviting somebody is a layer over their page, not a page of its own: the
   // person is the address, and `?invite=1` is how that page is set. So the
   // route it parses to is Gina — the flag is carried in the query and read by
@@ -277,7 +286,7 @@ test('Back has somewhere to go for somebody who arrived on a shared link', () =>
   assert.equal(parentOf(parseRoute('/places/GB/London')), '/places/GB');
   assert.equal(parentOf(parseRoute('/places/GB')), '/places');
   assert.equal(parentOf(parseRoute('/places/home')), '/places');
-  assert.equal(parentOf(parseRoute('/household/m1')), '/household');
+  assert.equal(parentOf(parseRoute('/household/m1')), '/settings');
   assert.equal(parentOf(parseRoute('/admin/audit')), '/admin/overview');
 });
 
@@ -443,4 +452,70 @@ test('telling Epic about one person, and reviewing what it heard', () => {
   assert.deepEqual(roundTrip('/household/m1'), { name: 'household', memberId: 'm1', voice: null });
   assert.equal(parentOf(parseRoute('/household/m1/tell')), '/household/m1');
   assert.equal(isTabHome(parseRoute('/household/m1/tell')), false, 'a recording is not where the tab is left');
+});
+
+/**
+ * Hosting (Events & Hosts, 12 Sep 2026): the fifth tab, and the pages that
+ * hang off it. The experience page and a host's profile work logged-out, so
+ * they light no tab; a booking is ours and lives under Trips.
+ */
+test('the Host tab, and every page inside it', () => {
+  assert.deepEqual(roundTrip('/host'), { name: 'host', page: 'home', offerId: null });
+  assert.deepEqual(roundTrip('/host/start'), { name: 'host', page: 'start', offerId: null });
+  assert.deepEqual(roundTrip('/host/video'), { name: 'host', page: 'video', offerId: null });
+  assert.deepEqual(roundTrip('/host/offers/new'), { name: 'host', page: 'new', offerId: null });
+  assert.deepEqual(roundTrip('/host/offers/o1'), { name: 'host', page: 'offer', offerId: 'o1' });
+  assert.deepEqual(roundTrip('/host/offers/o1/edit'), { name: 'host', page: 'edit', offerId: 'o1' });
+  assert.equal(paths.hostStart(3), '/host/start?step=3');
+  assert.equal(paths.hostNewOffer('series'), '/host/offers/new?shape=series');
+  assert.equal(paths.hostOfferEdit('o1', 2), '/host/offers/o1/edit?step=2');
+  assert.equal(paths.hostVideo('o1'), '/host/video?offer=o1');
+  assert.equal(parseRoute('/host/offers').name, 'unknown');
+  assert.equal(parseRoute('/host/offers/o1/nonsense').name, 'unknown');
+  for (const href of ['/host', '/host/start', '/host/offers/o1']) assert.equal(tabOf(parseRoute(href)), 'host');
+  // The tab keeps the bar; the forms inside it take the phone whole, and every page draws its own head.
+  assert.equal(isImmersive(parseRoute('/host')), false);
+  assert.equal(isImmersive(parseRoute('/host/start')), true);
+  assert.equal(isImmersive(parseRoute('/host/offers/o1/edit')), true);
+  assert.equal(ownsHeader(parseRoute('/host')), true);
+  assert.equal(isTabHome(parseRoute('/host')), true);
+  assert.equal(isTabHome(parseRoute('/host/offers/o1')), false);
+  assert.equal(parentOf(parseRoute('/host/offers/o1/edit')), '/host/offers/o1');
+  assert.equal(parentOf(parseRoute('/host/start')), '/host');
+});
+
+test('a host and an experience have public addresses; a booking is ours', () => {
+  assert.deepEqual(roundTrip('/hosts/h1'), { name: 'hostProfile', hostId: 'h1', layer: null });
+  assert.deepEqual(roundTrip('/hosts/h1/trust'), { name: 'hostProfile', hostId: 'h1', layer: 'trust' });
+  assert.deepEqual(roundTrip('/experiences/e1'), { name: 'experience', id: 'e1', layer: null });
+  assert.deepEqual(roundTrip('/experiences/e1/book'), { name: 'experience', id: 'e1', layer: 'book' });
+  assert.deepEqual(roundTrip('/experiences/e1/where'), { name: 'experience', id: 'e1', layer: 'where' });
+  assert.deepEqual(roundTrip('/bookings/b1'), { name: 'booking', id: 'b1', rate: false });
+  assert.deepEqual(roundTrip('/bookings/b1/rate'), { name: 'booking', id: 'b1', rate: true });
+  assert.equal(parseRoute('/hosts').name, 'unknown');
+  assert.equal(parseRoute('/experiences/e1/elsewhere').name, 'unknown');
+  // Logged-out pages light no tab; a booking is a layer of Trips.
+  assert.equal(tabOf(parseRoute('/hosts/h1')), null);
+  assert.equal(tabOf(parseRoute('/experiences/e1')), null);
+  assert.equal(tabOf(parseRoute('/bookings/b1')), 'trips');
+  assert.equal(parentOf(parseRoute('/hosts/h1/trust')), '/hosts/h1');
+  assert.equal(parentOf(parseRoute('/experiences/e1/book')), '/experiences/e1');
+  assert.equal(parentOf(parseRoute('/bookings/b1/rate')), '/bookings/b1');
+  assert.equal(parentOf(parseRoute('/bookings/b1')), '/trips?when=hosts');
+  assert.equal(titleOf(parseRoute('/experiences/e1/book')), 'Book this · Epic');
+  // The sheet is a form and takes the phone whole; the page draws its own head.
+  assert.equal(isImmersive(parseRoute('/experiences/e1/book')), true);
+  assert.equal(ownsHeader(parseRoute('/experiences/e1')), true);
+});
+
+test('who near a trip does what you love is a page of Inspire', () => {
+  assert.deepEqual(roundTrip('/inspire/people'), { name: 'people' });
+  assert.equal(paths.people({ trip: 't1', love: 'painting' }), '/inspire/people?trip=t1&love=painting');
+  assert.equal(tabOf(parseRoute('/inspire/people')), 'inspire');
+  assert.equal(parseRoute('/inspire/people/x').name, 'unknown');
+});
+
+test('Booked with hosts is how the Trips list is set, not a page of its own', () => {
+  assert.equal(paths.bookings(), '/trips?when=hosts');
+  assert.deepEqual(parseRoute('/trips?when=hosts'), { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null });
 });

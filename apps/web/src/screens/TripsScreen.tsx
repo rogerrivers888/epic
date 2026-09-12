@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-nat
 import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
-import { api, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
+import { api, Booking, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
 import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
@@ -98,7 +98,10 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
    * Past only, and a trip's people are on the trip.
    */
   const [span, setSpan] = useQueryState<'day' | 'holiday'>('span', 'day', asOneOf(['day', 'holiday'] as const, 'day'));
-  const [when, setWhen] = useQueryState<TripsWhen>('when', 'upcoming', asOneOf(['upcoming', 'past', 'ideas'] as const, 'upcoming'));
+  const [when, setWhen] = useQueryState<TripsWhen>('when', 'upcoming', asOneOf(['upcoming', 'past', 'ideas', 'hosts'] as const, 'upcoming'));
+  // Booked with hosts (Events v4, G2): the experiences this household has booked, beside its trips.
+  const [bookings, setBookings] = useState<Booking[] | null>(null);
+  useEffect(() => { api.bookings().then((r) => setBookings(r.bookings)).catch(() => setBookings([])); }, [openId, when]);
   const [error, setError] = useState<string | null>(null);
 
   // Which trip the address has open, for the loader — as a ref, so opening one
@@ -216,6 +219,8 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   return (
     <TripsList
       trips={data?.trips ?? null}
+      bookings={bookings}
+      onOpenBooking={(b) => navigate(paths.booking(b.id))}
       loading={!data}
       error={error}
       span={span}

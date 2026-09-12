@@ -1705,6 +1705,57 @@ export const api = {
   /** Whether this device is signed in, and whether the API is asking at all. */
   sessionState: () => request<SessionState>('/api/session'),
 
+  // --- hosting (Events & Hosts, 12 Sep 2026) ---------------------------------
+  /** The Host tab: the invitation, or the dashboard. */
+  hostHome: () => request<HostHome>('/api/host'),
+  becomeHost: (body: HostInput) => post<{ host: OwnHost }>('/api/host', body),
+  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected' }) =>
+    patch<{ host: OwnHost }>('/api/host', body),
+  /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
+  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo', durationS?: number | null): Promise<HostMedia> => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/host/media${qs({ kind, duration: durationS ?? undefined })}`, {
+      method: 'POST', credentials: 'include', body: blob,
+      headers: { 'content-type': blob.type || (kind === 'video' ? 'video/webm' : 'image/jpeg'), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body.media as HostMedia;
+  },
+  trimHostMedia: (id: string, trimStartS: number, trimEndS: number | null) => patch<{ media: HostMedia }>(`/api/host/media/${id}`, { trimStartS, trimEndS }),
+  deleteHostMedia: (id: string) => del<void>(`/api/host/media/${id}`),
+  createOffer: (shape: OfferShape) => post<{ offer: OwnOffer }>('/api/host/offers', { shape }),
+  hostOffer: (id: string) => request<{ offer: OwnOffer }>(`/api/host/offers/${id}`),
+  updateOffer: (id: string, body: OfferInput) => patch<{ offer: OwnOffer }>(`/api/host/offers/${id}`, body),
+  deleteOffer: (id: string) => del<void>(`/api/host/offers/${id}`),
+  submitOffer: (id: string) => post<{ offer: OwnOffer; inReview: boolean }>(`/api/host/offers/${id}/submit`, {}),
+  pauseOffer: (id: string, until: string | null) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/pause`, { until }),
+  resumeOffer: (id: string) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/resume`, {}),
+  cancelOffer: (id: string, note: string | null) => post<{ offer: OwnOffer; told: Told }>(`/api/host/offers/${id}/cancel`, { note }),
+  broadcastOffer: (id: string, body: string) => post<{ offer: OwnOffer; told: Told }>(`/api/host/offers/${id}/broadcast`, { body }),
+  addOfferDate: (id: string, startsOn: string, startsAt: string | null) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/dates`, { startsOn, startsAt }),
+  /** The guest's side. The page and the profile are public; the rest need a session. */
+  experience: (id: string) => request<{ offer: Experience; payments: PaymentsConfig }>(`/api/experiences/${id}`),
+  experienceMine: (id: string) => request<{ bookings: Booking[]; party: PartyMember[]; you: string | null }>(`/api/experiences/${id}/mine`),
+  experiencesNear: (q: { lat: number; lng: number; km?: number; love?: string | null }) => request<ExperiencesNear>(`/api/experiences/near${qs(q)}`),
+  bookExperience: (id: string, body: BookingInput) => post<{ booking: Booking; payments: PaymentsConfig }>(`/api/experiences/${id}/book`, body),
+  hostProfile: (id: string) => request<HostProfile>(`/api/hosts/${id}`),
+  reportHost: (id: string, reason: string, offerId?: string | null) => post<{ ok: true; message: string }>(`/api/hosts/${id}/report`, { reason, offerId }),
+  bookings: () => request<{ bookings: Booking[] }>('/api/bookings'),
+  booking: (id: string) => request<{ booking: Booking; payments: PaymentsConfig }>(`/api/bookings/${id}`),
+  cancelBooking: (id: string) => post<{ booking: Booking; refunded: boolean }>(`/api/bookings/${id}/cancel`, {}),
+  reviewHost: (bookingId: string, body: { stars: number; chips: string[]; text?: string | null; photoId?: string | null }) =>
+    post<{ review: { id: string; stars: number; chips: string[]; text: string | null; publishOn: string }; booking: Booking }>(`/api/bookings/${bookingId}/review`, body),
+  /** The back office: pitch review and the ladder. */
+  adminHosting: () => request<AdminHosting>('/api/admin/hosting'),
+  decideOffer: (id: string, decision: 'live' | 'changes', note: string | null, checklist?: Record<string, string>) => post<{ offer: Experience }>(`/api/admin/hosting/offers/${id}/decide`, { decision, note, checklist }),
+  setHostTrust: (id: string, body: { trust?: TrustLevel; checks?: 'running' | 'passed' }) => patch<{ host: OwnHost }>(`/api/admin/hosting/hosts/${id}`, body),
+  resolveHostReport: (id: string) => post<void>(`/api/admin/hosting/reports/${id}/resolve`, {}),
+  /** The six-digit code on an invite (G20), and the waiting list on a full group (G24). */
+  joinCode: (token: string, participantToken: string, code: string) => post<GuestJoinResult>(`/api/join/${token}/code`, { participantToken, code }),
+  joinCodeAgain: (token: string, participantToken: string) => post<{ codeSent: boolean; contact: string; expiresInMinutes: number; message: string }>(`/api/join/${token}/code/again`, { participantToken }),
+  joinWaitlist: (token: string, contact: string) => post<{ ok: true; message: string }>(`/api/join/${token}/waitlist`, { contact }),
+
   /**
    * The passcode, once. The token is kept on the device from here on; the
    * cookie the API also sets exists only so an `<img>` can load a photograph.
@@ -2311,7 +2362,6 @@ export type LookupItem = {
   /** Reviews × (rating ÷ 5)²: the crowd first, the stars second. Nought when nobody has counted. */
   priority: number;
 };
-
 export type LookupResult = {
   place: LookupPlace; mode: string; minutes: number; radiusKm: number; estimated: boolean;
   /** The minutes reach further than any source will answer, so the ring was cut to what they will. */
@@ -2999,3 +3049,131 @@ export type Intake = {
 export type SpokenPerson = { name: string; role: 'adult' | 'child' | null; age: number | null; band?: string | null; relationship: string | null; isSpeaker: boolean; existingId?: string | null };
 export type SpokenFood = { kind: 'diet' | 'allergy' | 'dislike' | 'favourite'; value: string; who?: string | null; memberId: string | null; memberName?: string | null };
 export type SpokenLike = { kind: 'love' | 'avoid'; phrase: string; label?: string | null; category: string | null; subcategory: string | null; who?: string | null; memberId: string | null; memberName?: string | null };
+
+// ---------------------------------------------------------------------------
+// Hosting (Events & Hosts, 12 Sep 2026)
+// ---------------------------------------------------------------------------
+
+export type HostType = 'practitioner' | 'local' | 'guide';
+export type LocalKind = 'family' | 'something_you_do' | 'night_out' | 'neighbourhood';
+export type TrustLevel = 'verified' | 'checked' | 'trusted';
+export type OfferShape = 'oneoff' | 'series' | 'anytime';
+export type OfferState = 'draft' | 'in_review' | 'live' | 'paused' | 'ended';
+export type OfferVenue = 'their_place' | 'your_place' | 'out_about' | 'online';
+export type PriceMode = 'free' | 'same_each' | 'by_numbers';
+export type RefundRule = '24h' | '7d' | 'none';
+
+export type PaymentsConfig = { provider: string | null; ready: boolean; note: string };
+export type Told = { sentTo: number; delivered: number; channel: 'sender' | 'none' };
+
+export type HostMedia = { id: string; url: string; kind: 'video' | 'photo'; mime: string; size: number; durationS: number | null; trimStartS: number | null; trimEndS: number | null; madeBy: 'self' | 'epic' };
+
+/** A host as a guest sees them: the person, then the trust level. */
+export type PublicHost = {
+  id: string; name: string; type: HostType; localKind: LocalKind | null; trust: TrustLevel; checks: 'running' | 'passed';
+  introText: string | null; introVideo: string | null; photo: string | null;
+  location: string | null; lat: number | null; lng: number | null; countryCode: string | null;
+  credentials: string[]; languages: string[]; childrenAges: number[];
+  rating: number | null; reviewCount: number; guests: number; isNew: boolean; since: string;
+  otherOffers?: number; km?: number; liveOffers?: number;
+};
+export type OwnHost = PublicHost & {
+  idDocument: 'passport' | 'driving_licence' | null; insuranceConfirmed: boolean; taxReference: string | null;
+  payoutStatus: 'not_connected' | 'connected'; payoutLabel: string | null; dateOfBirth: string | null;
+};
+export type HostInput = {
+  name: string; type: HostType; localKind?: LocalKind | null; introText?: string | null;
+  locationLabel?: string | null; lat?: number | null; lng?: number | null; countryCode?: string | null;
+  credentials?: string[]; languages?: string[]; childrenAges?: number[]; dateOfBirth?: string | null;
+};
+
+export type Standing = { heads: number; bookings: number; minimum: number | null; expected: number | null; maximum: number | null; needs: number; minimumMet: boolean; placesLeft: number | null; full: boolean };
+export type OfferPrice = { pence: number; each: number; ceilingPence: number | null; likelyPence: number | null; mode: 'free' | 'same_each' | 'by_numbers' | 'drop_in' };
+export type RunningOrderRow = { time: string | null; title: string; detail: string | null };
+export type FeaturedPerson = { name: string; role: string | null; photo: string | null };
+export type Week = { n: number; title: string };
+export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' | 'evening')[] };
+
+/** One experience, as a guest sees it. The exact address arrives only once booked. */
+export type Experience = {
+  id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: 'public' | 'link';
+  title: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
+  photos: string[]; video: string | null;
+  venue: OfferVenue; venueArea: string | null; venueLabel: string | null; venueLat: number | null; venueLng: number | null; venueCountry: string | null;
+  venueNotes: string | null; travelRadiusMin: number | null; travelChargePence: number | null; onlinePlatform: string | null;
+  durationMin: number | null; minCount: number | null; expectedCount: number | null; maxCount: number | null; partyMax: number | null; ageLimit: number | null;
+  priceMode: PriceMode; pricePence: number | null; totalPence: number | null; per: 'person' | 'household'; refundRule: RefundRule;
+  startsOn: string | null; startsAt: string | null; runningOrder: RunningOrderRow[]; featuredPeople: FeaturedPerson[];
+  weekday: number | null; firstDate: string | null; sessions: number | null; skippedDates: string[]; dates: string[];
+  outcome: string | null; arc: string | null; weeks: Week[]; joinMode: 'whole' | 'drop_in' | 'both' | null; dropInPence: number | null; missedNote: string | null;
+  availability: Availability; slots: { date: string; times: string[] }[];
+  standing: Standing; price: OfferPrice;
+  regulated: { country: string; answer: string | null } | null;
+  cancelledNote: string | null;
+  host: PublicHost | null;
+  km?: number;
+};
+export type ExperienceBooking = {
+  id: string; name: string | null; heads: number; party: PartyMember[]; occurrence: string | null; state: BookingState; paymentStatus: 'recorded' | 'paid' | 'refunded';
+  amountPence: number; note: string | null; address: string | null; accessNotes: string | null; bookedAt: string;
+};
+export type PitchChecklist = { what: string; home: string; suits: string; notSuits: string; photos: string };
+/** The host's own offer: the guest's view, plus the roster, the money and what stands between it and Publish. */
+export type OwnOffer = Experience & {
+  blockers: string[]; checklist: PitchChecklist; licenceNumber: string | null; licenceExpiry: string | null;
+  reviewNote: string | null; reviewChecklist: Record<string, string> | null; reviewedAt: string | null; submittedAt: string | null; publishedAt: string | null;
+  money: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; fee: { fee: number; net: number; percent: number } };
+  bookings: ExperienceBooking[];
+  broadcasts: { id: string; body: string; sentTo: number; delivered: number; at: string }[];
+};
+export type OfferInput = Partial<{
+  shape: OfferShape; title: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
+  photoIds: string[]; videoId: string | null;
+  venue: OfferVenue; venueLabel: string | null; venueArea: string | null; venueLat: number | null; venueLng: number | null; venueCountry: string | null; venueNotes: string | null;
+  travelRadiusMin: number | null; travelChargePence: number | null; onlinePlatform: string | null;
+  durationMin: number | null; minCount: number | null; expectedCount: number | null; maxCount: number | null; partyMax: number | null; ageLimit: number | null;
+  priceMode: PriceMode; pricePence: number | null; totalPence: number | null; per: 'person' | 'household'; refundRule: RefundRule;
+  startsOn: string | null; startsAt: string | null; runningOrder: RunningOrderRow[]; featuredPeople: { name: string; role: string | null; photoId?: string | null }[];
+  weekday: number | null; firstDate: string | null; sessions: number | null; skippedDates: string[]; outcome: string | null; arc: string | null; weeks: Week[];
+  joinMode: 'whole' | 'drop_in' | 'both' | null; dropInPence: number | null; missedNote: string | null;
+  availability: Availability; slotMin: number | null;
+  regulatedAnswer: 'no_commentary' | 'licensed' | null; licenceNumber: string | null; licenceExpiry: string | null;
+  visibility: 'public' | 'link';
+}>;
+
+export type HostHome = {
+  host: OwnHost | null;
+  offers: OwnOffer[];
+  stats: { live: number; booked: number; toComePence: number; joinedThisWeek: number; nextPayoutOn: string | null } | null;
+  nearby: PublicHost[];
+  config: { payments: PaymentsConfig; passions: { key: string; label: string }[]; regulated: Record<string, string>; videoMaxSeconds: number };
+  you?: { name: string | null; email: string | null };
+  firstListingRead?: boolean;
+};
+export type HostProfile = { host: PublicHost; offers: Experience[]; reviews: { stars: number; chips: string[]; text: string | null; on: string; title: string | null }[] };
+export type ExperiencesNear = { cards: Experience[]; passions: { key: string; label: string; people: number }[]; allPassions: { key: string; label: string }[] };
+
+export type PartyMember = { id?: string; name: string; age: number | null; child: boolean; avatarUrl?: string | null };
+export type BookingState = 'pending' | 'confirmed' | 'waitlisted' | 'cancelled' | 'attended';
+export type BookingInput = { party: PartyMember[]; occurrence?: string | null; bookedBy?: string | null; address?: string | null; accessNotes?: string | null; noteToHost?: string | null };
+export type Booking = {
+  id: string; offerId: string; hostId: string; title: string | null; shape: OfferShape; occurrence: string | null; on: string | null; startsAt: string | null;
+  durationMin: number | null; venue: OfferVenue; venueArea: string | null; venueLabel: string | null; venueNotes: string | null; onlinePlatform: string | null; refundRule: RefundRule;
+  party: PartyMember[]; heads: number; state: BookingState; paymentStatus: 'recorded' | 'paid' | 'refunded'; amountPence: number;
+  paidAt: string | null; refundedAt: string | null; cancelledAt: string | null; cancelledBy: 'guest' | 'host' | 'epic' | null;
+  address: string | null; accessNotes: string | null; noteToHost: string | null; decideBy: string | null;
+  offerState: OfferState; offerCancelledNote: string | null; minCount: number | null; maxCount: number | null;
+  host: { id: string; name: string; type: HostType; trust: TrustLevel | null; photo: string | null; location: string | null };
+  isPast: boolean; reviewed: boolean; bookedAt: string;
+};
+export type AdminHosting = {
+  inReview: (Experience & { hostName: string; hostType: HostType; hostTrust: TrustLevel; submittedAt: string | null; checklist: PitchChecklist; commentary: boolean })[];
+  hosts: (OwnHost & { liveOffers: number; inReview: number; openReports: number })[];
+  reports: { id: string; hostId: string; hostName: string; offerId: string | null; title: string | null; reason: string; at: string }[];
+  trustLevels: TrustLevel[];
+};
+/** What the invite's account step hands back now that a code may be sent (G20). */
+export type GuestJoinResult = JoinView & {
+  participantToken: string; sessionToken: string | null; account: GuestAccount | null;
+  signInRequired?: boolean; codeSent?: boolean; contact?: string; expiresInMinutes?: number; returning?: boolean; message?: string;
+};

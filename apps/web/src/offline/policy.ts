@@ -82,6 +82,15 @@ export function storable(fullPath: string, body: any): any | null {
   if (p === '/api/sources') return body;
   if (p === '/api/offline/manifest') return body;
 
+  // --- hosting (12 Sep 2026): a host's own words and pictures, and our own bookings ---
+  // Everything under these was written or recorded by a host or by this
+  // household, so it is ours to keep: the host's tab, an experience page, a
+  // host's profile, and Trips › Booked with hosts. A roster of other guests is
+  // on `/api/host/offers/<id>` only, and that is deliberately not here.
+  if (p === '/api/host' || p === '/api/bookings' || /^\/api\/bookings\/[^/]+$/.test(p)) return body;
+  if (/^\/api\/experiences\/[^/]+$/.test(p) && !/\/(near|passions)$/.test(p)) return body;
+  if (/^\/api\/hosts\/[^/]+$/.test(p)) return body;
+
   // --- the owned layer: researched by us, under licences that do not run out ---
   if (p === '/api/offline/records' || p === '/api/places/record') return body;
 

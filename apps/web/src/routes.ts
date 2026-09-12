@@ -30,7 +30,21 @@
  *   /trips/<id>/share                     …who is coming, and the link
  *   /trips/<id>/stop/<ref>                …one stop, and its Ask thread
  *   /trips/<id>/day/<dayId>               …on one day of it
- *   /household                         the family
+ *   /household/<id>                    one person in the household (the list is Settings now)
+ *   /host                              hosting: the invitation, or your dashboard
+ *   /host/start                           …become a host, four steps (?step=)
+ *   /host/offers/new                      …add an offer: step 1 picks the shape
+ *   /host/offers/<id>                     …one offer's dashboard
+ *   /host/offers/<id>/edit                …its wizard (?step=)
+ *   /host/video                           …record a video (?offer=<id> for one offer's)
+ *   /hosts/<id>                        a host's public profile (works logged-out)
+ *   /hosts/<id>/trust                     …the trust ladder, as a guest sees it
+ *   /experiences/<id>                  one experience's page (works logged-out)
+ *   /experiences/<id>/book                …the booking sheet
+ *   /experiences/<id>/where               …the four formats, explained
+ *   /bookings/<id>                     a booking: held, booked, or past
+ *   /bookings/<id>/rate                   …rate the host
+ *   /inspire/people                    who near your trip does what you love
  *   /household/<memberId>                 …one person
  *   /household/<memberId>/tell               …telling Epic about them, by voice (D3)
  *   /household/<memberId>/review             …the card of what was heard (D4)
@@ -106,7 +120,15 @@ function toParams(o: Record<string, string | null | undefined>): URLSearchParams
 }
 
 
-export type Tab = 'inspire' | 'plan' | 'places' | 'trips' | 'household' | 'settings' | 'prototypes';
+/**
+ * Five in the bar (owner, 12 Sep 2026, Groups & events NEW): Inspire · Places ·
+ * Trips · Host · Settings. Household folded into Settings to make the room, so
+ * `household` is no longer a tab — a person's page lights Settings up.
+ */
+export type Tab = 'inspire' | 'plan' | 'places' | 'trips' | 'host' | 'settings' | 'prototypes';
+
+/** The Host tab's pages. `home` is the tab itself: the invitation, or the dashboard. */
+export type HostPage = 'home' | 'start' | 'new' | 'offer' | 'edit' | 'video';
 
 export const MOODS: MoodKey[] = ['fun', 'food', 'culture', 'sport', 'activity', 'adrenaline', 'relaxing', 'outdoors'];
 
@@ -186,9 +208,9 @@ export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips'
 
 export type AdminScreen =
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
-  | 'lookup' | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'roles' | 'plans' | 'audit' | 'how';
+  | 'lookup' | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'roles' | 'plans' | 'audit' | 'how';
 export const ADMIN_SCREENS: AdminScreen[] = [
-  'overview', 'accounts', 'households', 'activity', 'reporting', 'lookup', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'roles', 'plans', 'audit', 'how',
+  'overview', 'accounts', 'households', 'activity', 'reporting', 'lookup', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'roles', 'plans', 'audit', 'how',
 ];
 
 /**
@@ -219,6 +241,21 @@ export type Route =
    */
   | { name: 'household'; memberId: string | null; voice: 'tell' | 'review' | null }
   | { name: 'settings'; section: SettingsSection }
+  /**
+   * Hosting (Events & Hosts, 12 Sep 2026). The tab is hosting only — guests
+   * find experiences in Inspire and Places and book them into Trips. `offerId`
+   * is set on an offer's dashboard and its wizard; `?step=` is the wizard's
+   * page and `?shape=` the fork on a new one.
+   */
+  | { name: 'host'; page: HostPage; offerId: string | null }
+  /** A host's public profile, and the trust ladder over it. Works logged-out. */
+  | { name: 'hostProfile'; hostId: string; layer: 'trust' | null }
+  /** One experience, and the two layers over it: the booking sheet and the formats. */
+  | { name: 'experience'; id: string; layer: 'book' | 'where' | null }
+  /** A booking of ours — held, booked or past — and rating the host after. */
+  | { name: 'booking'; id: string; rate: boolean }
+  /** Passion-led discovery: the people near a trip who do what you love (`?trip=`, `?love=`). */
+  | { name: 'people' }
   | { name: 'prototypes'; section: PrototypeSection | null }
   | { name: 'admin'; screen: AdminScreen }
   /**
@@ -267,6 +304,7 @@ export function parseRoute(path: string): Route {
     case 'inspire': {
       if (!a) return { name: 'inspire', searching: false, mode: 'activities', pick: null };
       if (a === 'search') return { name: 'inspire', searching: true, mode: 'activities', pick: null };
+      if (a === 'people') return b ? { name: 'unknown', path } : { name: 'people' };
       if (a === 'food') {
         // A cuisine is open ended — the list comes from what is actually near —
         // so anything in the slot is taken as one rather than checked against a
@@ -318,7 +356,38 @@ export function parseRoute(path: string): Route {
       if (a && b === 'tell') return { name: 'household', memberId: a, voice: 'tell' };
       if (a && b === 'review') return { name: 'household', memberId: a, voice: 'review' };
       if (b) return { name: 'unknown', path };
+      // The household list is Settings now ("You and yours", 12 Sep 2026); the
+      // bare address is answered by the legacy redirect, and a person keeps
+      // their own page.
       return { name: 'household', memberId: a ?? null, voice: null };
+    }
+
+    case 'host': {
+      if (!a) return { name: 'host', page: 'home', offerId: null };
+      if (a === 'start') return b ? { name: 'unknown', path } : { name: 'host', page: 'start', offerId: null };
+      if (a === 'video') return b ? { name: 'unknown', path } : { name: 'host', page: 'video', offerId: null };
+      if (a === 'offers' && b === 'new') return c ? { name: 'unknown', path } : { name: 'host', page: 'new', offerId: null };
+      if (a === 'offers' && b && !c) return { name: 'host', page: 'offer', offerId: b };
+      if (a === 'offers' && b && c === 'edit') return { name: 'host', page: 'edit', offerId: b };
+      return { name: 'unknown', path };
+    }
+
+    case 'hosts': {
+      if (!a) return { name: 'unknown', path };
+      if (b === 'trust') return c ? { name: 'unknown', path } : { name: 'hostProfile', hostId: a, layer: 'trust' };
+      return b ? { name: 'unknown', path } : { name: 'hostProfile', hostId: a, layer: null };
+    }
+
+    case 'experiences': {
+      if (!a) return { name: 'unknown', path };
+      if (b === 'book' || b === 'where') return c ? { name: 'unknown', path } : { name: 'experience', id: a, layer: b };
+      return b ? { name: 'unknown', path } : { name: 'experience', id: a, layer: null };
+    }
+
+    case 'bookings': {
+      if (!a) return { name: 'unknown', path };
+      if (b === 'rate') return c ? { name: 'unknown', path } : { name: 'booking', id: a, rate: true };
+      return b ? { name: 'unknown', path } : { name: 'booking', id: a, rate: false };
     }
 
     case 'say': {
@@ -387,6 +456,16 @@ export function hrefOf(route: Route): string {
             : buildHref(['trips', route.tripId, route.section,
               route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : null]);
     case 'household': return buildHref(['household', route.memberId, route.memberId ? route.voice : null]);
+    case 'host':
+      return route.page === 'home' ? '/host'
+        : route.page === 'start' ? '/host/start'
+          : route.page === 'video' ? '/host/video'
+            : route.page === 'new' ? '/host/offers/new'
+              : buildHref(['host', 'offers', route.offerId, route.page === 'edit' ? 'edit' : null]);
+    case 'hostProfile': return buildHref(['hosts', route.hostId, route.layer]);
+    case 'experience': return buildHref(['experiences', route.id, route.layer]);
+    case 'booking': return buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
+    case 'people': return '/inspire/people';
     case 'say':
       return route.steps ? '/say/steps'
         : route.intakeId ? buildHref(['say', route.intakeId, route.ask ? 'ask' : null])
@@ -428,7 +507,32 @@ export const paths = {
   tripTravel: (id: string) => buildHref(['trips', id, 'travel']),
   tripShare: (id: string) => buildHref(['trips', id, 'share']),
   tripStop: (id: string, venueRef: string) => buildHref(['trips', id, 'stop', venueRef]),
-  household: (memberId?: string | null) => buildHref(['household', memberId]),
+  /** A person's page. The household list itself is Settings now. */
+  household: (memberId?: string | null) => (memberId ? buildHref(['household', memberId]) : '/settings'),
+  // Hosting.
+  host: () => '/host',
+  hostStart: (step?: number) => (step && step > 1 ? `/host/start?step=${step}` : '/host/start'),
+  hostNewOffer: (shape?: string | null) => (shape ? `/host/offers/new?shape=${shape}` : '/host/offers/new'),
+  hostOffer: (id: string) => buildHref(['host', 'offers', id]),
+  hostOfferEdit: (id: string, step?: number) => `${buildHref(['host', 'offers', id, 'edit'])}${step && step > 1 ? `?step=${step}` : ''}`,
+  hostVideo: (offerId?: string | null) => (offerId ? `/host/video?offer=${encodeURIComponent(offerId)}` : '/host/video'),
+  hostProfile: (hostId: string) => buildHref(['hosts', hostId]),
+  hostTrust: (hostId: string) => buildHref(['hosts', hostId, 'trust']),
+  experience: (id: string) => buildHref(['experiences', id]),
+  experienceBook: (id: string) => buildHref(['experiences', id, 'book']),
+  experienceWhere: (id: string) => buildHref(['experiences', id, 'where']),
+  booking: (id: string) => buildHref(['bookings', id]),
+  bookingRate: (id: string) => buildHref(['bookings', id, 'rate']),
+  /** Who near a trip does what you love (F2). */
+  people: (opts?: { trip?: string | null; love?: string | null }) => {
+    const q = new URLSearchParams();
+    if (opts?.trip) q.set('trip', opts.trip);
+    if (opts?.love) q.set('love', opts.love);
+    const qs = q.toString();
+    return qs ? `/inspire/people?${qs}` : '/inspire/people';
+  },
+  /** Trips › Booked with hosts. */
+  bookings: () => '/trips?when=hosts',
   /** The spoken layer over one person: the recording, then the card of what was heard (D3, D4). */
   householdTell: (memberId: string) => buildHref(['household', memberId, 'tell']),
   householdReview: (memberId: string) => buildHref(['household', memberId, 'review']),
@@ -490,6 +594,15 @@ export function ownsHeader(route: Route): boolean {
   // shell's lime band above them would be a second header on every one.
   if (route.name === 'say' || route.name === 'welcome' || route.name === 'setup') return true;
   if (route.name === 'household' && route.voice) return true;
+  /**
+   * The Host tab draws the same head as Trips — the wordmark and one control
+   * — and every page inside it (onboarding, the wizard, the recorder, an
+   * offer's dashboard) is drawn to the top of the phone with its own title and
+   * its own back (Hosts and Events, H1–H4, W1–W5, D1).
+   */
+  if (route.name === 'host' || route.name === 'people' || route.name === 'booking') return true;
+  // The booking sheet draws its own "Book this" head; the shell's band above it would be a second one.
+  if (route.name === 'experience') return true;
   if (route.name === 'inspire') return !route.searching;
   /**
    * Places draws its own too (handover v8, §3): the wordmark over a lime band
@@ -544,6 +657,12 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // drawn to the handoff's boards, which have no tab bar (8 Sep 2026).
   if (route.name === 'say' || route.name === 'welcome' || route.name === 'setup') return true;
   if (route.name === 'household' && route.voice) return true;
+  // Becoming a host, the offer wizard and the recorder are forms; an offer's
+  // dashboard and a booking are one thing each. The tab itself keeps the bar.
+  if (route.name === 'host') return route.page !== 'home';
+  if (route.name === 'booking') return true;
+  // The booking sheet is a form under a keyboard: it takes the phone whole.
+  if (route.name === 'experience') return route.layer === 'book';
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
   if (route.section === 'group') return true;
   // The bare `/trips/<id>` is the map, and parses with no section at all.
@@ -561,8 +680,12 @@ export function tabOf(route: Route): Tab | null {
     case 'plan': return 'plan';
     case 'places': return 'places';
     case 'trips': return 'trips';
-    case 'household': return 'household';
+    // A person's page is a layer of Settings now.
+    case 'household': return 'settings';
     case 'settings': return 'settings';
+    case 'host': return 'host';
+    case 'people': return 'inspire';
+    case 'booking': return 'trips';
     case 'prototypes': return 'prototypes';
     default: return null;
   }
@@ -586,7 +709,10 @@ export function tabOf(route: Route): Tab | null {
  */
 export function isTabHome(route: Route): boolean {
   if (route.name === 'trips') return !route.tripId && !route.creating && !route.searching;
-  if (route.name === 'household') return !route.voice;
+  // A person is a record, not the list: Settings is left pointing at itself.
+  if (route.name === 'household') return false;
+  if (route.name === 'host') return route.page === 'home';
+  if (route.name === 'booking' || route.name === 'people') return false;
   return true;
 }
 
@@ -606,7 +732,14 @@ export function parentOf(route: Route): string {
       if (route.section) return paths.trip(route.tripId!);
       if (route.tripId || route.creating || route.searching) return '/trips';
       return '/inspire';
-    case 'household': return route.voice ? paths.household(route.memberId) : route.memberId ? '/household' : '/inspire';
+    case 'household': return route.voice ? paths.household(route.memberId) : '/settings';
+    case 'host':
+      if (route.page === 'edit' && route.offerId) return paths.hostOffer(route.offerId);
+      return route.page === 'home' ? '/inspire' : '/host';
+    case 'hostProfile': return route.layer ? paths.hostProfile(route.hostId) : '/inspire';
+    case 'experience': return route.layer ? paths.experience(route.id) : '/inspire';
+    case 'booking': return route.rate ? paths.booking(route.id) : paths.bookings();
+    case 'people': return '/inspire';
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
     case 'welcome': return '/inspire';
@@ -642,11 +775,16 @@ export function titleOf(route: Route): string {
             : route.section === 'stop' ? 'A stop' : null;
       return epic(layer ? `Trip — ${layer}` : 'Trip');
     }
-    case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'Household');
+    case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
     case 'welcome': return epic('Plan less. Live more.');
     case 'setup': return epic('Set up your family');
-    case 'settings': return epic('Settings');
+    case 'settings': return epic('You and yours');
+    case 'host': return epic(route.page === 'start' ? 'Become a host' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : 'Host');
+    case 'hostProfile': return epic(route.layer === 'trust' ? 'How Epic checks hosts' : 'A host');
+    case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : 'An experience');
+    case 'booking': return epic(route.rate ? 'How was it?' : 'Your booking');
+    case 'people': return epic('Who does what you love?');
     case 'prototypes': return epic('Prototypes');
     case 'admin': return epic(`Back office — ${route.screen}`);
     case 'join': return epic('Your trip');
@@ -665,6 +803,10 @@ export function titleOf(route: Route): string {
  * once, with a replace, and the new address is what stays in the bar.
  */
 export function legacyHref(path: string, query: URLSearchParams): string | null {
+  // The Household tab is folded into Settings (owner, 12 Sep 2026). The bare
+  // address is still on phones and in the old `?tab=` links; both land on
+  // "You and yours". A person's page (`/household/<id>`) is unchanged.
+  if (path === '/household' || path === '/household/') { const q = query.toString(); return q ? `/settings?${q}` : '/settings'; }
   if (path !== '/' && path !== '') return null;
   const join = query.get('join');
   if (join) return paths.join(join);
@@ -685,7 +827,7 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
   }
   const known: Record<string, string> = {
     inspire: paths.inspire(), plan: paths.plan(), places: paths.places(),
-    household: paths.household(), settings: paths.settings(), prototypes: paths.prototypes(),
+    household: paths.settings(), settings: paths.settings(), prototypes: paths.prototypes(), host: paths.host(),
   };
   return known[tab] ? withQuery(known[tab]) : null;
 }

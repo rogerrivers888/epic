@@ -21,6 +21,7 @@ import tasteRoutes from './routes/tastes.js';
 import conceptRoutes from './routes/concepts.js';
 import prototypeRoutes from './routes/prototypes.js';
 import groupRoutes, { startReminderLoop } from './routes/groups.js';
+import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes } from './routes/hosting.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
@@ -153,6 +154,9 @@ app.use('/api/photos', photoLimit);
 // can be reached through a path that resolves to the caller's own household.
 app.use('/api/accounts', requireDoor('admin'), accountRoutes);
 app.use('/api/admin', requireDoor('admin'), adminRoutes);
+// Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
+// never sets their own level; this is the only door that does.
+app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminRoutes);
 app.use('/api/admin/scout', requireDoor('admin'), scoutRoutes);
 app.use('/api/admin/library', requireDoor('admin'), libraryAdminRoutes);
 app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);
@@ -204,6 +208,10 @@ app.use('/api/offline', offlineRoutes);
 // Group trips: the organiser's door (/api/trips/:id/group, /api/groups/…) and
 // the invite link's (/api/join/:token), which shows a checklist and no roster.
 app.use('/api', groupRoutes);
+// Hosts and events. The experience page, a host's profile and their video are
+// public (auth.js) so a link works logged-out; booking and hosting are not.
+app.use('/api', hostingPublicRoutes);
+app.use('/api', hostingRoutes);
 // The other door into one trip: a link somebody was sent. Public (auth.js), and
 // everything in it is resolved from the token rather than from a session.
 app.use('/api/shared', sharedTripRoutes);

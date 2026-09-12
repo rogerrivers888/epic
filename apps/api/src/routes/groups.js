@@ -34,6 +34,9 @@ import { currentHousehold, householdOf } from './household.js';
 import { currentAccount } from '../context.js';
 import { CADENCES, DEFAULT_CADENCE, QUIET_HOURS, dueRuns, nextRun, reminderBody, schedule } from '../domain/reminders.js';
 import { channelReady, sendReminder } from '../sources/notify.js';
+import * as hostingRepo from '../repositories/hosting.js';
+import { mailConfigured, sendMail } from '../sources/mail.js';
+import { normaliseMobile, sendSms, smsConfigured } from '../sources/sms.js';
 import { DEFAULT_TZ } from '../domain/time.js';
 
 const router = Router();
@@ -266,6 +269,8 @@ export async function groupPayload(groupId) {
   const nextRecipients = next ? active.filter((p) => !p.member_id && (!p.joined_at || byId.get(p.id)?.outstanding.length)).length : 0;
   const sentRows = reminders.filter((r) => r.participant_id && (r.status === 'sent' || r.status === 'no_channel'));
 
+  // Who asked to be told if a place comes up (G24): a count on the group, the contacts on the invite step.
+  const waitlist = await hostingRepo.waitlistOf(group.id);
   return {
     group: {
       id: group.id, tripId: group.trip_id, name: group.name, expectedCount: group.expected_count,
@@ -294,6 +299,7 @@ export async function groupPayload(groupId) {
       heads: joined.reduce((n, p) => n + p.heads, 0),
       complete: joined.filter((p) => !byId.get(p.id).outstanding.length).length,
       missing: joined.filter((p) => byId.get(p.id).outstanding.length).length,
+      waitlist: waitlist.length,
     },
     reminders: {
       on: group.reminders_on,
@@ -1023,7 +1029,7 @@ async function joinPayload(group, participantToken) {
       // message channel until NOTIFY_WEBHOOK_URL is set, and the account screen
       // says which of the two things is about to happen rather than promising a
       // text nobody can send.
-      canSendCode: channelReady(),
+      canSendCode: canSendCode(),
       joined: active.filter((p) => p.joined_at).length, heads: active.filter((p) => p.joined_at).reduce((n, p) => n + p.heads, 0),
     },
     trip: {
@@ -1160,15 +1166,19 @@ router.post('/join/:token/account', async (req, res, next) => {
      * real: somebody who already has Epic should not be made to start again.
      * But it is only convenience, and it cannot be paid for with the front door.
      *
-     * So: a brand-new guest account is opened and signed into as before, since
-     * there is nothing there to take. An account that already exists is joined
-     * to the trip by name and told to sign in — unless the person is already
-     * signed into it on this device, in which case they have proved it.
+     * So: an account is joined to the trip by name, and a session is opened on
+     * it only on proof. Proof is one of two things — the person is already
+     * signed into that account on this device, or a six-digit code sent to the
+     * contact comes back (G20). Where no sender is configured (the key is the
+     * owner's), a brand-new guest account is opened and signed into as before,
+     * since there is nothing there to take, and an existing account is told to
+     * sign in with its own link.
      */
     const existing = await accountsRepo.accountByContact({ email: isEmail ? contact : null, mobile: isEmail ? null : contact });
     const live = existing && existing.status !== 'suspended' ? existing : null;
     const proved = live && currentAccount()?.id === live.id;
-    const account = proved ? live : (live ? null : await accountsRepo.createGuestAccount({ name, email: isEmail ? contact : null, mobile: isEmail ? null : contact }));
+    const codes = canSendCode();
+    const account = proved ? live : (live ? live : await accountsRepo.createGuestAccount({ name, email: isEmail ? contact : null, mobile: isEmail ? null : contact }));
 
     // Their row on this group: the one the organiser added by name if it
     // matches, otherwise a new one. Never two rows for one person.
@@ -1178,10 +1188,11 @@ router.post('/join/:token/account', async (req, res, next) => {
     const me = match
       ? await groupsRepo.joinOntoParticipant(match.id, { name, contact, contactKind: isEmail ? 'email' : 'mobile', heads: match.heads || 1, token: token() })
       : await groupsRepo.insertParticipant(group.id, { name, contact, contactKind: isEmail ? 'email' : 'mobile', heads: 1, joinedAt: new Date(), token: token() });
-    // Their place on the trip is theirs either way: the organiser invited this
-    // contact, and the participant token is good for this group and nothing
-    // else. Only the account — and the session on it — waits for proof.
-    if (!account) {
+    await groupsRepo.linkParticipantAccount(me.id, account.id);
+
+    // An existing account, not proved, and nothing to send a code with: they
+    // are on the trip, and the account waits for its own sign-in.
+    if (live && !proved && !codes) {
       return res.status(201).json({
         participantToken: me.token,
         sessionToken: null,
@@ -1193,7 +1204,21 @@ router.post('/join/:token/account', async (req, res, next) => {
       });
     }
 
-    await groupsRepo.linkParticipantAccount(me.id, account.id);
+    // A sender exists: the code is the proof, for a new account and an old one alike.
+    if (!proved && codes) {
+      const sent = await issueCode(account, isEmail ? account.email ?? contact : account.mobile ?? contact, isEmail, group);
+      return res.status(201).json({
+        participantToken: me.token,
+        sessionToken: null,
+        codeSent: sent.ok,
+        contact: sent.to,
+        expiresInMinutes: CODE_MINUTES,
+        returning: Boolean(live),
+        message: sent.ok ? `We sent a 6-digit code to ${sent.to}. It lasts ${CODE_MINUTES} minutes.` : sent.message,
+        account: null,
+        ...(await joinPayload(group, me.token)),
+      });
+    }
 
     const { token: sessionToken } = await openSession(`${name} · invited to ${group.name ?? 'a trip'}`, account.id);
     await accountsRepo.recordSignIn(account.id, { method: 'invite', label: group.name ?? null });
@@ -1208,6 +1233,91 @@ router.post('/join/:token/account', async (req, res, next) => {
       },
       ...(await joinPayload(group, me.token)),
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The six-digit code (G20). Only its hash is written down; it lasts ten
+ * minutes and six wrong guesses spend it. It goes by email or text where a
+ * sender is configured, else through the notify webhook — never nowhere.
+ */
+const CODE_MINUTES = 10;
+const codeHash = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');
+const canSendCode = () => smsConfigured() || mailConfigured() || channelReady();
+
+async function issueCode(account, to, isEmail, group) {
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  await hostingRepo.insertSignInCode(account.id, codeHash(code), to, new Date(Date.now() + CODE_MINUTES * 60_000));
+  const what = group.name ?? 'your trip';
+  const text = `Epic: your code for ${what} is ${code}. It lasts ${CODE_MINUTES} minutes.`;
+  try {
+    if (isEmail && mailConfigured()) await sendMail({ to, subject: `Your code for ${what}`, text });
+    else if (!isEmail && smsConfigured()) await sendSms({ to, text });
+    else {
+      const r = await sendReminder({ to, contactKind: isEmail ? 'email' : 'mobile', body: text, group: group.id, participant: null });
+      if (r.status !== 'sent') return { ok: false, to, message: "That code couldn't be sent. Try again, or ask whoever invited you." };
+    }
+    return { ok: true, to };
+  } catch {
+    return { ok: false, to, message: "That code couldn't be sent. Try again, or ask whoever invited you." };
+  }
+}
+
+/** POST /api/join/:token/code {participantToken, code} — the proof, and the session it earns. */
+router.post('/join/:token/code', async (req, res, next) => {
+  try {
+    const group = await groupByToken(req.params.token);
+    const me = await groupsRepo.participantByToken(group.id, req.body?.participantToken ?? '');
+    if (!me?.account_id) return res.status(403).json({ error: 'not_you', message: 'Say who you are first.' });
+    const code = String(req.body?.code ?? '').replace(/\D/g, '');
+    if (code.length !== 6) return res.status(400).json({ error: 'bad_code', message: 'Six digits.' });
+    const live = await hostingRepo.liveSignInCode(me.account_id, codeHash(code));
+    if (!live) return res.status(400).json({ error: 'bad_code', message: "That code has expired or isn't right. Send it again." });
+    await hostingRepo.useSignInCode(live.id);
+    const account = await accountsRepo.accountById(me.account_id);
+    if (!account || account.status === 'suspended') return res.status(403).json({ error: 'suspended', message: 'This account cannot sign in.' });
+    const { token: sessionToken } = await openSession(`${me.name} · invited to ${group.name ?? 'a trip'}`, account.id);
+    await accountsRepo.recordSignIn(account.id, { method: 'code', label: group.name ?? null });
+    res.json({
+      participantToken: me.token,
+      sessionToken,
+      account: {
+        id: account.id, name: account.name ?? me.name, email: account.email, mobile: account.mobile,
+        householdId: account.household_id, plan: account.plan, trialEndsOn: ymd(account.trial_ends_on),
+        returning: (account.sign_in_count ?? 0) > 1,
+      },
+      ...(await joinPayload(group, me.token)),
+    });
+  } catch (err) { next(err); }
+});
+
+/** POST /api/join/:token/code/again {participantToken} — "Didn't get it? Send it again." */
+router.post('/join/:token/code/again', async (req, res, next) => {
+  try {
+    const group = await groupByToken(req.params.token);
+    const me = await groupsRepo.participantByToken(group.id, req.body?.participantToken ?? '');
+    if (!me?.account_id) return res.status(403).json({ error: 'not_you', message: 'Say who you are first.' });
+    const account = await accountsRepo.accountById(me.account_id);
+    const to = me.contact_kind === 'email' ? account.email ?? me.contact : account.mobile ?? me.contact;
+    const sent = await issueCode(account, to, me.contact_kind === 'email', group);
+    res.json({ codeSent: sent.ok, contact: sent.to, expiresInMinutes: CODE_MINUTES, message: sent.ok ? `Sent again to ${sent.to}.` : sent.message });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /api/join/:token/waitlist {contact} — "Tell me if a place comes up"
+ * (G24). Just a mobile or an email, no account, nothing held. The organiser
+ * sees the list on the group screen and is told when a place opens.
+ */
+router.post('/join/:token/waitlist', async (req, res, next) => {
+  try {
+    const group = await groupByToken(req.params.token);
+    const contact = String(req.body?.contact ?? '').trim();
+    if (!contact) return res.status(400).json({ error: 'contact_required', message: 'A mobile or an email, so we can tell you.' });
+    const isEmail = contact.includes('@');
+    const normalised = isEmail ? contact.toLowerCase() : (normaliseMobile(contact) ?? contact);
+    await hostingRepo.joinWaitlist(group.id, normalised, isEmail ? 'email' : 'mobile');
+    res.status(201).json({ ok: true, message: `If a place comes up we will ${isEmail ? 'email' : 'text'} you. Nothing is held and nothing is taken.` });
   } catch (err) { next(err); }
 });
 

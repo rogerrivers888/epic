@@ -53,7 +53,7 @@ export function HouseholdScreen({ data, refresh, route }: {
   useEffect(() => { if (selected && selected.id !== selectedId && sideBySide) setSelectedId(selected.id); }, [selected?.id, sideBySide]);
 
   if (!data) return <View style={styles.page}><Text style={type.small}>Loading household…</Text></View>;
-  const { household, learned, vocabulary, senders } = data;
+  const { learned, vocabulary, senders } = data;
   const adult = members.find((m) => !m.isMinor);
 
   const detail = (m: Member, i: number) => (
@@ -63,7 +63,7 @@ export function HouseholdScreen({ data, refresh, route }: {
       relationships={vocabulary.relationships} allergens={vocabulary.allergens}
       learned={learned.filter((l) => l.memberId === m.id)} refresh={refresh}
       senders={senders}
-      onRemoved={() => setSelectedId(null)}
+      onRemoved={() => navigate(paths.settings(), { replace: true })}
     />
   );
 
@@ -74,18 +74,17 @@ export function HouseholdScreen({ data, refresh, route }: {
     />
   );
 
+  /**
+   * One person's page (Household folded into Settings, 12 Sep 2026). The
+   * list of people is "You and yours" now; this is what a row there opens. On
+   * a wide screen the people stay down the left so moving between them is one
+   * tap; on a phone the page is the person, with Back to the list.
+   */
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <HomeCard household={household} refresh={refresh} wide={sideBySide} />
-      {/* The soft offer (voice intake, D2): two minutes by voice, and Epic
-          stops asking. Shown while anybody here has nothing set. */}
-      {members.some((m) => summarise(m) === 'Nothing set yet') || !household.home ? (
-        <Press onPress={() => navigate(paths.setup())} accessibilityRole="button" style={styles.tellBanner}>
-          <View style={styles.tellTile}><Icon name="mic" size={18} color={colors.selectedFg} strokeWidth={2.2} /></View>
-          <Text style={[type.body, { flex: 1 }]}><Text style={{ fontWeight: '600' }}>Tell Epic about your family</Text> — two minutes, and we’ll stop asking.</Text>
-          <Icon name="more" size={16} color={colors.inkMuted} />
-        </Press>
-      ) : null}
+      <Press onPress={() => navigate(paths.settings())} accessibilityRole="button" style={{ alignSelf: 'flex-start' }}>
+        <Row><Icon name="back" size={18} /><Text style={type.h3}>You and yours</Text></Row>
+      </Press>
       <Text style={type.small}>Allergens exclude places; diets, likes and dislikes only rank them. Everything saves as you go.</Text>
 
       {sideBySide ? (
@@ -102,13 +101,12 @@ export function HouseholdScreen({ data, refresh, route }: {
         </View>
       ) : (
         <View style={{ gap: spacing.sm }}>
-          {members.map((m, i) => (
-            <View key={m.id} style={{ gap: spacing.sm }}>
-              <PersonRow member={m} index={i} selected={selectedId === m.id} onPress={() => setSelectedId(selectedId === m.id ? null : m.id)} onTell={() => navigate(paths.householdTell(m.id))} />
-              {selectedId === m.id ? detail(m, i) : null}
-            </View>
-          ))}
-          {adding ? addCard : <Button label="+ Add someone" kind="ghost" onPress={() => setAdding(true)} style={{ alignSelf: 'flex-start' }} />}
+          {adding ? addCard : selected ? (
+            <>
+              <PersonRow member={selected} index={members.indexOf(selected)} selected onPress={() => {}} onTell={() => navigate(paths.householdTell(selected.id))} />
+              {detail(selected, members.indexOf(selected))}
+            </>
+          ) : <Card><Text style={type.small}>Nobody by that name is in the household any more.</Text></Card>}
         </View>
       )}
     </ScrollView>
@@ -129,7 +127,7 @@ export function HouseholdScreen({ data, refresh, route }: {
  * stored when the box is left, the address when a real match is tapped, and the
  * picture when it is chosen.
  */
-function HomeCard({ household, refresh, wide }: { household: Household; refresh: () => Promise<void>; wide: boolean }) {
+export function HomeCard({ household, refresh, wide }: { household: Household; refresh: () => Promise<void>; wide: boolean }) {
   const [name, setName] = useState(household.name);
   const [changing, setChanging] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
@@ -265,7 +263,7 @@ function PersonRow({ member, index, selected, onPress, onTell }: { member: Membe
   );
 }
 
-function AddPerson({ onAdded, onCancel }: { onAdded: (id: string | null) => Promise<void>; onCancel: () => void }) {
+export function AddPerson({ onAdded, onCancel }: { onAdded: (id: string | null) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState('');
   const [rel, setRel] = useState<string>('child');
   const [birth, setBirth] = useState('');
@@ -332,7 +330,7 @@ const listOf = (cs: Constraint[], max = 4) => {
 };
 
 /** One line that says what this person is about, for the list. */
-function summarise(m: Member): string {
+export function summarise(m: Member): string {
   const parts: string[] = [];
   if (m.allergens.length) parts.push(`allergic to ${listOf(m.allergens)}`);
   if (m.diets.length) parts.push(m.diets.map((c) => c.value).join(', '));

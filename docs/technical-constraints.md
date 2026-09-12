@@ -682,6 +682,24 @@ Collapsed it is one line; opened it is each person's own number and then the mea
 
 Files: `web/src/components/verdict.ts`, `web/src/components/FamilyVerdict.tsx`, `web/src/components/VenueDrawer.tsx`, `web/src/components/MenuOrder.tsx`, `web/test/verdict.test.ts`.
 
+### 13.18 Hosts and events — **built** (owner, 12 Sep 2026; Supporting docs/Groups & events NEW)
+
+> "Merge the Household and Settings into 1 tab… insert the new tab called Host, and build everything that's in the folder. I don't want you to build the prototype. I want you to build the full working version."
+
+**Five tabs: Inspire · Places · Trips · Host · Settings.** Household is folded into Settings as "You and yours" (`SettingsScreen.tsx`); a person keeps their own page at `/household/<id>` and the bare `/household` is a legacy address that lands on Settings. The Host tab is hosting only — a guest finds experiences in Inspire (the "Hosted near you" shelf and `/inspire/people`, the passion-led surface) and books them into Trips ("Booked with hosts").
+
+**A host is a person with a menu of offers, not a listing** (`hosts`, `host_offers`, migration 079). One host per household; many offers, each with its own video, its own why-you line, format, duration, party size and price. Type — Practitioner / Local / Guide — is a positioning axis and is never sorted, ranked or priced by; trust — Verified / Checked / Epic Trusted — is a separate column the host cannot write (`/api/admin/hosting`). "New on Epic" is Verified with no reviews and never an empty star row.
+
+**The shape changes the questions** (`domain/hosting.js`). One-off asks for a running order and who else is there; series asks for the outcome first, then the arc, the weeks and joining; anytime is one line, why you for this, the four formats and a days-and-parts availability pattern. Steps 3–5 reuse the group set-up verbatim: minimum · expecting · maximum typed never nudged with the three-line panel, Free / Same each / Depends on numbers, Person / Household, the refund rule. A first listing is read (`in_review`, 48 hours, `pitchChecklist`); after one has passed, the rest go live as published. `paused` keeps its place and says when it is back.
+
+**Money is recorded, not taken.** Public experiences are Epic-collects only and Epic has no payment provider (the key is the owner's), so a booking's `payment_status` is `recorded`, every screen says nothing has left the account, and `paymentsConfig()` is the one place that changes when a provider exists. Held bookings (`pending`) flip to `confirmed` when the minimum is reached and are decided two days before it runs; calling an offer off cancels every booking and refunds what was paid. Reviews from both sides publish together a fortnight after the day.
+
+**What the brief's compliance section asked for is in the row, not retrofitted:** the regulated-city question (Italy, Greece, Spain, France) with listing copy flagged when it reads like heritage commentary; hosts 18+ and guests booking alone 18+, under-18s only as named party members with an adult; Checked required at their place, with children, and for a Practitioner above £100; a night out 18+ with a minimum party; tax reference and public liability insurance captured at onboarding; nothing here bundles an offer with accommodation. Video is recorded in the browser (`VideoRecorder.tsx`, a prompt script that ticks itself off, take counter, retake, a two-mark trim) and held in `host_media` as bytes, because the disk does not survive a deploy.
+
+**Group trips gained the states the same handoff named:** the six-digit code on an invite (`sign_in_codes`, only the hash; `POST /api/join/:token/code`), the waiting list on a full group (`group_waitlist`), the called-off page with where each item's money stands, and day 30 with no card.
+
+Files: `api/migrations/079_hosts_and_events.sql`, `api/src/domain/hosting.js`, `api/src/repositories/hosting.js`, `api/src/routes/hosting.js`, `api/test/hosting.test.js`; `web/src/components/hosting.tsx`, `web/src/screens/host/*`, `HostProfileScreen.tsx`, `ExperienceScreen.tsx`, `BookingScreen.tsx`, `PeopleScreen.tsx`, `SettingsScreen.tsx`, `admin/screens/Hosting.tsx`.
+
 ### 13.5 Closed-vocabulary matching for voice
 
 Used twice, for the same reason: rating capture interprets against known attendees and known ordered items; trip assembly interprets against the stops on screen. Constraining to a small known set matters more than ASR vendor choice.

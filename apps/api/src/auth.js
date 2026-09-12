@@ -227,6 +227,18 @@ const PUBLIC = [
   (req) => req.path.startsWith('/api/shared/'),
   (req) => /^\/api\/order\/[^/]+$/.test(req.path),
   /**
+   * An experience page, a host's profile and the video on either (hosts and
+   * events, 12 Sep 2026): "must work logged-out; account creation happens
+   * after the tap". Each is resolved from its id alone and never reaches
+   * currentHousehold(); the exact address of a host's home is withheld until a
+   * booking exists, and a booking needs a session. Reporting a host is public
+   * for the same reason the page is.
+   */
+  (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+$/.test(req.path) && !/^\/api\/experiences\/(near|passions)$/.test(req.path),
+  (req) => req.method === 'GET' && /^\/api\/hosts\/[^/]+$/.test(req.path),
+  (req) => req.method === 'POST' && /^\/api\/hosts\/[^/]+\/report$/.test(req.path),
+  (req) => req.method === 'GET' && /^\/api\/media\/[^/]+$/.test(req.path),
+  /**
    * A photograph with its own key.
    *
    * An `<img>` cannot carry a header, so this route used to be authorised by

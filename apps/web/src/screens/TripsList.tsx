@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
-import { TripSummary } from '../api';
+import { Booking, TripSummary } from '../api';
 import { colors, fonts, type } from '../theme';
 import { CategoryStrip, MenuBar, ScreenTop, PairSwitch, TopControl } from '../components/InspireHeader';
 import { VenueThumb } from '../components/VenueThumb';
@@ -11,6 +11,7 @@ import { StatusLine } from '../components/ui';
 // it needs: a title auto-made at creation that leads with a council reads as
 // the town instead.
 import { tripTitle } from './tripName';
+import { HostFace, dayShort, durationWords, money } from '../components/hosting';
 
 /**
  * The Trips tab (trip rebuild, 7 Sep 2026, screen 1a).
@@ -35,9 +36,16 @@ const SPANS = [
   { value: 'holiday' as const, label: 'Holidays' },
 ];
 
-export type TripsWhen = 'upcoming' | 'past' | 'ideas';
+/**
+ * `hosts` is Booked with hosts (Events v4, G2): the experiences this household
+ * has booked, beside its group trips — Upcoming, then Past with a Rate prompt,
+ * and refunded ones in red. Bookings are not trips, so they are their own
+ * strip rather than rows mixed into the others.
+ */
+export type TripsWhen = 'upcoming' | 'past' | 'ideas' | 'hosts';
 const WHENS: { key: TripsWhen; label: string }[] = [
   { key: 'upcoming', label: 'Upcoming' },
+  { key: 'hosts', label: 'Booked with hosts' },
   { key: 'past', label: 'Past' },
   { key: 'ideas', label: 'Ideas' },
 ];
@@ -78,8 +86,11 @@ function statusWords(t: TripSummary): { text: string; strong: boolean } {
   return { text: `In ${days} days`, strong: true };
 }
 
-export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, onOpen, onHold, onNew, wide }: {
+export function TripsList({ trips, bookings, loading, error, span, when, onSpan, onWhen, onOpen, onHold, onNew, onOpenBooking, wide }: {
   trips: TripSummary[] | null;
+  /** What the household has booked with hosts, for the `hosts` strip. */
+  bookings?: Booking[] | null;
+  onOpenBooking?: (b: Booking) => void;
   loading: boolean;
   error: string | null;
   span: 'day' | 'holiday';
@@ -100,8 +111,9 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
    */
   const inSpan = (t: TripSummary) => (span === 'holiday' ? t.nights > 0 : t.nights === 0);
   const inWhen = (t: TripSummary) =>
-    (when === 'ideas' ? t.datesFixed === false
-      : t.datesFixed !== false && (when === 'past' ? t.isPast : !t.isPast));
+    (when === 'hosts' ? false
+      : when === 'ideas' ? t.datesFixed === false
+        : t.datesFixed !== false && (when === 'past' ? t.isPast : !t.isPast));
 
   const counts = useMemo(() => {
     const mine = all.filter(inSpan);
@@ -109,8 +121,9 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
       upcoming: mine.filter((t) => t.datesFixed !== false && !t.isPast).length,
       past: mine.filter((t) => t.datesFixed !== false && t.isPast).length,
       ideas: mine.filter((t) => t.datesFixed === false).length,
+      hosts: (bookings ?? []).filter((b) => b.state !== 'cancelled' || b.paymentStatus === 'refunded').length,
     };
-  }, [all, span]);
+  }, [all, span, bookings]);
 
   const shown = all
     .filter((t) => inSpan(t) && inWhen(t))
@@ -134,16 +147,19 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
         </MenuBar>
 
         <Text style={styles.count}>
-          {count === 0
-            ? `No ${noun}s ${when === 'ideas' ? 'noted down' : when}`
-            : `${count} ${when === 'ideas' ? (count === 1 ? 'idea' : 'ideas') : when}`}
+          {when === 'hosts'
+            ? (count === 0 ? 'Nothing booked with a host yet' : `${count} booked with hosts`)
+            : count === 0
+              ? `No ${noun}s ${when === 'ideas' ? 'noted down' : when}`
+              : `${count} ${when === 'ideas' ? (count === 1 ? 'idea' : 'ideas') : when}`}
         </Text>
       </View>
 
       <ScrollView contentContainerStyle={[styles.body, wide && styles.wideBody]} keyboardShouldPersistTaps="handled">
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {loading && !trips ? <Text style={type.small}>Loading…</Text> : null}
-        {trips && !shown.length ? (
+        {when === 'hosts' ? <BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /> : null}
+        {when !== 'hosts' && trips && !shown.length ? (
           <Text style={styles.blank}>
             {when === 'ideas'
               ? 'Nothing on the list yet. Save a trip without a date and it waits here until you fix one.'
@@ -152,8 +168,48 @@ export function TripsList({ trips, loading, error, span, when, onSpan, onWhen, o
                 : `Nothing coming up. Tap New trip and say where you're going.`}
           </Text>
         ) : null}
-        {shown.map((t) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />)}
+        {when !== 'hosts' ? shown.map((t) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />) : null}
       </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * Booked with hosts (G2): upcoming first, then past with the rating prompt.
+ * A held booking says so; a called-off one says Refunded, in red, because that
+ * is money coming back and nothing else on this screen is red.
+ */
+function BookingRows({ bookings, onOpen }: { bookings: Booking[]; onOpen: (b: Booking) => void }) {
+  const live = bookings.filter((b) => b.state !== 'cancelled' || b.paymentStatus === 'refunded');
+  const upcoming = live.filter((b) => !b.isPast && b.state !== 'cancelled').sort((a, b) => (a.on ?? '').localeCompare(b.on ?? ''));
+  const past = live.filter((b) => b.isPast || b.state === 'cancelled').sort((a, b) => (b.on ?? '').localeCompare(a.on ?? ''));
+  if (!live.length) {
+    return <Text style={styles.blank}>Nothing booked with a host yet. Experiences are in Inspire — a painting afternoon, a run club, a day out with another family — and what you book lands here beside your trips.</Text>;
+  }
+  const row = (b: Booking) => {
+    const first = b.host.name.split(' ')[0];
+    const status = b.state === 'cancelled' && b.paymentStatus === 'refunded' ? { text: 'Refunded', red: true }
+      : b.state === 'cancelled' ? { text: 'Called off', red: false }
+        : b.state === 'pending' ? { text: b.minCount ? `needs ${Math.max(0, b.minCount - b.heads)} more · Held` : 'Held', red: false }
+          : b.state === 'waitlisted' ? { text: 'Waiting list', red: false }
+            : b.isPast ? { text: b.reviewed ? 'Went' : `Rate ${first} ›`, red: false, strong: !b.reviewed }
+              : { text: 'Booked', red: false, strong: true };
+    return (
+      <Press key={b.id} onPress={() => onOpen(b)} accessibilityRole="button" style={styles.row}>
+        <HostFace host={b.host} size={44} />
+        <View style={styles.rowBody}>
+          <Text style={styles.name} numberOfLines={2}>{b.title ?? 'An experience'}</Text>
+          <Text style={styles.meta} numberOfLines={1}>{[first, b.on ? dayShort(b.on) : null, b.startsAt, durationWords(b.durationMin), b.heads > 1 ? `${b.heads} of you` : null, b.amountPence ? money(b.amountPence) : null].filter(Boolean).join(' · ')}</Text>
+          <Text style={[styles.status, status.strong && styles.statusOn, status.red && { color: colors.overrun, fontWeight: '600' }]} numberOfLines={1}>{status.text}</Text>
+        </View>
+      </Press>
+    );
+  };
+  return (
+    <View>
+      {upcoming.map(row)}
+      {past.length ? <Text style={[styles.count, { paddingHorizontal: 0, paddingTop: 20 }]}>Past</Text> : null}
+      {past.map(row)}
     </View>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { api, GroupBooking, GuestAccount, HouseholdMemberInput, JoinView } from '../api';
+import { api, GroupBooking, GuestAccount, GuestJoinResult, HouseholdMemberInput, JoinView } from '../api';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { Icon, IconName } from '../components/Icon';
@@ -37,7 +37,13 @@ const remember = (token: string, participantToken: string) => {
   if (Platform.OS === 'web' && typeof localStorage !== 'undefined') localStorage.setItem(`${KEY}.${token}`, participantToken);
 };
 
-type Stage = 'landing' | 'account' | 'household' | 'book' | 'list' | 'trial';
+/**
+ * `code` is the six-digit code a sender delivered (G20): the account waits for
+ * it before this device is signed in. `full` is a group that has hit its
+ * maximum (G24) and `off` one that was called off (G25) — both drawn as pages
+ * of their own rather than a line under the landing.
+ */
+type Stage = 'landing' | 'account' | 'code' | 'household' | 'book' | 'list' | 'trial' | 'full' | 'off';
 
 const firstName = (n?: string | null) => (n ?? '').trim().split(/\s+/)[0] ?? '';
 
@@ -81,6 +87,8 @@ export function JoinScreen({ token, preview, onExit }: {
   /** Not a failure: they are on the trip, and the account they already have is theirs to sign into. */
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Where the code went and how long it lasts, for the code page. */
+  const [codeTo, setCodeTo] = useState<{ contact: string; minutes: number } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +97,10 @@ export function JoinScreen({ token, preview, onExit }: {
       // Somebody coming back to a link they have already used lands on their
       // own list, not on the sales page they have already read.
       if (r.you && !moved && !preview) setStage('list');
+      // A trip that is off, or a group that is full, is a page of its own —
+      // before anyone is asked to make an account for it (G24, G25).
+      else if (!moved && !preview && r.group.cancelled) setStage('off');
+      else if (!moved && !preview && !r.you && (r.group.closed || (r.invite.placesLeft != null && r.invite.placesLeft <= 0))) setStage('full');
     } catch (e: any) { setError(e.message); }
   }, [token, me, moved]);
   useEffect(() => { load(); }, [load]);
@@ -137,10 +149,25 @@ export function JoinScreen({ token, preview, onExit }: {
             if (r.sessionToken) setSessionToken(r.sessionToken);
             setMe(r.participantToken); setV(r); setError(null); setNotice(null);
             if (r.signInRequired) { setNotice(r.message ?? null); go('landing'); return; }
+            // A sender exists, so the code is the proof (G20): the account
+            // waits on the next page until it comes back.
+            if ((r as any).codeSent !== undefined) { setCodeTo({ contact: (r as any).contact ?? body.contact, minutes: (r as any).expiresInMinutes ?? 10 }); if (!(r as any).codeSent) setError((r as any).message ?? null); go('code'); return; }
             setAccount(r.account); go('household');
           } catch (e: any) { setError(e.message); } finally { setBusy(false); }
         }}
       />
+    ) : stage === 'code' ? (
+      <CodeStep
+        v={v} token={token} me={me} to={codeTo} busy={busy} error={error}
+        onBack={() => go('account')}
+        onDone={(r) => { if (r.sessionToken) setSessionToken(r.sessionToken); setV(r); setAccount(r.account); setError(null); go('household'); }}
+        onError={setError}
+        onAgain={(m) => setCodeTo(m)}
+      />
+    ) : stage === 'full' ? (
+      <FullPage v={v} token={token} narrow={!wide} onLook={() => go('landing')} />
+    ) : stage === 'off' ? (
+      <CalledOff v={v} narrow={!wide} onBack={() => { const w = typeof window !== 'undefined' ? window : null; if (w) w.location.assign('/trips'); }} />
     ) : stage === 'household' ? (
       <HouseholdStep
         v={v} account={account} busy={busy}
@@ -924,6 +951,152 @@ function Money({ item, organiser, joined, onAsk, onSet }: {
   );
 }
 
+/**
+ * Check your phone (G20). Six boxes, one code; send it again after a wait; no
+ * password to remember — the code is how you sign in from now on.
+ */
+function CodeStep({ v, token, me, to, busy, error, onBack, onDone, onError, onAgain }: {
+  v: JoinView; token: string; me: string | null; to: { contact: string; minutes: number } | null; busy: boolean; error: string | null;
+  onBack: () => void; onDone: (r: GuestJoinResult) => void; onError: (e: string | null) => void; onAgain: (m: { contact: string; minutes: number }) => void;
+}) {
+  const [code, setCode] = useState('');
+  const [wait, setWait] = useState(30);
+  const [sending, setSending] = useState(false);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait((w) => w - 1), 1000); return () => clearTimeout(t); }, [wait]);
+  const digits = code.replace(/\D/g, '').slice(0, 6);
+  const confirm = async () => {
+    if (digits.length !== 6 || !me) return;
+    setChecking(true);
+    try { onDone(await api.joinCode(token, me, digits)); } catch (e: any) { onError(e.message); } finally { setChecking(false); }
+  };
+  const again = async () => {
+    if (!me) return;
+    setSending(true);
+    try { const r = await api.joinCodeAgain(token, me); onAgain({ contact: r.contact, minutes: r.expiresInMinutes }); onError(r.codeSent ? null : r.message); setWait(30); }
+    catch (e: any) { onError(e.message); } finally { setSending(false); }
+  };
+  useEffect(() => { if (digits.length === 6) void confirm(); }, [digits]);
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Row style={{ justifyContent: 'space-between' }}>
+        <Press onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{v.group.name ?? v.trip.title ?? 'Back'}</Text></Row></Press>
+        <Wordmark height={26} />
+      </Row>
+      <View style={{ gap: 4 }}>
+        <Text style={type.title}>Check your {to?.contact.includes('@') ? 'email' : 'phone'}</Text>
+        <Text style={type.small}>We sent a 6-digit code to <Text style={{ fontWeight: '700', color: colors.ink }}>{to?.contact ?? 'you'}</Text>. It lasts {to?.minutes ?? 10} minutes.</Text>
+      </View>
+      <Press onPress={() => {}} accessibilityRole="none" style={styles.codeRow}>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <View key={i} style={[styles.codeBox, digits.length === i && styles.codeBoxOn]}><Text style={styles.codeDigit}>{digits[i] ?? ''}</Text></View>
+        ))}
+        <TextInput
+          value={digits} onChangeText={setCode} keyboardType="number-pad" inputMode="numeric" textContentType="oneTimeCode" autoComplete="one-time-code" autoFocus maxLength={6}
+          accessibilityLabel="The 6-digit code" style={styles.codeInput}
+        />
+      </Press>
+      {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
+      <Text style={type.small}>
+        Didn't get it?{' '}
+        {wait > 0 ? <Text>Send it again · 0:{String(wait).padStart(2, '0')}</Text> : <Text style={{ color: colors.accent, fontWeight: '700' }} onPress={() => void again()}>{sending ? 'Sending…' : 'Send it again'}</Text>}
+      </Text>
+      <View style={styles.hint}><Text style={[type.small, { color: colors.headerSub }]}>No password to remember. The code is how you sign in from now on — on this phone and any other.</Text></View>
+      <Button label="Confirm" icon="forward" loading={busy || checking} disabled={digits.length !== 6} onPress={() => void confirm()} />
+      <Text style={[type.small, { textAlign: 'center' }]}>Wrong number? <Text style={{ color: colors.accent, fontWeight: '700' }} onPress={onBack}>Go back and change it</Text></Text>
+    </View>
+  );
+}
+
+/** This one is full (G24): what you can still do, and a waiting list that holds nothing. */
+function FullPage({ v, token, narrow, onLook }: { v: JoinView; token: string; narrow: boolean; onLook: () => void }) {
+  const [contact, setContact] = useState('');
+  const [said, setSaid] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const them = v.group.organiser ?? 'the organiser';
+  const dates = v.trip.startDate ? `${shortDay(v.trip.startDate)} – ${shortDay(v.trip.endDate)}` : '';
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Row style={{ justifyContent: 'space-between' }}>
+        <Wordmark height={30} />
+        {v.group.organiser ? <Text style={type.label}>INVITED BY {v.group.organiser.toUpperCase()}</Text> : null}
+      </Row>
+      <View style={{ gap: 2 }}>
+        <Text style={type.title}>{v.group.name ?? v.trip.title ?? 'A trip'}</Text>
+        <Text style={type.small}>{[dates, v.trip.place, v.group.heads ? `${v.group.heads} going` : null].filter(Boolean).join(' · ')}</Text>
+      </View>
+      <Card style={{ borderColor: colors.ink }}>
+        <Text style={type.h2}>This one is full</Text>
+        <Text style={type.small}>{v.group.maximumCount ? `${them} capped it at ${v.group.maximumCount} and the last place has gone.` : `${them} has stopped taking people.`} The link has stopped taking people.</Text>
+      </Card>
+      <Text style={type.label}>WHAT YOU CAN STILL DO</Text>
+      {[
+        { n: 1, t: `Ask ${them} directly`, b: `${them.split(' ')[0]} can raise the maximum if there is room.` },
+        { n: 2, t: 'Wait for a place', b: `If someone drops out we will ${contact.includes('@') ? 'email' : 'text'} you — nothing is held.` },
+        { n: 3, t: 'Look at the trip anyway', b: 'The route and the places are all in Epic.' },
+      ].map((s) => (
+        <Row key={s.n} style={{ alignItems: 'flex-start' }}>
+          <View style={styles.numDot}><Text style={styles.numDotText}>{s.n}</Text></View>
+          <View style={{ flex: 1 }}><Text style={type.h3}>{s.t}</Text><Text style={type.small}>{s.b}</Text></View>
+        </Row>
+      ))}
+      {said ? <StatusLine tone="good">{said}</StatusLine> : (
+        <>
+          <TextInput value={contact} onChangeText={setContact} placeholder="Your mobile or email" placeholderTextColor={colors.inkFaint} autoCapitalize="none" style={styles.input} />
+          <Button label="Tell me if a place comes up" icon="send" loading={busy} disabled={!contact.trim()} onPress={async () => { setBusy(true); try { const r = await api.joinWaitlist(token, contact.trim()); setSaid(r.message); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />
+          <Text style={[type.small, { textAlign: 'center' }]}>Just a mobile — no account, nothing taken</Text>
+        </>
+      )}
+      <Button label="Look at the trip anyway" kind="ghost" onPress={onLook} />
+      {narrow ? null : <View />}
+    </View>
+  );
+}
+
+/** Called off (G25): where you stand, item by item, and where the money goes. */
+function CalledOff({ v, narrow, onBack }: { v: JoinView; narrow: boolean; onBack: () => void }) {
+  const them = v.group.organiser ?? 'The organiser';
+  const stood = v.items.filter((i) => i.mine || i.required);
+  const position = (i: JoinView['items'][number]) => {
+    if (i.bookWhere === 'yourself') return { head: 'You booked this yourself', line: `Cancel it with ${host(i.externalUrl) ?? 'them'}`, red: false };
+    if (i.mine?.status === 'paid' || (i.money?.billed && i.mine && ['in', 'booked'].includes(i.mine.status) && i.pricing === 'fixed')) return { head: `${money(i.money?.yoursPence ?? i.amountPence)} ${i.mine?.status === 'paid' ? 'paid' : 'agreed'}${i.mine?.on ? ` on ${shortDay(i.mine.on)}` : ''}`, line: i.mine?.status === 'paid' ? 'Refund on its way' : 'Never taken — nothing to return', red: i.mine?.status === 'paid' };
+    if (i.pricing === 'variable') return { head: 'Never charged — it settled on numbers', line: 'Nothing taken', red: false };
+    if (i.bookWhere === 'there') return { head: 'Paid there, on the day', line: 'Nothing taken', red: false };
+    return { head: 'Nothing was taken for this', line: 'Nothing to do', red: false };
+  };
+  return (
+    <View style={{ gap: spacing.md }}>
+      <Row style={{ justifyContent: 'space-between' }}>
+        <Wordmark height={30} />
+        <Text style={type.label}>FROM {them.toUpperCase()}</Text>
+      </Row>
+      <View style={{ gap: 2 }}>
+        <Text style={type.label}>CALLED OFF</Text>
+        <Text style={type.title}>{v.group.name ?? v.trip.title ?? 'The trip'} is off</Text>
+        <Text style={type.small}>{v.group.cancelledNote ?? `${them} called it off.`} Nothing has been taken from anyone that is not on its way back.</Text>
+      </View>
+      <Text style={type.label}>WHERE YOU STAND</Text>
+      {stood.length ? stood.map((i) => {
+        const p = position(i);
+        return (
+          <Row key={i.id} style={styles.bookRow}>
+            <View style={styles.tile}><Icon name={itemIcon(i.label, i.kind)} size={16} /></View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={type.h3}>{i.label}</Text>
+              <Text style={type.small}>{p.head}</Text>
+            </View>
+            <Text style={[type.small, { fontWeight: '700', color: p.red ? colors.overrun : colors.ink }]}>{p.line}</Text>
+          </Row>
+        );
+      }) : <Text style={type.small}>You had nothing booked on it.</Text>}
+      <Text style={type.small}>Refunds land back on the card you paid with, usually in three working days. Your Epic account and your household stay exactly as they are.</Text>
+      <Button label="Back to my trips" kind="secondary" icon="trips" onPress={onBack} />
+      <Text style={[type.small, { textAlign: 'center' }]}>{them.split(' ')[0]} may try again another time.</Text>
+      {narrow ? null : <View />}
+    </View>
+  );
+}
+
 /** Joining is a name, one contact, and how many are with them. Nothing else. */
 function JoinForm({ v, busy, onJoin, onCancel }: { v: JoinView; busy: boolean; onJoin: (body: any) => void; onCancel: () => void }) {
   const [name, setName] = useState('');
@@ -979,6 +1152,13 @@ function JoinForm({ v, busy, onJoin, onCancel }: { v: JoinView; busy: boolean; o
 
 const styles = StyleSheet.create({
   page: { padding: spacing.lg, gap: spacing.md, width: '100%' },
+  codeRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', position: 'relative', paddingVertical: spacing.sm },
+  codeBox: { width: 46, height: 56, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  codeBoxOn: { borderColor: colors.accent },
+  codeDigit: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', color: colors.ink },
+  codeInput: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, opacity: 0.01, fontSize: 24, textAlign: 'center' },
+  numDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
+  numDotText: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: colors.selectedFg },
   hint: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },
   previewBar: { backgroundColor: colors.lime, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
   trialCard: { backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.md },

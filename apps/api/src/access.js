@@ -44,6 +44,8 @@ export const CAPABILITIES = [
   { key: 'manage_library', area: 'Atlas', label: 'Manage the atlas', note: 'Run the harvest, publish and hide attractions, approve uploads and delete pictures.', manages: true },
   { key: 'view_audit', area: 'Governance', label: 'See the audit trail', note: 'Who did what to whom, and when.' },
   { key: 'manage_settings', area: 'Governance', label: 'Manage settings', note: 'Providers, sources and estate-wide configuration.', manages: true },
+  { key: 'view_hosting', area: 'Hosting', label: 'See hosts and offers', note: 'Who hosts, what is waiting to be read, and what has been reported.' },
+  { key: 'manage_hosting', area: 'Hosting', label: 'Review hosts and offers', note: 'Pass or send back a first pitch, set a host’s trust level, and resolve reports.', manages: true },
 ];
 
 export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));

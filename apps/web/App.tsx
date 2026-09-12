@@ -24,6 +24,11 @@ import { WelcomeScreen, wasWelcomed } from './src/screens/voice/WelcomeScreen';
 import { SetupScreen } from './src/screens/voice/SetupScreen';
 import { TellScreen } from './src/screens/voice/TellScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { HostScreen } from './src/screens/host/HostScreen';
+import { HostProfileScreen } from './src/screens/HostProfileScreen';
+import { ExperienceScreen } from './src/screens/ExperienceScreen';
+import { BookingScreen } from './src/screens/BookingScreen';
+import { PeopleScreen } from './src/screens/PeopleScreen';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
 import { JoinScreen } from './src/screens/JoinScreen';
 import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
@@ -48,7 +53,10 @@ const TABS: { key: Tab; label: string; icon: IconName; href: string; owner?: tru
   { key: 'inspire', label: 'Inspire', icon: 'inspire', href: paths.inspire() },
   { key: 'places', label: 'Places', icon: 'places', href: paths.places() },
   { key: 'trips', label: 'Trips', icon: 'trips', href: paths.trips() },
-  { key: 'household', label: 'Household', icon: 'household', href: paths.household() },
+  // Five in the bar (owner, 12 Sep 2026): Household folded into Settings to
+  // make room for Host. The Host tab is hosting only — guests find experiences
+  // in Inspire and Places and book them into Trips.
+  { key: 'host', label: 'Host', icon: 'host', href: paths.host() },
   { key: 'settings', label: 'Settings', icon: 'settings', href: paths.settings() },
 ];
 
@@ -242,6 +250,15 @@ function Routed() {
    * as public too (auth.js), and drawn without any of the household's app.
    */
   if (route.name === 'shared') return <SharedTripScreen token={route.token} you={query.get('you')} />;
+  /**
+   * A host's profile and an experience page (Events & Hosts, 12 Sep 2026)
+   * "must work logged-out; account creation happens after the tap". Answered
+   * before the passcode like the three above and drawn without the shell's
+   * chrome; the booking sheet under an experience needs a session and so goes
+   * through the Gate, which is what asks for one.
+   */
+  if (route.name === 'hostProfile') return <HostProfileScreen route={route} />;
+  if (route.name === 'experience' && route.layer !== 'book') return <ExperienceScreen route={route} />;
   return <Gate route={route} />;
 }
 
@@ -490,6 +507,11 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
         />
       ) : null}
       {route.name === 'household' && !route.voice ? <HouseholdScreen data={household} refresh={refreshHousehold} route={route} /> : null}
+      {/* Hosting (12 Sep 2026): the tab, and every page inside it. */}
+      {route.name === 'host' ? <HostScreen route={route} /> : null}
+      {route.name === 'people' ? <PeopleScreen household={household} /> : null}
+      {route.name === 'booking' ? <BookingScreen route={route} /> : null}
+      {route.name === 'experience' ? <ExperienceScreen route={route} /> : null}
       {route.name === 'household' && route.voice && route.memberId ? <TellScreen memberId={route.memberId} mode={route.voice} household={household} refresh={refreshHousehold} /> : null}
       {/* Voice intake (handoff, 8 Sep 2026): the mic, the wizard, the card, its questions; first run and the two-minute set-up. */}
       {route.name === 'say' && !route.intakeId && !route.steps ? <SayScreen household={household} /> : null}
