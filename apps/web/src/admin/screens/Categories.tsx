@@ -1,79 +1,68 @@
 /**
- * Categories — Epic's own two levels, every provider's words, and the rules
- * that map one onto the other.
+ * Categories — one category at a time: its subcategories, the attributes that
+ * put a place in each, and every provider's words lined up against them.
  *
  * The owner, 12 Sep 2026: "I'd like to have a screen where I can manage
- * categories and subcategories… Do we label particular attributes of a place
- * as an attribute, and then could we, for each category or subcategory, add
- * the combination of labels that determine whether that particular activity
- * lives in that particular subcategory?… view all of our providers, categories,
- * and subcategories, maybe in a separate tab… the mappings between our
- * providers' categories… map [our master categories and subcategories] to the
- * providers' subcategories."
+ * categories and subcategories… for each category or subcategory, add the
+ * combination of labels that determine whether that particular activity lives
+ * in that particular subcategory… view all of our providers, categories, and
+ * subcategories… map [ours] to the providers' subcategories."
  *
- * Three tabs, in that order:
+ * And, on the first draft, the same day: "I want to select a category in the
+ * drop-down box. I don't want you just showing a huge scroll ever. Just let me
+ * select a category and let me see the attributes for that category." And: "I
+ * hate this design… these big white boxes, the buttons with white boxes
+ * around them."
  *
- *   Categories   The two levels. Open a subcategory and it shows what fills
- *                it — every rule, as the labels it names — and a way to add
- *                one: pick labels, see where they land today, save.
- *   Labels       Every word each source uses, with where it lands and what
- *                decided that. Tap a word to write a rule about it.
- *   Providers    The matrix: our subcategories down the side, the sources
- *                across the top, and in each cell the source's words that land
- *                there. The last rows are the work: words filed in a category
- *                with no drawer, and words nothing has read at all.
+ * So the screen is one category, chosen from a control at the top, and three
+ * ways of looking at it: its subcategories with their attributes in one table,
+ * every provider's words that land in it, and a search for any word. Nothing
+ * is boxed. The design follows what the research and the owner's own earlier
+ * handover agree on (NN/g on visual hierarchy: borders and backgrounds
+ * sparingly, whitespace and weight do the work, at most three type sizes;
+ * NN/g on tables: hairlines to track rows, a human-readable first column, and
+ * edit in a panel beside the table rather than a modal; handover v8: "control
+ * rows are plain text with chevrons, never boxed buttons"). The one ink rule
+ * is the section rule; rows are 1px hairlines; the only filled things are the
+ * selected row, the chosen labels, and the one primary button.
  *
- * A label is one thing one source said, with the source's name in front
- * (`google:museum`, `osm:leisure=ice_rink`, `wikidata:Q23413`), and Epic's own
- * derived words are labels too (`experience:museum`). A rule says: places
- * carrying *all* of these labels go in this subcategory. Narrowest wins — one
- * place, then a combination, then a Wikidata type, then the atlas word, then
- * the experience — so nothing already filed moves unless a rule about it is
- * written (domain/labels.js, domain/moods.js).
+ * A label is one thing one source said (`google:museum`, `osm:leisure=ice_rink`,
+ * `wikidata:Q23413`) or one of Epic's own derived words (`experience:museum`).
+ * A rule says: places carrying *all* of these labels go in this subcategory.
+ * Narrowest wins — one place, then a combination, then a Wikidata type, then
+ * the atlas word, then the experience (domain/labels.js, domain/moods.js).
  *
  * Layout follows the shell's rule (CLAUDE.md): width from `useViewport`, one
- * tree with different styles rather than two returns, nothing over 390px
- * except the matrix, which scrolls sideways inside the frame.
+ * tree with different styles rather than two returns, nothing over 390px.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
   api, MoodKey, ShelfSubcategory, Taxonomy, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
-  TaxonomyNamespace, TaxonomyRule, TaxonomyTry,
+  TaxonomyRule, TaxonomyTry,
 } from '../../api';
-import { colors, radius, spacing, type, BORDER } from '../../theme';
-import { Icon, IconName } from '../../components/Icon';
-import { Button, Chip, Row, Wrap } from '../../components/ui';
+import { colors, spacing, type, BORDER } from '../../theme';
+import { Icon } from '../../components/Icon';
+import { Button, FoldLine } from '../../components/ui';
+import { ControlButton, ControlRow, Popover, PopoverList } from '../../components/ControlRow';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count } from '../kit';
+import { AdminPage, PageHead, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 
 const WIDE = 900;
 
-type Tab = 'categories' | 'labels' | 'providers';
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'categories', label: 'Categories' },
-  { key: 'labels', label: 'Labels' },
-  { key: 'providers', label: 'Providers' },
+type View_ = 'subcategories' | 'providers' | 'words';
+const VIEWS: { key: View_; label: string; short: string }[] = [
+  { key: 'subcategories', label: 'Subcategories & attributes', short: 'Subcategories' },
+  { key: 'providers', label: 'Provider words', short: 'Providers' },
+  { key: 'words', label: 'Find a word', short: 'Find a word' },
 ];
-
-/** The eight, as pictures; anything added later gets the pin. */
-const CAT_ICON: Record<string, IconName> = {
-  fun: 'festival', food: 'restaurant', culture: 'museum', sport: 'bowling', activity: 'sport',
-  adrenaline: 'climbing', relaxing: 'walk', outdoors: 'park',
-};
 
 /** What decided where a word lands, in words. */
 const HOW_WORD: Record<TaxonomyLanding['how'], string> = {
-  taught: 'a rule',
-  default: 'the code\'s own map',
-  fallback: 'nothing knew it',
-  none: 'not a place on its own',
-};
-const HOW_TONE: Record<TaxonomyLanding['how'], 'ok' | 'plain' | 'warn' | 'crit'> = {
-  taught: 'ok', default: 'plain', fallback: 'warn', none: 'plain',
+  taught: 'a rule', default: 'the code\'s own map', fallback: 'nothing knew it', none: 'not a place on its own',
 };
 
 /** What a rule is about, by where it is written. */
@@ -85,8 +74,93 @@ const SCOPE_WORD: Record<string, string> = {
   experience: 'every place read as this experience',
 };
 
+/** The sources, said the short way beside a word. */
+const SOURCE_WORD: Record<string, string> = {
+  google: 'Google', osm: 'OpenStreetMap', wikidata: 'Wikidata', tripadvisor: 'Tripadvisor', ticketmaster: 'Ticketmaster',
+  seatgeek: 'SeatGeek', predicthq: 'PredictHQ', datathistle: 'Data Thistle', atlas: 'Atlas word', experience: 'Experience',
+  venue: 'Venue kind', style: 'Style', flag: 'Flag',
+};
+
 const nsOf = (label: string) => label.split(':')[0];
 const keyOf = (label: string) => label.split(':').slice(1).join(':');
+const sourceWord = (ns: string) => SOURCE_WORD[ns] ?? ns;
+
+// ---------------------------------------------------------------------------
+// the quiet pieces: a rule, a hairline, a word, a text action
+// ---------------------------------------------------------------------------
+
+/** A section: a small heading over one ink rule. No box. */
+function Section({ title, right, children, style }: { title: string; right?: React.ReactNode; children: React.ReactNode; style?: object }) {
+  return (
+    <View style={[{ gap: 0 }, style]}>
+      <View style={styles.sectionHead}>
+        <Text style={styles.kicker}>{title}</Text>
+        <View style={{ flex: 1 }} />
+        {right}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+/** An action said as a word, not drawn as a box. */
+function TextAction({ label, onPress, disabled, tone = 'ink' }: { label: string; onPress: () => void; disabled?: boolean; tone?: 'ink' | 'muted' }) {
+  return (
+    <Press onPress={onPress} disabled={disabled} accessibilityRole="button" hitSlop={6} style={{ opacity: disabled ? 0.4 : 1 }}>
+      <Text style={[styles.action, tone === 'muted' && { color: colors.inkMuted }]}>{label}</Text>
+    </Press>
+  );
+}
+
+/** One of a few choices in a line: the chosen one is a flat lime word. */
+function Choice({ label, on, onPress }: { label: string; on: boolean; onPress?: () => void }) {
+  return (
+    <Press onPress={onPress} disabled={!onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.choice, on && styles.choiceOn]}>
+      <Text style={[type.small, { color: on ? colors.selectedFg : colors.inkMuted, fontWeight: on ? '700' : '500' }]}>{label}</Text>
+    </Press>
+  );
+}
+
+/** A label as words: the source in grey, the word in ink. */
+function Word({ label, name, muted }: { label: string; name?: string | null; muted?: boolean }) {
+  const key = keyOf(label);
+  return (
+    <Text style={[type.small, muted && { color: colors.inkMuted }]} numberOfLines={1}>
+      <Text style={{ color: colors.inkMuted }}>{sourceWord(nsOf(label))} · </Text>
+      <Text style={{ fontWeight: '600', color: muted ? colors.inkMuted : colors.ink }}>{name && name !== key ? name : key}</Text>
+      {name && name !== key ? <Text style={{ color: colors.inkMuted }}> {key}</Text> : null}
+    </Text>
+  );
+}
+
+/** A label that has been chosen: a flat lime-tint token with an × — the only filled thing in a form. */
+function Token({ label, name, onRemove }: { label: string; name?: string | null; onRemove?: () => void }) {
+  const key = keyOf(label);
+  return (
+    <View style={styles.token}>
+      <Text style={type.small}>
+        <Text style={{ color: colors.inkMuted }}>{sourceWord(nsOf(label))} · </Text>
+        <Text style={{ fontWeight: '700' }}>{name && name !== key ? name : key}</Text>
+      </Text>
+      {onRemove ? (
+        <Press onPress={onRemove} hitSlop={8} accessibilityLabel={`Remove ${name ?? key}`}><Icon name="close" size={13} color={colors.ink} /></Press>
+      ) : null}
+    </View>
+  );
+}
+
+/** A text field with one rule under it, not a box round it. */
+function Field({ value, onChangeText, placeholder, autoFocus, onSubmitEditing, style, icon }: {
+  value: string; onChangeText: (t: string) => void; placeholder?: string; autoFocus?: boolean; onSubmitEditing?: () => void; style?: object; icon?: 'search';
+}) {
+  return (
+    <View style={[styles.field, style]}>
+      {icon ? <Icon name={icon} size={14} color={colors.inkMuted} /> : null}
+      <TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={colors.inkMuted}
+                 autoFocus={autoFocus} onSubmitEditing={onSubmitEditing} style={styles.fieldInput} />
+    </View>
+  );
+}
 
 // ---------------------------------------------------------------------------
 
@@ -95,16 +169,16 @@ export function Categories({ canManage }: { canManage: boolean }) {
   const wide = width >= WIDE;
 
   const [tax, setTax] = useState<Taxonomy | null>(null);
-  // Which tab, which subcategory is open, which source and search — all in
-  // the address, so a drawer's rules or one provider's words are a link.
-  const [tab, setTab] = useQueryState<Tab>('tab', 'categories', asOneOf(['categories', 'labels', 'providers'] as const, 'categories'));
+  // Which category, which view, which subcategory is open — all in the address.
+  const [cat, setCat] = useQueryState<string>('cat', '', asText);
+  const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'words'] as const, 'subcategories'));
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
-  const [ns, setNs] = useQueryState<string>('ns', '', asText);
-  const [q, setQ] = useQueryState<string>('q', '', asText);
-  const [all, setAll] = useQueryState<string>('all', '', asText);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** A rule being written from the Labels or Providers tab, started from one word. */
+  /** Which control's panel is open, and where the panels hang from. */
+  const [open, setOpen] = useState<'category' | 'view' | 'sub' | null>(null);
+  const [foot, setFoot] = useState(40);
+  /** A rule being written from a word, outside the subcategory column. */
   const [editing, setEditing] = useState<{ labels: string[]; subcategory: string | null } | null>(null);
 
   const load = useCallback(async () => {
@@ -113,307 +187,262 @@ export function Categories({ canManage }: { canManage: boolean }) {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const changed = async (said: string) => { setNote(said); await load(); };
-  const failed = (said: string) => setNote(said);
+  const categories = tax?.categories ?? [];
+  const category = categories.find((c) => c.key === cat) ?? categories[0] ?? null;
+  const subs = category?.subcategories ?? [];
+  const chosen = subs.find((s) => s.key === sub) ?? null;
+  const rulesOf = (key: string) => (tax?.rules ?? []).filter((r) => r.subcategory === key);
 
-  const known = useMemo(() => (tax?.namespaces ?? []).reduce((n, x) => n + x.total, 0), [tax]);
-  const seen = useMemo(() => (tax?.namespaces ?? []).reduce((n, x) => n + x.seen, 0), [tax]);
+  const changed = async (said: string) => { setNote(said); await load(); };
+  const run = async (what: () => Promise<unknown>, said: string) => {
+    setBusy(true);
+    try { await what(); await changed(said); }
+    catch (err) { setNote(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
   const catLabel = (key: string | null | undefined) => tax?.categories.find((c) => c.key === key)?.label ?? key ?? '—';
-  const subLabel = (key: string | null | undefined) => tax?.subcategories.find((s) => s.key === key)?.label ?? key ?? null;
+  const subLabel = (key: string | null | undefined) => tax?.subcategories.find((s) => s.key === key)?.label ?? null;
 
   return (
     <AdminPage>
-      <PageHead
-        title="Categories"
-        sub="Epic's own categories and subcategories, every provider's words, and the rules that map one onto the other"
-      />
+      <PageHead title="Categories" sub="One category at a time: its subcategories, the attributes that put a place in each, and every provider's words against them" />
 
-      <TileRow>
-        <Tile label="Categories" value={count(tax?.categories.length ?? null)} sub="the chips on the home screen" />
-        <Tile label="Subcategories" value={count(tax?.subcategories.length ?? null)} sub="one parent each — that is the no-duplication rule" tone="accent" />
-        <Tile label="Rules" value={count(tax?.rules.length ?? null)}
-              sub={`${count(tax?.rules.filter((r) => r.scope === 'labels').length ?? 0)} about a combination`} tone="ok" />
-        <Tile label="Words known" value={count(known || null)} sub={`${count(seen)} seen on a real place`} />
-      </TileRow>
+      {/* The controls: plain words with chevrons, and the panels hang under them. */}
+      <View style={{ position: 'relative', zIndex: 20 }}>
+        <View onLayout={(e) => setFoot(e.nativeEvent.layout.height)}>
+          <ControlRow
+            left={<ControlButton label={category ? category.label : 'Category'} icon="filters" open={open === 'category'} onPress={() => setOpen(open === 'category' ? null : 'category')} spoken={`Category: ${category?.label ?? 'none'}`} />}
+            centre={<ControlButton label={(wide ? VIEWS.find((v) => v.key === view)?.label : VIEWS.find((v) => v.key === view)?.short) ?? ''} open={open === 'view'} onPress={() => setOpen(open === 'view' ? null : 'view')} spoken="What to show" />}
+            right={view === 'subcategories' && !wide && subs.length ? (
+              <ControlButton label={chosen?.label ?? 'All subcategories'} set={Boolean(chosen)} open={open === 'sub'} onPress={() => setOpen(open === 'sub' ? null : 'sub')} spoken="Subcategory" />
+            ) : null}
+          />
+        </View>
+        <Popover open={open === 'category'} top={foot} onClose={() => setOpen(null)}>
+          <PopoverList
+            options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
+            onPick={(k) => { setCat(k); setSub(''); setEditing(null); setOpen(null); }}
+          />
+        </Popover>
+        <Popover open={open === 'view'} top={foot} align="centre" onClose={() => setOpen(null)}>
+          <PopoverList options={VIEWS.map((v) => ({ key: v.key, label: v.label, on: v.key === view }))} onPick={(k) => { setView(k as View_); setEditing(null); setOpen(null); }} />
+        </Popover>
+        <Popover open={open === 'sub'} top={foot} align="right" onClose={() => setOpen(null)}>
+          <PopoverList
+            options={[{ key: '', label: 'All subcategories', on: !chosen }, ...subs.map((s) => ({ key: s.key, label: s.label, count: `${s.rules ?? 0}`, on: s.key === chosen?.key }))]}
+            onPick={(k) => { setSub(k); setOpen(null); }}
+          />
+        </Popover>
+      </View>
 
-      {note ? <Banner tone="accent">{note}</Banner> : null}
+      {category ? (
+        <View style={styles.catLine}>
+          <Text style={[type.small, { flex: 1, minWidth: 200 }]}>
+            {category.blurb ? `${category.blurb} ` : ''}
+            <Text style={{ color: colors.inkMuted }}>
+              {subs.length} subcategor{subs.length === 1 ? 'y' : 'ies'} · {subs.reduce((n, s) => n + (s.rules ?? 0), 0)} rules
+              {category.is_door ? ' · a door into Places' : ''}{!category.active ? ' · switched off' : ''}
+            </Text>
+          </Text>
+          {canManage && (tax?.rules ?? []).some((r) => r.subcategory && subs.some((s) => s.key === r.subcategory) && r.labelList.some((l) => l.label.startsWith('wikidata:') && !l.name)) ? (
+            <TextAction label="Name the Wikidata types" tone="muted" disabled={busy}
+                        onPress={() => void run(async () => { const r = await api.shelfNameKinds(600); if (!r.named) throw new Error('Every type here already has a name.'); return r; }, 'Named the types from Wikidata.')} />
+          ) : null}
+          {canManage ? (
+            <TextAction label={category.active ? 'Switch off' : 'Switch on'} tone="muted" disabled={busy}
+                        onPress={() => void run(() => api.shelfSaveCategory({ key: category.key, active: !category.active }),
+                          `${category.label} is ${category.active ? 'off the home screen' : 'back on the home screen'}.`)} />
+          ) : null}
+        </View>
+      ) : null}
 
-      <Banner>
-        A place carries labels: what each source called it, in that source's own words, plus what Epic read those
-        into. A rule says which subcategory places carrying a set of labels go in. Narrowest wins — one place, then a
-        combination of labels, then a Wikidata type, then the atlas word, then the experience — and naming a
-        subcategory settles the category, because a subcategory has exactly one parent.
-      </Banner>
-
-      <FilterRow>
-        {TABS.map((t) => (
-          <FilterChip key={t.key} label={t.label} on={tab === t.key} onPress={() => { setTab(t.key); setEditing(null); }} />
-        ))}
-      </FilterRow>
+      {note ? <Text style={[type.small, styles.note]}>{note}</Text> : null}
 
       {editing && tax ? (
-        <RuleEditor
-          key={editing.labels.join('+')}
-          tax={tax}
-          start={editing.labels}
-          startSubcategory={editing.subcategory}
-          fixedSubcategory={null}
-          canManage={canManage}
-          onClose={() => setEditing(null)}
-          onSaved={async (said) => { setEditing(null); await changed(said); }}
-        />
+        <RuleEditor key={editing.labels.join('+')} tax={tax} start={editing.labels} startSubcategory={editing.subcategory} fixedSubcategory={null}
+                    canManage={canManage} onClose={() => setEditing(null)} onSaved={async (said) => { setEditing(null); await changed(said); }} />
       ) : null}
 
-      {tab === 'categories' ? (
-        <CategoriesTab tax={tax} sub={sub} onOpen={(k) => setSub(k)} canManage={canManage} busy={busy} setBusy={setBusy}
-                       onChanged={changed} onFailed={failed} wide={wide} />
+      {!tax ? <Text style={type.small}>Loading…</Text> : null}
+
+      {tax && category && view === 'subcategories' ? (
+        <View style={[styles.split, wide && styles.splitWide]}>
+          {/* Every subcategory of this category with its attributes, in one table. */}
+          <Section title="Subcategories and their attributes" style={{ flex: 1, minWidth: 0 }}
+                   right={canManage ? <AddSubcategory category={category.key as MoodKey} label={category.label} busy={busy} run={run} /> : undefined}>
+            {subs.length === 0 ? <Text style={[type.small, styles.emptyRow]}>No subcategories yet.</Text> : null}
+            {subs.filter((s) => wide || !chosen || s.key === chosen.key).map((s) => {
+              const rules = rulesOf(s.key);
+              const words = rules.flatMap((r) => r.scope === 'place' ? [r.subject_label ?? r.subject] : r.labelList.map((l) => l.name ?? keyOf(l.label)));
+              const on = chosen?.key === s.key;
+              return (
+                <Press key={s.id} onPress={() => setSub(on ? '' : s.key)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                       style={[styles.subRow, !wide && styles.subRowNarrow, on && styles.subRowOn]}>
+                  <View style={[styles.subName, wide && { width: 200, flexGrow: 0 }]}>
+                    <Text style={[type.small, { fontWeight: '700' }]}>{s.label}</Text>
+                    <Text style={type.tiny}>
+                      {[wide ? null : `${rules.length} rule${rules.length === 1 ? '' : 's'}`, s.indoor === true ? 'indoors' : s.indoor === false ? 'outdoors' : null, s.for_kids === true ? 'for kids' : null, !s.active ? 'off' : null].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                  <Text style={[type.small, wide ? { flex: 1, minWidth: 0 } : { width: '100%' }, { color: words.length ? colors.ink : colors.inkMuted }]} numberOfLines={wide ? 2 : 3}>
+                    {words.length ? words.join(', ') : 'No attributes yet — only places moved here by hand.'}
+                  </Text>
+                  {wide ? <Text style={[type.tiny, styles.subCount]}>{rules.length}</Text> : null}
+                  {wide ? <Icon name={on ? 'collapse' : 'more'} size={14} color={colors.inkMuted} /> : null}
+                </Press>
+              );
+            })}
+          </Section>
+
+          {chosen ? (
+            <SubcategoryDetail key={chosen.id} sc={chosen} tax={tax} rules={rulesOf(chosen.key)} canManage={canManage} busy={busy} run={run} wide={wide}
+                               onChanged={changed} onClose={() => setSub('')} />
+          ) : null}
+        </View>
       ) : null}
 
-      {tab === 'labels' ? (
-        <LabelsTab tax={tax} ns={ns} setNs={setNs} q={q} setQ={setQ} all={all === '1'} setAll={(v) => setAll(v ? '1' : '')}
-                   catLabel={catLabel} subLabel={subLabel} canManage={canManage}
-                   onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
+      {tax && category && view === 'providers' ? (
+        <ProviderWords tax={tax} category={category.key} wide={wide} subLabel={subLabel}
+                       onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
 
-      {tab === 'providers' ? (
-        <ProvidersTab tax={tax} all={all === '1'} setAll={(v) => setAll(v ? '1' : '')} wide={wide}
-                      onNamespace={(k) => { setNs(k); setTab('labels'); }}
-                      onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
+      {tax && view === 'words' ? (
+        <FindWord tax={tax} catLabel={catLabel} subLabel={subLabel} canManage={canManage} foot={foot}
+                  onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
+
+      <View style={{ marginTop: spacing.md }}>
+        <FoldLine label="How this works" value="labels, rules, and what wins">
+          <View style={{ gap: spacing.xs, paddingVertical: spacing.xs }}>
+            <Text style={type.small}>
+              A place carries labels: what each source called it, in that source's own words (Google's type, the map's tag, the
+              Wikidata type), plus what Epic read those into (an experience, a venue kind). Those are the attributes.
+            </Text>
+            <Text style={type.small}>
+              A rule says: places carrying all of these labels go in this subcategory. Narrowest wins — a rule about one place,
+              then a combination of labels, then a Wikidata type, then the atlas word, then the experience. Naming a subcategory
+              settles the category, because a subcategory has exactly one parent.
+            </Text>
+            <Text style={type.small}>
+              Rename freely: keys never change. Move a subcategory and every place in it moves. Teach the type, not the place —
+              one rule against “castle” answers for every castle. Switch off rather than delete.
+            </Text>
+          </View>
+        </FoldLine>
+      </View>
     </AdminPage>
   );
 }
 
-// ---------------------------------------------------------------------------
-// the two levels
-// ---------------------------------------------------------------------------
-
-function CategoriesTab({ tax, sub, onOpen, canManage, busy, setBusy, onChanged, onFailed, wide }: {
-  tax: Taxonomy | null; sub: string; onOpen: (key: string) => void; canManage: boolean;
-  busy: boolean; setBusy: (b: boolean) => void;
-  onChanged: (said: string) => Promise<void>; onFailed: (said: string) => void; wide: boolean;
-}) {
-  const [adding, setAdding] = useState<string | null>(null);
-  const [label, setLabel] = useState('');
-
-  const run = async (what: () => Promise<unknown>, said: string) => {
-    setBusy(true);
-    try { await what(); await onChanged(said); }
-    catch (err) { onFailed(String((err as Error).message)); }
-    finally { setBusy(false); }
+/** "Add a subcategory", as a word that opens a field. */
+function AddSubcategory({ category, label, busy, run }: { category: MoodKey; label: string; busy: boolean; run: (what: () => Promise<unknown>, said: string) => Promise<void> }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const save = () => {
+    const l = name.trim(); setAdding(false); setName('');
+    if (l) void run(() => api.shelfSaveSubcategory({ categoryKey: category, label: l }), `Added ${l} under ${label}.`);
   };
-
-  if (!tax) return <Panel><Text style={type.small}>Loading…</Text></Panel>;
-
+  if (!adding) return <TextAction label="Add a subcategory" onPress={() => setAdding(true)} disabled={busy} />;
   return (
-    <>
-      <Panel
-        title="Categories and subcategories"
-        sub="Tap a subcategory to see what fills it and to add a rule. Renaming is safe; moving a subcategory moves every place in it."
-        padded={false}
-      >
-        {tax.categories.map((c) => (
-          <View key={c.key} style={styles.catBlock}>
-            <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
-              <Icon name={CAT_ICON[c.key] ?? 'place'} size={16} color={colors.icon} />
-              <Text style={styles.rowName}>{c.label}</Text>
-              <Pill label={`${c.subcategories.length} subcategor${c.subcategories.length === 1 ? 'y' : 'ies'}`} />
-              {c.is_door ? <Pill label="a door into Places" tone="accent" /> : null}
-              {!c.active ? <Pill label="switched off" tone="warn" /> : null}
-              <View style={{ flex: 1 }} />
-              {canManage ? (
-                <Chip label={c.active ? 'On' : 'Off'} icon={c.active ? 'check' : 'close'} selected={c.active}
-                      onPress={() => void run(() => api.shelfSaveCategory({ key: c.key, active: !c.active }),
-                        `${c.label} is ${c.active ? 'off the home screen' : 'back on the home screen'}.`)} />
-              ) : null}
-            </Row>
-            {c.blurb ? <Text style={type.tiny}>{c.blurb}</Text> : null}
-
-            <View style={styles.subList}>
-              {c.subcategories.map((sc) => (
-                <View key={sc.id}>
-                  <Press onPress={() => onOpen(sub === sc.key ? '' : sc.key)} style={[styles.subRow, sub === sc.key && styles.subRowOn]}>
-                    <Text style={[type.body, { flex: 1, minWidth: 0 }]} numberOfLines={2}>{sc.label}</Text>
-                    <Wrap style={{ gap: 4, justifyContent: 'flex-end' }}>
-                      <Pill label={`${sc.rules ?? 0} rule${sc.rules === 1 ? '' : 's'}`} tone={sc.rules ? 'plain' : 'warn'} />
-                      {sc.indoor === true ? <Pill label="indoors" /> : sc.indoor === false ? <Pill label="outdoors" /> : null}
-                      {sc.for_kids === true ? <Pill label="for kids" /> : null}
-                      {!sc.active ? <Pill label="off" tone="warn" /> : null}
-                    </Wrap>
-                    <Icon name={sub === sc.key ? 'collapse' : 'more'} size={16} color={colors.inkMuted} />
-                  </Press>
-                  {sub === sc.key ? (
-                    <SubcategoryPanel sc={sc} tax={tax} canManage={canManage} busy={busy} run={run} wide={wide}
-                                      onChanged={onChanged} onFailed={onFailed} />
-                  ) : null}
-                </View>
-              ))}
-            </View>
-
-            {canManage ? (
-              adding === c.key ? (
-                <Row style={{ gap: 4, flexWrap: 'wrap' }}>
-                  <TextInput value={label} onChangeText={setLabel} placeholder="Farm shops & pick your own"
-                             placeholderTextColor={colors.inkFaint} style={[styles.input, { minWidth: 200, flexGrow: 1 }]} autoFocus
-                             onSubmitEditing={() => {
-                               const l = label.trim(); setAdding(null); setLabel('');
-                               if (l) void run(() => api.shelfSaveSubcategory({ categoryKey: c.key as MoodKey, label: l }), `Added ${l} under ${c.label}.`);
-                             }} />
-                  <Button label="Add" icon="add" disabled={!label.trim() || busy} onPress={() => {
-                    const l = label.trim(); setAdding(null); setLabel('');
-                    if (l) void run(() => api.shelfSaveSubcategory({ categoryKey: c.key as MoodKey, label: l }), `Added ${l} under ${c.label}.`);
-                  }} />
-                  <Button label="Cancel" kind="secondary" onPress={() => { setAdding(null); setLabel(''); }} />
-                </Row>
-              ) : (
-                <Wrap><Chip label="Add a subcategory" icon="add" onPress={() => { setAdding(c.key); setLabel(''); }} /></Wrap>
-              )
-            ) : null}
-          </View>
-        ))}
-      </Panel>
-
-      <Panel title="How to manage these" sub="The four moves, and what each one does to the home screen">
-        <Text style={type.small}>
-          <Text style={{ fontWeight: '700' }}>Rename</Text> a category or subcategory freely. The key underneath never changes, so every rule
-          pointing at it follows the new name.
-        </Text>
-        <Text style={type.small}>
-          <Text style={{ fontWeight: '700' }}>Move</Text> a subcategory to another category and every place filed in it moves shelf with it. That
-          is how to reorganise: move the drawer, not the hundred places inside.
-        </Text>
-        <Text style={type.small}>
-          <Text style={{ fontWeight: '700' }}>Fill</Text> a subcategory with rules. A rule names labels — a Wikidata type, a Google type, a map tag,
-          an experience, or several at once — and every place carrying all of them lands there. Teach the type, not the
-          place: one rule against “castle” answers for every castle in the country. The Shelves screen is still where a
-          single place is moved by hand.
-        </Text>
-        <Text style={type.small}>
-          <Text style={{ fontWeight: '700' }}>Switch off</Text> rather than delete. A category cannot be deleted while it has subcategories; deleting
-          a subcategory keeps its rules' weights and simply stops them naming a drawer, so nothing leaves the home screen.
-        </Text>
-      </Panel>
-    </>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+      <Field value={name} onChangeText={setName} placeholder="Farm shops & pick your own" autoFocus onSubmitEditing={save} style={{ minWidth: 200 }} />
+      <TextAction label="Add" onPress={save} disabled={!name.trim()} />
+      <TextAction label="Cancel" tone="muted" onPress={() => { setAdding(false); setName(''); }} />
+    </View>
   );
 }
 
-/**
- * One subcategory, opened: its settings, what fills it, and a way to add a rule.
- */
-function SubcategoryPanel({ sc, tax, canManage, busy, run, wide, onChanged, onFailed }: {
-  sc: ShelfSubcategory; tax: Taxonomy; canManage: boolean; busy: boolean;
+// ---------------------------------------------------------------------------
+// one subcategory: its settings, what fills it, and a way to add a rule
+// ---------------------------------------------------------------------------
+
+function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChanged, onClose }: {
+  sc: ShelfSubcategory; tax: Taxonomy; rules: TaxonomyRule[]; canManage: boolean; busy: boolean;
   run: (what: () => Promise<unknown>, said: string) => Promise<void>; wide: boolean;
-  onChanged: (said: string) => Promise<void>; onFailed: (said: string) => void;
+  onChanged: (said: string) => Promise<void>; onClose: () => void;
 }) {
-  const [rules, setRules] = useState<TaxonomyRule[] | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(sc.label);
+  const [moving, setMoving] = useState(false);
   const [adding, setAdding] = useState(false);
 
-  const loadRules = useCallback(async () => {
-    try { setRules((await api.taxonomyRules(sc.key)).rules); }
-    catch (err) { onFailed(String((err as Error).message)); }
-  }, [sc.key, onFailed]);
-  useEffect(() => { void loadRules(); }, [loadRules, tax]);
-
+  const rename = () => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); };
   const tri = (field: 'indoor' | 'forKids', value: boolean | null | undefined, word: string) => (
-    <Row style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-      <Text style={type.tiny}>{word}:</Text>
+    <View style={styles.line}>
+      <Text style={[type.tiny, { width: 64 }]}>{word}</Text>
       {([['Yes', true], ['No', false], ['Depends', 'unset']] as const).map(([l, v]) => (
-        <Chip key={l} label={l} selected={v === 'unset' ? value == null : value === v}
-              onPress={canManage ? () => void run(() => api.shelfSaveSubcategory({ id: sc.id, [field]: v } as never), `${sc.label}: ${word.toLowerCase()} — ${l.toLowerCase()}.`) : undefined} />
+        <Choice key={l} label={l} on={v === 'unset' ? value == null : value === v}
+                onPress={canManage ? () => void run(() => api.shelfSaveSubcategory({ id: sc.id, [field]: v } as never), `${sc.label}: ${word.toLowerCase()} — ${l.toLowerCase()}.`) : undefined} />
       ))}
-    </Row>
+    </View>
   );
 
   return (
-    <View style={styles.subPanel}>
+    <Section title={sc.label} style={[styles.detail, wide && styles.detailWide]} right={<TextAction label="Close" tone="muted" onPress={onClose} />}>
       {canManage ? (
-        <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
+        <View style={styles.line}>
           {renaming ? (
             <>
-              <TextInput value={name} onChangeText={setName} style={[styles.input, { minWidth: 180, flexGrow: 1 }]} autoFocus
-                         onSubmitEditing={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
-              <Button label="Save" icon="check" onPress={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
+              <Field value={name} onChangeText={setName} autoFocus onSubmitEditing={rename} style={{ flex: 1, minWidth: 160 }} />
+              <TextAction label="Save" onPress={rename} />
+              <TextAction label="Cancel" tone="muted" onPress={() => setRenaming(false)} />
             </>
           ) : (
-            <Chip label="Rename" icon="edit" onPress={() => { setName(sc.label); setRenaming(true); }} />
+            <>
+              <TextAction label="Rename" onPress={() => { setName(sc.label); setRenaming(true); }} />
+              <TextAction label={moving ? 'Move to…' : 'Move'} onPress={() => setMoving((m) => !m)} />
+              <View style={{ flex: 1 }} />
+              <TextAction label="Delete" tone="muted" disabled={busy}
+                          onPress={() => void run(() => api.shelfDeleteSubcategory(sc.id), 'Gone. Its rules keep their weights and stop naming a drawer; nothing left the home screen.').then(onClose)} />
+            </>
           )}
-          <Text style={type.tiny}>Move to:</Text>
+        </View>
+      ) : null}
+      {moving ? (
+        <View style={[styles.line, { flexWrap: 'wrap' }]}>
+          <Text style={[type.tiny, { width: 64 }]}>Move to</Text>
           {tax.categories.filter((c) => c.key !== sc.category_key).map((c) => (
-            <Chip key={c.key} label={c.label} onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: c.key as MoodKey }), `Moved ${sc.label} to ${c.label} — everything filed in it moved with it.`)} />
+            <Choice key={c.key} label={c.label} on={false}
+                    onPress={() => { setMoving(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: c.key as MoodKey }), `Moved ${sc.label} to ${c.label} — everything filed in it moved with it.`); }} />
           ))}
-          <View style={{ flex: 1 }} />
-          <Button label="Delete it" icon="close" kind="secondary" disabled={busy}
-                  onPress={() => void run(() => api.shelfDeleteSubcategory(sc.id), 'Gone. Its rules keep their weights and stop naming a drawer; nothing left the home screen.')} />
-        </Row>
+        </View>
       ) : null}
       {tri('indoor', sc.indoor, 'Indoors')}
       {tri('forKids', sc.for_kids, 'For kids')}
 
-      <View style={styles.divider} />
-
-      <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Text style={[type.small, { fontWeight: '700', flex: 1 }]}>What fills {sc.label}</Text>
+      <View style={[styles.sectionHead, { marginTop: spacing.md }]}>
+        <Text style={styles.kicker}>What puts a place here</Text>
+        <View style={{ flex: 1 }} />
         {canManage && !adding ? <Button label="Add a rule" icon="add" onPress={() => setAdding(true)} /> : null}
-      </Row>
-      <Text style={type.tiny}>
-        Every rule that names this drawer. A place carrying all of a rule's labels lands here — unless a narrower rule says otherwise.
-      </Text>
+      </View>
 
       {adding ? (
         <RuleEditor tax={tax} start={[]} startSubcategory={sc.key} fixedSubcategory={sc.key} canManage={canManage}
-                    onClose={() => setAdding(false)}
-                    onSaved={async (said) => { setAdding(false); await onChanged(said); await loadRules(); }} />
+                    onClose={() => setAdding(false)} onSaved={async (said) => { setAdding(false); await onChanged(said); }} />
       ) : null}
 
-      {rules === null ? <Text style={type.tiny}>Loading…</Text>
-        : rules.length === 0 ? (
-          <Text style={type.small}>Nothing fills this yet. Only places moved here one at a time on the Shelves screen will show under it.</Text>
-        ) : rules.map((r) => (
-          <RuleRow key={r.id} rule={r} wide={wide} canManage={canManage} busy={busy}
-                   onForget={() => void run(() => api.shelfForget(r.id), `Forgotten. ${r.subject_label ?? r.subject} falls back to where it started.`).then(loadRules)} />
-        ))}
-    </View>
-  );
-}
-
-/** One rule, drawn as the labels it names. */
-function RuleRow({ rule, wide, canManage, busy, onForget }: {
-  rule: TaxonomyRule; wide: boolean; canManage: boolean; busy: boolean; onForget: () => void;
-}) {
-  return (
-    <View style={[styles.ruleRow, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
-      <View style={{ flex: 1, gap: 4, minWidth: 0 }}>
-        <Wrap style={{ gap: 4 }}>
-          {rule.scope === 'place' ? (
-            <Chip label={rule.subject_label ?? rule.subject} icon="place" />
-          ) : rule.labelList.map((l) => (
-            <LabelChip key={l.label} label={l.label} name={l.name} />
-          ))}
-        </Wrap>
-        <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
-          <Pill label={SCOPE_WORD[rule.scope] ?? rule.scope} />
-          {rule.seeded ? <Pill label="where Epic started" /> : <Pill label="you decided this" tone="accent" />}
-          {Object.entries(rule.weights ?? {}).length ? (
-            <Pill label={`weights: ${Object.entries(rule.weights).map(([k, v]) => `${k} ${Math.round((v ?? 0) * 100)}`).join(', ')}`} />
+      {rules.length === 0 ? (
+        <Text style={[type.small, styles.emptyRow]}>Nothing yet. Only places moved here one at a time on the Shelves screen will show under it.</Text>
+      ) : rules.map((r) => (
+        <View key={r.id} style={styles.ruleRow}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            {r.scope === 'place' ? (
+              <Text style={[type.small, { fontWeight: '600' }]}>{r.subject_label ?? r.subject}</Text>
+            ) : r.labelList.map((l) => <Word key={l.label} label={l.label} name={l.name} />)}
+            <Text style={type.tiny}>
+              {SCOPE_WORD[r.scope] ?? r.scope}{r.seeded ? ' · where Epic started' : ' · you decided this'}
+              {r.reason ? ` · ${r.reason}` : ''}{r.taught_by ? ` · ${r.taught_by}` : ''} · {ago(r.updated_at)}
+            </Text>
+          </View>
+          {canManage ? (
+            <TextAction label="Forget" tone="muted" disabled={busy}
+                        onPress={() => void run(() => api.shelfForget(r.id), `Forgotten. ${r.subject_label ?? r.subject} falls back to where it started.`)} />
           ) : null}
-        </Row>
-        {rule.reason ? <Text style={type.small}>{rule.reason}</Text> : null}
-        <Text style={type.tiny}>{rule.taught_by ? `${rule.taught_by} · ` : ''}{ago(rule.updated_at)}</Text>
-      </View>
-      {canManage ? <Button label="Forget" icon="close" kind="secondary" disabled={busy} onPress={onForget} /> : null}
-    </View>
+        </View>
+      ))}
+    </Section>
   );
-}
-
-/** A label as a chip: the source, then the English name, with the raw word underneath the name where they differ. */
-function LabelChip({ label, name, onPress, onRemove, selected }: {
-  label: string; name: string | null; onPress?: () => void; onRemove?: () => void; selected?: boolean;
-}) {
-  const ns = nsOf(label);
-  const key = keyOf(label);
-  return <Chip label={`${ns} · ${name && name !== key ? `${name} (${key})` : key}`} onPress={onPress} onRemove={onRemove} selected={selected} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +450,7 @@ function LabelChip({ label, name, onPress, onRemove, selected }: {
 // ---------------------------------------------------------------------------
 
 /**
- * Pick labels, see where they land today, name the drawer, save.
+ * Pick labels, see where they land today, name the subcategory, save.
  *
  * The preview is the API's own answer for a place carrying exactly these
  * labels (POST /try), so what the form says will happen and what the home
@@ -452,11 +481,11 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
       })));
   }, [labels]);
 
-  // The search, across every source, debounced.
+  // The search, across every source, debounced; never a list until something is typed.
   useEffect(() => {
     if (q.trim().length < 2) { setFound([]); return; }
     const t = setTimeout(() => {
-      void api.taxonomyLabels({ q: q.trim(), all: true, limit: 40 }).then((d) => setFound(d.labels)).catch(() => setFound([]));
+      void api.taxonomyLabels({ q: q.trim(), all: true, limit: 30 }).then((d) => setFound(d.labels)).catch(() => setFound([]));
     }, 250);
     return () => clearTimeout(t);
   }, [q]);
@@ -486,361 +515,284 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
     finally { setBusy(false); }
   };
 
-  return (
-    <Panel title="A rule" sub="Places carrying all of these labels go in this subcategory"
-           right={<Button label="Close" icon="close" kind="secondary" onPress={onClose} />}>
-      <Text style={type.small}>Which labels?</Text>
-      <Wrap style={{ gap: 4 }}>
-        {labels.map((l) => (
-          <LabelChip key={l.label} label={l.label} name={l.name} selected
-                     onRemove={() => setLabels((prev) => prev.filter((x) => x.label !== l.label))} />
-        ))}
-        {labels.length === 0 ? <Text style={type.tiny}>None yet — search below.</Text> : null}
-      </Wrap>
-      <View style={styles.search}>
-        <Icon name="search" size={15} color={colors.inkMuted} />
-        <TextInput value={q} onChangeText={setQ} placeholder="castle, ice_rink, stadium, Q23413…"
-                   placeholderTextColor={colors.inkFaint} style={styles.searchInput} />
-      </View>
-      {found.length ? (
-        <Wrap style={{ gap: 4 }}>
-          {found.filter((f) => !chosen.has(`${f.namespace}:${f.key}`)).slice(0, 24).map((f) => (
-            <LabelChip key={`${f.namespace}:${f.key}`} label={`${f.namespace}:${f.key}`} name={f.label}
-                       onPress={() => { setLabels((prev) => [...prev, { label: `${f.namespace}:${f.key}`, name: f.label ?? keyOf(f.key) }]); setQ(''); setFound([]); }} />
-          ))}
-        </Wrap>
-      ) : q.trim().length >= 2 ? <Text style={type.tiny}>No source uses a word like that.</Text> : null}
-      <Text style={type.tiny}>{level.replace(/^a/, 'This will be a')}. A rule about one Wikidata type, atlas word or experience is written at that level, the same as the Shelves screen writes it; a provider's own word, or several labels together, sits above the type rules and below a rule about one place.</Text>
+  const why = preview?.because?.[0];
+  const landing = !labels.length ? 'Pick at least one label to see where it lands today.'
+    : !preview ? 'Working out where these land today…'
+      : `Today a place with ${labels.length === 1 ? 'this label' : 'these labels'} lands in ${catLabel(preview.category)}${subLabel(preview.subcategory) ? ` · ${subLabel(preview.subcategory)}` : ' with no subcategory'}${why ? (why.scope === 'default' ? ` — ${why.subject_label ?? 'the code\'s own map'}` : ` — a rule for ${SCOPE_WORD[why.scope] ?? why.scope}`) : ''}.${sub && preview.subcategory !== sub ? ` After saving: ${catLabel(catOf(sub))} · ${subLabel(sub)}.` : ''}`;
 
-      <View style={styles.divider} />
+  return (
+    <View style={styles.editor}>
+      <View style={styles.sectionHead}>
+        <Text style={styles.kicker}>A rule</Text>
+        <View style={{ flex: 1 }} />
+        <TextAction label="Close" tone="muted" onPress={onClose} />
+      </View>
+
+      <Text style={[type.tiny, { marginTop: spacing.sm }]}>Labels — places carrying all of these</Text>
+      <View style={styles.tokens}>
+        {labels.map((l) => <Token key={l.label} label={l.label} name={l.name} onRemove={() => setLabels((prev) => prev.filter((x) => x.label !== l.label))} />)}
+        {labels.length === 0 ? <Text style={[type.small, { color: colors.inkMuted }]}>None yet.</Text> : null}
+      </View>
+      <Field icon="search" value={q} onChangeText={setQ} placeholder="Type a word from any source: castle, ice_rink, stadium, Q23413" />
+      {found.filter((f) => !chosen.has(`${f.namespace}:${f.key}`)).slice(0, 12).map((f) => (
+        <Press key={`${f.namespace}:${f.key}`} accessibilityRole="button" style={styles.foundRow}
+               onPress={() => { setLabels((prev) => [...prev, { label: `${f.namespace}:${f.key}`, name: f.label ?? keyOf(f.key) }]); setQ(''); setFound([]); }}>
+          <View style={{ flex: 1, minWidth: 0 }}><Word label={`${f.namespace}:${f.key}`} name={f.label} /></View>
+          <Text style={type.tiny}>{f.landing.subcategory ? subLabel(f.landing.subcategory) : f.landing.category ? catLabel(f.landing.category) : ''}</Text>
+          <Icon name="add" size={14} color={colors.ink} />
+        </Press>
+      ))}
+      {q.trim().length >= 2 && !found.length ? <Text style={[type.tiny, { paddingVertical: 6 }]}>No source uses a word like that.</Text> : null}
+      <Text style={type.tiny}>This will be {level}. One Wikidata type, atlas word or experience is written at that level, as the Shelves screen writes it; a provider's own word, or several labels together, sits above the type rules and below a rule about one place.</Text>
 
       {fixedSubcategory ? (
-        <Text style={type.small}>Into: <Text style={{ fontWeight: '700' }}>{catLabel(catOf(fixedSubcategory))} · {subLabel(fixedSubcategory)}</Text></Text>
+        <Text style={[type.small, { marginTop: spacing.sm }]}>Into <Text style={{ fontWeight: '700' }}>{catLabel(catOf(fixedSubcategory))} · {subLabel(fixedSubcategory)}</Text></Text>
       ) : (
-        <>
-          <Text style={type.small}>Which subcategory?</Text>
+        <View style={{ marginTop: spacing.sm, gap: 4 }}>
+          <Text style={type.tiny}>Into which subcategory</Text>
           {tax.categories.map((c) => (
-            <Row key={c.key} style={{ gap: 4, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              <Chip label={c.label} icon={CAT_ICON[c.key] ?? 'place'} />
-              <Wrap style={{ gap: 4, flex: 1 }}>
-                {c.subcategories.filter((s) => s.active).map((s) => (
-                  <Chip key={s.key} label={s.label} selected={sub === s.key} onPress={() => setSub(s.key)} />
-                ))}
-              </Wrap>
-            </Row>
+            <View key={c.key} style={[styles.line, { flexWrap: 'wrap', alignItems: 'flex-start' }]}>
+              <Text style={[type.tiny, { width: 80, paddingTop: 5 }]}>{c.label}</Text>
+              <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+                {c.subcategories.filter((s) => s.active).map((s) => <Choice key={s.key} label={s.label} on={sub === s.key} onPress={() => setSub(s.key)} />)}
+              </View>
+            </View>
           ))}
-        </>
+        </View>
       )}
 
-      <Banner tone={preview ? (preview.subcategory === sub && sub ? 'ok' : 'accent') : 'plain'}>
-        {!labels.length ? 'Pick at least one label to see where it lands today.'
-          : !preview ? 'Working out where these land today…'
-            : `Today a place with ${labels.length === 1 ? 'this label' : 'these labels'} lands in ${catLabel(preview.category)}${subLabel(preview.subcategory) ? ` · ${subLabel(preview.subcategory)}` : ' with no subcategory'}${preview.because[0] ? ` — because ${preview.because[0].scope === 'default' ? preview.because[0].subject_label ?? 'of the code\'s own map' : `of a ${SCOPE_WORD[preview.because[0].scope]?.replace('every place', 'rule for every place') ?? preview.because[0].scope} rule`}` : ''}.${sub && preview.subcategory !== sub ? ` After saving it will land in ${catLabel(catOf(sub))} · ${subLabel(sub)}.` : ''}`}
-      </Banner>
+      <Text style={[type.small, styles.landing, preview && sub && preview.subcategory === sub && { color: colors.accent }]}>{landing}</Text>
 
-      <Text style={type.small}>Why? (kept on the rule, so it can be argued with later)</Text>
-      <TextInput value={reason} onChangeText={setReason} placeholder="A castle that is also a museum is a historic house day, not a ruin."
-                 placeholderTextColor={colors.inkFaint} style={styles.input} />
-      {err ? <Banner tone="warn">{err}</Banner> : null}
-      <Row style={{ gap: spacing.sm, flexWrap: 'wrap' }}>
+      <Field value={reason} onChangeText={setReason} placeholder="Why — kept on the rule so it can be argued with later" />
+      {err ? <Text style={[type.small, { color: colors.overrun }]}>{err}</Text> : null}
+      <View style={[styles.line, { marginTop: spacing.sm }]}>
         <Button label={busy ? 'Saving…' : 'Save the rule'} icon="check" disabled={busy || !canManage || !labels.length || !sub} onPress={() => void save()} />
-        <Button label="Cancel" kind="secondary" onPress={onClose} />
-      </Row>
-    </Panel>
+        <TextAction label="Cancel" tone="muted" onPress={onClose} />
+      </View>
+    </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// every word each source uses
+// every provider's words that land in this category
 // ---------------------------------------------------------------------------
 
-function LabelsTab({ tax, ns, setNs, q, setQ, all, setAll, catLabel, subLabel, canManage, onPick }: {
-  tax: Taxonomy | null; ns: string; setNs: (k: string) => void; q: string; setQ: (q: string) => void;
-  all: boolean; setAll: (v: boolean) => void;
-  catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
-  canManage: boolean; onPick: (label: string, subcategory: string | null) => void;
-}) {
-  const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
-  const [more, setMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const PAGE = 400;
-  // Which filters a page was asked for; a page that lands after they changed is dropped.
-  const generation = React.useRef(0);
-  const [typed, setTyped] = useState(q);
-  const namespace = ns || tax?.namespaces[0]?.key || 'google';
-
-  useEffect(() => { setTyped(q); }, [q]);
-  useEffect(() => {
-    const t = setTimeout(() => { if (typed !== q) setQ(typed); }, 300);
-    return () => clearTimeout(t);
-  }, [typed, q, setQ]);
-
-  useEffect(() => {
-    let live = true;
-    generation.current += 1;
-    setRows(null);
-    void api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: PAGE })
-      .then((d) => { if (live) { setRows(d.labels); setMore(d.more); } })
-      .catch(() => { if (live) { setRows([]); setMore(false); } });
-    return () => { live = false; };
-  }, [namespace, q, all, tax]);
-
-  // The next page, appended: the vocabulary is thousands long and a list that
-  // silently stopped at four hundred would hide most of it (Codex, 12 Sep 2026).
-  const showMore = async () => {
-    const asked = generation.current;
-    setLoadingMore(true);
-    try {
-      const d = await api.taxonomyLabels({ namespace, q: q || undefined, all: all || namespace !== 'wikidata', limit: PAGE, offset: rows?.length ?? 0 });
-      if (asked !== generation.current) return;
-      setRows((prev) => [...(prev ?? []), ...d.labels]);
-      setMore(d.more);
-    } catch { if (asked === generation.current) setMore(false); }
-    finally { setLoadingMore(false); }
-  };
-
-  const here = tax?.namespaces.find((n) => n.key === namespace) ?? null;
-
-  return (
-    <>
-      <FilterRow>
-        {(tax?.namespaces ?? []).map((n) => (
-          <FilterChip key={n.key} label={n.label} count={n.seen || n.total} on={namespace === n.key} onPress={() => setNs(n.key)} />
-        ))}
-      </FilterRow>
-
-      <Panel title={here?.label ?? namespace} sub={here?.what}>
-        <Row style={{ gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
-          <View style={[styles.search, { flexGrow: 1, flexBasis: 200 }]}>
-            <Icon name="search" size={15} color={colors.inkMuted} />
-            <TextInput value={typed} onChangeText={setTyped} placeholder="Search this source's words" placeholderTextColor={colors.inkFaint} style={styles.searchInput} />
-          </View>
-          {namespace === 'wikidata' ? (
-            <Chip label={all ? 'Every type' : 'Seen on a place'} icon="filters" selected={all} onPress={() => setAll(!all)} />
-          ) : null}
-          {here ? <Pill label={`${count(here.total)} known · ${count(here.seen)} seen · ${count(here.taught)} in a rule`} /> : null}
-        </Row>
-        <Text style={type.tiny}>
-          {here?.own === false
-            ? 'A licensed source: these are its published words and a count of how often each was seen. Which place carried which word stays in the session.'
-            : 'An open source, or Epic\'s own words: safe to keep.'}
-          {' '}Tap a word to write a rule about it.
-        </Text>
-      </Panel>
-
-      <Panel title="Where each word lands" sub="Today's answer for a place carrying only that word, and what decided it" padded={false}>
-        {rows === null ? <View style={{ padding: spacing.md }}><Text style={type.small}>Loading…</Text></View>
-          : rows.length === 0 ? <View style={{ padding: spacing.md }}><Text style={type.small}>{q ? 'No word like that here.' : namespace === 'wikidata' && !all ? 'No atlas place has carried a type yet. Switch to “Every type”.' : 'Nothing known yet.'}</Text></View>
-            : rows.map((r) => (
-              <Press key={`${r.namespace}:${r.key}`} onPress={canManage ? () => onPick(`${r.namespace}:${r.key}`, r.landing.subcategory) : undefined} style={styles.labelRow}>
-                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                  <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
-                    <Text style={styles.rowName}>{r.label ?? r.key}</Text>
-                    {r.label && r.label !== r.key ? <Text style={styles.mono}>{r.key}</Text> : null}
-                    {r.note ? <Pill label={r.note} /> : null}
-                    {r.seen_count ? <Pill label={`seen ${count(r.seen_count)}`} /> : null}
-                    {r.active === false ? <Pill label="off" tone="warn" /> : null}
-                  </Row>
-                  {r.landing.derived.length ? (
-                    <Text style={type.tiny} numberOfLines={1}>read as {r.landing.derived.join(', ')}</Text>
-                  ) : null}
-                </View>
-                <Wrap style={{ gap: 4, justifyContent: 'flex-end' }}>
-                  <Chip
-                    label={r.landing.how === 'none' ? (r.namespace === 'wikidata' ? 'not admitted to the atlas' : 'not a place on its own')
-                      : `${catLabel(r.landing.category)}${subLabel(r.landing.subcategory) ? ` · ${subLabel(r.landing.subcategory)}` : ' · no subcategory'}`}
-                    icon={r.landing.category ? CAT_ICON[r.landing.category] ?? 'place' : 'place'}
-                  />
-                  <Pill label={r.landing.how === 'none' && r.namespace === 'wikidata' ? 'the harvest refuses it' : HOW_WORD[r.landing.how]} tone={HOW_TONE[r.landing.how]} />
-                  {r.landing.via && r.landing.via.scope !== 'default' ? (
-                    <Pill label={`via ${r.landing.via.scope}: ${r.landing.via.subject_label ?? r.landing.via.subject ?? ''}`} tone="ok" />
-                  ) : null}
-                </Wrap>
-                {canManage ? <Icon name="more" size={16} color={colors.inkMuted} /> : null}
-              </Press>
-            ))}
-        {rows && more ? (
-          <View style={{ padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line }}>
-            <Button label={loadingMore ? 'Loading…' : `Show the next ${PAGE}`} kind="secondary" icon="expand" disabled={loadingMore} onPress={() => void showMore()} />
-          </View>
-        ) : null}
-      </Panel>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// the matrix: our subcategories × their words
-// ---------------------------------------------------------------------------
-
-function ProvidersTab({ tax, all, setAll, wide, onNamespace, onPick }: {
-  tax: Taxonomy | null; all: boolean; setAll: (v: boolean) => void; wide: boolean;
-  onNamespace: (key: string) => void; onPick: (label: string, subcategory: string | null) => void;
+function ProviderWords({ tax, category, wide, subLabel, onPick }: {
+  tax: Taxonomy; category: string; wide: boolean; subLabel: (k: string | null | undefined) => string | null;
+  onPick: (label: string, subcategory: string | null) => void;
 }) {
   const [m, setM] = useState<TaxonomyMatrix | null>(null);
   const [open, setOpen] = useState<{ row: string; ns: string; where: 'cells' | 'unfiled' | 'nowhere' } | null>(null);
 
   useEffect(() => {
     let live = true;
-    setM(null);
-    void api.taxonomyMatrix(all).then((d) => { if (live) setM(d); }).catch(() => { if (live) setM(null); });
+    void api.taxonomyMatrix(false).then((d) => { if (live) setM(d); }).catch(() => { if (live) setM(null); });
     return () => { live = false; };
-  }, [all, tax]);
+  }, [tax]);
 
-  const nsLabel = (k: string) => tax?.namespaces.find((n) => n.key === k)?.label ?? k;
+  const cat = m?.categories.find((c) => c.key === category) ?? null;
+  const nsLabel = (k: string) => tax.namespaces.find((n) => n.key === k)?.label ?? k;
   const cellOf = (where: 'cells' | 'unfiled' | 'nowhere', row: string, ns: string): TaxonomyMatrixEntry[] => m?.[where]?.[row]?.[ns] ?? [];
-  const FIRST = wide ? 220 : 150;
-  const COL = 118;
+  // Only the sources that say anything about this category: an empty column is noise.
+  const namespaces = useMemo(() => {
+    if (!m || !cat) return [];
+    return m.namespaces.filter((ns) => cat.subcategories.some((s) => cellOf('cells', s.key, ns).length) || cellOf('unfiled', cat.key, ns).length || cellOf('nowhere', cat.key, ns).length);
+  }, [m, cat]);
 
-  const cell = (where: 'cells' | 'unfiled' | 'nowhere', row: string, ns: string, subcategory: string | null) => {
-    const words = cellOf(where, row, ns);
-    const on = open?.where === where && open.row === row && open.ns === ns;
-    return (
-      <Press key={ns} onPress={words.length ? () => setOpen(on ? null : { row, ns, where }) : undefined}
-             style={[styles.cell, { width: COL }, on && styles.cellOn, !words.length && { opacity: 0.35 }]}>
-        <Text style={[type.small, { fontWeight: '700' }]}>{words.length ? count(words.length) : '·'}</Text>
-        {words.length ? (
-          <Text style={type.tiny} numberOfLines={2}>{words.slice(0, 3).map((w) => w.label ?? w.key).join(', ')}{words.length > 3 ? '…' : ''}</Text>
-        ) : null}
-      </Press>
-    );
+  const rowsOf = (): { key: string; label: string; where: 'cells' | 'unfiled' | 'nowhere'; row: string }[] => {
+    if (!cat) return [];
+    return [
+      ...cat.subcategories.map((s) => ({ key: s.key, label: s.label, where: 'cells' as const, row: s.key })),
+      ...(m?.unfiled[cat.key] ? [{ key: '_unfiled', label: `${cat.label}, no subcategory`, where: 'unfiled' as const, row: cat.key }] : []),
+      ...(m?.nowhere[cat.key] ? [{ key: '_nowhere', label: `Nothing read it; falls to ${cat.label}`, where: 'nowhere' as const, row: cat.key }] : []),
+    ];
   };
-
   const opened = open ? cellOf(open.where, open.row, open.ns) : [];
-  const openedSub = open?.where === 'cells' ? open.row : null;
+  const COL = wide ? 130 : 110;
+
+  if (!m) return <Text style={type.small}>Working it out…</Text>;
+  if (!cat) return <Text style={type.small}>Nothing to show.</Text>;
 
   return (
-    <>
-      <Panel title="The providers" sub="Each source's vocabulary: how much of it is known, how much has been seen on a real place, and how much is named in a rule. Tap one to read its words.">
-        <Wrap style={{ gap: 4 }}>
-          {(tax?.namespaces ?? []).map((n) => (
-            <Chip key={n.key} label={`${n.label} · ${count(n.seen)}/${count(n.total)} seen · ${count(n.taught)} taught`} onPress={() => onNamespace(n.key)} />
-          ))}
-        </Wrap>
-        <Row style={{ gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Chip label={all ? 'Every Wikidata type' : 'Wikidata types seen on a place'} icon="filters" selected={all} onPress={() => setAll(!all)} />
-          <Text style={[type.tiny, { flex: 1 }]}>
-            Each cell is the words from that source which land in that subcategory today. Tap a cell to read them; tap a word to write a rule.
-          </Text>
-        </Row>
-      </Panel>
+    <View style={{ gap: spacing.md }}>
+      <Section title={`Each source's words that land in ${cat.label}`}>
+        <Text style={[type.tiny, { paddingVertical: 6 }]}>A number is how many of that source's words land in the row; tap it to read them, and tap a word to write a rule about it. The last rows are the work: words read into {cat.label} with no subcategory, and words nothing read at all.</Text>
+        <View style={styles.tableWrap}>
+          <View>
+            <View style={[styles.tRow, styles.tHead]}>
+              <View style={[styles.tFirst, wide && { width: 220 }]}><Text style={styles.kicker}>Subcategory</Text></View>
+              {namespaces.map((ns) => <View key={ns} style={[styles.tCell, { width: COL }]}><Text style={styles.kicker} numberOfLines={2}>{nsLabel(ns)}</Text></View>)}
+            </View>
+            {rowsOf().map((r) => (
+              <View key={r.key} style={[styles.tRow, r.where !== 'cells' && styles.tWork]}>
+                <View style={[styles.tFirst, wide && { width: 220 }]}><Text style={[type.small, { fontWeight: r.where === 'cells' ? '600' : '400' }]} numberOfLines={2}>{r.label}</Text></View>
+                {namespaces.map((ns) => {
+                  const words = cellOf(r.where, r.row, ns);
+                  const on = open?.where === r.where && open.row === r.row && open.ns === ns;
+                  return (
+                    <Press key={ns} disabled={!words.length} onPress={() => setOpen(on ? null : { row: r.row, ns, where: r.where })} accessibilityRole="button"
+                           style={[styles.tCell, { width: COL }, on && styles.tCellOn]}>
+                      <Text style={[type.small, { fontWeight: '700', color: words.length ? colors.ink : colors.inkMuted }]}>{words.length ? count(words.length) : '–'}</Text>
+                      {words.length ? <Text style={type.tiny} numberOfLines={1}>{words.slice(0, 2).map((w) => w.label ?? w.key).join(', ')}{words.length > 2 ? '…' : ''}</Text> : null}
+                    </Press>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        </View>
+      </Section>
 
       {open && opened.length ? (
-        <Panel title={`${nsLabel(open.ns)} → ${open.where === 'cells' ? (tax?.subcategories.find((s) => s.key === open.row)?.label ?? open.row) : open.where === 'unfiled' ? `${tax?.categories.find((c) => c.key === open.row)?.label ?? open.row}, no subcategory` : `nothing read it, so ${tax?.categories.find((c) => c.key === open.row)?.label ?? open.row}`}`}
-               sub="Tap a word to write a rule about it" right={<Button label="Close" icon="close" kind="secondary" onPress={() => setOpen(null)} />}>
-          <Wrap style={{ gap: 4 }}>
-            {opened.map((w) => (
-              <Chip key={w.key} label={`${w.label && w.label !== w.key ? `${w.label} (${w.key})` : w.key}${w.seen ? ` · ${w.seen}` : ''}`}
-                    tone={w.how === 'taught' ? 'accent' : 'neutral'} onPress={() => onPick(`${open.ns}:${w.key}`, openedSub)} />
-            ))}
-          </Wrap>
-        </Panel>
+        <Section title={`${nsLabel(open.ns)} → ${open.where === 'cells' ? subLabel(open.row) ?? open.row : open.where === 'unfiled' ? 'no subcategory' : 'nothing read it'}`}
+                 right={<TextAction label="Close" tone="muted" onPress={() => setOpen(null)} />}>
+          {opened.map((w) => (
+            <Press key={w.key} accessibilityRole="button" style={styles.foundRow} onPress={() => onPick(`${open.ns}:${w.key}`, open.where === 'cells' ? open.row : null)}>
+              <View style={{ flex: 1, minWidth: 0 }}><Word label={`${open.ns}:${w.key}`} name={w.label} /></View>
+              <Text style={type.tiny}>{w.how === 'taught' ? 'a rule' : w.how === 'default' ? 'the code\'s map' : ''}{w.seen ? ` · seen ${count(w.seen)}` : ''}</Text>
+              <Icon name="more" size={14} color={colors.inkMuted} />
+            </Press>
+          ))}
+        </Section>
       ) : null}
+    </View>
+  );
+}
 
-      <Panel title="Our subcategories against their words" sub={m ? undefined : 'Working it out…'} padded={false}>
-        {m ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator>
-            <View>
-              <View style={[styles.mRow, styles.mHead]}>
-                <View style={[styles.cellFirst, { width: FIRST }]}><Text style={type.tiny}>Subcategory</Text></View>
-                {m.namespaces.map((ns) => (
-                  <Press key={ns} onPress={() => onNamespace(ns)} style={[styles.cell, { width: COL }]}>
-                    <Text style={[type.tiny, { fontWeight: '700' }]} numberOfLines={2}>{nsLabel(ns)}</Text>
-                  </Press>
-                ))}
-              </View>
-              {m.categories.map((c) => (
-                <React.Fragment key={c.key}>
-                  <View style={[styles.mRow, styles.mCat]}>
-                    <View style={[styles.cellFirst, { width: FIRST, flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
-                      <Icon name={CAT_ICON[c.key] ?? 'place'} size={14} color={colors.icon} />
-                      <Text style={[type.small, { fontWeight: '700' }]}>{c.label}</Text>
-                    </View>
-                    {m.namespaces.map((ns) => <View key={ns} style={[styles.cell, { width: COL }]} />)}
-                  </View>
-                  {c.subcategories.map((s) => (
-                    <View key={s.key} style={styles.mRow}>
-                      <View style={[styles.cellFirst, { width: FIRST }]}><Text style={type.small} numberOfLines={2}>{s.label}</Text></View>
-                      {m.namespaces.map((ns) => cell('cells', s.key, ns, s.key))}
-                    </View>
-                  ))}
-                  {m.unfiled[c.key] ? (
-                    <View style={[styles.mRow, styles.mWork]}>
-                      <View style={[styles.cellFirst, { width: FIRST }]}><Text style={type.small} numberOfLines={2}>{c.label}, no subcategory</Text></View>
-                      {m.namespaces.map((ns) => cell('unfiled', c.key, ns, null))}
-                    </View>
-                  ) : null}
-                  {m.nowhere[c.key] ? (
-                    <View style={[styles.mRow, styles.mWork]}>
-                      <View style={[styles.cellFirst, { width: FIRST }]}><Text style={type.small} numberOfLines={2}>Nothing read it; falls to {c.label}</Text></View>
-                      {m.namespaces.map((ns) => cell('nowhere', c.key, ns, null))}
-                    </View>
-                  ) : null}
-                </React.Fragment>
-              ))}
-            </View>
-          </ScrollView>
-        ) : null}
-      </Panel>
+// ---------------------------------------------------------------------------
+// find a word from any source
+// ---------------------------------------------------------------------------
 
-      <Panel title="Reading the last rows" sub="The two kinds of gap, kept apart">
-        <Text style={type.small}>
-          <Text style={{ fontWeight: '700' }}>No subcategory</Text> — the word is read into a category but no rule names a drawer, so places carrying
-          only that word show under the category unsorted. A rule fixes it.
-        </Text>
-        <Text style={type.small}>
-          <Text style={{ fontWeight: '700' }}>Nothing read it</Text> — no map in the code knows the word, so a place carrying only that word falls to
-          the broadest shelf. Most of Google's list is here on purpose (plumbers, banks); the ones that are days out are the work.
-        </Text>
-      </Panel>
-    </>
+function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
+  tax: Taxonomy; catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
+  canManage: boolean; foot: number; onPick: (label: string, subcategory: string | null) => void;
+}) {
+  const [ns, setNs] = useQueryState<string>('ns', '', asText);
+  const [q, setQ] = useQueryState<string>('q', '', asText);
+  const [typed, setTyped] = useState(q);
+  const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [foot, setFoot] = useState(36);
+  const generation = React.useRef(0);
+  const PAGE = 50;
+  const source = tax.namespaces.find((n) => n.key === ns) ?? null;
+
+  useEffect(() => { setTyped(q); }, [q]);
+  useEffect(() => { const t = setTimeout(() => { if (typed !== q) setQ(typed); }, 300); return () => clearTimeout(t); }, [typed, q, setQ]);
+
+  // Nothing is listed until there is a word or a source to list: never a huge scroll.
+  useEffect(() => {
+    generation.current += 1;
+    if (!q.trim() && !ns) { setRows(null); setMore(false); return; }
+    let live = true;
+    void api.taxonomyLabels({ namespace: ns || undefined, q: q.trim() || undefined, all: Boolean(q.trim()) || (ns !== 'wikidata' && ns !== ''), limit: PAGE })
+      .then((d) => { if (live) { setRows(d.labels); setMore(d.more); } })
+      .catch(() => { if (live) { setRows([]); setMore(false); } });
+    return () => { live = false; };
+  }, [ns, q, tax]);
+
+  const showMore = async () => {
+    const asked = generation.current;
+    try {
+      const d = await api.taxonomyLabels({ namespace: ns || undefined, q: q.trim() || undefined, all: Boolean(q.trim()) || (ns !== 'wikidata' && ns !== ''), limit: PAGE, offset: rows?.length ?? 0 });
+      if (asked !== generation.current) return;
+      setRows((prev) => [...(prev ?? []), ...d.labels]);
+      setMore(d.more);
+    } catch { /* the list stands */ }
+  };
+
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <View style={{ position: 'relative', zIndex: 15 }}>
+        <View style={[styles.line, { flexWrap: 'wrap' }]} onLayout={(e) => setFoot(e.nativeEvent.layout.height)}>
+          <ControlButton label={source ? source.label : 'Any source'} set={Boolean(source)} open={open} onPress={() => setOpen((o) => !o)} spoken="Source" />
+          <Field icon="search" value={typed} onChangeText={setTyped} placeholder="A word: stadium, ice_rink, castle, Q23413" style={{ flex: 1, minWidth: 220 }} />
+        </View>
+        <Popover open={open} top={foot} onClose={() => setOpen(false)}>
+          <PopoverList
+            options={[{ key: '', label: 'Any source', on: !ns }, ...tax.namespaces.map((n) => ({ key: n.key, label: n.label, count: `${count(n.seen)} / ${count(n.total)}`, on: n.key === ns }))]}
+            onPick={(k) => { setNs(k); setOpen(false); }}
+          />
+        </Popover>
+      </View>
+      {source ? <Text style={type.tiny}>{source.what}. {count(source.total)} known, {count(source.seen)} seen on a real place, {count(source.taught)} in a rule.</Text> : null}
+
+      {rows === null ? (
+        <Text style={[type.small, { color: colors.inkMuted }]}>Type a word, or pick a source, and the words that match are listed with where each one lands today.</Text>
+      ) : rows.length === 0 ? (
+        <Text style={[type.small, { color: colors.inkMuted }]}>No word like that.</Text>
+      ) : (
+        <Section title={`${rows.length}${more ? '+' : ''} words`}>
+          {rows.map((r) => {
+            const label = `${r.namespace}:${r.key}`;
+            const lands = r.landing.how === 'none' ? (r.namespace === 'wikidata' && r.active === false ? 'excluded from the atlas' : 'not a place on its own')
+              : `${catLabel(r.landing.category)}${subLabel(r.landing.subcategory) ? ` · ${subLabel(r.landing.subcategory)}` : ' · no subcategory'}`;
+            return (
+              <Press key={label} disabled={!canManage} onPress={() => onPick(label, r.landing.subcategory)} accessibilityRole="button" style={styles.wordRow}>
+                <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+                  <Word label={label} name={r.label} />
+                  <Text style={type.tiny} numberOfLines={1}>
+                    {[r.note, r.seen_count ? `seen ${count(r.seen_count)}` : null, r.landing.derived.length ? `read as ${r.landing.derived.map(keyOf).join(', ')}` : null].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 1, maxWidth: '45%' }}>
+                  <Text style={[type.small, { fontWeight: '600', textAlign: 'right' }]} numberOfLines={2}>{lands}</Text>
+                  <Text style={[type.tiny, { textAlign: 'right' }]} numberOfLines={1}>
+                    {HOW_WORD[r.landing.how]}{r.landing.via && r.landing.via.scope !== 'default' ? ` · ${r.landing.via.subject_label ?? r.landing.via.subject ?? ''}` : ''}
+                  </Text>
+                </View>
+                {canManage ? <Icon name="more" size={14} color={colors.inkMuted} /> : null}
+              </Press>
+            );
+          })}
+          {more ? <View style={{ paddingVertical: spacing.sm }}><TextAction label={`Show the next ${PAGE}`} onPress={() => void showMore()} /></View> : null}
+        </Section>
+      )}
+    </View>
   );
 }
 
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  rowName: { ...type.body, fontWeight: '700' },
-  mono: { ...type.tiny, color: colors.inkMuted },
-  search: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, backgroundColor: colors.surface,
-  },
-  searchInput: { flex: 1, paddingVertical: 9, color: colors.ink, outlineStyle: 'none' as never },
-  input: {
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 9, color: colors.ink, backgroundColor: colors.surface,
-  },
-  divider: { height: 1, backgroundColor: colors.line, marginVertical: spacing.xs },
-  catBlock: {
-    gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
-  },
-  subList: { gap: 2 },
-  subRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap',
-    paddingVertical: 8, paddingHorizontal: spacing.sm, borderRadius: radius.sm,
-  },
-  subRowOn: { backgroundColor: colors.well },
-  subPanel: {
-    gap: spacing.sm, padding: spacing.md, marginBottom: spacing.xs,
-    backgroundColor: colors.surfaceMuted, borderRadius: radius.sm,
-  },
-  ruleRow: {
-    gap: spacing.sm, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
-  },
-  labelRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, flexWrap: 'wrap',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
-  },
-  mRow: { flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line },
-  mHead: { backgroundColor: colors.surfaceMuted, borderTopWidth: 0 },
-  mCat: { backgroundColor: colors.well },
-  mWork: { backgroundColor: colors.surfaceMuted },
-  cellFirst: { paddingVertical: 8, paddingHorizontal: spacing.sm, justifyContent: 'center' },
-  cell: { paddingVertical: 8, paddingHorizontal: spacing.xs, gap: 2, borderLeftWidth: BORDER, borderLeftColor: colors.line, justifyContent: 'center' },
-  cellOn: { backgroundColor: colors.selected },
+  kicker: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: 32 },
+  action: { ...type.small, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline' },
+  choice: { paddingHorizontal: 8, paddingVertical: 3 },
+  choiceOn: { backgroundColor: colors.selected },
+  catLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap', paddingVertical: 2 },
+  note: { color: colors.accent, fontWeight: '600' },
+  line: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6 },
+
+  split: { gap: spacing.lg },
+  splitWide: { flexDirection: 'row', alignItems: 'flex-start' },
+  detail: { width: '100%' },
+  detailWide: { width: 420, flexGrow: 0, flexShrink: 0 },
+
+  subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 9, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, borderLeftWidth: 4, borderLeftColor: 'transparent' },
+  subRowNarrow: { flexWrap: 'wrap', rowGap: 4 },
+  subRowOn: { backgroundColor: colors.well, borderLeftColor: colors.selected },
+  subName: { flexGrow: 1, flexBasis: 140, minWidth: 0, gap: 1 },
+  subCount: { width: 24, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  emptyRow: { color: colors.inkMuted, paddingVertical: spacing.sm },
+
+  ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  foundRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  wordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+
+  editor: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, backgroundColor: colors.surfaceMuted, marginVertical: spacing.sm, gap: 4 },
+  tokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingVertical: 6 },
+  token: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.selected, paddingHorizontal: 8, paddingVertical: 4 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line, paddingVertical: 2 },
+  fieldInput: { flex: 1, paddingVertical: 6, color: colors.ink, fontSize: 14, outlineStyle: 'none' as never, backgroundColor: 'transparent' },
+  landing: { paddingVertical: spacing.sm },
+
+  tableWrap: { overflow: 'scroll' as never, width: '100%' },
+  tRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  tHead: { borderBottomWidth: BORDER, borderBottomColor: colors.line },
+  tWork: { backgroundColor: colors.surfaceMuted },
+  tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
+  tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
+  tCellOn: { backgroundColor: colors.selected },
 });
