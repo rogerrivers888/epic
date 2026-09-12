@@ -544,7 +544,7 @@ function Pictures({ regions, canManage, wide }: { regions: LibraryRegion[]; canM
                      accessibilityLabel={img.title ?? 'Picture'}>
             <View style={styles.cellShot}>
               {img.lqip ? <Image source={{ uri: img.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}
-              <Image source={{ uri: api.imageUrl(img.id, 500) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
+              <Image source={{ uri: api.imageUrl(img, 500) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
             </View>
             <Text style={styles.cellTitle} numberOfLines={1}>{img.title ?? img.source_ref}</Text>
             <Row style={{ gap: 4, flexWrap: 'wrap' }}>
@@ -595,7 +595,7 @@ function ImageDetail({ image, canManage, onClose, onChanged, wide }: {
       <View style={[styles.detail, wide && { flexDirection: 'row' }]}>
         <View style={[styles.detailShot, wide && { width: 320, height: 220 }]}>
           {image.lqip ? <Image source={{ uri: image.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}
-          <Image source={{ uri: api.imageUrl(image.id, 960) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
+          <Image source={{ uri: api.imageUrl(image, 960) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
         </View>
 
         <View style={{ flex: 1, gap: spacing.xs, minWidth: 0 }}>
@@ -696,7 +696,7 @@ function Uploads({ canManage }: { canManage: boolean }) {
             <View key={img.id} style={styles.cell}>
               <View style={styles.cellShot}>
                 {img.lqip ? <Image source={{ uri: img.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}
-                <Image source={{ uri: api.imageUrl(img.id, 500) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
+                <Image source={{ uri: api.imageUrl(img, 500) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
               </View>
               <Text style={styles.cellTitle} numberOfLines={1}>{img.title ?? 'Untitled'}</Text>
               {canManage ? (

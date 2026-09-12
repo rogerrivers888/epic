@@ -45,7 +45,7 @@ import { sweepRegion, sweepCost, rematchRegion, ACTIVITY_QUERIES } from '../sour
 import { portraitsForApp, setPortrait } from '../sources/portraits.js';
 import { sweepPictures, PICTURE_VERSION } from '../sources/placePicture.js';
 import { mapillaryReady, mapillaryTrouble } from '../sources/streetLevel.js';
-import { imageLinkValid } from '../sources/photoLinks.js';
+import { imageLinkValid, stampImage } from '../sources/photoLinks.js';
 import { query } from '../db.js';
 
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -393,6 +393,13 @@ adminRouter.patch('/kinds/:qid', requires('manage_library'), async (req, res, ne
 
 // --- the images ------------------------------------------------------------
 
+/**
+ * A pending household upload is served on its signed link only (the image
+ * route above), so the back office — whose whole job here is to look at it
+ * before anyone else may — is handed that link with the row (Codex, 12 Sep 2026).
+ */
+const forReviewer = (row) => (row?.contributor_household_id && row.moderation !== 'approved' ? stampImage(row) : row);
+
 adminRouter.get('/images', requires('view_library'), async (req, res, next) => {
   try {
     const out = await lib.searchImages({
@@ -405,13 +412,13 @@ adminRouter.get('/images', requires('view_library'), async (req, res, next) => {
       limit: Math.min(200, Number(req.query.limit) || 60),
       offset: Number(req.query.offset) || 0,
     });
-    res.json(out);
+    res.json({ ...out, images: (out.images ?? []).map(forReviewer) });
   } catch (err) { next(err); }
 });
 
 adminRouter.get('/images/:id', requires('view_library'), async (req, res, next) => {
   try {
-    const image = await lib.imageById(req.params.id);
+    const image = forReviewer(await lib.imageById(req.params.id));
     if (!image) return res.status(404).json({ error: 'not_found' });
     const { rows: links } = await query(
       `select l.*, coalesce(a.name, r.name) as label, a.region_slug

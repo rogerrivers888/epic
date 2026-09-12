@@ -2118,7 +2118,9 @@ export const api = {
   inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; live?: 1; refresh?: 1 }) =>
     request<InspireNear>(`/api/inspire/near${qs(q)}`),
 
-  imageUrl: (id: string, width = 500) => `${API_URL}/api/images/${id}/${width}`,
+  /** A library picture's bytes. Given the row rather than the id, a pending household upload's signed link comes with it. */
+  imageUrl: (image: string | { id: string; sig?: string; exp?: number }, width = 500) =>
+    ownedImageUrl(typeof image === 'string' ? { id: image } : image, width),
 
   /** The household app's read: one county, instantly, off one table. */
   regionAttractions: (slug: string) => request<RegionAttractions>(`/api/atlas/regions/${slug}`),
