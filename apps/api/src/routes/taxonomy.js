@@ -272,8 +272,8 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         // Every label must parse: dropping a bad one would write a broader rule
         // than was asked for (Codex, 12 Sep 2026).
         if (!labels.length) throw new Error('no label');
-        const badOne = labels.find((l) => !parseLabel(l));
-        if (badOne) throw new Error(`not a label: ${badOne}`);
+        const badAt = labels.findIndex((l) => !parseLabel(l));
+        if (badAt >= 0) throw new Error(`not a label: ${labels[badAt] || '(empty)'}`);
         if (it.aside) {
           if (labels.length !== 1) throw new Error('set aside one label at a time');
           const { namespace, key } = parseLabel(labels[0]);

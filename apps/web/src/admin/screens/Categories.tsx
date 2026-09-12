@@ -1007,6 +1007,7 @@ const styles = StyleSheet.create({
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
   tCellOn: { backgroundColor: colors.selected },
-  rowScrim: { position: 'fixed' as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 },
+  // Under the panel (the popover's anchor sits at zIndex 6), over everything else.
+  rowScrim: { position: 'fixed' as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
   inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
 });
