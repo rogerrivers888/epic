@@ -93,26 +93,32 @@ const samePlace = (a, b) => {
 export async function sweep(code, opts = {}) {
   const area = await scout.areaFor(code);
   if (!area) throw Object.assign(new Error(`No area called ${code}. Add it first.`), { status: 404 });
-  if (!opts.dryRun && !(await scout.markSweeping(code))) return { code, state: 'sweeping', why: 'A sweep of this area is already running.' };
+  let lease = null;
+  if (!opts.dryRun) {
+    lease = await scout.markSweeping(code);
+    if (!lease) return { code, state: 'sweeping', why: 'A sweep of this area is already running.' };
+  }
   try {
-    return await runSweep(area, code, opts);
+    return await runSweep(area, code, { ...opts, lease });
   } catch (err) {
     // Hand the area back before rethrowing. The repository will take an
     // abandoned lock after half an hour, but a sweep that failed in a second
     // should be retryable in the next one — and the reason belongs on the area
-    // where the back office shows it, not only in the log.
+    // where the back office shows it, not only in the log. Nothing about what
+    // the last good sweep found is touched: this one found nothing, which is
+    // not the same as saying the area holds nothing.
     if (!opts.dryRun) {
-      await scout.finishSweep(code, {
-        state: 'failed',
+      await scout.releaseSweep(code, {
         why: `the sweep stopped: ${String(err?.message ?? err).slice(0, 140)}`,
         nextSweepAt: new Date(Date.now() + 86_400_000),
+        lease,
       }).catch(() => null);
     }
     throw err;
   }
 }
 
-async function runSweep(area, code, { dryRun = false, householdId = null } = {}) {
+async function runSweep(area, code, { dryRun = false, householdId = null, lease = null } = {}) {
   const center = { lat: area.lat, lng: area.lng };
   const radiusKm = area.radius_km;
   const notes = [];
@@ -255,7 +261,7 @@ async function runSweep(area, code, { dryRun = false, householdId = null } = {})
     state: kept.length ? 'done' : 'failed',
     why: askedTheCrowd ? notes.join('; ')
       : `${notes.join('; ')} — ranked on open data alone${provisional ? ', research held until the crowd can be asked' : ''}; will try again tomorrow`,
-    seen, chains, kept: kept.length, nextSweepAt: next,
+    seen, chains, kept: kept.length, nextSweepAt: next, lease,
   });
 
   return { code, state: kept.length ? 'done' : 'failed', seen, chains, kept: kept.length, dropped: dropped.length, googleCalls, notes, nextSweepAt: next.toISOString() };

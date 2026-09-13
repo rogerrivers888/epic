@@ -32,17 +32,6 @@ export async function allAreas() {
   return rows;
 }
 
-/** Areas whose turn it is. A sweep in flight is never handed out twice. */
-export async function dueAreas(limit = 1) {
-  const { rows } = await query(
-    `select * from scout_areas
-      where state <> 'sweeping' and next_sweep_at is not null and next_sweep_at <= now()
-      order by next_sweep_at limit $1`,
-    [limit],
-  );
-  return rows;
-}
-
 /**
  * How long a sweep may hold its area before the lock is treated as abandoned.
  * The longest real sweep seen is a few minutes; this is well past that and
@@ -51,35 +40,94 @@ export async function dueAreas(limit = 1) {
 export const SWEEP_LOCK_MINUTES = 30;
 
 /**
- * Take the area's lock, or say it is already held.
+ * Areas whose turn it is. A sweep in flight is never handed out twice — but an
+ * abandoned one is, or the loop would walk past the stuck area for ever and
+ * only somebody naming that exact code could rescue it (Codex, 13 Sep 2026).
+ * `markSweeping` is still what decides; this only offers the candidate.
+ */
+export async function dueAreas(limit = 1) {
+  const { rows } = await query(
+    `select * from scout_areas
+      where next_sweep_at is not null and next_sweep_at <= now()
+        and (state <> 'sweeping'
+             or sweeping_since is null
+             or sweeping_since < now() - ($2 || ' minutes')::interval)
+      order by next_sweep_at limit $1`,
+    [limit, String(SWEEP_LOCK_MINUTES)],
+  );
+  return rows;
+}
+
+/**
+ * Take the area's lock, and answer with the lease that proves it is yours.
  *
  * The lock used to be a one-way door: only a sweep that reached the end
  * cleared it, so a sweep that threw left its area unsweepable for ever by
  * anyone (found on BS48, 13 Sep 2026). A lock older than `SWEEP_LOCK_MINUTES`
  * is therefore taken over — no sweep runs that long, and the alternative is an
  * area nobody can ever look at again.
+ *
+ * Every lock carries a token, and finishing has to quote it. Without that, a
+ * sweep that overran its half hour and then woke up would clear the lock of
+ * whoever had since taken over, and two sweeps would write the same area at
+ * once (Codex, 13 Sep 2026).
+ *
+ * Returns the lease, or null when somebody else is genuinely mid-sweep.
  */
 export async function markSweeping(code) {
   const { rows } = await query(
     `update scout_areas
-        set state = 'sweeping', why = null, sweeping_since = now()
+        set state = 'sweeping', why = null, sweeping_since = now(),
+            sweep_lease = gen_random_uuid()
       where code = $1
         and (state <> 'sweeping'
              or sweeping_since is null
              or sweeping_since < now() - ($2 || ' minutes')::interval)
-      returning code`,
+      returning sweep_lease`,
     [code, String(SWEEP_LOCK_MINUTES)],
+  );
+  return rows[0]?.sweep_lease ?? null;
+}
+
+/**
+ * Hand the area back without claiming a sweep happened.
+ *
+ * A sweep that threw has not seen anything, kept anything or dropped anything,
+ * and saying otherwise would wipe the last good selection's counters, move
+ * `swept_at` and count a sweep that never ran (Codex, 13 Sep 2026). So the
+ * failure path touches the state, the reason and when to try again — nothing
+ * that describes coverage.
+ */
+export async function releaseSweep(code, { why = null, nextSweepAt = null, lease = null } = {}) {
+  const { rows } = await query(
+    `update scout_areas
+        set state = 'failed', why = $2, sweeping_since = null, sweep_lease = null,
+            next_sweep_at = coalesce($3, next_sweep_at)
+      where code = $1 and ($4::uuid is null or sweep_lease is not distinct from $4)
+      returning code`,
+    [code, why, nextSweepAt, lease],
   );
   return rows.length > 0;
 }
 
-export async function finishSweep(code, { state, why = null, seen = 0, chains = 0, kept = 0, nextSweepAt = null }) {
-  await query(
+/**
+ * Write what the sweep found and let the area go.
+ *
+ * `lease` is what `markSweeping` answered with. Quoting it stops a sweep that
+ * overran and was taken over from overwriting the newer one's work; passing
+ * nothing keeps the old unconditional behaviour for callers that never held a
+ * lock. Returns whether it applied.
+ */
+export async function finishSweep(code, { state, why = null, seen = 0, chains = 0, kept = 0, nextSweepAt = null, lease = null }) {
+  const { rows } = await query(
     `update scout_areas set state = $2, why = $3, seen = $4, chains = $5, kept = $6,
-            swept_at = now(), sweeps = sweeps + 1, next_sweep_at = $7, sweeping_since = null
-      where code = $1`,
-    [code, state, why, seen, chains, kept, nextSweepAt],
+            swept_at = now(), sweeps = sweeps + 1, next_sweep_at = $7,
+            sweeping_since = null, sweep_lease = null
+      where code = $1 and ($8::uuid is null or sweep_lease is not distinct from $8)
+      returning code`,
+    [code, state, why, seen, chains, kept, nextSweepAt, lease],
   );
+  return rows.length > 0;
 }
 
 /**
