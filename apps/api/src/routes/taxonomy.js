@@ -56,6 +56,8 @@ let decided = false;
 export async function ensureTaxonomyReady() { return ready(); }
 async function ready() {
   await labelRepo.ensureKnown(knownLabels());
+  // Which words are generic, before the first search is counted (Codex, 13 Sep 2026).
+  await labelRepo.loadGenerics();
   if (decided) return;
   decided = true;
   try {
@@ -348,9 +350,16 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           await labelRepo.save({ namespace, key, decision });
           // A decision replaces a mapping: a rule about this one word, if there
           // is one, goes, or the resolver would keep filing by it (Codex, 13 Sep 2026).
-          // For 'generic' that is the whole point — the word must never decide
-          // a landing again, so any rule naming it alone goes with it.
-          await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
+          // For 'generic' that is the whole point, and it goes further: a word
+          // that carries nothing cannot carry anything in company either, so a
+          // combination rule naming it — `google:museum + google:tourist_attraction`
+          // — goes too, or it would keep deciding landings through the back
+          // door (Codex, 13 Sep 2026, second pass).
+          if (decision === 'generic') {
+            await query(`delete from shelf_rules where scope = 'labels' and (subject = $1 or $1 = any(labels))`, [labels[0]]);
+          } else {
+            await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
+          }
           shelfRules.forget();
           done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel', generic: decision === 'generic' });
           continue;

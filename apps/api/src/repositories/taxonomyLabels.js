@@ -76,6 +76,22 @@ function refreshGenerics() {
 /** A decision was written: the next `observe` should look the set up again. */
 export function forgetGenerics() { genericAt = 0; }
 
+/**
+ * Load the set now, before anything is observed.
+ *
+ * `observe` runs on the search path and cannot wait, so without this the first
+ * search after a restart would count no company at all — and with a twelve-hour
+ * search cache it would not come round again for half a day (Codex, 13 Sep
+ * 2026). `ready()` calls this at boot.
+ */
+export async function loadGenerics() {
+  try {
+    const { rows } = await query(`select namespace, key from taxonomy_labels where decision = 'generic'`);
+    genericSet = new Set(rows.map((r) => `${r.namespace}:${r.key}`));
+    genericAt = Date.now();
+  } catch { /* the next observe asks again */ }
+}
+
 async function flush() {
   timer = null;
   if (!pending.size) return;

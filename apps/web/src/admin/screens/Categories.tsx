@@ -36,7 +36,7 @@
  * tree with different styles rather than two returns, nothing over 390px.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
@@ -717,9 +717,14 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
    */
   const [withKey, setWith] = useQueryState<string>('with', '', asText);
   const [withWords, setWithWords] = useState<TaxonomyLabel[] | null>(null);
+  // The answer is only drawn if it is still the row that was asked about: two
+  // rows opened quickly would otherwise show one's words under the other, with
+  // mapping controls for the wrong word (Codex, 13 Sep 2026).
+  const wantedWith = useRef('');
   const loadWith = useCallback(async (key: string) => {
-    try { const d = await api.taxonomyPairs(`google:${key}`); setWithWords(d.words); }
-    catch { setWithWords([]); }
+    wantedWith.current = key;
+    try { const d = await api.taxonomyPairs(`google:${key}`); if (wantedWith.current === key) setWithWords(d.words); }
+    catch { if (wantedWith.current === key) setWithWords([]); }
   }, []);
   useEffect(() => { if (!withKey) { setWithWords(null); return; } setWithWords(null); void loadWith(withKey); }, [withKey, loadWith]);
 
