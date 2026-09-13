@@ -364,6 +364,10 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
       // Read the key inside the transaction, not from the five-second cache,
       // so two adoptions at once or another process's write cannot slip past
       // the check (Codex, 13 Sep 2026).
+      // One adoption of a given name at a time: a lock on the key itself, so a
+      // second request for a name that does not exist yet waits and then finds
+      // the row the first one made (Codex, 13 Sep 2026).
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`adopt:${key}`]);
       const seen = await c.query('select * from shelf_subcategories where key = $1 for update', [key]);
       const existing = seen.rows[0] ?? null;
       if (existing && existing.category_key !== categoryKey) {
