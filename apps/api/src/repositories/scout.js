@@ -220,17 +220,20 @@ export async function withoutRecord(limit = 25) {
     `select distinct on (p.venue_ref) p.venue_ref, p.name, p.lat, p.lng, p.website, p.category, p.epic_score
        from scout_places p
        left join place_records r on r.venue_ref = p.venue_ref
+       join scout_areas a on a.code = p.area_code
       where r.venue_ref is null and p.name is not null
-        -- Only where the crowd has actually been asked. A first sweep that
-        -- could not reach the licensed search keeps its census deliberately
-        -- unresearched, because a selection made without a ranking is a list
-        -- in name order and researching it is spending on the wrong places
-        -- (sweepArea's provisional flag). Those areas hold no band at all, which
-        -- is the honest way to recognise one after the fact — otherwise this
-        -- pass would queue every one of them on the very next tick (Codex,
+        -- Everything except a provisional area. A *first* sweep that could not
+        -- reach the licensed search keeps its census deliberately unresearched,
+        -- because a selection made without a ranking is a list in name order
+        -- and researching it spends on the wrong places. That is exactly
+        -- sweepArea's askedTheCrowd-and-never-swept test, and after the fact it
+        -- reads as: nothing in the area carries a band, and the area has only
+        -- ever been swept once. A later unranked retry is not provisional — it
+        -- is researched on purpose — so it must stay recoverable here (Codex,
         -- 13 Sep 2026).
-        and exists (select 1 from scout_places q
-                     where q.area_code = p.area_code and q.crowd_band is not null)
+        and (a.sweeps > 1
+             or exists (select 1 from scout_places q
+                         where q.area_code = p.area_code and q.crowd_band is not null))
       order by p.venue_ref, p.epic_score desc nulls last
       limit $1`,
     [limit],

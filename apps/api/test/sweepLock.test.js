@@ -212,3 +212,30 @@ test('a provisional area — swept before the crowd could be asked — is left a
   await query('delete from scout_places where area_code = $1', [CODE]);
   await query('delete from scout_areas where code = $1', [CODE]);
 });
+
+test('an unranked *retry* is still recoverable — only a first sweep is provisional', async () => {
+  await anArea();
+  const unranked = (ref, name) => ({ venueRef: ref, name, epicScore: 2, ownedScore: 2, crowdBand: null, countBand: null, from: ['osm'] });
+
+  // Sweep one: no crowd. Provisional, deliberately left alone.
+  await scout.commitSweep(CODE, {
+    lease: await scout.markSweeping(CODE),
+    places: [unranked('osm:r1', 'Unranked')], state: 'done', nextSweepAt: new Date(),
+  });
+  assert.ok(!(await scout.withoutRecord(50)).map((w) => w.ref).includes('osm:r1'));
+
+  // Sweep two: the crowd still could not be asked, but the area has been swept
+  // before, so sweepArea researches this one — and a crash afterwards must
+  // leave it findable.
+  await scout.commitSweep(CODE, {
+    lease: await scout.markSweeping(CODE),
+    places: [unranked('osm:r1', 'Unranked')], state: 'done', nextSweepAt: new Date(),
+  });
+  assert.ok(
+    (await scout.withoutRecord(50)).map((w) => w.ref).includes('osm:r1'),
+    'a retry on an already-swept area is not provisional',
+  );
+
+  await query('delete from scout_places where area_code = $1', [CODE]);
+  await query('delete from scout_areas where code = $1', [CODE]);
+});
