@@ -534,7 +534,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * panel hangs directly under the control; `align: 'right'` hangs it from the
  * control's right edge for a control at the end of a row.
  */
-export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null }: {
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null }: {
   label: string;
   value: string;
   groups: { key: string; label: string; items: DropdownOption[] }[];
@@ -552,14 +552,22 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   onOpenChange?: (open: boolean) => void;
   /** Open a level in, at this group — a mapped row opens at its own category (owner, 13 Sep 2026). */
   startIn?: string | null;
+  /**
+   * A row on the first level that starts something new: "Adopt Google's
+   * word as a new subcategory". Tapping it shows the groups again, and the
+   * group picked is where the new thing goes (owner, 13 Sep 2026: "I would
+   * like a new one called water park").
+   */
+  adopt?: { label: string; onPick: (groupKey: string) => void } | null;
 }) {
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
+  const [adopting, setAdopting] = useState(false);
   const group = groups.find((g) => g.key === into) ?? null;
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
-  const close = () => { setOpen(false); setInto(null); };
+  const close = () => { setOpen(false); setInto(null); setAdopting(false); };
   const wrapRef = React.useRef<any>(null);
-  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); onOpenChange?.(false); }, [onOpenChange]));
+  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); onOpenChange?.(false); }, [onOpenChange]));
   const pick = (key: string) => { onPick(key); close(); };
   return (
     <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
@@ -580,7 +588,23 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
           <Press style={dd.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[dd.panel, align === 'right' && dd.panelRight, { width }]} accessibilityRole="menu">
             <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
-              {group ? (
+              {adopting ? (
+                <>
+                  <Press onPress={() => setAdopting(false)} accessibilityRole="button" accessibilityLabel="Back"
+                         style={({ hovered }: any) => [dd.item, dd.back, hovered && dd.itemHover]}>
+                    <Icon name="back" size={14} color={colors.ink} strokeWidth={2.4} />
+                    <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: '700' }]} numberOfLines={2}>New subcategory — under which category?</Text>
+                  </Press>
+                  {groups.map((g) => (
+                    <Press key={g.key} onPress={() => { adopt?.onPick(g.key); close(); }} accessibilityRole="menuitem"
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                      <View style={{ width: 16 }} />
+                      <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{g.label}</Text>
+                      <Text style={type.tiny}>{g.items.length}</Text>
+                    </Press>
+                  ))}
+                </>
+              ) : group ? (
                 <>
                   <Press onPress={() => setInto(null)} accessibilityRole="button" accessibilityLabel="Back to the categories"
                          style={({ hovered }: any) => [dd.item, dd.back, hovered && dd.itemHover]}>
@@ -596,6 +620,17 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                       {o.count != null && o.count !== '' ? <Text style={type.tiny}>{String(o.count)}</Text> : null}
                     </Press>
                   ))}
+                  {/* Inside a category, adopting puts the new subcategory right here. */}
+                  {adopt ? (
+                    <>
+                      <View style={dd.rule} />
+                      <Press onPress={() => { adopt.onPick(group.key); close(); }} accessibilityRole="menuitem"
+                             style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                        <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.ink} strokeWidth={2.6} /></View>
+                        <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={2}>{adopt.label} under {group.label}</Text>
+                      </Press>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -606,7 +641,15 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                       <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
                     </Press>
                   ))}
-                  {extra.length ? <View style={dd.rule} /> : null}
+                  {adopt ? (
+                    <Press onPress={() => setAdopting(true)} accessibilityRole="menuitem"
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                      <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.ink} strokeWidth={2.6} /></View>
+                      <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={2}>{adopt.label}</Text>
+                      <Icon name="more" size={14} color={colors.inkMuted} />
+                    </Press>
+                  ) : null}
+                  {extra.length || adopt ? <View style={dd.rule} /> : null}
                   {groups.map((g) => {
                     const within = g.items.some((o) => o.on);
                     return (

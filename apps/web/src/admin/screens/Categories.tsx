@@ -45,7 +45,7 @@ import {
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, FoldLine, Segmented } from '../../components/ui';
+import { Button, FoldLine } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
 import { AdminPage, DrillDropdown, Dropdown, PageHead, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
@@ -794,6 +794,23 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
     finally { setBusyKey(null); }
   };
 
+  /**
+   * Google's word becomes a subcategory of ours, under the category picked,
+   * and the word is mapped to it (owner, 13 Sep 2026: "if they call it water
+   * park… I would like a new one called water park, and likewise with marina").
+   */
+  const adoptWord = async (r: TaxonomyLabel, categoryKey: string) => {
+    setBusyKey(r.key);
+    try {
+      const { subcategory } = await api.shelfSaveSubcategory({ categoryKey: categoryKey as MoodKey, label: r.label ?? r.key });
+      const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: subcategory.key, reason: `Adopted Google's own word, ${r.label ?? r.key}.` }]);
+      if (out.failed.length) throw new Error(out.failed[0].error);
+      await reload();
+      await onChanged(`New subcategory ${subcategory.label} under ${catLabel(categoryKey)}, with ${r.label ?? r.key} mapped to it.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusyKey(null); }
+  };
+
   /** Every unmapped subcategory in a group with a suggestion, approved in one press. */
   const approveAll = async (types: TaxonomyLabel[]) => {
     const items = types.filter((r) => !decided(r) && r.suggestion).map((r) => ({
@@ -828,8 +845,13 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   return (
     <View>
       <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md }]}>
-        <View style={{ width: wide ? 360 : '100%' }}>
-          <Segmented value={tab} onChange={(v) => { setTab(v); setGroup('-'); }} options={[{ value: 'mapped', label: 'Mapped' }, { value: 'unmapped', label: 'Unmapped' }, { value: 'all', label: 'All' }]} />
+        <View style={[styles.tabs, { width: wide ? 360 : '100%' }]}>
+          {([['mapped', 'Mapped'], ['unmapped', 'Unmapped'], ['all', 'All']] as const).map(([v, l], i) => (
+            <Press key={v} effect="none" onPress={() => { setTab(v); setGroup('-'); }} accessibilityRole="button" accessibilityState={{ selected: tab === v }}
+                   style={[styles.tabItem, i > 0 && styles.tabDivider, tab === v && styles.tabOn]}>
+              <Text style={[type.small, { fontWeight: '700', color: tab === v ? colors.selectedFg : colors.inkMuted }]}>{l}</Text>
+            </Press>
+          ))}
         </View>
         <View style={{ flex: 1 }} />
         <Press effect="none" onPress={() => setNoise(noise === '1' ? '' : '1')} accessibilityRole="switch" accessibilityState={{ checked: noise === '1' }}
@@ -837,10 +859,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           <Text style={[type.small, { fontWeight: '700', color: noise === '1' ? colors.selectedFg : colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} excluded · {asideCount}</Text>
         </Press>
       </View>
-      <View style={[styles.tRow, styles.tHead, styles.gRow]}>
-        <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker} numberOfLines={1}>{first}</Text></View>
-        {COLS.map((h) => <View key={h} style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
-        {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]}><Text style={styles.kicker} numberOfLines={1}>{last}</Text></View> : null}
+      <View style={[styles.tRow, styles.tHeadSoft, styles.gRow]}>
+        <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={1}>{first}</Text></View>
+        {COLS.map((h) => <View key={h} style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
+        {wide ? <View style={[styles.tCell, styles.headCell, styles.gLast, { width: LAST }]}><Text style={styles.colHead} numberOfLines={1}>{last}</Text></View> : null}
       </View>
       {groups.map((g) => {
         const on = chosen?.key === g.key;
@@ -892,18 +914,18 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                 ) : null}
               </View>
               {shown.length ? (
-                <View style={[styles.tRow, { borderBottomWidth: BORDER, borderBottomColor: colors.line, alignItems: 'center' }]}>
+                <View style={[styles.tRow, styles.tHeadSoft, { alignItems: 'center' }]}>
                   {canManage ? (
                     <Press effect="none" disabled={!tickable.length} onPress={() => setTicked((prev) => { const n = new Set(prev); for (const r of tickable) { if (allTicked) n.delete(r.key); else n.add(r.key); } return n; })}
                            accessibilityRole="checkbox" accessibilityState={{ checked: allTicked }} accessibilityLabel="Tick every suggestion in this category" style={styles.tickCell}>
                       <View style={[styles.tick, allTicked && styles.tickOn, !tickable.length && { opacity: 0.3 }]}>{allTicked ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
                     </Press>
                   ) : null}
-                  <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={styles.kicker}>Google's subcategory</Text></View>
+                  <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Google's subcategory</Text></View>
                   {/* The same columns as the category rows above, so Places sits under Places. */}
                   {wide ? <View style={{ width: COL }} /> : null}
-                  {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.kicker, { textAlign: 'center' }]}>Places</Text></View> : null}
-                  {wide ? <View style={[styles.tCell, { width: COL * 2 + LAST }]}><Text style={[styles.kicker, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
+                  {wide ? <View style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View> : null}
+                  {wide ? <View style={[styles.tCell, styles.headCell, { width: COL * 2 + LAST }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
                 </View>
               ) : null}
               {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing here.</Text> : null}
@@ -964,6 +986,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                           }))}
                           onPick={(k) => void decide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : { subcategory: k })}
                           onOpenChange={(o) => setOpenKey(o ? r.key : null)}
+                          adopt={{
+                            label: `Adopt Google's “${r.label ?? r.key}” as a new subcategory`,
+                            onPick: (cat) => void adoptWord(r, cat),
+                          }}
                           startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
                         {!decided(r) && sug ? (
@@ -1130,6 +1156,14 @@ const styles = StyleSheet.create({
   tableWrap: { width: '100%' },
   tRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   tHead: { borderBottomWidth: BORDER, borderBottomColor: colors.line },
+  /** The Google table's header rule: soft, not ink (owner, 13 Sep 2026: "very bright white"). */
+  tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.lineSoft },
+  headCell: { paddingTop: 10, paddingBottom: 2 },
+  colHead: { ...type.small, fontWeight: '700', color: colors.inkMuted },
+  tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.lineSoft, overflow: 'hidden' },
+  tabItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
+  tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
+  tabOn: { backgroundColor: colors.selected },
   tWork: { backgroundColor: colors.surfaceMuted },
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
