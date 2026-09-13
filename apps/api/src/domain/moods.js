@@ -267,6 +267,14 @@ export const vocabularyOf = (categories, subcategories) => ({
  * weakly-placed one would make the home screen quietly lose places rather than
  * file them imperfectly. How confident the answer is comes back separately.
  */
+/** The label rules a person wrote, without the ones Epic wrote for itself. */
+const ownerOnly = (labelRules) => {
+  if (!labelRules?.size) return labelRules;
+  const out = new Map();
+  for (const [k, r] of labelRules) if (r?.taught_by !== 'Epic') out.set(k, r);
+  return out;
+};
+
 export function winner(weights, rank = RANK) {
   const entries = Object.entries(weights ?? {});
   if (!entries.length) return null;
@@ -405,13 +413,13 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   const ref = venue?.source && venue?.sourcePlaceId ? `${venue.source}:${venue.sourcePlaceId}` : null;
   // The label rules that fire for this place: a provider's own word, or several
   // words at once. Narrower than an experience, broader than the one place.
-  const hits = labelHits(rules?.labels, labelsOf(venue));
-  // A rule the owner wrote beats every rule Epic wrote for itself: where any
-  // owner rule fires, Epic's are left out of the level altogether, so the
-  // owner's word cannot be out-voted by Epic's on the primary type (Codex,
-  // 13 Sep 2026).
-  const owned = hits.filter((s) => rules?.labels?.get(s)?.taught_by !== 'Epic');
-  const level = owned.length ? owned : hits;
+  const labels = labelsOf(venue);
+  // A rule the owner wrote beats every rule Epic wrote for itself: the
+  // owner's rules are matched on their own first, and only where none fires
+  // do Epic's get a say — so neither the primary type nor a longer rule of
+  // Epic's can out-vote the owner's word (Codex, 13 Sep 2026).
+  const owned = labelHits(ownerOnly(rules?.labels), labels);
+  const level = owned.length ? owned : labelHits(rules?.labels, labels);
   const chain = [['place', [ref]], ['labels', level], ['experience', venue?.experiences ?? []]];
 
   // Somewhere to eat is Food unless somebody has said otherwise about this
