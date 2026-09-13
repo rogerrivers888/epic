@@ -11,6 +11,21 @@ export async function recordSend({ to, subject, purpose, providerId, status, fai
   return rows[0];
 }
 
+/**
+ * What the sender answered, written onto the row that was made before the
+ * send. Never lowers a status the webhook has already raised: a Delivery can
+ * land before Postmark's own reply has been read (Codex, 13 Sep 2026).
+ */
+export async function finishSend(id, { providerId, status, failure }) {
+  const { rows } = await query(
+    `update mail_messages set provider_id = coalesce($2, provider_id), failure = coalesce($3, failure),
+       status = case when status = 'sent' then $4 else status end
+     where id = $1 returning *`,
+    [id, providerId ?? null, failure ?? null, status],
+  );
+  return rows[0] ?? null;
+}
+
 /** What has happened to this address lately: the suppression check reads it. */
 export async function recentTo(to, days = 90) {
   const { rows } = await query(`select id, status, bounced_at, failure from mail_messages where lower(to_address) = lower($1) and sent_at > now() - make_interval(days => $2) order by sent_at desc limit 20`, [to, days]);
@@ -24,13 +39,18 @@ export async function recentTo(to, days = 90) {
  */
 export async function applyProviderEvent(event) {
   const providerId = String(event?.MessageID ?? '');
-  if (!providerId) return null;
-  const { rows } = await query('select * from mail_messages where provider_id = $1 limit 1', [providerId]);
+  // Our own id travels out as Postmark metadata and comes back on every event,
+  // so an event that beats the send's reply home still finds its row.
+  const own = String(event?.Metadata?.epic_id ?? '');
+  const ownId = /^[0-9a-f-]{36}$/i.test(own) ? own : null;
+  if (!providerId && !ownId) return null;
+  const { rows } = await query(`select * from mail_messages where (provider_id = $1 and $1 <> '') or ($2::uuid is not null and id = $2::uuid) order by (provider_id = $1) desc limit 1`, [providerId, ownId]);
   const row = rows[0];
   if (!row) return null;
   const patch = applyEvent(row, event) ?? {};
   const sets = ['events = events || $2::jsonb'];
   const params = [row.id, JSON.stringify([{ ...event, receivedAt: new Date().toISOString() }])];
+  if (!row.provider_id && providerId) { params.push(providerId); sets.push(`provider_id = $${params.length}`); }
   for (const [k, v] of Object.entries(patch)) { params.push(v); sets.push(`${k} = $${params.length}`); }
   const { rows: out } = await query(`update mail_messages set ${sets.join(', ')} where id = $1 returning *`, params);
   return out[0];
@@ -42,6 +62,8 @@ export async function summary({ days = 30, status = null, limit = 200 } = {}) {
   const where = ['sent_at > now() - make_interval(days => $1)'];
   const params = [days];
   if (status === 'not_delivered') where.push(`status in ('bounced', 'soft_bounced', 'complained', 'failed')`);
+  // Delivered is everything their server accepted, so an opened one is delivered too (Codex, 13 Sep 2026).
+  else if (status === 'delivered') where.push(`status in ('delivered', 'opened')`);
   else if (status) { params.push(status); where.push(`status = $${params.length}`); }
   params.push(limit);
   const { rows } = await query(`select id, to_address, subject, purpose, provider_id, status, bounce_type, failure, sent_at, delivered_at, opened_at, bounced_at from mail_messages where ${where.join(' and ')} order by sent_at desc limit $${params.length}`, params);

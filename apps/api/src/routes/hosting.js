@@ -760,7 +760,7 @@ async function sendInvites(host, offer, invites) {
     const text = `${host.name} has invited you to ${offer.title ?? 'something'}${offer.starts_on ? ` on ${ymd(offer.starts_on)}` : ''}. Say yes or no here: ${inviteUrl(i.token)}`;
     try {
       let sent = false;
-      if (i.contact_kind === 'email' && mailConfigured()) sent = (await sendMail({ to: i.contact, subject: `${host.name} has invited you`, text })).sent;
+      if (i.contact_kind === 'email' && mailConfigured()) sent = (await sendMail({ to: i.contact, subject: `${host.name} has invited you`, text, purpose: 'invitation' })).sent;
       else if (i.contact_kind === 'mobile' && smsConfigured()) sent = (await sendSms({ to: i.contact, text })).sent;
       if (sent) { await repo.markInviteSent(i.id); delivered += 1; }
     } catch { /* stays unsent; the host sees it */ }
@@ -868,7 +868,7 @@ async function tellBooked(bookings, text) {
     if (!a) continue;
     try {
       // The senders answer `{ sent }` rather than throwing; only a delivered one counts.
-      if (a.email && mailConfigured()) { if ((await sendMail({ to: a.email, subject: 'From your Epic host', text })).sent) delivered += 1; }
+      if (a.email && mailConfigured()) { if ((await sendMail({ to: a.email, subject: 'From your Epic host', text, purpose: 'host_message' })).sent) delivered += 1; }
       else if (a.mobile && smsConfigured()) { if ((await sendSms({ to: a.mobile, text: `Epic: ${text}` })).sent) delivered += 1; }
     } catch { /* recorded below as not delivered */ }
   }

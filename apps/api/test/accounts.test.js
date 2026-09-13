@@ -129,7 +129,7 @@ test('signing in by link answers without a session, and nothing else new does', 
 const { invitationEmail, mailConfigured, mailStatus, sendMail, webUrl } = await import('../src/sources/mail.js');
 
 test('with no key, sending says so rather than pretending', async () => {
-  await withEnv({ RESEND_API_KEY: null, EPIC_MAIL_FROM: null }, async () => {
+  await withEnv({ POSTMARK_SERVER_TOKEN: null, EPIC_MAIL_FROM: null }, async () => {
     assert.equal(mailConfigured(), false);
     assert.equal(mailStatus().reason, 'no_sender');
     const result = await sendMail({ to: 'friend@example.com', subject: 'x', text: 'y' });
@@ -141,7 +141,7 @@ test('with no key, sending says so rather than pretending', async () => {
 });
 
 test('a key with no from-address is not a working sender', async () => {
-  await withEnv({ RESEND_API_KEY: 're_test', EPIC_MAIL_FROM: null }, () => {
+  await withEnv({ POSTMARK_SERVER_TOKEN: 'pm_test', EPIC_MAIL_FROM: null }, () => {
     assert.equal(mailConfigured(), false);
     assert.equal(mailStatus().reason, 'no_from');
   });

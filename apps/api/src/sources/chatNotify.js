@@ -42,7 +42,7 @@ async function contactOf(person) {
 
 async function deliver(to, text, subject = 'On Epic') {
   try {
-    if (to.kind === 'email') return (await sendMail({ to: to.to, subject, text })).sent ? 'email' : null;
+    if (to.kind === 'email') return (await sendMail({ to: to.to, subject, text, purpose: 'chat' })).sent ? 'email' : null;
     return (await sendSms({ to: to.to, text: `Epic: ${text}` })).sent ? 'sms' : null;
   } catch { return null; }
 }

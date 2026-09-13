@@ -447,7 +447,7 @@ async function sendHouseholdInvite(req, { account, member, household, channels, 
     if (!status.configured) attempts.push({ channel: 'email', sent: false, message: status.message });
     else {
       const body = householdInvitationEmail({ name: member.name, url, household: household.name, from, expiresAt: link.expires_at, returning });
-      const out = await sendMail({ to: account.email, ...body });
+      const out = await sendMail({ to: account.email, ...body, purpose: 'household_invitation' });
       attempts.push({ channel: 'email', sent: out.sent, message: out.sent ? `Sent to ${account.email}.` : out.message });
     }
   }

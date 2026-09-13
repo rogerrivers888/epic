@@ -1256,7 +1256,7 @@ async function issueCode(account, to, isEmail, group) {
   const text = `Epic: your code for ${what} is ${code}. It lasts ${CODE_MINUTES} minutes.`;
   try {
     let sent;
-    if (isEmail && mailConfigured()) sent = (await sendMail({ to, subject: `Your code for ${what}`, text })).sent;
+    if (isEmail && mailConfigured()) sent = (await sendMail({ to, subject: `Your code for ${what}`, text, purpose: 'code' })).sent;
     else if (!isEmail && smsConfigured()) sent = (await sendSms({ to, text })).sent;
     else sent = (await sendReminder({ to, contactKind: isEmail ? 'email' : 'mobile', body: text, group: group.id, participant: null })).status === 'sent';
     if (!sent) return { ok: false, to, message: "That code couldn't be sent. Try again, or ask whoever invited you." };
@@ -1331,7 +1331,7 @@ async function tellWaitlist(group) {
     try {
       // The senders answer `{ sent }` rather than throwing; a refusal is a refusal.
       let sent;
-      if (isEmail && mailConfigured()) sent = (await sendMail({ to: w.contact, subject: `A place has come up on ${fresh.name ?? 'the trip'}`, text })).sent;
+      if (isEmail && mailConfigured()) sent = (await sendMail({ to: w.contact, subject: `A place has come up on ${fresh.name ?? 'the trip'}`, text, purpose: 'waitlist' })).sent;
       else if (!isEmail && smsConfigured()) sent = (await sendSms({ to: w.contact, text })).sent;
       else sent = (await sendReminder({ to: w.contact, contactKind: isEmail ? 'email' : 'mobile', body: text, group: fresh.id, participant: null })).status === 'sent';
       if (!sent) throw new Error('not sent');

@@ -28,7 +28,7 @@ import { deployed } from '../auth.js';
  *   EPIC_WEB_URL             where the app is served, so a link in an e-mail points at the app rather than the API
  */
 
-import { recentTo, recordSend } from '../repositories/mail.js';
+import { finishSend, recentTo, recordSend } from '../repositories/mail.js';
 import { suppressedBy } from '../domain/mail.js';
 
 const KEY = () => (process.env.POSTMARK_SERVER_TOKEN || '').trim();
@@ -97,24 +97,28 @@ export async function sendMail({ to, subject, text, html, purpose = 'message' })
     const m = await recordSend({ to, subject, purpose, status: 'failed', failure: `Not sent: this address ${bad.status === 'complained' ? 'marked an earlier message as spam' : 'bounced'} on ${new Date(bad.bounced_at).toLocaleDateString('en-GB')}.` }).catch(() => null);
     return { sent: false, reason: 'suppressed', message: m?.failure ?? 'This address bounced recently, so nothing was sent.' };
   }
+  // The row first, then the send, with our id in Postmark's metadata: a
+  // Delivery event can arrive before Postmark's reply to the send has been
+  // read, and it must still find its row (Codex, 13 Sep 2026).
+  const row = await recordSend({ to, subject, purpose, status: 'sent' }).catch(() => null);
   try {
     const res = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',
       headers: { 'X-Postmark-Server-Token': KEY(), accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify({ From: process.env.EPIC_MAIL_FROM, To: to, Subject: subject, TextBody: text, HtmlBody: html, MessageStream: STREAM(), Tag: purpose, TrackOpens: true }),
+      body: JSON.stringify({ From: process.env.EPIC_MAIL_FROM, To: to, Subject: subject, TextBody: text, HtmlBody: html, MessageStream: STREAM(), Tag: purpose, TrackOpens: true, ...(row ? { Metadata: { epic_id: row.id } } : {}) }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || Number(body?.ErrorCode ?? 0) !== 0) {
       // The provider's own words, trimmed: the owner is the only person who
       // sees this and it is what tells him the domain is not verified yet.
       const failure = `Postmark refused it (${body?.ErrorCode ?? res.status}). ${String(body?.Message ?? '').slice(0, 300)}`.trim();
-      await recordSend({ to, subject, purpose, status: 'failed', failure }).catch(() => null);
+      if (row) await finishSend(row.id, { status: 'failed', failure }).catch(() => null);
       return { sent: false, reason: 'send_failed', message: failure };
     }
-    const row = await recordSend({ to, subject, purpose, providerId: body.MessageID ?? null, status: 'sent' }).catch(() => null);
+    if (row) await finishSend(row.id, { providerId: body.MessageID ?? null, status: 'sent' }).catch(() => null);
     return { sent: true, id: row?.id ?? null, providerId: body.MessageID ?? null };
   } catch (err) {
-    await recordSend({ to, subject, purpose, status: 'failed', failure: err.message }).catch(() => null);
+    if (row) await finishSend(row.id, { status: 'failed', failure: err.message }).catch(() => null);
     return { sent: false, reason: 'send_failed', message: err.message };
   }
 }

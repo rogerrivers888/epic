@@ -162,7 +162,7 @@ async function invite(req, account, { requestedBy = 'owner', returning = false }
       expiresAt: link.expires_at,
       returning,
     });
-    const sent = await sendMail({ to: account.email, ...body });
+    const sent = await sendMail({ to: account.email, ...body, purpose: returning ? 'sign_in' : 'account_invitation' });
     if (!sent.sent) { delivery = sent.reason ?? 'send_failed'; error = sent.message ?? null; }
   }
 

@@ -246,6 +246,7 @@ async function sendInvite(req, { trip, household, guest, shareToken }) {
         to: guest.contact,
         subject: `${from} has shared ${what} with you`,
         text: `${from} has shared ${what} with you on Epic.\n\nThe plan, who is coming and the chat are here — no account needed:\n${url}\n`,
+        purpose: 'shared_trip',
       });
       return 'email';
     }
