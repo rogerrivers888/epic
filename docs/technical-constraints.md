@@ -748,6 +748,30 @@ A visit holds a venue identifier from the rented layer and everything else from 
 
 ---
 
+### 13.19 Casual meet ups — **built** (owner, 13 Sep 2026; Supporting docs/Groups & events NEW/Casual meet ups; migration 095)
+
+> Owner, 13 Sep 2026: "Please go ahead and build this functionality end to end. This is not a prototype. Please build it for real."
+
+**The other half of meetups, for the things that are not events yet.** Somebody says what they are up for — standing, or for one trip — and Epic introduces them to somebody who said something that fits. It is not a fourth shape and it replaces nothing. There is **no listing, no search, no profile page and no way to ask who is in the pool**: the only thing that ever comes out of it is an introduction Epic makes. Fourteen screens (O1–O14); `migrations/095_open_to.sql`, `domain/openTo.js` (the rules, pure and tested), `repositories/openTo.js`, `routes/openTo.js`, `screens/open/UpFor.tsx` and `screens/open/Match.tsx`; addresses under `/open`.
+
+**Two tables.** `open_entries` is what one household is up for — one live standing entry per household and one per trip, both enforced by partial unique indexes. A standing entry is asked again after three months; a trip entry clears when the trip ends. `open_matches` is one introduction, and it walks one answer at a time: `host_asked → guest_asked → videos → both_yes → verified → chat`, or `lapsed`/`ended`.
+
+**The rules that decide an introduction are all in `fits()`, and they bite both ways.** A shared interest, a **shared language** (a requirement, and only fluency is ever asked about it), the distance, the kind (family meets family, never a family and an adult), and each side's preferences — **age, company and language only**. Never ethnicity, religion or nationality; never anything about a child. A preference has to fit *both* ways, so it cannot be used to hunt: if you ask for a similar age, they must be happy with yours too.
+
+**A preference Epic cannot establish is never treated as met.** "Women" and "Men" are on the O11 chip set but Epic holds no record of anybody's sex, so `companyFits()` refuses them and `unverifiablePrefs()` reports which ones, which the screen says in deep green. **Open for the owner: either a stated field, or those two chips go.** Silently widening the filter, or faking it, was not an option.
+
+**Who is told what, at each stage.** The **host is asked first** and adds the detail for that one guest; until they say yes the guest is not told the introduction exists — the list hides it and the detail 404s. A **no is silent at every stage**: nobody is ever told they were turned down, so "not this time" costs the person answering nothing. **Verdicts are hidden until both have answered**, and only a pair of yeses is ever reported (`verdictFor`). The twenty-second **hello videos are blind until both are recorded** (`videoVisible`), are used for one decision and are deleted. An unanswered introduction is **nudged once halfway and lapses after seven days**. The guest reads a first name, a town, the shared things and what the host added — **never a surname, a photograph or a contact detail**.
+
+**ID is asked once, at the gate, and only after two yeses** (O9) — not to be in the pool. **Home addresses are never shared and a first meet is never at one.** Family to family: daytime, somewhere public, both families present throughout, both adults ID-checked, ages as bands, and **no child's name or photograph and no matching or filtering by a child's sex**.
+
+**What a side is told about the other's journey** is the destination, the town they are travelling from and the **month** — never a date and never an address. The card counts the people already asked (`liveMatchCounts`) and never lists them.
+
+**None of this is held on a device.** `/api/open/**` is deliberately absent from `offline/policy.ts`: an introduction is a decision somebody is part-way through, not a record, and the unnamed-endpoints-are-not-saved fallback is what keeps the screens online-only.
+
+The word "strangers" is never used anywhere in this feature.
+
+---
+
 ## 14. Spend containment patterns
 
 Cost is the central commercial risk: provider content cannot be retained between sessions, so the same search for the same household next week bills again. Nothing amortises. A client retry loop is a direct billing event.

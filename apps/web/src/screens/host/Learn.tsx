@@ -68,6 +68,13 @@ export function LearnHome({ wide }: { wide: boolean }) {
         </View>
       </ScrollView>
       <View style={wide ? k.wide : undefined}>
+        <Press onPress={() => navigate(paths.open())} accessibilityRole="button" style={styles.upFor}>
+          <View style={{ flex: 1 }}>
+            <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>Or just say what you are up for</Text>
+            <Text style={[t.tiny, { lineHeight: 16 }]}>No date, no price, nothing to cancel. We introduce you when somebody fits.</Text>
+          </View>
+          <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+        </Press>
         <Cta quiet label="Show me what people host" onPress={() => navigate(paths.hostExamples())} style={{ paddingBottom: 14 }} />
       </View>
     </View>
@@ -280,6 +287,7 @@ const styles = StyleSheet.create({
   egTag: { alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2 },
   egTagText: { fontFamily: t.label.fontFamily, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.48, lineHeight: 12 },
   more: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderWidth: 1, borderColor: colors.ruleSoft },
+  upFor: { flexDirection: 'row', alignItems: 'center', gap: 11, marginHorizontal: 20, paddingVertical: 11, paddingHorizontal: 12, backgroundColor: colors.warm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   person: { width: '48%', flexGrow: 1, gap: 8, padding: 13, borderWidth: 1, borderColor: colors.ruleSoft },
   hero: { height: 150, borderRadius: 10, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' },

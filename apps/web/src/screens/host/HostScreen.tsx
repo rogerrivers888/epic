@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, HostHome, OfferShape, Visibility } from '../../api';
+import { api, HostHome, OfferShape, OpenHome, OpenMatch, Visibility } from '../../api';
 import { colors, fonts, type, INK, LIME } from '../../theme';
 import { Button } from '../../components/ui';
 import { Icon } from '../../components/Icon';
@@ -142,6 +142,7 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
           <Text style={[t.body, { fontSize: 15, fontWeight: '700', color: INK }]}>Add another thing you do</Text>
           <Icon name="add" size={18} color={INK} strokeWidth={2} />
         </Press>
+        <UpFor />
         {asks.length ? (
           <View style={{ gap: 7, marginTop: 8 }}>
             <Text style={t.kicker}>People have asked {first} about</Text>
@@ -188,6 +189,48 @@ function DeleteAll({ onDone }: { onDone: () => Promise<void> }) {
   );
 }
 
+/**
+ * What you are up for, and any introduction waiting on you (Casual meet ups).
+ *
+ * Nothing here is listed, so there is no menu of it — only what this household
+ * said, and the one thing Epic has brought them. An introduction the other
+ * side has not answered is not shown at all: they have not been told it exists.
+ */
+function UpFor() {
+  const { navigate } = useRouter();
+  const [home, setHome] = useState<OpenHome | null>(null);
+  const [matches, setMatches] = useState<OpenMatch[]>([]);
+  useEffect(() => {
+    api.openHome().then(setHome).catch(() => setHome(null));
+    api.openMatches().then((r) => setMatches(r.matches)).catch(() => setMatches([]));
+  }, []);
+  const standing = home?.entries.find((e) => e.scope === 'standing') ?? null;
+  const yours = matches.filter((m) => m.waitingOn === 'you');
+  return (
+    <View style={{ gap: 8, marginTop: 14 }}>
+      <Text style={t.kicker}>What you are up for</Text>
+      {yours.map((m) => (
+        <Press key={m.id} onPress={() => navigate(paths.openMatch(m.id))} accessibilityRole="button" style={styles.introRow}>
+          <View style={[k.tile30, k.lime]}><Icon name="household" size={15} color={INK} strokeWidth={2} /></View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>{m.stage === 'host_asked' ? 'We have a match' : m.stage === 'videos' ? 'Twenty seconds, when you are ready' : 'An introduction is waiting'}</Text>
+            <Text style={t.tiny} numberOfLines={1}>{m.interests.join(' · ') || 'Somebody is up for the same things'}</Text>
+          </View>
+          <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+        </Press>
+      ))}
+      <Press onPress={() => navigate(standing ? paths.openSaved() : paths.open())} accessibilityRole="button" style={styles.introRow}>
+        <View style={[k.tile30, k.warm]}><Icon name="mic" size={15} color={INK} strokeWidth={2} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>{standing ? (standing.interests.length === 1 ? 'One thing you are up for' : `${standing.interests.length} things you are up for`) : 'Just say what you are up for'}</Text>
+          <Text style={t.tiny} numberOfLines={1}>{standing ? standing.interests.join(' · ') : 'No date, no price, nothing to cancel.'}</Text>
+        </View>
+        <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+      </Press>
+    </View>
+  );
+}
+
 function Stat({ n, label }: { n: string; label: string }) {
   return <View style={styles.stat}><Text style={t.h21}>{n}</Text><Text style={styles.statLabel}>{label}</Text></View>;
 }
@@ -202,4 +245,5 @@ const styles = StyleSheet.create({
   thumb: { width: 74, height: 56, borderRadius: 8, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
   addBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, backgroundColor: LIME, marginTop: 6 },
   deleteBox: { padding: 14, gap: 10, borderWidth: 2, borderColor: colors.overrun, marginTop: 8 },
+  introRow: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
 });

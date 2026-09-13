@@ -487,6 +487,20 @@ test('the Host tab, and every page inside it', () => {
   // An invitation is outside the app.
   assert.deepEqual(roundTrip('/invited/tok'), { name: 'invited', token: 'tok' });
   assert.deepEqual(roundTrip('/i/tok'), { name: 'invitedLink', token: 'tok' });
+
+  // What you are up for (Casual meet ups, O1–O14): the fork, each step, a trip's own, and one introduction.
+  assert.deepEqual(roundTrip('/open'), { name: 'open', page: 'fork', tripId: null, matchId: null });
+  assert.deepEqual(roundTrip('/open/say'), { name: 'open', page: 'say', tripId: null, matchId: null });
+  assert.deepEqual(roundTrip('/open/heard'), { name: 'open', page: 'heard', tripId: null, matchId: null });
+  assert.deepEqual(roundTrip('/open/saved'), { name: 'open', page: 'saved', tripId: null, matchId: null });
+  assert.deepEqual(roundTrip('/open/who'), { name: 'open', page: 'who', tripId: null, matchId: null });
+  assert.deepEqual(roundTrip('/open/trip/t1'), { name: 'open', page: 'trip', tripId: 't1', matchId: null });
+  assert.deepEqual(roundTrip('/open/trip/t1/card'), { name: 'open', page: 'card', tripId: 't1', matchId: null });
+  assert.deepEqual(roundTrip('/open/matches/m1'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1' });
+  assert.equal(parseRoute('/open/nonsense').name, 'unknown');
+  assert.equal(parseRoute('/open/trip').name, 'unknown');
+  assert.equal(tabOf(parseRoute('/open')), 'host');
+  assert.equal(tabOf(parseRoute('/open/trip/t1')), 'trips');
   assert.equal(parseRoute('/i').name, 'unknown');
   assert.equal(tabOf(parseRoute('/invited/tok')), null);
   assert.equal(parseRoute('/invited').name, 'unknown');

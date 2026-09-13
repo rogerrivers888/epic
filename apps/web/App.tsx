@@ -30,6 +30,8 @@ import { ExperienceScreen } from './src/screens/ExperienceScreen';
 import { BookingScreen } from './src/screens/BookingScreen';
 import { PeopleScreen } from './src/screens/PeopleScreen';
 import { InvitedScreen, InvitedLinkScreen } from './src/screens/InvitedScreen';
+import { ForkScreen, HeardScreen as UpForHeardScreen, ListeningScreen, SavedScreen, TripIntakeScreen, WhoScreen } from './src/screens/open/UpFor';
+import { MatchScreen } from './src/screens/open/Match';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
 import { JoinScreen } from './src/screens/JoinScreen';
 import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
@@ -516,6 +518,15 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {route.name === 'people' ? <PeopleScreen household={household} /> : null}
       {route.name === 'booking' ? <BookingScreen route={route} /> : null}
       {route.name === 'experience' ? <ExperienceScreen route={route} /> : null}
+      {/* What you are up for, and the introductions it leads to (Casual meet ups). */}
+      {route.name === 'open' && route.matchId ? <MatchScreen matchId={route.matchId} /> : null}
+      {route.name === 'open' && !route.matchId && route.page === 'fork' ? <ForkScreen /> : null}
+      {route.name === 'open' && route.page === 'say' ? <ListeningScreen tripId={route.tripId} /> : null}
+      {route.name === 'open' && route.page === 'heard' ? <UpForHeardScreen tripId={route.tripId} /> : null}
+      {route.name === 'open' && route.page === 'saved' ? <SavedScreen tripId={null} /> : null}
+      {route.name === 'open' && route.page === 'who' ? <WhoScreen tripId={route.tripId} /> : null}
+      {route.name === 'open' && route.page === 'trip' && route.tripId ? <TripIntakeScreen tripId={route.tripId} /> : null}
+      {route.name === 'open' && route.page === 'card' && route.tripId ? <SavedScreen tripId={route.tripId} /> : null}
       {route.name === 'household' && route.voice && route.memberId ? <TellScreen memberId={route.memberId} mode={route.voice} household={household} refresh={refreshHousehold} /> : null}
       {/* Voice intake (handoff, 8 Sep 2026): the mic, the wizard, the card, its questions; first run and the two-minute set-up. */}
       {route.name === 'say' && !route.intakeId && !route.steps ? <SayScreen household={household} /> : null}

@@ -286,6 +286,12 @@ export type Route =
   | { name: 'invited'; token: string }
   /** The host's own invitation link, passed round (lanes A and B, C2): /i/<token> opens the offer it names. */
   | { name: 'invitedLink'; token: string }
+  /**
+   * "Just say what you are up for" (Casual meet ups, O1–O14): the intake, the
+   * card it saves, who you would rather meet, and one introduction at a time.
+   * `trip` scopes the intake to a trip; without it, it is standing.
+   */
+  | { name: 'open'; page: 'fork' | 'say' | 'heard' | 'saved' | 'who' | 'trip' | 'card'; tripId: string | null; matchId: string | null }
   /** A host's public profile, and the trust ladder over it. Works logged-out. */
   | { name: 'hostProfile'; hostId: string; layer: 'trust' | null }
   /** One experience, and the two layers over it: the booking sheet and the formats. */
@@ -484,6 +490,24 @@ export function parseRoute(path: string): Route {
     case 'i':
       return a && !b ? { name: 'invitedLink', token: a } : { name: 'unknown', path };
 
+    /**
+     * What somebody is up for. `/open` is the fork, `/open/say` the listening,
+     * `/open/heard` the chips, `/open/saved` the card, `/open/who` who you
+     * would rather meet, `/open/trip/<id>` a trip's intake and its card, and
+     * `/open/matches/<id>` one introduction, whichever stage it is at.
+     */
+    case 'open': {
+      if (!a) return { name: 'open', page: 'fork', tripId: null, matchId: null };
+      if (a === 'matches') return b && !c ? { name: 'open', page: 'fork', tripId: null, matchId: b } : { name: 'unknown', path };
+      if (a === 'trip') {
+        if (!b) return { name: 'unknown', path };
+        if (!c) return { name: 'open', page: 'trip', tripId: b, matchId: null };
+        return c === 'card' && segments.length === 4 ? { name: 'open', page: 'card', tripId: b, matchId: null } : { name: 'unknown', path };
+      }
+      if (['say', 'heard', 'saved', 'who'].includes(a) && !b) return { name: 'open', page: a as 'say', tripId: null, matchId: null };
+      return { name: 'unknown', path };
+    }
+
     case 'shared':
       return a ? { name: 'shared', token: a } : { name: 'unknown', path };
 
@@ -531,6 +555,11 @@ export function hrefOf(route: Route): string {
                         : buildHref(['host', 'offers', route.offerId, route.page === 'edit' ? 'edit' : null]);
     case 'invited': return buildHref(['invited', route.token]);
     case 'invitedLink': return buildHref(['i', route.token]);
+    case 'open':
+      if (route.matchId) return buildHref(['open', 'matches', route.matchId]);
+      if (route.page === 'trip') return buildHref(['open', 'trip', route.tripId]);
+      if (route.page === 'card') return buildHref(['open', 'trip', route.tripId, 'card']);
+      return buildHref(['open', route.page === 'fork' ? null : route.page]);
     case 'hostProfile': return buildHref(['hosts', route.hostId, route.layer]);
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
     case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
@@ -612,6 +641,15 @@ export const paths = {
   hostMe: () => '/host/profile',
   invited: (token: string) => buildHref(['invited', token]),
   invitedLink: (token: string) => buildHref(['i', token]),
+  /** What you are up for: the fork, and each step of the intake. `trip` scopes it to a trip. */
+  open: () => '/open',
+  openSay: (tripId?: string | null) => `/open/say${tripId ? `?trip=${encodeURIComponent(tripId)}` : ''}`,
+  openHeard: (tripId?: string | null) => `/open/heard${tripId ? `?trip=${encodeURIComponent(tripId)}` : ''}`,
+  openSaved: () => '/open/saved',
+  openWho: (tripId?: string | null) => `/open/who${tripId ? `?trip=${encodeURIComponent(tripId)}` : ''}`,
+  openTrip: (tripId: string) => buildHref(['open', 'trip', tripId]),
+  openTripCard: (tripId: string) => buildHref(['open', 'trip', tripId, 'card']),
+  openMatch: (id: string) => buildHref(['open', 'matches', id]),
   hostNewOffer: (shape?: string | null) => (shape ? `/host/offers/new?shape=${shape}` : '/host/offers/new'),
   hostOffer: (id: string) => buildHref(['host', 'offers', id]),
   /** A step is named, not numbered: the sequence differs by shape, visibility and money. */
@@ -704,6 +742,8 @@ export function ownsHeader(route: Route): boolean {
    * its own back (Hosts and Events, H1–H4, W1–W5, D1).
    */
   if (route.name === 'host' || route.name === 'people' || route.name === 'booking') return true;
+  // Saying what you are up for is a form, and an introduction is one thing: each draws its own head.
+  if (route.name === 'open') return true;
   // The booking sheet draws its own "Book this" head; the shell's band above it would be a second one.
   if (route.name === 'experience') return true;
   if (route.name === 'inspire') return !route.searching;
@@ -765,6 +805,7 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // The learn layer keeps the bar (it is still the tab); the set-up, the
   // profile and the recorder take the phone whole.
   if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who'].includes(route.page);
+  if (route.name === 'open') return true;
   if (route.name === 'booking') return true;
   // The booking sheet is a form under a keyboard: it takes the phone whole. So is asking the host something.
   if (route.name === 'experience') return route.layer === 'book' || route.layer === 'ask';
@@ -792,6 +833,8 @@ export function tabOf(route: Route): Tab | null {
     case 'household': return 'settings';
     case 'settings': return 'settings';
     case 'host': return 'host';
+    // Saying what you are up for belongs to hosting; a trip's intake belongs to that trip.
+    case 'open': return route.tripId ? 'trips' : 'host';
     case 'people': return 'inspire';
     case 'booking': return 'trips';
     case 'prototypes': return 'prototypes';
@@ -897,6 +940,7 @@ export function titleOf(route: Route): string {
     case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
     case 'invited': return epic('You are invited');
     case 'invitedLink': return epic('You are invited');
+    case 'open': return epic(route.matchId ? 'An introduction' : route.page === 'who' ? 'Who you would rather meet' : 'What you are up for');
     case 'hostProfile': return epic(route.layer === 'trust' ? 'How Epic checks hosts' : 'A host');
     case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
     case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');

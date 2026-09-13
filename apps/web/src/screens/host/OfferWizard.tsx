@@ -937,13 +937,24 @@ function Basics({ home, onChanged }: { home: HostHome | null; onChanged: () => P
 }
 
 function Kind({ home, onChanged, save }: { home: HostHome | null; onChanged: () => Promise<void>; save: Save }) {
+  const { navigate } = useRouter();
   const h = home?.host ?? null;
   const set = async (patch: Parameters<typeof api.updateHost>[0]) => { await api.updateHost(patch); await onChanged(); await save({}); };
   return (
     <View>
       <View style={[k.gutter, { paddingTop: 16 }]}><Text style={t.h25}>Which sounds most like you?</Text></View>
-      <View style={[k.gutter, { paddingTop: 14 }]}>
+      <View style={[k.gutter, { paddingTop: 14, gap: 12 }]}>
         <KindChooser kind={h?.type ?? null} sub={h?.localKind ?? null} onKind={(kind) => void set({ type: kind, localKind: kind === 'meetups' ? h?.localKind ?? null : null })} onSub={(s) => void set({ type: 'meetups', localKind: s })} />
+        {/* Meetups forks: define an event, or just say what you are up for (Casual meet ups, O1). */}
+        {h?.type === 'meetups' ? (
+          <Press onPress={() => navigate(paths.open())} accessibilityRole="button" style={styles.upForRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>Or just say what you are up for</Text>
+              <Text style={[t.tiny, { lineHeight: 16 }]}>No date, no price, nothing to cancel. We introduce you when somebody fits.</Text>
+            </View>
+            <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+          </Press>
+        ) : null}
       </View>
     </View>
   );
@@ -1311,6 +1322,7 @@ const styles = StyleSheet.create({
   laneLine: { fontFamily: t.label.fontFamily, fontSize: 11.5, fontWeight: '600', color: colors.accent, marginTop: -4, marginBottom: 2, marginLeft: 4, lineHeight: 15, paddingTop: 8 },
   wheel: { borderWidth: 1, borderColor: colors.ruleSoft, padding: 12, gap: 10 },
   docBanner: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 11, paddingHorizontal: 12, backgroundColor: colors.surfaceMuted },
+  upForRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 12, backgroundColor: colors.warm },
   calendar: { borderWidth: 1, borderColor: colors.ruleSoft, padding: 13, marginTop: 2 },
   weekRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   weekN: { ...t.kicker, fontFamily: t.label.fontFamily, fontSize: 10.5, textTransform: 'none', width: 56, lineHeight: 13 },

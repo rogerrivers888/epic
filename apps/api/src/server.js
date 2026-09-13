@@ -28,6 +28,7 @@ import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hosti
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import postmarkRoutes from './routes/postmark.js';
+import openToRoutes, { startOpenToLoop } from './routes/openTo.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
 import lookupRoutes from './routes/lookup.js';
 import { router as localityRoutes } from './routes/localities.js';
@@ -158,6 +159,8 @@ app.use('/api/photos', photoLimit);
 // Mounted before the household routes so nothing about other people's accounts
 // can be reached through a path that resolves to the caller's own household.
 app.use('/api/accounts', requireDoor('admin'), accountRoutes);
+// What people are up for, and the introductions between them (routes/openTo.js).
+app.use('/api', openToRoutes);
 app.use('/api/admin', requireDoor('admin'), adminRoutes);
 // What became of the e-mails we sent, from Postmark, admitted by its own token.
 app.use('/api/postmark', postmarkRoutes);
@@ -479,6 +482,8 @@ setTimeout(() => { ensureTaxonomyReady().catch(() => null); }, 5000).unref?.();
 startReminderLoop();
 // Held bookings are decided on their day (routes/hosting.js).
 startHostingLoop();
+// Nudge an unanswered introduction once, let it go after a week, clear a trip entry when the trip has been.
+startOpenToLoop();
 startChatLoop();
 // A harvest of the atlas cannot survive a restart, and this process restarting
 // is exactly what has just happened. Anything the last one left saying

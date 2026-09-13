@@ -302,3 +302,124 @@ export function StatCell({ label, value, hot }: { label: string; value: string; 
     </View>
   );
 }
+
+// ---------------------------------------------------------------------------
+// the pieces "what you are up for" draws (Casual meet ups, O1–O14)
+// ---------------------------------------------------------------------------
+
+/**
+ * A plain fact, carrying a guarantee: a 2px ink left rule, 11px of padding and
+ * no fill. The board uses it for every promise the flow makes — "they do not
+ * know you exist", "a no is silent" — so it is one component, not a style
+ * copied per screen.
+ */
+export function Aside({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={{ borderLeftWidth: 2, borderLeftColor: colors.line, paddingLeft: 11, paddingVertical: 1 }}>
+      <Text style={[t.small, { lineHeight: 18 }]}>{children}</Text>
+    </View>
+  );
+}
+
+/** A refusal: a 1px red rule and red type. The two family rules, and the one about addresses. */
+export function RedNote({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 9, alignItems: 'flex-start', paddingVertical: 11, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.overrun }}>
+      <Icon name="alert" size={15} color={colors.overrun} strokeWidth={2} />
+      <Text style={[t.small, { flex: 1, fontWeight: '600', color: colors.overrun, lineHeight: 17 }]}>{children}</Text>
+    </View>
+  );
+}
+
+/**
+ * A chip. Lime is what you said this time and carries an × to take it off;
+ * warm grey is a fact from your profile or the trip, and taps to change it.
+ * The project keeps this pairing everywhere, so the colour is the meaning.
+ */
+export function SaidChip({ label, onRemove }: { label: string; onRemove?: () => void }) {
+  return (
+    <View style={[styles.chipBase, { backgroundColor: LIME, borderColor: LIME }]}>
+      <Text style={[t.body, { fontSize: 13.5, fontWeight: '600', color: INK, lineHeight: 17 }]}>{label}</Text>
+      {onRemove ? <Press onPress={onRemove} accessibilityRole="button" accessibilityLabel={`Take off ${label}`} hitSlop={8}><Icon name="close" size={13} color={INK} strokeWidth={2.4} /></Press> : null}
+    </View>
+  );
+}
+
+export function FactChip({ label, onPress }: { label: string; onPress?: () => void }) {
+  const body = (
+    <View style={[styles.chipBase, { backgroundColor: colors.warm, borderColor: colors.ruleSoft }]}>
+      <Text style={[t.body, { fontSize: 13.5, fontWeight: '600', color: colors.ink, lineHeight: 17 }]}>{label}</Text>
+    </View>
+  );
+  return onPress ? <Press onPress={onPress} accessibilityRole="button">{body}</Press> : body;
+}
+
+/** One of a set you pick from: lime and 700 when it is on, warm grey when it is not. */
+export function ChoiceChip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.chipBase, { paddingVertical: 9, paddingHorizontal: 12, backgroundColor: on ? LIME : colors.warm, borderColor: on ? LIME : colors.ruleSoft }]}>
+      <Text style={[t.body, { fontSize: 13.5, fontWeight: on ? '700' : '600', color: on ? INK : colors.ink, lineHeight: 17 }]}>{label}</Text>
+      {on ? <Icon name="check" size={13} color={INK} strokeWidth={3} /> : null}
+    </Press>
+  );
+}
+
+/** A ruled row: a 30px warm tile, a title and a line under it. The board's workhorse. */
+export function InfoRow({ icon, title, line, onPress }: { icon: IconName; title: string; line?: string | null; onPress?: () => void }) {
+  const body = (
+    <View style={{ flexDirection: 'row', gap: 11, alignItems: 'flex-start', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft }}>
+      <View style={[k.tile30, k.warm, { borderWidth: 1, borderColor: colors.ruleSoft }]}><Icon name={icon} size={15} color={INK} strokeWidth={2} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>{title}</Text>
+        {line ? <Text style={[t.small, { lineHeight: 17, marginTop: 1 }]}>{line}</Text> : null}
+      </View>
+      {onPress ? <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} /> : null}
+    </View>
+  );
+  return onPress ? <Press onPress={onPress} accessibilityRole="button">{body}</Press> : body;
+}
+
+/** The lime success block: a 44px ink square with a lime tick, a heading and a deep-green line. */
+export function DoneBlock({ title, line }: { title: string; line: string }) {
+  return (
+    <View style={[k.limeBlock, { padding: 18, flexDirection: 'row', gap: 12, alignItems: 'center' }]}>
+      <View style={[k.tile44, k.ink]}><Icon name="check" size={24} color={LIME} strokeWidth={3} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={[t.h21, { color: INK }]}>{title}</Text>
+        <Text style={[t.small, { color: colors.onLime, marginTop: 2, lineHeight: 16 }]}>{line}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** A consequence, at size: lime tint, no rule, deep-green type. */
+export function TintBlock({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <View style={{ backgroundColor: colors.surfaceMuted, padding: 15, gap: 6 }}>
+      {title ? <Text style={[t.h21, { lineHeight: 24 }]}>{title}</Text> : null}
+      <Text style={[t.label, { fontWeight: '400', color: colors.accent, lineHeight: 19 }]}>{children}</Text>
+    </View>
+  );
+}
+
+/** Two buttons side by side: one filled, one ruled. The answer to every question in this flow. */
+export function TwoWay({ yes, no, onYes, onNo, tone = 'lime', icon, busy, wide = 1.4 }: {
+  yes: string; no: string; onYes: () => void; onNo: () => void; tone?: 'lime' | 'ink'; icon?: IconName; busy?: boolean; wide?: number;
+}) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      <Press onPress={onYes} disabled={busy} accessibilityRole="button" style={[styles.answer, { flex: wide, backgroundColor: tone === 'lime' ? LIME : colors.primary }, busy && { opacity: 0.6 }]}>
+        {icon ? <Icon name={icon} size={16} color={tone === 'lime' ? INK : colors.primaryFg} strokeWidth={2} /> : null}
+        <Text style={[t.body, { fontWeight: '700', color: tone === 'lime' ? INK : colors.primaryFg }]}>{yes}</Text>
+      </Press>
+      <Press onPress={onNo} disabled={busy} accessibilityRole="button" style={[styles.answer, { flex: 1, borderWidth: 1, borderColor: colors.line }, busy && { opacity: 0.6 }]}>
+        <Text style={[t.body, { fontWeight: '700' }]}>{no}</Text>
+      </Press>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  chipBase: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 11, borderWidth: 1 },
+  answer: { height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+});

@@ -1896,6 +1896,30 @@ export const api = {
   invited: (token: string) => request<InvitedView>(`/api/invited/${token}`),
   invitedLink: (token: string) => request<{ offerId: string; title: string | null; visibility: Visibility }>(`/api/invited/link/${encodeURIComponent(token)}`),
   hostContacts: () => request<{ contacts: HostContact[] }>('/api/host/contacts'),
+  // What you are up for, and the introductions it leads to. Nothing here lists anybody.
+  openHome: () => request<OpenHome>('/api/open'),
+  openHeard: (transcript: string) => post<{ heard: OpenHeard; transcript: string }>('/api/open/heard', { transcript }),
+  saveOpen: (body: { scope: OpenScope; tripId?: string | null; interests: string[]; level?: string[]; when?: string[]; where?: string | null; miles?: number | null; languages?: OpenLanguage[]; kind?: OpenKind; childAgeBands?: string[]; transcript?: string | null }) =>
+    post<{ entry: OpenEntry; introduced: number }>('/api/open', body),
+  openWho: (id: string, prefs: { age?: string; company?: string[]; fluency?: string; languages?: OpenLanguage[] }) =>
+    request<{ entry: OpenEntry }>(`/api/open/${id}/who`, { method: 'PATCH', body: JSON.stringify(prefs) }),
+  endOpen: (id: string) => request<void>(`/api/open/${id}`, { method: 'DELETE' }),
+  openMatches: () => request<{ matches: OpenMatch[] }>('/api/open/matches'),
+  openMatch: (id: string) => request<{ match: OpenMatch }>(`/api/open/matches/${id}`),
+  openHostAnswer: (id: string, body: { answer: 'yes' | 'no'; where?: string | null; note?: string | null }) => post<{ match: OpenMatch }>(`/api/open/matches/${id}/host`, body),
+  openGuestAnswer: (id: string, answer: 'yes' | 'no') => post<{ match: OpenMatch }>(`/api/open/matches/${id}/guest`, { answer }),
+  openHello: async (id: string, blob: Blob, seconds: number) => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/open/matches/${id}/hello?seconds=${Math.round(seconds)}`, {
+      method: 'POST', credentials: 'include', body: blob,
+      headers: { 'content-type': blob.type || 'video/webm', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || 'That did not send.');
+    return body as { match: OpenMatch };
+  },
+  openDecide: (id: string, answer: 'yes' | 'no') => post<{ match: OpenMatch }>(`/api/open/matches/${id}/decide`, { answer }),
+  openVerify: (id: string) => post<{ match: OpenMatch }>(`/api/open/matches/${id}/verify`, {}),
   addHostContact: (c: { name: string; mobile?: string | null; email?: string | null }) => post<{ contact: HostContact }>('/api/host/contacts', c),
   removeHostContact: (id: string) => request<void>(`/api/host/contacts/${id}`, { method: 'DELETE' }),
   answerInvite: (token: string, rsvp: 'yes' | 'no', heads?: number | null) => post<{ invite: OfferInvite }>(`/api/invited/${token}`, { rsvp, heads }),
@@ -3334,6 +3358,51 @@ export type ExperienceBooking = {
 };
 export type PitchChecklist = { what: string; home: string; suits: string; notSuits: string; photos: string };
 /** The host's own offer: the guest's view, plus the roster, the money and what stands between it and Publish. */
+// ---------------------------------------------------------------------------
+// "Just say what you are up for" (Casual meet ups, O1–O14)
+// ---------------------------------------------------------------------------
+
+export type OpenScope = 'standing' | 'trip';
+export type OpenKind = 'adult' | 'family';
+export type OpenLanguage = { name: string; level: 'fluent' | 'some' };
+/** What somebody is up for. No date, no price, no cap, no venue and no listing. */
+export type OpenEntry = {
+  id: string; scope: OpenScope; tripId: string | null; kind: OpenKind;
+  interests: string[]; level: string[]; when: string[];
+  where: string | null; miles: number | null; languages: OpenLanguage[]; money: string;
+  prefs: { age: 'any' | 'similar'; company: string[]; fluency: 'fluent' | 'some' };
+  /** Preferences Epic holds nothing to check, so the screen says so rather than implying it filtered. */
+  cannotHonour: string[];
+  childAgeBands: string[]; transcript: string | null; state: string;
+  /** How many people Epic has already asked on this entry's behalf. A count, never a list. */
+  asked: number;
+  reviewDueAt: string | null; expiresAt: string | null; updatedAt: string;
+};
+export type OpenHome = {
+  entries: OpenEntry[];
+  you: { party: string; languages: OpenLanguage[]; home: string | null; miles: number | null };
+  config: { helloSeconds: number; company: string[]; agePrefs: string[]; fluency: string[]; listening: boolean };
+};
+/** What the listener made of what was said — chips to confirm, never a transcript to proof-read. */
+export type OpenHeard = { interests: string[]; level: string[]; when: string[]; languages: string[] };
+/** One introduction, at whatever stage it is at, shaped by what this side may know. */
+export type OpenMatch = {
+  id: string; stage: 'host_asked' | 'guest_asked' | 'videos' | 'both_yes' | 'verified' | 'chat' | 'lapsed' | 'ended';
+  kind: OpenKind; side: 'host' | 'guest'; interests: string[];
+  waitingOn: 'you' | 'them' | null; lapsesAt: string;
+  video: { mine: string | null; theirs: string | null; waiting: boolean; seconds: number; gone: boolean };
+  /** Nothing of theirs until both have answered, and a no is never reported at all. */
+  verdict: { mine: boolean | null; theirs: boolean | null; settled: boolean; introduced?: boolean };
+  verified: { you: boolean; them: boolean };
+  /** The language the two of you share, and how well you speak it. */
+  language: { name: string; level: string } | null;
+  /** Your own first name and journey — what the screens use to speak to you; never sent the other way. */
+  you: { name: string | null; journey: { from: string | null; to: string | null; when: string | null } | null };
+  from?: string | null; origin?: string | null; when?: string | null; childAgeBands?: string[]; name?: string | null;
+  detail?: { where: string | null; note: string | null };
+  introduction?: { name: string; town: string | null; interests: string[]; where: string | null; note: string | null; language: { name: string; level: string } | null };
+};
+
 /** One of my Epic contacts: everyone this household has invited (lanes A and B, C2f). */
 export type HostContact = { id: string; name: string; mobile: string | null; email: string | null; timesInvited: number; lastInvitedAt: string | null };
 export type OwnOffer = Experience & {

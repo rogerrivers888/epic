@@ -38,6 +38,15 @@ const isChat = (p: string) => /^\/api\/chat\/(trip|offer)\/[^/]+(\/topics\/[^/]+
 const isJoinChat = (p: string) => /^\/api\/join\/[^/]+\/chat(\/[^/]+)?$/.test(p);
 /** The FAQ on a listing: the one place an answer becomes long-lived public content. Its own branch, not the chat's. */
 const isFaq = (p: string) => /^\/api\/experiences\/[^/]+\/faq$/.test(p);
+/**
+ * Casual meet ups (13 Sep 2026) is deliberately absent from this file, and
+ * `/api/open/**` must stay absent. An introduction is a decision somebody is
+ * part-way through, not a record: a verdict is hidden until both sides have
+ * answered, the twenty-second videos are held for one decision and deleted,
+ * and a "not this time" is silent. A copy on a device would outlive all three.
+ * The screens are online-only by design, and the fallback — an endpoint not
+ * named here is not saved — is what keeps them that way.
+ */
 const isTripTravel = (p: string) => /^\/api\/trips\/[^/]+\/travel$/.test(p);
 const isDirections = (p: string) => /^\/api\/trips\/[^/]+\/directions$/.test(p);
 const isVisit = (p: string) => /^\/api\/visits\/[^/]+$/.test(p);
