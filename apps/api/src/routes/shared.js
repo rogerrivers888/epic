@@ -158,7 +158,7 @@ router.post('/:token/enter', async (req, res, next) => {
       await chat.insertGuestCode(guest.id, code, new Date(Date.now() + CODE_MINUTES * 60_000));
       const what = trip.title || trip.place_label || 'the trip';
       try {
-        if (isEmail) await sendMail({ to: contact, subject: `Your code for ${what}`, text: `Your code is ${code}. It works for ${CODE_MINUTES} minutes.` });
+        if (isEmail) await sendMail({ to: contact, subject: `Your code for ${what}`, text: `Your code is ${code}. It works for ${CODE_MINUTES} minutes.`, purpose: 'code' });
         else await sendSms({ to: contact, text: `Epic: your code for ${what} is ${code}. It works for ${CODE_MINUTES} minutes.` });
       } catch {
         return res.json({ guestId: guest.id, sent: null, message: "That code couldn't be sent. Ask whoever shared the trip to send you your own link." });
@@ -217,6 +217,11 @@ async function requireGuest(req, trip, res) {
   const guest = await guestOf(req, trip);
   if (!guest || guest.status !== 'joined') {
     res.status(403).json({ error: 'not_in', message: 'Say who you are first.' });
+    return null;
+  }
+  // A guest row that stands for a group participant opens nothing once they have left the group (Codex, 13 Sep 2026).
+  if (await chat.guestWithdrawn(guest)) {
+    res.status(403).json({ error: 'not_in', message: 'You are no longer on this trip.' });
     return null;
   }
   return guest;

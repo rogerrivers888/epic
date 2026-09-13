@@ -176,6 +176,13 @@ export async function guestForParticipant(tripId, participant, token) {
   return rows[0];
 }
 
+/** Whether the participant a guest row stands for has left the group. False for a plain share-link guest. */
+export async function guestWithdrawn(guest) {
+  if (!guest?.participant_id) return false;
+  const { rows } = await query('select withdrawn_at from group_participants where id = $1', [guest.participant_id]);
+  return !rows[0] || Boolean(rows[0].withdrawn_at);
+}
+
 export async function removeGuest(tripId, guestId) {
   const { rowCount } = await query('delete from trip_guests where id = $1 and trip_id = $2', [guestId, tripId]);
   return rowCount;

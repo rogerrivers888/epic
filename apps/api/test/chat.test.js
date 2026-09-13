@@ -401,4 +401,6 @@ test('a participant who withdrew is no longer in the conversation', async () => 
   const inChat = guests.filter((x) => x.status === 'joined' && (!x.participant_id || active.has(x.participant_id)));
   assert.equal(guests.some((x) => x.id === g.id), true, 'the row is still there');
   assert.equal(inChat.some((x) => x.id === g.id), false, 'but they are not in the conversation');
+  assert.equal(await guestRepo.guestWithdrawn(g), true, 'and their token opens nothing');
+  assert.equal(await guestRepo.guestWithdrawn({ participant_id: null }), false, 'a plain share-link guest is unaffected');
 });
