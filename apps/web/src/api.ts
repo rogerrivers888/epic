@@ -2212,6 +2212,9 @@ export const api = {
   /** A group's suggestions approved in one press: rules and set-asides together. */
   taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; reason?: string | null }[]) =>
     post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
+  /** Google's own word becomes a subcategory of ours under this category, and the word is mapped to it — one transaction. */
+  taxonomyAdopt: (body: { label: string; categoryKey: string; name?: string }) =>
+    post<{ subcategory: ShelfSubcategory; rule: TaxonomyRule; created: boolean }>('/api/admin/taxonomy/adopt', body),
   /** Where a set of labels would land right now, without saving anything. */
   taxonomyTry: (labels: string[]) => post<TaxonomyTry>('/api/admin/taxonomy/try', { labels }),
   taxonomySaveLabel: (body: { namespace: string; key: string; label?: string | null; active?: boolean }) =>

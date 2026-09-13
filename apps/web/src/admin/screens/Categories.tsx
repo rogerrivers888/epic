@@ -802,11 +802,9 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const adoptWord = async (r: TaxonomyLabel, categoryKey: string) => {
     setBusyKey(r.key);
     try {
-      const { subcategory } = await api.shelfSaveSubcategory({ categoryKey: categoryKey as MoodKey, label: r.label ?? r.key });
-      const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: subcategory.key, reason: `Adopted Google's own word, ${r.label ?? r.key}.` }]);
-      if (out.failed.length) throw new Error(out.failed[0].error);
+      const { subcategory, created } = await api.taxonomyAdopt({ label: `google:${r.key}`, categoryKey, name: r.label ?? r.key });
       await reload();
-      await onChanged(`New subcategory ${subcategory.label} under ${catLabel(categoryKey)}, with ${r.label ?? r.key} mapped to it.`);
+      await onChanged(`${created ? 'New subcategory' : 'Subcategory'} ${subcategory.label} under ${catLabel(categoryKey)}, with ${r.label ?? r.key} mapped to it.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };

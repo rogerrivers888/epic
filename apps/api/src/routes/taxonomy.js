@@ -28,7 +28,7 @@
 
 import { Router } from 'express';
 import { requires } from '../access.js';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
@@ -336,6 +336,58 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
       } catch (err) { failed.push({ labels, error: String(err.message ?? err) }); }
     }
     res.json({ done, failed });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /adopt { label, categoryKey, name } — Google's own word becomes a
+ * subcategory of ours, under the category picked, and the word is mapped to
+ * it: one transaction, so neither half can be left without the other. A
+ * subcategory already spelled that way under the same category is reused;
+ * under another category it is refused rather than moved (Codex, 13 Sep 2026).
+ */
+const slugOf = (text) => String(text || '').toLowerCase().trim().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next) => {
+  try {
+    await ready();
+    const label = String(req.body?.label || '');
+    const parsed = parseLabel(label);
+    if (!parsed) throw bad('Say which word.');
+    const name = String(req.body?.name || parsed.key.replace(/_/g, ' ')).trim();
+    const key = slugOf(name);
+    if (!key) throw bad('The new subcategory needs a name.');
+    const tax = await taxonomy.taxonomy();
+    const categoryKey = String(req.body?.categoryKey || '');
+    if (!tax.byKey.has(categoryKey)) throw bad(`${categoryKey} is not a category`);
+    const existing = tax.subByKey.get(key) ?? null;
+    if (existing && existing.category_key !== categoryKey) {
+      throw bad(`There is already a subcategory called ${existing.label} under ${tax.byKey.get(existing.category_key)?.label ?? existing.category_key}. Pick it from the list, or rename that one first.`);
+    }
+    const { subject } = scopeFor([label]);
+    const result = await withTransaction(async (c) => {
+      let sc = existing;
+      if (!sc) {
+        const ins = await c.query(
+          `insert into shelf_subcategories (category_key, key, label, position, seeded) values ($1, $2, $3, 100, false) returning *`,
+          [categoryKey, key, name]);
+        sc = ins.rows[0];
+      }
+      const rule = await c.query(
+        `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded, labels)
+         values ('labels', $1, $2, '{}', $3, $4, $5, false, $6)
+         on conflict (scope, subject) do update
+            set subcategory = excluded.subcategory, reason = excluded.reason, taught_by = excluded.taught_by, seeded = false, labels = excluded.labels, updated_at = now()
+         returning *`,
+        [subject, name, sc.key, `Adopted Google's own word, ${name}.`, actorOf(req), [label]]);
+      await c.query(`update taxonomy_labels set decision = null, active = true, updated_at = now() where namespace = $1 and key = $2`, [parsed.namespace, parsed.key]);
+      await c.query(
+        `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+         values ($1,$2,'taxonomy.adopt','shelf_subcategory',$3,$4,$5)`,
+        [req.account?.id ?? null, actorOf(req), sc.id, `${categoryKey} · ${sc.label}`, JSON.stringify({ label, created: !existing, ruleId: rule.rows[0].id })]);
+      return { subcategory: sc, rule: rule.rows[0], created: !existing };
+    });
+    shelfRules.forget(); taxonomy.forget();
+    res.json(result);
   } catch (err) { next(err); }
 });
 
