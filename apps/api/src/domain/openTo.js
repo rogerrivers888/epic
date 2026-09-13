@@ -90,6 +90,33 @@ export function sharedLanguages(a = [], b = []) {
 }
 const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 : 0);
 
+/**
+ * A place, cut down to somewhere you could name in a sentence.
+ *
+ * A household's home is held as whatever they typed — often a full address
+ * ("Fairways, Titlarks Hill, Ascot, SL5 0JD") — and a trip's origin is the
+ * same. Nothing in this feature may ever carry that: a home address is never
+ * shared, and the guest is told a *town*. So a label is trimmed to its town
+ * before it goes anywhere, and it is done here rather than at each of the four
+ * places a label travels, because one of them would have been missed.
+ *
+ * The rule: drop anything that looks like a postcode, and of what is left take
+ * the last part. "12 High Street, Windsor" is Windsor; "Reading" is Reading;
+ * "Ascot, Berkshire" becomes Berkshire, which is broader than the truth and
+ * never narrower — the direction that is safe to be wrong in.
+ */
+/**
+ * A part is a code rather than a place when it carries a digit and is made of
+ * nothing but digits, capitals, spaces and hyphens: "SL5 0JD", "1100-053",
+ * "20500", "K1A 0B1", "1012 AB". A town does not look like that, and the few
+ * that carry a digit at all are not written in capitals.
+ */
+const POSTCODE = /^(?=.*\d)[A-Z0-9][A-Z0-9 -]*$/;
+export function townOf(label) {
+  const parts = String(label ?? '').split(',').map((p) => p.trim()).filter(Boolean).filter((p) => !POSTCODE.test(p));
+  return parts.length ? parts[parts.length - 1] : null;
+}
+
 /** The language the two share, at the level each holds it, or null. */
 export function sharedLanguage(a = [], b = []) {
   return sharedLanguages(a, b)[0] ?? null;
@@ -262,7 +289,9 @@ export function livesUntil({ scope, tripEnd }, now = new Date()) {
  */
 export function introductionOf({ match, host, hostName, language }) {
   const first = String(hostName ?? '').trim().split(/\s+/)[0] || 'Somebody';
-  const town = host?.where_label ?? null;
+  // A town, never an address: whatever the household typed as home, this is
+  // the most anybody on the other side is ever told.
+  const town = townOf(host?.where_label);
   return {
     name: first,
     town,

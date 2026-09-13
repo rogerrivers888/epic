@@ -16,7 +16,7 @@ import { aHousehold, testDatabase } from './helpers/db.js';
 const { query } = await testDatabase();
 const repo = await import('../src/repositories/openTo.js');
 const {
-  companyFits, fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue,
+  companyFits, fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue, townOf,
   partyOf, sharedInterests, sharedLanguage, similarAge, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
 } = await import('../src/domain/openTo.js');
 
@@ -505,4 +505,32 @@ test('what an upload is for decides who may read it, and forgetting fails safe',
   assert.equal(hostMediaPurpose('evidence'), 'evidence');
   assert.equal(hostMediaPurpose(undefined), 'evidence', 'a purpose nobody named is not public');
   assert.equal(hostMediaPurpose('something else'), 'evidence');
+});
+
+test('a place is cut down to a town before it goes anywhere', () => {
+  // A household's home is whatever they typed, and often that is the house.
+  assert.equal(townOf('Fairways, Titlarks Hill, Ascot, SL5 0JD'), 'Ascot');
+  assert.equal(townOf('12 High Street, Windsor, SL4 1AA'), 'Windsor');
+  assert.equal(townOf('Reading'), 'Reading');
+  assert.equal(townOf('Lisbon'), 'Lisbon');
+  assert.equal(townOf('1600 Pennsylvania Ave, Washington, 20500'), 'Washington');
+  assert.equal(townOf('Rua Augusta 100, Lisboa, 1100-053'), 'Lisboa');
+  // Broader than the truth is the safe direction to be wrong in.
+  assert.equal(townOf('Ascot, Berkshire'), 'Berkshire');
+  assert.equal(townOf(null), null);
+  assert.equal(townOf('   '), null);
+  assert.equal(townOf('SL5 0JD'), null, 'a postcode on its own is not a town');
+  assert.equal(townOf('K1A 0B1'), null);
+  assert.equal(townOf('1012 AB, Amsterdam'), 'Amsterdam');
+  assert.equal(townOf('Stoke-on-Trent'), 'Stoke-on-Trent', 'a hyphen is not a postcode');
+});
+
+test('what the guest is told is a town, whatever the host typed as home', () => {
+  const match = { interests: ['Chess club'], host_where: null, host_note: null };
+  const host = { where_label: 'Fairways, Titlarks Hill, Ascot, SL5 0JD' };
+  const intro = introductionOf({ match, host, hostName: 'Roger Sumner-Rivers', language: null });
+  assert.equal(intro.town, 'Ascot', 'never the house, never the postcode');
+  assert.equal(intro.name, 'Roger', 'and never a surname');
+  assert.ok(!JSON.stringify(intro).includes('Titlarks'));
+  assert.ok(!JSON.stringify(intro).includes('SL5'));
 });

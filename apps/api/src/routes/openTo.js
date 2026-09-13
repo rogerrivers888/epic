@@ -21,7 +21,7 @@ const householdById = async (id) => (await query('select * from households where
 import {
   AGE_PREFS, COMPANY, FLUENCY, HELLO_SECONDS, HEARD_SCHEMA, HEARD_SYSTEM, KINDS,
   fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue, partyOf,
-  unverifiablePrefs, verdictFor, videoVisible, waitingOn,
+  townOf, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
 } from '../domain/openTo.js';
 import { extract as extractWith, openaiEnabled } from '../sources/openai.js';
 import { currentHousehold, loadMembers } from './household.js';
@@ -160,7 +160,9 @@ router.post('/open', async (req, res, next) => {
       scope, tripId, interests, kind,
       level: words(req.body?.level, 6),
       whenChips: words(req.body?.when, 6),
-      whereLabel: str(req.body?.where, 120) ?? (trip ? trip.place_label ?? trip.destination_label ?? trip.title : household.home_label),
+      // The town, never the address. A household's home is held as whatever
+      // they typed, and an entry's label is a thing the other side gets told.
+      whereLabel: townOf(str(req.body?.where, 120) ?? (trip ? trip.place_label ?? trip.destination_label ?? trip.title : household.home_label)),
       whereMiles: int(req.body?.miles) ?? household.home_radius_miles ?? null,
       languages: JSON.stringify(languagesOf(req.body?.languages)),
       money: 'free',
@@ -262,8 +264,8 @@ async function journeyOf(entry) {
   const trip = await tripById(entry.trip_id).catch(() => null);
   if (!trip) return null;
   return {
-    from: trip.origin_label ?? null,
-    to: trip.place_label ?? trip.destination_label ?? trip.title ?? entry.where_label ?? null,
+    from: townOf(trip.origin_label),
+    to: townOf(trip.place_label ?? trip.destination_label ?? trip.title ?? entry.where_label),
     when: trip.start_date ? String(trip.start_date).slice(0, 10) : trip.depart_at ? String(trip.depart_at).slice(0, 10) : null,
   };
 }
@@ -365,7 +367,7 @@ async function matchPayload(match, side, host, guest) {
     const journey = await journeyOf(theirs);
     return {
       ...base,
-      from: journey?.to ?? theirs.where_label,
+      from: journey?.to ?? townOf(theirs.where_label),
       origin: journey?.from ?? null,
       when: journey?.when ?? null,
       childAgeBands: match.kind === 'family' ? theirs.child_age_bands ?? [] : [],
