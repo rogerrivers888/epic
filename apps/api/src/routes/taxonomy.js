@@ -56,8 +56,6 @@ let decided = false;
 export async function ensureTaxonomyReady() { return ready(); }
 async function ready() {
   await labelRepo.ensureKnown(knownLabels());
-  // Which words are generic, before the first search is counted (Codex, 13 Sep 2026).
-  await labelRepo.loadGenerics();
   if (decided) return;
   decided = true;
   try {
@@ -78,6 +76,10 @@ async function ready() {
       await shelfRules.teach({ scope, subject, labels: [label], subjectLabel: r.key.replace(/_/g, ' '), weights: {}, subcategory: m.subcategory, reason: `Mapped by Epic: ${m.why}.`, by: 'Epic', known });
     }
   } catch { decided = false; }
+  // Last, because the decisions just above are where most generic words are
+  // made: `observe` runs on the search path and cannot wait, so the set has to
+  // be right before the first search rather than after it (Codex, 13 Sep 2026).
+  await labelRepo.loadGenerics();
 }
 
 /** English names for a list of labels, from whichever table holds each. */
