@@ -291,7 +291,7 @@ export type Route =
    * card it saves, who you would rather meet, and one introduction at a time.
    * `trip` scopes the intake to a trip; without it, it is standing.
    */
-  | { name: 'open'; page: 'fork' | 'say' | 'heard' | 'saved' | 'who' | 'trip' | 'card'; tripId: string | null; matchId: string | null }
+  | { name: 'open'; page: 'fork' | 'say' | 'heard' | 'saved' | 'who' | 'trip' | 'card'; tripId: string | null; matchId: string | null; chat: ChatLayer | null }
   /** A host's public profile, and the trust ladder over it. Works logged-out. */
   | { name: 'hostProfile'; hostId: string; layer: 'trust' | null }
   /** One experience, and the two layers over it: the booking sheet and the formats. */
@@ -492,19 +492,30 @@ export function parseRoute(path: string): Route {
 
     /**
      * What somebody is up for. `/open` is the fork, `/open/say` the listening,
-     * `/open/heard` the chips, `/open/saved` the card, `/open/who` who you
-     * would rather meet, `/open/trip/<id>` a trip's intake and its card, and
-     * `/open/matches/<id>` one introduction, whichever stage it is at.
+     * `/open/heard` the chips, `/open/saved` the card and `/open/who` who you
+     * would rather meet — all of them standing.
+     *
+     * The same four steps scoped to a trip are their own addresses under
+     * `/open/trip/<id>`: `…/say`, `…/heard`, `…/who` and `…/card`, with the
+     * bare `/open/trip/<id>` the intake. Which trip is part of the page, so it
+     * belongs in the path — a query would be dropped by this parser and the
+     * step would silently save a standing entry instead (Codex, 13 Sep 2026).
      */
     case 'open': {
-      if (!a) return { name: 'open', page: 'fork', tripId: null, matchId: null };
-      if (a === 'matches') return b && !c ? { name: 'open', page: 'fork', tripId: null, matchId: b } : { name: 'unknown', path };
-      if (a === 'trip') {
+      if (!a) return { name: 'open', page: 'fork', tripId: null, matchId: null, chat: null };
+      if (a === 'matches') {
         if (!b) return { name: 'unknown', path };
-        if (!c) return { name: 'open', page: 'trip', tripId: b, matchId: null };
-        return c === 'card' && segments.length === 4 ? { name: 'open', page: 'card', tripId: b, matchId: null } : { name: 'unknown', path };
+        // Chat is a layer inside an introduction, the way it is inside a trip
+        // and a hosted offer — the same component, a fourth door.
+        if (c === 'chat') return segments.length > 5 ? { name: 'unknown', path } : { name: 'open', page: 'fork', tripId: null, matchId: b, chat: chatLayerOf(segments[4]) };
+        return !c ? { name: 'open', page: 'fork', tripId: null, matchId: b, chat: null } : { name: 'unknown', path };
       }
-      if (['say', 'heard', 'saved', 'who'].includes(a) && !b) return { name: 'open', page: a as 'say', tripId: null, matchId: null };
+      if (a === 'trip') {
+        if (!b || segments.length > 4) return { name: 'unknown', path };
+        if (!c) return { name: 'open', page: 'trip', tripId: b, matchId: null, chat: null };
+        return ['say', 'heard', 'who', 'card'].includes(c) ? { name: 'open', page: c as 'card', tripId: b, matchId: null, chat: null } : { name: 'unknown', path };
+      }
+      if (['say', 'heard', 'saved', 'who'].includes(a) && !b) return { name: 'open', page: a as 'say', tripId: null, matchId: null, chat: null };
       return { name: 'unknown', path };
     }
 
@@ -556,9 +567,8 @@ export function hrefOf(route: Route): string {
     case 'invited': return buildHref(['invited', route.token]);
     case 'invitedLink': return buildHref(['i', route.token]);
     case 'open':
-      if (route.matchId) return buildHref(['open', 'matches', route.matchId]);
-      if (route.page === 'trip') return buildHref(['open', 'trip', route.tripId]);
-      if (route.page === 'card') return buildHref(['open', 'trip', route.tripId, 'card']);
+      if (route.matchId) return buildHref(['open', 'matches', route.matchId, route.chat ? 'chat' : null, route.chat ? chatSegment(route.chat) : null]);
+      if (route.tripId) return buildHref(['open', 'trip', route.tripId, route.page === 'trip' ? null : route.page]);
       return buildHref(['open', route.page === 'fork' ? null : route.page]);
     case 'hostProfile': return buildHref(['hosts', route.hostId, route.layer]);
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
@@ -643,13 +653,18 @@ export const paths = {
   invitedLink: (token: string) => buildHref(['i', token]),
   /** What you are up for: the fork, and each step of the intake. `trip` scopes it to a trip. */
   open: () => '/open',
-  openSay: (tripId?: string | null) => `/open/say${tripId ? `?trip=${encodeURIComponent(tripId)}` : ''}`,
-  openHeard: (tripId?: string | null) => `/open/heard${tripId ? `?trip=${encodeURIComponent(tripId)}` : ''}`,
+  openSay: (tripId?: string | null) => (tripId ? buildHref(['open', 'trip', tripId, 'say']) : '/open/say'),
+  openHeard: (tripId?: string | null) => (tripId ? buildHref(['open', 'trip', tripId, 'heard']) : '/open/heard'),
   openSaved: () => '/open/saved',
-  openWho: (tripId?: string | null) => `/open/who${tripId ? `?trip=${encodeURIComponent(tripId)}` : ''}`,
+  openWho: (tripId?: string | null) => (tripId ? buildHref(['open', 'trip', tripId, 'who']) : '/open/who'),
   openTrip: (tripId: string) => buildHref(['open', 'trip', tripId]),
   openTripCard: (tripId: string) => buildHref(['open', 'trip', tripId, 'card']),
   openMatch: (id: string) => buildHref(['open', 'matches', id]),
+  /** The four chat layers inside an introduction, once both ID checks have cleared. */
+  openMatchChat: (id: string) => buildHref(['open', 'matches', id, 'chat']),
+  openMatchChatTopic: (id: string, topicId: string) => buildHref(['open', 'matches', id, 'chat', topicId]),
+  openMatchChatAsk: (id: string, tag?: string | null) => buildHref(['open', 'matches', id, 'chat', 'ask'], { tag }),
+  openMatchChatBell: (id: string) => buildHref(['open', 'matches', id, 'chat', 'bell']),
   hostNewOffer: (shape?: string | null) => (shape ? `/host/offers/new?shape=${shape}` : '/host/offers/new'),
   hostOffer: (id: string) => buildHref(['host', 'offers', id]),
   /** A step is named, not numbered: the sequence differs by shape, visibility and money. */

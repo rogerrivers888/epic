@@ -811,7 +811,7 @@ export type FlightLookup = {
 // audience; replies are flat inside it; the host or organiser marks one reply
 // as the answer. One component, two contexts: a trip and a hosted offer.
 
-export type ChatContextType = 'trip' | 'offer';
+export type ChatContextType = 'trip' | 'offer' | 'meet';
 export type ChatTagKind = 'stop' | 'day' | 'trip' | 'offer_aspect';
 export type ChatAudience = 'everyone' | 'host_only';
 export type ChatState = 'open' | 'answered' | 'notice';
@@ -1918,7 +1918,34 @@ export const api = {
     if (!res.ok) throw new Error(body.message || 'That did not send.');
     return body as { match: OpenMatch };
   },
+  /**
+   * The bytes of one hello, fetched with the session and held as a blob for as
+   * long as the screen is open. A hello is not public the way a listing's
+   * video is, so it cannot be a plain `<video src>` on an open address — and
+   * nothing about it is written to a cache.
+   */
+  openHelloBytes: async (path: string) => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}${path}`, {
+      credentials: 'include', cache: 'no-store',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('That video is no longer there.');
+    return URL.createObjectURL(await res.blob());
+  },
   openDecide: (id: string, answer: 'yes' | 'no') => post<{ match: OpenMatch }>(`/api/open/matches/${id}/decide`, { answer }),
+  /** One of the two images the ID check asks for. Held only until somebody has looked at it. */
+  openIdImage: async (id: string, which: 'doc' | 'selfie', blob: Blob) => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/open/matches/${id}/id/${which}`, {
+      method: 'POST', credentials: 'include', body: blob,
+      headers: { 'content-type': blob.type || 'image/jpeg', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || 'That did not send.');
+    return body as { check: OpenIdCheck };
+  },
+  /** Send the check. Nobody clears their own: it waits, and Epic answers either way. */
   openVerify: (id: string) => post<{ match: OpenMatch }>(`/api/open/matches/${id}/verify`, {}),
   addHostContact: (c: { name: string; mobile?: string | null; email?: string | null }) => post<{ contact: HostContact }>('/api/host/contacts', c),
   removeHostContact: (id: string) => request<void>(`/api/host/contacts/${id}`, { method: 'DELETE' }),
@@ -1946,6 +1973,10 @@ export const api = {
     post<{ review: { id: string; stars: number; chips: string[]; text: string | null; publishOn: string }; booking: Booking }>(`/api/bookings/${bookingId}/review`, body),
   /** The back office: pitch review and the ladder. */
   adminHosting: () => request<AdminHosting>('/api/admin/hosting'),
+  /** The one ID check in Casual meet ups (O9): the queue, and the decision. Nobody clears their own. */
+  adminOpenChecks: () => request<{ checks: AdminIdCheck[] }>('/api/admin/open/checks'),
+  decideIdCheck: (id: string, decision: 'pass' | 'fail', note: string | null) =>
+    post<{ check: OpenIdCheck; stage: string | null }>(`/api/admin/open/checks/${id}/decide`, { decision, note }),
   adminMail: (days: number, status?: string | null) => request<AdminMail>(`/api/admin/mail?days=${days}${status ? `&status=${encodeURIComponent(status)}` : ''}`),
   decideOffer: (id: string, decision: 'live' | 'changes', note: string | null, checklist?: Record<string, string>) => post<{ offer: Experience }>(`/api/admin/hosting/offers/${id}/decide`, { decision, note, checklist }),
   setHostTrust: (id: string, body: { trust?: TrustLevel; checks?: 'running' | 'passed' }) => patch<{ host: OwnHost }>(`/api/admin/hosting/hosts/${id}`, body),
@@ -3383,6 +3414,22 @@ export type OpenHome = {
   you: { party: string; languages: OpenLanguage[]; home: string | null; miles: number | null };
   config: { helloSeconds: number; company: string[]; agePrefs: string[]; fluency: string[]; listening: boolean };
 };
+/**
+ * The one ID check (O9). `draft` while the two images are being taken,
+ * `pending` once it is with Epic, and then passed or sent back with a reason.
+ * Nobody sets this themselves.
+ */
+export type OpenIdCheck = {
+  state: 'draft' | 'pending' | 'passed' | 'failed';
+  doc: boolean; selfie: boolean;
+  submittedAt: string | null; decidedAt: string | null; note: string | null;
+};
+/** One ID check waiting to be looked at. The images are addresses, and they go the moment it is decided. */
+export type AdminIdCheck = {
+  id: string; matchId: string; side: 'host' | 'guest'; household: string | null;
+  kind: string; interests: string[]; submittedAt: string;
+  doc: string | null; selfie: string | null;
+};
 /** What the listener made of what was said — chips to confirm, never a transcript to proof-read. */
 export type OpenHeard = { interests: string[]; level: string[]; when: string[]; languages: string[] };
 /** One introduction, at whatever stage it is at, shaped by what this side may know. */
@@ -3394,6 +3441,8 @@ export type OpenMatch = {
   /** Nothing of theirs until both have answered, and a no is never reported at all. */
   verdict: { mine: boolean | null; theirs: boolean | null; settled: boolean; introduced?: boolean };
   verified: { you: boolean; them: boolean };
+  /** Your own ID check, and nothing about theirs beyond whether it cleared. */
+  check: OpenIdCheck;
   /** The language the two of you share, and how well you speak it. */
   language: { name: string; level: string } | null;
   /** Your own first name and journey — what the screens use to speak to you; never sent the other way. */

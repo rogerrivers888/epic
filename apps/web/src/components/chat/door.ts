@@ -55,6 +55,15 @@ export const tripDoor = (tripId: string) => householdDoor('trip', tripId, {
 export const bookingDoor = (bookingId: string, offerId: string) => householdDoor('offer', offerId, {
   list: paths.bookingChat(bookingId), topic: (t) => paths.bookingChatTopic(bookingId, t), ask: (tag) => paths.bookingChatAsk(bookingId, tag), bell: paths.bookingChatBell(bookingId),
 });
+/**
+ * Two people introduced through Casual meet ups, after both ID checks have
+ * cleared. The same rooms as anywhere else, and the same rules — the only
+ * difference is who is in them: two, on first names.
+ */
+export const meetDoor = (matchId: string) => householdDoor('meet', matchId, {
+  list: paths.openMatchChat(matchId), topic: (t) => paths.openMatchChatTopic(matchId, t), ask: (tag) => paths.openMatchChatAsk(matchId, tag), bell: paths.openMatchChatBell(matchId),
+});
+
 export const hostOfferDoor = (offerId: string) => householdDoor('offer', offerId, {
   list: paths.hostOfferChat(offerId), topic: (t) => paths.hostOfferChatTopic(offerId, t), ask: (tag) => paths.hostOfferChatAsk(offerId, tag), bell: paths.hostOfferChatBell(offerId),
 });

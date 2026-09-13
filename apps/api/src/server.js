@@ -28,7 +28,7 @@ import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hosti
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import postmarkRoutes from './routes/postmark.js';
-import openToRoutes, { startOpenToLoop } from './routes/openTo.js';
+import openToRoutes, { adminRouter as openToAdminRoutes, startOpenToLoop } from './routes/openTo.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
 import lookupRoutes from './routes/lookup.js';
 import { router as localityRoutes } from './routes/localities.js';
@@ -167,6 +167,8 @@ app.use('/api/postmark', postmarkRoutes);
 // Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
 // never sets their own level; this is the only door that does.
 app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminRoutes);
+// The one ID check in Casual meet ups: nobody clears their own (routes/openTo.js).
+app.use('/api/admin/open', requireDoor('admin'), openToAdminRoutes);
 app.use('/api/admin/scout', requireDoor('admin'), scoutRoutes);
 app.use('/api/admin/library', requireDoor('admin'), libraryAdminRoutes);
 app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);

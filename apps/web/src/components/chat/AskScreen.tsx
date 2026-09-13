@@ -73,6 +73,9 @@ export function AskScreen({ door, onBack, onPosted, initialTag, initialPrivate, 
   const ctx = data?.context ?? null;
   const topics = data?.topics ?? [];
   const isOffer = ctx?.type === 'offer';
+  // Two people, introduced (Casual meet ups). One room, no roster, no host.
+  const isMeet = ctx?.type === 'meet';
+  const them = ctx?.people.members.find((m) => m.id !== ctx?.me?.memberId)?.name ?? 'them';
   const host = ctx ? hostFirst(ctx) : 'the host';
 
   // The kind follows the anchor when one arrived with the address or the edit.
@@ -93,7 +96,14 @@ export function AskScreen({ door, onBack, onPosted, initialTag, initialPrivate, 
   const booked = ctx ? Math.max(0, ctx.people.count - ctx.people.members.filter((m) => m.isHost).length) : 0;
 
   const kinds: { key: Kind; icon: IconName; title: string; hint: string }[] = ctx
-    ? isOffer
+    ? isMeet
+      ? [
+        // Two people and one room. There is no audience to choose, so there is
+        // no question to ask about who gets it (Casual meet ups, after O9).
+        { key: 'aspect', icon: 'message', title: 'Meeting up', hint: `Just you and ${them}. Nobody else sees it.` },
+        { key: 'date', icon: 'address', title: 'Where and when', hint: 'Somewhere public, and a time that suits you both.' },
+      ]
+      : isOffer
       ? [
         { key: 'aspect', icon: 'faq', title: 'About the whole thing', hint: `${ctx.me?.booked ? `Everyone booked gets it — ${booked} ${booked === 1 ? 'person' : 'people'}.` : `Goes to ${host}.`} What to bring, getting there, money.` },
         ...(ctx.anchors.stops.length ? [{ key: 'date' as Kind, icon: 'calendar' as IconName, title: ctx.anchors.stops.some((a) => a.ref.startsWith('week:')) ? 'About a date or a week' : 'About a date', hint: 'Only the people booked on it, and the host.' }] : []),
@@ -110,6 +120,7 @@ export function AskScreen({ door, onBack, onPosted, initialTag, initialPrivate, 
   const chooseKind = (k: Kind) => {
     setKind(k);
     if (k === 'trip' || k === 'notice') { if (!anchor || !anchor.startsWith('trip:')) setAnchor(isOffer ? 'offer_aspect:offer' : 'trip:trip'); }
+    if (isMeet) { setAnchor(k === 'date' ? 'meet_aspect:where' : 'meet_aspect:meet'); return; }
     if (k === 'aspect') { if (!anchor || !anchor.startsWith('offer_aspect:') || anchor.includes(':date:') || anchor.includes(':week:')) setAnchor('offer_aspect:offer'); }
     if (k === 'stop') { if (!anchor?.startsWith('stop:')) { setAnchor(null); setLayer('stop'); } }
     if (k === 'day') { if (!anchor?.startsWith('day:')) { setAnchor(null); setLayer('day'); } }
@@ -119,6 +130,7 @@ export function AskScreen({ door, onBack, onPosted, initialTag, initialPrivate, 
 
   const reach = (): string => {
     if (!ctx) return '';
+    if (isMeet) return `Just you and ${them}. Nobody else sees it, and no contact details are exchanged.`;
     if (audience === 'host_only') return isOffer ? `Just ${host}. Nobody else sees it.` : `A private message to ${host}. Nobody else sees it.`;
     if (isOffer) return `${booked} ${booked === 1 ? 'person is' : 'people are'} booked on this. Nobody else is pinged.`;
     if (kind === 'trip' || kind === 'notice') return `Everyone gets it — ${people} ${people === 1 ? 'person' : 'people'}.`;

@@ -308,7 +308,12 @@ export function HeardScreen({ tripId }: { tripId: string | null }) {
   const level = draft?.level ?? [];
   const when = draft?.when.length ? draft.when : entry?.when ?? [];
   const where = tripId ? [placeOf(trip)].filter(Boolean) as string[] : [home?.you.home, home?.you.miles ? `${home.you.miles} miles` : null].filter(Boolean) as string[];
-  const languages: OpenLanguage[] = (draft?.languages.length ? draft.languages.map((n) => ({ name: n, level: 'fluent' as const })) : entry?.languages ?? []);
+  // What is shown is what is saved. A language on this screen that the save
+  // dropped could never be introduced to anybody, because a shared language is
+  // a requirement (Codex, 13 Sep 2026).
+  const languages: OpenLanguage[] = draft?.languages.length
+    ? draft.languages.map((n) => ({ name: n, level: 'fluent' as const }))
+    : entry?.languages.length ? entry.languages : home?.you.languages ?? [];
   const prefs = entry?.prefs ?? { age: 'any' as const, company: ['anyone'], fluency: 'some' as const };
   const whoChips = [tripId ? 'Locals' : 'Visitors', prefs.age === 'similar' ? 'A similar age' : 'Any age', ...(prefs.company.includes('anyone') ? ['Anyone'] : prefs.company.map((c) => c[0].toUpperCase() + c.slice(1)))];
 
@@ -365,7 +370,7 @@ export function HeardScreen({ tripId }: { tripId: string | null }) {
             <Fact label="Roughly when" chips={when.length ? when : ['Whenever']} />
             <Fact label="Roughly where" chips={where.length ? where : ['Near home']} />
             <Fact label={tripId ? 'Who I would like to meet' : 'Who you would meet'} chips={whoChips} span onChange={() => navigate(paths.openWho(tripId))} />
-            <Fact label="Language" chips={languages.length ? languages.map((l) => (l.level === 'some' ? `${l.name}, a bit` : l.name)) : ['English']} />
+            <Fact label="Language" chips={languages.map((l) => (l.level === 'some' ? `${l.name}, a bit` : l.name))} />
             <Fact label="Money" chips={['Free']} />
           </View>
           {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
@@ -558,6 +563,7 @@ export function WhoScreen({ tripId }: { tripId: string | null }) {
 }
 
 const styles = StyleSheet.create({
+  tripRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.ruleSoft },
   scroll: { paddingBottom: 16 },
   option: { flexDirection: 'row', gap: 12, alignItems: 'flex-start', padding: 13, borderWidth: 1, borderColor: colors.ruleSoft, backgroundColor: colors.surface },
   optionOn: { padding: 12, borderWidth: 2, borderColor: colors.line, backgroundColor: colors.surfaceMuted },
@@ -570,3 +576,41 @@ const styles = StyleSheet.create({
   gridCell: { width: '47%', flexGrow: 1 },
   gridSpan: { width: '100%' },
 });
+
+// ---------------------------------------------------------------------------
+// The way in from a trip
+// ---------------------------------------------------------------------------
+
+/**
+ * A row on the trip itself: "what are you up for in Lisbon?" before anything is
+ * said, and what was said once it is (Casual meet ups, O5/O6). A trip entry
+ * clears when the trip ends, so this is the only place it needs to live.
+ */
+export function UpForOnTrip({ tripId, where }: { tripId: string; where: string | null }) {
+  const { navigate } = useRouter();
+  const [entry, setEntry] = useState<OpenEntry | null>(null);
+  useEffect(() => {
+    let on = true;
+    api.openHome().then((r) => { if (on) setEntry(r.entries.find((e) => e.tripId === tripId) ?? null); }).catch(() => null);
+    return () => { on = false; };
+  }, [tripId]);
+  const n = entry?.interests.length ?? 0;
+  return (
+    <Press
+      onPress={() => navigate(entry ? paths.openTripCard(tripId) : paths.openTrip(tripId))}
+      accessibilityRole="button"
+      style={styles.tripRow}
+    >
+      <Icon name="household" size={18} color={colors.ink} strokeWidth={2} />
+      <View style={{ flex: 1 }}>
+        <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>
+          {entry ? `Up for ${count(n)} ${n === 1 ? 'thing' : 'things'}${where ? ` in ${where}` : ''}` : `What are you up for${where ? ` in ${where}` : ''}?`}
+        </Text>
+        <Text style={[t.tiny, { lineHeight: 16 }]} numberOfLines={1}>
+          {entry ? entry.interests.join(' · ') : 'We introduce you to people who are up for the same. Nothing is listed.'}
+        </Text>
+      </View>
+      <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+    </Press>
+  );
+}

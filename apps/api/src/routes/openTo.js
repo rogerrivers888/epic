@@ -20,13 +20,17 @@ import { query, withTransaction } from '../db.js';
 const householdById = async (id) => (await query('select * from households where id = $1', [id])).rows[0] ?? null;
 import {
   AGE_PREFS, COMPANY, FLUENCY, HELLO_SECONDS, HEARD_SCHEMA, HEARD_SYSTEM, KINDS,
-  fits, hasLapsed, introductionOf, livesUntil, nextStage, nudgeDue, partyOf,
-  sharedLanguage, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
+  fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue, partyOf,
+  unverifiablePrefs, verdictFor, videoVisible, waitingOn,
 } from '../domain/openTo.js';
 import { extract as extractWith, openaiEnabled } from '../sources/openai.js';
 import { currentHousehold, loadMembers } from './household.js';
+import { tell } from '../sources/chatNotify.js';
+import { requires } from '../access.js';
 
 const router = express.Router();
+/** The back office's door onto the one ID check (O9). Mounted under /api/admin/open. */
+export const adminRouter = express.Router();
 
 const refuse = (status, code, message) => Object.assign(new Error(message), { status, code });
 const str = (v, max = 2000) => (v == null ? null : String(v).trim().slice(0, max) || null);
@@ -34,6 +38,23 @@ const int = (v) => (v == null || v === '' ? null : Math.max(0, Math.round(Number
 const list = (v, max = 40) => (Array.isArray(v) ? v.slice(0, max) : []);
 const words = (v, max = 24, each = 60) => list(v, max).map((s) => str(s, each)).filter(Boolean);
 const oneOf = (all, v) => (all.includes(v) ? v : null);
+
+/**
+ * The languages this household speaks, as far as Epic knows: whatever their
+ * last entry said, and English when they have never said. It is one value,
+ * returned here and saved by the screen that shows it — the confirmation used
+ * to display "English" as a fallback and save nothing, and because `fits()`
+ * requires a shared language those entries could never be introduced to
+ * anybody (Codex, 13 Sep 2026). If English is wrong they change it, and the
+ * change sticks for the next one.
+ */
+function languagesYouSpeak(entries = []) {
+  for (const e of entries) {
+    const held = languagesOf(e.languages);
+    if (held.length) return held;
+  }
+  return [{ name: 'English', level: 'fluent' }];
+}
 
 /** The languages a household speaks, as the pool holds them: a name and how well. */
 const languagesOf = (v) => list(v, 8).map((l) => ({ name: str(l?.name ?? l, 40), level: oneOf(FLUENCY, l?.level) ?? 'fluent' })).filter((l) => l.name);
@@ -90,7 +111,7 @@ router.get('/open', async (req, res, next) => {
     const asked = await repo.liveMatchCounts(entries.map((e) => e.id));
     res.json({
       entries: entries.map((e) => entryPayload(e, asked.get(e.id) ?? 0)),
-      you: { party: partyOf(members), languages: [], home: household.home_label ?? null, miles: household.home_radius_miles ?? null },
+      you: { party: partyOf(members), languages: languagesYouSpeak(entries), home: household.home_label ?? null, miles: household.home_radius_miles ?? null },
       config: { helloSeconds: HELLO_SECONDS, company: COMPANY, agePrefs: AGE_PREFS, fluency: FLUENCY, listening: openaiEnabled() },
     });
   } catch (err) { next(err); }
@@ -166,7 +187,14 @@ router.patch('/open/:id/who', async (req, res, next) => {
       prefFluency: oneOf(FLUENCY, req.body?.fluency) ?? entry.pref_fluency,
       languages: req.body?.languages ? JSON.stringify(languagesOf(req.body.languages)) : undefined,
     });
-    res.json({ entry: entryPayload(saved) });
+    // A preference that is only written down is not a preference. Narrowing
+    // ends the introductions it no longer admits, before either side has been
+    // asked anything; widening looks for the people it now admits
+    // (Codex, 13 Sep 2026).
+    const ended = await withdrawUnfitting(saved);
+    const made = await findIntroductions(saved);
+    const asked = await repo.liveMatchCounts([saved.id]);
+    res.json({ entry: entryPayload(saved, asked.get(saved.id) ?? 0), ended, introduced: made });
   } catch (err) { next(err); }
 });
 
@@ -227,6 +255,43 @@ async function journeyOf(entry) {
   };
 }
 
+/**
+ * What a person is told about their own ID check. Never the images back, and
+ * on a fail the reason in the words they are told — nothing about the other
+ * side's check at all, which is theirs.
+ */
+const checkPayload = (c) => (c ? {
+  state: c.state, doc: Boolean(c.doc_media_id), selfie: Boolean(c.selfie_media_id),
+  submittedAt: c.submitted_at, decidedAt: c.decided_at, note: c.state === 'failed' ? c.note : null,
+} : { state: 'draft', doc: false, selfie: false, submittedAt: null, decidedAt: null, note: null });
+
+/**
+ * Introductions this entry no longer admits, let go of silently.
+ *
+ * Only the ones nobody has answered yet: once somebody has said yes, they have
+ * made a decision about a person, and a preference change does not reach back
+ * and undo that. Nobody is told, which is the same as every other way one of
+ * these can end.
+ */
+export async function withdrawUnfitting(entry) {
+  let ended = 0;
+  const mine = await sideOf(entry);
+  for (const row of await repo.matchesOf(entry.household_id)) {
+    if (row.stage !== 'host_asked') continue;
+    const isHost = row.host_entry_id === entry.id;
+    if (!isHost && row.guest_entry_id !== entry.id) continue;
+    const otherId = isHost ? row.guest_entry_id : row.host_entry_id;
+    const other = await repo.entryById(otherId);
+    if (!other) continue;
+    const theirs = await sideOf(other);
+    const [host, guest] = isHost ? [mine, theirs] : [theirs, mine];
+    if (fits(host, guest).ok) continue;
+    await repo.updateMatch(row.id, { stage: 'ended' });
+    ended += 1;
+  }
+  return ended;
+}
+
 /** Which side of a match this household is on, or null when it is neither. */
 async function sideFor(match, householdId) {
   const host = await repo.entryById(match.host_entry_id);
@@ -253,18 +318,29 @@ async function matchPayload(match, side, host, guest) {
     name: String(own.find((m) => !m.is_minor && !m.isMinor)?.name ?? '').trim().split(/\s+/)[0] || null,
     journey: await journeyOf(yours),
   };
-  const language = sharedLanguage(host.languages, guest.languages);
+  const language = languageFor(host, guest);
   const verdict = verdictFor(match, side);
   const video = videoVisible(match, side);
+  // Your own check, and never a word about theirs beyond whether it cleared.
+  const check = (await repo.idChecksOf(match.id).catch(() => [])).find((c) => c.side === side) ?? null;
   const base = {
     id: match.id, stage: match.stage, kind: match.kind, side,
     interests: match.interests ?? [],
     waitingOn: waitingOn(match) === side ? 'you' : waitingOn(match) ? 'them' : null,
     lapsesAt: match.lapses_at,
     // The videos are for one decision: what you may watch, and never a stored face.
-    video: { mine: video.mine, theirs: video.theirs, waiting: video.waiting, seconds: HELLO_SECONDS, gone: Boolean(match.videos_deleted_at) },
+    // Addresses, not ids. A hello is not public the way a listing's video is:
+    // it is held for one decision and deleted, so it is served from an address
+    // that checks the session, the side and whether yours is in yet
+    // (Codex, 13 Sep 2026). A raw id would have played on /api/media.
+    video: {
+      mine: video.mine ? `/api/open/matches/${match.id}/hello/mine` : null,
+      theirs: video.theirs ? `/api/open/matches/${match.id}/hello/theirs` : null,
+      waiting: video.waiting, seconds: HELLO_SECONDS, gone: Boolean(match.videos_deleted_at),
+    },
     verdict,
     verified: { you: Boolean(side === 'host' ? match.host_verified_at : match.guest_verified_at), them: Boolean(side === 'host' ? match.guest_verified_at : match.host_verified_at) },
+    check: checkPayload(check),
     // The language the two of you share, and how well you speak it — the one
     // thing about the other side that is true from the moment they match.
     language: language ? { name: language.name, level: language.mine } : null,
@@ -390,6 +466,45 @@ router.post('/open/matches/:id/hello', express.raw({ type: ['video/*', 'audio/*'
 });
 
 /**
+ * The bytes of one hello, for one of the two people in this introduction and
+ * nobody else. `videoVisible` is the whole rule: your own always, theirs only
+ * once yours is in. Never cached, and gone the moment the match deletes them.
+ */
+router.get('/open/matches/:id/hello/:which', async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const which = oneOf(['mine', 'theirs'], req.params.which);
+    if (!which) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const match = await repo.matchById(req.params.id);
+    if (!match) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const found = await sideFor(match, household.id);
+    if (!found) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    if (found.side === 'guest' && match.host_verdict !== 'yes') throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const visible = videoVisible(match, found.side);
+    const id = which === 'mine' ? visible.mine : visible.theirs;
+    if (!id) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const media = await hostRepo.mediaById(id);
+    if (!media) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    res.setHeader('content-type', media.mime);
+    res.setHeader('cache-control', 'no-store');
+    res.setHeader('accept-ranges', 'bytes');
+    // A video element asks for ranges; answer them so it can play at all.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+    if (range) {
+      const start = range[1] ? Number(range[1]) : 0;
+      const end = range[2] ? Math.min(Number(range[2]), media.size - 1) : media.size - 1;
+      if (start >= media.size) return res.status(416).end();
+      res.status(206);
+      res.setHeader('content-range', `bytes ${start}-${end}/${media.size}`);
+      res.setHeader('content-length', end - start + 1);
+      return res.end(media.bytes.subarray(start, end + 1));
+    }
+    res.setHeader('content-length', media.size);
+    res.end(media.bytes);
+  } catch (err) { next(err); }
+});
+
+/**
  * Having watched theirs, say whether to be introduced. The other side's answer
  * is not reported until both are in, and only a pair of yeses is ever reported
  * at all: nobody is told they were turned down.
@@ -428,26 +543,150 @@ router.post('/open/matches/:id/decide', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** The ID check: once each, after two yeses, before anything is exchanged. */
+/**
+ * The ID check: once each, after two yeses, before anything is exchanged.
+ *
+ * Nobody verifies themselves. This used to set the timestamp on an empty
+ * request, which made the gate a checkbox (Codex, 13 Sep 2026). A person sends
+ * the two images O9 asks for, the check waits at `pending`, and the back
+ * office passes or fails it — the same place a host's trust is set, and never
+ * the person's own doing. Only a pass sets the timestamp, and only two passes
+ * open the chat.
+ */
+
+/** Which side of a match this household is, at the gate. Throws rather than hints. */
+async function gateSide(matchId, householdId, client) {
+  const match = client ? await repo.lockMatch(matchId, client) : await repo.matchById(matchId);
+  if (!match) throw refuse(404, 'not_found', 'There is no introduction at that address.');
+  const host = await repo.entryById(match.host_entry_id, client);
+  const guest = await repo.entryById(match.guest_entry_id, client);
+  const side = host?.household_id === householdId ? 'host' : guest?.household_id === householdId ? 'guest' : null;
+  if (!side) throw refuse(404, 'not_found', 'There is no introduction at that address.');
+  if (!['both_yes', 'verified'].includes(match.stage)) throw refuse(409, 'not_yet', 'Not at this stage.');
+  return { match, host, guest, side };
+}
+
+/** One of the two images. Held only until somebody has looked at it. */
+router.post('/open/matches/:id/id/:which', express.raw({ type: ['image/*', 'application/octet-stream'], limit: '12mb' }), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const which = oneOf(['doc', 'selfie'], req.params.which);
+    if (!which) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const { match, side } = await gateSide(req.params.id, household.id);
+    const existing = await repo.idCheckFor(match.id, side);
+    if (existing?.state === 'passed') throw refuse(409, 'done', 'That check has already cleared.');
+    if (existing?.state === 'pending') throw refuse(409, 'waiting', 'That is with us. We will tell you either way.');
+    if (!req.body?.length) throw refuse(400, 'no_image', 'Nothing was sent.');
+    const media = await hostRepo.insertMedia({ householdId: household.id, kind: 'photo', mime: str(req.headers['content-type'], 80) ?? 'image/jpeg', bytes: req.body });
+    // Replacing an image drops the one it replaces: we hold two, never a pile.
+    const oldId = which === 'doc' ? existing?.doc_media_id : existing?.selfie_media_id;
+    const check = await repo.saveIdCheck({
+      matchId: match.id, householdId: household.id, side,
+      docMediaId: which === 'doc' ? media.id : null,
+      selfieMediaId: which === 'selfie' ? media.id : null,
+      state: 'draft',
+    });
+    if (oldId) await hostRepo.deleteMedia(oldId, household.id).catch(() => null);
+    res.status(201).json({ check: checkPayload(check) });
+  } catch (err) { next(err); }
+});
+
+/** Send the check. It waits; it does not clear itself. */
 router.post('/open/matches/:id/verify', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const out = await withTransaction(async (client) => {
-      const match = await repo.lockMatch(req.params.id, client);
-      if (!match) throw refuse(404, 'not_found', 'There is no introduction at that address.');
-      const host = await repo.entryById(match.host_entry_id, client);
-      const guest = await repo.entryById(match.guest_entry_id, client);
-      const side = host?.household_id === household.id ? 'host' : guest?.household_id === household.id ? 'guest' : null;
-      if (!side) throw refuse(404, 'not_found', 'There is no introduction at that address.');
-      if (!['both_yes', 'verified'].includes(match.stage)) throw refuse(409, 'not_yet', 'Not at this stage.');
-      const patch = side === 'host' ? { hostVerifiedAt: new Date() } : { guestVerifiedAt: new Date() };
-      const stage = nextStage(match, side === 'host' ? { hostVerified: new Date() } : { guestVerified: new Date() });
-      return repo.updateMatch(match.id, { ...patch, stage: stage === 'chat' ? 'chat' : 'verified' }, client);
-    });
-    const found = await sideFor(out, household.id);
-    res.json({ match: await matchPayload(out, found.side, found.host, found.guest) });
+    const { match, side } = await gateSide(req.params.id, household.id);
+    const check = await repo.idCheckFor(match.id, side);
+    if (!check) throw refuse(400, 'nothing_sent', 'Send a photograph of your ID and a selfie first.');
+    if (check.state === 'passed') throw refuse(409, 'done', 'That check has already cleared.');
+    if (check.state === 'pending') throw refuse(409, 'waiting', 'That is with us. We will tell you either way.');
+    if (!check.doc_media_id || !check.selfie_media_id) {
+      throw refuse(400, 'incomplete', check.doc_media_id ? 'We still need the selfie.' : 'We still need a photograph of your ID.');
+    }
+    await repo.submitIdCheck(check.id);
+    const found = await sideFor(match, household.id);
+    res.json({ match: await matchPayload(match, found.side, found.host, found.guest) });
   } catch (err) { next(err); }
 });
+
+// ---------------------------------------------------------------------------
+// the back office: the ID queue
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything waiting to be looked at. It says which introduction and which
+ * side, and it names the two images — it does not say who the other person is,
+ * because deciding an ID does not need that.
+ */
+adminRouter.get('/checks', requires('manage_hosting'), async (_req, res, next) => {
+  try {
+    const rows = await repo.pendingIdChecks();
+    res.json({
+      checks: rows.map((c) => ({
+        id: c.id, matchId: c.match_id, side: c.side, household: c.household_name ?? null,
+        kind: c.kind, interests: c.interests ?? [], submittedAt: c.submitted_at,
+        doc: c.doc_media_id ? `/api/media/${c.doc_media_id}` : null,
+        selfie: c.selfie_media_id ? `/api/media/${c.selfie_media_id}` : null,
+      })),
+    });
+  } catch (err) { next(err); }
+});
+
+/** Pass it or send it back. Either way the two images go: we keep the result. */
+adminRouter.post('/checks/:id/decide', requires('manage_hosting'), async (req, res, next) => {
+  try {
+    const pass = req.body?.decision === 'pass';
+    if (!pass && req.body?.decision !== 'fail') throw refuse(400, 'decision_required', 'Pass it, or send it back.');
+    const note = str(req.body?.note, 500);
+    if (!pass && !note) throw refuse(400, 'note_required', 'Say what was wrong, in the words they will read.');
+    const out = await decideIdCheck(req.params.id, { pass, note, by: req.session?.email ?? 'back office' });
+    res.json({ check: checkPayload(out.check), stage: out.match?.stage ?? null });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The back office's decision. A pass sets that side's timestamp, and two
+ * passes are what opens the chat — the only path to `chat` there is.
+ */
+export async function decideIdCheck(id, { pass, note, by }) {
+  return withTransaction(async (client) => {
+    const before = await repo.idCheckById(id, client);
+    if (!before) throw refuse(404, 'not_found', 'There is no check at that address.');
+    if (before.state !== 'pending') throw refuse(409, 'decided', 'That one has already been decided.');
+    const check = await repo.decideIdCheck(id, { state: pass ? 'passed' : 'failed', note: pass ? null : note, by }, client);
+    if (!pass) return { check, match: await repo.lockMatch(before.match_id, client) };
+    const match = await repo.lockMatch(before.match_id, client);
+    const when = new Date();
+    const patch = before.side === 'host' ? { hostVerifiedAt: when } : { guestVerifiedAt: when };
+    const stage = nextStage(match, before.side === 'host' ? { hostVerified: when } : { guestVerified: when });
+    const saved = await repo.updateMatch(match.id, { ...patch, stage: stage === 'chat' ? 'chat' : 'verified' }, client);
+    return { check, match: saved };
+  });
+}
+
+/**
+ * The one nudge, sent.
+ *
+ * It says somebody is waiting and nothing else — not who, not where, not what
+ * it is about — because at this point one side has not agreed to be known to
+ * the other, and a nudge that named either of them would be the leak the whole
+ * feature is built to avoid. It goes through the same door the chat's pings
+ * use, so a nudge nobody could be told about is recorded as honestly as one
+ * that went (Codex, 13 Sep 2026).
+ */
+async function nudge(match) {
+  const side = waitingOn(match);
+  if (!side) return false;
+  const entry = await repo.entryById(side === 'host' ? match.host_entry_id : match.guest_entry_id).catch(() => null);
+  if (!entry) return false;
+  const person = (await loadMembers(entry.household_id).catch(() => [])).find((m) => !m.is_minor && !m.isMinor);
+  if (!person) return false;
+  await tell(
+    { memberId: person.id, guestId: null, householdId: entry.household_id, name: person.name },
+    { kind: 'notice', text: 'Somebody on Epic is waiting on you. Open Epic to answer — it goes after a week either way.' },
+  ).catch(() => null);
+  return true;
+}
 
 /**
  * The sweep: nudge an unanswered introduction once, let it go after a week,
@@ -458,7 +697,11 @@ export async function sweepOpenTo(now = new Date()) {
   const out = { nudged: 0, lapsed: 0, cleared: 0, due: 0 };
   for (const match of await repo.openIntroductions()) {
     if (hasLapsed(match, now)) { await repo.updateMatch(match.id, { stage: 'lapsed' }); out.lapsed += 1; continue; }
-    if (nudgeDue(match, now)) { await repo.updateMatch(match.id, { nudgedAt: now }); out.nudged += 1; }
+    if (nudgeDue(match, now)) {
+      await nudge(match);
+      await repo.updateMatch(match.id, { nudgedAt: now });
+      out.nudged += 1;
+    }
   }
   for (const entry of await repo.expiredEntries(now)) { await repo.endEntry(entry.id); out.cleared += 1; }
   out.due = (await repo.dueForReview(now)).length;

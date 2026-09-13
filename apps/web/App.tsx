@@ -519,7 +519,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {route.name === 'booking' ? <BookingScreen route={route} /> : null}
       {route.name === 'experience' ? <ExperienceScreen route={route} /> : null}
       {/* What you are up for, and the introductions it leads to (Casual meet ups). */}
-      {route.name === 'open' && route.matchId ? <MatchScreen matchId={route.matchId} /> : null}
+      {route.name === 'open' && route.matchId ? <MatchScreen matchId={route.matchId} chat={route.chat} /> : null}
       {route.name === 'open' && !route.matchId && route.page === 'fork' ? <ForkScreen /> : null}
       {route.name === 'open' && route.page === 'say' ? <ListeningScreen tripId={route.tripId} /> : null}
       {route.name === 'open' && route.page === 'heard' ? <UpForHeardScreen tripId={route.tripId} /> : null}

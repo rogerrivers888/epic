@@ -25,6 +25,7 @@ import * as trips from '../repositories/trips.js';
 import * as tripChat from '../repositories/tripChat.js';
 import * as hosting from '../repositories/hosting.js';
 import * as groupsRepo from '../repositories/groups.js';
+import * as openTo from '../repositories/openTo.js';
 import crypto from 'node:crypto';
 import * as households from '../repositories/households.js';
 import { accountsForHousehold } from '../repositories/accounts.js';
@@ -33,7 +34,7 @@ import { withTransaction } from '../db.js';
 import { tell } from '../sources/chatNotify.js';
 import { seriesDates, ymd } from '../domain/hosting.js';
 import {
-  AUDIENCES, DEFAULT_PREFS, OFFER_ASPECTS, QUICK_REACTIONS, COMMON_REACTIONS, SHOWING, SUGGEST_PUBLISH_AT, TAG_KINDS, TRIP_ANCHORS,
+  AUDIENCES, DEFAULT_PREFS, MEET_ASPECTS, OFFER_ASPECTS, QUICK_REACTIONS, COMMON_REACTIONS, SHOWING, SUGGEST_PUBLISH_AT, TAG_KINDS, TRIP_ANCHORS,
   askCount, authorOf, canSee, isNearDuplicate, isOnAnchor, legacyMessages, legacyPeople, matchesShowing, menuFor, mentionsIn, normaliseQuestion, notificationText,
   rateLimited, rosterFor, samePerson, whoIsTold,
 } from '../domain/chat.js';
@@ -208,6 +209,42 @@ export async function offerContext(offer, me, { household } = {}) {
   };
 }
 
+/**
+ * An introduction as a chat context (Casual meet ups, after O9). Two people
+ * and no more: one adult from each household, on first names only, with no
+ * surname, no photograph and no contact details on either side — the
+ * introduction never stopped being an introduction.
+ *
+ * It exists only once both ID checks have cleared. Before that the match has
+ * no conversation, which is the promise O14 makes: "nothing is exchanged until
+ * it clears".
+ */
+export async function meetContext(match, me, { household } = {}) {
+  const [hostEntry, guestEntry] = await Promise.all([openTo.entryById(match.host_entry_id), openTo.entryById(match.guest_entry_id)]);
+  const sides = [hostEntry, guestEntry].filter(Boolean);
+  const people = [];
+  for (const side of sides) {
+    const adults = (await households.membersOf(side.household_id)).filter((m) => !m.is_minor);
+    const adult = adults[0];
+    if (!adult) continue;
+    people.push({
+      memberId: adult.id, guestId: null, name: firstName(adult.name),
+      // No photograph, on either side: this is an introduction, not a profile.
+      avatarUrl: null, householdId: side.household_id, isHost: false,
+    });
+  }
+  const them = people.find((p) => p.householdId !== household?.id) ?? null;
+  const meRow = me ? { ...me, name: firstName(me.name), isHost: false, booked: true, contextType: 'meet' } : null;
+  return {
+    type: 'meet', id: match.id, name: them ? `You and ${them.name}` : 'Your introduction', dates: null,
+    host: null, people, me: meRow,
+    anchors: { level: MEET_ASPECTS.map((a) => ({ kind: 'meet_aspect', ref: a.ref, label: a.label })), days: [], stops: [] },
+    sub: (match.interests ?? []).join(' · ') || 'Introduced by Epic',
+    // The head runs name and subtitle together, and two first names say it.
+    subtitle: null,
+  };
+}
+
 /** The context an address names, for the signed-in household. */
 async function resolve(type, id) {
   const household = await currentHousehold();
@@ -225,6 +262,17 @@ async function resolve(type, id) {
     // A public offer may be asked about before booking (C7); a private one may not be read into at all.
     if (!ctx.me?.booked && offer.visibility === 'invite') throw refuse(403, 'not_booked', 'This one is invitation only.');
     return ctx;
+  }
+  if (type === 'meet') {
+    const match = await openTo.matchById(id);
+    if (!match) throw refuse(404, 'not_found', 'There is no introduction at that address.');
+    const host = await openTo.entryById(match.host_entry_id);
+    const guest = await openTo.entryById(match.guest_entry_id);
+    const mine = host?.household_id === household.id || guest?.household_id === household.id;
+    // Not one of the two, or the gate has not cleared: there is nothing here,
+    // and saying so any other way would confirm the introduction exists.
+    if (!mine || match.stage !== 'chat') throw refuse(404, 'not_found', 'There is no introduction at that address.');
+    return meetContext(match, me, { household });
   }
   throw refuse(404, 'no_such_context', 'Not a conversation.');
 }
@@ -837,6 +885,20 @@ async function contextsFor(household, member) {
       seen.add(o.id);
       out.push({ type: 'offer', id: o.id, name: o.title ?? 'Your offer', when: 'You are hosting', prefs: prefFor('offer', o.id) });
     }
+  }
+  // An introduction that has cleared both ID checks is a conversation too, and
+  // it is named the way it reads on the match: two first names, nothing else.
+  for (const m of await openTo.matchesOf(household.id).catch(() => [])) {
+    if (m.stage !== 'chat') continue;
+    const other = m.host_household_id === household.id ? m.guest_entry_id : m.host_entry_id;
+    const entry = await openTo.entryById(other).catch(() => null);
+    const adult = entry ? (await households.membersOf(entry.household_id)).find((x) => !x.is_minor) : null;
+    out.push({
+      type: 'meet', id: m.id,
+      name: adult ? `You and ${firstName(adult.name)}` : 'An introduction',
+      when: (m.interests ?? []).join(' · ') || 'Introduced by Epic',
+      prefs: prefFor('meet', m.id),
+    });
   }
   return out;
 }

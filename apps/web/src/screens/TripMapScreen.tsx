@@ -49,6 +49,7 @@ import { asNumber, asOneOf, asText, useQueryState, useRouter } from '../router';
 import { paths, type TripSection } from '../routes';
 import { weeksOf } from './tripWeeks';
 import { fromName, shortPlaceName, tripName } from './tripName';
+import { UpForOnTrip } from './open/UpFor';
 
 const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
 const clock = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -1241,6 +1242,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
             (9 Sep 2026). What was said still leads the Activities and Food
             browses, which is where the ideas are. */}
         <TheDay d={d} day={day} fromHome={startsAtHome} onAdd={() => { setPill('food'); setDetent('half'); }} onOpenStop={onOpenStop} onFirstRows={setRowsH} />
+        {/* What you are up for while you are there (Casual meet ups, O5): no
+            date, no price, nothing to cancel, and nothing listed. It belongs to
+            the trip rather than the day, so it sits under the whole spine. */}
+        <UpForOnTrip tripId={trip.id} where={trip.locality ?? trip.place?.label ?? trip.title ?? null} />
       </>
     )
     )

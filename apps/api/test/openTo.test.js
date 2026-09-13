@@ -16,7 +16,7 @@ import { aHousehold, testDatabase } from './helpers/db.js';
 const { query } = await testDatabase();
 const repo = await import('../src/repositories/openTo.js');
 const {
-  companyFits, fits, hasLapsed, introductionOf, livesUntil, nextStage, nudgeDue,
+  companyFits, fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue,
   partyOf, sharedInterests, sharedLanguage, similarAge, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
 } = await import('../src/domain/openTo.js');
 
@@ -331,4 +331,75 @@ test('the card counts the people already asked, and counts them for one entry on
   assert.equal(counts.get(host.id), 1);
   assert.equal(counts.get(two.id) ?? 0, 0);
   assert.equal((await repo.liveMatchCounts([])).size, 0, 'no entries, no query');
+});
+
+test('any shared language that suits both will do, not just the first one listed', () => {
+  // She lists Portuguese first and speaks it fluently; he has a little. He
+  // asked for fluent. They both also speak English fluently, which is the
+  // introduction — the order of an array is not a rule anybody agreed to.
+  const hostLangs = [{ name: 'Portuguese', level: 'some' }, { name: 'English', level: 'fluent' }];
+  const guestLangs = [{ name: 'Portuguese', level: 'fluent' }, { name: 'English', level: 'fluent' }];
+  const host = side(entry({ languages: hostLangs, pref_fluency: 'fluent' }));
+  const guest = side(entry({ id: 'e2', household_id: 'h2', scope: 'trip', languages: guestLangs, pref_fluency: 'fluent' }));
+  const verdict = fits(host, guest);
+  assert.equal(verdict.ok, true, 'English carries it');
+  assert.equal(verdict.language.name, 'english');
+  assert.equal(languageFor(host.entry, guest.entry).name, 'english', 'and that is the language the screens name');
+
+  // With nothing spoken well enough on either side, it is still a no.
+  const poor = side(entry({ id: 'e3', household_id: 'h3', scope: 'trip', languages: [{ name: 'English', level: 'some' }], pref_fluency: 'fluent' }));
+  assert.equal(fits(host, poor).ok, false);
+});
+
+test('a new trip entry never has to be a standing one first', async () => {
+  const home = await aHousehold(query, 'somebody with a standing entry');
+  await repo.insertEntry(home.household.id, { scope: 'standing', interests: ['Chess club'] });
+  // Before, this inserted the defaults and updated afterwards, so the row was
+  // momentarily standing and the one-standing-entry index refused it outright.
+  const trip = await repo.insertEntry(home.household.id, { scope: 'trip', interests: ['Beach walks'] });
+  assert.equal(trip.scope, 'trip');
+  assert.equal((await repo.entriesOf(home.household.id)).length, 2);
+});
+
+test('narrowing who you would meet lets go of the introductions it no longer admits', async () => {
+  const { findIntroductions } = await import('../src/routes/openTo.js');
+  const local = await aHousehold(query, 'a local who will narrow it');
+  const away = await aHousehold(query, 'a couple visiting');
+  await query('update households set home_lat = 51.4543, home_lng = -0.9781 where id = $1', [local.household.id]);
+  await query(`insert into members (household_id, name, is_minor) values ($1, 'One', false), ($1, 'Two', false)`, [away.household.id]);
+  const trip = (await query(
+    `insert into trips (household_id, title, origin_label, origin_lat, origin_lng, destination_label, destination_lat, destination_lng, depart_at, return_at, travel_mode, intensity, base_lat, base_lng)
+     values ($1, 'Reading', 'Lisbon', 38.72, -9.14, 'Reading', 51.4543, -0.9781, now(), now() + interval '3 days', 'walking', 'relaxed', 51.4543, -0.9781) returning *`,
+    [away.household.id],
+  )).rows[0];
+  const langs = JSON.stringify([{ name: 'English', level: 'fluent' }]);
+  const host = await repo.insertEntry(local.household.id, { scope: 'standing', interests: ['Chess club'], languages: langs, whereMiles: 25 });
+  const guest = await repo.insertEntry(away.household.id, { scope: 'trip', tripId: trip.id, interests: ['Chess club'], languages: langs });
+  // Other households in this database may fit too; this is about the one pair.
+  await findIntroductions(guest);
+  const ours = () => repo.matchesOf(local.household.id).then((rows) => rows.find((m) => m.guest_entry_id === guest.id));
+  assert.equal((await ours())?.stage, 'host_asked');
+
+  // "Families only" no longer admits a couple, and the introduction goes —
+  // silently, before either of them was asked anything.
+  await repo.updateEntry(host.id, { prefCompany: ['families'] });
+  const { withdrawUnfitting } = await import('../src/routes/openTo.js');
+  assert.ok(await withdrawUnfitting(await repo.entryById(host.id)) >= 1);
+  assert.equal((await ours())?.stage, 'ended');
+});
+
+test('a match still reaches chat after its videos have been deleted', () => {
+  // The twenty seconds are used for one decision and then they go. Their ids
+  // go with them, and the stage must not wait for a file that was deleted on
+  // purpose — otherwise no introduction could ever open a chat.
+  const base = {
+    host_verdict: 'yes', guest_verdict: 'yes',
+    host_video_id: null, guest_video_id: null, host_video_yes: true, guest_video_yes: true,
+    videos_deleted_at: new Date(), stage: 'both_yes',
+  };
+  assert.equal(nextStage(base, {}), 'both_yes', 'nobody has been checked yet');
+  assert.equal(nextStage({ ...base, host_verified_at: new Date() }, {}), 'both_yes', 'one of two is not both');
+  assert.equal(nextStage({ ...base, host_verified_at: new Date(), guest_verified_at: new Date() }, {}), 'chat');
+  // And before either has answered, a missing video is still a missing video.
+  assert.equal(nextStage({ ...base, videos_deleted_at: null, host_video_yes: null, guest_video_yes: null }, {}), 'videos');
 });

@@ -123,7 +123,10 @@ export function TopicList({ door, onBack, onOpen, onAsk, onBell, fixedAbout, emb
       <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.list, { paddingBottom: 96 + insetBottom }]} keyboardShouldPersistTaps="handled">
         {data && !list.length ? (
           <Text style={styles.empty}>
-            {topics.length ? 'Nothing here with these two set this way.' : ctx?.type === 'offer' ? 'Nothing asked yet. Ask the first thing.' : 'Nothing asked yet. Ask something and everybody on the trip can answer.'}
+            {topics.length ? 'Nothing here with these two set this way.'
+              : ctx?.type === 'offer' ? 'Nothing asked yet. Ask the first thing.'
+              : ctx?.type === 'meet' ? 'Nothing said yet. Say hello, or ask where and when suits.'
+              : 'Nothing asked yet. Ask something and everybody on the trip can answer.'}
           </Text>
         ) : null}
         {list.map((t) => <Row key={t.id} t={t} roleWord={roleWord} onPress={() => onOpen(t.id)} />)}

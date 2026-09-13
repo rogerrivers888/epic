@@ -18,14 +18,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, OpenMatch } from '../../api';
+import { api, OpenIdCheck, OpenMatch } from '../../api';
+import { pickPlacePhoto } from '../../components/pickPhoto';
 import { colors, INK, LIME } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { StatusLine } from '../../components/ui';
-import { mediaUrl } from '../../components/hosting';
 import { useViewport } from '../../hooks/useViewport';
 import { useRouter } from '../../router';
-import { paths } from '../../routes';
+import { ChatLayer, paths } from '../../routes';
+import { ChatScreen } from '../../components/chat/ChatScreen';
+import { meetDoor } from '../../components/chat/door';
 import { Aside, Cta, DoneBlock, FactChip, InfoRow, Nav, RedNote, TintBlock, TwoWay, k, t } from '../../components/hostKit';
 
 const TOP = (Platform.OS === 'web' ? 'max(8px, var(--epic-sat))' : 8) as any;
@@ -44,10 +46,10 @@ const listOf = (xs: string[]) => {
   return s.length > 1 ? `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}` : s[0] ?? 'the same things';
 };
 
-export function MatchScreen({ matchId }: { matchId: string }) {
+export function MatchScreen({ matchId, chat }: { matchId: string; chat?: ChatLayer | null }) {
   const { width } = useViewport();
   const wide = width >= 900;
-  const { navigate, back } = useRouter();
+  const { navigate, back, query } = useRouter();
   const [match, setMatch] = useState<OpenMatch | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -77,6 +79,12 @@ export function MatchScreen({ matchId }: { matchId: string }) {
   }
   if (!match) return <View style={[k.page, k.gutter, { paddingTop: 24 }]}><Text style={t.sub}>Opening…</Text></View>;
 
+  // Chat, inside Epic: the same component as a trip's and an offer's, through a
+  // door of its own. It only exists once both ID checks have cleared.
+  if (chat && match.stage === 'chat') {
+    return <ChatScreen door={meetDoor(matchId)} layer={chat} navigate={navigate} back={back} query={query} onSettings={() => navigate(paths.settingsNotifications())} />;
+  }
+
   const m = match;
   // The header is where you are in this: your own town when you are the one at
   // home, and the direction you are travelling when you are the one visiting.
@@ -93,8 +101,10 @@ export function MatchScreen({ matchId }: { matchId: string }) {
     // O12 / O13 — twenty seconds each, blind, then both decide.
     if (m.stage === 'videos') return <Swap match={m} busy={busy} onSent={setMatch} onDecide={(a) => answer(() => api.openDecide(m.id, a))} onError={setError} />;
     // O14 / O9 — both said yes; then ID, once each, before anything is exchanged.
-    if (m.stage === 'both_yes' || m.stage === 'verified') return <BothYes match={m} busy={busy} onVerify={() => answer(() => api.openVerify(m.id))} />;
-    if (m.stage === 'chat') return <Introduced match={m} />;
+    if (m.stage === 'both_yes' || m.stage === 'verified') {
+      return <BothYes match={m} busy={busy} onVerify={() => answer(() => api.openVerify(m.id))} onChanged={(check) => setMatch({ ...m, check })} onError={setError} />;
+    }
+    if (m.stage === 'chat') return <Introduced match={m} onChat={() => navigate(paths.openMatchChat(m.id))} />;
     return <Waiting match={m} />;
   };
 
@@ -313,7 +323,17 @@ function Record({ match: m, onSent, onError }: { match: OpenMatch; onSent: (m: O
 
 /** O13 — theirs is in. Watch it, then say whether you would like to be introduced. */
 function Watch({ match: m, busy, onDecide }: { match: OpenMatch; busy: boolean; onDecide: (a: 'yes' | 'no') => void }) {
-  const src = mediaUrl(m.video.theirs);
+  // Held as a blob for as long as this screen is open, and revoked when it
+  // closes: a hello plays here and nowhere else, and is never cached.
+  const [src, setSrc] = useState<string | null>(null);
+  const theirs = m.video.theirs;
+  useEffect(() => {
+    if (!theirs) return;
+    let url: string | null = null;
+    let on = true;
+    api.openHelloBytes(theirs).then((u) => { url = u; if (on) setSrc(u); else URL.revokeObjectURL(u); }).catch(() => null);
+    return () => { on = false; if (url) URL.revokeObjectURL(url); };
+  }, [theirs]);
   const them = m.side === 'guest' ? m.introduction?.name ?? 'They' : m.name ?? 'They';
   // Where they are from: their town if you are the visitor, the town they are
   // travelling from if you are the one at home. Never anything closer than that.
@@ -363,7 +383,9 @@ function Waiting({ match: m }: { match: OpenMatch }) {
 // O14 · O9 — both said yes, then ID, then details
 // ---------------------------------------------------------------------------
 
-function BothYes({ match: m, busy, onVerify }: { match: OpenMatch; busy: boolean; onVerify: () => void }) {
+function BothYes({ match: m, busy, onVerify, onChanged, onError }: {
+  match: OpenMatch; busy: boolean; onVerify: () => void; onChanged: (c: OpenIdCheck) => void; onError: (e: string) => void;
+}) {
   // O14 says you are introduced and what is left; O9 is the gate itself. They
   // are two screens because the ID is a separate decision from the yes.
   const [atGate, setAtGate] = useState(false);
@@ -387,30 +409,7 @@ function BothYes({ match: m, busy, onVerify }: { match: OpenMatch; busy: boolean
     );
   }
   // O9 — the gate. The only point Epic ever asks for ID, and it asks both sides.
-  if (!mine) {
-    return (
-      <View>
-        <View style={[k.gutter, { paddingTop: 16, gap: 5 }]}>
-          <Text style={t.h24}>Before you two swap details</Text>
-          <Text style={[t.label, { fontWeight: '400', color: colors.inkMuted, lineHeight: 19 }]}>You have both said yes. This is the only point we ask for ID.</Text>
-        </View>
-        <View style={[k.gutter, { paddingTop: 14, gap: 12 }]}>
-          <Text style={t.kicker}>Both of you</Text>
-          <View>
-            <InfoRow icon="identity" title="A photograph of your ID" line="Passport or driving licence. We check it and keep nothing but the result." />
-            <InfoRow icon="face" title="A selfie, once" line="So we know the ID is yours. Never shown to anybody." />
-          </View>
-          <Text style={t.kicker}>What unlocks when it clears</Text>
-          <View>
-            <InfoRow icon="message" title="Chat, inside Epic" line="Numbers and emails stay out of it until you choose." />
-            <InfoRow icon="address" title="The meeting place" line="The club, the café, the park gate — a public place, always." />
-          </View>
-          <RedNote>Home addresses are never shared by Epic, and a first meet is never at one.</RedNote>
-        </View>
-        <Cta label="Verify and continue" loading={busy} onPress={onVerify} style={{ paddingTop: 14, paddingBottom: 14 }} />
-      </View>
-    );
-  }
+  if (!mine) return <Gate match={m} busy={busy} onVerify={onVerify} onChanged={onChanged} onError={onError} />;
   return (
     <View>
       <View style={[k.gutter, { paddingTop: 16 }]}>
@@ -428,7 +427,75 @@ function BothYes({ match: m, busy, onVerify }: { match: OpenMatch; busy: boolean
   );
 }
 
-function Introduced({ match: m }: { match: OpenMatch }) {
+/**
+ * O9 — the one ID check. Two photographs, then it goes to Epic and waits:
+ * nobody clears their own, which is the only thing that makes this a gate
+ * rather than a checkbox. A fail comes back with the reason and can be redone.
+ */
+function Gate({ match: m, busy, onVerify, onChanged, onError }: {
+  match: OpenMatch; busy: boolean; onVerify: () => void; onChanged: (c: OpenIdCheck) => void; onError: (e: string) => void;
+}) {
+  const check = m.check;
+  const [sending, setSending] = useState<'doc' | 'selfie' | null>(null);
+  const waiting = check.state === 'pending';
+  const failed = check.state === 'failed';
+
+  const take = async (which: 'doc' | 'selfie') => {
+    setSending(which);
+    try {
+      const blob = await pickPlacePhoto({ camera: which === 'selfie' });
+      if (blob) onChanged((await api.openIdImage(m.id, which, blob.blob)).check);
+    } catch (e: any) { onError(e.message); } finally { setSending(null); }
+  };
+
+  return (
+    <View>
+      <View style={[k.gutter, { paddingTop: 16, gap: 5 }]}>
+        <Text style={t.h24}>{waiting ? 'That is with us' : 'Before you two swap details'}</Text>
+        <Text style={[t.label, { fontWeight: '400', color: colors.inkMuted, lineHeight: 19 }]}>
+          {waiting
+            ? 'We look at it ourselves, and we will tell you either way. Nothing is exchanged until it clears.'
+            : 'You have both said yes. This is the only point we ask for ID.'}
+        </Text>
+      </View>
+      <View style={[k.gutter, { paddingTop: 14, gap: 12 }]}>
+        {failed && check.note ? <RedNote>{check.note}</RedNote> : null}
+        <Text style={t.kicker}>Both of you</Text>
+        <View>
+          <InfoRow
+            icon="identity" title="A photograph of your ID"
+            line="Passport or driving licence. We check it and keep nothing but the result."
+            done={check.doc} busy={sending === 'doc'}
+            action={waiting ? undefined : check.doc ? 'Replace' : 'Take it'}
+            onAction={waiting ? undefined : () => void take('doc')}
+          />
+          <InfoRow
+            icon="face" title="A selfie, once"
+            line="So we know the ID is yours. Never shown to anybody."
+            done={check.selfie} busy={sending === 'selfie'}
+            action={waiting ? undefined : check.selfie ? 'Replace' : 'Take it'}
+            onAction={waiting ? undefined : () => void take('selfie')}
+          />
+        </View>
+        <Text style={t.kicker}>What unlocks when it clears</Text>
+        <View>
+          <InfoRow icon="message" title="Chat, inside Epic" line="Numbers and emails stay out of it until you choose." />
+          <InfoRow icon="address" title="The meeting place" line="The club, the café, the park gate — a public place, always." />
+        </View>
+        <RedNote>Home addresses are never shared by Epic, and a first meet is never at one.</RedNote>
+      </View>
+      {waiting ? null : (
+        <Cta
+          label={check.doc && check.selfie ? 'Send it to Epic' : 'Both photographs first'}
+          loading={busy} disabled={!check.doc || !check.selfie}
+          onPress={onVerify} style={{ paddingTop: 14, paddingBottom: 14 }}
+        />
+      )}
+    </View>
+  );
+}
+
+function Introduced({ match: m, onChat }: { match: OpenMatch; onChat: () => void }) {
   const them = m.side === 'guest' ? m.introduction?.name ?? 'They' : m.name ?? 'They';
   return (
     <View>
@@ -442,6 +509,7 @@ function Introduced({ match: m }: { match: OpenMatch }) {
         <RedNote>Home addresses are never shared by Epic, and a first meet is never at one.</RedNote>
         <Aside>The videos are gone. They were for this decision and nothing else.</Aside>
       </View>
+      <Cta label="Open the chat" icon="message" onPress={onChat} style={{ paddingTop: 14, paddingBottom: 14 }} />
     </View>
   );
 }

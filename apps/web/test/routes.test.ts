@@ -489,14 +489,27 @@ test('the Host tab, and every page inside it', () => {
   assert.deepEqual(roundTrip('/i/tok'), { name: 'invitedLink', token: 'tok' });
 
   // What you are up for (Casual meet ups, O1–O14): the fork, each step, a trip's own, and one introduction.
-  assert.deepEqual(roundTrip('/open'), { name: 'open', page: 'fork', tripId: null, matchId: null });
-  assert.deepEqual(roundTrip('/open/say'), { name: 'open', page: 'say', tripId: null, matchId: null });
-  assert.deepEqual(roundTrip('/open/heard'), { name: 'open', page: 'heard', tripId: null, matchId: null });
-  assert.deepEqual(roundTrip('/open/saved'), { name: 'open', page: 'saved', tripId: null, matchId: null });
-  assert.deepEqual(roundTrip('/open/who'), { name: 'open', page: 'who', tripId: null, matchId: null });
-  assert.deepEqual(roundTrip('/open/trip/t1'), { name: 'open', page: 'trip', tripId: 't1', matchId: null });
-  assert.deepEqual(roundTrip('/open/trip/t1/card'), { name: 'open', page: 'card', tripId: 't1', matchId: null });
-  assert.deepEqual(roundTrip('/open/matches/m1'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1' });
+  assert.deepEqual(roundTrip('/open'), { name: 'open', page: 'fork', tripId: null, matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/say'), { name: 'open', page: 'say', tripId: null, matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/heard'), { name: 'open', page: 'heard', tripId: null, matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/saved'), { name: 'open', page: 'saved', tripId: null, matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/who'), { name: 'open', page: 'who', tripId: null, matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/trip/t1'), { name: 'open', page: 'trip', tripId: 't1', matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/trip/t1/card'), { name: 'open', page: 'card', tripId: 't1', matchId: null, chat: null });
+  // Every step of the trip intake is its own address: the trip is part of the
+  // page, so a step can never lose it and save a standing entry instead.
+  assert.deepEqual(roundTrip('/open/trip/t1/say'), { name: 'open', page: 'say', tripId: 't1', matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/trip/t1/heard'), { name: 'open', page: 'heard', tripId: 't1', matchId: null, chat: null });
+  assert.deepEqual(roundTrip('/open/trip/t1/who'), { name: 'open', page: 'who', tripId: 't1', matchId: null, chat: null });
+  assert.equal(parseRoute('/open/trip/t1/nonsense').name, 'unknown');
+  assert.equal(parseRoute('/open/trip/t1/card/more').name, 'unknown');
+  assert.deepEqual(roundTrip('/open/matches/m1'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1', chat: null });
+  // Chat is a layer inside an introduction, the same four layers as a trip's.
+  assert.deepEqual(roundTrip('/open/matches/m1/chat'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1', chat: { page: 'list' } });
+  assert.deepEqual(roundTrip('/open/matches/m1/chat/ask'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1', chat: { page: 'ask' } });
+  assert.deepEqual(roundTrip('/open/matches/m1/chat/bell'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1', chat: { page: 'bell' } });
+  assert.deepEqual(roundTrip('/open/matches/m1/chat/t9'), { name: 'open', page: 'fork', tripId: null, matchId: 'm1', chat: { page: 'topic', topicId: 't9' } });
+  assert.equal(parseRoute('/open/matches/m1/nonsense').name, 'unknown');
   assert.equal(parseRoute('/open/nonsense').name, 'unknown');
   assert.equal(parseRoute('/open/trip').name, 'unknown');
   assert.equal(tabOf(parseRoute('/open')), 'host');

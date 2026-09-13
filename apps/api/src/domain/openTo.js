@@ -75,15 +75,33 @@ export function unverifiablePrefs(prefs) {
   return list(prefs).map(norm).filter((p) => p === 'women' || p === 'men');
 }
 
-/** The language the two share, at the level each holds it, or null. */
-export function sharedLanguage(a = [], b = []) {
+/** Every language the two share, at the level each holds it. */
+export function sharedLanguages(a = [], b = []) {
   const mine = list(a).map((l) => ({ name: norm(l.name ?? l), level: norm(l.level ?? 'fluent') }));
   const theirs = list(b).map((l) => ({ name: norm(l.name ?? l), level: norm(l.level ?? 'fluent') }));
+  const out = [];
   for (const m of mine) {
     const t = theirs.find((x) => x.name === m.name);
-    if (t) return { name: m.name, mine: m.level, theirs: t.level };
+    if (t) out.push({ name: m.name, mine: m.level, theirs: t.level });
   }
-  return null;
+  // The one they both speak best first, so a screen naming "the" shared
+  // language names the one the conversation would actually happen in.
+  return out.sort((x, y) => rank(y) - rank(x));
+}
+const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 : 0);
+
+/** The language the two share, at the level each holds it, or null. */
+export function sharedLanguage(a = [], b = []) {
+  return sharedLanguages(a, b)[0] ?? null;
+}
+
+/**
+ * The language an introduction is actually in: the one `fits()` accepted, so a
+ * screen never names a language the match was not made on.
+ */
+export function languageFor(host, guest) {
+  const shared = sharedLanguages(host?.languages, guest?.languages);
+  return shared.find((l) => fluencyOk(host?.pref_fluency, l.theirs) && fluencyOk(guest?.pref_fluency, l.mine)) ?? shared[0] ?? null;
 }
 
 /** Somebody asking for fluent gets fluent; somebody happy with some gets either. */
@@ -130,11 +148,12 @@ export function fits(host, guest) {
   const interests = sharedInterests(h.interests, g.interests);
   if (!interests.length) return no('nothing in common');
 
-  const lang = sharedLanguage(h.languages, g.languages);
-  if (!lang) return no('no shared language');
-  // Whoever asked for fluent must get it; "some is fine" takes either.
-  if (!fluencyOk(h.pref_fluency, lang.theirs)) return no('they do not speak it well enough for what the host asked');
-  if (!fluencyOk(g.pref_fluency, lang.mine)) return no('the host does not speak it well enough for what the guest asked');
+  // Any language that satisfies both sides will do: being refused because of
+  // the order of an array is not a rule anybody agreed to (Codex, 13 Sep 2026).
+  const shared = sharedLanguages(h.languages, g.languages);
+  if (!shared.length) return no('no shared language');
+  const lang = shared.find((l) => fluencyOk(h.pref_fluency, l.theirs) && fluencyOk(g.pref_fluency, l.mine));
+  if (!lang) return no('neither language is spoken well enough for what was asked');
 
   // Age, both ways, and only when it can be established.
   if (h.pref_age === 'similar' && !similarAge(host.age, guest.age)) return no('not a similar age, or an age we do not know');
@@ -193,7 +212,12 @@ export function nextStage(match, { hostVerdict, guestVerdict, hostVideo, guestVi
   if (m.host_video_yes === false || m.guest_video_yes === false) return 'ended';
   if (m.host_verdict !== 'yes') return 'host_asked';
   if (m.guest_verdict !== 'yes') return 'guest_asked';
-  if (!m.host_video_id || !m.guest_video_id || m.host_video_yes == null || m.guest_video_yes == null) return 'videos';
+  // The videos are deleted the moment they have done their job, so their ids
+  // are gone by the time the ID checks clear. Once both answers are in, the
+  // swap is behind us and the absence of a video is the point, not a step
+  // still to do.
+  const swapDone = m.host_video_yes != null && m.guest_video_yes != null;
+  if (!swapDone || (!m.videos_deleted_at && (!m.host_video_id || !m.guest_video_id))) return 'videos';
   if (m.host_video_yes !== true || m.guest_video_yes !== true) return 'ended';
   if (!m.host_verified_at || !m.guest_verified_at) return m.stage === 'verified' || m.stage === 'chat' ? m.stage : 'both_yes';
   return 'chat';

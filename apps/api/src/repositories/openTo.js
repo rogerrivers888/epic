@@ -39,9 +39,26 @@ export async function entriesOf(householdId) {
   return rows;
 }
 
-export async function insertEntry(householdId, fields = {}) {
-  const { rows } = await query('insert into open_entries (household_id) values ($1) returning *', [householdId]);
-  return Object.keys(fields).length ? updateEntry(rows[0].id, fields) : rows[0];
+/**
+ * A new entry, written once with its final scope. It used to insert the
+ * defaults and update afterwards, which meant a household's first trip entry
+ * momentarily claimed to be a standing one — and if they already had a
+ * standing entry, `open_entries_one_standing_idx` refused it outright
+ * (Codex, 13 Sep 2026).
+ */
+export async function insertEntry(householdId, fields = {}, client) {
+  const columns = ['household_id'];
+  const params = [householdId];
+  for (const [key, column] of Object.entries(COLUMNS)) {
+    if (fields[key] === undefined) continue;
+    params.push(fields[key]);
+    columns.push(column);
+  }
+  const { rows } = await on(client)(
+    `insert into open_entries (${columns.join(', ')}) values (${params.map((_, i) => `$${i + 1}`).join(', ')}) returning *`,
+    params,
+  );
+  return rows[0];
 }
 
 export async function updateEntry(id, patch, client) {
@@ -192,3 +209,84 @@ export async function expiredEntries(now = new Date()) {
 }
 
 export { withTransaction };
+
+// ---------------------------------------------------------------------------
+// the one ID check (migration 096)
+// ---------------------------------------------------------------------------
+
+/** This side's check on this match, if it has started one. */
+export async function idCheckFor(matchId, side, client) {
+  const { rows } = await on(client)('select * from open_id_checks where match_id = $1 and side = $2', [matchId, side]);
+  return rows[0] ?? null;
+}
+
+/** Both sides' checks on one match — what the match payload needs to know whose turn it is. */
+export async function idChecksOf(matchId) {
+  const { rows } = await query('select * from open_id_checks where match_id = $1', [matchId]);
+  return rows;
+}
+
+/**
+ * Start or correct this side's check. A person may replace either image while
+ * it is still a draft or has been sent back; once it is passed it is done.
+ */
+export async function saveIdCheck({ matchId, householdId, side, docMediaId, selfieMediaId, state }, client) {
+  const { rows } = await on(client)(
+    `insert into open_id_checks (match_id, household_id, side, doc_media_id, selfie_media_id, state)
+     values ($1, $2, $3, $4, $5, coalesce($6, 'draft'))
+     on conflict (match_id, side) do update set
+       doc_media_id = coalesce($4, open_id_checks.doc_media_id),
+       selfie_media_id = coalesce($5, open_id_checks.selfie_media_id),
+       state = coalesce($6, open_id_checks.state),
+       updated_at = now()
+     returning *`,
+    [matchId, householdId, side, docMediaId ?? null, selfieMediaId ?? null, state ?? null],
+  );
+  return rows[0];
+}
+
+export async function submitIdCheck(id, client) {
+  const { rows } = await on(client)(
+    `update open_id_checks set state = 'pending', submitted_at = now(), note = null, updated_at = now() where id = $1 returning *`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+/** The back office's queue: everything waiting on a decision, oldest first. */
+export async function pendingIdChecks() {
+  const { rows } = await query(
+    `select c.*, m.stage, m.interests, m.kind, h.name as household_name
+       from open_id_checks c
+       join open_matches m on m.id = c.match_id
+       left join households h on h.id = c.household_id
+      where c.state = 'pending'
+      order by c.submitted_at`,
+  );
+  return rows;
+}
+
+export async function idCheckById(id, client) {
+  const { rows } = await on(client)('select * from open_id_checks where id = $1 for update', [id]);
+  return rows[0] ?? null;
+}
+
+/**
+ * The decision, and the end of the images. "We check it and keep nothing but
+ * the result" — so the bytes go the moment somebody has looked, pass or fail.
+ */
+export async function decideIdCheck(id, { state, note, by }, client) {
+  const run = on(client);
+  const before = (await run('select * from open_id_checks where id = $1', [id])).rows[0];
+  if (!before) return null;
+  const { rows } = await run(
+    `update open_id_checks set state = $2, note = $3, decided_by = $4, decided_at = now(),
+       doc_media_id = null, selfie_media_id = null, updated_at = now()
+     where id = $1 returning *`,
+    [id, state, note ?? null, by ?? null],
+  );
+  for (const mediaId of [before.doc_media_id, before.selfie_media_id]) {
+    if (mediaId) await run('delete from host_media where id = $1', [mediaId]);
+  }
+  return rows[0] ?? null;
+}

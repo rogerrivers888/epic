@@ -365,15 +365,25 @@ export function ChoiceChip({ label, on, onPress }: { label: string; on: boolean;
 }
 
 /** A ruled row: a 30px warm tile, a title and a line under it. The board's workhorse. */
-export function InfoRow({ icon, title, line, onPress }: { icon: IconName; title: string; line?: string | null; onPress?: () => void }) {
+export function InfoRow({ icon, title, line, onPress, done, busy, action, onAction }: {
+  icon: IconName; title: string; line?: string | null; onPress?: () => void;
+  /** A row that is also a thing to do: a named action on the right, and a tick once it is done. */
+  done?: boolean; busy?: boolean; action?: string; onAction?: () => void;
+}) {
   const body = (
     <View style={{ flexDirection: 'row', gap: 11, alignItems: 'flex-start', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft }}>
-      <View style={[k.tile30, k.warm, { borderWidth: 1, borderColor: colors.ruleSoft }]}><Icon name={icon} size={15} color={INK} strokeWidth={2} /></View>
+      <View style={[k.tile30, done ? k.ink : k.warm, { borderWidth: 1, borderColor: done ? INK : colors.ruleSoft }]}>
+        <Icon name={done ? 'check' : icon} size={15} color={done ? LIME : INK} strokeWidth={done ? 3 : 2} />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>{title}</Text>
         {line ? <Text style={[t.small, { lineHeight: 17, marginTop: 1 }]}>{line}</Text> : null}
       </View>
-      {onPress ? <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} /> : null}
+      {action && onAction ? (
+        <Press onPress={onAction} accessibilityRole="button" disabled={busy} style={{ paddingVertical: 5, paddingHorizontal: 10, borderWidth: 1, borderColor: INK, opacity: busy ? 0.5 : 1 }}>
+          <Text style={[t.label, { fontSize: 11.5 }]}>{busy ? 'One moment' : action}</Text>
+        </Press>
+      ) : onPress ? <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} /> : null}
     </View>
   );
   return onPress ? <Press onPress={onPress} accessibilityRole="button">{body}</Press> : body;

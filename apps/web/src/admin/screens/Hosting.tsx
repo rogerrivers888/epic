@@ -17,14 +17,14 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
-import { api, AdminHosting, TrustLevel } from '../../api';
+import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { api, AdminHosting, AdminIdCheck, TrustLevel } from '../../api';
 import { colors, fonts, spacing, type, BORDER, TARGET } from '../../theme';
 import { Button, Row, Segmented, StatusLine } from '../../components/ui';
 import { AdminPage, Banner, PageHead, Panel, Pill, Tile, TileRow, ago } from '../kit';
 import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
-import { SHAPE_LABEL, TRUST_LABEL, TYPE_LABEL, VENUE_LABEL, metaLine, money, priceWords } from '../../components/hosting';
+import { SHAPE_LABEL, TRUST_LABEL, TYPE_LABEL, VENUE_LABEL, mediaUrl, metaLine, money, priceWords } from '../../components/hosting';
 
 const CHECKS = [
   { key: 'what', label: 'What you will actually do' }, { key: 'home', label: 'What they go home with' }, { key: 'suits', label: 'Who it suits' }, { key: 'notSuits', label: 'Who it does not suit' }, { key: 'photos', label: 'Photos' },
@@ -136,6 +136,8 @@ export function Hosting({ canManage }: { canManage: boolean }) {
         ))}
       </Panel>
 
+      <IdChecks canManage={canManage} onError={setError} />
+
       <Panel title="Reports" sub="What a guest said was wrong. Resolved when somebody has looked.">
         {!data?.reports.length ? <Text style={type.small}>None open.</Text> : data.reports.map((r) => (
           <Row key={r.id} style={styles.report}>
@@ -151,6 +153,61 @@ export function Hosting({ canManage }: { canManage: boolean }) {
       </Panel>
       <Text style={type.tiny}>Payouts: {money(0)} moved. Epic has no payment provider connected; bookings are recorded and honoured, and nothing is charged.</Text>
     </AdminPage>
+  );
+}
+
+/**
+ * The one ID check in Casual meet ups (O9). Two people have said yes to each
+ * other and neither can go further until somebody here has looked. Nobody
+ * clears their own, which is what makes it a gate — and the two images go the
+ * moment it is decided, pass or fail, because "we keep nothing but the result".
+ */
+function IdChecks({ canManage, onError }: { canManage: boolean; onError: (e: string) => void }) {
+  const [checks, setChecks] = useState<AdminIdCheck[]>([]);
+  const [note, setNote] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try { setChecks((await api.adminOpenChecks()).checks); } catch (e: any) { onError(e.message); }
+  }, [onError]);
+  useEffect(() => { void load(); }, [load]);
+
+  const decide = async (id: string, decision: 'pass' | 'fail') => {
+    setBusy(id);
+    try { await api.decideIdCheck(id, decision, note[id]?.trim() || null); setNote((n) => ({ ...n, [id]: '' })); await load(); }
+    catch (e: any) { onError(e.message); } finally { setBusy(null); }
+  };
+
+  return (
+    <Panel title="ID checks" sub="Both sides said yes. Nothing is exchanged until somebody here has looked — and the photographs go the moment it is decided.">
+      {!checks.length ? <Text style={type.small}>Nothing waiting.</Text> : checks.map((c) => (
+        <View key={c.id} style={styles.pitch}>
+          <Row style={{ gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Pill label={c.side === 'host' ? 'Local' : 'Visiting'} />
+            <Pill label={c.kind === 'family' ? 'Family' : 'Adults'} />
+            <Text style={[type.h3, { flex: 1 }]}>{c.household ?? 'A household'}</Text>
+            <Text style={type.tiny}>{ago(c.submittedAt)}</Text>
+          </Row>
+          <Text style={type.small}>{c.interests.join(' · ') || 'Introduced by Epic'}</Text>
+          <Row style={{ gap: spacing.md, marginTop: spacing.sm, flexWrap: 'wrap' }}>
+            {c.doc ? <Press onPress={() => Linking.openURL(mediaUrl(c.doc) ?? '')} accessibilityRole="button"><Text style={[type.body, { fontWeight: '700', color: colors.accent }]}>The ID ›</Text></Press> : <Text style={type.tiny}>No ID sent</Text>}
+            {c.selfie ? <Press onPress={() => Linking.openURL(mediaUrl(c.selfie) ?? '')} accessibilityRole="button"><Text style={[type.body, { fontWeight: '700', color: colors.accent }]}>The selfie ›</Text></Press> : <Text style={type.tiny}>No selfie sent</Text>}
+          </Row>
+          {canManage ? (
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              <TextInput
+                value={note[c.id] ?? ''} onChangeText={(v) => setNote((n) => ({ ...n, [c.id]: v }))}
+                placeholder="If it goes back: what was wrong, in the words they will read" placeholderTextColor={colors.ghost}
+                multiline style={styles.input}
+              />
+              <Row style={{ gap: spacing.sm }}>
+                <Button label="It is them" onPress={() => void decide(c.id, 'pass')} disabled={busy === c.id} />
+                <Button label="Send it back" kind="secondary" onPress={() => void decide(c.id, 'fail')} disabled={busy === c.id} />
+              </Row>
+            </View>
+          ) : null}
+        </View>
+      ))}
+    </Panel>
   );
 }
 

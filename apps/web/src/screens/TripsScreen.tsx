@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-nat
 import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
-import { api, OpenEntry, Booking, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
+import { api, Booking, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
 import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
@@ -75,31 +75,6 @@ export type TripSeed = {
 
 /** Inside a trip: which of Find / Shortlist / The day you were on, per trip. */
 type TripPageMemory = { section: Section };
-
-/**
- * A way into "what are you up for in <city>?" from the trip it belongs to
- * (Casual meet ups, O5). A trip entry clears when the trip ends, so this row
- * shows what was said while it is live and the way in before that.
- */
-function UpForOnTrip({ tripId, where }: { tripId: string; where: string | null }) {
-  const { navigate } = useRouter();
-  const [entry, setEntry] = useState<OpenEntry | null>(null);
-  useEffect(() => {
-    let on = true;
-    api.openHome().then((r) => { if (on) setEntry(r.entries.find((e) => e.tripId === tripId) ?? null); }).catch(() => null);
-    return () => { on = false; };
-  }, [tripId]);
-  return (
-    <Press onPress={() => navigate(entry ? paths.openTripCard(tripId) : paths.openTrip(tripId))} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.ruleSoft }}>
-      <Icon name="household" size={18} color={colors.ink} />
-      <View style={{ flex: 1 }}>
-        <Text style={type.h3}>{entry ? `Up for ${entry.interests.length} ${entry.interests.length === 1 ? 'thing' : 'things'}${where ? ` in ${where}` : ''}` : `What are you up for${where ? ` in ${where}` : ''}?`}</Text>
-        <Text style={type.small} numberOfLines={1}>{entry ? entry.interests.join(' · ') : 'We introduce you to people who are up for the same. Nothing is listed.'}</Text>
-      </View>
-      <Icon name="more" size={16} color={colors.inkMuted} />
-    </Press>
-  );
-}
 
 export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUsed }: {
   /** Which layer the address asks for: the list, the new-trip form, or one trip on one of its tabs. */
@@ -494,8 +469,6 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
             </Card>
           ) : null}
           <ShortlistJourney d={d} day={day} household={household} wide={wide} onChanged={load} onFind={() => setSection('find')} onSaved={async () => { await load(); await refreshHousehold(); setSection('itinerary'); }} />
-          {/* What you are up for while you are there (Casual meet ups, O5): no date, no price, nothing to cancel. */}
-          <UpForOnTrip tripId={trip.id} where={trip.locality ?? trip.title ?? null} />
         </View>
       ) : null}
       {section === 'day' && day ? (

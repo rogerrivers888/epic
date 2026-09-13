@@ -26,7 +26,7 @@
 // ---------------------------------------------------------------------------
 
 export const CONTEXTS = ['trip', 'offer'];
-export const TAG_KINDS = ['stop', 'day', 'trip', 'offer_aspect'];
+export const TAG_KINDS = ['stop', 'day', 'trip', 'offer_aspect', 'meet_aspect'];
 export const AUDIENCES = ['everyone', 'host_only'];
 export const STATES = ['open', 'answered', 'notice'];
 export const FOLLOW_SOURCES = ['authored', 'replied', 'tag', 'mention', 'manual'];
@@ -51,6 +51,17 @@ export const OFFER_ASPECTS = [
   { ref: 'where', label: 'Getting there' },
   { ref: 'access', label: 'Access' },
   { ref: 'money', label: 'Money and booking' },
+];
+
+/**
+ * What two people introduced through Casual meet ups talk about before they
+ * meet. Short on purpose: this is a conversation between two households who
+ * have not met, and everything about where and when is still theirs to agree.
+ */
+export const MEET_ASPECTS = [
+  { ref: 'meet', label: 'Meeting up' },
+  { ref: 'where', label: 'Where and when' },
+  { ref: 'who', label: 'Who is coming' },
 ];
 
 /** The fixed top row of the reaction picker (E3): six on one tap, no search. */
