@@ -523,6 +523,15 @@ test('a place is cut down to a town before it goes anywhere', () => {
   assert.equal(townOf('K1A 0B1'), null);
   assert.equal(townOf('1012 AB, Amsterdam'), 'Amsterdam');
   assert.equal(townOf('Stoke-on-Trent'), 'Stoke-on-Trent', 'a hyphen is not a postcode');
+  // The ways the first version of this leaked, each one now nothing at all.
+  assert.equal(townOf('Fairways, Ascot, sl5 0jd'), 'Ascot', 'a postcode in lower case is still a postcode');
+  assert.equal(townOf('12 High Street Windsor SL4 1AA'), null, 'an address with no commas is not salvaged');
+  assert.equal(townOf('Flat 2, 14 Titlarks Hill'), null, 'and neither is a street');
+  assert.equal(townOf('High Street, Windsor'), 'Windsor');
+  // Places that must survive, because refusing everything would be no use.
+  assert.equal(townOf('Newcastle upon Tyne'), 'Newcastle upon Tyne');
+  assert.equal(townOf("Bishop's Stortford"), "Bishop's Stortford");
+  assert.equal(townOf('Lisboa'), 'Lisboa');
 });
 
 test('what the guest is told is a town, whatever the host typed as home', () => {

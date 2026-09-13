@@ -15,6 +15,7 @@ import express from 'express';
 import * as repo from '../repositories/openTo.js';
 import * as hostRepo from '../repositories/hosting.js';
 import { tripById } from '../repositories/trips.js';
+import { reverseGeocode } from '../sources/geocode.js';
 import { query, withTransaction } from '../db.js';
 
 const householdById = async (id) => (await query('select * from households where id = $1', [id])).rows[0] ?? null;
@@ -38,6 +39,31 @@ const int = (v) => (v == null || v === '' ? null : Math.max(0, Math.round(Number
 const list = (v, max = 40) => (Array.isArray(v) ? v.slice(0, max) : []);
 const words = (v, max = 24, each = 60) => list(v, max).map((s) => str(s, each)).filter(Boolean);
 const oneOf = (all, v) => (all.includes(v) ? v : null);
+
+/**
+ * Where an entry says it is, as a town and never an address.
+ *
+ * The coordinates are the truthful source — a household's home and a trip's
+ * base are both geocoded already — so this asks the map what the place is
+ * called and only falls back to trimming the free text somebody typed. If
+ * neither gives a town the entry carries none, and the screens say nothing
+ * rather than something that turns out to be a house number.
+ */
+const townCache = new Map();
+async function townFor({ typed, lat, lng }) {
+  const fromText = townOf(typed);
+  if (lat == null || lng == null) return fromText;
+  // A town for a point never changes, and the same household saves from the
+  // same place — so this is remembered, the way routes/atlas.js remembers it.
+  // Zoom 12 is the level that answers with the town: any shallower and a
+  // council's name comes back ("Windsor and Maidenhead" for Ascot).
+  const key = `${Number(lat).toFixed(2)},${Number(lng).toFixed(2)}`;
+  if (!townCache.has(key)) {
+    const there = await reverseGeocode(lat, lng, { zoom: 12 }).catch(() => null);
+    townCache.set(key, townOf(there?.locality ?? there?.address?.town ?? null));
+  }
+  return townCache.get(key) ?? fromText;
+}
 
 /**
  * The languages this household speaks, as far as Epic knows: whatever their
@@ -162,7 +188,11 @@ router.post('/open', async (req, res, next) => {
       whenChips: words(req.body?.when, 6),
       // The town, never the address. A household's home is held as whatever
       // they typed, and an entry's label is a thing the other side gets told.
-      whereLabel: townOf(str(req.body?.where, 120) ?? (trip ? trip.place_label ?? trip.destination_label ?? trip.title : household.home_label)),
+      whereLabel: await townFor({
+        typed: str(req.body?.where, 120) ?? (trip ? trip.place_label ?? trip.destination_label ?? trip.title : household.home_label),
+        lat: trip ? trip.base_lat ?? trip.destination_lat : household.home_lat,
+        lng: trip ? trip.base_lng ?? trip.destination_lng : household.home_lng,
+      }),
       whereMiles: int(req.body?.miles) ?? household.home_radius_miles ?? null,
       languages: JSON.stringify(languagesOf(req.body?.languages)),
       money: 'free',
@@ -264,8 +294,8 @@ async function journeyOf(entry) {
   const trip = await tripById(entry.trip_id).catch(() => null);
   if (!trip) return null;
   return {
-    from: townOf(trip.origin_label),
-    to: townOf(trip.place_label ?? trip.destination_label ?? trip.title ?? entry.where_label),
+    from: await townFor({ typed: trip.origin_label, lat: trip.origin_lat, lng: trip.origin_lng }),
+    to: await townFor({ typed: trip.place_label ?? trip.destination_label ?? trip.title ?? entry.where_label, lat: trip.base_lat ?? trip.destination_lat, lng: trip.base_lng ?? trip.destination_lng }),
     when: trip.start_date ? String(trip.start_date).slice(0, 10) : trip.depart_at ? String(trip.depart_at).slice(0, 10) : null,
   };
 }

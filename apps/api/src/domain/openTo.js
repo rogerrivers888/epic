@@ -91,30 +91,42 @@ export function sharedLanguages(a = [], b = []) {
 const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 : 0);
 
 /**
- * A place, cut down to somewhere you could name in a sentence.
+ * A place, cut down to somewhere you could name in a sentence — or nothing.
  *
- * A household's home is held as whatever they typed — often a full address
- * ("Fairways, Titlarks Hill, Ascot, SL5 0JD") — and a trip's origin is the
- * same. Nothing in this feature may ever carry that: a home address is never
- * shared, and the guest is told a *town*. So a label is trimmed to its town
- * before it goes anywhere, and it is done here rather than at each of the four
- * places a label travels, because one of them would have been missed.
+ * A household's home is held as whatever they typed ("Fairways, Titlarks Hill,
+ * Ascot, SL5 0JD"), and a trip's origin is the same. Nothing in this feature
+ * may ever carry that: a home address is never shared, and the guest is told a
+ * *town*.
  *
- * The rule: drop anything that looks like a postcode, and of what is left take
- * the last part. "12 High Street, Windsor" is Windsor; "Reading" is Reading;
- * "Ascot, Berkshire" becomes Berkshire, which is broader than the truth and
- * never narrower — the direction that is safe to be wrong in.
+ * The first version of this took the last comma-separated part of whatever was
+ * left, which worked on the formats it was tested with and handed back "sl5
+ * 0jd" for a lowercase postcode and "12 High Street Windsor SL4 1AA" whole for
+ * an address with no commas (Codex, 13 Sep 2026). So it does not salvage any
+ * more: a label travels only when what comes out *looks like a place name* —
+ * letters, spaces, hyphens and apostrophes, and not a street. Anything else is
+ * null, and a screen that is told nothing says nothing. Losing the town is a
+ * disappointment; sending the house is the thing this feature exists to
+ * prevent.
+ *
+ * `routes/openTo.js` asks the geocoder for a real locality first and only
+ * falls back to this, so the honest answer is usually available anyway.
  */
-/**
- * A part is a code rather than a place when it carries a digit and is made of
- * nothing but digits, capitals, spaces and hyphens: "SL5 0JD", "1100-053",
- * "20500", "K1A 0B1", "1012 AB". A town does not look like that, and the few
- * that carry a digit at all are not written in capitals.
- */
-const POSTCODE = /^(?=.*\d)[A-Z0-9][A-Z0-9 -]*$/;
+/** A code, not a place: carries a digit and nothing but digits, letters, spaces and hyphens. */
+const POSTCODE = /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 -]*$/;
+/** Words that make a part a street rather than a town. Over-refusing is the safe way to be wrong. */
+const STREETY = /\b(street|st|road|rd|lane|ln|avenue|ave|drive|dr|close|way|court|ct|crescent|terrace|place|gardens|grove|park|hill|rise|mews|row|walk|square|sq|parade|villas|cottages|house|flat|apartment|apt|suite|unit|floor|po box)\b/i;
+/** What a town may be made of: letters, spaces, hyphens, apostrophes, full stops. No digits. */
+const PLACEY = /^[\p{L}][\p{L} .'’-]*$/u;
+
 export function townOf(label) {
-  const parts = String(label ?? '').split(',').map((p) => p.trim()).filter(Boolean).filter((p) => !POSTCODE.test(p));
-  return parts.length ? parts[parts.length - 1] : null;
+  const parts = String(label ?? '').split(',').map((p) => p.trim()).filter(Boolean);
+  const kept = parts.filter((p) => !POSTCODE.test(p));
+  const candidate = kept.length ? kept[kept.length - 1] : null;
+  if (!candidate) return null;
+  // It has to read as a place on its own. An address with no commas arrives
+  // here as one long part and fails, which is the point.
+  if (!PLACEY.test(candidate) || STREETY.test(candidate)) return null;
+  return candidate;
 }
 
 /** The language the two share, at the level each holds it, or null. */
