@@ -538,11 +538,16 @@ export async function answerInvite(id, rsvp, heads) {
 // media
 // ---------------------------------------------------------------------------
 
-export async function insertMedia({ householdId, kind, mime, bytes, durationS, madeBy = 'self' }) {
+/**
+ * `isPrivate` marks media that `GET /api/media/:id` must refuse — a hello and
+ * the two images at the ID gate (migration 097). Everything else here belongs
+ * to a page that is public anyway.
+ */
+export async function insertMedia({ householdId, kind, mime, bytes, durationS, madeBy = 'self', isPrivate = false }) {
   const { rows } = await query(
-    `insert into host_media (household_id, kind, mime, bytes, size, duration_s, made_by) values ($1,$2,$3,$4,$5,$6,$7)
-     returning id, household_id, kind, mime, size, duration_s, trim_start_s, trim_end_s, made_by, created_at`,
-    [householdId, kind, mime, bytes, bytes.length, durationS ?? null, madeBy],
+    `insert into host_media (household_id, kind, mime, bytes, size, duration_s, made_by, is_private) values ($1,$2,$3,$4,$5,$6,$7,$8)
+     returning id, household_id, kind, mime, size, duration_s, trim_start_s, trim_end_s, made_by, is_private, created_at`,
+    [householdId, kind, mime, bytes, bytes.length, durationS ?? null, madeBy, isPrivate],
   );
   return rows[0];
 }

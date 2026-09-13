@@ -768,6 +768,8 @@ A visit holds a venue identifier from the rented layer and everything else from 
 
 **Then chat opens, inside Epic.** An introduction that has cleared both checks is a third chat context — `meet` — through the same component, the same rules and a door of its own (`/open/matches/<id>/chat`). Two people, on first names, no photograph and no contact details; three aspects (meeting up · where and when · who is coming); and it does not exist before the gate clears, which is what O14's "nothing is exchanged until it clears" means. **The one nudge is sent** through the chat's own notifier, and says somebody is waiting and nothing else — not who, not where, not what about.
 
+**A hello and an ID photograph are not public media.** Both live in `host_media` beside a host's photograph, and `GET /api/media/:id` is public by design — so they carry `is_private` (migration 097) and that handler refuses them. They are reachable only from their own guarded addresses: a hello from `/api/open/matches/<id>/hello/<mine|theirs>` behind `videoVisible`, an ID image from `/api/admin/open/checks/<id>/<doc|selfie>` behind the back office's door and **only while the check is `pending`** — a replacement sent after a fail is a draft until the person sends it. Both are `no-store`, and both screens fetch the bytes with the session and hold them as a blob they revoke, so neither becomes a URL in anybody's history.
+
 **None of this is held on a device.** `/api/open/**` is deliberately absent from `offline/policy.ts`: an introduction is a decision somebody is part-way through, not a record, and the unnamed-endpoints-are-not-saved fallback is what keeps the screens online-only.
 
 The word "strangers" is never used anywhere in this feature.

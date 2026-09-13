@@ -440,3 +440,44 @@ test('saying it again is editing it: what no longer fits is let go of', async ()
   assert.ok(await withdrawUnfitting(await repo.entryById(host.id)) >= 1);
   assert.equal((await ours())?.stage, 'ended');
 });
+
+test('a hello and an ID photograph are not on the public media route', async () => {
+  const hostRepo = await import('../src/repositories/hosting.js');
+  const home = await aHousehold(query, 'somebody with a hello and a passport');
+  const bytes = Buffer.from('not really a video');
+  // What Casual meet ups writes: a twenty-second hello, and the two images at
+  // the gate. Both live in host_media beside a host's photograph, and the
+  // public reader has to be able to tell them apart.
+  const hello = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'video', mime: 'video/webm', bytes, isPrivate: true });
+  const doc = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes, isPrivate: true });
+  const listing = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes });
+
+  assert.equal((await hostRepo.mediaById(hello.id)).is_private, true);
+  assert.equal((await hostRepo.mediaById(doc.id)).is_private, true);
+  assert.equal((await hostRepo.mediaById(listing.id)).is_private, false, 'a listing photograph is on a public page and stays public');
+});
+
+test('a reviewer sees an ID check only while it is waiting on them', async () => {
+  const home = await aHousehold(query, 'somebody at the gate');
+  const away = await aHousehold(query, 'the other side of it');
+  const h = await repo.insertEntry(home.household.id, { scope: 'standing', interests: ['Chess club'] });
+  const g = await repo.insertEntry(away.household.id, { scope: 'trip', interests: ['Chess club'] });
+  const match = await repo.insertMatch({ hostEntryId: h.id, guestEntryId: g.id, interests: ['Chess club'], kind: 'adult' });
+  const hostRepo = await import('../src/repositories/hosting.js');
+  const img = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes: Buffer.from('x'), isPrivate: true });
+
+  let check = await repo.saveIdCheck({ matchId: match.id, householdId: home.household.id, side: 'host', docMediaId: img.id, selfieMediaId: img.id, state: 'draft' });
+  assert.equal(check.state, 'draft', 'a draft is nobody else’s to look at');
+  check = await repo.submitIdCheck(check.id);
+  assert.equal(check.state, 'pending', 'sending it is what opens it to a reviewer');
+
+  // Sent back, and then the replacement images land on the same row. Until it
+  // is sent again it is a draft, and the reviewer's old address must not work.
+  await repo.decideIdCheck(check.id, { state: 'failed', note: 'Too dark to read.', by: 'test' });
+  assert.equal((await repo.idCheckOf(check.id)).state, 'failed');
+  assert.equal((await repo.idCheckOf(check.id)).doc_media_id, null, 'and the images went with the decision');
+  // A fresh photograph, because the old one no longer exists to point at.
+  const again = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes: Buffer.from('y'), isPrivate: true });
+  const redone = await repo.saveIdCheck({ matchId: match.id, householdId: home.household.id, side: 'host', docMediaId: again.id, selfieMediaId: null, state: 'draft' });
+  assert.equal(redone.state, 'draft', 'a replacement is a draft until it is sent');
+});

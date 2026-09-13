@@ -471,7 +471,7 @@ router.post('/open/matches/:id/hello', express.raw({ type: ['video/*', 'audio/*'
     if (!req.body?.length) throw refuse(400, 'no_video', 'Nothing was recorded.');
     const seconds = Number(req.query.seconds) || null;
     if (seconds && seconds > HELLO_SECONDS + 2) throw refuse(400, 'too_long', `Twenty seconds is the limit.`);
-    const media = await hostRepo.insertMedia({ householdId: household.id, kind: 'video', mime: str(req.headers['content-type'], 80) ?? 'video/webm', bytes: req.body, durationS: seconds });
+    const media = await hostRepo.insertMedia({ householdId: household.id, kind: 'video', mime: str(req.headers['content-type'], 80) ?? 'video/webm', bytes: req.body, durationS: seconds, isPrivate: true });
     const patch = found.side === 'host' ? { hostVideoId: media.id } : { guestVideoId: media.id };
     const saved = await repo.updateMatch(match.id, { ...patch, stage: nextStage({ ...match, ...(found.side === 'host' ? { host_video_id: media.id } : { guest_video_id: media.id }) }, {}) });
     res.status(201).json({ match: await matchPayload(saved, found.side, found.host, found.guest) });
@@ -594,7 +594,7 @@ router.post('/open/matches/:id/id/:which', express.raw({ type: ['image/*', 'appl
     if (existing?.state === 'passed') throw refuse(409, 'done', 'That check has already cleared.');
     if (existing?.state === 'pending') throw refuse(409, 'waiting', 'That is with us. We will tell you either way.');
     if (!req.body?.length) throw refuse(400, 'no_image', 'Nothing was sent.');
-    const media = await hostRepo.insertMedia({ householdId: household.id, kind: 'photo', mime: str(req.headers['content-type'], 80) ?? 'image/jpeg', bytes: req.body });
+    const media = await hostRepo.insertMedia({ householdId: household.id, kind: 'photo', mime: str(req.headers['content-type'], 80) ?? 'image/jpeg', bytes: req.body, isPrivate: true });
     // Replacing an image drops the one it replaces: we hold two, never a pile.
     const oldId = which === 'doc' ? existing?.doc_media_id : existing?.selfie_media_id;
     const check = await repo.saveIdCheck({
@@ -661,6 +661,10 @@ adminRouter.get('/checks/:id/:which', requires('manage_hosting'), async (req, re
     const which = oneOf(['doc', 'selfie'], req.params.which);
     if (!which) throw refuse(404, 'not_found', 'There is nothing at that address.');
     const check = await repo.idCheckOf(req.params.id);
+    // Only while it is waiting to be decided. A failed check keeps its row, and
+    // the replacement images land on it — those are not a reviewer's to look at
+    // until the person sends them (Codex, 13 Sep 2026).
+    if (check && check.state !== 'pending') throw refuse(404, 'not_found', 'There is nothing at that address.');
     const mediaId = check && (which === 'doc' ? check.doc_media_id : check.selfie_media_id);
     if (!mediaId) throw refuse(404, 'not_found', 'There is nothing at that address.');
     const media = await hostRepo.mediaById(mediaId);

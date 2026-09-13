@@ -399,11 +399,20 @@ router.delete('/host/media/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** GET /api/media/:id — the bytes. Public: the page it plays on is public, and the id is unguessable. */
+/**
+ * GET /api/media/:id — the bytes. Public: the page it plays on is public, and
+ * the id is unguessable.
+ *
+ * That is true of a host's photograph and a listing's video, and it is not
+ * true of a hello or a photograph of somebody's passport, which live in the
+ * same table. Those are marked private (migration 097) and refused here, so
+ * the guarded addresses that serve them are the only way in — otherwise
+ * guarding them changed nothing at all (Codex, 13 Sep 2026).
+ */
 publicRouter.get('/media/:id', async (req, res, next) => {
   try {
     const m = await repo.mediaById(req.params.id);
-    if (!m) return res.status(404).json({ error: 'not_found' });
+    if (!m || m.is_private) return res.status(404).json({ error: 'not_found' });
     res.setHeader('content-type', m.mime);
     if (m.kind === 'doc') res.setHeader('content-disposition', 'attachment; filename="for-guests.pdf"');
     res.setHeader('cache-control', 'public, max-age=31536000, immutable');
