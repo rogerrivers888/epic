@@ -3373,8 +3373,8 @@ export type Booking = {
 };
 export type InvitedView = { invite: OfferInvite; offer: Experience; going: number; payments: PaymentsConfig };
 /** Every e-mail sent and what Postmark said became of it (admin › Mail). */
-export type MailRow = { id: string; to_address: string; subject: string; purpose: string; provider_id: string | null; status: 'sent' | 'delivered' | 'opened' | 'bounced' | 'soft_bounced' | 'complained' | 'failed'; bounce_type: string | null; failure: string | null; sent_at: string; delivered_at: string | null; opened_at: string | null; bounced_at: string | null };
-export type AdminMail = { counts: Record<string, number>; rows: MailRow[]; words: Record<string, string>; sender: { configured: boolean; from?: string; provider?: string; stream?: string; events?: boolean; message?: string; setup?: string } };
+export type MailRow = { id: string; to_address: string; subject: string; purpose: string; provider_id: string | null; status: 'sending' | 'sent' | 'delivered' | 'opened' | 'bounced' | 'soft_bounced' | 'complained' | 'failed'; bounce_type: string | null; failure: string | null; sent_at: string; delivered_at: string | null; opened_at: string | null; bounced_at: string | null };
+export type AdminMail = { counts: Record<string, number>; filters: { delivered: number; not_delivered: number }; rows: MailRow[]; words: Record<string, string>; sender: { configured: boolean; from?: string; provider?: string; stream?: string; events?: boolean; message?: string; setup?: string } };
 export type AdminHosting = {
   inReview: (Experience & { hostName: string; hostType: HostType | null; hostTrust: TrustLevel; submittedAt: string | null; checklist: PitchChecklist; commentary: boolean })[];
   hosts: (OwnHost & { liveOffers: number; inReview: number; openReports: number })[];

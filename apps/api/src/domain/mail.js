@@ -19,7 +19,7 @@ export const HARD_BOUNCES = new Set(['HardBounce', 'BadEmailAddress', 'ManuallyD
 /** How long a hard bounce or a complaint keeps an address off the list. */
 export const SUPPRESS_DAYS = 90;
 
-const RANK = { failed: 0, sent: 1, soft_bounced: 2, delivered: 3, opened: 4, bounced: 5, complained: 6 };
+const RANK = { sending: 0, failed: 0, sent: 1, soft_bounced: 2, delivered: 3, opened: 4, bounced: 5, complained: 6 };
 
 /**
  * The next state of a message after one event.
@@ -63,5 +63,5 @@ export function suppressedBy(past, now = new Date()) {
 
 /** The status as a word for a screen, and its tone. Never colour alone. */
 export const STATUS_WORDS = {
-  sent: 'Sent', delivered: 'Delivered', opened: 'Opened', bounced: 'Bounced', soft_bounced: 'Delayed', complained: 'Marked as spam', failed: 'Not sent',
+  sending: 'Sending', sent: 'Sent', delivered: 'Delivered', opened: 'Opened', bounced: 'Bounced', soft_bounced: 'Delayed', complained: 'Marked as spam', failed: 'Not sent',
 };

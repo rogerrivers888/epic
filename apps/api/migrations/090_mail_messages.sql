@@ -14,7 +14,9 @@ create table if not exists mail_messages (
   purpose text not null default 'message',
   provider text not null default 'postmark',
   provider_id text,
-  status text not null default 'sent' check (status in ('sent', 'delivered', 'opened', 'bounced', 'soft_bounced', 'complained', 'failed')),
+  -- `sending` is the row before Postmark has answered; a process that dies there
+  -- leaves it honest rather than claiming a send that may never have left.
+  status text not null default 'sending' check (status in ('sending', 'sent', 'delivered', 'opened', 'bounced', 'soft_bounced', 'complained', 'failed')),
   bounce_type text,
   failure text,
   sent_at timestamptz not null default now(),

@@ -18,7 +18,7 @@ import { AdminPage, Banner, DataTable, Dropdown, PageHead, RangePicker, Tile, Ti
 
 const FILTERS: { key: string; label: string }[] = [
   { key: '', label: 'Any outcome' }, { key: 'sent', label: 'Sent' }, { key: 'delivered', label: 'Delivered' }, { key: 'opened', label: 'Opened' },
-  { key: 'not_delivered', label: 'Not delivered' }, { key: 'bounced', label: 'Bounced' }, { key: 'soft_bounced', label: 'Delayed' }, { key: 'complained', label: 'Marked as spam' }, { key: 'failed', label: 'Not sent' },
+  { key: 'not_delivered', label: 'Not delivered' }, { key: 'bounced', label: 'Bounced' }, { key: 'soft_bounced', label: 'Delayed' }, { key: 'complained', label: 'Marked as spam' }, { key: 'failed', label: 'Not sent' }, { key: 'sending', label: 'Sending' },
 ];
 const purposeLabel = (p: string) => { const w = (p || '').replace(/_/g, ' ').trim(); return w ? w[0].toUpperCase() + w.slice(1) : '—'; };
 
@@ -33,7 +33,8 @@ export function Mail() {
   const c = data?.counts ?? {};
   const n = (k: string) => c[k] ?? 0;
   const sentAll = Object.values(c).reduce((a, b) => a + b, 0);
-  const notDelivered = n('bounced') + n('soft_bounced') + n('complained') + n('failed');
+  const delivered = data?.filters?.delivered ?? n('delivered') + n('opened');
+  const notDelivered = data?.filters?.not_delivered ?? n('bounced') + n('soft_bounced') + n('complained') + n('failed');
   const words = data?.words ?? {};
   const outcome = (r: MailRow) => {
     const when = r.status === 'opened' ? r.opened_at : r.status === 'delivered' ? r.delivered_at : r.bounced_at;
@@ -60,11 +61,11 @@ export function Mail() {
       {data && data.sender.configured && !data.sender.events ? <Banner tone="warn">Sends go out, but nothing comes back: add POSTMARK_WEBHOOK_TOKEN in Doppler and give Postmark the webhook address, so deliveries, opens and bounces land here.</Banner> : null}
       <TileRow>
         <Tile label="Sent" value={String(sentAll)} sub={`in ${days} days`} />
-        <Tile label="Delivered" value={String(n('delivered') + n('opened'))} sub="accepted by their server" tone="ok" onPress={() => setStatus('delivered')} />
+        <Tile label="Delivered" value={String(delivered)} sub="accepted by their server" tone="ok" onPress={() => setStatus('delivered')} />
         <Tile label="Opened" value={String(n('opened'))} sub="read receipts" tone="ok" onPress={() => setStatus('opened')} />
         <Tile label="Not delivered" value={String(notDelivered)} sub="bounced, delayed, spam or not sent" tone={notDelivered ? 'warn' : 'plain'} onPress={() => setStatus('not_delivered')} />
       </TileRow>
-      <Dropdown label="Show" value={FILTERS.find((f) => f.key === status)?.label ?? 'Any outcome'} width={240} options={FILTERS.map((f) => ({ key: f.key, label: f.label, on: f.key === status, count: f.key ? (f.key === 'not_delivered' ? notDelivered : n(f.key)) : sentAll }))} onPick={setStatus} />
+      <Dropdown label="Show" value={FILTERS.find((f) => f.key === status)?.label ?? 'Any outcome'} width={240} options={FILTERS.map((f) => ({ key: f.key, label: f.label, on: f.key === status, count: f.key ? (f.key === 'not_delivered' ? notDelivered : f.key === 'delivered' ? delivered : n(f.key)) : sentAll }))} onPick={setStatus} />
       <DataTable rows={data?.rows ?? []} columns={columns} initialSort={{ key: 'when', dir: 'desc' }} empty={<Text style={type.small}>{data ? 'Nothing sent in this window.' : 'Loading…'}</Text>} />
     </AdminPage>
   );

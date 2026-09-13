@@ -19,7 +19,7 @@ export async function recordSend({ to, subject, purpose, providerId, status, fai
 export async function finishSend(id, { providerId, status, failure }) {
   const { rows } = await query(
     `update mail_messages set provider_id = coalesce($2, provider_id), failure = coalesce($3, failure),
-       status = case when status = 'sent' then $4 else status end
+       status = case when status in ('sending', 'sent') then $4 else status end
      where id = $1 returning *`,
     [id, providerId ?? null, failure ?? null, status],
   );
@@ -61,11 +61,15 @@ export async function summary({ days = 30, status = null, limit = 200 } = {}) {
   const { rows: counts } = await query(`select status, count(*)::int as n from mail_messages where sent_at > now() - make_interval(days => $1) group by status`, [days]);
   const where = ['sent_at > now() - make_interval(days => $1)'];
   const params = [days];
-  if (status === 'not_delivered') where.push(`status in ('bounced', 'soft_bounced', 'complained', 'failed')`);
+  if (status === 'not_delivered') where.push(`status in ('bounced', 'soft_bounced', 'complained', 'failed', 'sending')`);
   // Delivered is everything their server accepted, so an opened one is delivered too (Codex, 13 Sep 2026).
   else if (status === 'delivered') where.push(`status in ('delivered', 'opened')`);
   else if (status) { params.push(status); where.push(`status = $${params.length}`); }
   params.push(limit);
   const { rows } = await query(`select id, to_address, subject, purpose, provider_id, status, bounce_type, failure, sent_at, delivered_at, opened_at, bounced_at from mail_messages where ${where.join(' and ')} order by sent_at desc limit $${params.length}`, params);
-  return { counts: Object.fromEntries(counts.map((c) => [c.status, c.n])), rows };
+  const byStatus = Object.fromEntries(counts.map((c) => [c.status, c.n]));
+  // The counts a filter answers with, so a tile never promises more rows than its list shows (Codex, 13 Sep 2026).
+  const n = (k) => byStatus[k] ?? 0;
+  const filters = { delivered: n('delivered') + n('opened'), not_delivered: n('bounced') + n('soft_bounced') + n('complained') + n('failed') + n('sending') };
+  return { counts: byStatus, filters, rows };
 }

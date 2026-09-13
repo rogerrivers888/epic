@@ -100,7 +100,7 @@ export async function sendMail({ to, subject, text, html, purpose = 'message' })
   // The row first, then the send, with our id in Postmark's metadata: a
   // Delivery event can arrive before Postmark's reply to the send has been
   // read, and it must still find its row (Codex, 13 Sep 2026).
-  const row = await recordSend({ to, subject, purpose, status: 'sent' }).catch(() => null);
+  const row = await recordSend({ to, subject, purpose, status: 'sending' }).catch(() => null);
   try {
     const res = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',
