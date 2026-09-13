@@ -114,7 +114,7 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Stat n={String(s.live)} label={s.live === 1 ? 'offer live' : 'offers live'} />
           <Stat n={String(s.booked)} label="booked" />
-          <Stat n={money(s.toComePence)} label={home.config.payments.ready ? 'to come' : 'recorded'} />
+          <Stat n={s.toComePence ? money(s.toComePence) : '£0'} label={home.config.payments.ready ? 'to come' : 'recorded'} />
         </View>
       </View>
 

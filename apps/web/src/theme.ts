@@ -167,6 +167,15 @@ const LIGHT = {
   travel: '#D8D3CB',
   dwell: LIME,
   slack: LIME_TINT,
+  /**
+   * The hosting canvases (13 Sep 2026) draw two things no other screen has:
+   * the deep green that sits on a lime block — oklch(0.40 0.11 130), darker
+   * than moss so it reads on the brand colour — and the near-black ground a
+   * video sits on before anything is recorded. The lime block stays lime in
+   * both modes, so its text does too.
+   */
+  onLime: '#335200',
+  videoGround: '#2A2726',
   // Meaning that must still read as danger. The owner kept these red when
   // everything else went (7 Sep 2026): an allergen is not a brand decision.
   overrun: '#C0392B',
@@ -230,6 +239,8 @@ const DARK: typeof LIGHT = {
   travel: D.ruleSoft,
   dwell: LIME,
   slack: D.sheet,
+  onLime: '#335200',
+  videoGround: D.bubble,
   overrun: '#E8776B',
   overrunSoft: '#3E1F1B',
   allergen: '#EA7A70',

@@ -310,6 +310,10 @@ router.delete('/host', async (req, res, next) => {
     // One transaction with every offer locked: a booking landing meanwhile
     // waits on the lock and then finds nothing to book, rather than being
     // confirmed and cascading away a moment later (Codex, 12 Sep 2026).
+    // Who to tell, once the rows are gone: the promise on the button is that
+    // anyone holding a place is called off, and a place that vanishes without
+    // a word is not called off (Codex, 13 Sep 2026).
+    const toTell = [];
     await withTransaction(async (client) => {
       const offers = await repo.lockOffersOfHost(host.id, client);
       const bookings = (await Promise.all(offers.map((o) => repo.bookingsOfOffer(o.id, client)))).flat();
@@ -321,9 +325,17 @@ router.delete('/host', async (req, res, next) => {
       for (const b of holding) {
         await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'host', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null }, client);
       }
+      for (const o of offers) {
+        const bs = holding.filter((b) => b.offer_id === o.id);
+        if (bs.length) toTell.push({ title: o.title, bookings: bs });
+      }
       await repo.deleteMediaOfHost(host, offers, client);
       await repo.deleteHost(host.id, household.id, client);
     });
+    // After the commit, so nobody is told about a cancellation that rolled back.
+    for (const { title, bookings } of toTell) {
+      await tellBooked(bookings, `${title ?? 'Your booking'} has been called off by the host. Anything paid is refunded to the card it was paid with.`);
+    }
     res.status(204).end();
   } catch (err) { next(err); }
 });
