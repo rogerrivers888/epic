@@ -972,7 +972,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                           Google category that makes it not a day out. */}
                       {(() => {
                         const bits = [
-                          !wide ? `${count(r.seen_count)} places` : null,
+                          !wide ? `${count(r.seen_count)} ${r.seen_count === 1 ? 'place' : 'places'}` : null,
                           !decided(r) && sug && !/^the obvious/.test(sug.why) ? sug.why : null,
                           st === 'mapped' && r.landing.how === 'taught' ? (r.landing.via?.by === 'Epic' ? 'mapped by Epic' : 'mapped by you') : st === 'mapped' ? 'mapped by the code' : null,
                         ].filter(Boolean);
@@ -1037,7 +1037,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                                     <Text style={type.small} numberOfLines={1}>
                                       <Text style={{ fontWeight: '600' }}>{w.label ?? w.key}</Text> <Text style={{ color: colors.inkMuted }}>{w.key}</Text>
                                     </Text>
-                                    {!wide ? <Text style={type.tiny}>{count(w.seen_count)} places</Text> : null}
+                                    {!wide ? <Text style={type.tiny}>{count(w.seen_count)} {w.seen_count === 1 ? 'place' : 'places'}</Text> : null}
                                   </View>
                                   {/* The same three slots as the row above, so Places stays
                                       in the Places column (owner, 13 Sep 2026). */}
