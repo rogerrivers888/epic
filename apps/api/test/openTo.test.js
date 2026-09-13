@@ -527,13 +527,19 @@ test('a place is cut down to a town before it goes anywhere', () => {
   assert.equal(townOf('Fairways, Ascot, sl5 0jd'), 'Ascot', 'a postcode in lower case is still a postcode');
   assert.equal(townOf('12 High Street Windsor SL4 1AA'), null, 'an address with no commas is not salvaged');
   assert.equal(townOf('Flat 2, 14 Titlarks Hill'), null, 'and neither is a street');
-  // Address-only words are never a town, so they are refused even where the
-  // ambiguous ones are allowed through. Trimming the list once let these back.
+  // An address ends with the word; a place name carries it at the front or in
+  // the middle. Four passes were spent tuning a word list before that was the
+  // rule, so both directions are held here (Codex, 13 Sep 2026).
   assert.equal(townOf('Flat 2, Manor House'), null);
   assert.equal(townOf('Rose Villas'), null);
   assert.equal(townOf('Chapel Close'), null);
   assert.equal(townOf('Ground Floor'), null);
-  // And they are refused as a part, not as the whole label.
+  assert.equal(townOf('12 High Street'), null);
+  assert.equal(townOf('Church Lane'), null);
+  assert.equal(townOf('Cottage Grove'), 'Cottage Grove', 'a real city, and the word is not at the end');
+  assert.equal(townOf('Villa Park'), 'Villa Park');
+  assert.equal(townOf('Road Town'), 'Road Town');
+  // And an address word is refused as a part, not as the whole label.
   assert.equal(townOf('The Old Cottage, Ascot'), 'Ascot');
   assert.equal(townOf('Rose Villas, Windsor'), 'Windsor');
   assert.equal(townOf('High Street, Windsor'), 'Windsor');
@@ -546,8 +552,7 @@ test('a place is cut down to a town before it goes anywhere', () => {
   assert.equal(townOf('Grove'), 'Grove');
   // A locality from the map is a structured field, not something typed, so it
   // is taken as given — it still may not be a postcode or carry a digit.
-  assert.equal(townOf('Road Town', { trusted: true }), 'Road Town', 'the map knows a town when it names one');
-  assert.equal(townOf('Road Town'), null, 'typed, it reads as a street');
+  assert.equal(townOf('Manor House', { trusted: true }), 'Manor House', 'the map knows a place when it names one');
   assert.equal(townOf('SL5 0JD', { trusted: true }), null, 'trusted is not a way round the postcode rule');
   assert.equal(townOf('12 High Street Windsor SL4 1AA', { trusted: true }), null);
   assert.equal(townOf('Newcastle upon Tyne'), 'Newcastle upon Tyne');

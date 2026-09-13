@@ -114,26 +114,29 @@ const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 :
 /** A code, not a place: carries a digit and nothing but digits, letters, spaces and hyphens. */
 const POSTCODE = /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 -]*$/;
 /**
- * Words that make a part an address rather than a town, in typed free text.
+ * Whether a typed part is an address rather than a place — by where the word
+ * sits, not by which word it is.
  *
- * There are two kinds and they are not the same. **Ambiguous** words —
- * "hill", "park", "grove", "st", "place", "square", "way", "court", "row" —
- * are ordinary in real place names, and a list that refused them lost St
- * Albans, Burgess Hill, Park City, Notting Hill and Grove. **Address-only**
- * words are never a town at all, and trimming the list the first time took
- * those out with the rest, which let "Flat 2, Manor House" through as a town
- * (Codex, 13 Sep 2026).
+ * Four passes were spent tuning a list of words, and each version was wrong in
+ * the other direction: long enough to catch "Manor House" refused St Albans
+ * and Burgess Hill; short enough to allow those let "Manor House" through;
+ * putting "cottage" and "villa" back refused Cottage Grove and Villa Park
+ * (Codex, 13 Sep 2026). The list was never the distinction.
  *
- * So: every word here is one that names a street, a building or a part of
- * one, and none of them is a place anybody lives in the name of.
+ * The distinction is position. In an address the word comes **last** — Manor
+ * *House*, Rose *Villas*, Chapel *Close*, High *Street*, Ground *Floor*. In a
+ * place name it comes first or in the middle — *Cottage* Grove, *Villa* Park,
+ * *Church* Stretton. So a part is refused when it *ends* with one of these,
+ * and a real town that merely contains one is untouched.
  */
-const STREETY = new RegExp(`\\b(${[
-  // a street
-  'street', 'road', 'lane', 'avenue', 'drive', 'crescent', 'terrace', 'mews', 'cul-de-sac', 'close',
-  // a building, or a part of one
+const ADDRESS_TAIL = new RegExp(`\\b(${[
+  // what a street is called
+  'street', 'road', 'lane', 'avenue', 'drive', 'crescent', 'terrace', 'mews', 'close', 'walk', 'row', 'way',
+  // what a building, or a part of one, is called
   'house', 'cottage', 'cottages', 'villa', 'villas', 'bungalow', 'lodge', 'annexe', 'block', 'building',
-  'flat', 'apartment', 'apt', 'suite', 'unit', 'floor', 'penthouse', 'po box',
-].join('|')})\\b`, 'i');
+  'flat', 'apartment', 'apt', 'suite', 'unit', 'floor', 'penthouse',
+].join('|')})\\.?$`, 'i');
+
 /** What a town may be made of: letters, spaces, hyphens, apostrophes, full stops. No digits. */
 const PLACEY = /^[\p{L}][\p{L} .'’-]*$/u;
 
@@ -151,7 +154,7 @@ export function townOf(label, { trusted = false } = {}) {
   // It has to read as a place on its own. An address with no commas arrives
   // here as one long part and fails, which is the point.
   if (!PLACEY.test(candidate)) return null;
-  if (!trusted && STREETY.test(candidate)) return null;
+  if (!trusted && ADDRESS_TAIL.test(candidate)) return null;
   return candidate;
 }
 
