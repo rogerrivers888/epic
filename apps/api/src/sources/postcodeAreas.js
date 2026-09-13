@@ -53,6 +53,17 @@ export const PLACES = {
     counties: ['Greater London'],
     districts: [],
   },
+  bristol: {
+    label: 'Bristol',
+    // The city and what surrounds it, which is one postcode area and four
+    // unitary authorities (owner, 13 Sep 2026: "we need to sweep the whole
+    // city and surrounding areas once"). Bath is not in it: Bath is BA, and
+    // the area list is the outer fence — so North East Somerset contributes
+    // only the Chew Valley and Keynsham, which are Bristol's hinterland.
+    areas: ['BS'],
+    counties: [],
+    districts: ['Bristol, City of', 'North Somerset', 'South Gloucestershire', 'Bath and North East Somerset'],
+  },
 };
 
 /** What ONS says about one outward code, or null where there is no such code. */
@@ -82,7 +93,14 @@ export async function outcode(code) {
   return value;
 }
 
-const belongs = (o, place) =>
+/**
+ * Whether an outward code is part of a place, by what ONS says it is in.
+ *
+ * Exported because it is half the fence and the half that is easy to get
+ * wrong: the other half is the area list, which is what keeps Bath out of
+ * Bristol even though both sit in Bath and North East Somerset.
+ */
+export const belongs = (o, place) =>
   o.counties.some((c) => place.counties.includes(c)) || o.districts.some((d) => place.districts.includes(d));
 
 /**
