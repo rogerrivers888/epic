@@ -10,12 +10,6 @@
 -- "abandoned", which is the only thing the code was missing.
 alter table scout_areas add column if not exists sweeping_since timestamptz;
 
--- Who holds the lock, so a sweep that overran its half hour and woke up after
--- somebody else had taken over cannot clear the newer one's lock and write over
--- its work. The timestamp cannot do this job: it loses its microseconds on the
--- way through JavaScript and no longer matches itself.
-alter table scout_areas add column if not exists sweep_lease uuid;
-
 -- Anything already stuck is abandoned by definition: no sweep survives a
 -- deploy, and every one of these predates this migration.
 update scout_areas set state = 'failed', why = coalesce(why, 'the sweep stopped before it finished')
