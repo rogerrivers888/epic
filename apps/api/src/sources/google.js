@@ -660,8 +660,13 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
   };
   let data;
   try { data = await call('/places:searchText', { fieldMask: EXAMPLE_FIELDS, meter, body }); }
-  catch (err) { return { places: [], calls: 1, problem: String(err.message).slice(0, 160) }; }
-  const places = (data.places || []).slice(0, limit).map((p) => ({
+  catch (err) { return { places: [], calls: 1, problem: String(err.message).slice(0, 160), fenced: searchable }; }
+  // Without `includedType` this is a plain words search, and Google does not
+  // promise the answers carry the word at all. Anything that does not is
+  // dropped rather than shown as an example of it (Codex, 13 Sep 2026).
+  const raw = data.places || [];
+  const kept = searchable ? raw : raw.filter((p) => (p.types || []).includes(String(type)));
+  const places = kept.slice(0, limit).map((p) => ({
     id: p.id,
     name: p.displayName?.text ?? null,
     address: p.formattedAddress ?? null,
@@ -670,7 +675,7 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
     mapsUrl: p.googleMapsUri ?? null,
     website: p.websiteUri ?? null,
   }));
-  return { places, calls: 1, problem: null };
+  return { places, calls: 1, problem: null, fenced: searchable };
 }
 
 export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null, includedType = 'restaurant', keepLodging = false } = {}) {

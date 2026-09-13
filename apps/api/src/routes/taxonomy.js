@@ -254,6 +254,9 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       });
     res.json({
       label, near: household?.home_label ?? 'London', places: out.places,
+      // False where Google would not take the word as a filter: the search was
+      // by words and the answers were then kept only if they really carry it.
+      fenced: out.fenced !== false,
       alsoCalled, calls: out.calls, problem: out.problem,
       subcategories: tax.subcategories, categories: tax.categories,
     });

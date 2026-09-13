@@ -1118,7 +1118,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       {!egBusy && eg && !eg.problem && !eg.places.length ? <Text style={type.tiny}>Google knows no place of this type near {eg.near}.</Text> : null}
                       {!egBusy && eg && eg.places.length ? (
                         <>
-                          <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.</Text>
+                          <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.{eg.fenced ? '' : ' Google will not filter by this word, so these were found by words and then kept only where it really appears.'}</Text>
                           {eg.places.map((pl) => (
                             <View key={pl.id} style={styles.egRow}>
                               <View style={{ flex: 1, minWidth: 0 }}>

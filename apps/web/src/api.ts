@@ -2887,6 +2887,8 @@ export type TaxonomyExamples = {
   places: { id: string; name: string | null; address: string | null; primaryType: string | null; types: string[]; mapsUrl: string | null; website: string | null }[];
   /** Every other Google word on those places, commonest first, with where each lands. */
   alsoCalled: { key: string; on: number; label: string | null; decision: string | null; landing: TaxonomyLanding }[];
+  /** False where Google would not fence the search by this word, so it was matched on words and then checked. */
+  fenced: boolean;
   calls: number;
   problem: string | null;
   subcategories: ShelfSubcategory[];
