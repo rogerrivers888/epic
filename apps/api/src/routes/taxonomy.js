@@ -359,12 +359,16 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
     const tax = await taxonomy.taxonomy();
     const categoryKey = String(req.body?.categoryKey || '');
     if (!tax.byKey.has(categoryKey)) throw bad(`${categoryKey} is not a category`);
-    const existing = tax.subByKey.get(key) ?? null;
-    if (existing && existing.category_key !== categoryKey) {
-      throw bad(`There is already a subcategory called ${existing.label} under ${tax.byKey.get(existing.category_key)?.label ?? existing.category_key}. Pick it from the list, or rename that one first.`);
-    }
     const { subject } = scopeFor([label]);
     const result = await withTransaction(async (c) => {
+      // Read the key inside the transaction, not from the five-second cache,
+      // so two adoptions at once or another process's write cannot slip past
+      // the check (Codex, 13 Sep 2026).
+      const seen = await c.query('select * from shelf_subcategories where key = $1 for update', [key]);
+      const existing = seen.rows[0] ?? null;
+      if (existing && existing.category_key !== categoryKey) {
+        throw bad(`There is already a subcategory called ${existing.label} under ${tax.byKey.get(existing.category_key)?.label ?? existing.category_key}. Pick it from the list, or rename that one first.`);
+      }
       let sc = existing;
       if (!sc) {
         const ins = await c.query(
@@ -376,7 +380,7 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
         `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded, labels)
          values ('labels', $1, $2, '{}', $3, $4, $5, false, $6)
          on conflict (scope, subject) do update
-            set subcategory = excluded.subcategory, reason = excluded.reason, taught_by = excluded.taught_by, seeded = false, labels = excluded.labels, updated_at = now()
+            set subcategory = excluded.subcategory, weights = excluded.weights, reason = excluded.reason, taught_by = excluded.taught_by, seeded = false, labels = excluded.labels, updated_at = now()
          returning *`,
         [subject, name, sc.key, `Adopted Google's own word, ${name}.`, actorOf(req), [label]]);
       await c.query(`update taxonomy_labels set decision = null, active = true, updated_at = now() where namespace = $1 and key = $2`, [parsed.namespace, parsed.key]);
