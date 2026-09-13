@@ -149,3 +149,31 @@ test('a superseded sweep writes no places at all, not even half of them', async 
   await query('delete from scout_places where area_code = $1', [CODE]);
   await query('delete from scout_areas where code = $1', [CODE]);
 });
+
+test('a place the sweep never handed over is found again, not left for six months', async () => {
+  await anArea();
+  const lease = await scout.markSweeping(CODE);
+  await scout.commitSweep(CODE, {
+    lease,
+    places: [
+      { venueRef: 'osm:handed', name: 'Handed Over', epicScore: 5, ownedScore: 4, from: ['osm'] },
+      { venueRef: 'osm:missed', name: 'Never Handed Over', epicScore: 6, ownedScore: 5, from: ['osm'] },
+    ],
+    state: 'done', seen: 2, chains: 0, nextSweepAt: new Date(Date.now() + 180 * 86_400_000),
+  });
+  // The process stopped here, having only got as far as the first place.
+  await query(
+    `insert into place_records (venue_ref) values ('osm:handed') on conflict do nothing`,
+  );
+
+  const waiting = await scout.withoutRecord(50);
+  const refs = waiting.map((w) => w.ref);
+  assert.ok(refs.includes('osm:missed'), 'the one that never got a record must be on the list');
+  assert.ok(!refs.includes('osm:handed'), 'the one that did must not be');
+  // And it carries what the researcher needs to ask about it.
+  assert.equal(waiting.find((w) => w.ref === 'osm:missed').name, 'Never Handed Over');
+
+  await query("delete from place_records where venue_ref in ('osm:handed','osm:missed')");
+  await query('delete from scout_places where area_code = $1', [CODE]);
+  await query('delete from scout_areas where code = $1', [CODE]);
+});

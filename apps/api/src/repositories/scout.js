@@ -204,6 +204,30 @@ export async function commitSweep(code, { lease, places = [], state, why = null,
   });
 }
 
+/**
+ * Swept places the researcher has never been told about.
+ *
+ * The sweep writes its selection and then asks for each place to be
+ * researched, and those are two separate things: a process that stopped in
+ * between left places with no `place_records` row at all, on an area already
+ * marked done and not due again for six months (Codex, 13 Sep 2026).
+ * `needingKind` cannot see them — it joins *from* `place_records`, so a place
+ * with no record is invisible to it. This is the list that closes that gap,
+ * and the loop works through it every tick.
+ */
+export async function withoutRecord(limit = 25) {
+  const { rows } = await query(
+    `select distinct on (p.venue_ref) p.venue_ref, p.name, p.lat, p.lng, p.website, p.category, p.epic_score
+       from scout_places p
+       left join place_records r on r.venue_ref = p.venue_ref
+      where r.venue_ref is null and p.name is not null
+      order by p.venue_ref, p.epic_score desc nulls last
+      limit $1`,
+    [limit],
+  );
+  return rows.map((r) => ({ ref: r.venue_ref, name: r.name, lat: r.lat, lng: r.lng, website: r.website, category: r.category }));
+}
+
 /** Drop anything the latest sweep did not see again — it has closed, or fallen out of the cut. */
 export async function pruneArea(areaCode, keepRefs, run = query) {
   const { rows } = await run(

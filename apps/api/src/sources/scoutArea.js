@@ -264,15 +264,12 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
     return { code, state: 'superseded', why: 'Another sweep of this area took over while this one was working.', seen, chains, kept: 0, googleCalls, notes };
   }
 
-  if (!provisional) {
-    // Straight to the researcher, once the places are actually written:
-    // OpenStreetMap, their own page, the encyclopedias. Nothing licensed is
-    // asked for and nothing waits on it.
-    for (const c of kept) {
-      await owned.ensureRecord(c.venueRef);
-      queueEnrichment(c.venueRef, { seed: { name: c.name, lat: c.lat, lng: c.lng, website: c.website, category: c.category } });
-    }
-  }
+  // Straight to the researcher, once the places are actually written:
+  // OpenStreetMap, their own page, the encyclopedias. Nothing licensed is
+  // asked for and nothing waits on it. One place failing does not cost the
+  // rest theirs, and anything missed here is picked up by `researchBacklog`
+  // rather than waiting for the next sweep in six months.
+  if (!provisional) await research(kept);
 
   return { code, state: kept.length ? 'done' : 'failed', seen, chains, kept: kept.length, dropped: committed.dropped.length, googleCalls, notes, nextSweepAt: next.toISOString() };
 }
@@ -534,12 +531,50 @@ export async function fillCuisineGroups({ limit = 5000 } = {}) {
 const backoff = (attempts) => new Date(Date.now() + (MENU_BACKOFF_H[Math.min(attempts, MENU_BACKOFF_H.length) - 1] ?? 720) * 3600_000);
 
 /** The background loop: one area at a time, then menus. Nothing here is urgent. */
+/**
+ * Hand a batch of swept places to the researcher, one at a time.
+ *
+ * Each is `place_records` row plus a queued job. A place that throws is
+ * skipped rather than taking the rest of the batch with it — the backlog pass
+ * will find it again, because a place with no record stays on that list.
+ */
+async function research(places) {
+  let done = 0;
+  for (const c of places) {
+    const ref = c.venueRef ?? c.ref;
+    try {
+      await owned.ensureRecord(ref);
+      queueEnrichment(ref, { seed: { name: c.name, lat: c.lat, lng: c.lng, website: c.website, category: c.category } });
+      done += 1;
+    } catch (err) {
+      console.warn(`scout: could not start research on ${ref}: ${err.message}`);
+    }
+  }
+  return done;
+}
+
+/**
+ * The places a finished sweep never managed to hand over.
+ *
+ * The selection is committed in one transaction and the research is asked for
+ * afterwards, so a process that stopped in between left places on a done area
+ * with no record and nothing due for six months (Codex, 13 Sep 2026). This is
+ * the catch-up, and it is cheap: a query that usually answers with nothing.
+ */
+export async function researchBacklog({ limit = 25 } = {}) {
+  const waiting = await scout.withoutRecord(limit);
+  if (!waiting.length) return { queued: 0, waiting: 0 };
+  return { queued: await research(waiting), waiting: waiting.length };
+}
+
 export function startScoutLoop({ everyMs = 15 * 60_000 } = {}) {
   const tick = async () => {
     try {
       const [area] = await scout.dueAreas(1);
       if (area) await sweep(area.code);
     } catch (err) { console.warn(`scout: sweep failed: ${err.message}`); }
+    // Anything a stopped sweep never handed to the researcher.
+    try { await researchBacklog({ limit: 25 }); } catch (err) { console.warn(`scout: research backlog failed: ${err.message}`); }
     try { await fillCuisineGroups(); } catch (err) { console.warn(`scout: cuisine groups failed: ${err.message}`); }
     try { await fillMenus({ limit: 3 }); } catch (err) { console.warn(`scout: menus failed: ${err.message}`); }
     // And read a couple of what it found. Small and slow: this is the only part
