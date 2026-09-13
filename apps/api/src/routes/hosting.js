@@ -717,6 +717,7 @@ router.post('/host/offers/:id/invites', async (req, res, next) => {
 router.post('/host/offers/:id/invites/send', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
+    if (offer.state !== 'live') throw refuse(409, 'not_live', 'Publish it first — the link would open nothing yet.');
     const pending = (await repo.invitesOf(offer.id)).filter((i) => !i.sent_at);
     const told = await sendInvites(host, offer, pending);
     res.json({ offer: await ownOfferPayload(offer, host), told });

@@ -380,15 +380,15 @@ function Weeks({ offer: o, save }: { offer: OwnOffer; save: Save }) {
 // ---------------------------------------------------------------------------
 
 function Numbers({ offer: o, save }: { offer: OwnOffer; save: Save }) {
-  const paid = o.money !== 'free';
-  const [focus, setFocus] = useState<'min' | 'expect' | 'max'>(paid ? 'min' : 'expect');
-  const [min, setMin] = useState(str(o.minCount));
+  // Expecting and Maximum here. A minimum only exists when money does, and
+  // money is asked next — so the minimum is asked once, on the price step.
+  const [focus, setFocus] = useState<'expect' | 'max'>('expect');
   const [exp, setExp] = useState(str(o.expectedCount));
   const [max, setMax] = useState(str(o.maxCount));
   const [age, setAge] = useState(str(o.ageLimit ?? 18));
-  const commit = () => void save({ minCount: paid ? num(min) : null, expectedCount: num(exp), maxCount: num(max) });
-  const hint = focus === 'min' ? `Under ${num(min) ?? '…'} and it is called off — everybody is told and nothing is taken.` : focus === 'expect' ? 'Just your best guess. It is not shown to anyone.' : `At ${num(max) ?? '…'} it is full and the page stops taking bookings.`;
-  const boxes = [...(paid ? [{ k: 'min' as const, l: 'Minimum', v: min, s: setMin }] : []), { k: 'expect' as const, l: 'Expecting', v: exp, s: setExp }, { k: 'max' as const, l: 'Maximum', v: max, s: setMax }];
+  const commit = () => void save({ expectedCount: num(exp), maxCount: num(max) });
+  const hint = focus === 'expect' ? 'Just your best guess. It is not shown to anyone.' : `At ${num(max) ?? '…'} it is full and the page stops taking bookings.`;
+  const boxes = [{ k: 'expect' as const, l: 'Expecting', v: exp, s: setExp }, { k: 'max' as const, l: 'Maximum', v: max, s: setMax }];
   const restricted = o.ageLimit != null;
   return (
     <View style={{ gap: spacing.md }}>
