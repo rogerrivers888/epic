@@ -120,14 +120,17 @@ export function townOf(label) {
 }
 
 /**
- * The last gate before a place goes to the other household: it passes only if
- * it is *already* one clean place name.
+ * The last gate before a place goes to the other household.
  *
  * `where_label` is written by `townFor` from the coordinates, so it is a town
- * by the time it is stored. This is what stands between a row written before
- * that was true — or by anything else, ever — and the guest reading it. It
- * does not split, trim or salvage: a label with a comma in it is an address
- * somebody typed, and an address is nothing at all here.
+ * by the time it is stored, and every label written before that was true has
+ * been cleared (migrations 100 and 101 — telling a house from a town by its
+ * words is what six passes at an address parser failed to do, so those rows
+ * were dropped rather than judged).
+ *
+ * This is the second pair of eyes on that: one clean place name, no commas, no
+ * digits, not a code. It does not split, trim or salvage, because anything
+ * that needs salvaging is an address and an address is nothing at all here.
  */
 export function placeName(label) {
   const one = String(label ?? '').trim();
