@@ -43,10 +43,32 @@ export async function dueAreas(limit = 1) {
   return rows;
 }
 
+/**
+ * How long a sweep may hold its area before the lock is treated as abandoned.
+ * The longest real sweep seen is a few minutes; this is well past that and
+ * well short of making a genuinely running sweep race itself.
+ */
+export const SWEEP_LOCK_MINUTES = 30;
+
+/**
+ * Take the area's lock, or say it is already held.
+ *
+ * The lock used to be a one-way door: only a sweep that reached the end
+ * cleared it, so a sweep that threw left its area unsweepable for ever by
+ * anyone (found on BS48, 13 Sep 2026). A lock older than `SWEEP_LOCK_MINUTES`
+ * is therefore taken over — no sweep runs that long, and the alternative is an
+ * area nobody can ever look at again.
+ */
 export async function markSweeping(code) {
   const { rows } = await query(
-    `update scout_areas set state = 'sweeping', why = null where code = $1 and state <> 'sweeping' returning code`,
-    [code],
+    `update scout_areas
+        set state = 'sweeping', why = null, sweeping_since = now()
+      where code = $1
+        and (state <> 'sweeping'
+             or sweeping_since is null
+             or sweeping_since < now() - ($2 || ' minutes')::interval)
+      returning code`,
+    [code, String(SWEEP_LOCK_MINUTES)],
   );
   return rows.length > 0;
 }
@@ -54,7 +76,7 @@ export async function markSweeping(code) {
 export async function finishSweep(code, { state, why = null, seen = 0, chains = 0, kept = 0, nextSweepAt = null }) {
   await query(
     `update scout_areas set state = $2, why = $3, seen = $4, chains = $5, kept = $6,
-            swept_at = now(), sweeps = sweeps + 1, next_sweep_at = $7
+            swept_at = now(), sweeps = sweeps + 1, next_sweep_at = $7, sweeping_since = null
       where code = $1`,
     [code, state, why, seen, chains, kept, nextSweepAt],
   );

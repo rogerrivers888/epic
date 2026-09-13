@@ -90,11 +90,29 @@ const samePlace = (a, b) => {
  * open map answered and the licensed search did not is still a useful sweep,
  * and saying so is more honest than a failure.
  */
-export async function sweep(code, { dryRun = false, householdId = null } = {}) {
+export async function sweep(code, opts = {}) {
   const area = await scout.areaFor(code);
   if (!area) throw Object.assign(new Error(`No area called ${code}. Add it first.`), { status: 404 });
-  if (!dryRun && !(await scout.markSweeping(code))) return { code, state: 'sweeping', why: 'A sweep of this area is already running.' };
+  if (!opts.dryRun && !(await scout.markSweeping(code))) return { code, state: 'sweeping', why: 'A sweep of this area is already running.' };
+  try {
+    return await runSweep(area, code, opts);
+  } catch (err) {
+    // Hand the area back before rethrowing. The repository will take an
+    // abandoned lock after half an hour, but a sweep that failed in a second
+    // should be retryable in the next one — and the reason belongs on the area
+    // where the back office shows it, not only in the log.
+    if (!opts.dryRun) {
+      await scout.finishSweep(code, {
+        state: 'failed',
+        why: `the sweep stopped: ${String(err?.message ?? err).slice(0, 140)}`,
+        nextSweepAt: new Date(Date.now() + 86_400_000),
+      }).catch(() => null);
+    }
+    throw err;
+  }
+}
 
+async function runSweep(area, code, { dryRun = false, householdId = null } = {}) {
   const center = { lat: area.lat, lng: area.lng };
   const radiusKm = area.radius_km;
   const notes = [];
