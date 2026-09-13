@@ -24,6 +24,8 @@ import * as chat from '../repositories/chat.js';
 import * as trips from '../repositories/trips.js';
 import * as tripChat from '../repositories/tripChat.js';
 import * as hosting from '../repositories/hosting.js';
+import * as groupsRepo from '../repositories/groups.js';
+import crypto from 'node:crypto';
 import * as households from '../repositories/households.js';
 import { accountsForHousehold } from '../repositories/accounts.js';
 import { currentHousehold, currentMember } from './household.js';
@@ -32,8 +34,8 @@ import { tell } from '../sources/chatNotify.js';
 import { seriesDates, ymd } from '../domain/hosting.js';
 import {
   AUDIENCES, DEFAULT_PREFS, OFFER_ASPECTS, QUICK_REACTIONS, COMMON_REACTIONS, SHOWING, SUGGEST_PUBLISH_AT, TAG_KINDS, TRIP_ANCHORS,
-  askCount, authorOf, canSee, isNearDuplicate, legacyMessages, legacyPeople, matchesShowing, menuFor, mentionsIn, normaliseQuestion, notificationText,
-  rateLimited, samePerson, whoIsTold,
+  askCount, authorOf, canSee, isNearDuplicate, isOnAnchor, legacyMessages, legacyPeople, matchesShowing, menuFor, mentionsIn, normaliseQuestion, notificationText,
+  rateLimited, rosterFor, samePerson, whoIsTold,
 } from '../domain/chat.js';
 
 export const router = Router();
@@ -70,20 +72,69 @@ export async function organiserOf(trip) {
   return adult ? { id: adult.id, name: adult.name } : null;
 }
 
-/** A trip as a chat context, for a member of the household that owns it or a guest with the link. */
+/**
+ * The group behind a trip, if it has one: who joined, what there is to book,
+ * and who said what — the roster (owner, 13 Sep 2026). Null for a plain trip.
+ */
+async function groupOf(trip) {
+  const groupId = await groupsRepo.groupIdForTrip(trip.id).catch(() => null);
+  if (!groupId) return null;
+  const [participants, items, states] = await Promise.all([
+    groupsRepo.joinedParticipants(groupId), groupsRepo.itemsOf(groupId), groupsRepo.statesOf(groupId),
+  ]);
+  return { id: groupId, participants, items, states };
+}
+
+/** A trip as a chat context, for a member of the household that owns it, a guest with the link, or a group participant. */
 export async function tripContext(trip, me) {
-  const [days, stops, attendees, guests, organiser] = await Promise.all([
-    trips.daysOf(trip.id), trips.stopsOf(trip.id), trips.attendeesOf(trip.id), tripChat.guestsOf(trip.id), organiserOf(trip),
+  const [days, stops, attendees, guests, organiser, group] = await Promise.all([
+    trips.daysOf(trip.id), trips.stopsOf(trip.id), trips.attendeesOf(trip.id), tripChat.guestsOf(trip.id), organiserOf(trip), groupOf(trip),
   ]);
   const joined = guests.filter((g) => g.status === 'joined');
   const people = [
     ...attendees.map((a) => ({ memberId: a.id, guestId: null, name: a.name, avatarUrl: a.avatar_url ?? null, householdId: trip.household_id, isHost: organiser?.id === a.id })),
-    ...joined.map((g) => ({ memberId: null, guestId: g.id, name: g.name, contact: g.contact, contactKind: g.contact_kind, isHost: false })),
+    ...joined.map((g) => ({ memberId: null, guestId: g.id, name: g.name, contact: g.contact, contactKind: g.contact_kind, isHost: false, participantId: g.participant_id ?? null })),
   ];
   // The organiser is in the conversation whether or not they are on the trip's attendee list.
   if (organiser && !people.some((p) => p.memberId === organiser.id)) {
     const m = (await households.membersOf(trip.household_id)).find((x) => x.id === organiser.id);
     if (m) people.unshift({ memberId: m.id, guestId: null, name: m.name, avatarUrl: m.avatar_url ?? null, householdId: trip.household_id, isHost: true });
+  }
+  /**
+   * Everyone who joined the group is in the conversation: a participant from
+   * the household is that member; anyone else stands in the chat as a guest
+   * row of their own (migration 089), made here the first time they are
+   * needed so the organiser's audience counts them before they open it.
+   */
+  if (group) {
+    const members = await households.membersOf(trip.household_id);
+    for (const gp of group.participants) {
+      if (gp.member_id) {
+        let p = people.find((x) => x.memberId === gp.member_id);
+        if (!p) {
+          const m = members.find((x) => x.id === gp.member_id);
+          if (m) { p = { memberId: m.id, guestId: null, name: m.name, avatarUrl: m.avatar_url ?? null, householdId: trip.household_id, isHost: organiser?.id === m.id }; people.push(p); }
+        }
+        if (p) p.participantId = gp.id;
+        continue;
+      }
+      let p = people.find((x) => x.participantId === gp.id);
+      if (!p) {
+        const g = await tripChat.guestForParticipant(trip.id, gp, crypto.randomBytes(18).toString('base64url'));
+        p = people.find((x) => x.guestId === g.id);
+        if (!p) { p = { memberId: null, guestId: g.id, name: g.name, contact: g.contact, contactKind: g.contact_kind, isHost: false }; people.push(p); }
+        p.participantId = gp.id;
+      }
+    }
+    // The roster: which stops and days each participant is on.
+    const roster = rosterFor({ items: group.items, states: group.states, participants: group.participants, stops });
+    // A day is rostered when an item is tied to a stop *on it* — by stop, not by venue, since the same place can be on two days.
+    const stopById = new Map(stops.map((st) => [st.id, st]));
+    const dayListed = new Set(group.items.map((i) => (i.stop_id ? stopById.get(i.stop_id)?.day_id : null)).filter(Boolean));
+    for (const p of people) {
+      const r = p.participantId ? roster.byParticipant.get(p.participantId) : null;
+      if (r) p.on = { stops: r.stops, days: r.days, listed: roster.listedStops, dayListed };
+    }
   }
   const byDay = new Map();
   for (const s of stops) { const l = byDay.get(s.day_id) ?? []; l.push(s); byDay.set(s.day_id, l); }
@@ -92,12 +143,15 @@ export async function tripContext(trip, me) {
     return { kind: 'day', ref: d.id, label: `${fmtDay(d.date)} · ${on[0]?.venue_name ?? 'free day'}`, date: ymd(d.date), sub: on.length ? on.map((s) => s.venue_name).join(', ') : 'Nothing booked' };
   });
   const dayOf = new Map(days.map((d) => [d.id, ymd(d.date)]));
-  const stopAnchors = stops.map((s) => ({ kind: 'stop', ref: s.venue_ref, label: s.venue_name, date: dayOf.get(s.day_id) ?? null, sub: fmtDate(dayOf.get(s.day_id)) ?? null, dayId: s.day_id }));
+  // How many people each anchor reaches, by the roster where there is one.
+  const onCount = (kind, ref) => people.filter((p) => isOnAnchor(p, { context_type: 'trip', tag_kind: kind, tag_ref: ref })).length;
+  for (const a of dayAnchors) a.people = onCount('day', a.ref);
+  const stopAnchors = stops.map((s) => ({ kind: 'stop', ref: s.venue_ref, label: s.venue_name, date: dayOf.get(s.day_id) ?? null, sub: fmtDate(dayOf.get(s.day_id)) ?? null, dayId: s.day_id, people: onCount('stop', s.venue_ref) }));
   const name = trip.title || trip.place_label || trip.locality || 'the trip';
   const dates = trip.dates_fixed === false ? null : { start: ymd(trip.start_date), end: ymd(trip.end_date) };
   const meRow = me ? { ...me, isHost: Boolean(me.memberId && organiser?.id === me.memberId), booked: true, contextType: 'trip' } : null;
   return {
-    type: 'trip', id: trip.id, name, dates,
+    type: 'trip', id: trip.id, name, dates, roster: Boolean(group),
     host: organiser ? { id: organiser.id, name: organiser.name, role: 'organiser' } : null,
     people, me: meRow,
     anchors: { level: TRIP_ANCHORS.map((a) => ({ kind: 'trip', ref: a.ref, label: a.label })), days: dayAnchors, stops: stopAnchors },
@@ -196,6 +250,10 @@ function audienceCount(t, ctx) {
   if (t.audience === 'host_only') return 2;
   const people = ctx.people.filter((p) => !p.unbooked);
   if (ctx.type === 'offer' && t.occurrence) return people.filter((p) => p.isHost || (p.occurrences ?? []).includes(t.occurrence)).length;
+  // On a group trip a question about a stop or a day reaches the people on it, and the organiser.
+  if (ctx.type === 'trip' && ctx.roster && (t.tag_kind === 'stop' || t.tag_kind === 'day')) {
+    return people.filter((p) => p.isHost || isOnAnchor(p, { context_type: 'trip', tag_kind: t.tag_kind, tag_ref: t.tag_ref })).length;
+  }
   return people.length;
 }
 
@@ -244,6 +302,8 @@ function publicContext(ctx) {
   const me = ctx.me;
   return {
     type: ctx.type, id: ctx.id, name: ctx.name, subtitle: ctx.subtitle, sub: ctx.sub, dates: ctx.dates,
+    /** Whether "the people on that day" is real here — a group trip's roster — or everyone on the trip. */
+    roster: Boolean(ctx.roster),
     host: ctx.host ? { name: ctx.host.name, role: ctx.host.role, memberId: ctx.host.id } : null,
     me: me ? { memberId: me.memberId ?? null, guestId: me.guestId ?? null, name: me.name, isHost: Boolean(me.isHost), guest: Boolean(me.guestId), booked: me.booked !== false, occurrences: me.occurrences ?? [] } : null,
     can: {
@@ -741,7 +801,9 @@ function anchorsOn(ctx) {
     const occ = ctx.me?.occurrences ?? [];
     return occ.map((o) => fmtDate(o.slice(0, 10)) ?? o).filter(Boolean);
   }
-  return ctx.anchors.days.slice(0, 3).map((d) => d.label);
+  const mine = ctx.me ? ctx.people.find((p) => samePerson(p, ctx.me)) : null;
+  const days = mine?.on ? ctx.anchors.days.filter((d) => mine.on.days.has(d.ref) || !mine.on.dayListed.has(d.ref)) : ctx.anchors.days;
+  return days.slice(0, 3).map((d) => d.label);
 }
 
 // ---------------------------------------------------------------------------

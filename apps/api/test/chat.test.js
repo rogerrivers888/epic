@@ -23,7 +23,7 @@ const { query } = await testDatabase();
 const repo = await import('../src/repositories/chat.js');
 const {
   aboutOptions, askCount, canSee, filterTopics, headerLine, inQuietHours, isDayOf, isNearDuplicate, matchesShowing, menuFor, mentionsIn,
-  normaliseQuestion, rateLimited, showingCounts, whoIsTold, legacyMessages, legacyPeople,
+  normaliseQuestion, rateLimited, showingCounts, whoIsTold, legacyMessages, legacyPeople, rosterFor, isOnAnchor,
 } = await import('../src/domain/chat.js');
 
 const sam = { memberId: 'sam', guestId: null, name: 'Sam Rivers', isHost: true, contextType: 'trip' };
@@ -338,4 +338,51 @@ test('the river is ordered by instant, not by how a Date prints', () => {
   const replies = [{ id: 'r', topicId: 'q', body: 'R', at: new Date('2026-10-12T09:00:00Z'), mine: false, author: { name: 'B', guest: false, initial: 'B', memberId: 'b', guestId: null }, seenBy: 0 }];
   assert.ok(String(replies[0].at) < String(topics[0].at), 'the string order would have put the reply first');
   assert.deepEqual(legacyMessages(topics, replies).map((m) => m.id), ['q', 'r']);
+});
+
+test('the group roster: a required item is everyone, an optional one is whoever said in, and a stop nobody was asked about is everyone', () => {
+  const stops = [{ id: 's1', venue_ref: 'osm:cooking', day_id: 'd1' }, { id: 's2', venue_ref: 'osm:etna', day_id: 'd2' }, { id: 's3', venue_ref: 'osm:market', day_id: 'd2' }];
+  const items = [{ id: 'i1', stop_id: 's1', required: false }, { id: 'i2', stop_id: 's2', required: true }];
+  const participants = [{ id: 'kate' }, { id: 'jon' }];
+  const states = [{ item_id: 'i1', participant_id: 'kate', status: 'paid' }, { item_id: 'i1', participant_id: 'jon', status: 'out' }];
+  const roster = rosterFor({ items, states, participants, stops });
+  assert.deepEqual([...roster.byParticipant.get('kate').stops], ['osm:cooking', 'osm:etna']);
+  assert.deepEqual([...roster.byParticipant.get('jon').stops], ['osm:etna'], 'Jon said out of the cooking');
+  assert.deepEqual([...roster.byParticipant.get('jon').days], ['d2']);
+  const dayListed = new Set(['d1', 'd2']);
+  const jon = { memberId: null, guestId: 'g-jon', on: { ...roster.byParticipant.get('jon'), listed: roster.listedStops, dayListed } };
+  assert.equal(isOnAnchor(jon, { context_type: 'trip', tag_kind: 'stop', tag_ref: 'osm:cooking' }), false);
+  assert.equal(isOnAnchor(jon, { context_type: 'trip', tag_kind: 'stop', tag_ref: 'osm:etna' }), true);
+  assert.equal(isOnAnchor(jon, { context_type: 'trip', tag_kind: 'stop', tag_ref: 'osm:market' }), true, 'nobody was asked about the market, so nobody is off it');
+  assert.equal(isOnAnchor(jon, { context_type: 'trip', tag_kind: 'day', tag_ref: 'd1' }), false, 'the only thing on day 1 is the cooking');
+  assert.equal(isOnAnchor(jon, { context_type: 'trip', tag_kind: 'day', tag_ref: 'd2' }), true);
+  assert.equal(isOnAnchor({ memberId: 'sam' }, { context_type: 'trip', tag_kind: 'stop', tag_ref: 'osm:cooking' }), true, 'no roster is on everything');
+});
+
+test('a question about an activity pings the people on it and not the ones who said out', () => {
+  const listed = new Set(['osm:cooking']); const dayListed = new Set(['d1']);
+  const on = (stops, days) => ({ stops: new Set(stops), days: new Set(days), listed, dayListed });
+  const roster = [
+    { memberId: 'sam', guestId: null, name: 'Sam', isHost: true },
+    { memberId: null, guestId: 'g-kate', name: 'Kate', on: on(['osm:cooking'], ['d1']) },
+    { memberId: null, guestId: 'g-jon', name: 'Jon', on: on([], []) },
+  ];
+  const t = { context_type: 'trip', tag_kind: 'stop', tag_ref: 'osm:cooking', audience: 'everyone', author_member_id: 'sam', author_guest_id: null, state: 'open' };
+  const told = whoIsTold({ kind: 'topic', topic: t, actor: roster[0] }, { people: roster, prefsOf: () => null, followersOf: () => [], today: '2026-10-11' });
+  assert.deepEqual(told.map((x) => x.person.name), ['Kate']);
+});
+
+test('a participant outside the household gets a guest row of their own, once', async () => {
+  const { household, member } = await aHousehold(query, 'The Organisers');
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date) values ($1, 'Sicily', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-18') returning *`, [household.id])).rows[0];
+  const group = (await query(`insert into trip_groups (trip_id, household_id, invite_token) values ($1, $2, 'inv-test') returning *`, [trip.id, household.id])).rows[0];
+  const gp = (await query(`insert into group_participants (group_id, name, contact, contact_kind, token, joined_at) values ($1, 'Priya Guest', 'priya@example.com', 'email', 'pt-1', now()) returning *`, [group.id])).rows[0];
+  const guestRepo = await import('../src/repositories/tripChat.js');
+  const g1 = await guestRepo.guestForParticipant(trip.id, gp, 'tok-1');
+  const g2 = await guestRepo.guestForParticipant(trip.id, gp, 'tok-2');
+  assert.equal(g1.id, g2.id, 'the same row the second time');
+  assert.equal(g1.status, 'joined');
+  assert.equal(g1.participant_id, gp.id);
+  // A member of the household who is also a participant is that member, not a guest — nothing to make.
+  assert.ok(member.id);
 });

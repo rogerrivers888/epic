@@ -819,7 +819,7 @@ export type ChatState = 'open' | 'answered' | 'notice';
 export type ChatShowing = 'all' | 'questions' | 'waiting' | 'answered' | 'notices' | 'mine' | 'replies_to_me' | 'private';
 export type ChatTag = { kind: ChatTagKind; ref: string | null; label: string | null; date: string | null };
 /** An anchor a question can be tagged to: a trip-level one, a day, a stop, an aspect of an offer. */
-export type ChatAnchor = { key: string; kind: ChatTagKind; ref: string; label: string; date?: string | null; sub?: string | null; dayId?: string | null };
+export type ChatAnchor = { key: string; kind: ChatTagKind; ref: string; label: string; date?: string | null; sub?: string | null; dayId?: string | null; /** How many people this anchor reaches, by the roster where there is one. */ people?: number };
 export type ChatPerson = { name: string; guest: boolean; initial: string; memberId: string | null; guestId: string | null; avatarUrl: string | null; isHost: boolean };
 export type ChatReaction = { emoji: string; count: number; mine: boolean };
 export type ChatTopic = {
@@ -842,6 +842,8 @@ export type ChatReply = {
 export type ChatMe = { memberId: string | null; guestId: string | null; name: string; isHost: boolean; guest: boolean; booked: boolean; occurrences: string[] };
 export type ChatContext = {
   type: ChatContextType; id: string; name: string; subtitle: string | null; sub: string; dates: { start: string; end: string } | null;
+  /** Whether "the people on that day" is real here — a group trip's roster — or everyone on the trip. */
+  roster: boolean;
   host: { name: string; role: 'organiser' | 'host'; memberId: string | null } | null;
   me: ChatMe | null;
   can: { ask: boolean; private: boolean; notice: boolean; answer: boolean };
@@ -1757,6 +1759,17 @@ export const api = {
     post<{ guestId: string; sent: 'sms' | 'email' | null; message?: string; token?: string } & Partial<SharedTrip>>(`/api/shared/${token}/enter`, body),
   sharedVerify: (token: string, body: { guestId: string; code: string }) =>
     post<{ token: string } & SharedTrip>(`/api/shared/${token}/verify`, body),
+  /** A group participant's door into the trip's chat (13 Sep 2026): the invite link plus their own token. */
+  joinChat: (token: string, p: string) => request<ChatList>(`/api/join/${token}/chat${qs({ p })}`),
+  joinTopic: (token: string, p: string, topicId: string) => request<ChatTopicView>(`/api/join/${token}/chat/${topicId}${qs({ p })}`),
+  joinSend: (token: string, body: { p: string; body: string; title?: string; tag?: { kind: ChatTagKind; ref: string }; audience?: ChatAudience; topicId?: string | null; quotesReplyId?: string | null }) =>
+    post<ChatTopicView>(`/api/join/${token}/chat`, body),
+  joinReact: (token: string, p: string, topicId: string, body: { targetType: 'topic' | 'reply'; targetId: string; emoji: string }) =>
+    post<{ on: boolean } & ChatTopicView>(`/api/join/${token}/chat/${topicId}/react`, { p, ...body }),
+  joinFollow: (token: string, p: string, topicId: string, on: boolean) =>
+    (on ? post<{ following: boolean }>(`/api/join/${token}/chat/${topicId}/follow`, { p }) : del<{ following: boolean }>(`/api/join/${token}/chat/${topicId}/follow${qs({ p })}`)),
+  joinReport: (token: string, p: string, topicId: string, body: { reason?: string | null; replyId?: string | null }) =>
+    post<{ ok: true; message: string }>(`/api/join/${token}/chat/${topicId}/report`, { p, ...body }),
   /** The conversation, as a guest: the same topic model, `everyone` topics only. */
   sharedChat: (token: string, you: string, stop?: string | null) => request<ChatList>(`/api/shared/${token}/chat${qs({ you, stop })}`),
   sharedTopic: (token: string, you: string, topicId: string) => request<ChatTopicView>(`/api/shared/${token}/chat/${topicId}${qs({ you })}`),

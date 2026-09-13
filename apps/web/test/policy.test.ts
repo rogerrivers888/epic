@@ -209,3 +209,15 @@ test('a question, a reply, a reaction and a follow wait for signal; a report, a 
     assert.equal(queueable('POST', path), false, `${path} must not queue`);
   }
 });
+
+test('a participant’s window onto the chat is kept like the household’s, contacts out', () => {
+  const body = { context: { people: { count: 1, members: [], guests: [{ id: 'g', name: 'Priya', contact: 'p@example.com' }] } }, topics: [] };
+  for (const path of ['/api/join/tok/chat', '/api/join/tok/chat/t1', '/api/join/tok/chat?p=x']) {
+    const kept = storable(path, body);
+    assert.notEqual(kept, null, `${path} should be saved`);
+    assert.equal(kept.context.people.guests[0].contact, null);
+  }
+  assert.equal(queueable('POST', '/api/join/tok/chat'), true);
+  assert.equal(queueable('POST', '/api/join/tok/chat/t1/react'), true);
+  assert.equal(queueable('POST', '/api/join/tok/chat/t1/report'), false);
+});

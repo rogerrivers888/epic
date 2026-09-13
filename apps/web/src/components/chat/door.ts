@@ -79,3 +79,23 @@ export function guestDoor(token: string, you: string, href: ChatDoor['href']): C
     href,
   };
 }
+
+/**
+ * A group participant (13 Sep 2026): the invite link plus their own token.
+ * From the household they are that member and may ask the organiser
+ * privately; from outside they stand as a guest and get the guest treatment.
+ */
+export function participantDoor(token: string, p: string, href: ChatDoor['href']): ChatDoor {
+  return {
+    type: 'trip',
+    list: () => api.joinChat(token, p),
+    read: async () => undefined,
+    topic: (t) => api.joinTopic(token, p, t),
+    ask: (body) => api.joinSend(token, { p, body: body.body ?? body.title, title: body.title, tag: body.tag, audience: body.audience }),
+    reply: (t, body) => api.joinSend(token, { p, body: body.body, topicId: t, quotesReplyId: body.quotesReplyId ?? null }),
+    follow: (t, on) => api.joinFollow(token, p, t, on),
+    react: (t, body) => api.joinReact(token, p, t, body),
+    report: (t, body) => api.joinReport(token, p, t, body),
+    href,
+  };
+}

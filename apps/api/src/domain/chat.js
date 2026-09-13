@@ -291,13 +291,57 @@ export function mentionsIn(text, people) {
   return found;
 }
 
-/** A person is "on" an anchor: on a stop or day if they are on the trip (Epic has no per-day roster yet); on an offer date if booked on it. */
+/**
+ * Who is on what, on a group trip (owner, 13 Sep 2026).
+ *
+ * `group_items` is the list of things to book, each required or optional and
+ * tied to a stop; `group_item_states` is each participant's answer. A required
+ * item is everyone who joined; an optional one is whoever said in, booked,
+ * declared or paid — never out. A day is the stops on it.
+ *
+ * Returns a map from participant id to `{ stops: Set<venueRef>, days: Set<dayId> }`.
+ * A stop with no item on it is left out of every roster: nobody was asked, so
+ * nobody is off it — `isOnAnchor` treats an unlisted stop as everyone's.
+ */
+export const ON_STATES = new Set(['in', 'booked', 'declared', 'paid']);
+export function rosterFor({ items = [], states = [], participants = [], stops = [] }) {
+  const stopById = new Map(stops.map((st) => [st.id, st]));
+  const listed = new Set();
+  const out = new Map(participants.map((p) => [p.id, { stops: new Set(), days: new Set() }]));
+  const onItem = (item) => {
+    if (item.required) return participants.map((p) => p.id);
+    return states.filter((st) => st.item_id === item.id && ON_STATES.has(st.status)).map((st) => st.participant_id);
+  };
+  for (const item of items) {
+    const stop = item.stop_id ? stopById.get(item.stop_id) : null;
+    if (!stop) continue;
+    listed.add(stop.venue_ref);
+    for (const pid of onItem(item)) {
+      const r = out.get(pid);
+      if (!r) continue;
+      r.stops.add(stop.venue_ref);
+      if (stop.day_id) r.days.add(stop.day_id);
+    }
+  }
+  return { byParticipant: out, listedStops: listed };
+}
+
+/**
+ * A person is "on" an anchor. On an offer: booked on that date. On a trip: on
+ * the stop, or the day, by the group's roster when they have one — a person
+ * with no roster (a plain family trip, or a stop nobody was asked about) is
+ * on everything.
+ */
 export function isOnAnchor(person, topic) {
   if (!person) return false;
   if (topic.context_type === 'offer') {
     if (!topic.occurrence) return true;
     return !person.occurrences || person.occurrences.includes(topic.occurrence);
   }
+  const on = person.on;
+  if (!on) return true;
+  if (topic.tag_kind === 'stop') return !on.listed || !on.listed.has(topic.tag_ref) || on.stops.has(topic.tag_ref);
+  if (topic.tag_kind === 'day') return !on.dayListed || !on.dayListed.has(topic.tag_ref) || on.days.has(topic.tag_ref);
   return true;
 }
 

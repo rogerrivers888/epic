@@ -14,6 +14,7 @@ import { router as tripTravelRoutes } from './routes/tripTravel.js';
 import { router as tripChatRoutes } from './routes/tripChat.js';
 import { router as sharedTripRoutes } from './routes/shared.js';
 import { router as chatRoutes, publicRouter as chatPublicRoutes } from './routes/chat.js';
+import { router as joinChatRoutes } from './routes/joinChat.js';
 import { startChatLoop } from './sources/chatNotify.js';
 import * as transit from './sources/transit.js';
 import * as transitRepo from './repositories/transit.js';
@@ -213,6 +214,8 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/offline', offlineRoutes);
 // Group trips: the organiser's door (/api/trips/:id/group, /api/groups/…) and
 // the invite link's (/api/join/:token), which shows a checklist and no roster.
+// A group participant's door into the trip's chat (13 Sep 2026), before the group router's own /join/:token routes.
+app.use('/api/join', joinChatRoutes);
 app.use('/api', groupRoutes);
 // Hosts and events. The experience page, a host's profile and their video are
 // public (auth.js) so a link works logged-out; booking and hosting are not.

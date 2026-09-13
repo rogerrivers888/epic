@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { api, GroupBooking, GuestAccount, GuestJoinResult, HouseholdMemberInput, JoinView } from '../api';
@@ -9,6 +9,10 @@ import { Wordmark } from '../components/Wordmark';
 import { InviteLanding, itemIcon, pageFromJoin } from '../components/InvitePage';
 import { FreeMonth } from '../components/FreeMonth';
 import { useViewport } from '../hooks/useViewport';
+import { useRouter } from '../router';
+import { chatLayerOf, paths, withQuery } from '../routes';
+import { ChatScreen } from '../components/chat/ChatScreen';
+import { participantDoor } from '../components/chat/door';
 import { setSessionToken } from '../session';
 
 /**
@@ -70,6 +74,7 @@ export function JoinScreen({ token, preview, onExit }: {
   onExit?: () => void;
 }) {
   const { width } = useViewport();
+  const { query, href, navigate } = useRouter();
   const [me, setMe] = useState<string | null>(() => (preview ? null : remembered(token)));
   const [v, setV] = useState<JoinView | null>(null);
   const [account, setAccount] = useState<GuestAccount | null>(null);
@@ -122,6 +127,14 @@ export function JoinScreen({ token, preview, onExit }: {
   if (!v) return <View style={styles.page}><Wordmark height={34} /><Text style={type.small}>Opening…</Text></View>;
 
   const wide = width >= 900;
+  /**
+   * The trip's conversation, for somebody who has joined (13 Sep 2026). The
+   * page has one address, so the chat and its layers are its query: `?chat=1`
+   * the list, `?topic=<id>` a question, `?ask=1` the composer.
+   */
+  if (!preview && me && v.you && (query.get('chat') || query.get('topic') || query.get('ask'))) {
+    return <ParticipantChat token={token} me={me} />;
+  }
   const inner = (
     stage === 'landing' ? (
       <InviteLanding
@@ -200,7 +213,7 @@ export function JoinScreen({ token, preview, onExit }: {
         doneLabel="See my list"
       />
     ) : (
-      <TheirList v={v} token={token} me={me} busy={busy} account={account} onAct={act} onBook={() => go('book')} onTrial={() => go('trial')} />
+      <TheirList v={v} token={token} me={me} busy={busy} account={account} onAct={act} onBook={() => go('book')} onTrial={() => go('trial')} onChat={() => navigate(withQuery(href, { chat: '1' }, paths.join(token)))} />
     )
   );
 
@@ -228,6 +241,22 @@ export function JoinScreen({ token, preview, onExit }: {
       {body}
     </ScrollView>
   );
+}
+
+/** The same chat component, through the participant's door; the layers are this page's query. */
+function ParticipantChat({ token, me }: { token: string; me: string }) {
+  const { href, query, navigate, back } = useRouter();
+  const base = paths.join(token);
+  const door = useMemo(() => participantDoor(token, me, {
+    list: withQuery(href, { chat: '1', topic: null, ask: null, tag: null, edit: null }, base),
+    topic: (id) => withQuery(href, { chat: null, topic: id, ask: null, tag: null, edit: null }, base),
+    ask: (tag) => withQuery(href, { chat: null, ask: '1', topic: null, tag: tag ?? null }, base),
+    bell: null,
+  }), [token, me, href, base]);
+  const layer = query.get('topic') ? chatLayerOf(query.get('topic')!) : query.get('ask') ? chatLayerOf('ask') : chatLayerOf(undefined);
+  // Back from the list is the participant's own list — the page with no chat in its query.
+  const listBack = (fallback: string) => (layer.page === 'list' ? navigate(withQuery(href, { chat: null, topic: null, ask: null, tag: null, edit: null }, base)) : back(fallback));
+  return <ChatScreen door={door} layer={layer} navigate={navigate} back={listBack} query={query} />;
 }
 
 const inDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
@@ -725,9 +754,9 @@ function Pill({ label, icon, on, onPress }: { label: string; icon?: IconName; on
  * rows the link has always opened, now behind the booking rather than in front
  * of it.
  */
-function TheirList({ v, token, me, busy, account, onAct, onBook, onTrial }: {
+function TheirList({ v, token, me, busy, account, onAct, onBook, onTrial, onChat }: {
   v: JoinView; token: string; me: string | null; busy: boolean; account: GuestAccount | null;
-  onAct: (fn: () => Promise<JoinView>) => Promise<void>; onBook: () => void; onTrial: () => void;
+  onAct: (fn: () => Promise<JoinView>) => Promise<void>; onBook: () => void; onTrial: () => void; onChat: () => void;
 }) {
   const you = v.you;
   const required = v.items.filter((i) => i.required);
@@ -775,6 +804,18 @@ function TheirList({ v, token, me, busy, account, onAct, onBook, onTrial }: {
         <Button label="Change my picks" kind="secondary" icon="edit" onPress={onBook} />
         {account ? <Button label="Your Epic" kind="ghost" icon="gift" onPress={onTrial} /> : null}
       </Row>
+
+      {/* The conversation: questions and notices, scoped to the days and activities you are on (13 Sep 2026). */}
+      {you && me ? (
+        <Press onPress={onChat} accessibilityRole="button" style={styles.chatRow}>
+          <View style={styles.chatTile}><Icon name="message" size={18} color={colors.selectedFg} strokeWidth={2} /></View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={type.h3}>Questions and notices</Text>
+            <Text style={type.small}>Ask the group, or answer. You are told about the days and activities you are on, and anything from {v.group.organiser ?? 'the organiser'}.</Text>
+          </View>
+          <Icon name="more" size={16} color={colors.inkMuted} />
+        </Press>
+      ) : null}
 
       {v.group.cancelled ? (
         <Card style={{ borderColor: colors.overrun }}>
@@ -1151,6 +1192,8 @@ function JoinForm({ v, busy, onJoin, onCancel }: { v: JoinView; busy: boolean; o
 }
 
 const styles = StyleSheet.create({
+  chatRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.ruleSoft },
+  chatTile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.lime },
   page: { padding: spacing.lg, gap: spacing.md, width: '100%' },
   codeRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', position: 'relative', paddingVertical: spacing.sm },
   codeBox: { width: 46, height: 56, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },

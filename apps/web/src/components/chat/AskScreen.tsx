@@ -122,8 +122,10 @@ export function AskScreen({ door, onBack, onPosted, initialTag, initialPrivate, 
     if (audience === 'host_only') return isOffer ? `Just ${host}. Nobody else sees it.` : `A private message to ${host}. Nobody else sees it.`;
     if (isOffer) return `${booked} ${booked === 1 ? 'person is' : 'people are'} booked on this. Nobody else is pinged.`;
     if (kind === 'trip' || kind === 'notice') return `Everyone gets it — ${people} ${people === 1 ? 'person' : 'people'}.`;
-    if (kind === 'day') return `${people} ${people === 1 ? 'person is' : 'people are'} on this day. Nobody else is pinged.`;
-    return `${people} ${people === 1 ? 'person is' : 'people are'} on this one. Nobody else is pinged.`;
+    // On a group trip the roster says who is on the day or the activity; on a plain trip it is everyone.
+    const on = picked?.people ?? people;
+    if (kind === 'day') return `${on} ${on === 1 ? 'person is' : 'people are'} on this day. Nobody else is pinged.`;
+    return `${on} ${on === 1 ? 'person is' : 'people are'} on this one${ctx.roster ? '' : ' — everyone on the trip'}. Nobody else is pinged.`;
   };
 
   const canPost = Boolean(ctx && title.trim() && anchor && (kind !== 'notice' || ctx.can.notice));
@@ -337,7 +339,7 @@ function DayPicker({ ctx, countOn, picked, onPick, onPickStop, onBack }: {
   const title = new Date(year, month, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const day = chosen ? byDate.get(chosen) ?? null : null;
   const onDay = chosen ? ctx.anchors.stops.filter((s) => s.date === chosen) : [];
-  const people = ctx.people.count;
+  const people = day?.people ?? ctx.people.count;
   return (
     <View style={[styles.page, wide && styles.wide]}>
       <View style={styles.head}>
@@ -383,7 +385,7 @@ function DayPicker({ ctx, countOn, picked, onPick, onPickStop, onBack }: {
             {onDay.length ? onDay.map((s) => (
               <Press key={s.key} onPress={() => onPickStop(s.key)} accessibilityRole="button" style={styles.dayStop}>
                 <Text style={styles.dayStopName} numberOfLines={1}>{s.label}</Text>
-                <Text style={styles.pickCount}>{countOn(s.key) ? `${countOn(s.key)} ${countOn(s.key) === 1 ? 'question' : 'questions'}` : '—'}</Text>
+                <Text style={styles.pickCount}>{[countOn(s.key) ? `${countOn(s.key)} ${countOn(s.key) === 1 ? 'question' : 'questions'}` : null, ctx.roster && s.people != null ? `${s.people} on it` : null].filter(Boolean).join(' · ') || '—'}</Text>
               </Press>
             )) : <Text style={styles.empty}>Nothing booked on this day yet.</Text>}
             <View style={styles.note}>

@@ -34,6 +34,8 @@ const isTripAsks = (p: string) => /^\/api\/trips\/[^/]+\/asks\/.+$/.test(p);
  * endpoint and an unnamed one is not saved.
  */
 const isChat = (p: string) => /^\/api\/chat\/(trip|offer)\/[^/]+(\/topics\/[^/]+)?$/.test(p);
+/** A group participant's window onto the same conversation (13 Sep 2026): the list and one question. */
+const isJoinChat = (p: string) => /^\/api\/join\/[^/]+\/chat(\/[^/]+)?$/.test(p);
 /** The FAQ on a listing: the one place an answer becomes long-lived public content. Its own branch, not the chat's. */
 const isFaq = (p: string) => /^\/api\/experiences\/[^/]+\/faq$/.test(p);
 const isTripTravel = (p: string) => /^\/api\/trips\/[^/]+\/travel$/.test(p);
@@ -162,7 +164,7 @@ export function storable(fullPath: string, body: any): any | null {
    * a pocket is somewhere we cannot reach to delete anything from. The names
    * stay, because a thread without them is unreadable.
    */
-  if (isTripChat(p) || isTripAsks(p) || isChat(p)) {
+  if (isTripChat(p) || isTripAsks(p) || isChat(p) || isJoinChat(p)) {
     const strip = (people: any) => (people
       ? { ...people, guests: (people.guests ?? []).map((g: any) => ({ ...g, contact: null })) }
       : people);
@@ -310,6 +312,8 @@ export function queueable(method: string, fullPath: string): boolean {
    * screen says it is).
    */
   if (p.startsWith('/api/chat/')) return !/\/(report|decide|withdraw)$/.test(p);
+  // The same through a participant's door: a question or a reply waits; a report does not.
+  if (/^\/api\/join\/[^/]+\/chat/.test(p)) return !/\/report$/.test(p);
 
   // A group participant ticking something off behind their invite link. They
   // are often the person with the worst signal — a car park, a stadium, a coach

@@ -150,6 +150,32 @@ export async function insertGuest(tripId, g) {
   return rows[0];
 }
 
+/**
+ * The guest row that stands for a group participant in the chat (migration
+ * 087). Found by participant, else by the contact they joined with, else made
+ * — joined already, because joining the group was the vouching.
+ */
+export async function guestForParticipant(tripId, participant, token) {
+  const byP = await query('select * from trip_guests where participant_id = $1', [participant.id]);
+  if (byP.rows[0]) return byP.rows[0];
+  if (participant.contact) {
+    const byC = await query(
+      `update trip_guests set participant_id = $3, status = 'joined', joined_at = coalesce(joined_at, now())
+        where trip_id = $1 and lower(contact) = lower($2) and participant_id is null returning *`,
+      [tripId, participant.contact, participant.id],
+    );
+    if (byC.rows[0]) return byC.rows[0];
+  }
+  const { rows } = await query(
+    `insert into trip_guests (trip_id, name, contact, contact_kind, token, status, joined_at, participant_id)
+     values ($1,$2,$3,$4,$5,'joined',now(),$6)
+     on conflict (participant_id) where participant_id is not null do update set name = excluded.name
+     returning *`,
+    [tripId, participant.name, participant.contact ?? null, participant.contact_kind ?? null, token, participant.id],
+  );
+  return rows[0];
+}
+
 export async function removeGuest(tripId, guestId) {
   const { rowCount } = await query('delete from trip_guests where id = $1 and trip_id = $2', [guestId, tripId]);
   return rowCount;
