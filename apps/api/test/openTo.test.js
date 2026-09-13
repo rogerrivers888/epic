@@ -527,6 +527,15 @@ test('a place is cut down to a town before it goes anywhere', () => {
   assert.equal(townOf('Fairways, Ascot, sl5 0jd'), 'Ascot', 'a postcode in lower case is still a postcode');
   assert.equal(townOf('12 High Street Windsor SL4 1AA'), null, 'an address with no commas is not salvaged');
   assert.equal(townOf('Flat 2, 14 Titlarks Hill'), null, 'and neither is a street');
+  // Address-only words are never a town, so they are refused even where the
+  // ambiguous ones are allowed through. Trimming the list once let these back.
+  assert.equal(townOf('Flat 2, Manor House'), null);
+  assert.equal(townOf('Rose Villas'), null);
+  assert.equal(townOf('Chapel Close'), null);
+  assert.equal(townOf('Ground Floor'), null);
+  // And they are refused as a part, not as the whole label.
+  assert.equal(townOf('The Old Cottage, Ascot'), 'Ascot');
+  assert.equal(townOf('Rose Villas, Windsor'), 'Windsor');
   assert.equal(townOf('High Street, Windsor'), 'Windsor');
   // Places that must survive, because refusing everything would be no use.
   // The first street list refused every one of these (Codex, 13 Sep 2026).

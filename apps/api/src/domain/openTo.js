@@ -114,13 +114,26 @@ const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 :
 /** A code, not a place: carries a digit and nothing but digits, letters, spaces and hyphens. */
 const POSTCODE = /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 -]*$/;
 /**
- * Words that make a part a street rather than a town — and only the ones that
- * are almost never a whole town's name. The first list was much longer and
- * refused St Albans, Burgess Hill, Park City and Road Town, which is no use to
- * anybody (Codex, 13 Sep 2026): "hill", "park", "grove", "st", "place",
- * "square", "way", "court" and "row" are all ordinary in real place names.
+ * Words that make a part an address rather than a town, in typed free text.
+ *
+ * There are two kinds and they are not the same. **Ambiguous** words —
+ * "hill", "park", "grove", "st", "place", "square", "way", "court", "row" —
+ * are ordinary in real place names, and a list that refused them lost St
+ * Albans, Burgess Hill, Park City, Notting Hill and Grove. **Address-only**
+ * words are never a town at all, and trimming the list the first time took
+ * those out with the rest, which let "Flat 2, Manor House" through as a town
+ * (Codex, 13 Sep 2026).
+ *
+ * So: every word here is one that names a street, a building or a part of
+ * one, and none of them is a place anybody lives in the name of.
  */
-const STREETY = /\b(street|road|lane|avenue|drive|crescent|terrace|mews|cul-de-sac|flat|apartment|apt|suite|po box)\b/i;
+const STREETY = new RegExp(`\\b(${[
+  // a street
+  'street', 'road', 'lane', 'avenue', 'drive', 'crescent', 'terrace', 'mews', 'cul-de-sac', 'close',
+  // a building, or a part of one
+  'house', 'cottage', 'cottages', 'villa', 'villas', 'bungalow', 'lodge', 'annexe', 'block', 'building',
+  'flat', 'apartment', 'apt', 'suite', 'unit', 'floor', 'penthouse', 'po box',
+].join('|')})\\b`, 'i');
 /** What a town may be made of: letters, spaces, hyphens, apostrophes, full stops. No digits. */
 const PLACEY = /^[\p{L}][\p{L} .'’-]*$/u;
 
