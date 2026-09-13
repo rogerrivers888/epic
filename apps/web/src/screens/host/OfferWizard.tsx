@@ -801,9 +801,10 @@ function Extract({ offer: o, save, setOffer, setError }: { offer: OwnOffer; save
                   ? <TextInput value={f.key} onChangeText={(v) => setFacts(facts.map((x, j) => (j === i ? { ...x, key: v } : x)))} onBlur={() => commitFacts(facts)} placeholder="Fact" placeholderTextColor={colors.ghost} style={[styles.factKey, { padding: 0 }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null]} />
                   : <Text style={styles.factKey} numberOfLines={1}>{f.key || 'Fact'}</Text>}
                 {editing === i
-                  ? <TextInput autoFocus value={f.value} onChangeText={(v) => setFacts(facts.map((x, j) => (j === i ? { ...x, value: v } : x)))} onBlur={() => { setEditing(null); commitFacts(facts); }} placeholder="…" placeholderTextColor={colors.ghost} style={[styles.factValue, { padding: 0 }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null]} />
+                  ? <TextInput autoFocus value={f.value} onChangeText={(v) => setFacts(facts.map((x, j) => (j === i ? { ...x, value: v } : x)))} onBlur={() => commitFacts(facts)} placeholder="…" placeholderTextColor={colors.ghost} style={[styles.factValue, { padding: 0 }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null]} />
                   : <Press onPress={() => setEditing(i)} accessibilityRole="button" style={{ flex: 1 }}><Text style={styles.factValue}>{f.value}</Text></Press>}
-                <Press onPress={() => setEditing(i)} accessibilityRole="button" accessibilityLabel="Edit" style={styles.factBtn}><Icon name="edit" size={14} color={colors.inkMuted} strokeWidth={2} /></Press>
+                {/* The row stays open while focus moves between its key and its value; the tick closes it (Codex, 13 Sep 2026). */}
+                <Press onPress={() => { if (editing === i) { setEditing(null); commitFacts(facts); } else setEditing(i); }} accessibilityRole="button" accessibilityLabel={editing === i ? 'Done' : 'Edit'} style={styles.factBtn}><Icon name={editing === i ? 'check' : 'edit'} size={14} color={editing === i ? colors.accent : colors.inkMuted} strokeWidth={editing === i ? 2.6 : 2} /></Press>
                 <Press onPress={() => commitFacts(facts.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel="Delete" style={styles.factBtn}><Icon name="close" size={14} color={colors.inkMuted} strokeWidth={2} /></Press>
               </View>
             ))}
