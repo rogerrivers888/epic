@@ -386,3 +386,19 @@ test('a participant outside the household gets a guest row of their own, once', 
   // A member of the household who is also a participant is that member, not a guest — nothing to make.
   assert.ok(member.id);
 });
+
+test('a participant who withdrew is no longer in the conversation', async () => {
+  const { household } = await aHousehold(query, 'The Leavers');
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date) values ($1, 'Bath', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning *`, [household.id])).rows[0];
+  const group = (await query(`insert into trip_groups (trip_id, household_id, invite_token) values ($1, $2, 'inv-leave') returning *`, [trip.id, household.id])).rows[0];
+  const gp = (await query(`insert into group_participants (group_id, name, token, joined_at) values ($1, 'Kate Gone', 'pt-gone', now()) returning *`, [group.id])).rows[0];
+  const guestRepo = await import('../src/repositories/tripChat.js');
+  const g = await guestRepo.guestForParticipant(trip.id, gp, 'tok-gone');
+  await query('update group_participants set withdrawn_at = now() where id = $1', [gp.id]);
+  const groupsRepo = await import('../src/repositories/groups.js');
+  const active = new Set((await groupsRepo.joinedParticipants(group.id)).map((x) => x.id));
+  const guests = await guestRepo.guestsOf(trip.id);
+  const inChat = guests.filter((x) => x.status === 'joined' && (!x.participant_id || active.has(x.participant_id)));
+  assert.equal(guests.some((x) => x.id === g.id), true, 'the row is still there');
+  assert.equal(inChat.some((x) => x.id === g.id), false, 'but they are not in the conversation');
+});

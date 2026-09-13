@@ -90,7 +90,11 @@ export async function tripContext(trip, me) {
   const [days, stops, attendees, guests, organiser, group] = await Promise.all([
     trips.daysOf(trip.id), trips.stopsOf(trip.id), trips.attendeesOf(trip.id), tripChat.guestsOf(trip.id), organiserOf(trip), groupOf(trip),
   ]);
-  const joined = guests.filter((g) => g.status === 'joined');
+  // A guest row that stands for a group participant is in the conversation
+  // only while that participant is still in the group: somebody who withdrew
+  // is not told what the group says after they left (Codex, 13 Sep 2026).
+  const active = new Set((group?.participants ?? []).map((gp) => gp.id));
+  const joined = guests.filter((g) => g.status === 'joined' && (!g.participant_id || active.has(g.participant_id)));
   const people = [
     ...attendees.map((a) => ({ memberId: a.id, guestId: null, name: a.name, avatarUrl: a.avatar_url ?? null, householdId: trip.household_id, isHost: organiser?.id === a.id })),
     ...joined.map((g) => ({ memberId: null, guestId: g.id, name: g.name, contact: g.contact, contactKind: g.contact_kind, isHost: false, participantId: g.participant_id ?? null })),
