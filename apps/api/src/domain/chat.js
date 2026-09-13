@@ -167,7 +167,8 @@ export function matchesAbout(topic, about) {
 export function filterTopics(topics, { showing = DEFAULT_SHOWING, about = null } = {}, me) {
   const out = topics.filter((t) => canSee(t, me) && matchesShowing(t, showing, me) && matchesAbout(t, about));
   const rank = (t) => (t.pinned ? 0 : t.state === 'open' ? 1 : 2);
-  return out.sort((a, b) => rank(a) - rank(b) || String(b.last_at ?? b.created_at).localeCompare(String(a.last_at ?? a.created_at)));
+  const when = (t) => new Date(t.last_at ?? t.created_at).getTime();
+  return out.sort((a, b) => rank(a) - rank(b) || when(b) - when(a));
 }
 
 /** The counts on the Showing rows (D4), computed over what this person may see. */
@@ -464,7 +465,8 @@ export function legacyMessages(topics, replies = []) {
       author: person(r.author), onStop: pointer(byTopic.get(r.topicId)), seenBy: r.seenBy ?? 0,
     })),
   ];
-  return rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  // By instant, not by String(): a Date from node-postgres stringifies weekday-first (Codex, 13 Sep 2026).
+  return rows.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 }
 
 export function legacyPeople(context) {

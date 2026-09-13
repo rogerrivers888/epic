@@ -328,3 +328,14 @@ test('the old addresses still answer with the flat river a phone may be holding'
   assert.equal(p.count, 2);
   assert.equal(p.guests[0].contact, null, 'a contact is never in the river');
 });
+
+test('the river is ordered by instant, not by how a Date prints', () => {
+  // node-postgres hands back Date objects, and String(new Date()) starts with the weekday:
+  // "Mon Oct 12 2026" sorts before "Wed Oct 07 2026" as text, and after it as an instant.
+  const topics = [
+    { id: 'q', title: 'Q', body: null, at: new Date('2026-10-07T09:00:00Z'), mine: false, author: { name: 'A', guest: false, initial: 'A', memberId: 'a', guestId: null }, tag: { kind: 'trip', ref: 'trip', label: 'x' }, seenBy: 0 },
+  ];
+  const replies = [{ id: 'r', topicId: 'q', body: 'R', at: new Date('2026-10-12T09:00:00Z'), mine: false, author: { name: 'B', guest: false, initial: 'B', memberId: 'b', guestId: null }, seenBy: 0 }];
+  assert.ok(String(replies[0].at) < String(topics[0].at), 'the string order would have put the reply first');
+  assert.deepEqual(legacyMessages(topics, replies).map((m) => m.id), ['q', 'r']);
+});
