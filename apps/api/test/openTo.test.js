@@ -16,7 +16,7 @@ import { aHousehold, testDatabase } from './helpers/db.js';
 const { query } = await testDatabase();
 const repo = await import('../src/repositories/openTo.js');
 const {
-  companyFits, fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue, townOf,
+  companyFits, fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue, placeName, townOf,
   partyOf, sharedInterests, sharedLanguage, similarAge, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
 } = await import('../src/domain/openTo.js');
 
@@ -507,65 +507,59 @@ test('what an upload is for decides who may read it, and forgetting fails safe',
   assert.equal(hostMediaPurpose('something else'), 'evidence');
 });
 
-test('a place is cut down to a town before it goes anywhere', () => {
-  // A household's home is whatever they typed, and often that is the house.
-  assert.equal(townOf('Fairways, Titlarks Hill, Ascot, SL5 0JD'), 'Ascot');
-  assert.equal(townOf('12 High Street, Windsor, SL4 1AA'), 'Windsor');
-  assert.equal(townOf('Reading'), 'Reading');
-  assert.equal(townOf('Lisbon'), 'Lisbon');
-  assert.equal(townOf('1600 Pennsylvania Ave, Washington, 20500'), 'Washington');
-  assert.equal(townOf('Rua Augusta 100, Lisboa, 1100-053'), 'Lisboa');
-  // Broader than the truth is the safe direction to be wrong in.
-  assert.equal(townOf('Ascot, Berkshire'), 'Berkshire');
-  assert.equal(townOf(null), null);
-  assert.equal(townOf('   '), null);
-  assert.equal(townOf('SL5 0JD'), null, 'a postcode on its own is not a town');
-  assert.equal(townOf('K1A 0B1'), null);
-  assert.equal(townOf('1012 AB, Amsterdam'), 'Amsterdam');
-  assert.equal(townOf('Stoke-on-Trent'), 'Stoke-on-Trent', 'a hyphen is not a postcode');
-  // The ways the first version of this leaked, each one now nothing at all.
-  assert.equal(townOf('Fairways, Ascot, sl5 0jd'), 'Ascot', 'a postcode in lower case is still a postcode');
-  assert.equal(townOf('12 High Street Windsor SL4 1AA'), null, 'an address with no commas is not salvaged');
-  assert.equal(townOf('Flat 2, 14 Titlarks Hill'), null, 'and neither is a street');
-  // An address ends with the word; a place name carries it at the front or in
-  // the middle. Four passes were spent tuning a word list before that was the
-  // rule, so both directions are held here (Codex, 13 Sep 2026).
-  assert.equal(townOf('Flat 2, Manor House'), null);
-  assert.equal(townOf('Rose Villas'), null);
-  assert.equal(townOf('Chapel Close'), null);
-  assert.equal(townOf('Ground Floor'), null);
-  assert.equal(townOf('12 High Street'), null);
-  assert.equal(townOf('Church Lane'), null);
-  assert.equal(townOf('Cottage Grove'), 'Cottage Grove', 'a real city, and the word is not at the end');
-  assert.equal(townOf('Villa Park'), 'Villa Park');
-  assert.equal(townOf('Road Town'), 'Road Town');
-  // And an address word is refused as a part, not as the whole label.
-  assert.equal(townOf('The Old Cottage, Ascot'), 'Ascot');
-  assert.equal(townOf('Rose Villas, Windsor'), 'Windsor');
-  assert.equal(townOf('High Street, Windsor'), 'Windsor');
-  // Places that must survive, because refusing everything would be no use.
-  // The first street list refused every one of these (Codex, 13 Sep 2026).
-  assert.equal(townOf('St Albans'), 'St Albans');
-  assert.equal(townOf('Burgess Hill'), 'Burgess Hill');
-  assert.equal(townOf('Park City'), 'Park City');
-  assert.equal(townOf('Notting Hill'), 'Notting Hill');
-  assert.equal(townOf('Grove'), 'Grove');
-  // A locality from the map is a structured field, not something typed, so it
-  // is taken as given — it still may not be a postcode or carry a digit.
-  assert.equal(townOf('Manor House', { trusted: true }), 'Manor House', 'the map knows a place when it names one');
-  assert.equal(townOf('SL5 0JD', { trusted: true }), null, 'trusted is not a way round the postcode rule');
-  assert.equal(townOf('12 High Street Windsor SL4 1AA', { trusted: true }), null);
+test('the guard on what the map hands back: a name, never a code or a house number', () => {
+  // This is not an address parser and is not asked to be one. Nothing typed is
+  // ever shared — `townFor` uses the coordinates and nothing else — so this is
+  // a second pair of eyes on a structured locality from the map.
+  assert.equal(townOf('Ascot'), 'Ascot');
+  assert.equal(townOf('Lisboa'), 'Lisboa');
   assert.equal(townOf('Newcastle upon Tyne'), 'Newcastle upon Tyne');
   assert.equal(townOf("Bishop's Stortford"), "Bishop's Stortford");
-  assert.equal(townOf('Lisboa'), 'Lisboa');
+  assert.equal(townOf('Stoke-on-Trent'), 'Stoke-on-Trent');
+  // Real cities that six versions of a word list variously refused.
+  assert.equal(townOf('St Albans'), 'St Albans');
+  assert.equal(townOf('Burgess Hill'), 'Burgess Hill');
+  assert.equal(townOf('Cottage Grove'), 'Cottage Grove');
+  assert.equal(townOf('Villa Park'), 'Villa Park');
+  assert.equal(townOf('Federal Way'), 'Federal Way');
+  assert.equal(townOf('Road Town'), 'Road Town');
+  // A code is never a place, in any case, in any country.
+  assert.equal(townOf('SL5 0JD'), null);
+  assert.equal(townOf('sl5 0jd'), null);
+  assert.equal(townOf('K1A 0B1'), null);
+  assert.equal(townOf('1100-053'), null);
+  assert.equal(townOf('Rua Augusta 100, Lisboa, 1100-053'), 'Lisboa');
+  assert.equal(townOf('1012 AB, Amsterdam'), 'Amsterdam');
+  // Nor is a house number.
+  assert.equal(townOf('12 High Street Windsor SL4 1AA'), null);
+  assert.equal(townOf('Flat 2, 14 Titlarks Hill'), null);
+  assert.equal(townOf(null), null);
+  assert.equal(townOf('   '), null);
 });
 
-test('what the guest is told is a town, whatever the host typed as home', () => {
+test('what the guest is told is a town, and an address never becomes one', () => {
   const match = { interests: ['Chess club'], host_where: null, host_note: null };
-  const host = { where_label: 'Fairways, Titlarks Hill, Ascot, SL5 0JD' };
-  const intro = introductionOf({ match, host, hostName: 'Roger Sumner-Rivers', language: null });
-  assert.equal(intro.town, 'Ascot', 'never the house, never the postcode');
-  assert.equal(intro.name, 'Roger', 'and never a surname');
-  assert.ok(!JSON.stringify(intro).includes('Titlarks'));
-  assert.ok(!JSON.stringify(intro).includes('SL5'));
+  // An entry's label is written by `townFor` from the coordinates, so it is
+  // already a town. If anything else ever reached this row, the guest is told
+  // nothing rather than the house.
+  const named = introductionOf({ match, host: { where_label: 'Ascot' }, hostName: 'Roger Sumner-Rivers', language: null });
+  assert.equal(named.town, 'Ascot');
+  assert.equal(named.name, 'Roger', 'and never a surname');
+
+  const leaked = introductionOf({ match, host: { where_label: 'Fairways, Titlarks Hill, Ascot, SL5 0JD' }, hostName: 'Roger', language: null });
+  assert.ok(!JSON.stringify(leaked).includes('Titlarks'));
+  assert.ok(!JSON.stringify(leaked).includes('SL5'));
+
+  const house = introductionOf({ match, host: { where_label: 'Flat 2, Manor House' }, hostName: 'Roger', language: null });
+  assert.equal(house.town, null, 'nothing at all, rather than a building');
+
+  // The gate does not split or salvage: one clean place name, or nothing.
+  assert.equal(placeName('Ascot'), 'Ascot');
+  assert.equal(placeName('Newcastle upon Tyne'), 'Newcastle upon Tyne');
+  assert.equal(placeName('Cottage Grove'), 'Cottage Grove');
+  assert.equal(placeName('Federal Way'), 'Federal Way');
+  assert.equal(placeName('12 High Street'), null, 'a house number is not a place');
+  assert.equal(placeName('Flat Above The Shop, Ascot'), null, 'a comma means somebody typed an address');
+  assert.equal(placeName('SL5 0JD'), null);
+  assert.equal(placeName(null), null);
 });

@@ -91,71 +91,49 @@ export function sharedLanguages(a = [], b = []) {
 const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 : 0);
 
 /**
- * A place, cut down to somewhere you could name in a sentence — or nothing.
+ * A place name, or nothing.
  *
- * A household's home is held as whatever they typed ("Fairways, Titlarks Hill,
- * Ascot, SL5 0JD"), and a trip's origin is the same. Nothing in this feature
- * may ever carry that: a home address is never shared, and the guest is told a
- * *town*.
+ * This is deliberately not an address parser any more. Six passes were spent
+ * making one — a word list long enough to catch "Manor House" refused St
+ * Albans; short enough to keep St Albans let "Manor House" through; matching
+ * by position let "Flat Above The Shop" past and refused Federal Way (Codex,
+ * 13 Sep 2026). There are infinitely many ways to write an address and a
+ * regular expression will lose that race every time.
  *
- * The first version of this took the last comma-separated part of whatever was
- * left, which worked on the formats it was tested with and handed back "sl5
- * 0jd" for a lowercase postcode and "12 High Street Windsor SL4 1AA" whole for
- * an address with no commas (Codex, 13 Sep 2026). So it does not salvage any
- * more: a label travels only when what comes out *looks like a place name* —
- * letters, spaces, hyphens and apostrophes, and not a street. Anything else is
- * null, and a screen that is told nothing says nothing. Losing the town is a
- * disappointment; sending the house is the thing this feature exists to
- * prevent.
- *
- * `routes/openTo.js` asks the geocoder for a real locality first and only
- * falls back to this, so the honest answer is usually available anyway.
+ * So nothing typed is ever shared. `routes/openTo.js townFor` asks the map for
+ * a locality — a structured city/town/village field — and an entry with no
+ * coordinates simply carries no town. This is the guard on what the map hands
+ * back: a name, letters only, never a code and never a house number. It is a
+ * second pair of eyes on a trusted source, not a way of rescuing an address.
  */
 /** A code, not a place: carries a digit and nothing but digits, letters, spaces and hyphens. */
 const POSTCODE = /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 -]*$/;
-/**
- * Whether a typed part is an address rather than a place — by where the word
- * sits, not by which word it is.
- *
- * Four passes were spent tuning a list of words, and each version was wrong in
- * the other direction: long enough to catch "Manor House" refused St Albans
- * and Burgess Hill; short enough to allow those let "Manor House" through;
- * putting "cottage" and "villa" back refused Cottage Grove and Villa Park
- * (Codex, 13 Sep 2026). The list was never the distinction.
- *
- * The distinction is position. In an address the word comes **last** — Manor
- * *House*, Rose *Villas*, Chapel *Close*, High *Street*, Ground *Floor*. In a
- * place name it comes first or in the middle — *Cottage* Grove, *Villa* Park,
- * *Church* Stretton. So a part is refused when it *ends* with one of these,
- * and a real town that merely contains one is untouched.
- */
-const ADDRESS_TAIL = new RegExp(`\\b(${[
-  // what a street is called
-  'street', 'road', 'lane', 'avenue', 'drive', 'crescent', 'terrace', 'mews', 'close', 'walk', 'row', 'way',
-  // what a building, or a part of one, is called
-  'house', 'cottage', 'cottages', 'villa', 'villas', 'bungalow', 'lodge', 'annexe', 'block', 'building',
-  'flat', 'apartment', 'apt', 'suite', 'unit', 'floor', 'penthouse',
-].join('|')})\\.?$`, 'i');
-
-/** What a town may be made of: letters, spaces, hyphens, apostrophes, full stops. No digits. */
+/** What a place may be made of: letters, spaces, hyphens, apostrophes, full stops. No digits. */
 const PLACEY = /^[\p{L}][\p{L} .'’-]*$/u;
 
-/**
- * `trusted` is a locality the map gave us — a structured city/town/village
- * field, not something anybody typed — so it needs the postcode and digit
- * guard but not the street test. Running the street test over it was how the
- * geocoder, the good source, lost St Albans (Codex, 13 Sep 2026).
- */
-export function townOf(label, { trusted = false } = {}) {
+export function townOf(label) {
   const parts = String(label ?? '').split(',').map((p) => p.trim()).filter(Boolean);
   const kept = parts.filter((p) => !POSTCODE.test(p));
   const candidate = kept.length ? kept[kept.length - 1] : null;
-  if (!candidate) return null;
-  // It has to read as a place on its own. An address with no commas arrives
-  // here as one long part and fails, which is the point.
-  if (!PLACEY.test(candidate)) return null;
-  if (!trusted && ADDRESS_TAIL.test(candidate)) return null;
+  if (!candidate || !PLACEY.test(candidate)) return null;
   return candidate;
+}
+
+/**
+ * The last gate before a place goes to the other household: it passes only if
+ * it is *already* one clean place name.
+ *
+ * `where_label` is written by `townFor` from the coordinates, so it is a town
+ * by the time it is stored. This is what stands between a row written before
+ * that was true — or by anything else, ever — and the guest reading it. It
+ * does not split, trim or salvage: a label with a comma in it is an address
+ * somebody typed, and an address is nothing at all here.
+ */
+export function placeName(label) {
+  const one = String(label ?? '').trim();
+  if (!one || one.includes(',')) return null;
+  if (POSTCODE.test(one) || !PLACEY.test(one)) return null;
+  return one;
 }
 
 /** The language the two share, at the level each holds it, or null. */
@@ -330,9 +308,10 @@ export function livesUntil({ scope, tripEnd }, now = new Date()) {
  */
 export function introductionOf({ match, host, hostName, language }) {
   const first = String(hostName ?? '').trim().split(/\s+/)[0] || 'Somebody';
-  // A town, never an address: whatever the household typed as home, this is
-  // the most anybody on the other side is ever told.
-  const town = townOf(host?.where_label);
+  // A town, or nothing. The label is already a town — `townFor` wrote it from
+  // the coordinates — and this refuses anything that is not, so a row written
+  // before that was true cannot reach the person on the other side.
+  const town = placeName(host?.where_label);
   return {
     name: first,
     town,

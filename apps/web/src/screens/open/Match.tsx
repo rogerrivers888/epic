@@ -140,7 +140,7 @@ function HostAsked({ match: m, busy, onAnswer }: { match: OpenMatch; busy: boole
           </TintBlock>
         ) : (
           <TintBlock title="We have a match">
-            Somebody visiting {m.from ?? 'your town'}{m.origin ? ` from ${m.origin}` : ''}{month ? ` in ${month}` : ''} is up for <Text style={[t.strong, { color: colors.ink }]}>{said}</Text>.
+            Somebody visiting {m.from ?? 'your way'}{m.origin ? ` from ${m.origin}` : ''}{month ? ` in ${month}` : ''} is up for <Text style={[t.strong, { color: colors.ink }]}>{said}</Text>.
           </TintBlock>
         )}
       </View>
@@ -199,7 +199,9 @@ function GuestAsked({ match: m, busy, onAnswer }: { match: OpenMatch; busy: bool
     <View>
       <View style={[k.gutter, { paddingTop: 16 }]}>
         <View style={{ backgroundColor: colors.surfaceMuted, padding: 15, gap: 6 }}>
-          <Text style={[t.h21, { fontSize: 20, lineHeight: 23 }]}>{i.name} in {i.town ?? 'town'} is up for {thing}</Text>
+          {/* A town only when there is one: Epic would rather say less than
+              guess, and "Ana in town" is not a sentence anybody wrote. */}
+          <Text style={[t.h21, { fontSize: 20, lineHeight: 23 }]}>{i.name}{i.town ? ` in ${i.town}` : ''} is up for {thing}</Text>
           <Text style={[t.label, { fontWeight: '400', color: colors.accent, lineHeight: 19 }]}>
             {i.name} is up for you tagging along{rest.length ? `, and is also up for ${listOf(rest)}` : ''}.{' '}
             {speaks ? <Text style={[t.strong, { color: colors.ink }]}>{speaks}</Text> : null}

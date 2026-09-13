@@ -22,7 +22,7 @@ const householdById = async (id) => (await query('select * from households where
 import {
   AGE_PREFS, COMPANY, FLUENCY, HELLO_SECONDS, HEARD_SCHEMA, HEARD_SYSTEM, KINDS,
   fits, hasLapsed, introductionOf, languageFor, livesUntil, nextStage, nudgeDue, partyOf,
-  townOf, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
+  placeName, townOf, unverifiablePrefs, verdictFor, videoVisible, waitingOn,
 } from '../domain/openTo.js';
 import { extract as extractWith, openaiEnabled } from '../sources/openai.js';
 import { currentHousehold, loadMembers } from './household.js';
@@ -43,35 +43,35 @@ const oneOf = (all, v) => (all.includes(v) ? v : null);
 /**
  * Where an entry says it is, as a town and never an address.
  *
- * The coordinates are the truthful source — a household's home and a trip's
- * base are both geocoded already — so this asks the map what the place is
- * called and only falls back to trimming the free text somebody typed. If
- * neither gives a town the entry carries none, and the screens say nothing
- * rather than something that turns out to be a house number.
+ * The coordinates are the only source. A household's home and a trip's base
+ * are both geocoded when they are set, so the map can say what the place is
+ * called, and what it says is a structured city/town/village field rather than
+ * a line somebody typed.
+ *
+ * Nothing typed is used, even as a fallback. That fallback was an address
+ * parser, and six passes at one proved what should have been obvious: there
+ * are infinitely many ways to write an address and every rule that caught one
+ * more let another through or refused a real town (Codex, 13 Sep 2026). An
+ * entry with no coordinates carries no town, and the screens say nothing —
+ * which is a disappointment, where sending somebody's house is the thing this
+ * feature exists to prevent.
+ *
+ * Zoom 12 is the level that answers with the town: any shallower and a
+ * council's name comes back ("Windsor and Maidenhead" for Ascot).
  */
 const townCache = new Map();
-async function townFor({ typed, lat, lng }) {
-  const fromText = townOf(typed);
-  if (lat == null || lng == null) return fromText;
-  /**
-   * A town for a point never changes, so it is remembered — but by the exact
-   * point. Rounding the key put two sides of a boundary in one bucket, which
-   * would have written the next village's name onto somebody's entry, and a
-   * lookup that merely failed was remembered as "no town" for the life of the
-   * process. Only an answer is kept (Codex, 13 Sep 2026).
-   *
-   * Zoom 12 is the level that answers with the town: any shallower and a
-   * council's name comes back ("Windsor and Maidenhead" for Ascot).
-   */
+async function townFor({ lat, lng }) {
+  if (lat == null || lng == null) return null;
+  // Remembered by the exact point: rounding the key put two sides of a
+  // boundary in one bucket. Only an answer is kept, so a lookup that merely
+  // failed is asked again rather than remembered as "no town" for ever.
   const key = `${lat},${lng}`;
-  if (!townCache.has(key)) {
-    const there = await reverseGeocode(lat, lng, { zoom: 12 }).catch(() => null);
-    if (!there) return fromText;
-    const named = townOf(there.locality ?? there.address?.town ?? null, { trusted: true });
-    if (named) townCache.set(key, named);
-    return named ?? fromText;
-  }
-  return townCache.get(key) ?? fromText;
+  if (townCache.has(key)) return townCache.get(key);
+  const there = await reverseGeocode(lat, lng, { zoom: 12 }).catch(() => null);
+  if (!there) return null;
+  const named = townOf(there.locality ?? there.address?.town ?? null);
+  if (named) townCache.set(key, named);
+  return named;
 }
 
 /**
@@ -198,7 +198,6 @@ router.post('/open', async (req, res, next) => {
       // The town, never the address. A household's home is held as whatever
       // they typed, and an entry's label is a thing the other side gets told.
       whereLabel: await townFor({
-        typed: str(req.body?.where, 120) ?? (trip ? trip.place_label ?? trip.destination_label ?? trip.title : household.home_label),
         lat: trip ? trip.base_lat ?? trip.destination_lat : household.home_lat,
         lng: trip ? trip.base_lng ?? trip.destination_lng : household.home_lng,
       }),
@@ -303,8 +302,8 @@ async function journeyOf(entry) {
   const trip = await tripById(entry.trip_id).catch(() => null);
   if (!trip) return null;
   return {
-    from: await townFor({ typed: trip.origin_label, lat: trip.origin_lat, lng: trip.origin_lng }),
-    to: await townFor({ typed: trip.place_label ?? trip.destination_label ?? trip.title ?? entry.where_label, lat: trip.base_lat ?? trip.destination_lat, lng: trip.base_lng ?? trip.destination_lng }),
+    from: await townFor({ lat: trip.origin_lat, lng: trip.origin_lng }),
+    to: await townFor({ lat: trip.base_lat ?? trip.destination_lat, lng: trip.base_lng ?? trip.destination_lng }),
     when: trip.start_date ? String(trip.start_date).slice(0, 10) : trip.depart_at ? String(trip.depart_at).slice(0, 10) : null,
   };
 }
@@ -406,7 +405,7 @@ async function matchPayload(match, side, host, guest) {
     const journey = await journeyOf(theirs);
     return {
       ...base,
-      from: journey?.to ?? townOf(theirs.where_label),
+      from: journey?.to ?? placeName(theirs.where_label),
       origin: journey?.from ?? null,
       when: journey?.when ?? null,
       childAgeBands: match.kind === 'family' ? theirs.child_age_bands ?? [] : [],
