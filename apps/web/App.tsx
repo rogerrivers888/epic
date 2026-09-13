@@ -261,7 +261,7 @@ function Routed() {
   if (route.name === 'hostProfile') return <HostProfileScreen route={route} />;
   // An invitation to a private offer (13 Sep 2026): no account, no password — yes or no, and how many.
   if (route.name === 'invited') return <InvitedScreen token={route.token} />;
-  if (route.name === 'experience' && route.layer !== 'book') return <ExperienceScreen route={route} />;
+  if (route.name === 'experience' && route.layer !== 'book' && route.layer !== 'ask') return <ExperienceScreen route={route} />;
   return <Gate route={route} />;
 }
 

@@ -13,22 +13,24 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, HostHome, OfferShape, Visibility } from '../../api';
-import { colors, fonts, spacing, type, BORDER } from '../../theme';
-import { Button, Row, Wrap } from '../../components/ui';
+import { colors, fonts, type, INK, LIME } from '../../theme';
+import { Button } from '../../components/ui';
 import { Icon } from '../../components/Icon';
-import { ScreenTop, TopControl } from '../../components/InspireHeader';
+import { ScreenTop } from '../../components/InspireHeader';
 import { useViewport } from '../../hooks/useViewport';
 import { useRouter } from '../../router';
 import { paths, type Route } from '../../routes';
-import { HostFace, OfferRow, RatingLine, SHAPE_ICON, SHAPE_LABEL, TrustBadge, TypeChip, VISIBILITY_CHIP, dateOnly, money } from '../../components/hosting';
+import { SHAPE_ICON, SHAPE_LABEL, STATE_LABEL, TRUST_LABEL, TYPE_CHIP, VISIBILITY_CHIP, mediaUrl, money, priceWords } from '../../components/hosting';
+import { Tag, k, t } from '../../components/hostKit';
 import { LearnExample, LearnExamples, LearnHome, LearnShape, LearnWho } from './Learn';
 import { OfferWizard } from './OfferWizard';
 import { OfferDashboard } from './OfferDashboard';
 import { VideoRecorder } from './VideoRecorder';
 import { ProfileScreen } from './ProfileScreen';
+import { HostInbox } from '../../components/chat/HostInbox';
 
 const WIDE = 900;
 
@@ -62,22 +64,26 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   if (route.page === 'who') return <LearnWho wide={wide} />;
   if ((route.page === 'profile' || route.page === 'start') && home) return <ProfileScreen home={home} onChanged={load} />;
   if (route.page === 'edit' && route.offerId) return <OfferWizard offerId={route.offerId} home={home} onChanged={load} />;
-  if (route.page === 'offer' && route.offerId) return <OfferDashboard offerId={route.offerId} hostName={home?.host?.name ?? ''} />;
+  if (route.page === 'offer' && route.offerId) return <OfferDashboard offerId={route.offerId} hostName={home?.host?.name ?? ''} chat={route.chat ?? null} />;
+  // The host inbox (C5): every question across every offer, waiting first.
+  if (route.page === 'questions') return <HostInbox onBack={() => navigate(paths.host())} onOpen={(offerId, topicId) => navigate(paths.hostOfferChatTopic(offerId, topicId))} />;
   if (route.page === 'video') {
     const offerId = query.get('offer');
     return <VideoRecorder offerId={offerId} onDone={() => navigate(offerId ? paths.hostOfferEdit(offerId, 'extract') : paths.hostMe(), { replace: true })} />;
   }
-  if (route.page === 'new' || route.page === 'profile') return <View style={styles.centre}><Text style={type.small}>{error ?? 'One moment…'}</Text></View>;
+  if (route.page === 'new' || route.page === 'profile') return <View style={styles.centre}><Text style={t.sub}>{error ?? 'One moment…'}</Text></View>;
 
-  if (!home) return <View style={styles.centre}><Text style={type.small}>{error ?? 'Loading…'}</Text></View>;
+  if (!home) return <View style={styles.centre}><Text style={t.sub}>{error ?? 'Loading…'}</Text></View>;
   if (!home.host || !home.offers.length) return <LearnHome wide={wide} />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={wide ? styles.wide : undefined}>
-        <ScreenTop><TopControl label="Add an offer" icon="add" onPress={() => navigate(paths.hostNewOffer())} /></ScreenTop>
+    <View style={k.page}>
+      <View style={wide ? k.wide : undefined}>
+        <ScreenTop>
+          <Press onPress={() => navigate(paths.hostMe())} accessibilityRole="button" accessibilityLabel="You, as a host" style={styles.menu}><Icon name="menu" size={16} color={colors.ink} strokeWidth={2} /></Press>
+        </ScreenTop>
       </View>
-      <ScrollView contentContainerStyle={[styles.body, wide && styles.wide]}>
+      <ScrollView contentContainerStyle={[styles.body, wide && k.wide]}>
         <Dashboard home={home} onReset={async () => { await load(); navigate(paths.host(), { replace: true }); }} />
       </ScrollView>
     </View>
@@ -93,60 +99,61 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
   const offers = [...home.offers].sort((a, b) => order[a.state] - order[b.state]);
   const bookedOn = (id: string) => home.offers.find((o) => o.id === id)?.bookings.filter((b) => b.state !== 'cancelled').reduce((n, b) => n + b.heads, 0) ?? 0;
   const asks = home.asks ?? [];
+  const first = h.name.split(' ')[0];
   return (
-    <View style={{ gap: spacing.lg }}>
-      <Text style={type.title}>Hosting</Text>
-      <Press onPress={() => navigate(paths.hostMe())} accessibilityRole="button" style={styles.me}>
-        <HostFace host={h} size={48} />
-        <View style={{ flex: 1, gap: 3 }}>
-          <Row style={{ flexWrap: 'wrap', gap: 6 }}><TypeChip type={h.type} localKind={h.localKind} small /><TrustBadge trust={h.trust} checks={h.checks} /></Row>
-          <Text style={type.h3}>{h.name}{h.location ? ` · ${h.location}` : ''}</Text>
-          <RatingLine host={h} />
-        </View>
-        <Icon name="more" size={16} color={colors.inkMuted} />
-      </Press>
-
-      <Row style={{ gap: spacing.sm }}>
-        <Stat n={String(s.live)} label={s.live === 1 ? 'offer live' : 'offers live'} />
-        <Stat n={String(s.booked)} label="booked" />
-        <Stat n={money(s.toComePence)} label={home.config.payments.ready ? 'to come' : 'recorded'} />
-      </Row>
-
-      <View>
-        <Row style={{ justifyContent: 'space-between', alignItems: 'baseline', paddingBottom: spacing.sm, borderBottomWidth: BORDER, borderBottomColor: colors.line }}>
-          <Text style={type.h2}>Your offers</Text>
-          {s.nextPayoutOn ? <Text style={type.small}>Next runs {dateOnly(s.nextPayoutOn)}</Text> : null}
-        </Row>
-        {offers.map((o) => (
-          <View key={o.id}>
-            <OfferRow item={o} own={{ booked: bookedOn(o.id), visibility: `${VISIBILITY_CHIP[o.visibility]}${o.visibility !== 'public' && o.invites.length ? ` · ${o.invites.filter((i) => i.rsvp === 'yes').length} of ${o.invites.length} said yes` : ''}` }} onPress={() => navigate(o.state === 'draft' ? paths.hostOfferEdit(o.id, 'plan') : paths.hostOffer(o.id))} />
+    <View>
+      <View style={[k.gutter, { paddingTop: 14, gap: 10 }]}>
+        <Press onPress={() => navigate(paths.hostMe())} accessibilityRole="button">
+          <Text style={t.h27}>Hosting</Text>
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 5, flexWrap: 'wrap' }}>
+            {h.type ? <Tag tone="tint">{TYPE_CHIP[h.type].toUpperCase()}</Tag> : null}
+            <Tag>{h.checks === 'running' ? 'CHECKS RUNNING' : TRUST_LABEL[h.trust].toUpperCase()}</Tag>
+            <Text style={t.small}>{h.name}{h.location ? ` · ${h.location}` : ''}</Text>
           </View>
-        ))}
+        </Press>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Stat n={String(s.live)} label={s.live === 1 ? 'offer live' : 'offers live'} />
+          <Stat n={String(s.booked)} label="booked" />
+          <Stat n={money(s.toComePence)} label={home.config.payments.ready ? 'to come' : 'recorded'} />
+        </View>
       </View>
 
-      <Button label="Add another thing you do" icon="add" onPress={() => navigate(paths.hostNewOffer())} />
-      <Row style={{ justifyContent: 'center', gap: spacing.sm }}>
-        {(['oneoff', 'series', 'anytime'] as OfferShape[]).map((sh) => (
-          <Press key={sh} onPress={() => navigate(paths.hostNewOffer(sh))} accessibilityRole="button" style={styles.shapeQuick}>
-            <Icon name={SHAPE_ICON[sh]} size={14} color={colors.ink} />
-            <Text style={type.tiny}>{SHAPE_LABEL[sh]}</Text>
-          </Press>
-        ))}
-      </Row>
-
-      {asks.length ? (
-        <View style={{ gap: spacing.sm }}>
-          <Text style={styles.kicker}>PEOPLE HAVE ASKED {h.name.split(' ')[0].toUpperCase()} ABOUT</Text>
-          <Wrap>{asks.map((a, i) => <View key={i} style={styles.ask}><Text style={styles.askText} numberOfLines={2}>{a}</Text></View>)}</Wrap>
-          <Text style={type.small}>{asks.length} {asks.length === 1 ? 'person' : 'people'} asked for something when they booked. Each one is a second offer waiting to be written.</Text>
+      <View style={[k.gutter, { paddingTop: 16, gap: 8 }]}>
+        <Text style={t.kicker}>Your offers</Text>
+        <View>
+          {offers.map((o, i) => (
+            <Press key={o.id} onPress={() => navigate(o.state === 'draft' ? paths.hostOfferEdit(o.id, 'plan') : paths.hostOffer(o.id))} accessibilityRole="button" style={[styles.offer, k.rule, i === 0 && k.ruleTop]}>
+              <View style={styles.thumb}>
+                {mediaUrl(o.photos[0]) ? <Image source={{ uri: mediaUrl(o.photos[0])! }} style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} resizeMode="cover" /> : <Icon name={SHAPE_ICON[o.shape]} size={18} color={colors.inkMuted} />}
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
+                  <Tag tone="ink">{SHAPE_LABEL[o.shape].toUpperCase()}</Tag>
+                  <Tag tone={o.state === 'live' ? 'lime' : 'warm'}>{STATE_LABEL[o.state].toUpperCase()}</Tag>
+                  {o.visibility !== 'public' ? <Tag>{VISIBILITY_CHIP[o.visibility].toUpperCase()}</Tag> : null}
+                </View>
+                <Text style={[t.body, { fontWeight: '600', lineHeight: 18, marginTop: 3 }]} numberOfLines={2}>{o.title ?? 'Untitled'}</Text>
+                <Text style={t.tiny} numberOfLines={1}>{[priceWords(o), o.visibility !== 'public' && o.invites.length ? `${o.invites.filter((iv) => iv.rsvp === 'yes').length} of ${o.invites.length} said yes` : `${bookedOn(o.id)} booked`].join(' · ')}</Text>
+              </View>
+            </Press>
+          ))}
         </View>
-      ) : null}
-
-      {!h.introVideo || h.checks === 'running' ? (
-        <Text style={type.small}>{h.checks === 'running' ? 'Your checks are running; the profile says so until they pass. ' : ''}{!h.introVideo ? 'No intro video yet — people book the person. Record one from your profile.' : ''}</Text>
-      ) : null}
-      <Text style={type.tiny}>Guests find you through Inspire and Places — there is nothing to browse here.</Text>
-      <DeleteAll onDone={onReset} />
+        <Press onPress={() => navigate(paths.hostNewOffer())} accessibilityRole="button" style={styles.addBar}>
+          <Text style={[t.body, { fontSize: 15, fontWeight: '700', color: INK }]}>Add another thing you do</Text>
+          <Icon name="add" size={18} color={INK} strokeWidth={2} />
+        </Press>
+        {asks.length ? (
+          <View style={{ gap: 7, marginTop: 8 }}>
+            <Text style={t.kicker}>People have asked {first} about</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -2 }}>{asks.map((a, i) => <Tag key={i} tone="plain">{a}</Tag>)}</View>
+            <Text style={[t.small, { lineHeight: 18 }]}>{asks.length === 1 ? 'One person' : `${['Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'][asks.length - 2] ?? asks.length} people`} asked for something you do not offer yet. Each one is a second offer waiting to be written.</Text>
+          </View>
+        ) : null}
+        {!h.introVideo || h.checks === 'running' ? (
+          <Text style={[t.small, { lineHeight: 18, marginTop: 8 }]}>{h.checks === 'running' ? 'Your checks are running; the profile says so until they pass. ' : ''}{!h.introVideo ? 'No intro video yet — people book the person. Record one from your profile.' : ''}</Text>
+        ) : null}
+        <DeleteAll onDone={onReset} />
+      </View>
     </View>
   );
 }
@@ -164,37 +171,35 @@ function DeleteAll({ onDone }: { onDone: () => Promise<void> }) {
   const [said, setSaid] = useState<string | null>(null);
   if (!arm) {
     return (
-      <Press onPress={() => setArm(true)} accessibilityRole="button" style={{ paddingVertical: 10 }}>
-        <Text style={[type.small, { color: colors.overrun, fontWeight: '700', textAlign: 'center' }]}>Delete all events</Text>
+      <Press onPress={() => setArm(true)} accessibilityRole="button" style={{ paddingVertical: 14, marginTop: 8 }}>
+        <Text style={[t.small, { color: colors.overrun, fontWeight: '700', textAlign: 'center' }]}>Delete all events</Text>
       </Press>
     );
   }
   return (
     <View style={styles.deleteBox}>
-      <Text style={type.body}>Everything goes: your host profile, every offer, every invitation and every video. Anyone holding a place is called off and refunded. You start again from the beginning.</Text>
-      {said ? <Text style={[type.small, { color: colors.overrun }]}>{said}</Text> : null}
-      <Row>
+      <Text style={[t.sub, { color: colors.ink }]}>Everything goes: your host profile, every offer, every invitation and every video. Anyone holding a place is called off and refunded. You start again from the beginning.</Text>
+      {said ? <Text style={[t.small, { color: colors.overrun }]}>{said}</Text> : null}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
         <Button label="Delete all events" kind="danger" icon="delete" loading={busy} onPress={async () => { setBusy(true); try { await api.stopHosting(true); await onDone(); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />
         <Button label="Keep them" kind="ghost" onPress={() => setArm(false)} />
-      </Row>
+      </View>
     </View>
   );
 }
 
 function Stat({ n, label }: { n: string; label: string }) {
-  return <View style={styles.stat}><Text style={styles.statN}>{n}</Text><Text style={type.tiny}>{label}</Text></View>;
+  return <View style={styles.stat}><Text style={t.h21}>{n}</Text><Text style={styles.statLabel}>{label}</Text></View>;
 }
 
 const styles = StyleSheet.create({
-  wide: { maxWidth: 760, alignSelf: 'center', width: '100%' },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  body: { paddingHorizontal: 20, paddingTop: spacing.md, paddingBottom: 40 },
-  me: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: BORDER, borderBottomColor: colors.line },
-  stat: { flex: 1, padding: spacing.md, gap: 2, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
-  statN: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.5, color: colors.ink },
-  shapeQuick: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 30, borderWidth: 1, borderColor: colors.ruleSoft },
-  kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, color: colors.inkMuted },
-  ask: { paddingHorizontal: 10, height: 32, justifyContent: 'center', backgroundColor: colors.warm, maxWidth: '100%' },
-  deleteBox: { padding: spacing.md, gap: spacing.sm, borderWidth: BORDER, borderColor: colors.overrun },
-  askText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  body: { paddingBottom: 40 },
+  menu: { width: 36, height: 36, borderWidth: 1, borderColor: colors.ruleSoft, alignItems: 'center', justifyContent: 'center' },
+  stat: { flex: 1, backgroundColor: colors.surfaceMuted, paddingVertical: 12, paddingHorizontal: 10 },
+  statLabel: { fontFamily: fonts.body, fontSize: 10.5, fontWeight: '600', color: colors.inkMuted, lineHeight: 14 },
+  offer: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11 },
+  thumb: { width: 74, height: 56, borderRadius: 8, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
+  addBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, backgroundColor: LIME, marginTop: 6 },
+  deleteBox: { padding: 14, gap: 10, borderWidth: 2, borderColor: colors.overrun, marginTop: 8 },
 });

@@ -28,6 +28,14 @@ const isTripPlaces = (p: string) => /^\/api\/trips\/[^/]+\/places$/.test(p);
 const isJourney = (p: string) => /^\/api\/trips\/[^/]+\/journey$/.test(p);
 const isTripChat = (p: string) => /^\/api\/trips\/[^/]+\/chat$/.test(p);
 const isTripAsks = (p: string) => /^\/api\/trips\/[^/]+\/asks\/.+$/.test(p);
+/**
+ * The chat module (13 Sep 2026): a trip's or a hosted offer's questions, and
+ * one question open. Named here explicitly — the offer context is a new
+ * endpoint and an unnamed one is not saved.
+ */
+const isChat = (p: string) => /^\/api\/chat\/(trip|offer)\/[^/]+(\/topics\/[^/]+)?$/.test(p);
+/** The FAQ on a listing: the one place an answer becomes long-lived public content. Its own branch, not the chat's. */
+const isFaq = (p: string) => /^\/api\/experiences\/[^/]+\/faq$/.test(p);
 const isTripTravel = (p: string) => /^\/api\/trips\/[^/]+\/travel$/.test(p);
 const isDirections = (p: string) => /^\/api\/trips\/[^/]+\/directions$/.test(p);
 const isVisit = (p: string) => /^\/api\/visits\/[^/]+$/.test(p);
@@ -154,14 +162,27 @@ export function storable(fullPath: string, body: any): any | null {
    * a pocket is somewhere we cannot reach to delete anything from. The names
    * stay, because a thread without them is unreadable.
    */
-  if (isTripChat(p) || isTripAsks(p)) {
+  if (isTripChat(p) || isTripAsks(p) || isChat(p)) {
+    const strip = (people: any) => (people
+      ? { ...people, guests: (people.guests ?? []).map((g: any) => ({ ...g, contact: null })) }
+      : people);
     return {
       ...body,
-      people: body.people
-        ? { ...body.people, guests: (body.people.guests ?? []).map((g: any) => ({ ...g, contact: null })) }
-        : body.people,
+      people: strip(body.people),
+      // The topic model carries the people inside `context` (routes/chat.js).
+      context: body.context ? { ...body.context, people: strip(body.context.people) } : body.context,
     };
   }
+
+  /**
+   * The FAQ on a listing (Chat screens, C7). The host's own answers to
+   * normalised questions, published with the asker's consent where a
+   * question was private — ours to keep, and public by design. It gets a
+   * branch of its own rather than the chat's because it is the one place
+   * answer text becomes long-lived public content, and the chat's stripping
+   * of guest contacts has nothing to do with it.
+   */
+  if (isFaq(p)) return body;
 
   /**
    * Getting there. The legs are the household's own booking, and the airports
@@ -279,6 +300,16 @@ export function queueable(method: string, fullPath: string): boolean {
 
   // What was ordered and what each person thought of each dish.
   if (p === '/api/orders' || p.startsWith('/api/orders/')) return true;
+
+  /**
+   * The chat module (13 Sep 2026). A question, a reply, a reaction, a follow
+   * and a bell setting all mean the same thing an hour later, so they wait.
+   * Three do not: a report (the answer is the confirmation), the asker's
+   * consent to publish (a decision somebody must see land) and taking an
+   * entry out of the FAQ (an act of withdrawal that must be true when the
+   * screen says it is).
+   */
+  if (p.startsWith('/api/chat/')) return !/\/(report|decide|withdraw)$/.test(p);
 
   // A group participant ticking something off behind their invite link. They
   // are often the person with the worst signal — a car park, a stadium, a coach

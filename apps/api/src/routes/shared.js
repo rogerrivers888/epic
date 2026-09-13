@@ -25,7 +25,8 @@ import * as trips from '../repositories/trips.js';
 import * as chat from '../repositories/tripChat.js';
 import * as travel from '../repositories/tripTravel.js';
 import { householdOf } from './household.js';
-import { newToken, publicMessage } from './tripChat.js';
+import { newToken } from './tripChat.js';
+import * as topics from './chat.js';
 import { sendMail, mailConfigured } from '../sources/mail.js';
 import { sendSms, smsConfigured, normaliseMobile } from '../sources/sms.js';
 import { nightsOf } from './trips.js';
@@ -206,6 +207,11 @@ router.post('/:token/verify', async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // the conversation, from outside
 // ---------------------------------------------------------------------------
+//
+// The topic model (13 Sep 2026, `routes/chat.js`) with a guest as the person:
+// they see `everyone` topics only, may start one and reply, cannot set
+// `host_only` (no account to hold it against) and cannot mark an answer.
+// Delivery of anything they are told goes to the contact on the invite.
 
 async function requireGuest(req, trip, res) {
   const guest = await guestOf(req, trip);
@@ -216,37 +222,66 @@ async function requireGuest(req, trip, res) {
   return guest;
 }
 
+async function guestCtx(req, res) {
+  const trip = await tripOfLink(req);
+  const guest = await requireGuest(req, trip, res);
+  if (!guest) return null;
+  await chat.touchGuest(guest.id);
+  return topics.tripContext(trip, { memberId: null, guestId: guest.id, name: guest.name, contact: guest.contact, contactKind: guest.contact_kind });
+}
+
 router.get('/:token/chat', async (req, res, next) => {
   try {
-    const trip = await tripOfLink(req);
-    const guest = await requireGuest(req, trip, res);
-    if (!guest) return;
-    const venueRef = req.query.stop ? String(req.query.stop) : undefined;
-    const rows = await chat.messagesOf(trip.id, { venueRef, onlyStop: venueRef !== undefined });
-    await chat.markRead(trip.id, { guestId: guest.id, ...(venueRef !== undefined ? { venueRef } : {}) });
-    res.json({ messages: rows.map((m) => publicMessage(m, { guestId: guest.id })) });
+    const ctx = await guestCtx(req, res);
+    if (!ctx) return;
+    const all = await topics.listPayload(ctx);
+    const stop = req.query.stop ? String(req.query.stop) : null;
+    res.json(stop ? { ...all, topics: all.topics.filter((t) => t.tag.kind === 'stop' && t.tag.ref === stop) } : all);
   } catch (err) { next(err); }
 });
 
 router.post('/:token/chat', async (req, res, next) => {
   try {
-    const trip = await tripOfLink(req);
-    const guest = await requireGuest(req, trip, res);
-    if (!guest) return;
-    const body = String(req.body?.body ?? '').trim();
-    if (!body) return res.status(400).json({ error: 'empty_message', message: 'Type something first.' });
-    if (body.length > 2000) return res.status(400).json({ error: 'too_long', message: 'That is longer than a message.' });
-    await chat.insertMessage(trip.id, {
-      body,
-      venueRef: req.body?.venueRef ?? null,
-      venueLabel: req.body?.venueLabel ?? null,
-      guestId: guest.id,
-    });
-    await chat.markRead(trip.id, { guestId: guest.id });
-    const venueRef = req.body?.venueRef ?? undefined;
-    const rows = await chat.messagesOf(trip.id, { venueRef, onlyStop: venueRef !== undefined });
-    res.status(201).json({ messages: rows.map((m) => publicMessage(m, { guestId: guest.id })) });
+    const ctx = await guestCtx(req, res);
+    if (!ctx) return;
+    const b = req.body ?? {};
+    if (b.topicId) {
+      await topics.createReply(ctx, String(b.topicId), { body: b.body, quotesReplyId: b.quotesReplyId ?? null });
+      return res.status(201).json(await topics.topicPayload(ctx, String(b.topicId)));
+    }
+    const tag = b.tag ?? (b.venueRef ? { kind: 'stop', ref: b.venueRef } : { kind: 'trip', ref: 'trip' });
+    // A guest's question is always for everyone: there is no account to hold a private thread against.
+    const t = await topics.createTopic(ctx, { title: b.title ?? b.body, body: b.title ? b.body : null, tag, audience: 'everyone' });
+    res.status(201).json(await topics.topicPayload(ctx, t.id));
   } catch (err) { next(err); }
+});
+
+router.get('/:token/chat/:topicId', async (req, res, next) => {
+  try {
+    const ctx = await guestCtx(req, res);
+    if (!ctx) return;
+    res.json(await topics.topicPayload(ctx, req.params.topicId));
+  } catch (err) { next(err); }
+});
+
+router.post('/:token/chat/:topicId/react', async (req, res, next) => {
+  try {
+    const ctx = await guestCtx(req, res);
+    if (!ctx) return;
+    const on = await topics.react(ctx, req.params.topicId, req.body);
+    res.json({ on, ...(await topics.topicPayload(ctx, req.params.topicId)) });
+  } catch (err) { next(err); }
+});
+
+router.post('/:token/chat/:topicId/follow', async (req, res, next) => {
+  try { const ctx = await guestCtx(req, res); if (!ctx) return; await topics.setFollowing(ctx, req.params.topicId, true); res.json({ following: true }); } catch (err) { next(err); }
+});
+router.delete('/:token/chat/:topicId/follow', async (req, res, next) => {
+  try { const ctx = await guestCtx(req, res); if (!ctx) return; await topics.setFollowing(ctx, req.params.topicId, false); res.json({ following: false }); } catch (err) { next(err); }
+});
+
+router.post('/:token/chat/:topicId/report', async (req, res, next) => {
+  try { const ctx = await guestCtx(req, res); if (!ctx) return; res.status(201).json(await topics.report(ctx, req.params.topicId, req.body)); } catch (err) { next(err); }
 });
 
 export { router };

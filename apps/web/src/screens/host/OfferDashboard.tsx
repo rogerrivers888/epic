@@ -21,7 +21,9 @@ import { Icon } from '../../components/Icon';
 import { DateRangePicker } from '../../components/DateRangePicker';
 import { useViewport } from '../../hooks/useViewport';
 import { useRouter } from '../../router';
-import { paths } from '../../routes';
+import { paths, type ChatLayer } from '../../routes';
+import { ChatScreen } from '../../components/chat/ChatScreen';
+import { hostOfferDoor } from '../../components/chat/door';
 import { HostFace, Kicker, SHAPE_LABEL, StandingBar, StateChip, dateOnly, dayShort, durationWords, metaLine, money, priceWords } from '../../components/hosting';
 
 /** A tile says £0, never "Free": it is a sum, not a price. */
@@ -31,10 +33,10 @@ const CHECKS: { key: keyof OwnOffer['checklist']; label: string }[] = [
   { key: 'what', label: 'What you will actually do' }, { key: 'home', label: 'What they go home with' }, { key: 'suits', label: 'Who it suits' }, { key: 'notSuits', label: 'Who it does not suit' }, { key: 'photos', label: 'Your photos' },
 ];
 
-export function OfferDashboard({ offerId, hostName }: { offerId: string; hostName: string }) {
+export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: string; hostName: string; chat?: ChatLayer | null }) {
   const { width } = useViewport();
   const wide = width >= 900;
-  const { navigate, back } = useRouter();
+  const { navigate, back, query } = useRouter();
   const [offer, setOffer] = useState<OwnOffer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,6 +55,8 @@ export function OfferDashboard({ offerId, hostName }: { offerId: string; hostNam
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
 
+  // The conversation on this offer (Chat screens, 13 Sep 2026): the host's door, whichever layer the address names.
+  if (chat) return <ChatScreen door={hostOfferDoor(offerId)} layer={chat} navigate={navigate} back={back} query={query} onSettings={() => navigate(paths.settingsNotifications())} />;
   if (error && !offer) return <View style={styles.page}><Text style={type.h2}>Not one of yours</Text><Text style={type.small}>{error}</Text><Button label="Back to hosting" kind="secondary" onPress={() => navigate(paths.host(), { replace: true })} /></View>;
   if (!offer) return <View style={styles.page}><Text style={type.small}>Opening…</Text></View>;
   const o = offer;
@@ -162,6 +166,18 @@ export function OfferDashboard({ offerId, hostName }: { offerId: string; hostNam
           </View>
         ) : null}
 
+        {/* The conversation: questions, notices, and what went into the FAQ. */}
+        {o.state !== 'draft' ? (
+          <Press onPress={() => navigate(paths.hostOfferChat(o.id))} accessibilityRole="button" style={styles.chatRow}>
+            <View style={styles.chatTile}><Icon name="message" size={18} color={colors.selectedFg} strokeWidth={2} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={type.h3}>Questions and notices</Text>
+              <Text style={type.small}>What people booked have asked, and what you have told them. Answer once, and it can go in the FAQ.</Text>
+            </View>
+            <Icon name="more" size={16} color={colors.inkMuted} />
+          </Press>
+        ) : null}
+
         {/* The controls. */}
         {o.state === 'live' || o.state === 'paused' ? (
           <View style={styles.block}>
@@ -226,6 +242,8 @@ function Tile({ label, value, sub, red }: { label: string; value: string; sub?: 
 }
 
 const styles = StyleSheet.create({
+  chatRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.ruleSoft },
+  chatTile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.lime },
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20, paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any, paddingBottom: 60, gap: spacing.sm },
   wide: { maxWidth: 720, alignSelf: 'center', width: '100%' },

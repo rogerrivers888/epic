@@ -104,7 +104,7 @@ test('Trips: the list, where-to, the form, a trip, a trip’s tab, and one day o
  */
 test('a trip has a chat, a way of getting there, a share sheet and a stop', () => {
   const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
-  assert.deepEqual(roundTrip('/trips/abc/chat'), { ...trips, tripId: 'abc', section: 'chat' });
+  assert.deepEqual(roundTrip('/trips/abc/chat'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'list' } });
   assert.deepEqual(roundTrip('/trips/abc/travel'), { ...trips, tripId: 'abc', section: 'travel' });
   assert.deepEqual(roundTrip('/trips/abc/share'), { ...trips, tripId: 'abc', section: 'share' });
   // A stop is named by its source-qualified ref, which has a colon in it and so
@@ -118,9 +118,10 @@ test('a trip has a chat, a way of getting there, a share sheet and a stop', () =
   assert.equal(parentOf(parseRoute('/trips/abc/chat')), '/trips/abc');
   assert.equal(parentOf(parseRoute('/trips/abc/stop/x')), '/trips/abc');
   assert.equal(tabOf(parseRoute('/trips/abc/chat')), 'trips');
-  // The chat is the trip page with the map collapsed, so it draws to every edge
-  // too; the other three are ordinary pages and keep the chrome.
-  assert.equal(isFullBleed(parseRoute('/trips/abc/chat')), true);
+  // The chat draws its own head now (Chat screens D3, 13 Sep 2026): a list of
+  // questions, not the map with a strip — so it keeps the chrome.
+  assert.equal(isFullBleed(parseRoute('/trips/abc/chat')), false);
+  assert.equal(ownsHeader(parseRoute('/trips/abc/chat')), true);
   assert.equal(isFullBleed(parseRoute('/trips/abc/travel')), false);
   assert.equal(isFullBleed(parseRoute('/trips/abc/stop/x')), false);
 });
@@ -536,4 +537,56 @@ test('who near a trip does what you love is a page of Inspire', () => {
 test('Booked with hosts is how the Trips list is set, not a page of its own', () => {
   assert.equal(paths.bookings(), '/trips?when=hosts');
   assert.deepEqual(parseRoute('/trips?when=hosts'), { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null });
+});
+
+
+// --- the chat module (13 Sep 2026) -----------------------------------------
+
+test('a conversation has four layers wherever it is mounted: the list, a question, asking, the bell', () => {
+  const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
+  assert.deepEqual(roundTrip('/trips/abc/chat/ask'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'ask' } });
+  assert.deepEqual(roundTrip('/trips/abc/chat/bell'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'bell' } });
+  assert.deepEqual(roundTrip('/trips/abc/chat/11111111-2222-3333-4444-555555555555'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'topic', topicId: '11111111-2222-3333-4444-555555555555' } });
+  assert.equal(parseRoute('/trips/abc/chat/ask/more').name, 'unknown', 'a layer is the last segment');
+  assert.equal(paths.tripChatTopic('abc', 't1'), '/trips/abc/chat/t1');
+  assert.equal(paths.tripChatAsk('abc'), '/trips/abc/chat/ask');
+  // How the composer is set is the query: which stop it was opened from.
+  assert.equal(paths.tripChatAsk('abc', 'stop:osm:node/1'), '/trips/abc/chat/ask?tag=stop%3Aosm%3Anode%2F1');
+  assert.equal(paths.tripChatBell('abc'), '/trips/abc/chat/bell');
+
+  // A hosted date (C8): the same four under the booking.
+  assert.deepEqual(roundTrip('/bookings/b1/chat'), { name: 'booking', id: 'b1', rate: false, chat: { page: 'list' } });
+  assert.deepEqual(roundTrip('/bookings/b1/chat/t1'), { name: 'booking', id: 'b1', rate: false, chat: { page: 'topic', topicId: 't1' } });
+  assert.deepEqual(roundTrip('/bookings/b1/chat/bell'), { name: 'booking', id: 'b1', rate: false, chat: { page: 'bell' } });
+  assert.equal(paths.bookingChatAsk('b1'), '/bookings/b1/chat/ask');
+  assert.equal(parentOf(parseRoute('/bookings/b1/chat/t1')), '/bookings/b1/chat');
+  assert.equal(parentOf(parseRoute('/bookings/b1/chat')), '/bookings/b1');
+
+  // The host's own offer, and the inbox across every offer (C5).
+  assert.deepEqual(roundTrip('/host/offers/o1/chat'), { name: 'host', page: 'offer', offerId: 'o1', chat: { page: 'list' } });
+  assert.deepEqual(roundTrip('/host/offers/o1/chat/ask'), { name: 'host', page: 'offer', offerId: 'o1', chat: { page: 'ask' } });
+  assert.deepEqual(roundTrip('/host/offers/o1/chat/t1'), { name: 'host', page: 'offer', offerId: 'o1', chat: { page: 'topic', topicId: 't1' } });
+  assert.deepEqual(roundTrip('/host/questions'), { name: 'host', page: 'questions', offerId: null });
+  assert.equal(paths.hostQuestions(), '/host/questions');
+  assert.equal(parentOf(parseRoute('/host/offers/o1/chat/t1')), '/host/offers/o1/chat');
+  assert.equal(parentOf(parseRoute('/host/offers/o1/chat')), '/host/offers/o1');
+  assert.equal(parentOf(parseRoute('/host/questions')), '/host');
+
+  // Asking the host from the listing, before booking (C7); Settings → Notifications (E5).
+  assert.deepEqual(roundTrip('/experiences/x/ask'), { name: 'experience', id: 'x', layer: 'ask' });
+  assert.equal(isImmersive(parseRoute('/experiences/x/ask')), true, 'a composer takes the phone whole');
+  assert.deepEqual(roundTrip('/settings/notifications'), { name: 'settings', section: 'notifications' });
+  assert.equal(paths.settingsNotifications(), '/settings/notifications');
+  assert.equal(tabOf(parseRoute('/settings/notifications')), 'settings');
+});
+
+test('a question open takes the phone whole; the list keeps the tab bar', () => {
+  assert.equal(isImmersive(parseRoute('/trips/abc/chat')), false);
+  assert.equal(isImmersive(parseRoute('/trips/abc/chat/t1')), true);
+  assert.equal(isImmersive(parseRoute('/trips/abc/chat/ask')), true);
+  assert.equal(isImmersive(parseRoute('/trips/abc/chat/bell')), true);
+  assert.equal(parentOf(parseRoute('/trips/abc/chat/t1')), '/trips/abc/chat');
+  assert.equal(parentOf(parseRoute('/trips/abc/chat')), '/trips/abc');
+  assert.equal(titleOf(parseRoute('/trips/abc/chat/t1')), 'Trip — A question · Epic');
+  assert.equal(titleOf(parseRoute('/trips/abc/chat/bell')), 'Trip — What you get told about · Epic');
 });

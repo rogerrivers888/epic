@@ -177,3 +177,35 @@ test('a recording is never queued for later', () => {
     assert.equal(queueable('POST', path), false, `${path} must not be queued`);
   }
 });
+
+
+// --- the chat module (13 Sep 2026) -----------------------------------------
+
+test('a conversation is kept on the device, in both contexts, with guest contacts taken out', () => {
+  const body = { context: { people: { count: 2, members: [], guests: [{ id: 'g', name: 'Priya', contact: '07700 900000' }] } }, topics: [] };
+  for (const path of ['/api/chat/trip/abc', '/api/chat/offer/abc', '/api/chat/trip/abc/topics/t1', '/api/chat/offer/abc/topics/t1']) {
+    const kept = storable(path, body);
+    assert.notEqual(kept, null, `${path} should be saved`);
+    assert.equal(kept.context.people.guests[0].contact, null, `${path} must not carry a guest's contact`);
+    assert.equal(body.context.people.guests[0].contact, '07700 900000', 'the answer on screen is untouched');
+  }
+  // The old addresses still answer, and still strip.
+  const legacy = storable('/api/trips/abc/chat', { people: { guests: [{ name: 'Priya', contact: 'x' }] }, topics: [] });
+  assert.equal(legacy.people.guests[0].contact, null);
+});
+
+test('the FAQ has a branch of its own, and the rest of the module is not saved', () => {
+  assert.deepEqual(storable('/api/experiences/abc/faq', { faq: [{ question: 'Stairs?', answer: 'Two steps.' }] }), { faq: [{ question: 'Stairs?', answer: 'Two steps.' }] });
+  for (const path of ['/api/chat/inbox', '/api/chat/settings', '/api/chat/trip/abc/prefs', '/api/chat/trip/abc/topics/t1/replies']) {
+    assert.equal(storable(path, { anything: true }), null, `${path} must not be saved`);
+  }
+});
+
+test('a question, a reply, a reaction and a follow wait for signal; a report, a consent and a withdrawal do not', () => {
+  for (const path of ['/api/chat/trip/abc/topics', '/api/chat/offer/abc/topics/t1/replies', '/api/chat/trip/abc/topics/t1/react', '/api/chat/trip/abc/topics/t1/follow', '/api/chat/trip/abc/prefs', '/api/chat/settings']) {
+    assert.equal(queueable('POST', path), true, `${path} should queue`);
+  }
+  for (const path of ['/api/chat/trip/abc/topics/t1/report', '/api/chat/offer/abc/topics/t1/requests/r1/decide', '/api/chat/faq/f1/withdraw']) {
+    assert.equal(queueable('POST', path), false, `${path} must not queue`);
+  }
+});

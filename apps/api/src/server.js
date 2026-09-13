@@ -13,6 +13,8 @@ import stayRoutes from './routes/stays.js';
 import { router as tripTravelRoutes } from './routes/tripTravel.js';
 import { router as tripChatRoutes } from './routes/tripChat.js';
 import { router as sharedTripRoutes } from './routes/shared.js';
+import { router as chatRoutes, publicRouter as chatPublicRoutes } from './routes/chat.js';
+import { startChatLoop } from './sources/chatNotify.js';
 import * as transit from './sources/transit.js';
 import * as transitRepo from './repositories/transit.js';
 import journeyRoutes from './routes/journey.js';
@@ -181,6 +183,8 @@ app.use('/api/trips', journeyRoutes);
 // enough to answer /:id/travel and /:id/chat as though they were sections.
 app.use('/api/trips', tripTravelRoutes);
 app.use('/api/trips', tripChatRoutes);
+// The chat module (13 Sep 2026): one component, two contexts — a trip's conversation and a hosted offer's.
+app.use('/api/chat', chatRoutes);
 app.use('/api/trips', tripRoutes);
 // What can be asked for near a point, counted from the beds themselves rather
 // than from a list of rules about coastlines (routes/stays.js).
@@ -213,6 +217,8 @@ app.use('/api', groupRoutes);
 // Hosts and events. The experience page, a host's profile and their video are
 // public (auth.js) so a link works logged-out; booking and hosting are not.
 app.use('/api', hostingPublicRoutes);
+// The FAQ on a listing is public for the same reason the listing is (Chat screens, C7).
+app.use('/api', chatPublicRoutes);
 app.use('/api', hostingRoutes);
 // The other door into one trip: a link somebody was sent. Public (auth.js), and
 // everything in it is resolved from the token rather than from a session.
@@ -467,6 +473,7 @@ setTimeout(() => { ensureTaxonomyReady().catch(() => null); }, 5000).unref?.();
 startReminderLoop();
 // Held bookings are decided on their day (routes/hosting.js).
 startHostingLoop();
+startChatLoop();
 // A harvest of the atlas cannot survive a restart, and this process restarting
 // is exactly what has just happened. Anything the last one left saying
 // "running" is closed out, and — if it had regions still to reach — the work is

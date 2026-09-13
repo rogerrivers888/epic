@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
-import { api, TripChat, TripDetail, TripPlace } from '../api';
+import { TripDetail, TripPlace } from '../api';
 import { colors, fonts, BORDER, TARGET } from '../theme';
 import { Icon } from '../components/Icon';
 import { Stars } from '../components/Icon';
-import { Thread, Composer } from '../components/Thread';
-import { StatusLine } from '../components/ui';
+import { TopicList } from '../components/chat/TopicList';
+import { tripDoor } from '../components/chat/door';
+import { useRouter } from '../router';
+import { paths } from '../routes';
 import { VenueThumb } from '../components/VenueThumb';
 import { useViewport } from '../hooks/useViewport';
 import { TOP_INSET } from '../components/InspireHeader';
@@ -15,9 +17,10 @@ import { TOP_INSET } from '../components/InspireHeader';
  * One stop, opened from inside a trip, on its Ask tab (trip rebuild, 7 Sep
  * 2026, screen 3d).
  *
- * A thread scoped to that stop and routed to whoever is organising. What is
- * said here also shows up in the trip's chat with a pointer back — one
- * conversation, two windows onto it (`repositories/tripChat.js`).
+ * The Ask tab is the trip's list of questions filtered to this stop's tag
+ * (Chat screens README §3: "the Ask thread *is* the topic list filtered to one
+ * tag") — one conversation, two windows onto it. Asking from here opens the
+ * composer with the stop already picked.
  *
  * Overview and Reviews are the tabs the handoff draws beside it, and the
  * handoff also says Reviews is "not designed yet". So Overview is what Epic
@@ -40,37 +43,22 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
   const { width } = useViewport();
   const wide = width >= 900;
   const id = trip.trip.id;
+  const { navigate } = useRouter();
   const [tab, setTab] = useState<'overview' | 'reviews' | 'ask'>('ask');
-  const [data, setData] = useState<TripChat | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-
-  const load = useCallback(async () => {
-    try { setData(await api.tripAsks(id, venueRef)); setError(null); } catch (e: any) { setError(e.message); }
-  }, [id, venueRef]);
-  useEffect(() => { load(); }, [load]);
+  const door = useMemo(() => tripDoor(id), [id]);
+  const [asks, setAsks] = useState<number | null>(null);
 
   const stop = trip.days
     .flatMap((d) => d.slots.flatMap((s) => s.stops.map((st) => ({ ...st, date: d.date }))))
     .find((s) => s.venueRef === venueRef) ?? null;
 
   const name = place?.name ?? stop?.name ?? 'This stop';
-  const organiser = data?.organiser?.name ?? null;
-  const asks = data?.messages.length ?? 0;
+  const about = `stop:${venueRef}`;
 
   const kicker = [
     trip.trip.title ?? trip.trip.place?.label ?? trip.trip.locality,
     stop?.startTime,
   ].filter(Boolean).join(' · ');
-
-  const send = async (body: string) => {
-    setSending(true);
-    try {
-      setData(await api.sendTripMessage(id, { body, venueRef, venueLabel: name }) as any);
-      await load();
-      setError(null);
-    } catch (e: any) { setError(e.message); } finally { setSending(false); }
-  };
 
   return (
     <View style={[styles.page, wide && styles.wide]}>
@@ -115,16 +103,22 @@ export function StopAskScreen({ trip, venueRef, place, onClose, onOpenPlace }: {
         </View>
       </View>
 
-      {error ? <View style={{ paddingHorizontal: 20, paddingTop: 8 }}><StatusLine tone="warn">{error}</StatusLine></View> : null}
-
       {tab === 'ask' ? (
         <>
-          <Thread
-            messages={data?.messages ?? []}
-            empty="Nothing asked about this stop yet."
-            helper={organiser ? `Questions here go to ${organiser}, who's organising, and stay with this stop.` : 'Questions here stay with this stop.'}
+          <TopicList
+            door={door}
+            embedded
+            fixedAbout={about}
+            onOpen={(topicId) => navigate(paths.tripChatTopic(id, topicId))}
+            onAsk={() => navigate(paths.tripChatAsk(id, about))}
+            onCount={setAsks}
           />
-          <Composer placeholder="Ask about this stop" onSend={send} busy={sending} />
+          <View style={styles.askFoot}>
+            <Press onPress={() => navigate(paths.tripChatAsk(id, about))} style={styles.askBtn} accessibilityRole="button">
+              <Text style={styles.askBtnText}>Ask about this stop</Text>
+              <Icon name="add" size={18} color={colors.primaryFg} strokeWidth={2.4} />
+            </Press>
+          </View>
         </>
       ) : null}
 
@@ -199,4 +193,7 @@ const styles = StyleSheet.create({
   body: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, lineHeight: 19 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 14, minHeight: TARGET },
   linkText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
+  askFoot: { paddingHorizontal: 20, paddingVertical: 10 },
+  askBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.primary, paddingHorizontal: 18, minHeight: 52 },
+  askBtnText: { fontFamily: fonts.heading, fontSize: 16, fontWeight: '800', letterSpacing: -0.32, color: colors.primaryFg },
 });

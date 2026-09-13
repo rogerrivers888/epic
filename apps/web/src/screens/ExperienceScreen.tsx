@@ -30,6 +30,10 @@ import { useRouter } from '../router';
 import { paths, type Route } from '../routes';
 import { signedIn } from '../session';
 import { LockScreen } from './LockScreen';
+import { Faq } from '../components/chat/Faq';
+import { AskScreen } from '../components/chat/AskScreen';
+import { TopicScreen } from '../components/chat/TopicScreen';
+import { householdDoor } from '../components/chat/door';
 import {
   HostFace, Kicker, NewOnEpic, RatingLine, REFUND_WORDS, ShapeChip, TRUST_LABEL, TrustBadge, TypeChip, VENUE_ICON, VENUE_LABEL, VideoHero,
   dateOnly, dayLong, dayShort, durationWords, mediaUrl, money, needsLine, priceWords, venueWords,
@@ -98,6 +102,34 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
 
   if (route.layer === 'where') {
     return <WhereItHappens offer={offer} revealed={revealed} onBack={() => back(paths.experience(offer.id))} wide={wide} />;
+  }
+
+  /**
+   * Asking the host from the listing, before booking (C7). The same composer
+   * as everywhere else, through the offer's door; a question asked before
+   * booking is private to the host, because there is no group to be in yet.
+   * `?topic=` on the listing is that question open.
+   */
+  const askDoor = householdDoor('offer', offer.id, {
+    list: paths.experience(offer.id), topic: (id) => `${paths.experience(offer.id)}?topic=${encodeURIComponent(id)}`, ask: () => paths.experienceAsk(offer.id), bell: null,
+  });
+  if (route.layer === 'ask') {
+    if (!signedIn()) {
+      return (
+        <View style={{ flex: 1 }}>
+          <View style={[styles.gutter, { paddingTop: spacing.md, gap: 4 }]}>
+            <Press onPress={() => back(paths.experience(offer.id))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
+            <Text style={type.small}>Asking needs an Epic account, so {host.name.split(' ')[0]} can answer you. Sign in, or ask for a link.</Text>
+          </View>
+          <LockScreen onIn={() => void load()} />
+        </View>
+      );
+    }
+    return <AskScreen door={askDoor} onBack={() => back(paths.experience(offer.id))} onPosted={(id) => navigate(askDoor.href.topic(id), { replace: true })} initialPrivate />;
+  }
+  const openTopic = query.get('topic');
+  if (openTopic && signedIn()) {
+    return <TopicScreen door={askDoor} topicId={openTopic} onBack={() => back(paths.experience(offer.id))} onEdit={(id) => navigate(`${paths.experienceAsk(offer.id)}?edit=${encodeURIComponent(id)}`)} shareHref={askDoor.href.topic(openTopic)} />;
   }
 
   const paused = offer.state === 'paused';
@@ -178,6 +210,9 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
               <Text style={styles.link}>Download</Text>
             </Press>
           ) : null}
+
+          {/* What people have asked, answered by the host in their own words (C7). */}
+          <Faq offerId={offer.id} hostName={host.name} onAsk={() => navigate(paths.experienceAsk(offer.id))} />
 
           {/* The money and the minimum, in one plain block. */}
           <View style={styles.priceBlock}>

@@ -11,6 +11,7 @@ import {
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
   HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap,
   Share2, CircleAlert, UserRound, Award, Presentation, HandHeart,
+  Bell, BellOff, Link, Reply, Flag, SmilePlus, Smile, Globe, CircleHelp,
 } from 'lucide-react-native';
 import { colors, spacing, type } from '../theme';
 
@@ -39,6 +40,8 @@ const ICONS = {
   video: Video, broadcast: Megaphone, series: Repeat, oneoff: CalendarCheck, anytime: Clock, payout: Banknote,
   online: Laptop, theirPlace: DoorOpen, yourPlace: House, outAbout: MapPin, handshake: Handshake, credential: GraduationCap,
   share: Share2, alert: CircleAlert, guest: UserRound, award: Award, pitch: Presentation, family: HandHeart,
+  // The chat module (13 Sep 2026): the bell, following, a link, a quoted reply, a report, reactions, the two audiences, a question, the FAQ.
+  bell: Bell, bellOff: BellOff, link: Link, reply: Reply, flag: Flag, react: SmilePlus, emoji: Smile, everyone: Globe, question: CircleHelp, faq: BookOpen,
   web: Monitor, mobile: Smartphone, person: User,
   // Light and dark mode, on the theme switch
   light: Sun, dark: Moon,

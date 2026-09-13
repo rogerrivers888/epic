@@ -31,6 +31,7 @@ import { colors, fonts, radius, resolveTheme, spacing, TARGET, type, BORDER } fr
 import { Button, Card, Chip, FoldLine, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
 import { useRouter } from '../router';
 import { paths, type Route, type SettingsSection } from '../routes';
+import { NotificationsSettings } from '../components/chat/NotificationsSettings';
 import { ProvidersTable } from '../components/ProvidersTable';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../hooks/useSession';
@@ -86,6 +87,7 @@ export function SettingsScreen({ data, refresh, route }: {
   const { navigate } = useRouter();
   const section: SettingsSection = route.section;
   if (!data) return <View style={styles.page}><Text style={type.small}>Loading…</Text></View>;
+  if (section === 'notifications') return <NotificationsSettings onBack={() => navigate(paths.settings())} />;
   if (section === 'providers') {
     return (
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
@@ -248,6 +250,12 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
           </View>
         </>
       ) : null}
+
+      {/* Notifications: every trip and hosted date in one list (Chat screens E5). */}
+      <Text style={styles.kicker}>Notifications</Text>
+      <View style={styles.rows}>
+        <LinkRow label="What you get told about" value="Every trip and hosted date, the digest, quiet hours" onPress={() => navigate(paths.settingsNotifications())} icon="bell" />
+      </View>
 
       {/* Voice. */}
       <Text style={styles.kicker}>Voice</Text>

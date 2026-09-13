@@ -1,11 +1,14 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { api, ChatMessage, SharedTrip } from '../api';
+import { api, SharedTrip } from '../api';
 import { colors, fonts, BORDER, type } from '../theme';
 import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
-import { Thread, Composer } from '../components/Thread';
+import { ChatScreen } from '../components/chat/ChatScreen';
+import { guestDoor } from '../components/chat/door';
+import { useRouter } from '../router';
+import { chatLayerOf, paths, withQuery } from '../routes';
 import { StatusLine } from '../components/ui';
 import { useViewport } from '../hooks/useViewport';
 
@@ -145,30 +148,23 @@ function Plan({ data, wide }: { data: SharedTrip; wide: boolean }) {
   );
 }
 
+/**
+ * The conversation, as a guest (Chat screens README §12): the same component
+ * through the guest door — `everyone` topics only, no private thread, no
+ * marking an answer. The page has one address, so the layers are its query:
+ * `?topic=<id>` is a question open, `?ask=1` the composer.
+ */
 function GuestChat({ token, you }: { token: string; you: string }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    try { const r = await api.sharedChat(token, you); setMessages(r.messages); setError(null); } catch (e: any) { setError(e.message); }
-  }, [token, you]);
-  useEffect(() => { load(); }, [load]);
-
-  return (
-    <>
-      {error ? <View style={{ paddingHorizontal: 20 }}><StatusLine tone="warn">{error}</StatusLine></View> : null}
-      <Thread messages={messages} empty="Nothing said yet — you can start it." />
-      <Composer
-        placeholder="Message the group"
-        busy={busy}
-        onSend={async (body) => {
-          setBusy(true);
-          try { const r = await api.sharedSend(token, { you, body }); setMessages(r.messages); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
-        }}
-      />
-    </>
-  );
+  const { href, query, navigate, back } = useRouter();
+  const base = paths.shared(token);
+  const door = useMemo(() => guestDoor(token, you, {
+    list: withQuery(href, { topic: null, ask: null, tag: null, edit: null }, base),
+    topic: (id) => withQuery(href, { topic: id, ask: null, tag: null, edit: null }, base),
+    ask: (tag) => withQuery(href, { ask: '1', topic: null, tag: tag ?? null }, base),
+    bell: null,
+  }), [token, you, href, base]);
+  const layer = query.get('topic') ? chatLayerOf(query.get('topic')!) : query.get('ask') ? chatLayerOf('ask') : chatLayerOf(undefined);
+  return <ChatScreen door={door} layer={layer} navigate={navigate} back={back} query={query} />;
 }
 
 /** Name, contact, code. Three fields, no account, no password. */

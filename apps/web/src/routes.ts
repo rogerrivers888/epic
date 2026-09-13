@@ -25,7 +25,10 @@
  *   /trips/new                            …the new-trip form
  *   /trips/<id>                           …one trip
  *   /trips/<id>/places                    …on one of its tabs
- *   /trips/<id>/chat                      …the group's conversation
+ *   /trips/<id>/chat                      …the group's questions and notices
+ *   /trips/<id>/chat/<topicId>              …one question, open
+ *   /trips/<id>/chat/ask                    …asking one
+ *   /trips/<id>/chat/bell                   …what you get told about here
  *   /trips/<id>/travel                    …getting there: flights, trains, the drive
  *   /trips/<id>/share                     …who is coming, and the link
  *   /trips/<id>/stop/<ref>                …one stop, and its Ask thread
@@ -138,7 +141,28 @@ export type Tab = 'inspire' | 'plan' | 'places' | 'trips' | 'host' | 'settings' 
  * `examples`, `example` and `who` are the learn layer, which asks for nothing.
  * `param` carries the shape or the example's key.
  */
-export type HostPage = 'home' | 'shape' | 'examples' | 'example' | 'who' | 'profile' | 'start' | 'new' | 'offer' | 'edit' | 'video';
+export type HostPage = 'home' | 'shape' | 'examples' | 'example' | 'who' | 'profile' | 'start' | 'new' | 'offer' | 'edit' | 'video' | 'questions';
+
+/**
+ * The chat module's layers (Chat screens, 13 Sep 2026), the same four wherever
+ * a conversation is mounted — a trip's, a booking's, a host's own offer:
+ *
+ *   …/chat               the list of questions (D3)
+ *   …/chat/ask           asking one (D6–D8)
+ *   …/chat/bell          what you get told about here (C9)
+ *   …/chat/<topicId>     one question, open (E1)
+ *
+ * `ask` and `bell` are reserved words in the last segment; a topic id is a
+ * uuid and can never collide with them.
+ */
+export type ChatLayer = { page: 'list' } | { page: 'ask' } | { page: 'bell' } | { page: 'topic'; topicId: string };
+export function chatLayerOf(segment: string | undefined): ChatLayer {
+  if (!segment) return { page: 'list' };
+  if (segment === 'ask' || segment === 'bell') return { page: segment };
+  return { page: 'topic', topicId: segment };
+}
+const chatSegment = (layer: ChatLayer | null | undefined): string | null =>
+  (!layer || layer.page === 'list' ? null : layer.page === 'topic' ? layer.topicId : layer.page);
 
 export const MOODS: MoodKey[] = ['fun', 'food', 'culture', 'sport', 'activity', 'adrenaline', 'relaxing', 'outdoors'];
 
@@ -210,8 +234,8 @@ export const TRIP_SECTIONS: TripSection[] = [
  */
 export const TRIP_TABS: TripSection[] = ['itinerary', 'places', 'map', 'group'];
 
-export type SettingsSection = 'preferences' | 'providers';
-export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers'];
+export type SettingsSection = 'preferences' | 'providers' | 'notifications';
+export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers', 'notifications'];
 
 export type PrototypeSection = 'plan' | 'places' | 'trips' | 'household' | 'settings';
 export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips', 'household', 'settings'];
@@ -244,7 +268,7 @@ export type Route =
    * `stopRef` is the source-qualified identifier of the stop whose Ask thread is
    * open — one more layer inside a trip, and one more address (3d).
    */
-  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null; stopRef: string | null }
+  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null; stopRef: string | null; chat?: ChatLayer }
   /**
    * `voice` is the spoken layer over one person (voice intake handoff, Option
    * D): `tell` is the recording, `review` the card of what was heard.
@@ -257,15 +281,16 @@ export type Route =
    * is set on an offer's dashboard and its wizard; `?step=` is the wizard's
    * page and `?shape=` the fork on a new one.
    */
-  | { name: 'host'; page: HostPage; offerId: string | null; param?: string | null }
+  | { name: 'host'; page: HostPage; offerId: string | null; param?: string | null; chat?: ChatLayer }
   /** An invitation to a private offer (13 Sep 2026): outside the app, the token is the credential. */
   | { name: 'invited'; token: string }
   /** A host's public profile, and the trust ladder over it. Works logged-out. */
   | { name: 'hostProfile'; hostId: string; layer: 'trust' | null }
   /** One experience, and the two layers over it: the booking sheet and the formats. */
-  | { name: 'experience'; id: string; layer: 'book' | 'where' | null }
+  /** `ask` is asking the host something before booking (C7); it needs a session like `book` does. */
+  | { name: 'experience'; id: string; layer: 'book' | 'where' | 'ask' | null }
   /** A booking of ours — held, booked or past — and rating the host after. */
-  | { name: 'booking'; id: string; rate: boolean }
+  | { name: 'booking'; id: string; rate: boolean; chat?: ChatLayer }
   /** Passion-led discovery: the people near a trip who do what you love (`?trip=`, `?love=`). */
   | { name: 'people' }
   | { name: 'prototypes'; section: PrototypeSection | null }
@@ -357,11 +382,14 @@ export function parseRoute(path: string): Route {
       if (b && !section) return { name: 'unknown', path };
       // A stop's Ask thread names the stop; a day names the day. Both are the
       // third segment, and which it is depends on the second.
-      return {
+      const parsed = {
         ...list, tripId: a, section,
         dayId: section === 'day' ? c ?? null : null,
         stopRef: section === 'stop' ? c ?? null : null,
       };
+      // The chat's layers: the list, asking, the bell, one question (Chat screens, 13 Sep 2026).
+      if (section === 'chat') return segments[4] ? { name: 'unknown', path } : { ...parsed, chat: chatLayerOf(c) };
+      return parsed;
     }
 
     case 'household': {
@@ -388,6 +416,10 @@ export function parseRoute(path: string): Route {
       if (a === 'offers' && b === 'new') return c ? { name: 'unknown', path } : { name: 'host', page: 'new', offerId: null };
       if (a === 'offers' && b && !c) return { name: 'host', page: 'offer', offerId: b };
       if (a === 'offers' && b && c === 'edit') return { name: 'host', page: 'edit', offerId: b };
+      // The conversation on one of the host's offers, and its layers.
+      if (a === 'offers' && b && c === 'chat') return segments[5] ? { name: 'unknown', path } : { name: 'host', page: 'offer', offerId: b, chat: chatLayerOf(segments[4]) };
+      // The host inbox: every question across every offer, waiting first (C5).
+      if (a === 'questions') return b ? { name: 'unknown', path } : { name: 'host', page: 'questions', offerId: null };
       return { name: 'unknown', path };
     }
 
@@ -399,13 +431,15 @@ export function parseRoute(path: string): Route {
 
     case 'experiences': {
       if (!a) return { name: 'unknown', path };
-      if (b === 'book' || b === 'where') return c ? { name: 'unknown', path } : { name: 'experience', id: a, layer: b };
+      if (b === 'book' || b === 'where' || b === 'ask') return c ? { name: 'unknown', path } : { name: 'experience', id: a, layer: b };
       return b ? { name: 'unknown', path } : { name: 'experience', id: a, layer: null };
     }
 
     case 'bookings': {
       if (!a) return { name: 'unknown', path };
       if (b === 'rate') return c ? { name: 'unknown', path } : { name: 'booking', id: a, rate: true };
+      // A hosted date's conversation (C8), and its layers.
+      if (b === 'chat') return segments[4] ? { name: 'unknown', path } : { name: 'booking', id: a, rate: false, chat: chatLayerOf(c) };
       return b ? { name: 'unknown', path } : { name: 'booking', id: a, rate: false };
     }
 
@@ -476,10 +510,12 @@ export function hrefOf(route: Route): string {
         : route.creating ? '/trips/new'
           : route.tripId == null ? '/trips'
             : buildHref(['trips', route.tripId, route.section,
-              route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : null]);
+              route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : route.section === 'chat' ? chatSegment(route.chat) : null]);
     case 'household': return buildHref(['household', route.memberId, route.memberId ? route.voice : null]);
     case 'host':
       return route.page === 'home' ? '/host'
+        : route.page === 'questions' ? '/host/questions'
+        : route.page === 'offer' && route.chat ? buildHref(['host', 'offers', route.offerId, 'chat', chatSegment(route.chat)])
         : route.page === 'shape' ? buildHref(['host', 'learn', route.param])
           : route.page === 'examples' ? '/host/learn/examples'
             : route.page === 'example' ? buildHref(['host', 'learn', 'examples', route.param])
@@ -492,7 +528,7 @@ export function hrefOf(route: Route): string {
     case 'invited': return buildHref(['invited', route.token]);
     case 'hostProfile': return buildHref(['hosts', route.hostId, route.layer]);
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
-    case 'booking': return buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
+    case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
     case 'people': return '/inspire/people';
     case 'say':
       return route.steps ? '/say/steps'
@@ -532,6 +568,29 @@ export const paths = {
     buildHref(['trips', id, section, section === 'day' ? dayId : null]),
   /** The three layers the trip rebuild adds, and the Ask thread on one stop. */
   tripChat: (id: string) => buildHref(['trips', id, 'chat']),
+  /**
+   * The chat module's layers (13 Sep 2026): one question open, asking, the
+   * bell. `tag` on Ask is how the composer is set — `stop:<ref>` from a stop's
+   * own Ask tab — and is the query, not the page.
+   */
+  tripChatTopic: (id: string, topicId: string) => buildHref(['trips', id, 'chat', topicId]),
+  tripChatAsk: (id: string, tag?: string | null) => buildHref(['trips', id, 'chat', 'ask'], { tag }),
+  tripChatBell: (id: string) => buildHref(['trips', id, 'chat', 'bell']),
+  /** The same four on a hosted date — a booking of ours (C8) — and on the host's own offer. */
+  bookingChat: (id: string) => buildHref(['bookings', id, 'chat']),
+  bookingChatTopic: (id: string, topicId: string) => buildHref(['bookings', id, 'chat', topicId]),
+  bookingChatAsk: (id: string, tag?: string | null) => buildHref(['bookings', id, 'chat', 'ask'], { tag }),
+  bookingChatBell: (id: string) => buildHref(['bookings', id, 'chat', 'bell']),
+  hostOfferChat: (id: string) => buildHref(['host', 'offers', id, 'chat']),
+  hostOfferChatTopic: (id: string, topicId: string) => buildHref(['host', 'offers', id, 'chat', topicId]),
+  hostOfferChatAsk: (id: string, tag?: string | null) => buildHref(['host', 'offers', id, 'chat', 'ask'], { tag }),
+  hostOfferChatBell: (id: string) => buildHref(['host', 'offers', id, 'chat', 'bell']),
+  /** The host inbox (C5). */
+  hostQuestions: () => '/host/questions',
+  /** Asking the host something from the listing, before booking (C7). */
+  experienceAsk: (id: string) => buildHref(['experiences', id, 'ask']),
+  /** Every trip and hosted date in one list, plus the digest time and quiet hours (E5). */
+  settingsNotifications: () => '/settings/notifications',
   tripTravel: (id: string) => buildHref(['trips', id, 'travel']),
   tripShare: (id: string) => buildHref(['trips', id, 'share']),
   tripStop: (id: string, venueRef: string) => buildHref(['trips', id, 'stop', venueRef]),
@@ -610,9 +669,11 @@ export const paths = {
  */
 export function isFullBleed(route: Route): boolean {
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
-  // The chat is the same screen with the map collapsed to a strip (5e), so it
-  // draws to every edge too; it is not in TRIP_TABS because it is not a tab.
-  return route.section == null || route.section === 'chat' || TRIP_TABS.includes(route.section);
+  // The chat used to be the map collapsed to a strip (5e). It is a list of
+  // questions with a head of its own now (Chat screens D3, 13 Sep 2026), so it
+  // keeps the chrome like the other layers; it is not in TRIP_TABS because it
+  // is not a tab.
+  return route.section == null || TRIP_TABS.includes(route.section);
 }
 
 /**
@@ -664,7 +725,7 @@ export function ownsHeader(route: Route): boolean {
      * They keep the tab bar, unlike a full-bleed screen: they are still Trips.
      */
     if (!route.tripId) return true;
-    return route.section === 'travel' || route.section === 'stop' || route.section === 'share';
+    return route.section === 'travel' || route.section === 'stop' || route.section === 'share' || route.section === 'chat';
   }
   return false;
 }
@@ -699,10 +760,13 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // profile and the recorder take the phone whole.
   if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who'].includes(route.page);
   if (route.name === 'booking') return true;
-  // The booking sheet is a form under a keyboard: it takes the phone whole.
-  if (route.name === 'experience') return route.layer === 'book';
+  // The booking sheet is a form under a keyboard: it takes the phone whole. So is asking the host something.
+  if (route.name === 'experience') return route.layer === 'book' || route.layer === 'ask';
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
   if (route.section === 'group') return true;
+  // A question open, asking one, the bell: each has a keyboard or is one thing
+  // (Chat screens, 13 Sep 2026). The list keeps the bar — it is still Trips.
+  if (route.section === 'chat') return Boolean(route.chat && route.chat.page !== 'list');
   // The bare `/trips/<id>` is the map, and parses with no section at all.
   const onTheMap = route.section == null || route.section === 'map' || route.section === 'itinerary';
   // "Hidden during any trip browse, place view or full view" (handover v8,
@@ -766,6 +830,8 @@ export function parentOf(route: Route): string {
       return route.scope.city ? paths.placesCountry(route.scope.country) : '/places';
     case 'trips':
       if (route.dayId) return paths.trip(route.tripId!, 'day');
+      // Up from a question, from asking or from the bell is the list of questions.
+      if (route.section === 'chat' && route.chat && route.chat.page !== 'list') return paths.tripChat(route.tripId!);
       // Up from a stop's Ask, or from Getting there, is the trip itself.
       if (route.section) return paths.trip(route.tripId!);
       if (route.tripId || route.creating || route.searching) return '/trips';
@@ -773,12 +839,14 @@ export function parentOf(route: Route): string {
     case 'household': return route.voice ? paths.household(route.memberId) : '/settings';
     case 'host':
       if (route.page === 'edit' && route.offerId) return paths.hostOffer(route.offerId);
+      if (route.page === 'offer' && route.chat && route.offerId) return route.chat.page === 'list' ? paths.hostOffer(route.offerId) : paths.hostOfferChat(route.offerId);
+      if (route.page === 'questions') return '/host';
       if (route.page === 'example') return paths.hostExamples();
       return route.page === 'home' ? '/inspire' : '/host';
     case 'invited': return '/inspire';
     case 'hostProfile': return route.layer ? paths.hostProfile(route.hostId) : '/inspire';
     case 'experience': return route.layer ? paths.experience(route.id) : '/inspire';
-    case 'booking': return route.rate ? paths.booking(route.id) : paths.bookings();
+    case 'booking': return route.chat ? (route.chat.page === 'list' ? paths.booking(route.id) : paths.bookingChat(route.id)) : route.rate ? paths.booking(route.id) : paths.bookings();
     case 'people': return '/inspire';
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
@@ -809,7 +877,7 @@ export function titleOf(route: Route): string {
       if (route.searching) return epic('Where are you going?');
       if (route.creating) return epic('A new trip');
       if (!route.tripId) return epic('Trips');
-      const layer = route.section === 'chat' ? 'Chat'
+      const layer = route.section === 'chat' ? (route.chat?.page === 'topic' ? 'A question' : route.chat?.page === 'ask' ? 'Ask something' : route.chat?.page === 'bell' ? 'What you get told about' : 'Chat')
         : route.section === 'travel' ? 'Getting there'
           : route.section === 'share' ? 'Share trip'
             : route.section === 'stop' ? 'A stop' : null;
@@ -819,12 +887,12 @@ export function titleOf(route: Route): string {
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
     case 'welcome': return epic('Plan less. Live more.');
     case 'setup': return epic('Set up your family');
-    case 'settings': return epic('You and yours');
-    case 'host': return epic(route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
+    case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : 'You and yours');
+    case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
     case 'invited': return epic('You are invited');
     case 'hostProfile': return epic(route.layer === 'trust' ? 'How Epic checks hosts' : 'A host');
-    case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : 'An experience');
-    case 'booking': return epic(route.rate ? 'How was it?' : 'Your booking');
+    case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
+    case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');
     case 'people': return epic('Who does what you love?');
     case 'prototypes': return epic('Prototypes');
     case 'admin': return epic(`Back office — ${route.screen}`);

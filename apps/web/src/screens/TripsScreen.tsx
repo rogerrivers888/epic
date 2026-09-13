@@ -24,14 +24,15 @@ import { SourceDataPanel } from '../components/SourceData';
 import { isAdmin } from '../admin';
 import { recallScreen, rememberScreen } from '../screenState';
 import { asOneOf, useQueryState, useRouter } from '../router';
-import { paths, TRIP_TABS, type Route, type TripSection } from '../routes';
+import { paths, TRIP_TABS, type ChatLayer, type Route, type TripSection } from '../routes';
 import { tripName } from './tripName';
 import { TripsList, TripsWhen } from './TripsList';
 import { NewTripSearchScreen } from './NewTripSearchScreen';
 import { CreateTripScreen } from './CreateTripScreen';
 import { voiceConfigured } from '../voice/settings';
 import { GettingThereScreen } from './GettingThereScreen';
-import { TripChatScreen } from './TripChatScreen';
+import { ChatScreen } from '../components/chat/ChatScreen';
+import { tripDoor } from '../components/chat/door';
 import { StopAskScreen } from './StopAskScreen';
 import { DeleteTripSheet, RenameTripSheet, ShareTripSheet, TripMenuSheet, TripMenuAction } from './TripSheets';
 
@@ -161,6 +162,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
         section={route.section}
         dayId={route.dayId}
         stopRef={route.stopRef}
+        chat={route.chat ?? null}
         household={household}
         onBack={async () => { back(paths.trips()); await load(); }}
         refreshHousehold={refreshHousehold}
@@ -270,7 +272,7 @@ function DeleteTrip({ id, onDeleted }: { id: string; onDeleted: () => Promise<vo
  * puts them ("Shortlist / Group move to the ⋯ menu"). Nothing was taken away:
  * every one of those tabs still has its own address and still opens.
  */
-function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onBack, refreshHousehold, wide }: {
+function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, household, onBack, refreshHousehold, wide }: {
   id: string;
   /** Which of the trip's tabs the address names — `/trips/<id>/places` — or null for "wherever this trip is up to". */
   section: Section | null;
@@ -278,9 +280,11 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onB
   dayId: string | null;
   /** And which stop, when it names one — `/trips/<id>/stop/<ref>` (3d). */
   stopRef: string | null;
+  /** And which layer of the chat — the list, a question, asking, the bell (Chat screens, 13 Sep 2026). */
+  chat: ChatLayer | null;
   household: HouseholdResponse | null; onBack: () => Promise<void>; refreshHousehold: () => Promise<void>; wide: boolean;
 }) {
-  const { query, navigate } = useRouter();
+  const { query, navigate, back } = useRouter();
   const [d, setD] = useState<TripDetail | null>(null);
   // Which part of the trip you were on, per trip: the section a fortnight in
   // Lisbon is on has nothing to do with Saturday's day out. It is remembered so
@@ -489,12 +493,20 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, household, onB
     return <GettingThereScreen trip={d} onBack={() => setSection('itinerary')} onClose={onBack} />;
   }
   if (section === 'chat') {
+    /**
+     * The chat module (13 Sep 2026): a list of questions that happens to be a
+     * chat, with its four layers on their own addresses. One component, the
+     * trip's door.
+     */
     return (
-      <TripChatScreen
-        trip={d}
-        onBack={() => setSection('itinerary')}
-        onOpenStop={(ref) => navigate(paths.tripStop(id, ref))}
-        onPeople={() => navigate(paths.tripShare(id))}
+      <ChatScreen
+        door={tripDoor(id)}
+        layer={chat ?? { page: 'list' }}
+        navigate={navigate}
+        back={back}
+        query={query}
+        insetBottom={chat && chat.page !== 'list' ? 0 : 70}
+        onSettings={() => navigate(paths.settingsNotifications())}
       />
     );
   }

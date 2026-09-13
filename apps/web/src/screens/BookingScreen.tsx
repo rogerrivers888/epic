@@ -25,6 +25,8 @@ import { useRouter } from '../router';
 import { paths, type Route } from '../routes';
 import { HostFace, Kicker, REFUND_WORDS, VENUE_ICON, dateOnly, dayShort, durationWords, money, venueWords } from '../components/hosting';
 import { pickPhotoBlob } from '../components/pickPhoto';
+import { ChatScreen } from '../components/chat/ChatScreen';
+import { bookingDoor } from '../components/chat/door';
 
 const WIDE = 900;
 const CHIPS = [{ key: 'skill', label: 'Skill' }, { key: 'company', label: 'Company' }, { key: 'value', label: 'Value' }];
@@ -32,7 +34,7 @@ const CHIPS = [{ key: 'skill', label: 'Skill' }, { key: 'company', label: 'Compa
 export function BookingScreen({ route }: { route: Extract<Route, { name: 'booking' }> }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
-  const { navigate, back } = useRouter();
+  const { navigate, back, query } = useRouter();
   const [data, setData] = useState<{ booking: Booking; payments: PaymentsConfig } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,6 +51,8 @@ export function BookingScreen({ route }: { route: Extract<Route, { name: 'bookin
   const first = b.host.name.split(' ')[0];
 
   if (route.rate) return <RateHost booking={b} wide={wide} onBack={() => back(paths.booking(b.id))} onDone={() => { void load(); back(paths.booking(b.id)); }} />;
+  // The hosted date's conversation (C8): the same component, the booking's door onto the offer.
+  if (route.chat) return <ChatScreen door={bookingDoor(b.id, b.offerId)} layer={route.chat} navigate={navigate} back={back} query={query} onSettings={() => navigate(paths.settingsNotifications())} />;
 
   const held = b.state === 'pending';
   const waitlisted = b.state === 'waitlisted';
@@ -94,6 +98,17 @@ export function BookingScreen({ route }: { route: Extract<Route, { name: 'bookin
         </View>
         <Icon name="more" size={16} color={colors.inkMuted} />
       </Press>
+
+      {!cancelled ? (
+        <Press onPress={() => navigate(paths.bookingChat(b.id))} accessibilityRole="button" style={styles.card}>
+          <View style={styles.chatTile}><Icon name="message" size={18} color={colors.selectedFg} strokeWidth={2} /></View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={type.h3}>Questions and notices</Text>
+            <Text style={type.small}>Everyone booked on this date, and {first}. Ask the group, or {first} privately.</Text>
+          </View>
+          <Icon name="more" size={16} color={colors.inkMuted} />
+        </Press>
+      ) : null}
 
       {held ? (
         <View style={styles.heldBar}>
@@ -249,6 +264,7 @@ function RateHost({ booking: b, wide, onBack, onDone }: { booking: Booking; wide
 }
 
 const styles = StyleSheet.create({
+  chatTile: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.lime },
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
   scroll: { paddingBottom: 60, paddingTop: spacing.lg, backgroundColor: colors.bg },
   scrollWide: { maxWidth: 720, alignSelf: 'center', width: '100%' },

@@ -236,6 +236,8 @@ const PUBLIC = [
    */
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+$/.test(req.path) && !/^\/api\/experiences\/(near|passions)$/.test(req.path),
   (req) => req.method === 'GET' && /^\/api\/hosts\/[^/]+$/.test(req.path),
+  // The FAQ on a listing: the host's answers to what people asked, before anyone books (Chat screens, C7).
+  (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/faq$/.test(req.path),
   (req) => req.method === 'POST' && /^\/api\/hosts\/[^/]+\/report$/.test(req.path),
   (req) => req.method === 'GET' && /^\/api\/media\/[^/]+$/.test(req.path),
   // An invitation to a private offer (13 Sep 2026): the token is the credential, and the answer is yes or no.

@@ -21,6 +21,8 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import * as trips from '../repositories/trips.js';
 import * as chat from '../repositories/tripChat.js';
+import * as chatRepo from '../repositories/chat.js';
+import * as topics from './chat.js';
 import { currentHousehold, currentMember } from './household.js';
 import * as households from '../repositories/households.js';
 import { accountsForHousehold } from '../repositories/accounts.js';
@@ -40,162 +42,70 @@ async function ownTrip(req) {
 }
 
 // ---------------------------------------------------------------------------
-// the shape a message takes on the wire
+// chat — the addresses the trip rebuild shipped, answered from the topic model
 // ---------------------------------------------------------------------------
+//
+// The chat module (13 Sep 2026, `routes/chat.js`) replaced the flat river with
+// topics and replies. These four endpoints keep their addresses — "same
+// endpoint" (Chat screens README §3) — so a device still holding the old
+// bundle, or a write queued in its outbox, lands in the same conversation.
 
-/**
- * One message, drawn.
- *
- * `mine` is what decides which side of the thread a bubble sits on, and it is
- * computed per reader rather than stored: the same message is on the right for
- * whoever wrote it and on the left for everybody else.
- */
-export function publicMessage(m, me) {
-  const mine = Boolean(
-    (me?.memberId && m.author_member_id === me.memberId)
-    || (me?.guestId && m.author_guest_id === me.guestId),
-  );
-  return {
-    id: m.id,
-    body: m.body,
-    at: m.created_at,
-    mine,
-    author: {
-      name: m.member_name ?? m.guest_name ?? 'Someone',
-      /** A guest is named as one in the thread: "Priya · guest". */
-      guest: Boolean(m.author_guest_id),
-      initial: (m.member_name ?? m.guest_name ?? '?').trim().charAt(0).toUpperCase(),
-      memberId: m.author_member_id ?? null,
-      guestId: m.author_guest_id ?? null,
-    },
-    /** Where it was asked, when it was asked on a stop rather than in the chat. */
-    onStop: m.venue_ref ? { venueRef: m.venue_ref, label: m.venue_label ?? null } : null,
-    seenBy: m.seen_by ?? 0,
-  };
+async function tripCtx(req) {
+  const { trip } = await ownTrip(req);
+  const me = await currentMember();
+  return topics.tripContext(trip, me ? { memberId: me.id, guestId: null, name: me.name, householdId: trip.household_id } : null);
 }
 
-/** Everybody who can be in this conversation, for the header line and the counts. */
-export async function peopleOf(tripId) {
-  const [attendees, guests] = await Promise.all([trips.attendeesOf(tripId), chat.guestsOf(tripId)]);
-  return {
-    members: attendees.map((a) => ({ id: a.id, name: a.name, isMinor: a.is_minor, avatarUrl: a.avatar_url ?? null })),
-    guests: guests.map((g) => ({
-      id: g.id, name: g.name, contact: g.contact, contactKind: g.contact_kind,
-      status: g.status, joinedAt: g.joined_at,
-    })),
-    count: attendees.length + guests.length,
-  };
-}
-
-export async function chatPayload(tripId, me, { venueRef = undefined, onlyStop = false } = {}) {
-  const [rows, people, unread, asks] = await Promise.all([
-    chat.messagesOf(tripId, { venueRef, onlyStop }),
-    peopleOf(tripId),
-    chat.unreadCount(tripId, me ?? {}),
-    chat.askCounts(tripId),
-  ]);
-  return {
-    messages: rows.map((m) => publicMessage(m, me)),
-    people,
-    unread,
-    askCounts: Object.fromEntries(asks),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// chat
-// ---------------------------------------------------------------------------
-
-/** GET /api/trips/:id/chat — the whole thread, per-stop Asks included. */
+/** GET /api/trips/:id/chat — the topic list. */
 router.get('/:id/chat', async (req, res, next) => {
-  try {
-    const { trip } = await ownTrip(req);
-    const me = await currentMember();
-    res.json(await chatPayload(trip.id, { memberId: me?.id ?? null }));
-  } catch (err) { next(err); }
+  try { res.json(await topics.listPayload(await tripCtx(req))); } catch (err) { next(err); }
 });
 
 /**
- * GET /api/trips/:id/asks/:venueRef — one stop's thread.
- *
- * The ref is a source-qualified identifier with a colon in it, so it arrives
- * encoded and Express hands it back decoded.
+ * GET /api/trips/:id/asks/:venueRef — one stop's questions: the same list,
+ * filtered to that stop's tag. The ref is a source-qualified identifier with a
+ * colon in it, so it arrives encoded and Express hands it back decoded.
  */
 router.get('/:id/asks/:venueRef', async (req, res, next) => {
   try {
-    const { trip } = await ownTrip(req);
-    const me = await currentMember();
-    res.json({
-      ...(await chatPayload(trip.id, { memberId: me?.id ?? null }, { venueRef: req.params.venueRef, onlyStop: true })),
-      /** Who a question here goes to. The organiser is whoever made the trip. */
-      organiser: (await organiserOf(trip)) ?? null,
-    });
+    const ctx = await tripCtx(req);
+    const all = await topics.listPayload(ctx);
+    res.json({ ...all, topics: all.topics.filter((t) => t.tag.kind === 'stop' && t.tag.ref === req.params.venueRef), about: `stop:${req.params.venueRef}` });
   } catch (err) { next(err); }
 });
-
-/**
- * Whoever is organising this trip.
- *
- * Not stored, and derived rather than guessed at: the household's own account
- * holder, which is the person who made the trip and the person a question on a
- * stop should reach. Alphabetical order over the attendees was the obvious
- * shortcut and the wrong answer — it made Jules the organiser of Roger's trip,
- * and put "Organiser · you" on somebody else's row in the share sheet (3b).
- *
- * Falls back to the first adult attending for a household with no account yet,
- * which is every household that has only ever used the shared passcode.
- */
-async function organiserOf(trip) {
-  const people = await households.membersOf(trip.household_id);
-  const accounts = await accountsForHousehold(trip.household_id).catch(() => []);
-  const linked = accounts.find((a) => a.member_id && people.some((m) => m.id === a.member_id));
-  if (linked) {
-    const m = people.find((x) => x.id === linked.member_id);
-    if (m) return { id: m.id, name: m.name };
-  }
-  const attending = await trips.attendeesOf(trip.id);
-  const adult = attending.find((a) => !a.is_minor) ?? attending[0]
-    ?? people.find((m) => !m.is_minor) ?? people[0];
-  return adult ? { id: adult.id, name: adult.name } : null;
-}
 
 /**
  * POST /api/trips/:id/chat — say something.
  *
- * `venueRef` makes it an Ask on that stop; without one it is the trip's chat.
- * The sender's own read is written with the message, so "Seen by 3" counts them
- * and a count that said 2 for a message everybody has read is impossible.
+ * `topicId` makes it a reply on that question; without one it starts a topic,
+ * tagged to `venueRef` when there is one and to the whole trip otherwise, with
+ * `audience` everyone unless said.
  */
 router.post('/:id/chat', async (req, res, next) => {
   try {
-    const { trip } = await ownTrip(req);
-    const me = await currentMember();
-    const body = String(req.body?.body ?? '').trim();
-    if (!body) return res.status(400).json({ error: 'empty_message', message: 'Type something first.' });
-    if (body.length > 2000) return res.status(400).json({ error: 'too_long', message: 'That is longer than a message — put it in a note on the trip.' });
-    const message = await chat.insertMessage(trip.id, {
-      body,
-      venueRef: req.body?.venueRef ?? null,
-      venueLabel: req.body?.venueLabel ?? null,
-      memberId: me?.id ?? null,
-    });
-    if (me?.id) await chat.markRead(trip.id, { memberId: me.id });
-    res.status(201).json({
-      message: publicMessage({ ...message, member_name: me?.name ?? null, seen_by: 1 }, { memberId: me?.id }),
-      ...(await chatPayload(trip.id, { memberId: me?.id ?? null })),
-    });
+    const ctx = await tripCtx(req);
+    const b = req.body ?? {};
+    if (b.topicId) {
+      await topics.createReply(ctx, String(b.topicId), { body: b.body, quotesReplyId: b.quotesReplyId ?? null });
+      return res.status(201).json(await topics.topicPayload(ctx, String(b.topicId)));
+    }
+    const tag = b.tag ?? (b.venueRef ? { kind: 'stop', ref: b.venueRef } : { kind: 'trip', ref: 'trip' });
+    const t = await topics.createTopic(ctx, { title: b.title ?? b.body, body: b.title ? b.body : null, tag, audience: b.audience ?? 'everyone', notice: b.notice });
+    res.status(201).json(await topics.topicPayload(ctx, t.id));
   } catch (err) { next(err); }
 });
 
 /** POST /api/trips/:id/chat/read — everything on screen has been seen. */
 router.post('/:id/chat/read', async (req, res, next) => {
   try {
-    const { trip } = await ownTrip(req);
-    const me = await currentMember();
-    if (me?.id) await chat.markRead(trip.id, { memberId: me.id });
+    const ctx = await tripCtx(req);
+    if (ctx.me) await chatRepo.markContextRead('trip', ctx.id, ctx.me);
     res.json({ unread: 0 });
   } catch (err) { next(err); }
 });
+
+/** Whoever is organising this trip — derived in routes/chat.js so the two never disagree. */
+const organiserOf = topics.organiserOf;
 
 // ---------------------------------------------------------------------------
 // share
