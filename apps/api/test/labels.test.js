@@ -147,3 +147,29 @@ test('a place two providers both returned keeps every provider\'s words after th
   assert.ok(merged[0].labels.includes('google:ice_cream_shop'));
   assert.ok(merged[0].labels.includes('osm:amenity=ice_cream'));
 });
+
+test('Epic\'s own one-word rules never out-vote Google\'s reading of a food place, and among equals the primary type leads', () => {
+  // KFC as the live API returns it: fast_food_restaurant first, then the rest.
+  // google.js reads that as a takeaway; Epic's automatic rules say
+  // chicken_wings_restaurant → Restaurants and fast_food_restaurant → Fast food.
+  // Those rules are Epic's (taught_by 'Epic'), so the food short-cut stands.
+  const rules = rulesOf(
+    { scope: 'labels', labels: ['google:chicken_wings_restaurant'], subcategory: 'restaurants', weights: {}, taught_by: 'Epic' },
+    { scope: 'labels', labels: ['google:fast_food_restaurant'], subcategory: 'fast-food', weights: {}, taught_by: 'Epic' },
+  );
+  const VOCAB2 = vocabularyOf(
+    [{ key: 'fun' }, { key: 'food' }],
+    [{ key: 'restaurants', category_key: 'food' }, { key: 'fast-food', category_key: 'food' }],
+  );
+  const kfc = { source: 'google', sourcePlaceId: 'kfc', category: 'takeaway', styles: ['fast-food', 'takeaway'], experiences: [],
+    labels: ['google:fast_food_restaurant', 'google:chicken_wings_restaurant', 'google:restaurant'] };
+  assert.equal(shelvesForVenue(kfc, rules, VOCAB2).subcategory, 'fast-food');
+  // A rule the owner wrote does override the short-cut, as before.
+  const own = rulesOf({ scope: 'labels', labels: ['google:chicken_wings_restaurant'], subcategory: 'restaurants', weights: {}, taught_by: 'roger' });
+  assert.equal(shelvesForVenue(kfc, own, VOCAB2).subcategory, 'restaurants');
+  // Among equal rules, the one about the label the place leads with wins.
+  const hits = labelHits(rules.labels, ['google:fast_food_restaurant', 'google:chicken_wings_restaurant']);
+  assert.equal(hits[0], 'google:fast_food_restaurant');
+  const hits2 = labelHits(rules.labels, ['google:chicken_wings_restaurant', 'google:fast_food_restaurant']);
+  assert.equal(hits2[0], 'google:chicken_wings_restaurant');
+});

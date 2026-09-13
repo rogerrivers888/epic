@@ -52,6 +52,8 @@ const bad = (message) => Object.assign(new Error(message), { status: 400, code: 
  * those… but only if you're sure").
  */
 let decided = false;
+/** Called at boot as well (server.js), so the mappings exist before anybody opens the screen. */
+export async function ensureTaxonomyReady() { return ready(); }
 async function ready() {
   await labelRepo.ensureKnown(knownLabels());
   if (decided) return;

@@ -122,7 +122,8 @@ export function canonical(labels) {
  */
 export function labelHits(labelRules, labels) {
   if (!labelRules?.size) return [];
-  const have = new Set((labels ?? []).map(String));
+  const list = (labels ?? []).map(String);
+  const have = new Set(list);
   const hits = [];
   for (const rule of labelRules.values()) {
     const need = rule?.labels ?? [];
@@ -130,7 +131,12 @@ export function labelHits(labelRules, labels) {
   }
   if (!hits.length) return [];
   const top = Math.max(...hits.map((r) => r.labels.length));
-  return hits.filter((r) => r.labels.length === top).map((r) => r.subject);
+  // Among equals, the rule about the label the place leads with comes first:
+  // google.js puts the primary type first, so a KFC typed
+  // fast_food_restaurant · chicken_wings_restaurant · restaurant is decided by
+  // the fast-food rule, as Google meant it (Codex, 13 Sep 2026).
+  const at = (r) => Math.min(...r.labels.map((l) => { const i = list.indexOf(l); return i < 0 ? Infinity : i; }));
+  return hits.filter((r) => r.labels.length === top).sort((a, b) => at(a) - at(b)).map((r) => r.subject);
 }
 
 /**

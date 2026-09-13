@@ -38,7 +38,7 @@ import { offline as offlineRoutes } from './routes/offline.js';
 import { startOwnLoop } from './sources/own.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
-import taxonomyRoutes from './routes/taxonomy.js';
+import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
 import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
@@ -457,6 +457,11 @@ setInterval(() => { void sweep(); }, 24 * 3600_000).unref?.();
 startOwnLoop();
 // The sweep: one area at a time, then the menus it claimed (sources/scoutArea.js).
 startScoutLoop();
+// The taxonomy's own decisions — which of Google's words are not a day out,
+// which are mapped by Epic — are made at boot, not only when the Categories
+// screen is opened, so a search filed by them behaves the same on a fresh
+// deploy (Codex, 13 Sep 2026). Off the boot path itself, like the loops.
+setTimeout(() => { ensureTaxonomyReady().catch(() => null); }, 5000).unref?.();
 // Epic chases the group, the organiser does not (owner, 4 Sep 2026): any run
 // whose morning has passed is written once, whether or not anyone is looking.
 startReminderLoop();

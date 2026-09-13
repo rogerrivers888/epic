@@ -410,8 +410,13 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
 
   // Somewhere to eat is Food unless somebody has said otherwise about this
   // place or about its labels — an ice-cream parlour typed as a cafe can be
-  // taught into a drawer of its own without touching every cafe.
-  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['labels', hits]])) {
+  // taught into a drawer of its own without touching every cafe. Somebody,
+  // not Epic: the rules Epic writes for itself (taught_by 'Epic') say where a
+  // Google word goes on its own, and google.js has already read the whole set
+  // of a food place's types with its primary-type and fast-food rules; those
+  // must not be out-voted by one of the words (Codex, 13 Sep 2026).
+  const owned = hits.filter((s) => rules?.labels?.get(s)?.taught_by !== 'Epic');
+  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['labels', owned]])) {
     const weights = { food: 1 };
     const fast = (venue?.styles ?? []).some((s) => s === 'fast-food' || s === 'takeaway');
     const drawer = fast ? 'fast-food' : FOOD_DRAWER[venue.category] ?? null;
