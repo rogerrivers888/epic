@@ -310,6 +310,10 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           const { namespace, key } = parseLabel(labels[0]);
           const decision = it.aside ? 'aside' : it.travel ? 'travel' : 'nearby';
           await labelRepo.save({ namespace, key, decision });
+          // A decision replaces a mapping: a rule about this one word, if there
+          // is one, goes, or the resolver would keep filing by it (Codex, 13 Sep 2026).
+          await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
+          shelfRules.forget();
           done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel' });
           continue;
         }
