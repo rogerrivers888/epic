@@ -629,6 +629,14 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                         <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.ink} strokeWidth={2.6} /></View>
                         <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={2}>{adopt.label} under {group.label}</Text>
                       </Press>
+                      {/* …or somewhere else: the owner opened on the suggested category and
+                          took the one row he saw for the only choice (13 Sep 2026). */}
+                      <Press onPress={() => setAdopting(true)} accessibilityRole="menuitem"
+                             style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                        <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.ink} strokeWidth={2.6} /></View>
+                        <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={2}>{adopt.label} under another category</Text>
+                        <Icon name="more" size={14} color={colors.inkMuted} />
+                      </Press>
                     </>
                   ) : null}
                 </>
