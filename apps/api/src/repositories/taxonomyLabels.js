@@ -150,15 +150,16 @@ export async function one(namespace, key) {
 
 /** Give a label its English name, or switch it off. Wikidata's names come from "Name the types". */
 export async function save({ namespace, key, label, note, active, decision }) {
-  // A decision is one of three: 'aside' (not a day out; active goes false),
-  // 'nearby' (useful beside one), or 'none' to clear it. Left out, it keeps.
+  // A decision is one of four: 'aside' (excluded from Epic; active goes
+  // false), 'travel' (getting there, parking), 'nearby' (useful beside a day
+  // out), or 'none' to clear it. Left out, it keeps.
   // The two fields stay in step both ways: a decision sets `active`, and an
   // explicit `active` clears or sets an aside decision (Codex, 13 Sep 2026).
   const d = decision === undefined ? null : decision === null || decision === 'none' ? 'none' : String(decision);
   const a = active == null ? null : Boolean(active);
   if (namespace === 'wikidata') {
     // A Wikidata type has one switch, `admit`; a decision is the same switch.
-    const admit = d === 'aside' ? false : d === 'nearby' || d === 'none' ? true : a;
+    const admit = d === 'aside' ? false : d === 'nearby' || d === 'travel' || d === 'none' ? true : a;
     const { rows } = await query(
       `update place_kinds set label = coalesce($2, label), admit = coalesce($3, admit), updated_at = now()
         where qid = $1 returning 'wikidata' as namespace, qid as key, label, category as note, seen_count, admit as active`,

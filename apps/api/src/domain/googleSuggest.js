@@ -83,11 +83,18 @@ const GENERIC_CUISINE = NOT_A_CUISINE;
  * might want to show in the app"). Kept, as "useful nearby", rather than
  * thrown out with the car dealers.
  */
-export const NEARBY_TYPES = new Set([
-  'parking', 'parking_garage', 'parking_lot', 'park_and_ride', 'electric_vehicle_charging_station', 'ebike_charging_station',
-  'public_bathroom', 'tourist_information_center', 'visitor_center', 'rest_stop', 'picnic_ground',
-  'train_station', 'bus_station', 'subway_station', 'light_rail_station', 'tram_stop', 'transit_station', 'ferry_terminal',
-  'airport', 'international_airport', 'bike_sharing_station', 'gas_station',
+export const NEARBY_TYPES = new Set(['public_bathroom', 'tourist_information_center', 'visitor_center', 'picnic_ground']);
+
+/**
+ * Getting there, and parking when you do (owner, 13 Sep 2026: "we're going
+ * to let people plan out how to get from the airport and how to get from the
+ * train station… train, bus, ferry. Parking."). Not petrol, not chargers, not
+ * rest stops — those are the car's business.
+ */
+export const TRAVEL_TYPES = new Set([
+  'parking', 'parking_garage', 'parking_lot', 'park_and_ride',
+  'train_station', 'bus_station', 'bus_stop', 'subway_station', 'light_rail_station', 'tram_stop', 'transit_station',
+  'ferry_terminal', 'airport', 'international_airport',
 ]);
 
 /** Google's groups that are never a day out: every type in them is suggested aside. */
@@ -113,7 +120,8 @@ const ASIDE_TYPES = new Set([
  */
 export function suggestFor(type, group, subcategoryKeys) {
   const has = (k) => subcategoryKeys.includes(k);
-  if (NEARBY_TYPES.has(type)) return { nearby: true, why: 'useful beside a day out — where to park, a loo, a station' };
+  if (TRAVEL_TYPES.has(type)) return { travel: true, why: 'getting there, or parking when you do' };
+  if (NEARBY_TYPES.has(type)) return { nearby: true, why: 'useful beside a day out — a loo, a visitor centre' };
   const named = TO_SUBCATEGORY[type];
   if (named) return has(named) ? { subcategory: named, why: 'the obvious subcategory for this word' } : null;
   // A steakhouse and a bar and grill are restaurants with a cuisine of their own.
@@ -168,6 +176,7 @@ export function sureMappingFor(type, group, subcategoryKeys) {
  * that is his to approve.
  */
 export function sureDecisionFor(type, group) {
+  if (TRAVEL_TYPES.has(type)) return 'travel';
   if (NEARBY_TYPES.has(type)) return 'nearby';
   if (TO_SUBCATEGORY[type] || /_restaurant$/.test(type)) return null;
   if (ASIDE_TYPES.has(type) || ASIDE_GROUPS.has(group)) return 'aside';

@@ -305,11 +305,12 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         if (!labels.length) throw new Error('no label');
         const badAt = labels.findIndex((l) => !parseLabel(l));
         if (badAt >= 0) throw new Error(`not a label: ${labels[badAt] || '(empty)'}`);
-        if (it.aside || it.nearby) {
+        if (it.aside || it.nearby || it.travel) {
           if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
-          await labelRepo.save({ namespace, key, decision: it.aside ? 'aside' : 'nearby' });
-          done.push({ labels, aside: Boolean(it.aside), nearby: Boolean(it.nearby) });
+          const decision = it.aside ? 'aside' : it.travel ? 'travel' : 'nearby';
+          await labelRepo.save({ namespace, key, decision });
+          done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel' });
           continue;
         }
         const subcategory = it.subcategory ? String(it.subcategory) : null;

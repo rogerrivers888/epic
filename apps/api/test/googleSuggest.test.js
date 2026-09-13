@@ -36,9 +36,13 @@ test('a cuisine is a restaurant, and the cuisine rides along; a counter is not',
 });
 
 test('parking and stations are useful nearby, never thrown out; and the sure decisions never touch our subcategories', () => {
-  assert.equal(suggestFor('parking', 'Automotive', DRAWERS).nearby, true);
-  assert.equal(suggestFor('train_station', 'Transportation', DRAWERS).nearby, true);
-  assert.equal(sureDecisionFor('parking', 'Automotive'), 'nearby');
+  assert.equal(suggestFor('parking', 'Automotive', DRAWERS).travel, true);
+  assert.equal(suggestFor('train_station', 'Transportation', DRAWERS).travel, true);
+  assert.equal(suggestFor('visitor_center', 'Services', DRAWERS).nearby, true);
+  assert.equal(sureDecisionFor('parking', 'Automotive'), 'travel');
+  assert.equal(sureDecisionFor('airport', 'Transportation'), 'travel');
+  assert.equal(sureDecisionFor('gas_station', 'Automotive'), 'aside');
+  assert.equal(sureDecisionFor('rest_stop', 'Automotive'), 'aside');
   assert.equal(sureDecisionFor('car_dealer', 'Automotive'), 'aside');
   assert.equal(sureDecisionFor('hotel', 'Lodging'), 'aside');
   assert.equal(sureDecisionFor('amusement_park', 'Entertainment and Recreation'), null);
