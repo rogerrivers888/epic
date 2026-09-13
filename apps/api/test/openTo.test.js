@@ -448,9 +448,9 @@ test('a hello and an ID photograph are not on the public media route', async () 
   // What Casual meet ups writes: a twenty-second hello, and the two images at
   // the gate. Both live in host_media beside a host's photograph, and the
   // public reader has to be able to tell them apart.
-  const hello = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'video', mime: 'video/webm', bytes, isPrivate: true });
-  const doc = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes, isPrivate: true });
-  const listing = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes });
+  const hello = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'video', mime: 'video/webm', bytes });
+  const doc = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes });
+  const listing = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes, isPrivate: false });
 
   assert.equal((await hostRepo.mediaById(hello.id)).is_private, true);
   assert.equal((await hostRepo.mediaById(doc.id)).is_private, true);
@@ -480,4 +480,17 @@ test('a reviewer sees an ID check only while it is waiting on them', async () =>
   const again = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes: Buffer.from('y'), isPrivate: true });
   const redone = await repo.saveIdCheck({ matchId: match.id, householdId: home.household.id, side: 'host', docMediaId: again.id, selfieMediaId: null, state: 'draft' });
   assert.equal(redone.state, 'draft', 'a replacement is a draft until it is sent');
+});
+
+test('media is private unless somebody says otherwise', async () => {
+  const hostRepo = await import('../src/repositories/hosting.js');
+  const home = await aHousehold(query, 'a household with media');
+  const bytes = Buffer.from('bytes');
+  // The default is the safe one, so a new kind of upload cannot become public
+  // by nobody having thought about it — which is how a hello and a passport
+  // ended up on the public reader in the first place.
+  const held = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'video', mime: 'video/webm', bytes });
+  assert.equal(held.is_private, true, 'private unless said otherwise');
+  const listing = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes, isPrivate: false });
+  assert.equal(listing.is_private, false, 'and a listing photograph says otherwise, deliberately');
 });

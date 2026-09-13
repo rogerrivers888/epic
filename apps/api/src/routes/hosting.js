@@ -376,7 +376,9 @@ router.post('/host/media', express.raw({ type: () => true, limit: '41mb' }), asy
     if (kind === 'doc' && mime !== 'application/pdf') throw refuse(400, 'bad_type', 'A document for guests is a PDF.');
     const durationS = int(req.query.duration);
     if (kind === 'video' && durationS && durationS > VIDEO_MAX_S) throw refuse(413, 'too_long', `A video can be up to ${VIDEO_MAX_S} seconds. Thirty to sixty is plenty.`);
-    const m = await repo.insertMedia({ householdId: household.id, kind, mime, bytes, durationS });
+    // The one public upload: a host's own photograph, a listing's video and the
+    // document guests download are all drawn on pages anybody may open.
+    const m = await repo.insertMedia({ householdId: household.id, kind, mime, bytes, durationS, isPrivate: false });
     res.status(201).json({ media: mediaMeta(m) });
   } catch (err) { next(err); }
 });

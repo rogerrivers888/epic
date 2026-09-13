@@ -539,11 +539,15 @@ export async function answerInvite(id, rsvp, heads) {
 // ---------------------------------------------------------------------------
 
 /**
- * `isPrivate` marks media that `GET /api/media/:id` must refuse — a hello and
- * the two images at the ID gate (migration 097). Everything else here belongs
- * to a page that is public anyway.
+ * Media is private unless somebody says otherwise (migration 098).
+ *
+ * It was the other way round, and the cost was that every new kind of upload
+ * was public by accident until somebody remembered — which is how a hello
+ * video and a photograph of a passport ended up downloadable from
+ * `GET /api/media/:id` (Codex, 13 Sep 2026). Only `POST /api/host/media` says
+ * `isPrivate: false`, because what it takes is what a public listing draws.
  */
-export async function insertMedia({ householdId, kind, mime, bytes, durationS, madeBy = 'self', isPrivate = false }) {
+export async function insertMedia({ householdId, kind, mime, bytes, durationS, madeBy = 'self', isPrivate = true }) {
   const { rows } = await query(
     `insert into host_media (household_id, kind, mime, bytes, size, duration_s, made_by, is_private) values ($1,$2,$3,$4,$5,$6,$7,$8)
      returning id, household_id, kind, mime, size, duration_s, trim_start_s, trim_end_s, made_by, is_private, created_at`,
