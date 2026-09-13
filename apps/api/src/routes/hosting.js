@@ -39,7 +39,7 @@ import { sendSms, smsConfigured } from '../sources/sms.js';
 import {
   ADULT_AGE, CHECK_KINDS, DAY_PARTS, EVIDENCE_FIELDS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, MONEY, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
   REGULATED_COUNTRIES, REPEATS, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S, VISIBILITIES,
-  ageGate, anytimeSlots, decideBy, isRegulated, lastDate, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
+  ageGate, anytimeSlots, decideBy, hostMediaPurpose, isRegulated, lastDate, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
   opensPrivately, readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
 } from '../domain/hosting.js';
 import { pdfText } from '../sources/menuRead.js';
@@ -157,7 +157,15 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = []) {
 }
 
 const invitePayload = (i) => ({ id: i.id, name: i.name, contact: i.contact, contactKind: i.contact_kind, heads: i.heads, rsvp: i.rsvp, rsvpHeads: i.rsvp_heads, sentAt: i.sent_at, answeredAt: i.answered_at, token: i.token });
-const evidencePayload = (e) => ({ id: e.id, offerId: e.offer_id, kind: e.kind, fields: e.fields ?? {}, media: mediaRef(e.media_id) });
+/**
+ * Evidence is never drawn, only counted: the wizard says "Uploaded · tap to
+ * change it" and nothing shows the certificate. So this reports whether one is
+ * there rather than an address — the address would be `/api/media`, which
+ * refuses evidence, and handing out a URL that cannot work is a lie in a
+ * payload (Codex, 13 Sep 2026). When the back office comes to read these it
+ * needs a guarded reader of its own, like the ID gate's.
+ */
+const evidencePayload = (e) => ({ id: e.id, offerId: e.offer_id, kind: e.kind, fields: e.fields ?? {}, media: Boolean(e.media_id) });
 
 function bookingPayload(b) {
   const offer = { shape: b.shape, starts_on: b.starts_on, first_date: b.first_date, sessions: b.sessions, skipped_dates: b.skipped_dates };
@@ -376,9 +384,20 @@ router.post('/host/media', express.raw({ type: () => true, limit: '41mb' }), asy
     if (kind === 'doc' && mime !== 'application/pdf') throw refuse(400, 'bad_type', 'A document for guests is a PDF.');
     const durationS = int(req.query.duration);
     if (kind === 'video' && durationS && durationS > VIDEO_MAX_S) throw refuse(413, 'too_long', `A video can be up to ${VIDEO_MAX_S} seconds. Thirty to sixty is plenty.`);
-    // The one public upload: a host's own photograph, a listing's video and the
-    // document guests download are all drawn on pages anybody may open.
-    const m = await repo.insertMedia({ householdId: household.id, kind, mime, bytes, durationS, isPrivate: false });
+    /**
+     * What this upload is for decides whether anybody may read it.
+     *
+     * `listing` is a host's own photograph, a listing's video, the document
+     * guests download and a review's picture — all drawn on pages anybody may
+     * open, so they go on the public reader. Anything else is private, which
+     * is what `evidence` is: a qualification or a licence the back office
+     * reads and, in the wizard's own words, "nothing here is shown to guests"
+     * (Codex, 13 Sep 2026). Private is the default, so a purpose nobody
+     * thought about fails safe — a picture that does not draw, rather than a
+     * certificate anybody can fetch.
+     */
+    const purpose = hostMediaPurpose(req.query.purpose);
+    const m = await repo.insertMedia({ householdId: household.id, kind, mime, bytes, durationS, isPrivate: purpose !== 'listing' });
     res.status(201).json({ media: mediaMeta(m) });
   } catch (err) { next(err); }
 });

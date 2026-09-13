@@ -1197,7 +1197,8 @@ function EvidenceStep({ offer: o, home, onChanged }: { offer: OwnOffer; home: Ho
   const upload = async (key: CheckKind) => {
     const blob = await pickPhotoBlob();
     if (!blob) return;
-    try { const m = await api.uploadHostMedia(blob, 'photo'); const have = existing.find((e) => e.kind === key); if (have) await api.updateEvidence(have.id, { mediaId: m.id }); else await api.addEvidence({ kind: key, offerId: o.id, fields: drafts[key] ?? {}, mediaId: m.id }); await onChanged(); } catch (e: any) { setSaid(e.message); }
+    // Evidence is never shown to guests, so it is never on the public reader.
+    try { const m = await api.uploadHostMedia(blob, 'photo', null, 'evidence'); const have = existing.find((e) => e.kind === key); if (have) await api.updateEvidence(have.id, { mediaId: m.id }); else await api.addEvidence({ kind: key, offerId: o.id, fields: drafts[key] ?? {}, mediaId: m.id }); await onChanged(); } catch (e: any) { setSaid(e.message); }
   };
   return (
     <View>

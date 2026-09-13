@@ -1851,9 +1851,15 @@ export const api = {
   /** Stop hosting: the host, its offers and its videos go, and the Host tab is the invitation again. */
   stopHosting: (force = false) => del<void>(`/api/host${force ? '?force=1' : ''}`),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
-  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo' | 'doc', durationS?: number | null): Promise<HostMedia> => {
+  /**
+   * `purpose` decides whether anybody may read it back. `listing` goes on the
+   * public reader because the page it draws on is public; `evidence` does not,
+   * because the wizard promises "nothing here is shown to guests". Private is
+   * the default at both ends, so a forgotten purpose fails safe.
+   */
+  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo' | 'doc', durationS?: number | null, purpose: 'listing' | 'evidence' = 'listing'): Promise<HostMedia> => {
     const token = sessionToken();
-    const res = await fetch(`${API_URL}/api/host/media${qs({ kind, duration: durationS ?? undefined })}`, {
+    const res = await fetch(`${API_URL}/api/host/media${qs({ kind, duration: durationS ?? undefined, purpose })}`, {
       method: 'POST', credentials: 'include', body: blob,
       headers: { 'content-type': blob.type || (kind === 'video' ? 'video/webm' : kind === 'doc' ? 'application/pdf' : 'image/jpeg'), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     });
@@ -3333,7 +3339,8 @@ export type Visibility = 'invite' | 'link' | 'public';
 export type Money = 'free' | 'direct' | 'epic';
 export type RepeatEvery = 'weekly' | 'fortnightly' | 'monthly';
 export type CheckKind = 'pub' | 'qual' | 'years' | 'lic';
-export type Evidence = { id: string; offerId: string | null; kind: CheckKind; fields: Record<string, string | null>; media: string | null };
+/** `media` is whether one was uploaded, not where it is: evidence is never drawn, and never public. */
+export type Evidence = { id: string; offerId: string | null; kind: CheckKind; fields: Record<string, string | null>; media: boolean };
 export type OfferInvite = { id: string; name: string; contact: string | null; contactKind: 'mobile' | 'email' | null; heads: number; rsvp: 'yes' | 'no' | null; rsvpHeads: number | null; sentAt: string | null; answeredAt: string | null; token: string };
 /** The sub-kind questionnaire, kept as the host answered it. */
 export type SubDetail = {

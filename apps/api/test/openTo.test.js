@@ -494,3 +494,15 @@ test('media is private unless somebody says otherwise', async () => {
   const listing = await hostRepo.insertMedia({ householdId: home.household.id, kind: 'photo', mime: 'image/jpeg', bytes, isPrivate: false });
   assert.equal(listing.is_private, false, 'and a listing photograph says otherwise, deliberately');
 });
+
+test('what an upload is for decides who may read it, and forgetting fails safe', async () => {
+  const { hostMediaPurpose } = await import('../src/domain/hosting.js');
+  // A listing's photograph is drawn on a page anybody may open; a host's
+  // qualification is not, and the wizard says so on screen. Anything the code
+  // forgets to name is private, so the failure is a picture that does not
+  // draw rather than a certificate anybody can fetch.
+  assert.equal(hostMediaPurpose('listing'), 'listing');
+  assert.equal(hostMediaPurpose('evidence'), 'evidence');
+  assert.equal(hostMediaPurpose(undefined), 'evidence', 'a purpose nobody named is not public');
+  assert.equal(hostMediaPurpose('something else'), 'evidence');
+});

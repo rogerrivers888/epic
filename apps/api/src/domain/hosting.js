@@ -26,6 +26,18 @@ export const VISIBILITIES = ['invite', 'link', 'public'];
 export const MONEY = ['free', 'direct', 'epic'];
 export const REPEATS = ['weekly', 'fortnightly', 'monthly'];
 export const CHECK_KINDS = ['pub', 'qual', 'years', 'lic'];
+
+/**
+ * What an upload to `POST /api/host/media` is for, which decides whether the
+ * public reader will serve it back. `listing` is a host's photograph, a
+ * listing's video, the document guests download and a review's picture — the
+ * things drawn on pages anybody may open. Everything else, `evidence`
+ * included, is private, and an unnamed purpose is private too: the failure
+ * should be a picture that does not draw, never a certificate anybody can
+ * fetch (Codex, 13 Sep 2026).
+ */
+export const MEDIA_PURPOSES = ['listing', 'evidence'];
+export const hostMediaPurpose = (v) => (MEDIA_PURPOSES.includes(v) ? v : 'evidence');
 /** The evidence each check asks for: proper fields, never one line. */
 export const EVIDENCE_FIELDS = {
   pub: ['title', 'where', 'link'],
