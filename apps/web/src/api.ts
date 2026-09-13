@@ -1918,6 +1918,7 @@ export const api = {
     post<{ review: { id: string; stars: number; chips: string[]; text: string | null; publishOn: string }; booking: Booking }>(`/api/bookings/${bookingId}/review`, body),
   /** The back office: pitch review and the ladder. */
   adminHosting: () => request<AdminHosting>('/api/admin/hosting'),
+  adminMail: (days: number, status?: string | null) => request<AdminMail>(`/api/admin/mail?days=${days}${status ? `&status=${encodeURIComponent(status)}` : ''}`),
   decideOffer: (id: string, decision: 'live' | 'changes', note: string | null, checklist?: Record<string, string>) => post<{ offer: Experience }>(`/api/admin/hosting/offers/${id}/decide`, { decision, note, checklist }),
   setHostTrust: (id: string, body: { trust?: TrustLevel; checks?: 'running' | 'passed' }) => patch<{ host: OwnHost }>(`/api/admin/hosting/hosts/${id}`, body),
   resolveHostReport: (id: string) => post<void>(`/api/admin/hosting/reports/${id}/resolve`, {}),
@@ -3371,6 +3372,9 @@ export type Booking = {
   isPast: boolean; reviewed: boolean; bookedAt: string;
 };
 export type InvitedView = { invite: OfferInvite; offer: Experience; going: number; payments: PaymentsConfig };
+/** Every e-mail sent and what Postmark said became of it (admin › Mail). */
+export type MailRow = { id: string; to_address: string; subject: string; purpose: string; provider_id: string | null; status: 'sent' | 'delivered' | 'opened' | 'bounced' | 'soft_bounced' | 'complained' | 'failed'; bounce_type: string | null; failure: string | null; sent_at: string; delivered_at: string | null; opened_at: string | null; bounced_at: string | null };
+export type AdminMail = { counts: Record<string, number>; rows: MailRow[]; words: Record<string, string>; sender: { configured: boolean; from?: string; provider?: string; stream?: string; events?: boolean; message?: string; setup?: string } };
 export type AdminHosting = {
   inReview: (Experience & { hostName: string; hostType: HostType | null; hostTrust: TrustLevel; submittedAt: string | null; checklist: PitchChecklist; commentary: boolean })[];
   hosts: (OwnHost & { liveOffers: number; inReview: number; openReports: number })[];

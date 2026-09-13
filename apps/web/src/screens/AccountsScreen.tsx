@@ -144,7 +144,7 @@ export function AccountsScreen() {
               <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>No mail sender configured</Text>
               <Text style={type.tiny}>
                 Epic will still make the link — it appears here for you to copy and send yourself. To have Epic e-mail it,
-                add <Text style={styles.mono}>RESEND_API_KEY</Text> and <Text style={styles.mono}>EPIC_MAIL_FROM</Text> in Doppler
+                add <Text style={styles.mono}>POSTMARK_SERVER_TOKEN</Text> and <Text style={styles.mono}>EPIC_MAIL_FROM</Text> in Doppler
                 (and <Text style={styles.mono}>EPIC_WEB_URL</Text> so links point at the app). Keys are yours to add, not mine.
               </Text>
             </View>

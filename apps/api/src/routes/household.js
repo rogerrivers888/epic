@@ -355,7 +355,7 @@ router.delete('/members/:id', async (req, res, next) => {
 // they are both in.
 //
 // Two channels, and the link is the same link either way. A text is the simplest
-// thing to receive and needs Twilio (sources/sms.js); an address needs Resend
+// thing to receive and needs Twilio (sources/sms.js); an address needs Postmark
 // (sources/mail.js). Both are keys, so both are the owner's to add in Doppler —
 // and with neither of them set nothing here fails: it mints the link, says it
 // could not send it, and shows it for him to hand over himself, which is the

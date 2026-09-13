@@ -30,6 +30,9 @@ import { BENCHABLE, judge, postcodeOf, say, tally } from '../domain/sourceBench.
 import * as providerCalls from '../repositories/providerCalls.js';
 import { currentHousehold } from './household.js';
 import { query } from '../db.js';
+import * as mailRepo from '../repositories/mail.js';
+import { mailStatus } from '../sources/mail.js';
+import { STATUS_WORDS } from '../domain/mail.js';
 
 const router = express.Router();
 
@@ -260,6 +263,20 @@ router.patch('/people/:id/role', requires('manage_roles'), async (req, res, next
 // ---------------------------------------------------------------------------
 
 /** GET /api/admin/activity — what has been happening, across every household. */
+/**
+ * Mail — every e-mail sent, and what Postmark said became of it (owner,
+ * 13 Sep 2026: "send and read receipts, and bounced email reporting"). Counts
+ * by status over the window, then the newest rows; `?status=` narrows to one,
+ * or to `not_delivered` for everything that did not arrive.
+ */
+router.get('/mail', requires('view_activity'), async (req, res, next) => {
+  try {
+    const status = String(req.query.status || '') || null;
+    const out = await mailRepo.summary({ days: days(req, 30), status, limit: 200 });
+    res.json({ ...out, words: STATUS_WORDS, sender: mailStatus() });
+  } catch (err) { next(err); }
+});
+
 router.get('/activity', requires('view_activity'), async (req, res, next) => {
   try {
     const window = days(req, 30);

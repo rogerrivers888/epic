@@ -27,6 +27,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
+import postmarkRoutes from './routes/postmark.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
 import lookupRoutes from './routes/lookup.js';
 import { router as localityRoutes } from './routes/localities.js';
@@ -158,6 +159,8 @@ app.use('/api/photos', photoLimit);
 // can be reached through a path that resolves to the caller's own household.
 app.use('/api/accounts', requireDoor('admin'), accountRoutes);
 app.use('/api/admin', requireDoor('admin'), adminRoutes);
+// What became of the e-mails we sent, from Postmark, admitted by its own token.
+app.use('/api/postmark', postmarkRoutes);
 // Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
 // never sets their own level; this is the only door that does.
 app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminRoutes);

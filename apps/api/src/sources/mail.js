@@ -3,25 +3,36 @@ import { deployed } from '../auth.js';
 /**
  * Sending an e-mail, when there is anything to send it with.
  *
- * Epic has never had a sender. Group reminders already know this and record
+ * Epic never had a sender. Group reminders already know this and record
  * `no_channel` rather than pretending (routes/groups.js), and this file follows
  * the same rule for invitations: with no key configured it does not throw, does
  * not queue and does not silently drop the message — it says it could not send,
  * and the admin screen shows the owner the link to hand over himself.
  *
- * The key is the owner's to add (CLAUDE.md: anything that holds a secret is the
- * owner's to do). It goes in Doppler as `RESEND_API_KEY`, never in the repo and
- * never as a Railway variable set by hand. Two non-secret companions go beside
- * it: `EPIC_MAIL_FROM` (the address invitations come from, which must be on a
- * domain verified with the sender) and `EPIC_WEB_URL` (where the app is served,
- * so a link in an e-mail points at the app rather than at the API).
+ * The sender is Postmark, because it is what Parcelvision sends with (owner,
+ * 13 Sep 2026: "we should use the same service here because we get send and
+ * read receipts, and bounced email reporting"). One HTTPS call, no SDK; every
+ * send is written to `mail_messages` with Postmark's MessageID, and Postmark's
+ * webhook (routes/postmark.js) brings back what became of it — delivered,
+ * opened, bounced, marked as spam — against that id. A hard bounce or a
+ * complaint keeps the address off the list for ninety days (domain/mail.js).
  *
- * Resend is the sender because it is one HTTPS call with no SDK — nothing to
- * add to package.json, nothing to keep up to date. Swapping it for Postmark or
- * SES is this one function.
+ * The keys are the owner's to add (CLAUDE.md: anything that holds a secret is
+ * the owner's to do). They go in Doppler, never in the repo and never as
+ * Railway variables set by hand:
+ *
+ *   POSTMARK_SERVER_TOKEN    the server's token, from Postmark › the server › API Tokens
+ *   POSTMARK_MESSAGE_STREAM  optional, the transactional stream to send on; `outbound` by default
+ *   POSTMARK_WEBHOOK_TOKEN   a secret we make up; Postmark presents it as the password on the webhook URL
+ *   EPIC_MAIL_FROM           the address mail comes from, on a domain verified in Postmark (DKIM and Return-Path)
+ *   EPIC_WEB_URL             where the app is served, so a link in an e-mail points at the app rather than the API
  */
 
-const KEY = () => process.env.RESEND_API_KEY || '';
+import { recentTo, recordSend } from '../repositories/mail.js';
+import { suppressedBy } from '../domain/mail.js';
+
+const KEY = () => (process.env.POSTMARK_SERVER_TOKEN || '').trim();
+const STREAM = () => (process.env.POSTMARK_MESSAGE_STREAM || 'outbound').trim();
 export const mailConfigured = () => Boolean(KEY() && process.env.EPIC_MAIL_FROM);
 
 /**
@@ -35,12 +46,12 @@ export const mailConfigured = () => Boolean(KEY() && process.env.EPIC_MAIL_FROM)
  */
 export function mailStatus() {
   if (KEY() && !process.env.EPIC_MAIL_FROM) {
-    return { configured: false, reason: 'no_from', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add EPIC_MAIL_FROM in Doppler — the address invitations come from, on a domain verified with the sender.', message: 'A send key is set but EPIC_MAIL_FROM is not, so there is no address to send from.' };
+    return { configured: false, reason: 'no_from', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add EPIC_MAIL_FROM in Doppler — the address mail comes from, on a domain verified in Postmark.', message: 'A Postmark token is set but EPIC_MAIL_FROM is not, so there is no address to send from.' };
   }
   if (!KEY()) {
-    return { configured: false, reason: 'no_sender', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add RESEND_API_KEY and EPIC_MAIL_FROM in Doppler.', message: 'No mail sender is configured. Add RESEND_API_KEY and EPIC_MAIL_FROM in Doppler to send invitations from Epic; until then, copy the link and send it yourself.' };
+    return { configured: false, reason: 'no_sender', short: "E-mail isn't switched on yet — you'll copy the link instead.", setup: 'To send by e-mail, add POSTMARK_SERVER_TOKEN and EPIC_MAIL_FROM in Doppler.', message: 'No mail sender is configured. Add POSTMARK_SERVER_TOKEN and EPIC_MAIL_FROM in Doppler to send from Epic; until then, copy the link and send it yourself.' };
   }
-  return { configured: true, from: process.env.EPIC_MAIL_FROM };
+  return { configured: true, from: process.env.EPIC_MAIL_FROM, provider: 'postmark', stream: STREAM(), events: Boolean((process.env.POSTMARK_WEBHOOK_TOKEN || '').trim()) };
 }
 
 /**
@@ -70,24 +81,40 @@ export function webUrl(req) {
  * Send one message. Never throws: the caller has already written down that a
  * link exists, and whether it could be delivered is a fact about the send, not
  * a reason to fail the request that made it.
+ *
+ * `purpose` is Postmark's Tag and the log's own word for what this was —
+ * `invitation`, `sign_in`, `code`, `host_message` — so the Activity view there
+ * and the Mail screen here group the same way.
  */
-export async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html, purpose = 'message' }) {
   const status = mailStatus();
   if (!status.configured) return { sent: false, reason: status.reason, message: status.message };
+  // An address that bounced hard or complained is not tried again for a while:
+  // Postmark suppresses it on its side too, and a send it refuses is a 406.
+  const past = await recentTo(to).catch(() => []);
+  const bad = suppressedBy(past);
+  if (bad) {
+    const m = await recordSend({ to, subject, purpose, status: 'failed', failure: `Not sent: this address ${bad.status === 'complained' ? 'marked an earlier message as spam' : 'bounced'} on ${new Date(bad.bounced_at).toLocaleDateString('en-GB')}.` }).catch(() => null);
+    return { sent: false, reason: 'suppressed', message: m?.failure ?? 'This address bounced recently, so nothing was sent.' };
+  }
   try {
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',
-      headers: { authorization: `Bearer ${KEY()}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: process.env.EPIC_MAIL_FROM, to: [to], subject, text, html }),
+      headers: { 'X-Postmark-Server-Token': KEY(), accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({ From: process.env.EPIC_MAIL_FROM, To: to, Subject: subject, TextBody: text, HtmlBody: html, MessageStream: STREAM(), Tag: purpose, TrackOpens: true }),
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || Number(body?.ErrorCode ?? 0) !== 0) {
       // The provider's own words, trimmed: the owner is the only person who
       // sees this and it is what tells him the domain is not verified yet.
-      return { sent: false, reason: 'send_failed', message: `The mail sender refused it (${res.status}). ${body.slice(0, 300)}` };
+      const failure = `Postmark refused it (${body?.ErrorCode ?? res.status}). ${String(body?.Message ?? '').slice(0, 300)}`.trim();
+      await recordSend({ to, subject, purpose, status: 'failed', failure }).catch(() => null);
+      return { sent: false, reason: 'send_failed', message: failure };
     }
-    return { sent: true };
+    const row = await recordSend({ to, subject, purpose, providerId: body.MessageID ?? null, status: 'sent' }).catch(() => null);
+    return { sent: true, id: row?.id ?? null, providerId: body.MessageID ?? null };
   } catch (err) {
+    await recordSend({ to, subject, purpose, status: 'failed', failure: err.message }).catch(() => null);
     return { sent: false, reason: 'send_failed', message: err.message };
   }
 }

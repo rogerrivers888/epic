@@ -217,6 +217,8 @@ const PUBLIC = [
   (req) => req.path === '/api/session',
   (req) => req.path === '/api/session/link',
   (req) => req.path === '/api/session/request-link',
+  // Postmark's delivery, open and bounce events: admitted by their own token (routes/postmark.js), never by a session.
+  (req) => req.method === 'POST' && req.path === '/api/postmark/events',
   (req) => req.path === '/api/join' || req.path.startsWith('/api/join/'),
   /**
    * A trip somebody was sent (trip rebuild, 7 Sep 2026): "anyone with the link

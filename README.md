@@ -196,7 +196,7 @@ Two different acts create an account, and confusing them is the mistake to avoid
   have been here, when they were last in, how many times they have signed in, and what their
   searching has cost this month and in total. The owner adds a person by e-mail; Epic makes
   them a household of their own and issues a single-use link that expires in a week.
-- **Sending needs a key.** With `RESEND_API_KEY` and `EPIC_MAIL_FROM` set, Epic e-mails the
+- **Sending needs a key.** With `POSTMARK_SERVER_TOKEN` and `EPIC_MAIL_FROM` set, Epic e-mails the
   link. Without them it still makes the link and shows it on the screen to be copied and sent
   by hand — nothing is silently dropped. Adding those keys is the owner's, in Doppler.
 - **Every household draws on the same provider allowances**, because a Google or Tripadvisor
@@ -224,7 +224,7 @@ spends it.
 - **A profile under thirteen has no sign-in**, and the panel says so instead of offering one
   (Epic 1 C8: a minor's profile is managed by a consenting adult).
 - **Sending needs a key, and the screen says which.** `TWILIO_ACCOUNT_SID` /
-  `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` for texts, `RESEND_API_KEY` / `EPIC_MAIL_FROM` for
+  `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` for texts, `POSTMARK_SERVER_TOKEN` / `EPIC_MAIL_FROM` for
   e-mail. With neither, Epic still makes the link and shows it to be copied and sent by hand —
   nothing is silently dropped. Adding them is the owner's, in Doppler.
 - **A Twilio trial is enough for your own household, with two caveats.** It texts only numbers
@@ -253,7 +253,9 @@ spends it.
 | `PORT` | set by the platform | |
 | `DATABASE_URL` | yes | Postgres connection string (Doppler) |
 | `EPIC_PASSCODE` | **yes, deployed** | The household's passcode (Doppler, owner-set). **Without it the deployed API answers 503 to every `/api` request and serves nothing** — see "The door" above. Locally, unset falls back to `epic-dev`. |
-| `RESEND_API_KEY` | optional | Mail sender (Doppler, owner-set) used for account invitations and sign-in links. Unset, Epic still makes the link and the Accounts screen shows it to be sent by hand. |
+| `POSTMARK_SERVER_TOKEN` | optional | Mail sender (Doppler, owner-set): Postmark, the same as Parcelvision, so every send is logged with its delivery, open and bounce events (admin › Mail). Unset, Epic still makes the link and the Accounts screen shows it to be sent by hand. |
+| `POSTMARK_WEBHOOK_TOKEN` | with the above | A secret the owner makes up and gives Postmark as the password on its webhook URL, `https://postmark:<token>@<api>/api/postmark/events`, with Delivery, Bounce, Spam complaint and Open ticked. Without it sends still go; nothing comes back. |
+| `POSTMARK_MESSAGE_STREAM` | optional | The transactional stream to send on; `outbound` unless set. |
 | `EPIC_MAIL_FROM` | with the above | The address invitations come from, on a domain verified with the sender, e.g. `Epic <hello@example.com>`. Non-secret, but a sender is not configured until both this and the key are set. |
 | `TWILIO_ACCOUNT_SID` | optional | Twilio **Account** SID — the `AC…` string under Account Info (Doppler, owner-set). It is the URL every request is sent to, not merely a username, so an `SK…` API key here produces a 404; Epic checks the shape and says so. With the two below, household invitations go out by text. Unset, Epic still makes the link and the screen shows it to be sent by hand. |
 | `TWILIO_AUTH_TOKEN` | with the above | The secret to sign with: the account's Auth Token, or an API key's secret when `TWILIO_API_KEY_SID` is set. Doppler only. |
