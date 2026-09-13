@@ -60,7 +60,9 @@ test('a mapping Epic is sure of is made itself; a judgement stays a suggestion',
 
 test('where nothing is obvious, nothing is suggested', () => {
   assert.equal(suggestFor('paintball_center', 'Entertainment and Recreation', DRAWERS), null);
-  assert.equal(suggestFor('tourist_attraction', 'Entertainment and Recreation', DRAWERS), null);
+  assert.equal(suggestFor('skateboard_park', 'Entertainment and Recreation', DRAWERS), null);
+  // `tourist_attraction` used to be here. It is not "nothing obvious" — it is a
+  // label that spans our categories, and has its own answer now (13 Sep 2026).
 });
 
 test('every suggestion names a drawer key that could exist, never a category or a typo', () => {
@@ -77,4 +79,25 @@ test('every suggestion names a drawer key that could exist, never a category or 
     const s = suggestFor(type, group, [...SEEDED]);
     if (s?.subcategory) assert.ok(SEEDED.has(s.subcategory), `${type} → ${s.subcategory}`);
   }
+});
+
+test('a word that spans our categories is a label, never a mapping', () => {
+  // Owner, 13 Sep 2026: "it's just a label called 'tourist attraction'… where
+  // we recognise that a Google category is simply a generic label that catches
+  // multiple subcategories that span multiple different categories in Epic, we
+  // should just create a label for the category."
+  for (const t of ['tourist_attraction', 'establishment', 'point_of_interest', 'food', 'sports_activity_location']) {
+    assert.equal(suggestFor(t, 'Entertainment and Recreation', DRAWERS).generic, true, t);
+    assert.equal(sureDecisionFor(t, 'Entertainment and Recreation'), 'generic', t);
+    // Generic beats every other reading: it is never mapped, aside or nearby.
+    assert.equal(suggestFor(t, 'Entertainment and Recreation', DRAWERS).subcategory, undefined, t);
+    assert.equal(sureMappingFor(t, 'Entertainment and Recreation', DRAWERS), null, t);
+  }
+  // A word that only ever catches things we exclude is excluded, not generic.
+  assert.equal(suggestFor('finance', null, DRAWERS).aside, true);
+  assert.equal(suggestFor('general_contractor', null, DRAWERS).aside, true);
+  assert.equal(sureDecisionFor('finance', null), 'aside');
+  // And a specific word in the same group is untouched.
+  assert.equal(suggestFor('museum', 'Culture', DRAWERS).subcategory, 'museums');
+  assert.equal(suggestFor('museum', 'Culture', DRAWERS).generic, undefined);
 });

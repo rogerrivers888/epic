@@ -97,6 +97,27 @@ export const TRAVEL_TYPES = new Set([
   'ferry_terminal', 'airport', 'international_airport',
 ]);
 
+/**
+ * Google's words that are not a subcategory at all.
+ *
+ * The owner, 13 Sep 2026: "Where we recognise that a Google category is simply
+ * a generic label that catches multiple subcategories that span multiple
+ * different categories in Epic, we should just create a label for the category
+ * and instead surface all the subcategories and map those accordingly."
+ *
+ * `establishment` and `point_of_interest` are on every place Google knows;
+ * `food` is on a supermarket as well as a bistro; `tourist_attraction` is on a
+ * museum, a castle, a pier and a beach at once; `sports_activity_location` and
+ * `sports_club` cover a golf course and a gym alike. None of them says what a
+ * place *is*, so none of them can decide where it lands: the place's own
+ * specific words do. Marking one 'generic' records that it is understood and
+ * carries nothing, and takes it out of the mapping queue for good.
+ */
+export const GENERIC_TYPES = new Set([
+  'establishment', 'point_of_interest', 'food', 'health',
+  'tourist_attraction', 'sports_activity_location', 'sports_club',
+]);
+
 /** Google's groups that are never a day out: every type in them is suggested aside. */
 const ASIDE_GROUPS = new Set(['Automotive', 'Business', 'Education', 'Facilities', 'Finance', 'Geographical Areas', 'Government', 'Housing', 'Lodging', 'Services', 'Transportation']);
 
@@ -106,6 +127,9 @@ const ASIDE_TYPES = new Set([
   'wedding_venue', 'sports_coaching', 'sports_school', 'art_studio',
   'chiropractor', 'dental_clinic', 'dentist', 'doctor', 'drugstore', 'general_hospital', 'hospital', 'massage', 'medical_center', 'medical_clinic',
   'medical_lab', 'pharmacy', 'physiotherapist', 'skin_care_clinic', 'tanning_studio',
+  // Legacy words Google still returns that are not in Table A, and that only
+  // ever catch things we exclude anyway (owner, 13 Sep 2026).
+  'finance', 'general_contractor',
 ]);
 
 /**
@@ -113,6 +137,7 @@ const ASIDE_TYPES = new Set([
  *
  *   { subcategory: 'castles', why }   — a drawer of ours
  *   { aside: true, why }              — not a day out
+ *   { generic: true, why }            — a label, not a subcategory
  *
  * A restaurant of any cuisine (`*_restaurant`) is Restaurants unless the map
  * above says it is really a counter. Shops not named above are aside: a
@@ -120,6 +145,7 @@ const ASIDE_TYPES = new Set([
  */
 export function suggestFor(type, group, subcategoryKeys) {
   const has = (k) => subcategoryKeys.includes(k);
+  if (GENERIC_TYPES.has(type)) return { generic: true, why: 'a word Google puts on places all over Epic — the place\'s own words decide' };
   if (TRAVEL_TYPES.has(type)) return { travel: true, why: 'getting there, or parking when you do' };
   if (NEARBY_TYPES.has(type)) return { nearby: true, why: 'useful beside a day out — a loo, a visitor centre' };
   const named = TO_SUBCATEGORY[type];
@@ -176,6 +202,7 @@ export function sureMappingFor(type, group, subcategoryKeys) {
  * that is his to approve.
  */
 export function sureDecisionFor(type, group) {
+  if (GENERIC_TYPES.has(type)) return 'generic';
   if (TRAVEL_TYPES.has(type)) return 'travel';
   if (NEARBY_TYPES.has(type)) return 'nearby';
   if (TO_SUBCATEGORY[type] || /_restaurant$/.test(type)) return null;

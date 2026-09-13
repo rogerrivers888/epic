@@ -44,9 +44,37 @@ export async function ensureKnown(entries) {
 // ---------------------------------------------------------------------------
 
 const pending = new Map();
+const pendingPairs = new Map();
 let timer = null;
 const FLUSH_MS = 20_000;
 const FLUSH_AT = 400;
+
+/**
+ * Which words have been marked "generic" — a label, not a subcategory.
+ *
+ * A generic word is the only one we count company for: the point of
+ * `taxonomy_label_pairs` is to answer "what does `tourist_attraction`
+ * actually catch?", so only the pairs with a generic word on one side are
+ * worth keeping. The set is read from the table and re-read on a minute's
+ * timer; `observe` is called on the search path and must not wait for it, so
+ * it uses whatever was last loaded and asks for a refresh behind itself.
+ */
+let genericSet = new Set();
+let genericAt = 0;
+let genericBusy = false;
+const GENERIC_TTL_MS = 60_000;
+
+function refreshGenerics() {
+  if (genericBusy || Date.now() - genericAt < GENERIC_TTL_MS) return;
+  genericBusy = true;
+  query(`select namespace, key from taxonomy_labels where decision = 'generic'`)
+    .then(({ rows }) => { genericSet = new Set(rows.map((r) => `${r.namespace}:${r.key}`)); genericAt = Date.now(); })
+    .catch(() => { genericAt = Date.now(); })
+    .finally(() => { genericBusy = false; });
+}
+
+/** A decision was written: the next `observe` should look the set up again. */
+export function forgetGenerics() { genericAt = 0; }
 
 async function flush() {
   timer = null;
@@ -72,6 +100,32 @@ async function flush() {
   } catch {
     // A count is a count; losing a batch is not worth failing a search over.
   }
+  await flushPairs();
+}
+
+async function flushPairs() {
+  if (!pendingPairs.size) return;
+  const batch = [...pendingPairs.entries()];
+  pendingPairs.clear();
+  const labels = []; const others = []; const counts = [];
+  for (const [pair, n] of batch) {
+    const i = pair.indexOf('\u0000');
+    if (i <= 0) continue;
+    labels.push(pair.slice(0, i)); others.push(pair.slice(i + 1)); counts.push(n);
+  }
+  if (!labels.length) return;
+  try {
+    await query(
+      `insert into taxonomy_label_pairs (label, other, seen_count)
+       select u.label, u.other, u.n
+         from unnest($1::text[], $2::text[], $3::int[]) as u(label, other, n)
+       on conflict (label, other) do update
+          set seen_count = taxonomy_label_pairs.seen_count + excluded.seen_count,
+              updated_at = now()`,
+      [labels, others, counts]);
+  } catch {
+    // Same again: company kept is a nicety, not the search.
+  }
 }
 
 /**
@@ -79,12 +133,50 @@ async function flush() {
  * — the harvest keeps `place_kinds.seen_count` itself.
  */
 export function observe(labels) {
+  const list = [];
   for (const l of labels ?? []) {
     if (!l || l.startsWith('wikidata:')) continue;
     pending.set(l, (pending.get(l) ?? 0) + 1);
+    list.push(l);
   }
-  if (pending.size >= FLUSH_AT) void flush();
+  // What a generic word was seen *with*, so the screen can show what it
+  // catches (owner, 13 Sep 2026: "surface all the subcategories and map those
+  // accordingly"). Same source on both sides: Google's generic word is
+  // answered by Google's specific ones, not by our own derived vocabulary.
+  if (genericSet.size) {
+    for (const a of list) {
+      if (!genericSet.has(a)) continue;
+      const ns = a.slice(0, a.indexOf(':') + 1);
+      for (const b of list) {
+        if (b === a || genericSet.has(b) || !b.startsWith(ns)) continue;
+        const k = `${a}\u0000${b}`;
+        pendingPairs.set(k, (pendingPairs.get(k) ?? 0) + 1);
+      }
+    }
+  }
+  refreshGenerics();
+  if (pending.size >= FLUSH_AT || pendingPairs.size >= FLUSH_AT) void flush();
   else if (!timer) { timer = setTimeout(() => void flush(), FLUSH_MS); timer.unref?.(); }
+}
+
+/**
+ * The specific words seen on the same place as this generic one, commonest
+ * first. Empty until real searches have run — nothing about a place is stored,
+ * so this is counted as it is seen, exactly like `seen_count`.
+ */
+export async function pairsFor(label, limit = 60) {
+  const { rows } = await query(
+    `select p.other, p.seen_count,
+            l.label as name, l.note, l.decision, l.active
+       from taxonomy_label_pairs p
+       left join taxonomy_labels l
+              on l.namespace = split_part(p.other, ':', 1)
+             and l.key = substr(p.other, length(split_part(p.other, ':', 1)) + 2)
+      where p.label = $1
+      order by p.seen_count desc, p.other asc
+      limit $2`,
+    [String(label), Math.min(500, Math.max(1, limit))]);
+  return rows;
 }
 
 /** For a test, or a shutdown: write what is waiting. */
@@ -150,16 +242,17 @@ export async function one(namespace, key) {
 
 /** Give a label its English name, or switch it off. Wikidata's names come from "Name the types". */
 export async function save({ namespace, key, label, note, active, decision }) {
-  // A decision is one of four: 'aside' (excluded from Epic; active goes
+  // A decision is one of five: 'aside' (excluded from Epic; active goes
   // false), 'travel' (getting there, parking), 'nearby' (useful beside a day
-  // out), or 'none' to clear it. Left out, it keeps.
+  // out), 'generic' (a label, not a subcategory), or 'none' to clear it. Left
+  // out, it keeps.
   // The two fields stay in step both ways: a decision sets `active`, and an
   // explicit `active` clears or sets an aside decision (Codex, 13 Sep 2026).
   const d = decision === undefined ? null : decision === null || decision === 'none' ? 'none' : String(decision);
   const a = active == null ? null : Boolean(active);
   if (namespace === 'wikidata') {
     // A Wikidata type has one switch, `admit`; a decision is the same switch.
-    const admit = d === 'aside' ? false : d === 'nearby' || d === 'travel' || d === 'none' ? true : a;
+    const admit = d === 'aside' ? false : d === 'nearby' || d === 'travel' || d === 'generic' || d === 'none' ? true : a;
     const { rows } = await query(
       `update place_kinds set label = coalesce($2, label), admit = coalesce($3, admit), updated_at = now()
         where qid = $1 returning 'wikidata' as namespace, qid as key, label, category as note, seen_count, admit as active`,
@@ -183,6 +276,8 @@ export async function save({ namespace, key, label, note, active, decision }) {
             updated_at = now()
      returning *`,
     [namespace, key, label ?? null, note ?? null, a, d]);
+  // A word just made (or unmade) generic changes what `observe` counts company for.
+  if (d) forgetGenerics();
   return rows[0];
 }
 
@@ -204,5 +299,6 @@ export async function decideMany(items) {
        from (select unnest($1::text[]) as key, unnest($2::text[]) as decision) c
       where l.namespace = 'google' and l.key = c.key and l.decision is null`,
     [items.map((i) => i.key), items.map((i) => i.decision)]);
+  forgetGenerics();
   return rowCount;
 }

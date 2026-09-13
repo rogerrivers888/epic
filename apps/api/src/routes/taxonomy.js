@@ -194,6 +194,42 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
 });
 
 /**
+ * GET /pairs?label=google:tourist_attraction — what a generic word catches.
+ *
+ * The owner, 13 Sep 2026: "instead surface all the subcategories and map those
+ * accordingly." A generic word says nothing on its own, so the useful question
+ * is which specific words of the same source turn up on the same places. Those
+ * are counted as they are seen (repositories/taxonomyLabels.js) — nothing about
+ * a place is stored — and come back in the same shape as a row on the screen,
+ * so each one can be mapped from here.
+ */
+taxonomyRoutes.get('/pairs', requires('view_library'), async (req, res, next) => {
+  try {
+    await ready();
+    const label = String(req.query.label || '').trim();
+    const parsed = parseLabel(label);
+    if (!parsed) throw bad(`${label || '(nothing)'} is not a label`);
+    const [pairs, rules, tax] = await Promise.all([
+      labelRepo.pairsFor(label, Math.min(200, Number(req.query.limit) || 60)),
+      shelfRules.rules(), taxonomy.taxonomy(),
+    ]);
+    const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
+    const words = pairs.map((p) => {
+      const i = p.other.indexOf(':');
+      const namespace = p.other.slice(0, i);
+      const key = p.other.slice(i + 1);
+      return {
+        namespace, key, label: p.name ?? null, note: p.note ?? null,
+        seen_count: p.seen_count, active: p.active !== false, decision: p.decision ?? null,
+        landing: landingOf({ namespace, key }, rules, tax.vocab),
+        suggestion: namespace === 'google' ? suggestFor(key, p.note, subKeys) : null,
+      };
+    });
+    res.json({ label, words, subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+/**
  * GET /matrix — every subcategory against every provider.
  *
  * Rows are Epic's drawers; columns are the namespaces; a cell is the words
@@ -284,10 +320,10 @@ taxonomyRoutes.put('/rules', requires('manage_library'), async (req, res, next) 
 });
 
 /**
- * POST /rules/batch { items: [{ labels, subcategory, aside, reason }] } — the
- * owner approving a group's suggestions in one press. Each item is either a
- * rule (labels → subcategory) or a label set aside; one that fails does not
- * stop the rest, and the answer says which.
+ * POST /rules/batch { items: [{ labels, subcategory, aside, nearby, travel, generic, reason }] }
+ * — the owner approving a group's suggestions in one press. Each item is
+ * either a rule (labels → subcategory) or one of the four decisions that are
+ * not a rule; one that fails does not stop the rest, and the answer says which.
  */
 taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res, next) => {
   try {
@@ -305,16 +341,18 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         if (!labels.length) throw new Error('no label');
         const badAt = labels.findIndex((l) => !parseLabel(l));
         if (badAt >= 0) throw new Error(`not a label: ${labels[badAt] || '(empty)'}`);
-        if (it.aside || it.nearby || it.travel) {
+        if (it.aside || it.nearby || it.travel || it.generic) {
           if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
-          const decision = it.aside ? 'aside' : it.travel ? 'travel' : 'nearby';
+          const decision = it.aside ? 'aside' : it.travel ? 'travel' : it.generic ? 'generic' : 'nearby';
           await labelRepo.save({ namespace, key, decision });
           // A decision replaces a mapping: a rule about this one word, if there
           // is one, goes, or the resolver would keep filing by it (Codex, 13 Sep 2026).
+          // For 'generic' that is the whole point — the word must never decide
+          // a landing again, so any rule naming it alone goes with it.
           await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
           shelfRules.forget();
-          done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel' });
+          done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel', generic: decision === 'generic' });
           continue;
         }
         const subcategory = it.subcategory ? String(it.subcategory) : null;

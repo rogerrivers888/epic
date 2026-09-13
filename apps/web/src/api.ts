@@ -1886,7 +1886,7 @@ export const api = {
   seedOfferDoc: (id: string, mediaId: string | null) => post<{ offer: OwnOffer; seeded: string[] }>(`/api/host/offers/${id}/doc`, { mediaId }),
   /** The listing written from the video. `force` overwrites what the host typed. */
   extractOffer: (id: string, force = false) => post<{ offer: OwnOffer; seeded: string[]; transcript: string }>(`/api/host/offers/${id}/extract`, { force }),
-  addInvites: (id: string, invites: { name: string; contact?: string | null; heads?: number }[], send = true) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/invites`, { invites, send }),
+  addInvites: (id: string, invites: { name: string; contact?: string | null; mobile?: string | null; email?: string | null; heads?: number }[], send = true) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/invites`, { invites, send }),
   sendInvites: (id: string) => post<{ offer: OwnOffer; told: Told }>(`/api/host/offers/${id}/invites/send`, {}),
   removeInvite: (id: string, inviteId: string) => del<{ offer: OwnOffer }>(`/api/host/offers/${id}/invites/${inviteId}`),
   addEvidence: (body: { kind: CheckKind; offerId?: string | null; fields: Record<string, string | null>; mediaId?: string | null }) => post<{ evidence: Evidence }>('/api/host/evidence', body),
@@ -1894,6 +1894,10 @@ export const api = {
   removeEvidence: (id: string) => del<void>(`/api/host/evidence/${id}`),
   /** An invitation to a private offer: what it opens, and the answer. Public. */
   invited: (token: string) => request<InvitedView>(`/api/invited/${token}`),
+  invitedLink: (token: string) => request<{ offerId: string; title: string | null; visibility: Visibility }>(`/api/invited/link/${encodeURIComponent(token)}`),
+  hostContacts: () => request<{ contacts: HostContact[] }>('/api/host/contacts'),
+  addHostContact: (c: { name: string; mobile?: string | null; email?: string | null }) => post<{ contact: HostContact }>('/api/host/contacts', c),
+  removeHostContact: (id: string) => request<void>(`/api/host/contacts/${id}`, { method: 'DELETE' }),
   answerInvite: (token: string, rsvp: 'yes' | 'no', heads?: number | null) => post<{ invite: OfferInvite }>(`/api/invited/${token}`, { rsvp, heads }),
   hostOffer: (id: string) => request<{ offer: OwnOffer }>(`/api/host/offers/${id}`),
   updateOffer: (id: string, body: OfferInput) => patch<{ offer: OwnOffer }>(`/api/host/offers/${id}`, body),
@@ -1905,7 +1909,7 @@ export const api = {
   broadcastOffer: (id: string, body: string) => post<{ offer: OwnOffer; told: Told }>(`/api/host/offers/${id}/broadcast`, { body }),
   addOfferDate: (id: string, startsOn: string, startsAt: string | null) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/dates`, { startsOn, startsAt }),
   /** The guest's side. The page and the profile are public; the rest need a session. */
-  experience: (id: string, inviteToken?: string | null) => request<{ offer: Experience; payments: PaymentsConfig }>(`/api/experiences/${id}${inviteToken ? `?i=${encodeURIComponent(inviteToken)}` : ''}`),
+  experience: (id: string, inviteToken?: string | null, linkToken?: string | null) => request<{ offer: Experience; payments: PaymentsConfig }>(`/api/experiences/${id}${inviteToken ? `?i=${encodeURIComponent(inviteToken)}` : linkToken ? `?l=${encodeURIComponent(linkToken)}` : ''}`),
   experienceMine: (id: string) => request<{ bookings: Booking[]; party: PartyMember[]; you: string | null }>(`/api/experiences/${id}/mine`),
   experiencesNear: (q: { lat: number; lng: number; km?: number; love?: string | null }) => request<ExperiencesNear>(`/api/experiences/near${qs(q)}`),
   bookExperience: (id: string, body: BookingInput) => post<{ booking: Booking; payments: PaymentsConfig }>(`/api/experiences/${id}/book`, body),
@@ -2224,8 +2228,10 @@ export const api = {
   taxonomySaveRule: (body: { labels: string[]; subcategory?: string | null; weights?: ShelfWeights; reason?: string | null }) =>
     put<{ rule: TaxonomyRule }>('/api/admin/taxonomy/rules', body),
   /** A group's suggestions approved in one press: rules and set-asides together. */
-  taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; reason?: string | null }[]) =>
-    post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
+  taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; reason?: string | null }[]) =>
+    post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
+  /** The specific words seen on the same places as a generic one, commonest first. */
+  taxonomyPairs: (label: string) => request<TaxonomyPairs>(`/api/admin/taxonomy/pairs${qs({ label })}`),
   /** Google's own word becomes a subcategory of ours under this category, and the word is mapped to it — one transaction. */
   taxonomyAdopt: (body: { label: string; categoryKey: string; name?: string }) =>
     post<{ subcategory: ShelfSubcategory; rule: TaxonomyRule; created: boolean }>('/api/admin/taxonomy/adopt', body),
@@ -2775,11 +2781,23 @@ export type TaxonomyLanding = {
 export type TaxonomyLabel = {
   namespace: string; key: string; label: string | null; note: string | null;
   seen_count: number; active: boolean; seeded: boolean;
-  /** Excluded from Epic, travel (getting there, parking), or useful beside a day out; null while undecided. */
-  decision?: 'aside' | 'nearby' | 'travel' | null;
+  /**
+   * Excluded from Epic, travel (getting there, parking), useful beside a day
+   * out, or generic — a label the source puts on places all over Epic, which
+   * therefore never decides where one lands. Null while undecided.
+   */
+  decision?: 'aside' | 'nearby' | 'travel' | 'generic' | null;
   landing: TaxonomyLanding;
   /** For a Google type: where it could go, for the owner to approve or change. */
-  suggestion?: { subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; cuisine?: string; why: string } | null;
+  suggestion?: { subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; cuisine?: string; why: string } | null;
+};
+
+/** What a generic word was actually seen on: the source's own specific words. */
+export type TaxonomyPairs = {
+  label: string;
+  words: TaxonomyLabel[];
+  subcategories: ShelfSubcategory[];
+  categories: ShelfCategory[];
 };
 
 /** A rule as the Categories screen draws it: every rule as the labels it is about. */
@@ -3316,10 +3334,15 @@ export type ExperienceBooking = {
 };
 export type PitchChecklist = { what: string; home: string; suits: string; notSuits: string; photos: string };
 /** The host's own offer: the guest's view, plus the roster, the money and what stands between it and Publish. */
+/** One of my Epic contacts: everyone this household has invited (lanes A and B, C2f). */
+export type HostContact = { id: string; name: string; mobile: string | null; email: string | null; timesInvited: number; lastInvitedAt: string | null };
 export type OwnOffer = Experience & {
   blockers: string[]; checklist: PitchChecklist; licenceNumber: string | null; licenceExpiry: string | null;
   /** The steps this offer's set-up walks, derived from its three axes. The progress bar counts these. */
   steps: string[];
+  /** What the public lane would ask, so a shared screen can say "2 of 4 · 2 of 10 public". */
+  publicSteps: string[];
+  linkToken: string; linkUrl: string;
   seeded: string[]; checks: CheckKind[]; rulesAccepted: boolean; transcript: string | null;
   invites: OfferInvite[];
   reviewNote: string | null; reviewChecklist: Record<string, string> | null; reviewedAt: string | null; submittedAt: string | null; publishedAt: string | null;

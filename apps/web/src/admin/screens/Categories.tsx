@@ -709,6 +709,19 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const [busyKey, setBusyKey] = useState<string | null>(null);
   /** The row whose dropdown is open, lifted over the rows after it. */
   const [openKey, setOpenKey] = useState<string | null>(null);
+  /**
+   * The generic word whose company is open (owner, 13 Sep 2026: "instead
+   * surface all the subcategories and map those accordingly"). A word like
+   * `tourist_attraction` says nothing on its own, so what is worth seeing is
+   * the specific words Google puts on the same places — each mappable here.
+   */
+  const [withKey, setWith] = useQueryState<string>('with', '', asText);
+  const [withWords, setWithWords] = useState<TaxonomyLabel[] | null>(null);
+  const loadWith = useCallback(async (key: string) => {
+    try { const d = await api.taxonomyPairs(`google:${key}`); setWithWords(d.words); }
+    catch { setWithWords([]); }
+  }, []);
+  useEffect(() => { if (!withKey) { setWithWords(null); return; } setWithWords(null); void loadWith(withKey); }, [withKey, loadWith]);
 
   const reload = useCallback(async () => {
     const d = await api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 });
@@ -722,11 +735,12 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
     return () => { live = false; };
   }, [tax]);
 
-  /** Where a Google subcategory stands: mapped to one of ours, a category only, not a day out, or nothing said. */
-  const standing = (r: TaxonomyLabel): 'mapped' | 'category' | 'aside' | 'nearby' | 'travel' | 'undecided' =>
+  /** Where a Google subcategory stands: mapped to one of ours, a category only, not a day out, a label, or nothing said. */
+  const standing = (r: TaxonomyLabel): 'mapped' | 'category' | 'aside' | 'nearby' | 'travel' | 'generic' | 'undecided' =>
     r.decision === 'aside' || r.active === false ? 'aside' : r.decision === 'nearby' ? 'nearby' : r.decision === 'travel' ? 'travel'
+      : r.decision === 'generic' ? 'generic'
       : r.landing.subcategory ? 'mapped' : r.landing.how === 'fallback' || !r.landing.category ? 'undecided' : 'category';
-  const decided = (r: TaxonomyLabel) => { const st = standing(r); return st === 'mapped' || st === 'aside' || st === 'nearby' || st === 'travel'; };
+  const decided = (r: TaxonomyLabel) => { const st = standing(r); return st === 'mapped' || st === 'aside' || st === 'nearby' || st === 'travel' || st === 'generic'; };
   /** Ticked rows, for approving several at once. */
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const tick = (key: string, on: boolean) => setTicked((prev) => { const n = new Set(prev); if (on) n.add(key); else n.delete(key); return n; });
@@ -764,6 +778,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       for (const c of tax.categories) {
         for (const r of rowsIn) if (r.active !== false && !r.decision && r.landing.category === c.key && r.landing.how !== 'fallback') put(c.key, c.label, r);
       }
+      for (const r of rowsIn) if (standing(r) === 'generic') put('_generic', 'Just a label', r);
       for (const r of rowsIn) if (standing(r) === 'travel') put('_travel', 'Travel', r);
       for (const r of rowsIn) if (standing(r) === 'nearby') put('_nearby', 'Useful nearby', r);
       for (const r of rowsIn) if (standing(r) === 'aside') put('_aside', 'Excluded from Epic', r);
@@ -783,13 +798,14 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, places: t.places + g.places, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, places: 0, mapped: 0, unmapped: 0 });
 
   /** One Google subcategory decided, on the fly: one of ours, or not a day out. */
-  const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean }, why?: string) => {
+  const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }, why?: string) => {
     setBusyKey(r.key);
     try {
-      const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), reason: why ?? null }]);
+      const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), generic: Boolean(choice.generic), reason: why ?? null }]);
       if (out.failed.length) throw new Error(out.failed[0].error);
       await reload();
-      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`);
+      if (withKey) void loadWith(withKey);
+      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
@@ -812,7 +828,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   /** Every unmapped subcategory in a group with a suggestion, approved in one press. */
   const approveAll = async (types: TaxonomyLabel[]) => {
     const items = types.filter((r) => !decided(r) && r.suggestion).map((r) => ({
-      labels: [`google:${r.key}`], subcategory: r.suggestion?.subcategory ?? null, aside: Boolean(r.suggestion?.aside), nearby: Boolean(r.suggestion?.nearby), travel: Boolean(r.suggestion?.travel), reason: `Approved: ${r.suggestion?.why}.`,
+      labels: [`google:${r.key}`], subcategory: r.suggestion?.subcategory ?? null, aside: Boolean(r.suggestion?.aside), nearby: Boolean(r.suggestion?.nearby), travel: Boolean(r.suggestion?.travel), generic: Boolean(r.suggestion?.generic), reason: `Approved: ${r.suggestion?.why}.`,
     }));
     if (!items.length) return;
     setBusyKey('*');
@@ -930,11 +946,12 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
               {shown.map((r) => {
                 const st = standing(r);
                 const sug = r.suggestion ?? null;
-                const sugText = sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
+                const sugText = sug?.generic ? 'just a label' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
                 // What the control says: where it is, or where it could go, or that nobody knows.
-                const ctlLabel = st === 'aside' ? 'Excluded' : st === 'nearby' || st === 'travel' || st === 'mapped' ? 'Mapped' : sugText ? 'Suggested' : 'Choose a subcategory';
+                const ctlLabel = st === 'aside' ? 'Excluded' : st === 'generic' ? 'Kept as' : st === 'nearby' || st === 'travel' || st === 'mapped' ? 'Mapped' : sugText ? 'Suggested' : 'Choose a subcategory';
                 const ctlValue = busyKey === r.key ? 'Saving…'
                   : st === 'aside' ? 'from Epic'
+                    : st === 'generic' ? 'just a label'
                     : st === 'travel' ? 'travel'
                     : st === 'nearby' ? 'useful nearby'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
@@ -974,6 +991,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[
+                            { key: '=', label: 'Just a label — it spans our categories, the place\u2019s own words decide', on: st === 'generic' },
                             { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
                             { key: '>', label: 'Travel — getting there, parking', on: st === 'travel' },
                             { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: st === 'nearby' },
@@ -982,7 +1000,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                             key: c.key, label: c.label,
                             items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: st === 'mapped' && r.landing.subcategory === sc.key })),
                           }))}
-                          onPick={(k) => void decide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : { subcategory: k })}
+                          onPick={(k) => void decide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
                           onOpenChange={(o) => setOpenKey(o ? r.key : null)}
                           adopt={{
                             label: `Adopt Google's “${r.label ?? r.key}” as a new subcategory`,
@@ -1000,6 +1018,67 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       </View>
                     )}
                   </View>
+                  {/* What a generic word actually catches: the source's own
+                      specific words seen on the same places, each mappable
+                      from here (owner, 13 Sep 2026). */}
+                  {st === 'generic' ? (
+                    <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: withKey === r.key ? spacing.sm : 6 }}>
+                      <TextAction label={withKey === r.key ? 'Hide the words it catches' : 'The words it catches'}
+                                  onPress={() => { setWith(withKey === r.key ? '' : r.key); setOnly(''); }} />
+                      {withKey === r.key ? (
+                        withWords == null ? <Text style={type.tiny}>Looking…</Text>
+                          : withWords.length === 0
+                            ? <Text style={type.tiny}>Nothing counted yet. Nothing about a place is stored, so the words seen beside this one are counted as searches run.</Text>
+                            : withWords.map((w) => {
+                              const wst = standing(w);
+                              return (
+                                <View key={w.key} style={[styles.pairRow, openKey === w.key ? { zIndex: 40 } : undefined, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
+                                  <View style={[{ flex: 1, minWidth: 0 }, !wide && { width: '100%' }]}>
+                                    <Text style={type.small} numberOfLines={1}>
+                                      <Text style={{ fontWeight: '600' }}>{w.label ?? w.key}</Text> <Text style={{ color: colors.inkMuted }}>{w.key}</Text>
+                                    </Text>
+                                    {!wide ? <Text style={type.tiny}>{count(w.seen_count)} places</Text> : null}
+                                  </View>
+                                  {/* The same three slots as the row above, so Places stays
+                                      in the Places column (owner, 13 Sep 2026). */}
+                                  {wide ? <View style={{ width: COL }} /> : null}
+                                  {wide ? (
+                                    <View style={[styles.tCell, { width: COL }]}>
+                                      <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'] }]}>{count(w.seen_count)}</Text>
+                                    </View>
+                                  ) : null}
+                                  {canManage ? (
+                                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', width: wide ? COL * 2 + LAST : undefined, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
+                                    <DrillDropdown
+                                      label={wst === 'mapped' ? 'Mapped' : wst === 'aside' ? 'Excluded' : wst === 'generic' ? 'Kept as' : wst === 'travel' || wst === 'nearby' ? 'Mapped' : 'Choose a subcategory'}
+                                      value={busyKey === w.key ? 'Saving…'
+                                        : wst === 'mapped' ? `${catLabel(w.landing.category)} · ${subLabel(w.landing.subcategory)}`
+                                          : wst === 'aside' ? 'from Epic' : wst === 'generic' ? 'just a label'
+                                            : wst === 'travel' ? 'travel' : wst === 'nearby' ? 'useful nearby' : '…'}
+                                      align="right" width={300}
+                                      extra={[
+                                        { key: '=', label: 'Just a label — it spans our categories, the place\u2019s own words decide', on: wst === 'generic' },
+                                        { key: '-', label: 'Excluded from Epic', on: wst === 'aside' },
+                                        { key: '>', label: 'Travel — getting there, parking', on: wst === 'travel' },
+                                        { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: wst === 'nearby' },
+                                      ]}
+                                      groups={tax.categories.filter((c) => c.active).map((c) => ({
+                                        key: c.key, label: c.label,
+                                        items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: wst === 'mapped' && w.landing.subcategory === sc.key })),
+                                      }))}
+                                      onPick={(k) => void decide(w, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+                                      onOpenChange={(o) => setOpenKey(o ? w.key : null)}
+                                      adopt={{ label: `Adopt Google\u2019s \u201C${w.label ?? w.key}\u201D as a new subcategory`, onPick: (cat) => void adoptWord(w, cat) }}
+                                      startIn={wst === 'mapped' ? w.landing.category ?? null : null}
+                                    />
+                                    </View>
+                                  ) : null}
+                                </View>
+                              );
+                            })
+                      ) : null}
+                    </View>
+                  ) : null}
                   </View>
                 );
               })}
@@ -1143,6 +1222,9 @@ const styles = StyleSheet.create({
   ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   foundRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   wordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  // A word a generic one was seen with: inside the row above it, so it reads as
+  // "what this catches" rather than as another subcategory of Google's.
+  pairRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.lineSoft },
 
   editor: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, backgroundColor: colors.surfaceMuted, marginVertical: spacing.sm, gap: 4 },
   tokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingVertical: 6 },
