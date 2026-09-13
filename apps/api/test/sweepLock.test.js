@@ -156,8 +156,8 @@ test('a place the sweep never handed over is found again, not left for six month
   await scout.commitSweep(CODE, {
     lease,
     places: [
-      { venueRef: 'osm:handed', name: 'Handed Over', epicScore: 5, ownedScore: 4, from: ['osm'] },
-      { venueRef: 'osm:missed', name: 'Never Handed Over', epicScore: 6, ownedScore: 5, from: ['osm'] },
+      { venueRef: 'osm:handed', name: 'Handed Over', epicScore: 5, ownedScore: 4, crowdBand: 'top', countBand: 'many', from: ['osm'] },
+      { venueRef: 'osm:missed', name: 'Never Handed Over', epicScore: 6, ownedScore: 5, crowdBand: 'high', countBand: 'many', from: ['osm'] },
     ],
     state: 'done', seen: 2, chains: 0, nextSweepAt: new Date(Date.now() + 180 * 86_400_000),
   });
@@ -174,6 +174,41 @@ test('a place the sweep never handed over is found again, not left for six month
   assert.equal(waiting.find((w) => w.ref === 'osm:missed').name, 'Never Handed Over');
 
   await query("delete from place_records where venue_ref in ('osm:handed','osm:missed')");
+  await query('delete from scout_places where area_code = $1', [CODE]);
+  await query('delete from scout_areas where code = $1', [CODE]);
+});
+
+test('a provisional area — swept before the crowd could be asked — is left alone', async () => {
+  await anArea();
+  const lease = await scout.markSweeping(CODE);
+  // No crowd_band on anything: the licensed search could not be reached, so
+  // this selection is a census in name order rather than a ranking.
+  await scout.commitSweep(CODE, {
+    lease,
+    places: [
+      { venueRef: 'osm:prov1', name: 'Unranked One', epicScore: 2, ownedScore: 2, crowdBand: null, countBand: null, from: ['osm'] },
+      { venueRef: 'osm:prov2', name: 'Unranked Two', epicScore: 2, ownedScore: 2, crowdBand: null, countBand: null, from: ['osm'] },
+    ],
+    state: 'done', seen: 2, chains: 0, nextSweepAt: new Date(),
+  });
+
+  const refs = (await scout.withoutRecord(50)).map((w) => w.ref);
+  assert.ok(!refs.includes('osm:prov1'), 'an unranked selection must not be researched');
+  assert.ok(!refs.includes('osm:prov2'));
+
+  // Once a sweep does reach the crowd, the area's places join the queue.
+  const again = await scout.markSweeping(CODE);
+  await scout.commitSweep(CODE, {
+    lease: again,
+    places: [
+      { venueRef: 'osm:prov1', name: 'Unranked One', epicScore: 6, ownedScore: 3, crowdBand: 'top', countBand: 'many', from: ['osm'] },
+      { venueRef: 'osm:prov2', name: 'Unranked Two', epicScore: 5, ownedScore: 3, crowdBand: 'good', countBand: 'few', from: ['osm'] },
+    ],
+    state: 'done', seen: 2, chains: 0, nextSweepAt: new Date(),
+  });
+  const after = (await scout.withoutRecord(50)).map((w) => w.ref);
+  assert.ok(after.includes('osm:prov1') && after.includes('osm:prov2'), 'a ranked selection is research-worthy');
+
   await query('delete from scout_places where area_code = $1', [CODE]);
   await query('delete from scout_areas where code = $1', [CODE]);
 });
