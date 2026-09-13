@@ -648,7 +648,11 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
   const dLng = km / (111.32 * Math.cos((center.lat * Math.PI) / 180) || 1);
   const body = {
     textQuery: words || String(type).replace(/_/g, ' '),
-    pageSize: Math.min(20, Math.max(1, limit)),
+    // Fenced, the page is already only the type asked for, so ask for what will
+    // be shown. Unfenced, the filter below throws some away, so ask for the
+    // most Google will give and keep the first dozen that survive (Codex, 13
+    // Sep 2026).
+    pageSize: searchable ? Math.min(20, Math.max(1, limit)) : 20,
     ...(searchable ? { includedType: type } : {}),
     languageCode: 'en-GB',
     locationRestriction: {
