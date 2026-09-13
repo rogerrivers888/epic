@@ -1155,12 +1155,14 @@ const styles = StyleSheet.create({
   tRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   tHead: { borderBottomWidth: BORDER, borderBottomColor: colors.line },
   /** The Google table's header rule: soft, not ink (owner, 13 Sep 2026: "very bright white"). */
-  tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.lineSoft },
+  // A header's rule and the tab frame sit between the ink rule and the hairline:
+  // the owner found the ink one too bright and the hairline invisible (13 Sep 2026).
+  tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.decor },
   headCell: { paddingTop: 10, paddingBottom: 2 },
-  colHead: { ...type.small, fontWeight: '700', color: colors.inkMuted },
-  tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.lineSoft, overflow: 'hidden' },
+  colHead: { ...type.small, fontWeight: '600', color: colors.inkMuted },
+  tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, overflow: 'hidden', backgroundColor: colors.panelWarm },
   tabItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
-  tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.lineSoft },
+  tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.decor },
   tabOn: { backgroundColor: colors.selected },
   tWork: { backgroundColor: colors.surfaceMuted },
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
