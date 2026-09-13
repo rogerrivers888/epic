@@ -44,8 +44,6 @@ alter table host_offers
 
 -- What was priced was Epic-collects; what was not was free.
 update host_offers set money = case when price_mode = 'free' then 'free' else 'epic' end;
--- A minimum only exists when money does.
-update host_offers set min_count = null where money = 'free';
 
 -- --- evidence: what backs a claim up, never shown to guests -------------------
 create table if not exists host_evidence (

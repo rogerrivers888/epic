@@ -718,7 +718,7 @@ router.post('/host/offers/:id/invites/send', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
     // Only publication is waited for: a paused offer still opens and takes an answer.
-    if (offer.state === 'draft' || offer.state === 'in_review') throw refuse(409, 'not_live', 'Publish it first — the link would open nothing yet.');
+    if (!['live', 'paused'].includes(offer.state)) throw refuse(409, 'not_live', offer.state === 'ended' ? 'This one was called off.' : 'Publish it first — the link would open nothing yet.');
     const pending = (await repo.invitesOf(offer.id)).filter((i) => !i.sent_at);
     const told = await sendInvites(host, offer, pending);
     res.json({ offer: await ownOfferPayload(offer, host), told });
@@ -755,8 +755,8 @@ publicRouter.get('/invited/:token', async (req, res, next) => {
     const inv = await repo.inviteByToken(req.params.token);
     if (!inv) return res.status(404).json({ error: 'not_found', message: 'That invitation does not open anything.' });
     const o = await repo.offerById(inv.offer_id);
-    // Nothing opens before the host has pressed publish.
-    if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_yet', message: 'This invitation is not ready yet.' });
+    // Nothing opens before the host has pressed publish, or after it was called off.
+    if (!o || !['live', 'paused'].includes(o.state)) return res.status(404).json({ error: 'not_yet', message: o?.state === 'ended' ? 'This one was called off.' : 'This invitation is not ready yet.' });
     const h = await repo.hostById(o.host_id);
     const bookings = await repo.bookingsOfOffer(o.id);
     const answered = (await repo.invitesOf(o.id)).filter((x) => x.rsvp === 'yes');
@@ -775,7 +775,7 @@ publicRouter.post('/invited/:token', async (req, res, next) => {
     const inv = await repo.inviteByToken(req.params.token);
     if (!inv) return res.status(404).json({ error: 'not_found', message: 'That invitation does not open anything.' });
     const o = await repo.offerById(inv.offer_id);
-    if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_yet', message: 'This invitation is not ready yet.' });
+    if (!o || !['live', 'paused'].includes(o.state)) return res.status(404).json({ error: 'not_yet', message: o?.state === 'ended' ? 'This one was called off.' : 'This invitation is not ready yet.' });
     const rsvp = oneOf(['yes', 'no'], req.body?.rsvp);
     if (!rsvp) throw refuse(400, 'rsvp_required', 'Yes or no.');
     const heads = rsvp === 'yes' ? Math.max(1, int(req.body?.heads) ?? inv.heads) : 0;
