@@ -2317,6 +2317,8 @@ export const api = {
     post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
   /** The specific words seen on the same places as a generic one, commonest first. */
   taxonomyPairs: (label: string) => request<TaxonomyPairs>(`/api/admin/taxonomy/pairs${qs({ label })}`),
+  /** Real places carrying a Google word — one live provider call, so only on a press. */
+  taxonomyExamples: (label: string) => request<TaxonomyExamples>(`/api/admin/taxonomy/examples${qs({ label })}`),
   /** Google's own word becomes a subcategory of ours under this category, and the word is mapped to it — one transaction. */
   taxonomyAdopt: (body: { label: string; categoryKey: string; name?: string }) =>
     post<{ subcategory: ShelfSubcategory; rule: TaxonomyRule; created: boolean }>('/api/admin/taxonomy/adopt', body),
@@ -2875,6 +2877,20 @@ export type TaxonomyLabel = {
   landing: TaxonomyLanding;
   /** For a Google type: where it could go, for the owner to approve or change. */
   suggestion?: { subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; cuisine?: string; why: string } | null;
+};
+
+/** A handful of real places carrying one Google word, read live and never stored. */
+export type TaxonomyExamples = {
+  label: string;
+  /** The area the search was fenced to — the household's home, or London. */
+  near: string;
+  places: { id: string; name: string | null; address: string | null; primaryType: string | null; types: string[]; mapsUrl: string | null; website: string | null }[];
+  /** Every other Google word on those places, commonest first, with where each lands. */
+  alsoCalled: { key: string; on: number; label: string | null; decision: string | null; landing: TaxonomyLanding }[];
+  calls: number;
+  problem: string | null;
+  subcategories: ShelfSubcategory[];
+  categories: ShelfCategory[];
 };
 
 /** What a generic word was actually seen on: the source's own specific words. */

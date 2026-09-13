@@ -613,6 +613,59 @@ export const googleSource = {
  * rather than one, because "restaurants" and "italian" surface different
  * halves of a town.
  */
+/**
+ * A handful of real places carrying one Google type — so a word on the
+ * Categories screen can be looked at rather than guessed at.
+ *
+ * The owner, 13 Sep 2026: "I definitely need a means to be able to click
+ * through and see some examples of some of these places. Adventure Sports
+ * Centre: I don't know what that is… whether they do water sports or other
+ * sorts of sports, or whether this is a fun day out."
+ *
+ * One Text Search, fenced to the type and to a box round the area, with the
+ * smallest field mask that answers the question: what is it called, where is
+ * it, and what else does Google call it. Nothing here is stored — the names
+ * are read on the screen and dropped, like every other licensed fact in the
+ * back office (Technical Constraints §4).
+ */
+const EXAMPLE_FIELDS = [
+  'places.id', 'places.displayName', 'places.formattedAddress',
+  'places.types', 'places.primaryType', 'places.googleMapsUri', 'places.websiteUri',
+].join(',');
+
+export async function examplesOfType({ center, radiusKm = 40, type, words = null, meter = null, limit = 12 } = {}) {
+  if (!KEY()) return { places: [], calls: 0, problem: 'no Google key' };
+  if (!type || !center || center.lat == null) return { places: [], calls: 0, problem: 'no type or no area' };
+  const km = Math.min(radiusKm, 50);
+  const dLat = km / 111.32;
+  const dLng = km / (111.32 * Math.cos((center.lat * Math.PI) / 180) || 1);
+  const body = {
+    textQuery: words || String(type).replace(/_/g, ' '),
+    pageSize: Math.min(20, Math.max(1, limit)),
+    includedType: type,
+    languageCode: 'en-GB',
+    locationRestriction: {
+      rectangle: {
+        low: { latitude: center.lat - dLat, longitude: center.lng - dLng },
+        high: { latitude: center.lat + dLat, longitude: center.lng + dLng },
+      },
+    },
+  };
+  let data;
+  try { data = await call('/places:searchText', { fieldMask: EXAMPLE_FIELDS, meter, body }); }
+  catch (err) { return { places: [], calls: 1, problem: String(err.message).slice(0, 160) }; }
+  const places = (data.places || []).slice(0, limit).map((p) => ({
+    id: p.id,
+    name: p.displayName?.text ?? null,
+    address: p.formattedAddress ?? null,
+    primaryType: p.primaryType ?? null,
+    types: p.types ?? [],
+    mapsUrl: p.googleMapsUri ?? null,
+    website: p.websiteUri ?? null,
+  }));
+  return { places, calls: 1, problem: null };
+}
+
 export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null, includedType = 'restaurant', keepLodging = false } = {}) {
   if (!KEY() || !center || center.lat == null) return { places: [], calls: 0, problems: ['no Google key'] };
   // Text Search fences with a rectangle, not a circle: `locationRestriction`

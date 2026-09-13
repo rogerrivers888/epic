@@ -37,10 +37,10 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
-  api, MoodKey, ShelfSubcategory, Taxonomy, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
+  api, MoodKey, ShelfSubcategory, Taxonomy, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
   TaxonomyRule, TaxonomyTry,
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -715,6 +715,24 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
    * `tourist_attraction` says nothing on its own, so what is worth seeing is
    * the specific words Google puts on the same places — each mappable here.
    */
+  /**
+   * The word whose real places are open (owner, 13 Sep 2026: "I definitely need
+   * a means to be able to click through and see some examples of some of these
+   * places. Adventure Sports Centre: I don't know what that is"). One live
+   * provider call, so it is asked for on a press and never on a page load.
+   */
+  const [egKey, setEg] = useQueryState<string>('eg', '', asText);
+  const [eg, setEgData] = useState<TaxonomyExamples | null>(null);
+  const [egBusy, setEgBusy] = useState(false);
+  const wantedEg = useRef('');
+  const loadEg = useCallback(async (key: string) => {
+    wantedEg.current = key; setEgBusy(true);
+    try { const d = await api.taxonomyExamples(`google:${key}`); if (wantedEg.current === key) setEgData(d); }
+    catch { if (wantedEg.current === key) setEgData(null); }
+    finally { if (wantedEg.current === key) setEgBusy(false); }
+  }, []);
+  useEffect(() => { if (!egKey) { setEgData(null); return; } setEgData(null); void loadEg(egKey); }, [egKey, loadEg]);
+
   const [withKey, setWith] = useQueryState<string>('with', '', asText);
   const [withWords, setWithWords] = useState<TaxonomyLabel[] | null>(null);
   // The answer is only drawn if it is still the row that was asked about: two
@@ -830,6 +848,28 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
     finally { setBusyKey(null); }
   };
 
+  /**
+   * One answer for every ticked word (owner, 13 Sep 2026: "I guess that's a
+   * bulk action, so then you'd need to add a toolbar above where I can bulk
+   * apply a particular category or subcategory (the same control)").
+   */
+  const applyMany = async (rows: TaxonomyLabel[], choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }) => {
+    if (!rows.length) return;
+    const said = choice.aside ? 'excluded from Epic' : choice.travel ? 'travel' : choice.nearby ? 'useful nearby' : choice.generic ? 'a label, not a subcategory' : `${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}`;
+    setBusyKey('*');
+    try {
+      const out = await api.taxonomyBatch(rows.map((r) => ({
+        labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null,
+        aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), generic: Boolean(choice.generic),
+        reason: `Set in bulk from the Categories screen: ${said}.`,
+      })));
+      setTicked(new Set());
+      await reload();
+      await onChanged(`${out.done.length} of ${rows.length} → ${said}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusyKey(null); }
+  };
+
   /** Every unmapped subcategory in a group with a suggestion, approved in one press. */
   const approveAll = async (types: TaxonomyLabel[]) => {
     const items = types.filter((r) => !decided(r) && r.suggestion).map((r) => ({
@@ -892,9 +932,14 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
         const shown = g.types.filter((r) => !only || by !== 'ours' || r.landing.subcategory === only);
         const suggestible = g.types.filter((r) => !decided(r) && r.suggestion).length;
         // Ticked rows in this group that have a suggestion to approve.
-        const tickable = shown.filter((r) => !decided(r) && r.suggestion);
+        // Anything on screen can be ticked, not only the ones with a suggestion:
+        // the tick is how several words are given the same answer at once
+        // (owner, 13 Sep 2026: "you'd need to add a toolbar above where I can
+        // bulk apply a particular category or subcategory").
+        const tickable = shown;
         const tickedHere = tickable.filter((r) => ticked.has(r.key));
         const allTicked = tickable.length > 0 && tickedHere.length === tickable.length;
+        const tickedWithSuggestion = tickedHere.filter((r) => !decided(r) && r.suggestion);
         return (
           <View key={g.key} style={on && openKey ? { zIndex: 40 } : undefined}>
           <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
@@ -922,12 +967,34 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                     {subsHere.map((sc) => <Choice key={sc.key} label={`${sc.label} · ${sc.n}`} on={only === sc.key} onPress={() => setOnly(only === sc.key ? '' : sc.key)} />)}
                   </View>
                 ) : <View style={{ flex: 1 }} />}
-                {canManage && suggestible ? (
-                  <Press effect="none" onPress={() => void approveAll(tickedHere.length ? tickedHere : g.types)} disabled={busyKey != null} accessibilityRole="button"
+                {/* Ticked rows get one answer between them, from the same control
+                    the single rows use. */}
+                {canManage && tickedHere.length ? (
+                  <>
+                    <TextAction label="Clear" onPress={() => setTicked(new Set())} />
+                    <DrillDropdown
+                      label={busyKey === '*' ? 'Saving…' : `Apply to ${tickedHere.length} ticked`} value="choose one" align="right" width={300} set
+                      extra={[
+                        { key: '=', label: 'Just a label \u2014 it spans our categories, the place\u2019s own words decide', on: false },
+                        { key: '-', label: 'Excluded from Epic', on: false },
+                        { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
+                        { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
+                      ]}
+                      groups={tax.categories.filter((c) => c.active).map((c) => ({
+                        key: c.key, label: c.label,
+                        items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: false })),
+                      }))}
+                      onPick={(k) => void applyMany(tickedHere, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+                      onOpenChange={(o) => setOpenKey(o ? `bulk:${g.key}` : null)}
+                    />
+                  </>
+                ) : null}
+                {canManage && (tickedWithSuggestion.length || (!tickedHere.length && suggestible)) ? (
+                  <Press effect="none" onPress={() => void approveAll(tickedHere.length ? tickedWithSuggestion : g.types)} disabled={busyKey != null} accessibilityRole="button"
                          style={[styles.barControl, styles.barButton, busyKey != null && { opacity: 0.5 }]}>
                     <Icon name="check" size={14} color={colors.primaryFg} />
                     <Text style={[type.small, { fontWeight: '700', color: colors.primaryFg }]}>
-                      {busyKey === '*' ? 'Approving…' : tickedHere.length ? `Approve ${tickedHere.length} ticked` : `Approve all ${suggestible} suggestions`}
+                      {busyKey === '*' ? 'Approving…' : tickedWithSuggestion.length ? `Approve ${tickedWithSuggestion.length} suggested` : `Approve all ${suggestible} suggestions`}
                     </Text>
                   </Press>
                 ) : null}
@@ -936,11 +1003,14 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                 <View style={[styles.tRow, styles.tHeadSoft, { alignItems: 'center' }]}>
                   {canManage ? (
                     <Press effect="none" disabled={!tickable.length} onPress={() => setTicked((prev) => { const n = new Set(prev); for (const r of tickable) { if (allTicked) n.delete(r.key); else n.add(r.key); } return n; })}
-                           accessibilityRole="checkbox" accessibilityState={{ checked: allTicked }} accessibilityLabel="Tick every suggestion in this category" style={styles.tickCell}>
+                           accessibilityRole="checkbox" accessibilityState={{ checked: allTicked }} accessibilityLabel="Tick every word shown" style={styles.tickCell}>
                       <View style={[styles.tick, allTicked && styles.tickOn, !tickable.length && { opacity: 0.3 }]}>{allTicked ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
                     </Press>
                   ) : null}
-                  <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Google's subcategory</Text></View>
+                  {/* The tick box and the name are a gap apart on the rows below;
+                      the header has to carry the same gap or it sits proud of the
+                      words (owner, 13 Sep 2026: "move it to the right about 2 mm"). */}
+                  <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }, canManage && { marginLeft: spacing.sm }]}><Text style={styles.colHead}>Google's subcategory</Text></View>
                   {/* The same columns as the category rows above, so Places sits under Places. */}
                   {wide ? <View style={{ width: COL }} /> : null}
                   {wide ? <View style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View> : null}
@@ -966,9 +1036,9 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                   <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
                     <View style={[{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, wide ? { flex: 1, minWidth: 0 } : null]}>
                     {canManage ? (
-                      <Press effect="none" disabled={decided(r) || !sug} onPress={() => tick(r.key, !ticked.has(r.key))}
+                      <Press effect="none" onPress={() => tick(r.key, !ticked.has(r.key))}
                              accessibilityRole="checkbox" accessibilityState={{ checked: ticked.has(r.key) }} accessibilityLabel={`Tick ${r.label ?? r.key}`} style={styles.tickCell}>
-                        <View style={[styles.tick, ticked.has(r.key) && styles.tickOn, (decided(r) || !sug) && { opacity: 0.3 }]}>{ticked.has(r.key) ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
+                        <View style={[styles.tick, ticked.has(r.key) && styles.tickOn]}>{ticked.has(r.key) ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
                       </Press>
                     ) : null}
                     <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
@@ -981,7 +1051,13 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                           !decided(r) && sug && !/^the obvious/.test(sug.why) ? sug.why : null,
                           st === 'mapped' && r.landing.how === 'taught' ? (r.landing.via?.by === 'Epic' ? 'mapped by Epic' : 'mapped by you') : st === 'mapped' ? 'mapped by the code' : null,
                         ].filter(Boolean);
-                        return bits.length ? <Text style={type.tiny} numberOfLines={1}>{bits.join(' · ')}</Text> : null;
+                        return (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
+                            {bits.length ? <Text style={type.tiny} numberOfLines={1}>{bits.join(' · ')}</Text> : null}
+                            {/* One live Google search, on a press. */}
+                            <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples'} onPress={() => { setEg(egKey === r.key ? '' : r.key); setWith(''); }} />
+                          </View>
+                        );
                       })()}
                     </View>
                     </View>
@@ -1023,6 +1099,45 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       </View>
                     )}
                   </View>
+                  {/* Real places carrying this word, so it can be looked at
+                      rather than guessed at (owner, 13 Sep 2026). */}
+                  {egKey === r.key ? (
+                    <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
+                      {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
+                      {!egBusy && eg?.problem ? <Text style={type.tiny}>Could not look: {eg.problem}</Text> : null}
+                      {!egBusy && eg && !eg.problem && !eg.places.length ? <Text style={type.tiny}>Google knows no place of this type near {eg.near}.</Text> : null}
+                      {!egBusy && eg && eg.places.length ? (
+                        <>
+                          <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.</Text>
+                          {eg.places.map((pl) => (
+                            <View key={pl.id} style={styles.egRow}>
+                              <View style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={type.small} numberOfLines={1}><Text style={{ fontWeight: '600' }}>{pl.name ?? pl.id}</Text></Text>
+                                <Text style={type.tiny} numberOfLines={1}>{[pl.address, pl.primaryType ? `Google leads with ${pl.primaryType.replace(/_/g, ' ')}` : null].filter(Boolean).join(' · ')}</Text>
+                              </View>
+                              {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
+                            </View>
+                          ))}
+                          {eg.alsoCalled.length ? (
+                            <View style={{ paddingTop: 6, gap: 2 }}>
+                              <Text style={styles.colHead}>Also called, on those places</Text>
+                              {eg.alsoCalled.map((w) => (
+                                <Text key={w.key} style={type.tiny} numberOfLines={1}>
+                                  <Text style={{ fontWeight: '600', color: colors.ink }}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
+                                  {` · on ${w.on} of ${eg.places.length} · `}
+                                  {w.decision === 'generic' ? 'just a label'
+                                    : w.decision === 'aside' ? 'excluded from Epic'
+                                    : w.decision === 'travel' ? 'travel'
+                                    : w.decision === 'nearby' ? 'useful nearby'
+                                    : w.landing.subcategory ? `${catLabel(w.landing.category)} · ${subLabel(w.landing.subcategory)}` : 'unmapped'}
+                                </Text>
+                              ))}
+                            </View>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </View>
+                  ) : null}
                   {/* What a generic word actually catches: the source's own
                       specific words seen on the same places, each mappable
                       from here (owner, 13 Sep 2026). */}
@@ -1230,6 +1345,7 @@ const styles = StyleSheet.create({
   // A word a generic one was seen with: inside the row above it, so it reads as
   // "what this catches" rather than as another subcategory of Google's.
   pairRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.lineSoft },
+  egRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 5, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.lineSoft },
 
   editor: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, backgroundColor: colors.surfaceMuted, marginVertical: spacing.sm, gap: 4 },
   tokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingVertical: 6 },

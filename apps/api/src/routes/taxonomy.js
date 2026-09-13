@@ -37,6 +37,9 @@ import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
 import { suggestFor, sureDecisionFor, sureMappingFor } from '../domain/googleSuggest.js';
+import { examplesOfType } from '../sources/google.js';
+import { currentHousehold } from './household.js';
+import * as visitsRepo from '../repositories/visits.js';
 import { SHELF_FLOOR } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
@@ -195,6 +198,65 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
     }));
     res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /examples?label=google:event_venue — a handful of real places.
+ *
+ * The owner, 13 Sep 2026: "there are 195 event venues… I need to be able to
+ * click through and see some examples because I have no idea what they are,
+ * where they fall into, and what I should be doing with them."
+ *
+ * One Google Text Search, fenced to that type and to a box round the
+ * household's home, answered with the names, the addresses and — the point of
+ * it — every other word Google puts on the same place, each said to be mapped
+ * or not. Nothing is stored. It costs one provider call, so it happens on a
+ * press and never on a page load.
+ */
+taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, next) => {
+  try {
+    await ready();
+    const label = String(req.query.label || '').trim();
+    const parsed = parseLabel(label);
+    if (!parsed) throw bad(`${label || '(nothing)'} is not a label`);
+    if (parsed.namespace !== 'google') throw bad('Examples come from Google, so only a Google word can be looked at.');
+    const household = await currentHousehold();
+    const center = household?.home_lat != null && household?.home_lng != null
+      ? { lat: Number(household.home_lat), lng: Number(household.home_lng) }
+      // Nowhere set yet: central London, which has one of most things.
+      : { lat: 51.5074, lng: -0.1278 };
+    const meter = {};
+    const out = await examplesOfType({ center, type: parsed.key, meter, limit: 12 });
+    if (Object.keys(meter).length) {
+      await visitsRepo.recordProviderCall(household?.id ?? null, 'google', 'admin.taxonomy.examples', meter).catch(() => null);
+    }
+    // Every word on those places, said with where it lands, so the answer to
+    // "what is an event venue?" is the company it keeps.
+    const [rules, tax, rows] = await Promise.all([shelfRules.rules(), taxonomy.taxonomy(), labelRepo.list({ namespace: 'google', limit: 2000 })]);
+    const byKey = new Map(rows.map((r) => [r.key, r]));
+    const seen = new Map();
+    for (const p of out.places) {
+      for (const t of p.types ?? []) {
+        if (t === parsed.key) continue;
+        seen.set(t, (seen.get(t) ?? 0) + 1);
+      }
+    }
+    const alsoCalled = [...seen.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 24)
+      .map(([key, on]) => {
+        const row = byKey.get(key);
+        return {
+          key, on, label: row?.label ?? null, decision: row?.decision ?? null,
+          landing: landingOf({ namespace: 'google', key }, rules, tax.vocab),
+        };
+      });
+    res.json({
+      label, near: household?.home_label ?? 'London', places: out.places,
+      alsoCalled, calls: out.calls, problem: out.problem,
+      subcategories: tax.subcategories, categories: tax.categories,
+    });
   } catch (err) { next(err); }
 });
 
