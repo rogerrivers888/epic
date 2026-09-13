@@ -290,3 +290,9 @@ export async function decideIdCheck(id, { state, note, by }, client) {
   }
   return rows[0] ?? null;
 }
+
+/** One check, read without locking it — the back office looking at an image. */
+export async function idCheckOf(id) {
+  const { rows } = await query('select * from open_id_checks where id = $1', [id]);
+  return rows[0] ?? null;
+}

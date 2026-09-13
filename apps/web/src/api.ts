@@ -1899,8 +1899,13 @@ export const api = {
   // What you are up for, and the introductions it leads to. Nothing here lists anybody.
   openHome: () => request<OpenHome>('/api/open'),
   openHeard: (transcript: string) => post<{ heard: OpenHeard; transcript: string }>('/api/open/heard', { transcript }),
-  saveOpen: (body: { scope: OpenScope; tripId?: string | null; interests: string[]; level?: string[]; when?: string[]; where?: string | null; miles?: number | null; languages?: OpenLanguage[]; kind?: OpenKind; childAgeBands?: string[]; transcript?: string | null }) =>
-    post<{ entry: OpenEntry; introduced: number }>('/api/open', body),
+  saveOpen: (body: {
+    scope: OpenScope; tripId?: string | null; interests: string[]; level?: string[]; when?: string[];
+    where?: string | null; miles?: number | null; languages?: OpenLanguage[]; kind?: OpenKind;
+    childAgeBands?: string[]; transcript?: string | null;
+    /** Who you would rather meet, when it was set on the way through and there was no entry to patch yet. */
+    age?: string; company?: string[]; fluency?: string;
+  }) => post<{ entry: OpenEntry; introduced: number; ended?: number }>('/api/open', body),
   openWho: (id: string, prefs: { age?: string; company?: string[]; fluency?: string; languages?: OpenLanguage[] }) =>
     request<{ entry: OpenEntry }>(`/api/open/${id}/who`, { method: 'PATCH', body: JSON.stringify(prefs) }),
   endOpen: (id: string) => request<void>(`/api/open/${id}`, { method: 'DELETE' }),
@@ -1975,6 +1980,20 @@ export const api = {
   adminHosting: () => request<AdminHosting>('/api/admin/hosting'),
   /** The one ID check in Casual meet ups (O9): the queue, and the decision. Nobody clears their own. */
   adminOpenChecks: () => request<{ checks: AdminIdCheck[] }>('/api/admin/open/checks'),
+  /**
+   * One of the two images, as a blob held only while the reviewer is looking.
+   * Never a URL opened in a tab: a passport does not belong in a browser's
+   * history, and this address is no-store for the same reason.
+   */
+  idCheckImage: async (path: string) => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}${path}`, {
+      credentials: 'include', cache: 'no-store',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('That image is no longer there.');
+    return URL.createObjectURL(await res.blob());
+  },
   decideIdCheck: (id: string, decision: 'pass' | 'fail', note: string | null) =>
     post<{ check: OpenIdCheck; stage: string | null }>(`/api/admin/open/checks/${id}/decide`, { decision, note }),
   adminMail: (days: number, status?: string | null) => request<AdminMail>(`/api/admin/mail?days=${days}${status ? `&status=${encodeURIComponent(status)}` : ''}`),

@@ -403,3 +403,40 @@ test('a match still reaches chat after its videos have been deleted', () => {
   // And before either has answered, a missing video is still a missing video.
   assert.equal(nextStage({ ...base, videos_deleted_at: null, host_video_yes: null, guest_video_yes: null }, {}), 'videos');
 });
+
+test('a no ends the match and the videos go with it, without waiting for an answer that is not coming', () => {
+  // The other side never answers an ended match, so waiting for their verdict
+  // before deleting would keep two faces on a disk for ever.
+  const m = {
+    host_verdict: 'yes', guest_verdict: 'yes',
+    host_video_id: 'a', guest_video_id: 'b',
+    host_video_yes: null, guest_video_yes: null, stage: 'videos',
+  };
+  assert.equal(nextStage(m, { hostVideoYes: false }), 'ended');
+  // And a yes on its own is not the end of anything: hers is still to come.
+  assert.equal(nextStage(m, { hostVideoYes: true }), 'videos');
+});
+
+test('saying it again is editing it: what no longer fits is let go of', async () => {
+  const { findIntroductions, withdrawUnfitting } = await import('../src/routes/openTo.js');
+  const local = await aHousehold(query, 'a local who plays chess and bowls');
+  const away = await aHousehold(query, 'a visitor who plays chess');
+  await query('update households set home_lat = 51.4543, home_lng = -0.9781 where id = $1', [local.household.id]);
+  const trip = (await query(
+    `insert into trips (household_id, title, origin_label, origin_lat, origin_lng, destination_label, destination_lat, destination_lng, depart_at, return_at, travel_mode, intensity, base_lat, base_lng)
+     values ($1, 'Reading', 'Lisbon', 38.72, -9.14, 'Reading', 51.4543, -0.9781, now(), now() + interval '3 days', 'walking', 'relaxed', 51.4543, -0.9781) returning *`,
+    [away.household.id],
+  )).rows[0];
+  const langs = JSON.stringify([{ name: 'English', level: 'fluent' }]);
+  const host = await repo.insertEntry(local.household.id, { scope: 'standing', interests: ['Chess club', 'Bowls'], languages: langs, whereMiles: 25 });
+  const guest = await repo.insertEntry(away.household.id, { scope: 'trip', tripId: trip.id, interests: ['Chess club'], languages: langs });
+  await findIntroductions(guest);
+  const ours = () => repo.matchesOf(local.household.id).then((rows) => rows.find((m) => m.guest_entry_id === guest.id));
+  assert.equal((await ours())?.stage, 'host_asked');
+
+  // He takes chess off. The chess introduction has to go with it — nothing in
+  // common is nothing in common, however it stopped being true.
+  await repo.updateEntry(host.id, { interests: ['Bowls'] });
+  assert.ok(await withdrawUnfitting(await repo.entryById(host.id)) >= 1);
+  assert.equal((await ours())?.stage, 'ended');
+});

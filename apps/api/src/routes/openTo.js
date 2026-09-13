@@ -168,9 +168,22 @@ router.post('/open', async (req, res, next) => {
       transcript: str(req.body?.transcript, 4000),
       reviewDueAt: lives.reviewDueAt, expiresAt: lives.expiresAt,
     };
+    // Who you would rather meet can be set on the way through, before there is
+    // an entry to patch. Age, company and language only, exactly as O11's own
+    // endpoint accepts them, and nothing else is read off this body.
+    if (req.body?.age !== undefined) fields.prefAge = oneOf(AGE_PREFS, req.body.age) ?? 'any';
+    if (req.body?.fluency !== undefined) fields.prefFluency = oneOf(FLUENCY, req.body.fluency) ?? 'some';
+    if (req.body?.company !== undefined) {
+      const picked = words(req.body.company, 5).map((c) => String(c).toLowerCase()).filter((c) => COMPANY.includes(c));
+      fields.prefCompany = picked.length ? picked : ['anyone'];
+    }
     const entry = existing ? await repo.updateEntry(existing.id, fields) : await repo.insertEntry(household.id, fields);
+    // Saying it again is editing it. Dropping "chess" has to take the chess
+    // introduction with it, before we go looking for new ones — the same rule
+    // the preferences editor follows (Codex, 13 Sep 2026).
+    const ended = existing ? await withdrawUnfitting(entry) : 0;
     const made = await findIntroductions(entry);
-    res.status(existing ? 200 : 201).json({ entry: entryPayload(entry), introduced: made });
+    res.status(existing ? 200 : 201).json({ entry: entryPayload(entry), introduced: made, ended });
   } catch (err) { next(err); }
 });
 
@@ -527,9 +540,13 @@ router.post('/open/matches/:id/decide', async (req, res, next) => {
       if (already != null) throw refuse(409, 'answered', 'You have already answered this one.');
       const patch = side === 'host' ? { hostVideoYes: yes } : { guestVideoYes: yes };
       const stage = nextStage(match, side === 'host' ? { hostVideoYes: yes } : { guestVideoYes: yes });
-      // The videos were for this decision. Once both have decided they go.
+      // The videos were for this decision, and the decision is over the moment
+      // it is settled either way. A no ends the match at once, and the other
+      // answer is never coming — so waiting for it would have kept two faces on
+      // a disk for ever (Codex, 13 Sep 2026).
       const both = (side === 'host' ? match.guest_video_yes : match.host_video_yes) != null;
-      return repo.updateMatch(match.id, { ...patch, stage, ...(both ? { videosDeletedAt: new Date() } : {}) }, client);
+      const done = both || stage === 'ended';
+      return repo.updateMatch(match.id, { ...patch, stage, ...(done ? { videosDeletedAt: new Date() } : {}) }, client);
     });
     const hostHousehold = (await repo.entryById(out.host_entry_id))?.household_id ?? null;
     const guestHousehold = (await repo.entryById(out.guest_entry_id))?.household_id ?? null;
@@ -625,10 +642,33 @@ adminRouter.get('/checks', requires('manage_hosting'), async (_req, res, next) =
       checks: rows.map((c) => ({
         id: c.id, matchId: c.match_id, side: c.side, household: c.household_name ?? null,
         kind: c.kind, interests: c.interests ?? [], submittedAt: c.submitted_at,
-        doc: c.doc_media_id ? `/api/media/${c.doc_media_id}` : null,
-        selfie: c.selfie_media_id ? `/api/media/${c.selfie_media_id}` : null,
+        // Our own address, not /api/media: that one is public and caches for a
+        // year, which is no way to hand round a passport (Codex, 13 Sep 2026).
+        doc: c.doc_media_id ? `/api/admin/open/checks/${c.id}/doc` : null,
+        selfie: c.selfie_media_id ? `/api/admin/open/checks/${c.id}/selfie` : null,
       })),
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * One of the two images, for somebody who may decide it and nobody else. Never
+ * cached: the row is deleted the moment it is decided, and a copy left in a
+ * browser would outlive the thing it was kept for.
+ */
+adminRouter.get('/checks/:id/:which', requires('manage_hosting'), async (req, res, next) => {
+  try {
+    const which = oneOf(['doc', 'selfie'], req.params.which);
+    if (!which) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const check = await repo.idCheckOf(req.params.id);
+    const mediaId = check && (which === 'doc' ? check.doc_media_id : check.selfie_media_id);
+    if (!mediaId) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    const media = await hostRepo.mediaById(mediaId);
+    if (!media) throw refuse(404, 'not_found', 'There is nothing at that address.');
+    res.setHeader('content-type', media.mime);
+    res.setHeader('cache-control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('content-length', media.size);
+    res.end(media.bytes);
   } catch (err) { next(err); }
 });
 

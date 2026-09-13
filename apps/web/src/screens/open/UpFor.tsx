@@ -14,7 +14,7 @@
  * and the copy differ.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, OpenEntry, OpenHome, OpenLanguage, Trip } from '../../api';
@@ -32,7 +32,15 @@ import {
 const TOP = (Platform.OS === 'web' ? 'max(8px, var(--epic-sat))' : 8) as any;
 /** What was heard, held between the listening and the chips. Nothing is saved until it is confirmed. */
 const DRAFT = 'epic.open.heard';
-type Draft = { interests: string[]; level: string[]; when: string[]; languages: string[]; transcript: string };
+type DraftPrefs = { age: 'any' | 'similar'; company: string[]; fluency: 'fluent' | 'some' };
+/**
+ * What was heard, plus anything changed about it before it is saved. The
+ * preferences live here too: "Who you would rather meet" can be opened from
+ * the confirmation, which is *before* there is an entry to patch, and a
+ * screenful of choices that silently vanished on Save was not a choice at all
+ * (Codex, 13 Sep 2026).
+ */
+type Draft = { interests: string[]; level: string[]; when: string[]; languages: string[]; transcript: string; prefs?: DraftPrefs };
 const loadDraft = (): Draft | null => { try { const v = sessionStorage.getItem(DRAFT); return v ? JSON.parse(v) : null; } catch { return null; } };
 const saveDraft = (d: Draft | null) => { try { if (d) sessionStorage.setItem(DRAFT, JSON.stringify(d)); else sessionStorage.removeItem(DRAFT); } catch { /* a private window */ } };
 
@@ -314,7 +322,9 @@ export function HeardScreen({ tripId }: { tripId: string | null }) {
   const languages: OpenLanguage[] = draft?.languages.length
     ? draft.languages.map((n) => ({ name: n, level: 'fluent' as const }))
     : entry?.languages.length ? entry.languages : home?.you.languages ?? [];
-  const prefs = entry?.prefs ?? { age: 'any' as const, company: ['anyone'], fluency: 'some' as const };
+  // What is shown here is what Save sends: the draft's if it was changed on
+  // the way through, else the entry's, else the defaults.
+  const prefs: DraftPrefs = draft?.prefs ?? entry?.prefs ?? { age: 'any', company: ['anyone'], fluency: 'some' };
   const whoChips = [tripId ? 'Locals' : 'Visitors', prefs.age === 'similar' ? 'A similar age' : 'Any age', ...(prefs.company.includes('anyone') ? ['Anyone'] : prefs.company.map((c) => c[0].toUpperCase() + c.slice(1)))];
 
   const drop = (from: 'interests' | 'level', word: string) => setDraft((d) => (d ? { ...d, [from]: d[from].filter((x) => x !== word) } : d));
@@ -327,6 +337,7 @@ export function HeardScreen({ tripId }: { tripId: string | null }) {
         scope: tripId ? 'trip' : 'standing', tripId, interests, level, when,
         where: where[0] ?? null, miles: home?.you.miles ?? null, languages,
         transcript: draft?.transcript ?? null,
+        age: prefs.age, company: prefs.company, fluency: prefs.fluency,
       });
       saveDraft(null);
       navigate(tripId ? paths.openTripCard(tripId) : paths.openSaved(), { replace: true });
@@ -486,7 +497,18 @@ export function WhoScreen({ tripId }: { tripId: string | null }) {
   const [age, setAge] = useState<'any' | 'similar'>('any');
   const [company, setCompany] = useState<string[]>(['anyone']);
   const [fluency, setFluency] = useState<'fluent' | 'some'>('some');
-  useEffect(() => { if (entry) { setAge(entry.prefs.age); setCompany(entry.prefs.company.length ? entry.prefs.company : ['anyone']); setFluency(entry.prefs.fluency); } }, [entry?.id]);
+  // Opened from the confirmation there is no entry yet, so the draft holds it.
+  const draft = loadDraft();
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    const held = entry?.prefs ?? draft?.prefs ?? null;
+    if (!held) return;
+    started.current = true;
+    setAge(held.age as 'any' | 'similar');
+    setCompany(held.company.length ? held.company : ['anyone']);
+    setFluency(held.fluency as 'fluent' | 'some');
+  }, [entry?.id, draft?.prefs]);
 
   const speaks = entry?.languages ?? [];
   const first = speaks[0]?.name ?? 'English';
@@ -502,7 +524,14 @@ export function WhoScreen({ tripId }: { tripId: string | null }) {
   const cannot = company.filter((c) => c === 'women' || c === 'men');
 
   const save = async () => {
-    if (!entry) { back(paths.openHeard(tripId)); return; }
+    // No entry yet means this was opened on the way through the intake: hold it
+    // in the draft, and the Save on the confirmation sends it with the rest.
+    if (!entry) {
+      const held = loadDraft();
+      if (held) saveDraft({ ...held, prefs: { age, company, fluency } });
+      back(paths.openHeard(tripId));
+      return;
+    }
     setBusy(true);
     try { await api.openWho(entry.id, { age, company, fluency }); back(tripId ? paths.openTripCard(tripId) : paths.openHeard(tripId)); }
     catch (e: any) { setSaid(e.message); } finally { setBusy(false); }

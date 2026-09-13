@@ -17,14 +17,14 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, AdminHosting, AdminIdCheck, TrustLevel } from '../../api';
 import { colors, fonts, spacing, type, BORDER, TARGET } from '../../theme';
 import { Button, Row, Segmented, StatusLine } from '../../components/ui';
 import { AdminPage, Banner, PageHead, Panel, Pill, Tile, TileRow, ago } from '../kit';
 import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
-import { SHAPE_LABEL, TRUST_LABEL, TYPE_LABEL, VENUE_LABEL, mediaUrl, metaLine, money, priceWords } from '../../components/hosting';
+import { SHAPE_LABEL, TRUST_LABEL, TYPE_LABEL, VENUE_LABEL, metaLine, money, priceWords } from '../../components/hosting';
 
 const CHECKS = [
   { key: 'what', label: 'What you will actually do' }, { key: 'home', label: 'What they go home with' }, { key: 'suits', label: 'Who it suits' }, { key: 'notSuits', label: 'Who it does not suit' }, { key: 'photos', label: 'Photos' },
@@ -157,6 +157,30 @@ export function Hosting({ canManage }: { canManage: boolean }) {
 }
 
 /**
+ * One of the two images, shown here and nowhere else. Fetched with the session
+ * and held as a blob that is revoked on the way out, so a passport never
+ * becomes a URL in somebody's history or a file in a browser cache.
+ */
+function IdImage({ path, label, onError }: { path: string | null; label: string; onError: (e: string) => void }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!path) return;
+    let url: string | null = null;
+    let on = true;
+    api.idCheckImage(path).then((u) => { url = u; if (on) setSrc(u); else URL.revokeObjectURL(u); }).catch((e) => onError(e.message));
+    return () => { on = false; if (url) URL.revokeObjectURL(url); };
+  }, [path, onError]);
+  return (
+    <View style={{ gap: 4 }}>
+      <Text style={styles.label}>{label}</Text>
+      {src
+        ? <Image source={{ uri: src }} style={{ width: 150, height: 105, backgroundColor: colors.warm }} resizeMode="contain" />
+        : <View style={{ width: 150, height: 105, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' }}><Text style={type.tiny}>{path ? 'Opening…' : 'Not sent'}</Text></View>}
+    </View>
+  );
+}
+
+/**
  * The one ID check in Casual meet ups (O9). Two people have said yes to each
  * other and neither can go further until somebody here has looked. Nobody
  * clears their own, which is what makes it a gate — and the two images go the
@@ -188,9 +212,9 @@ function IdChecks({ canManage, onError }: { canManage: boolean; onError: (e: str
             <Text style={type.tiny}>{ago(c.submittedAt)}</Text>
           </Row>
           <Text style={type.small}>{c.interests.join(' · ') || 'Introduced by Epic'}</Text>
-          <Row style={{ gap: spacing.md, marginTop: spacing.sm, flexWrap: 'wrap' }}>
-            {c.doc ? <Press onPress={() => Linking.openURL(mediaUrl(c.doc) ?? '')} accessibilityRole="button"><Text style={[type.body, { fontWeight: '700', color: colors.accent }]}>The ID ›</Text></Press> : <Text style={type.tiny}>No ID sent</Text>}
-            {c.selfie ? <Press onPress={() => Linking.openURL(mediaUrl(c.selfie) ?? '')} accessibilityRole="button"><Text style={[type.body, { fontWeight: '700', color: colors.accent }]}>The selfie ›</Text></Press> : <Text style={type.tiny}>No selfie sent</Text>}
+          <Row style={{ gap: spacing.md, marginTop: spacing.sm, alignItems: 'flex-start' }}>
+            <IdImage path={c.doc} label="The ID" onError={onError} />
+            <IdImage path={c.selfie} label="The selfie" onError={onError} />
           </Row>
           {canManage ? (
             <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
