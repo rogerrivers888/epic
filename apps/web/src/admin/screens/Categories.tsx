@@ -721,7 +721,12 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
    * places. Adventure Sports Centre: I don't know what that is"). One live
    * provider call, so it is asked for on a press and never on a page load.
    */
-  const [egKey, setEg] = useQueryState<string>('eg', '', asText);
+  // Deliberately *not* in the address. Every other layer of this screen is
+  // (routes.ts is the rule), but opening this one spends a Google call, and a
+  // refreshed tab, a shared link or a Back would spend another without anybody
+  // pressing anything (Codex, 13 Sep 2026). Nothing here is stored, so there is
+  // nothing at that address to share either.
+  const [egKey, setEg] = useState('');
   const [eg, setEgData] = useState<TaxonomyExamples | null>(null);
   const [egBusy, setEgBusy] = useState(false);
   const wantedEg = useRef('');
@@ -906,7 +911,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md }]}>
         <View style={[styles.tabs, { width: wide ? 360 : '100%' }]}>
           {([['mapped', 'Mapped'], ['unmapped', 'Unmapped'], ['all', 'All']] as const).map(([v, l], i) => (
-            <Press key={v} effect="none" onPress={() => { setTab(v); setGroup('-'); }} accessibilityRole="button" accessibilityState={{ selected: tab === v }}
+            <Press key={v} effect="none" onPress={() => { setTab(v); setGroup('-'); setTicked(new Set()); }} accessibilityRole="button" accessibilityState={{ selected: tab === v }}
                    style={[styles.tabItem, i > 0 && styles.tabDivider, tab === v && styles.tabOn]}>
               <Text style={[type.small, { fontWeight: '700', color: tab === v ? colors.selectedFg : colors.inkMuted }]}>{l}</Text>
             </Press>
@@ -942,7 +947,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
         const tickedWithSuggestion = tickedHere.filter((r) => !decided(r) && r.suggestion);
         return (
           <View key={g.key} style={on && openKey ? { zIndex: 40 } : undefined}>
-          <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
+          {/* Opening another category clears the ticks: they mean "these rows,
+              here", and a bulk apply must never quietly skip ones out of sight
+              (Codex, 13 Sep 2026). */}
+          <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); setTicked(new Set()); setEg(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
               {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
@@ -1054,8 +1062,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                         return (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
                             {bits.length ? <Text style={type.tiny} numberOfLines={1}>{bits.join(' · ')}</Text> : null}
-                            {/* One live Google search, on a press. */}
-                            <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples'} onPress={() => { setEg(egKey === r.key ? '' : r.key); setWith(''); }} />
+                            {/* One live Google search, on a press — and the endpoint
+                                asks for manage_library, so a read-only admin is not
+                                offered a button that can only 403 (Codex, 13 Sep 2026). */}
+                            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples'} onPress={() => { setEg(egKey === r.key ? '' : r.key); setWith(''); }} /> : null}
                           </View>
                         );
                       })()}

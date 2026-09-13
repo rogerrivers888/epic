@@ -18,6 +18,8 @@ import { stampPhotos } from './photoLinks.js';
 //   • Attribution: "Google" must be shown wherever these results appear.
 //   • The key never leaves the server; photos are proxied (/api/photos/google).
 
+import { GOOGLE_TYPES } from './googleTypes.js';
+
 const KEY = () => process.env.GOOGLE_MAPS_API_KEY?.trim();
 const PLACES = 'https://places.googleapis.com/v1';
 export const GOOGLE_ATTRIBUTION = 'Powered by Google';
@@ -628,12 +630,17 @@ export const googleSource = {
  * are read on the screen and dropped, like every other licensed fact in the
  * back office (Technical Constraints §4).
  */
+const SEARCHABLE_TYPES = new Set(GOOGLE_TYPES.map((t) => t.type));
 const EXAMPLE_FIELDS = [
   'places.id', 'places.displayName', 'places.formattedAddress',
   'places.types', 'places.primaryType', 'places.googleMapsUri', 'places.websiteUri',
 ].join(',');
 
 export async function examplesOfType({ center, radiusKm = 40, type, words = null, meter = null, limit = 12 } = {}) {
+  // `includedType` takes a Table A value and nothing else: a word Google only
+  // ever *returns* — `establishment`, `point_of_interest`, `food` — is a 400,
+  // not a filter. Those are asked for in words instead (Codex, 13 Sep 2026).
+  const searchable = SEARCHABLE_TYPES.has(String(type));
   if (!KEY()) return { places: [], calls: 0, problem: 'no Google key' };
   if (!type || !center || center.lat == null) return { places: [], calls: 0, problem: 'no type or no area' };
   const km = Math.min(radiusKm, 50);
@@ -642,7 +649,7 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
   const body = {
     textQuery: words || String(type).replace(/_/g, ' '),
     pageSize: Math.min(20, Math.max(1, limit)),
-    includedType: type,
+    ...(searchable ? { includedType: type } : {}),
     languageCode: 'en-GB',
     locationRestriction: {
       rectangle: {

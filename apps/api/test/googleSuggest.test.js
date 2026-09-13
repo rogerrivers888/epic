@@ -101,3 +101,24 @@ test('a word that spans our categories is a label, never a mapping', () => {
   assert.equal(suggestFor('museum', 'Culture', DRAWERS).subcategory, 'museums');
   assert.equal(suggestFor('museum', 'Culture', DRAWERS).generic, undefined);
 });
+
+test('a word is read from what it actually holds, not from what it sounds like', () => {
+  // Looked at through /examples on 13 Sep 2026: event venues are rooms you hire
+  // (Landing Forty Two, Avenue Conference & Events), dance halls are classes and
+  // studios, and an adventure sports centre is as often an indoor activity arena
+  // as a high-ropes course. All three used to be suggested a drawer they do not
+  // belong in.
+  assert.equal(suggestFor('event_venue', 'Entertainment and Recreation', DRAWERS).subcategory, undefined);
+  assert.equal(suggestFor('event_venue', 'Entertainment and Recreation', DRAWERS).aside, true);
+  assert.equal(suggestFor('dance_hall', 'Entertainment and Recreation', DRAWERS).aside, true);
+  assert.equal(suggestFor('adventure_sports_center', 'Entertainment and Recreation', DRAWERS), null);
+  // But none of the three is decided without him: they are all in UNSURE.
+  assert.equal(sureDecisionFor('event_venue', 'Entertainment and Recreation'), null);
+  assert.equal(sureDecisionFor('dance_hall', 'Entertainment and Recreation'), null);
+  // A genuine gig venue is still mapped by its own word.
+  const GIGS = [...DRAWERS, 'live-music', 'theatre'];
+  assert.equal(suggestFor('live_music_venue', 'Entertainment and Recreation', GIGS).subcategory, 'live-music');
+  assert.equal(suggestFor('concert_hall', 'Entertainment and Recreation', GIGS).subcategory, 'theatre');
+  // And a whole aside group is still decided without asking.
+  assert.equal(sureDecisionFor('car_wash', 'Automotive'), 'aside');
+});

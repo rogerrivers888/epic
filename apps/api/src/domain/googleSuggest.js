@@ -23,10 +23,10 @@ import { NOT_A_CUISINE } from '../sources/google.js';
 /** Google type → our subcategory key. */
 const TO_SUBCATEGORY = {
   // Entertainment and Recreation
-  adventure_sports_center: 'ropes', amphitheatre: 'theatre', amusement_center: 'cinema-bowling', amusement_park: 'theme-parks',
+  amphitheatre: 'theatre', amusement_center: 'cinema-bowling', amusement_park: 'theme-parks',
   aquarium: 'zoos-wildlife', barbecue_area: 'parks', botanical_garden: 'gardens', bowling_alley: 'cinema-bowling',
   city_park: 'parks', comedy_club: 'live-music', concert_hall: 'theatre', cultural_center: 'galleries', cycling_park: 'cycling', go_karting_venue: 'karting',
-  dance_hall: 'live-music', dog_park: 'parks', event_venue: 'live-music', ferris_wheel: 'theme-parks', garden: 'gardens',
+  dog_park: 'parks', ferris_wheel: 'theme-parks', garden: 'gardens',
   hiking_area: 'trails', historical_landmark: 'landmarks', indoor_playground: 'play', karaoke: 'live-music',
   live_music_venue: 'live-music', marina: 'paddling', miniature_golf_course: 'days-out', movie_theater: 'cinema-bowling',
   national_park: 'nature', night_club: 'pubs-bars', observation_deck: 'viewpoints', off_roading_area: 'off-road',
@@ -121,8 +121,20 @@ export const GENERIC_TYPES = new Set([
 /** Google's groups that are never a day out: every type in them is suggested aside. */
 const ASIDE_GROUPS = new Set(['Automotive', 'Business', 'Education', 'Facilities', 'Finance', 'Geographical Areas', 'Government', 'Housing', 'Lodging', 'Services', 'Transportation']);
 
+/**
+ * Why a word is suggested aside, where the general reason would not explain it.
+ * Looked at on 13 Sep 2026 through `/examples`, which is the only honest way
+ * to know what one of Google's words actually holds.
+ */
+const ASIDE_WHY = {
+  event_venue: 'a room you hire for your own event — the real gig venues carry live music venue or concert hall as well',
+  dance_hall: 'dance classes and studios, not somewhere you can turn up and join in',
+};
+
 /** Types in a day-out group that are still not a day out. */
 const ASIDE_TYPES = new Set([
+  // Hire space and classes, looked at one by one (owner, 13 Sep 2026).
+  'event_venue', 'dance_hall',
   'banquet_hall', 'casino', 'childrens_camp', 'community_center', 'convention_center', 'internet_cafe', 'movie_rental', 'plaza',
   'wedding_venue', 'sports_coaching', 'sports_school', 'art_studio',
   'chiropractor', 'dental_clinic', 'dentist', 'doctor', 'drugstore', 'general_hospital', 'hospital', 'massage', 'medical_center', 'medical_clinic',
@@ -153,7 +165,7 @@ export function suggestFor(type, group, subcategoryKeys) {
   // A steakhouse and a bar and grill are restaurants with a cuisine of their own.
   if (type === 'steak_house') return has('restaurants') ? { subcategory: 'restaurants', cuisine: 'steakhouse', why: 'a restaurant; steakhouse is kept as its cuisine' } : null;
   if (type === 'bar_and_grill') return has('restaurants') ? { subcategory: 'restaurants', cuisine: 'bar and grill', why: 'a restaurant; bar and grill is kept as its cuisine' } : null;
-  if (ASIDE_TYPES.has(type)) return { aside: true, why: 'not somewhere a family goes for the day' };
+  if (ASIDE_TYPES.has(type)) return { aside: true, why: ASIDE_WHY[type] ?? 'not somewhere a family goes for the day' };
   if (ASIDE_GROUPS.has(group)) return { aside: true, why: `Google files it under ${group}` };
   if (/_restaurant$/.test(type)) {
     if (!has('restaurants')) return null;
@@ -202,6 +214,10 @@ export function sureMappingFor(type, group, subcategoryKeys) {
  * that is his to approve.
  */
 export function sureDecisionFor(type, group) {
+  // `UNSURE` means "ask him", and that has to hold for a set-aside as much as
+  // for a mapping: an event venue is *probably* a room somebody hires, and
+  // probably is not sure (owner, 13 Sep 2026).
+  if (UNSURE.has(type)) return null;
   if (GENERIC_TYPES.has(type)) return 'generic';
   if (TRAVEL_TYPES.has(type)) return 'travel';
   if (NEARBY_TYPES.has(type)) return 'nearby';
