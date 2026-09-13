@@ -164,9 +164,16 @@ test('Epic\'s own one-word rules never out-vote Google\'s reading of a food plac
   const kfc = { source: 'google', sourcePlaceId: 'kfc', category: 'takeaway', styles: ['fast-food', 'takeaway'], experiences: [],
     labels: ['google:fast_food_restaurant', 'google:chicken_wings_restaurant', 'google:restaurant'] };
   assert.equal(shelvesForVenue(kfc, rules, VOCAB2).subcategory, 'fast-food');
-  // A rule the owner wrote does override the short-cut, as before.
+  // A rule the owner wrote does override the short-cut, as before — and it
+  // beats Epic's rule on the primary type too, because Epic's are left out of
+  // the level whenever an owner rule fires.
   const own = rulesOf({ scope: 'labels', labels: ['google:chicken_wings_restaurant'], subcategory: 'restaurants', weights: {}, taught_by: 'roger' });
   assert.equal(shelvesForVenue(kfc, own, VOCAB2).subcategory, 'restaurants');
+  const both = rulesOf(
+    { scope: 'labels', labels: ['google:fast_food_restaurant'], subcategory: 'fast-food', weights: {}, taught_by: 'Epic' },
+    { scope: 'labels', labels: ['google:chicken_wings_restaurant'], subcategory: 'restaurants', weights: {}, taught_by: 'roger' },
+  );
+  assert.equal(shelvesForVenue(kfc, both, VOCAB2).subcategory, 'restaurants');
   // Among equal rules, the one about the label the place leads with wins.
   const hits = labelHits(rules.labels, ['google:fast_food_restaurant', 'google:chicken_wings_restaurant']);
   assert.equal(hits[0], 'google:fast_food_restaurant');

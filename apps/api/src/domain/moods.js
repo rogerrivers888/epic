@@ -406,7 +406,13 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   // The label rules that fire for this place: a provider's own word, or several
   // words at once. Narrower than an experience, broader than the one place.
   const hits = labelHits(rules?.labels, labelsOf(venue));
-  const chain = [['place', [ref]], ['labels', hits], ['experience', venue?.experiences ?? []]];
+  // A rule the owner wrote beats every rule Epic wrote for itself: where any
+  // owner rule fires, Epic's are left out of the level altogether, so the
+  // owner's word cannot be out-voted by Epic's on the primary type (Codex,
+  // 13 Sep 2026).
+  const owned = hits.filter((s) => rules?.labels?.get(s)?.taught_by !== 'Epic');
+  const level = owned.length ? owned : hits;
+  const chain = [['place', [ref]], ['labels', level], ['experience', venue?.experiences ?? []]];
 
   // Somewhere to eat is Food unless somebody has said otherwise about this
   // place or about its labels — an ice-cream parlour typed as a cafe can be
@@ -415,7 +421,6 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   // Google word goes on its own, and google.js has already read the whole set
   // of a food place's types with its primary-type and fast-food rules; those
   // must not be out-voted by one of the words (Codex, 13 Sep 2026).
-  const owned = hits.filter((s) => rules?.labels?.get(s)?.taught_by !== 'Epic');
   if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['labels', owned]])) {
     const weights = { food: 1 };
     const fast = (venue?.styles ?? []).some((s) => s === 'fast-food' || s === 'takeaway');
