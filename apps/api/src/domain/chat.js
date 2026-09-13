@@ -437,3 +437,31 @@ export function reachWords(kind, count, { hostName, contextType }) {
   if (kind === 'host_only') return `A private message to ${hostName ?? 'the organiser'}. Nobody else sees it.`;
   return people;
 }
+
+// ---------------------------------------------------------------------------
+// the shape the trip rebuild's bundle still reads
+// ---------------------------------------------------------------------------
+
+/**
+ * A topic list as the flat river the old `/api/trips/:id/chat` answered with:
+ * `messages` oldest first, each a question as one bubble with its stop
+ * pointer. A bundle a phone is still holding reads `data.messages` and
+ * `data.people`, and a backend that rolled out first must not blank it
+ * (Codex, 13 Sep 2026). The new fields ride alongside; nothing is taken away.
+ */
+export function legacyMessages(topics) {
+  return [...topics]
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+    .map((t) => ({
+      id: t.id, body: t.body ? `${t.title}\n\n${t.body}` : t.title, at: t.at, mine: Boolean(t.mine),
+      author: { name: t.author.name, guest: t.author.guest, initial: t.author.initial, memberId: t.author.memberId, guestId: t.author.guestId },
+      onStop: t.tag?.kind === 'stop' ? { venueRef: t.tag.ref, label: t.tag.label ?? null } : null,
+      seenBy: t.seenBy ?? 0,
+    }));
+}
+
+export function legacyPeople(context) {
+  const members = (context?.people?.members ?? []).map((m) => ({ id: m.id, name: m.name, isMinor: false, avatarUrl: m.avatarUrl ?? null }));
+  const guests = (context?.people?.guests ?? []).map((g) => ({ id: g.id, name: g.name, contact: null, contactKind: null, status: 'joined', joinedAt: null }));
+  return { members, guests, count: members.length + guests.length };
+}

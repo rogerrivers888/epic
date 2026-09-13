@@ -32,7 +32,7 @@ import { tell } from '../sources/chatNotify.js';
 import { seriesDates, ymd } from '../domain/hosting.js';
 import {
   AUDIENCES, DEFAULT_PREFS, OFFER_ASPECTS, QUICK_REACTIONS, COMMON_REACTIONS, SHOWING, SUGGEST_PUBLISH_AT, TAG_KINDS, TRIP_ANCHORS,
-  askCount, authorOf, canSee, isNearDuplicate, matchesShowing, menuFor, mentionsIn, normaliseQuestion, notificationText,
+  askCount, authorOf, canSee, isNearDuplicate, legacyMessages, legacyPeople, matchesShowing, menuFor, mentionsIn, normaliseQuestion, notificationText,
   rateLimited, samePerson, whoIsTold,
 } from '../domain/chat.js';
 
@@ -114,8 +114,16 @@ export async function offerContext(offer, me, { household } = {}) {
     isHost: Boolean(r.is_host), occurrences: r.occurrences ?? [], bookedAt: r.booked_at,
   }));
   const hostMember = people.find((p) => p.isHost) ?? null;
-  const mine = me ? people.find((p) => p.memberId === me.memberId) : null;
   const isHost = Boolean(me && host && household && host.household_id === household.id);
+  /**
+   * Somebody asking from the listing before booking (C7) is in the
+   * conversation too — theirs, privately, with the host — so a reply or an
+   * answer reaches them. They are not counted as booked (Codex, 13 Sep 2026).
+   */
+  if (me && !isHost && !people.some((p) => p.memberId === me.memberId)) {
+    people.push({ memberId: me.memberId, guestId: null, name: me.name, avatarUrl: null, householdId: me.householdId ?? null, isHost: false, occurrences: [], bookedAt: null, unbooked: true });
+  }
+  const mine = me ? people.find((p) => p.memberId === me.memberId) : null;
   const meRow = me ? {
     ...me, isHost, contextType: 'offer',
     booked: isHost || Boolean(mine && mine.occurrences.length),
@@ -130,7 +138,7 @@ export async function offerContext(offer, me, { household } = {}) {
   } else if (offer.shape === 'oneoff' && offer.starts_on) {
     more.push({ kind: 'offer_aspect', ref: `date:${ymd(offer.starts_on)}`, label: fmtDate(offer.starts_on), date: ymd(offer.starts_on) });
   }
-  const booked = people.filter((p) => !p.isHost);
+  const booked = people.filter((p) => !p.isHost && !p.unbooked);
   return {
     type: 'offer', id: offer.id, name: offer.title || 'this', dates: offer.starts_on ? { start: ymd(offer.starts_on), end: ymd(offer.starts_on) } : null,
     host: host ? { id: hostMember?.memberId ?? null, hostId: host.id, name: host.name, role: 'host' } : null,
@@ -186,8 +194,9 @@ const tagOf = (t, ctx) => {
 /** "of 12": how many people a topic could reach. */
 function audienceCount(t, ctx) {
   if (t.audience === 'host_only') return 2;
-  if (ctx.type === 'offer' && t.occurrence) return ctx.people.filter((p) => p.isHost || (p.occurrences ?? []).includes(t.occurrence)).length;
-  return ctx.people.length;
+  const people = ctx.people.filter((p) => !p.unbooked);
+  if (ctx.type === 'offer' && t.occurrence) return people.filter((p) => p.isHost || (p.occurrences ?? []).includes(t.occurrence)).length;
+  return people.length;
 }
 
 const groupReactions = (rows, me) => {
@@ -245,8 +254,8 @@ function publicContext(ctx) {
       answer: Boolean(me?.isHost),
     },
     people: {
-      count: ctx.people.length,
-      members: ctx.people.filter((p) => p.memberId).map((p) => ({ id: p.memberId, name: p.name, avatarUrl: p.avatarUrl ?? null, isHost: p.isHost })),
+      count: ctx.people.filter((p) => !p.unbooked).length,
+      members: ctx.people.filter((p) => p.memberId && !p.unbooked).map((p) => ({ id: p.memberId, name: p.name, avatarUrl: p.avatarUrl ?? null, isHost: p.isHost })),
       guests: ctx.people.filter((p) => p.guestId).map((p) => ({ id: p.guestId, name: p.name })),
     },
     anchors: {
@@ -309,6 +318,13 @@ export async function listPayload(ctx) {
   }
   return out;
 }
+
+/**
+ * The list with the flat river the trip rebuild's bundle still reads
+ * (`messages`, `people`) riding alongside. For the addresses that predate the
+ * topic model; the new ones do not carry it.
+ */
+export const withLegacy = (list) => ({ ...list, messages: legacyMessages(list.topics), people: legacyPeople(list.context) });
 
 const pickPrefs = (p) => ({ started: p.started, anchors: p.anchors, from_host: p.from_host, every_topic: p.every_topic, mentions: p.mentions, digest: p.digest });
 
@@ -502,11 +518,15 @@ export async function markAnswer(ctx, topicId, body) {
     const r = await chat.replyById(replyId);
     if (!r || r.topic_id !== t.id) throw refuse(404, 'reply_not_found', 'That reply is not on this question.');
   }
-  const updated = await chat.setAnswer(t.id, replyId);
-  let faq = null;
-  if (replyId && body?.publish === 'faq') {
+  // Everything that can refuse does so before anything is written (Codex, 13 Sep 2026).
+  const toFaq = Boolean(replyId && body?.publish === 'faq');
+  if (toFaq) {
     if (ctx.type !== 'offer') throw refuse(400, 'no_faq', 'A trip has no FAQ.');
     if (t.audience === 'host_only') throw refuse(400, 'private', 'A private answer goes in the FAQ only if the asker says so — ask them from your reply.');
+  }
+  const updated = await chat.setAnswer(t.id, replyId);
+  let faq = null;
+  if (toFaq) {
     const r = await chat.replyById(replyId);
     const others = (await chat.topicsOf('offer', ctx.id)).map((x) => x.title);
     faq = await chat.insertFaq({

@@ -23,7 +23,7 @@ const { query } = await testDatabase();
 const repo = await import('../src/repositories/chat.js');
 const {
   aboutOptions, askCount, canSee, filterTopics, headerLine, inQuietHours, isDayOf, isNearDuplicate, matchesShowing, menuFor, mentionsIn,
-  normaliseQuestion, rateLimited, showingCounts, whoIsTold,
+  normaliseQuestion, rateLimited, showingCounts, whoIsTold, legacyMessages, legacyPeople,
 } = await import('../src/domain/chat.js');
 
 const sam = { memberId: 'sam', guestId: null, name: 'Sam Rivers', isHost: true, contextType: 'trip' };
@@ -309,4 +309,20 @@ test('preferences default to the design and a digest can be asked for', async ()
   assert.equal(due.some((n) => n.id === held.id), true);
   await repo.markNotified([held.id], 'none');
   assert.equal((await repo.dueNotifications()).some((n) => n.id === held.id), false);
+});
+
+test('the old addresses still answer with the flat river a phone may be holding', () => {
+  const topics = [
+    { id: 'b', title: 'Later', body: null, at: '2026-10-02T10:00:00Z', mine: false, author: { name: 'Jon Lee', guest: false, initial: 'J', memberId: 'jon', guestId: null }, tag: { kind: 'trip', ref: 'trip', label: 'The whole trip' }, seenBy: 2 },
+    { id: 'a', title: 'Is the crater walk alright?', body: 'For a nine-year-old.', at: '2026-10-01T10:00:00Z', mine: true, author: { name: 'Priya', guest: true, initial: 'P', memberId: null, guestId: 'priya' }, tag: { kind: 'stop', ref: 'osm:node/1', label: 'Etna' }, seenBy: 4 },
+  ];
+  const m = legacyMessages(topics);
+  assert.deepEqual(m.map((x) => x.id), ['a', 'b'], 'oldest first, as the river was');
+  assert.equal(m[0].body, 'Is the crater walk alright?\n\nFor a nine-year-old.');
+  assert.deepEqual(m[0].onStop, { venueRef: 'osm:node/1', label: 'Etna' });
+  assert.equal(m[1].onStop, null);
+  assert.equal(m[0].author.guest, true);
+  const p = legacyPeople({ people: { members: [{ id: 'jon', name: 'Jon Lee', avatarUrl: null, isHost: true }], guests: [{ id: 'priya', name: 'Priya' }] } });
+  assert.equal(p.count, 2);
+  assert.equal(p.guests[0].contact, null, 'a contact is never in the river');
 });
