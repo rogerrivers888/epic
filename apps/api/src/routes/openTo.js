@@ -53,14 +53,23 @@ const townCache = new Map();
 async function townFor({ typed, lat, lng }) {
   const fromText = townOf(typed);
   if (lat == null || lng == null) return fromText;
-  // A town for a point never changes, and the same household saves from the
-  // same place — so this is remembered, the way routes/atlas.js remembers it.
-  // Zoom 12 is the level that answers with the town: any shallower and a
-  // council's name comes back ("Windsor and Maidenhead" for Ascot).
-  const key = `${Number(lat).toFixed(2)},${Number(lng).toFixed(2)}`;
+  /**
+   * A town for a point never changes, so it is remembered — but by the exact
+   * point. Rounding the key put two sides of a boundary in one bucket, which
+   * would have written the next village's name onto somebody's entry, and a
+   * lookup that merely failed was remembered as "no town" for the life of the
+   * process. Only an answer is kept (Codex, 13 Sep 2026).
+   *
+   * Zoom 12 is the level that answers with the town: any shallower and a
+   * council's name comes back ("Windsor and Maidenhead" for Ascot).
+   */
+  const key = `${lat},${lng}`;
   if (!townCache.has(key)) {
     const there = await reverseGeocode(lat, lng, { zoom: 12 }).catch(() => null);
-    townCache.set(key, townOf(there?.locality ?? there?.address?.town ?? null));
+    if (!there) return fromText;
+    const named = townOf(there.locality ?? there.address?.town ?? null, { trusted: true });
+    if (named) townCache.set(key, named);
+    return named ?? fromText;
   }
   return townCache.get(key) ?? fromText;
 }

@@ -529,6 +529,18 @@ test('a place is cut down to a town before it goes anywhere', () => {
   assert.equal(townOf('Flat 2, 14 Titlarks Hill'), null, 'and neither is a street');
   assert.equal(townOf('High Street, Windsor'), 'Windsor');
   // Places that must survive, because refusing everything would be no use.
+  // The first street list refused every one of these (Codex, 13 Sep 2026).
+  assert.equal(townOf('St Albans'), 'St Albans');
+  assert.equal(townOf('Burgess Hill'), 'Burgess Hill');
+  assert.equal(townOf('Park City'), 'Park City');
+  assert.equal(townOf('Notting Hill'), 'Notting Hill');
+  assert.equal(townOf('Grove'), 'Grove');
+  // A locality from the map is a structured field, not something typed, so it
+  // is taken as given — it still may not be a postcode or carry a digit.
+  assert.equal(townOf('Road Town', { trusted: true }), 'Road Town', 'the map knows a town when it names one');
+  assert.equal(townOf('Road Town'), null, 'typed, it reads as a street');
+  assert.equal(townOf('SL5 0JD', { trusted: true }), null, 'trusted is not a way round the postcode rule');
+  assert.equal(townOf('12 High Street Windsor SL4 1AA', { trusted: true }), null);
   assert.equal(townOf('Newcastle upon Tyne'), 'Newcastle upon Tyne');
   assert.equal(townOf("Bishop's Stortford"), "Bishop's Stortford");
   assert.equal(townOf('Lisboa'), 'Lisboa');

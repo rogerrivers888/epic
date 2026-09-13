@@ -113,19 +113,32 @@ const rank = (l) => (l.mine === 'fluent' ? 1 : 0) + (l.theirs === 'fluent' ? 1 :
  */
 /** A code, not a place: carries a digit and nothing but digits, letters, spaces and hyphens. */
 const POSTCODE = /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 -]*$/;
-/** Words that make a part a street rather than a town. Over-refusing is the safe way to be wrong. */
-const STREETY = /\b(street|st|road|rd|lane|ln|avenue|ave|drive|dr|close|way|court|ct|crescent|terrace|place|gardens|grove|park|hill|rise|mews|row|walk|square|sq|parade|villas|cottages|house|flat|apartment|apt|suite|unit|floor|po box)\b/i;
+/**
+ * Words that make a part a street rather than a town — and only the ones that
+ * are almost never a whole town's name. The first list was much longer and
+ * refused St Albans, Burgess Hill, Park City and Road Town, which is no use to
+ * anybody (Codex, 13 Sep 2026): "hill", "park", "grove", "st", "place",
+ * "square", "way", "court" and "row" are all ordinary in real place names.
+ */
+const STREETY = /\b(street|road|lane|avenue|drive|crescent|terrace|mews|cul-de-sac|flat|apartment|apt|suite|po box)\b/i;
 /** What a town may be made of: letters, spaces, hyphens, apostrophes, full stops. No digits. */
 const PLACEY = /^[\p{L}][\p{L} .'’-]*$/u;
 
-export function townOf(label) {
+/**
+ * `trusted` is a locality the map gave us — a structured city/town/village
+ * field, not something anybody typed — so it needs the postcode and digit
+ * guard but not the street test. Running the street test over it was how the
+ * geocoder, the good source, lost St Albans (Codex, 13 Sep 2026).
+ */
+export function townOf(label, { trusted = false } = {}) {
   const parts = String(label ?? '').split(',').map((p) => p.trim()).filter(Boolean);
   const kept = parts.filter((p) => !POSTCODE.test(p));
   const candidate = kept.length ? kept[kept.length - 1] : null;
   if (!candidate) return null;
   // It has to read as a place on its own. An address with no commas arrives
   // here as one long part and fails, which is the point.
-  if (!PLACEY.test(candidate) || STREETY.test(candidate)) return null;
+  if (!PLACEY.test(candidate)) return null;
+  if (!trusted && STREETY.test(candidate)) return null;
   return candidate;
 }
 
