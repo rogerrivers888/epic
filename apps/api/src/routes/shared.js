@@ -237,7 +237,7 @@ router.get('/:token/chat', async (req, res, next) => {
     const all = await topics.listPayload(ctx);
     const stop = req.query.stop ? String(req.query.stop) : null;
     // With the old flat `messages` alongside, for a guest's phone still holding the last bundle.
-    res.json(topics.withLegacy(stop ? { ...all, topics: all.topics.filter((t) => t.tag.kind === 'stop' && t.tag.ref === stop) } : all));
+    res.json(await topics.withLegacy(ctx, stop ? { ...all, topics: all.topics.filter((t) => t.tag.kind === 'stop' && t.tag.ref === stop) } : all));
   } catch (err) { next(err); }
 });
 
@@ -249,13 +249,13 @@ router.post('/:token/chat', async (req, res, next) => {
     if (b.topicId) {
       await topics.createReply(ctx, String(b.topicId), { body: b.body, quotesReplyId: b.quotesReplyId ?? null });
       const view = await topics.topicPayload(ctx, String(b.topicId));
-      return res.status(201).json({ ...view, ...topics.withLegacy(await topics.listPayload(ctx)), topic: view.topic });
+      return res.status(201).json({ ...view, ...(await topics.withLegacy(ctx, await topics.listPayload(ctx))), topic: view.topic });
     }
     const tag = b.tag ?? (b.venueRef ? { kind: 'stop', ref: b.venueRef } : { kind: 'trip', ref: 'trip' });
     // A guest's question is always for everyone: there is no account to hold a private thread against.
     const t = await topics.createTopic(ctx, { title: b.title ?? b.body, body: b.title ? b.body : null, tag, audience: 'everyone' });
     const view = await topics.topicPayload(ctx, t.id);
-    res.status(201).json({ ...view, ...topics.withLegacy(await topics.listPayload(ctx)), topic: view.topic });
+    res.status(201).json({ ...view, ...(await topics.withLegacy(ctx, await topics.listPayload(ctx))), topic: view.topic });
   } catch (err) { next(err); }
 });
 

@@ -58,7 +58,7 @@ async function tripCtx(req) {
 
 /** GET /api/trips/:id/chat — the topic list, with the old flat `messages` and `people` alongside for a bundle that still reads them. */
 router.get('/:id/chat', async (req, res, next) => {
-  try { res.json(topics.withLegacy(await topics.listPayload(await tripCtx(req)))); } catch (err) { next(err); }
+  try { const ctx = await tripCtx(req); res.json(await topics.withLegacy(ctx, await topics.listPayload(ctx))); } catch (err) { next(err); }
 });
 
 /**
@@ -70,7 +70,7 @@ router.get('/:id/asks/:venueRef', async (req, res, next) => {
   try {
     const ctx = await tripCtx(req);
     const all = await topics.listPayload(ctx);
-    res.json({ ...topics.withLegacy({ ...all, topics: all.topics.filter((t) => t.tag.kind === 'stop' && t.tag.ref === req.params.venueRef) }), about: `stop:${req.params.venueRef}` });
+    res.json({ ...(await topics.withLegacy(ctx, { ...all, topics: all.topics.filter((t) => t.tag.kind === 'stop' && t.tag.ref === req.params.venueRef) })), about: `stop:${req.params.venueRef}` });
   } catch (err) { next(err); }
 });
 
@@ -89,12 +89,12 @@ router.post('/:id/chat', async (req, res, next) => {
     if (b.topicId) {
       await topics.createReply(ctx, String(b.topicId), { body: b.body, quotesReplyId: b.quotesReplyId ?? null });
       const view = await topics.topicPayload(ctx, String(b.topicId));
-      return res.status(201).json({ ...view, ...topics.withLegacy(await topics.listPayload(ctx)), topic: view.topic });
+      return res.status(201).json({ ...view, ...(await topics.withLegacy(ctx, await topics.listPayload(ctx))), topic: view.topic });
     }
     const tag = b.tag ?? (b.venueRef ? { kind: 'stop', ref: b.venueRef } : { kind: 'trip', ref: 'trip' });
     const t = await topics.createTopic(ctx, { title: b.title ?? b.body, body: b.title ? b.body : null, tag, audience: b.audience ?? 'everyone', notice: b.notice });
     const view = await topics.topicPayload(ctx, t.id);
-    const list = topics.withLegacy(await topics.listPayload(ctx));
+    const list = await topics.withLegacy(ctx, await topics.listPayload(ctx));
     res.status(201).json({ ...view, ...list, topic: view.topic, message: list.messages.find((m) => m.id === t.id) ?? null });
   } catch (err) { next(err); }
 });

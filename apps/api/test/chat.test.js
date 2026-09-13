@@ -316,11 +316,13 @@ test('the old addresses still answer with the flat river a phone may be holding'
     { id: 'b', title: 'Later', body: null, at: '2026-10-02T10:00:00Z', mine: false, author: { name: 'Jon Lee', guest: false, initial: 'J', memberId: 'jon', guestId: null }, tag: { kind: 'trip', ref: 'trip', label: 'The whole trip' }, seenBy: 2 },
     { id: 'a', title: 'Is the crater walk alright?', body: 'For a nine-year-old.', at: '2026-10-01T10:00:00Z', mine: true, author: { name: 'Priya', guest: true, initial: 'P', memberId: null, guestId: 'priya' }, tag: { kind: 'stop', ref: 'osm:node/1', label: 'Etna' }, seenBy: 4 },
   ];
-  const m = legacyMessages(topics);
-  assert.deepEqual(m.map((x) => x.id), ['a', 'b'], 'oldest first, as the river was');
+  const replies = [{ id: 'r1', topicId: 'a', body: 'Fine for a nine-year-old.', at: '2026-10-01T12:00:00Z', mine: false, author: { name: 'Sam Rivers', guest: false, initial: 'S', memberId: 'sam', guestId: null }, seenBy: 3 }];
+  const m = legacyMessages(topics, replies);
+  assert.deepEqual(m.map((x) => x.id), ['a', 'r1', 'b'], 'oldest first, replies in the river where they were said');
+  assert.deepEqual(m[1].onStop, { venueRef: 'osm:node/1', label: 'Etna' }, 'a reply points where its question does');
   assert.equal(m[0].body, 'Is the crater walk alright?\n\nFor a nine-year-old.');
   assert.deepEqual(m[0].onStop, { venueRef: 'osm:node/1', label: 'Etna' });
-  assert.equal(m[1].onStop, null);
+  assert.equal(m[2].onStop, null, 'the whole-trip question carries no pointer');
   assert.equal(m[0].author.guest, true);
   const p = legacyPeople({ people: { members: [{ id: 'jon', name: 'Jon Lee', avatarUrl: null, isHost: true }], guests: [{ id: 'priya', name: 'Priya' }] } });
   assert.equal(p.count, 2);

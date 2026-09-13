@@ -449,15 +449,22 @@ export function reachWords(kind, count, { hostName, contextType }) {
  * `data.people`, and a backend that rolled out first must not blank it
  * (Codex, 13 Sep 2026). The new fields ride alongside; nothing is taken away.
  */
-export function legacyMessages(topics) {
-  return [...topics]
-    .sort((a, b) => String(a.at).localeCompare(String(b.at)))
-    .map((t) => ({
-      id: t.id, body: t.body ? `${t.title}\n\n${t.body}` : t.title, at: t.at, mine: Boolean(t.mine),
-      author: { name: t.author.name, guest: t.author.guest, initial: t.author.initial, memberId: t.author.memberId, guestId: t.author.guestId },
-      onStop: t.tag?.kind === 'stop' ? { venueRef: t.tag.ref, label: t.tag.label ?? null } : null,
-      seenBy: t.seenBy ?? 0,
-    }));
+export function legacyMessages(topics, replies = []) {
+  const byTopic = new Map(topics.map((t) => [t.id, t]));
+  const pointer = (t) => (t?.tag?.kind === 'stop' ? { venueRef: t.tag.ref, label: t.tag.label ?? null } : null);
+  const person = (a) => ({ name: a.name, guest: a.guest, initial: a.initial, memberId: a.memberId, guestId: a.guestId });
+  const rows = [
+    ...topics.map((t) => ({
+      id: t.id, topicId: t.id, body: t.body ? `${t.title}\n\n${t.body}` : t.title, at: t.at, mine: Boolean(t.mine),
+      author: person(t.author), onStop: pointer(t), seenBy: t.seenBy ?? 0,
+    })),
+    // Replies are in the river too, each pointing where its question does (Codex, 13 Sep 2026).
+    ...replies.filter((r) => byTopic.has(r.topicId)).map((r) => ({
+      id: r.id, topicId: r.topicId, body: r.body, at: r.at, mine: Boolean(r.mine),
+      author: person(r.author), onStop: pointer(byTopic.get(r.topicId)), seenBy: r.seenBy ?? 0,
+    })),
+  ];
+  return rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
 export function legacyPeople(context) {

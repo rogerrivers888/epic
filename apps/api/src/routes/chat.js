@@ -324,7 +324,11 @@ export async function listPayload(ctx) {
  * (`messages`, `people`) riding alongside. For the addresses that predate the
  * topic model; the new ones do not carry it.
  */
-export const withLegacy = (list) => ({ ...list, messages: legacyMessages(list.topics), people: legacyPeople(list.context) });
+export async function withLegacy(ctx, list) {
+  const rows = await chat.repliesAcross(list.topics.map((t) => t.id));
+  const replies = rows.map((r) => ({ id: r.id, topicId: r.topic_id, body: r.body, at: r.created_at, mine: samePerson(authorOf(r), ctx.me), author: personOf(r, ctx), seenBy: r.seen_by ?? 0 }));
+  return { ...list, messages: legacyMessages(list.topics, replies), people: legacyPeople(list.context) };
+}
 
 const pickPrefs = (p) => ({ started: p.started, anchors: p.anchors, from_host: p.from_host, every_topic: p.every_topic, mentions: p.mentions, digest: p.digest });
 
