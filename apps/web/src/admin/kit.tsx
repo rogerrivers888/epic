@@ -652,7 +652,9 @@ const dd = StyleSheet.create({
   },
   panelSoft: { borderColor: colors.lineSoft, borderRadius: 8 },
   /** Hung from the control's right edge, for a control at the end of a row. */
-  panelRight: { left: undefined, right: 0 },
+  // `left: 'auto'`, not undefined: StyleSheet.create drops an undefined value, so
+  // the panel kept `left: 0` and ran off the page to the right (owner, 13 Sep 2026).
+  panelRight: { left: 'auto' as never, right: 0 },
   back: { borderBottomWidth: 1, borderBottomColor: colors.lineSoft, marginBottom: 4 },
   rule: { height: 1, backgroundColor: colors.lineSoft, marginVertical: 4 },
   quick: { gap: spacing.md, paddingHorizontal: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, flexWrap: 'wrap' },
