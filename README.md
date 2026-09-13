@@ -47,6 +47,8 @@ Place data comes from two sources behind one interface (`apps/api/src/sources/`)
 | `GET/PATCH /api/household`, `…/members`, `…/constraints` | household, members, allergens / dislikes / likes |
 | `GET/POST/PATCH /api/host`, `…/offers`, `…/media` | hosting: the host's profile, their offers (draft → in review → live / paused), their videos |
 | `GET /api/experiences/:id`, `GET /api/hosts/:id` (public) · `POST /api/experiences/:id/book`, `GET /api/bookings` | the guest's side: an experience page, a host's profile, a booking recorded (no payment provider yet) |
+| `POST …/offers/:id/doc`, `…/extract`, `…/invites`, `POST /api/host/evidence` | a PDF for guests seeded into the fields; the listing written from the video; who is invited; what backs it up |
+| `GET/POST /api/invited/:token` (public) | an invitation to a private offer: yes or no, and how many |
 | `GET /api/admin/hosting`, `…/offers/:id/decide`, `…/hosts/:id` | pitch review and the trust ladder, behind the admin door |
 | `POST /api/discover` | time-bounded discovery with constraints applied and attribution logged |
 | `POST /api/plan/start` | a sentence → intent → one candidate pool → several trip options |
