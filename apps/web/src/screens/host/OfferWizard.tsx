@@ -278,7 +278,7 @@ function EventStep({ offer: o, save, onSeeded }: { offer: OwnOffer; save: Save; 
     input.onchange = async () => {
       const f = input.files?.[0]; if (!f) return;
       setDocBusy(true);
-      try { const m = await api.uploadHostMedia(f, 'doc'); const r = await api.seedOfferDoc(o.id, m.id); onSeeded(r.offer); } catch { /* said by the frame */ } finally { setDocBusy(false); }
+      try { const m = await api.uploadHostMedia(f, 'doc', null, 'listing'); const r = await api.seedOfferDoc(o.id, m.id); onSeeded(r.offer); } catch { /* said by the frame */ } finally { setDocBusy(false); }
     };
     input.click();
   };

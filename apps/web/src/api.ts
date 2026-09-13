@@ -1852,12 +1852,17 @@ export const api = {
   stopHosting: (force = false) => del<void>(`/api/host${force ? '?force=1' : ''}`),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
   /**
-   * `purpose` decides whether anybody may read it back. `listing` goes on the
-   * public reader because the page it draws on is public; `evidence` does not,
-   * because the wizard promises "nothing here is shown to guests". Private is
-   * the default at both ends, so a forgotten purpose fails safe.
+   * `purpose` decides whether anybody may read it back, and it is required at
+   * both ends. `listing` goes on the public reader because the page it draws
+   * on is public; `evidence` does not, because the wizard promises "nothing
+   * here is shown to guests".
+   *
+   * It has no default here on purpose. It had one — `listing` — which meant
+   * the server failed safe and this did not, so a future sensitive upload
+   * whose caller forgot the argument would have been public (Codex, 13 Sep
+   * 2026). Saying it at every call site is the whole point.
    */
-  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo' | 'doc', durationS?: number | null, purpose: 'listing' | 'evidence' = 'listing'): Promise<HostMedia> => {
+  uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo' | 'doc', durationS: number | null, purpose: 'listing' | 'evidence'): Promise<HostMedia> => {
     const token = sessionToken();
     const res = await fetch(`${API_URL}/api/host/media${qs({ kind, duration: durationS ?? undefined, purpose })}`, {
       method: 'POST', credentials: 'include', body: blob,

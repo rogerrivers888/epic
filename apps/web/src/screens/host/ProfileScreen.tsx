@@ -109,7 +109,7 @@ export function ProfileScreen({ home, onChanged }: { home: HostHome; onChanged: 
     const blob = await pickPhotoBlob();
     if (!blob) return;
     setBusy(true);
-    try { const m = await api.uploadHostMedia(blob, 'photo'); await save({ photoId: m.id }); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); }
+    try { const m = await api.uploadHostMedia(blob, 'photo', null, 'listing'); await save({ photoId: m.id }); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); }
   };
 
   return (

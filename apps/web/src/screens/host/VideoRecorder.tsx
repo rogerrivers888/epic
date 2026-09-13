@@ -100,7 +100,7 @@ export function VideoRecorder({ offerId, title, onDone }: { offerId: string | nu
     if (!b) return;
     setStage('uploading'); setError(null);
     try {
-      const m = await api.uploadHostMedia(b, 'video', duration ?? seconds);
+      const m = await api.uploadHostMedia(b, 'video', duration ?? seconds, 'listing');
       if (trim && (trim.start > 0 || trim.end < seconds)) await api.trimHostMedia(m.id, trim.start, trim.end);
       if (offerId) await api.updateOffer(offerId, { videoId: m.id });
       else await api.updateHost({ introVideoId: m.id });

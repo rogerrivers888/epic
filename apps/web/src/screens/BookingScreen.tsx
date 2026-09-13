@@ -198,7 +198,7 @@ function RateHost({ booking: b, wide, onBack, onDone }: { booking: Booking; wide
   const addPhoto = async () => {
     const blob = await pickPhotoBlob();
     if (!blob) return;
-    try { const m = await api.uploadHostMedia(blob, 'photo'); setPhoto({ id: m.id, url: m.url }); } catch (e: any) { setError(e.message); }
+    try { const m = await api.uploadHostMedia(blob, 'photo', null, 'listing'); setPhoto({ id: m.id, url: m.url }); } catch (e: any) { setError(e.message); }
   };
   const post = async () => {
     setBusy(true); setError(null);
