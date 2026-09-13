@@ -331,3 +331,18 @@ test('the price lives inside "is anyone paying", so a private paid event is stil
   assert.deepEqual(laneB, laneA, 'lane B is lane A, screen for screen');
   assert.equal(stepsFor({ shape: 'oneoff', visibility: 'public', money: 'epic' }, { type: 'skill' }).filter((s) => s !== 'plan' && s !== 'done').length, 9);
 });
+
+test('a private offer is opened by its credential, never by its id', async () => {
+  const { opensPrivately } = await import('../src/domain/hosting.js');
+  const offer = { id: 'off-1', visibility: 'invite', link_token: 'the-link' };
+  assert.equal(opensPrivately(offer, {}), false, 'the id alone opens nothing');
+  assert.equal(opensPrivately(offer, { linkToken: 'the-link' }), true);
+  assert.equal(opensPrivately(offer, { linkToken: 'nearly' }), false);
+  assert.equal(opensPrivately(offer, { invite: { offer_id: 'off-1' } }), true, 'a personal invitation to this one');
+  assert.equal(opensPrivately(offer, { invite: { offer_id: 'another' } }), false, 'an invitation to something else opens nothing');
+  assert.equal(opensPrivately(offer, { hasBooking: true }), true, 'somebody already booked on it keeps their way back');
+  assert.equal(opensPrivately({ ...offer, visibility: 'link' }, {}), false, 'a link offer is not open to a bare id either');
+  assert.equal(opensPrivately({ ...offer, visibility: 'public' }, {}), true, 'a listed one is open to anyone');
+  assert.equal(opensPrivately(null, { linkToken: 'the-link' }), false);
+  assert.equal(opensPrivately({ ...offer, link_token: null }, { linkToken: null }), false, 'no token on either side is not a match');
+});

@@ -40,7 +40,7 @@ import {
   ADULT_AGE, CHECK_KINDS, DAY_PARTS, EVIDENCE_FIELDS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, MONEY, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
   REGULATED_COUNTRIES, REPEATS, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S, VISIBILITIES,
   ageGate, anytimeSlots, decideBy, isRegulated, lastDate, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
-  readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
+  opensPrivately, readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
 } from '../domain/hosting.js';
 import { pdfText } from '../sources/menuRead.js';
 import { extract as extractWith, openaiEnabled, transcribe } from '../sources/openai.js';
@@ -54,6 +54,8 @@ const str = (v, max = 2000) => (v == null ? null : String(v).trim().slice(0, max
 const int = (v) => (v == null || v === '' ? null : Math.max(0, Math.round(Number(v))) || null);
 const oneOf = (all, v) => (all.includes(v) ? v : null);
 const list = (v, max = 40) => (Array.isArray(v) ? v.slice(0, max) : []);
+/** An address we could actually send to. Used wherever one is given — a contact, an invitation. */
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 /** Which build of "you can take money" this estate is on. Nothing yet: it says so. */
@@ -719,16 +721,17 @@ const linkUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL ||
 /** POST …/invites [{name, contact, heads}] — who is invited. A text with a link goes when a sender exists. */
 router.post('/host/offers/:id/invites', async (req, res, next) => {
   try {
-    const { host, offer } = await myOffer(req.params.id);
+    const { household, host, offer } = await myOffer(req.params.id);
     const rows = list(req.body?.invites ?? [req.body], 200);
     const made = [];
-    const { household } = await myHost();
     for (const r of rows) {
       const name = str(r.name, 80);
       if (!name) continue;
       // A mobile and an email may both be given (C2c); the text goes to the mobile first.
       const mobile = str(r.mobile, 40) ?? (str(r.contact, 120)?.includes('@') ? null : str(r.contact, 120));
       const email = str(r.email, 120) ?? (str(r.contact, 120)?.includes('@') ? str(r.contact, 120) : null);
+      // One rule for an address wherever it is given: a half-typed one is not a way to reach anybody (Codex, 13 Sep 2026).
+      if (email && !EMAIL.test(email)) throw refuse(400, 'bad_email', `${email} does not look like an email address.`);
       const contact = mobile ?? email;
       const kind = contact ? (contact.includes('@') ? 'email' : 'mobile') : null;
       // Everyone invited is remembered as one of my Epic contacts (README: "Contacts are always saved").
@@ -797,7 +800,7 @@ router.post('/host/contacts', async (req, res, next) => {
     const email = str(req.body?.email, 120);
     if (!name) throw refuse(400, 'name_required', 'Give their name.');
     if (!mobile && !email) throw refuse(400, 'contact_required', 'Give a mobile or an email — we need one way to send the invitation.');
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw refuse(400, 'bad_email', 'That does not look like an email address.');
+    if (email && !EMAIL.test(email)) throw refuse(400, 'bad_email', 'That does not look like an email address.');
     const c = await repo.rememberContact(household.id, { name, mobile, email });
     res.status(201).json({ contact: contactPayload(c) });
   } catch (err) { next(err); }
@@ -975,11 +978,11 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     const o = await repo.offerById(req.params.id);
     if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_found', message: 'There is no experience at that address yet.' });
     // Only the people named can open an invite-only offer, even with the link.
+    // Only the credential opens an invite-only offer: a personal invitation's
+    // token, or the host's own invitation link, which they pass round themselves.
     if (o.visibility === 'invite') {
-      const inv = req.query.i ? await repo.inviteByToken(String(req.query.i)) : null;
-      // …or with the host's own invitation link (`?l=`), which they pass round themselves (lane A, C2).
-      const viaLink = req.query.l && String(req.query.l) === o.link_token;
-      if (!viaLink && (!inv || inv.offer_id !== o.id)) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
+      const invite = req.query.i ? await repo.inviteByToken(String(req.query.i)) : null;
+      if (!opensPrivately(o, { linkToken: str(req.query.l, 64), invite })) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
     }
     const h = await repo.hostById(o.host_id);
     const [bookings, rating] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id)]);
@@ -1062,6 +1065,20 @@ router.post('/experiences/:id/book', async (req, res, next) => {
       const host = await repo.hostById(o.host_id, client);
       if (!host) throw refuse(409, 'not_bookable', 'This experience is not taking bookings.');
       if (host.household_id === household.id) throw refuse(409, 'own_offer', 'You cannot book your own experience.');
+      /**
+       * A private offer is booked by somebody holding its credential, and the
+       * credential is checked again here rather than only where the page was
+       * read: an id copied out of an address bar is not an invitation
+       * (Codex, 13 Sep 2026). A household that already holds a booking on it
+       * keeps its way back in.
+       */
+      if (o.visibility !== 'public') {
+        const linkToken = str(req.query.l ?? b.linkToken, 64);
+        const inviteGiven = str(req.query.i ?? b.inviteToken, 64);
+        const invite = inviteGiven ? await repo.inviteByToken(inviteGiven, client) : null;
+        const hasBooking = (await repo.bookingsOfOffer(o.id, client)).some((x) => x.household_id === household.id && x.state !== 'cancelled');
+        if (!opensPrivately(o, { linkToken, invite, hasBooking })) throw refuse(404, 'not_found', 'This one is invitation only.');
+      }
       const gate = ageGate(o, party);
       if (gate.blocked.length) throw refuse(400, 'age_limit', `Over ${gate.limit} only — ${gate.blocked.map((p) => p.name).join(', ')} cannot come to this one.`);
       // Guests booking alone are 18+; under-18s come as named party members with an adult.

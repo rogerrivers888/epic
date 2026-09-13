@@ -311,6 +311,27 @@ export function publishBlockers(offer, host) {
  * progress bar is derived from it so it is honest for every combination;
  * nothing hard-codes a total.
  */
+/**
+ * Whether somebody may open — or book — a private offer.
+ *
+ * A public offer is open to anyone. An invite-only or link offer is opened by
+ * **the credential, not the id**: the host's own invitation link, or a personal
+ * invitation's token for that offer. A household that already holds a booking
+ * on it keeps its way back in, because it was let in once and the link may be
+ * long gone from its history.
+ *
+ * Checked where the page is read *and* again where a booking is made: an id
+ * copied out of an address bar, a log or a stripped query is not an invitation
+ * (Codex, 13 Sep 2026).
+ */
+export function opensPrivately(offer, { linkToken = null, invite = null, hasBooking = false } = {}) {
+  if (!offer) return false;
+  if (offer.visibility === 'public') return true;
+  if (linkToken && offer.link_token && linkToken === offer.link_token) return true;
+  if (invite && invite.offer_id === offer.id) return true;
+  return Boolean(hasBooking);
+}
+
 export function stepsFor(offer, host) {
   const pub = offer.visibility === 'public';
   const steps = ['plan', 'vis', 'event'];

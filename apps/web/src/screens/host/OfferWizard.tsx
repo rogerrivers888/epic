@@ -515,6 +515,7 @@ function Invite({ offer: o, setOffer, setError, live, setChrome }: { offer: OwnO
   const [just, setJust] = useState<{ n: number; ids: string[] } | null>(null);
   const [contactSearch, setContactSearch] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busyRef = useRef(false);
   const loadContacts = useCallback(async () => { try { setContacts((await api.hostContacts()).contacts); } catch { /* the list is empty until it loads */ } }, []);
   useEffect(() => { void loadContacts(); }, [loadContacts]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -535,7 +536,10 @@ function Invite({ offer: o, setOffer, setError, live, setChrome }: { offer: OwnO
     timer.current = setTimeout(() => setJust(null), 2600);
   };
   const add = async (rows: Reach[]) => {
-    if (!rows.length) return;
+    // One send at a time: a double tap would otherwise invite the same person
+    // twice and text them twice (Codex, 13 Sep 2026).
+    if (!rows.length || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const before = new Set(o.invites.map((i) => i.id));
@@ -543,7 +547,7 @@ function Invite({ offer: o, setOffer, setError, live, setChrome }: { offer: OwnO
       setOffer(r.offer); setError(null); setText('');
       confirm(rows.length, r.offer.invites.filter((i) => !before.has(i.id)).map((i) => i.id));
       void loadContacts();
-    } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+    } catch (e: any) { setError(e.message); } finally { busyRef.current = false; setBusy(false); }
   };
   const remove = async (i: OfferInvite) => { try { const r = await api.removeInvite(o.id, i.id); setOffer(r.offer); } catch (e: any) { setError(e.message); } };
   const browsePhone = async () => {
@@ -667,12 +671,12 @@ function Invite({ offer: o, setOffer, setError, live, setChrome }: { offer: OwnO
               </View>
             </Press>
             {epicMatches.length ? <><Text style={[t.kicker, { paddingHorizontal: 13, paddingTop: 9, paddingBottom: 5 }]}>On Epic already</Text><View style={{ paddingHorizontal: 13 }}>{epicMatches.slice(0, 6).map((c) => (
-              <Press key={c.id} onPress={() => void add([{ name: c.name, mobile: c.mobile, email: c.email }])} accessibilityRole="button" style={[styles.guest, k.rule]}>
+              <Press key={c.id} onPress={() => void add([{ name: c.name, mobile: c.mobile, email: c.email }])} disabled={busy} accessibilityRole="button" style={[styles.guest, k.rule, busy && { opacity: 0.5 }]}>
                 <Avatar name={c.name} /><View style={{ flex: 1, minWidth: 0 }}><Text style={styles.guestName}>{c.name}</Text><Text style={t.tiny}>{reachOf(c)}{inPhone(c) ? ' · also in your phone' : c.timesInvited ? ` · invited to ${c.timesInvited}` : ''}</Text></View><CheckBox on={false} size={22} />
               </Press>
             ))}</View></> : null}
             {phoneMatches.length ? <><Text style={[t.kicker, { paddingHorizontal: 13, paddingTop: 9, paddingBottom: 5 }]}>In my phone, not on Epic</Text><View style={{ paddingHorizontal: 13 }}>{phoneMatches.slice(0, 6).map((r, i) => (
-              <Press key={i} onPress={() => void add([r])} accessibilityRole="button" style={[styles.guest, k.rule]}>
+              <Press key={i} onPress={() => void add([r])} disabled={busy} accessibilityRole="button" style={[styles.guest, k.rule, busy && { opacity: 0.5 }]}>
                 <Avatar name={r.name} /><View style={{ flex: 1, minWidth: 0 }}><Text style={styles.guestName}>{r.name}</Text><Text style={t.tiny}>{reachOf(r)}</Text></View><CheckBox on={false} size={22} />
               </Press>
             ))}</View></> : null}

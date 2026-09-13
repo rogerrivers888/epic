@@ -49,6 +49,14 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const inviteToken = query.get('i');
   // …or the host's own invitation link (`?l=`), passed round by hand (lanes A and B).
   const linkToken = query.get('l');
+  /**
+   * The credential travels with every hop inside the page. A link or an
+   * invitation is what opens an invite-only offer, and the booking sheet, the
+   * place and the questions are the same page a layer in — dropping it there
+   * shuts the guest out of the thing they were sent (Codex, 13 Sep 2026).
+   */
+  const credential = inviteToken ? `i=${encodeURIComponent(inviteToken)}` : linkToken ? `l=${encodeURIComponent(linkToken)}` : null;
+  const keyed = useCallback((href: string) => (credential ? `${href}${href.includes('?') ? '&' : '?'}${credential}` : href), [credential]);
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
   const [mine, setMine] = useState<{ bookings: Booking[]; party: PartyMember[]; you: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +94,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
       return (
         <View style={{ flex: 1 }}>
           <View style={[styles.gutter, { paddingTop: spacing.md, gap: 4 }]}>
-            <Press onPress={() => back(paths.experience(offer.id))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
+            <Press onPress={() => back(keyed(paths.experience(offer.id)))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
             <Text style={type.small}>Booking needs an Epic account, so the host knows who is coming and your booking lands in Trips. Sign in, or ask for a link.</Text>
           </View>
           <LockScreen onIn={() => void load()} />
@@ -96,14 +104,15 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
     return (
       <BookSheet
         offer={offer} payments={payments} party={mine?.party ?? []} you={mine?.you ?? null} wide={wide}
-        onBack={() => back(paths.experience(offer.id))}
+        keys={{ inviteToken, linkToken }}
+        onBack={() => back(keyed(paths.experience(offer.id)))}
         onBooked={(b) => navigate(paths.booking(b.id), { replace: true })}
       />
     );
   }
 
   if (route.layer === 'where') {
-    return <WhereItHappens offer={offer} revealed={revealed} onBack={() => back(paths.experience(offer.id))} wide={wide} />;
+    return <WhereItHappens offer={offer} revealed={revealed} onBack={() => back(keyed(paths.experience(offer.id)))} wide={wide} />;
   }
 
   /**
@@ -113,25 +122,25 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
    * `?topic=` on the listing is that question open.
    */
   const askDoor = householdDoor('offer', offer.id, {
-    list: paths.experience(offer.id), topic: (id) => `${paths.experience(offer.id)}?topic=${encodeURIComponent(id)}`, ask: () => paths.experienceAsk(offer.id), bell: null,
+    list: keyed(paths.experience(offer.id)), topic: (id) => keyed(`${paths.experience(offer.id)}?topic=${encodeURIComponent(id)}`), ask: () => keyed(paths.experienceAsk(offer.id)), bell: null,
   });
   if (route.layer === 'ask') {
     if (!signedIn()) {
       return (
         <View style={{ flex: 1 }}>
           <View style={[styles.gutter, { paddingTop: spacing.md, gap: 4 }]}>
-            <Press onPress={() => back(paths.experience(offer.id))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
+            <Press onPress={() => back(keyed(paths.experience(offer.id)))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
             <Text style={type.small}>Asking needs an Epic account, so {host.name.split(' ')[0]} can answer you. Sign in, or ask for a link.</Text>
           </View>
           <LockScreen onIn={() => void load()} />
         </View>
       );
     }
-    return <AskScreen door={askDoor} onBack={() => back(paths.experience(offer.id))} onPosted={(id) => navigate(askDoor.href.topic(id), { replace: true })} initialPrivate />;
+    return <AskScreen door={askDoor} onBack={() => back(keyed(paths.experience(offer.id)))} onPosted={(id) => navigate(askDoor.href.topic(id), { replace: true })} initialPrivate />;
   }
   const openTopic = query.get('topic');
   if (openTopic && signedIn()) {
-    return <TopicScreen door={askDoor} topicId={openTopic} onBack={() => back(paths.experience(offer.id))} onEdit={(id) => navigate(`${paths.experienceAsk(offer.id)}?edit=${encodeURIComponent(id)}`)} shareHref={askDoor.href.topic(openTopic)} />;
+    return <TopicScreen door={askDoor} topicId={openTopic} onBack={() => back(keyed(paths.experience(offer.id)))} onEdit={(id) => navigate(keyed(`${paths.experienceAsk(offer.id)}?edit=${encodeURIComponent(id)}`))} shareHref={askDoor.href.topic(openTopic)} />;
   }
 
   const paused = offer.state === 'paused';
@@ -182,7 +191,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
           </Row>
 
           {/* What changes by shape. */}
-          {offer.shape === 'oneoff' ? <OneOffBody offer={offer} /> : offer.shape === 'series' ? <SeriesBody offer={offer} /> : <AnytimeBody offer={offer} onPick={() => navigate(paths.experienceBook(offer.id))} />}
+          {offer.shape === 'oneoff' ? <OneOffBody offer={offer} /> : offer.shape === 'series' ? <SeriesBody offer={offer} /> : <AnytimeBody offer={offer} onPick={() => navigate(keyed(paths.experienceBook(offer.id)))} />}
 
           {/* Where it happens, in the format's own words, with the door to the four. */}
           <View style={styles.block}>
@@ -194,7 +203,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
                 <Text style={type.small}>{whereBody(offer, host.name, revealed)}</Text>
               </View>
             </Row>
-            <Press onPress={() => navigate(paths.experienceWhere(offer.id))} accessibilityRole="button"><Text style={styles.link}>How the four formats work ›</Text></Press>
+            <Press onPress={() => navigate(keyed(paths.experienceWhere(offer.id)))} accessibilityRole="button"><Text style={styles.link}>How the four formats work ›</Text></Press>
           </View>
 
           {offer.includes ? (
@@ -214,7 +223,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
           ) : null}
 
           {/* What people have asked, answered by the host in their own words (C7). */}
-          <Faq offerId={offer.id} hostName={host.name} onAsk={() => navigate(paths.experienceAsk(offer.id))} />
+          <Faq offerId={offer.id} hostName={host.name} onAsk={() => navigate(keyed(paths.experienceAsk(offer.id)))} />
 
           {/* The money and the minimum, in one plain block. */}
           <View style={styles.priceBlock}>
@@ -253,7 +262,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
           label={cta}
           icon={full ? 'hours' : offer.shape === 'anytime' ? 'calendar' : 'forward'}
           disabled={ended || paused}
-          onPress={() => navigate(paths.experienceBook(offer.id))}
+          onPress={() => navigate(keyed(paths.experienceBook(offer.id)))}
         />
         <Text style={[type.tiny, { textAlign: 'center' }]}>{ended ? (past ? 'This one has already happened.' : offer.cancelledNote ?? 'Called off.') : paused ? 'Not taking bookings just now.' : payments.ready ? 'Card charged when it is certain.' : 'Nothing is charged yet — a booking is recorded and honoured.'}</Text>
       </View>
@@ -440,8 +449,10 @@ function WhereItHappens({ offer, revealed, onBack, wide }: { offer: Experience; 
 // the booking sheet (F3)
 // ---------------------------------------------------------------------------
 
-function BookSheet({ offer, payments, party, you, wide, onBack, onBooked }: {
+function BookSheet({ offer, payments, party, you, wide, keys, onBack, onBooked }: {
   offer: Experience; payments: PaymentsConfig; party: PartyMember[]; you: string | null; wide: boolean;
+  /** What opened a private offer: the booking is checked against it again on the API. */
+  keys: { inviteToken: string | null; linkToken: string | null };
   onBack: () => void; onBooked: (b: Booking) => void;
 }) {
   const host = offer.host!;
@@ -481,6 +492,7 @@ function BookSheet({ offer, payments, party, you, wide, onBack, onBooked }: {
     setBusy(true); setError(null);
     try {
       const r = await api.bookExperience(offer.id, {
+        inviteToken: keys.inviteToken, linkToken: keys.linkToken,
         party: chosen.map((p) => ({ name: p.name, age: p.age, child: p.child })),
         occurrence: offer.shape === 'anytime' ? slot : occurrence,
         bookedBy: you, noteToHost: note.trim() || null,

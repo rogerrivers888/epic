@@ -521,8 +521,8 @@ export async function deleteContact(householdId, id) {
   await query('delete from host_contacts where household_id = $1 and id = $2', [householdId, id]);
 }
 
-export async function inviteByToken(token) {
-  const { rows } = await query('select * from offer_invites where token = $1', [token]);
+export async function inviteByToken(token, client) {
+  const { rows } = await on(client)('select * from offer_invites where token = $1', [token]);
   return rows[0] ?? null;
 }
 

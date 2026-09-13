@@ -3383,7 +3383,8 @@ export type ExperiencesNear = { cards: Experience[]; passions: { key: string; la
 
 export type PartyMember = { id?: string; name: string; age: number | null; child: boolean; avatarUrl?: string | null };
 export type BookingState = 'pending' | 'confirmed' | 'waitlisted' | 'cancelled' | 'attended';
-export type BookingInput = { party: PartyMember[]; occurrence?: string | null; bookedBy?: string | null; address?: string | null; accessNotes?: string | null; noteToHost?: string | null };
+/** `inviteToken` / `linkToken`: a private offer is booked only by somebody holding its credential (Codex, 13 Sep 2026). */
+export type BookingInput = { party: PartyMember[]; occurrence?: string | null; bookedBy?: string | null; address?: string | null; accessNotes?: string | null; noteToHost?: string | null; inviteToken?: string | null; linkToken?: string | null };
 export type Booking = {
   id: string; offerId: string; hostId: string; title: string | null; shape: OfferShape; occurrence: string | null; on: string | null; startsAt: string | null;
   durationMin: number | null; venue: OfferVenue; venueArea: string | null; venueLabel: string | null; venueNotes: string | null; onlinePlatform: string | null; refundRule: RefundRule;
