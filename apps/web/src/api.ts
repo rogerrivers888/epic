@@ -806,25 +806,96 @@ export type FlightLookup = {
   from?: Terminal | null; to?: Terminal | null; scheduled?: boolean; asks?: string[];
 };
 
-export type ChatMessage = {
-  id: string; body: string; at: string; mine: boolean;
-  author: { name: string; guest: boolean; initial: string; memberId: string | null; guestId: string | null };
-  /** Set where it was asked on a stop rather than in the chat — the "› Asked on …" pointer. */
-  onStop: { venueRef: string; label: string | null } | null;
-  seenBy: number;
+// --- the chat module (13 Sep 2026, "Supporting docs/Chat screens") --------
+// A topic is a question or a notice, tagged to one thing and visible to one
+// audience; replies are flat inside it; the host or organiser marks one reply
+// as the answer. One component, two contexts: a trip and a hosted offer.
+
+export type ChatContextType = 'trip' | 'offer';
+export type ChatTagKind = 'stop' | 'day' | 'trip' | 'offer_aspect';
+export type ChatAudience = 'everyone' | 'host_only';
+export type ChatState = 'open' | 'answered' | 'notice';
+/** The Showing dropdown (D4): one enum. `waiting` and `answered` narrow `questions`. */
+export type ChatShowing = 'all' | 'questions' | 'waiting' | 'answered' | 'notices' | 'mine' | 'replies_to_me' | 'private';
+export type ChatTag = { kind: ChatTagKind; ref: string | null; label: string | null; date: string | null };
+/** An anchor a question can be tagged to: a trip-level one, a day, a stop, an aspect of an offer. */
+export type ChatAnchor = { key: string; kind: ChatTagKind; ref: string; label: string; date?: string | null; sub?: string | null; dayId?: string | null };
+export type ChatPerson = { name: string; guest: boolean; initial: string; memberId: string | null; guestId: string | null; avatarUrl: string | null; isHost: boolean };
+export type ChatReaction = { emoji: string; count: number; mine: boolean };
+export type ChatTopic = {
+  id: string; title: string; body: string | null; tag: ChatTag; audience: ChatAudience; occurrence: string | null;
+  state: ChatState; pinned: boolean; author: ChatPerson; at: string; lastAt: string;
+  replyCount: number; seenBy: number; audienceCount: number;
+  answer: { replyId: string; by: string; at: string } | null;
+  mine: boolean; following: boolean; opened: boolean; unreadReplies: number;
+  reactions: ChatReaction[];
+  /** Which Showing values this topic passes — the rules live on the API, once. */
+  flags: Record<ChatShowing, boolean>;
 };
+export type ChatReply = {
+  id: string; body: string; at: string; isAnswer: boolean; author: ChatPerson; mine: boolean; seenBy: number;
+  /** An inline reply: a rendered quote, never a nested node. */
+  quotes: { id: string; by: string; body: string } | null;
+  reactions: ChatReaction[];
+  publishRequest: { id: string; destination: 'faq' | 'group'; decision: 'anonymous' | 'named' | 'declined' | null; decidedAt: string | null } | null;
+};
+export type ChatMe = { memberId: string | null; guestId: string | null; name: string; isHost: boolean; guest: boolean; booked: boolean; occurrences: string[] };
+export type ChatContext = {
+  type: ChatContextType; id: string; name: string; subtitle: string | null; sub: string; dates: { start: string; end: string } | null;
+  host: { name: string; role: 'organiser' | 'host'; memberId: string | null } | null;
+  me: ChatMe | null;
+  can: { ask: boolean; private: boolean; notice: boolean; answer: boolean };
+  people: { count: number; members: { id: string; name: string; avatarUrl: string | null; isHost: boolean }[]; guests: { id: string; name: string }[] };
+  anchors: { level: ChatAnchor[]; days: ChatAnchor[]; stops: ChatAnchor[] };
+};
+/** What you get told about (C9). The defaults are the design. */
+export type ChatPrefs = { started: boolean; anchors: boolean; from_host: boolean; every_topic: boolean; mentions: boolean; digest: boolean };
+export type ChatList = {
+  context: ChatContext; topics: ChatTopic[]; prefs: ChatPrefs; unread: number;
+  /** Trips: how many questions sit on each stop, by venue ref (the Ask tab's count). */
+  askCounts?: Record<string, number>;
+  organiser?: { id: string; name: string } | null;
+  /** Offers: "three answers came with this booking" (C8), and how many the FAQ holds. */
+  faqFromEarlier?: number; faqCount?: number;
+  /** The old `/asks/<ref>` address says which stop it was filtered to. */
+  about?: string;
+};
+export type ChatMenuGroup = { title: string; items: { key: string; label: string; hint?: string }[] };
+export type ChatTopicView = {
+  context: ChatContext; topic: ChatTopic; replies: ChatReply[];
+  /** The asker's decision to make (D2), shown exactly as it would be published. */
+  publishRequests: { id: string; replyId: string; destination: 'faq' | 'group'; forMe: boolean; askedBy: string | null; preview: { question: string; answer: string } }[];
+  menu: ChatMenuGroup[];
+  /** For the host: how many times this has been asked across the offer's dates. */
+  askCount: number | null; suggestPublishAt: number;
+  picker: { quick: string[]; mostUsed: string[]; yours: boolean };
+  faq?: { id: string } | null;
+};
+export type ChatInbox = {
+  host: { id: string; name: string } | null;
+  offers: { id: string; title: string | null; shape: string; state: string; startsOn: string | null; topics: ChatInboxItem[] }[];
+  counts: { waiting: number; answered: number; private: number; all: number };
+  suggestPublishAt: number;
+};
+export type ChatInboxItem = {
+  id: string; offerId: string; title: string; tag: { kind: ChatTagKind; ref: string | null; label: string | null }; audience: ChatAudience; state: ChatState;
+  at: string; lastAt: string; author: { name: string; initial: string }; askedTimes: number; suggestPublish: boolean; replyCount: number; seenBy: number;
+  flags: { waiting: boolean; answered: boolean; private: boolean };
+};
+export type ChatSettings = {
+  digestAt: string; quietFrom: string | null; quietTo: string | null;
+  contexts: { type: ChatContextType; id: string; name: string; when: string; prefs: ChatPrefs }[];
+  defaults: ChatPrefs;
+};
+/** An answered question that outlives the booking (C7). */
+export type FaqEntry = { id: string; question: string; answer: string; askCount: number; askedBy: string | null; publishedAt: string };
+
+export type ChatAskBody = { title: string; body?: string | null; tag: { kind: ChatTagKind; ref: string }; audience: ChatAudience; notice?: boolean; occurrence?: string | null };
 
 export type TripPeople = {
   members: { id: string; name: string; isMinor: boolean; avatarUrl: string | null }[];
   guests: { id: string; name: string; contact: string | null; contactKind: string | null; status: string; joinedAt: string | null }[];
   count: number;
-};
-
-export type TripChat = {
-  messages: ChatMessage[]; people: TripPeople; unread: number;
-  /** How many questions sit on each stop, by venue ref. */
-  askCounts: Record<string, number>;
-  organiser?: { id: string; name: string } | null;
 };
 
 export type TripShare = {
@@ -1640,10 +1711,36 @@ export const api = {
   chooseTransfer: (id: string, mode: TransferMode | null) => post<TripTravel>(`/api/trips/${id}/travel/transfer`, { mode }),
 
   // the conversation
-  tripChat: (id: string) => request<TripChat>(`/api/trips/${id}/chat`),
-  tripAsks: (id: string, venueRef: string) => request<TripChat>(`/api/trips/${id}/asks/${encodeURIComponent(venueRef)}`),
-  sendTripMessage: (id: string, body: { body: string; venueRef?: string | null; venueLabel?: string | null }) =>
-    post<{ message: ChatMessage } & TripChat>(`/api/trips/${id}/chat`, body),
+  // --- the chat module: one component, two contexts -------------------------
+  /** The list (D3). `type` is `trip` or `offer`; `id` the trip's or the offer's. */
+  chat: (type: ChatContextType, id: string) => request<ChatList>(`/api/chat/${type}/${id}`),
+  chatRead: (type: ChatContextType, id: string) => post<{ unread: number }>(`/api/chat/${type}/${id}/read`, {}),
+  chatTopic: (type: ChatContextType, id: string, topicId: string) => request<ChatTopicView>(`/api/chat/${type}/${id}/topics/${topicId}`),
+  chatAsk: (type: ChatContextType, id: string, body: ChatAskBody) => post<ChatTopicView>(`/api/chat/${type}/${id}/topics`, body),
+  chatEdit: (type: ChatContextType, id: string, topicId: string, body: Partial<ChatAskBody> & { pinned?: boolean }) => patch<ChatTopicView>(`/api/chat/${type}/${id}/topics/${topicId}`, body),
+  chatReply: (type: ChatContextType, id: string, topicId: string, body: { body: string; quotesReplyId?: string | null; publishRequest?: 'faq' | 'group' | null }) =>
+    post<ChatTopicView>(`/api/chat/${type}/${id}/topics/${topicId}/replies`, body),
+  chatAnswer: (type: ChatContextType, id: string, topicId: string, body: { replyId: string | null; publish?: 'faq' | null }) => post<ChatTopicView>(`/api/chat/${type}/${id}/topics/${topicId}/answer`, body),
+  chatFollow: (type: ChatContextType, id: string, topicId: string, on: boolean) =>
+    (on ? post<{ following: boolean }>(`/api/chat/${type}/${id}/topics/${topicId}/follow`, {}) : del<{ following: boolean }>(`/api/chat/${type}/${id}/topics/${topicId}/follow`)),
+  chatReact: (type: ChatContextType, id: string, topicId: string, body: { targetType: 'topic' | 'reply'; targetId: string; emoji: string }) =>
+    post<{ on: boolean } & ChatTopicView>(`/api/chat/${type}/${id}/topics/${topicId}/react`, body),
+  chatDecide: (type: ChatContextType, id: string, topicId: string, requestId: string, decision: 'anonymous' | 'named' | 'declined') =>
+    post<{ decision: string; published: { faqId?: string; topicId?: string } | null } & ChatTopicView>(`/api/chat/${type}/${id}/topics/${topicId}/requests/${requestId}/decide`, { decision }),
+  chatReport: (type: ChatContextType, id: string, topicId: string, body: { reason?: string | null; replyId?: string | null }) => post<{ ok: true; message: string }>(`/api/chat/${type}/${id}/topics/${topicId}/report`, body),
+  chatPrefs: (type: ChatContextType, id: string) => request<{ context: ChatContext; prefs: ChatPrefs; digestAt: string; anchorsOn: string[] }>(`/api/chat/${type}/${id}/prefs`),
+  setChatPrefs: (type: ChatContextType, id: string, prefs: Partial<ChatPrefs>) => put<{ prefs: ChatPrefs }>(`/api/chat/${type}/${id}/prefs`, prefs),
+  chatSettings: () => request<ChatSettings>('/api/chat/settings'),
+  setChatSettings: (body: { digestAt?: string; quietFrom?: string | null; quietTo?: string | null }) => put<{ digestAt: string; quietFrom: string | null; quietTo: string | null }>('/api/chat/settings', body),
+  chatInbox: () => request<ChatInbox>('/api/chat/inbox'),
+  /** The FAQ on a listing (C7). Public. */
+  experienceFaq: (id: string) => request<{ faq: FaqEntry[]; hostName: string | null }>(`/api/experiences/${id}/faq`),
+  withdrawFaq: (id: string) => post<{ ok: true }>(`/api/chat/faq/${id}/withdraw`, {}),
+  /** The addresses the trip rebuild shipped, still answered — from the topic model now. */
+  tripChat: (id: string) => request<ChatList>(`/api/trips/${id}/chat`),
+  tripAsks: (id: string, venueRef: string) => request<ChatList>(`/api/trips/${id}/asks/${encodeURIComponent(venueRef)}`),
+  sendTripMessage: (id: string, body: { body: string; venueRef?: string | null; venueLabel?: string | null; audience?: ChatAudience; topicId?: string | null }) =>
+    post<ChatTopicView>(`/api/trips/${id}/chat`, body),
   readTripChat: (id: string) => post<{ unread: number }>(`/api/trips/${id}/chat/read`, {}),
 
   // sharing
@@ -1660,10 +1757,17 @@ export const api = {
     post<{ guestId: string; sent: 'sms' | 'email' | null; message?: string; token?: string } & Partial<SharedTrip>>(`/api/shared/${token}/enter`, body),
   sharedVerify: (token: string, body: { guestId: string; code: string }) =>
     post<{ token: string } & SharedTrip>(`/api/shared/${token}/verify`, body),
-  sharedChat: (token: string, you: string, stop?: string | null) =>
-    request<{ messages: ChatMessage[] }>(`/api/shared/${token}/chat${qs({ you, stop })}`),
-  sharedSend: (token: string, body: { you: string; body: string; venueRef?: string | null; venueLabel?: string | null }) =>
-    post<{ messages: ChatMessage[] }>(`/api/shared/${token}/chat`, body),
+  /** The conversation, as a guest: the same topic model, `everyone` topics only. */
+  sharedChat: (token: string, you: string, stop?: string | null) => request<ChatList>(`/api/shared/${token}/chat${qs({ you, stop })}`),
+  sharedTopic: (token: string, you: string, topicId: string) => request<ChatTopicView>(`/api/shared/${token}/chat/${topicId}${qs({ you })}`),
+  sharedSend: (token: string, body: { you: string; body: string; title?: string; tag?: { kind: ChatTagKind; ref: string }; venueRef?: string | null; topicId?: string | null; quotesReplyId?: string | null }) =>
+    post<ChatTopicView>(`/api/shared/${token}/chat`, body),
+  sharedReact: (token: string, you: string, topicId: string, body: { targetType: 'topic' | 'reply'; targetId: string; emoji: string }) =>
+    post<{ on: boolean } & ChatTopicView>(`/api/shared/${token}/chat/${topicId}/react`, { you, ...body }),
+  sharedFollow: (token: string, you: string, topicId: string, on: boolean) =>
+    (on ? post<{ following: boolean }>(`/api/shared/${token}/chat/${topicId}/follow`, { you }) : del<{ following: boolean }>(`/api/shared/${token}/chat/${topicId}/follow${qs({ you })}`)),
+  sharedReport: (token: string, you: string, topicId: string, body: { reason?: string | null; replyId?: string | null }) =>
+    post<{ ok: true; message: string }>(`/api/shared/${token}/chat/${topicId}/report`, { you, ...body }),
   addStop: (tripId: string, body: { venueRef: string; name: string; lat?: number; lng?: number; dwellMinutes?: number }) => post<TripDetail>(`/api/trips/${tripId}/stops`, body),
   removeStop: (tripId: string, stopId: string) => del<TripDetail>(`/api/trips/${tripId}/stops/${stopId}`),
   reorderStops: (tripId: string, stopIds: string[]) => post<TripDetail>(`/api/trips/${tripId}/stops/reorder`, { stopIds }),
@@ -1732,7 +1836,7 @@ export const api = {
   updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected' }) =>
     patch<{ host: OwnHost }>('/api/host', body),
   /** Stop hosting: the host, its offers and its videos go, and the Host tab is the invitation again. */
-  stopHosting: () => del<void>('/api/host'),
+  stopHosting: (force = false) => del<void>(`/api/host${force ? '?force=1' : ''}`),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
   uploadHostMedia: async (blob: Blob, kind: 'video' | 'photo' | 'doc', durationS?: number | null): Promise<HostMedia> => {
     const token = sessionToken();

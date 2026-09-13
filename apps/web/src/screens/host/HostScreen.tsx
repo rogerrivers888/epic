@@ -78,14 +78,14 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
         <ScreenTop><TopControl label="Add an offer" icon="add" onPress={() => navigate(paths.hostNewOffer())} /></ScreenTop>
       </View>
       <ScrollView contentContainerStyle={[styles.body, wide && styles.wide]}>
-        <Dashboard home={home} />
+        <Dashboard home={home} onReset={async () => { await load(); navigate(paths.host(), { replace: true }); }} />
       </ScrollView>
     </View>
   );
 }
 
 /** S4 · live, with room to grow. */
-function Dashboard({ home }: { home: HostHome }) {
+function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<void> }) {
   const { navigate } = useRouter();
   const h = home.host!;
   const s = home.stats!;
@@ -146,6 +146,37 @@ function Dashboard({ home }: { home: HostHome }) {
         <Text style={type.small}>{h.checks === 'running' ? 'Your checks are running; the profile says so until they pass. ' : ''}{!h.introVideo ? 'No intro video yet — people book the person. Record one from your profile.' : ''}</Text>
       ) : null}
       <Text style={type.tiny}>Guests find you through Inspire and Places — there is nothing to browse here.</Text>
+      <DeleteAll onDone={onReset} />
+    </View>
+  );
+}
+
+/**
+ * Delete all events (owner, 13 Sep 2026: "I'm currently in testing mode on the
+ * hosting tab… reset me back to the starting point so that I can continue my
+ * testing"). Two taps: the host record, every offer, invitation and video go —
+ * anyone still holding a place is called off and refunded on the way — and the
+ * tab is the learn layer again.
+ */
+function DeleteAll({ onDone }: { onDone: () => Promise<void> }) {
+  const [arm, setArm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  if (!arm) {
+    return (
+      <Press onPress={() => setArm(true)} accessibilityRole="button" style={{ paddingVertical: 10 }}>
+        <Text style={[type.small, { color: colors.overrun, fontWeight: '700', textAlign: 'center' }]}>Delete all events</Text>
+      </Press>
+    );
+  }
+  return (
+    <View style={styles.deleteBox}>
+      <Text style={type.body}>Everything goes: your host profile, every offer, every invitation and every video. Anyone holding a place is called off and refunded. You start again from the beginning.</Text>
+      {said ? <Text style={[type.small, { color: colors.overrun }]}>{said}</Text> : null}
+      <Row>
+        <Button label="Delete all events" kind="danger" icon="delete" loading={busy} onPress={async () => { setBusy(true); try { await api.stopHosting(true); await onDone(); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />
+        <Button label="Keep them" kind="ghost" onPress={() => setArm(false)} />
+      </Row>
     </View>
   );
 }
@@ -164,5 +195,6 @@ const styles = StyleSheet.create({
   shapeQuick: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 30, borderWidth: 1, borderColor: colors.ruleSoft },
   kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, color: colors.inkMuted },
   ask: { paddingHorizontal: 10, height: 32, justifyContent: 'center', backgroundColor: colors.warm, maxWidth: '100%' },
+  deleteBox: { padding: spacing.md, gap: spacing.sm, borderWidth: BORDER, borderColor: colors.overrun },
   askText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
 });

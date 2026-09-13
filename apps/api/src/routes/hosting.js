@@ -303,6 +303,10 @@ router.delete('/host', async (req, res, next) => {
     const { household, host } = await myHost();
     if (!host) throw refuse(404, 'not_a_host', 'You are not hosting.');
     const today = ymd(new Date());
+    // `?force=1` is the testing reset (owner, 13 Sep 2026: "Delete all events…
+    // reset me back to the starting point"): anything still holding a place
+    // is called off and refunded on the way out rather than refusing.
+    const force = req.query.force === '1' || req.query.force === 'true';
     // One transaction with every offer locked: a booking landing meanwhile
     // waits on the lock and then finds nothing to book, rather than being
     // confirmed and cascading away a moment later (Codex, 12 Sep 2026).
@@ -313,7 +317,10 @@ router.delete('/host', async (req, res, next) => {
       // goes with the host; what was cancelled was never a place.
       // A whole-run booking is still to come until its last week has been.
       const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state) && (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
-      if (holding.length) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
+      if (holding.length && !force) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
+      for (const b of holding) {
+        await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'host', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null }, client);
+      }
       await repo.deleteMediaOfHost(host, offers, client);
       await repo.deleteHost(host.id, household.id, client);
     });
