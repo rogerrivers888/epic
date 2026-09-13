@@ -47,6 +47,8 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const { navigate, back, query } = useRouter();
   // An invite-only offer opens only with the invitation's token (`?i=`).
   const inviteToken = query.get('i');
+  // …or the host's own invitation link (`?l=`), passed round by hand (lanes A and B).
+  const linkToken = query.get('l');
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
   const [mine, setMine] = useState<{ bookings: Booking[]; party: PartyMember[]; you: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,11 +56,11 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
 
   const load = useCallback(async () => {
     try {
-      setData(await api.experience(route.id, inviteToken));
+      setData(await api.experience(route.id, inviteToken, linkToken));
       setError(null);
       if (signedIn()) api.experienceMine(route.id).then(setMine).catch(() => setMine(null));
     } catch (e: any) { setError(e.message); }
-  }, [route.id, inviteToken]);
+  }, [route.id, inviteToken, linkToken]);
   useEffect(() => { void load(); }, [load]);
 
   if (error && !data) {

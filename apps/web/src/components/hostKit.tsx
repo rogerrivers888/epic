@@ -100,8 +100,9 @@ export const k = StyleSheet.create({
   tag: { paddingHorizontal: 8, paddingVertical: 4, backgroundColor: colors.warm, alignSelf: 'flex-start' },
   tagText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.33, color: colors.inkMuted, lineHeight: 13 },
   // two or three cells that share a row: ink when picked, the tint otherwise
-  segs: { flexDirection: 'row' },
-  seg: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 11, paddingHorizontal: 6, backgroundColor: colors.surfaceMuted },
+  // "A segmented control is drawn as 1px ink around the pair with ink fill on the chosen half — not as two grey blocks" (lanes A and B).
+  segs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.line },
+  seg: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 11, paddingHorizontal: 6, backgroundColor: colors.surface },
   segOn: { backgroundColor: colors.primary },
   segText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, textAlign: 'center' },
   segTextOn: { color: colors.primaryFg },
@@ -124,8 +125,10 @@ export const k = StyleSheet.create({
   dashed: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 13, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.ghost },
   // the primary action: 52px ink bar, label left, arrow right
   ctaWrap: { paddingHorizontal: 20, paddingBottom: 8 },
-  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, height: 52, backgroundColor: colors.primary },
-  ctaText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.primaryFg },
+  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, height: 50, backgroundColor: colors.primary },
+  ctaText: { fontFamily: fonts.body, fontSize: 15.5, fontWeight: '700', color: colors.primaryFg },
+  ctaLime: { backgroundColor: LIME },
+  ctaLimeText: { color: INK },
   ctaQuiet: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.ruleSoft },
   ctaQuietText: { color: colors.ink },
   ctaSub: { fontFamily: fonts.body, fontSize: 12.5, color: colors.inkMuted, textAlign: 'center', paddingHorizontal: 20, paddingBottom: 10, lineHeight: 16 },
@@ -257,12 +260,13 @@ export function UnitBox({ value, onChange, onCommit, unit, width = 140, big, pre
  * with an optional caption beneath. `quiet` is the cream, ruled version the
  * learn screens use ("Show me what people host", "Got it").
  */
-export function Cta({ label, onPress, sub, quiet, arrow = true, loading, disabled, icon, style }: { label: string; onPress: () => void; sub?: string | null; quiet?: boolean; arrow?: boolean; loading?: boolean; disabled?: boolean; icon?: IconName; style?: ViewStyle }) {
+export function Cta({ label, onPress, sub, quiet, lime, arrow = true, loading, disabled, icon, style }: { label: string; onPress: () => void; sub?: string | null; quiet?: boolean; lime?: boolean; arrow?: boolean; loading?: boolean; disabled?: boolean; icon?: IconName; style?: ViewStyle }) {
+  const fg = quiet || lime ? colors.ink : colors.primaryFg;
   return (
     <View style={[k.ctaWrap, style]}>
-      <Press onPress={onPress} disabled={loading || disabled} accessibilityRole="button" style={[k.cta, quiet && k.ctaQuiet, (loading || disabled) && { opacity: 0.6 }]}>
-        <Text style={[k.ctaText, quiet && k.ctaQuietText]}>{loading ? 'One moment…' : label}</Text>
-        {icon ? <Icon name={icon} size={18} color={quiet ? colors.ink : colors.primaryFg} strokeWidth={2} /> : arrow && !quiet ? <Icon name="forward" size={18} color={colors.primaryFg} strokeWidth={2} /> : null}
+      <Press onPress={onPress} disabled={loading || disabled} accessibilityRole="button" style={[k.cta, quiet && k.ctaQuiet, lime && k.ctaLime, (loading || disabled) && { opacity: 0.6 }]}>
+        <Text style={[k.ctaText, quiet && k.ctaQuietText, lime && k.ctaLimeText]}>{loading ? 'One moment…' : label}</Text>
+        {icon ? <Icon name={icon} size={17} color={fg} strokeWidth={2} /> : arrow && !quiet ? <Icon name="forward" size={17} color={fg} strokeWidth={2} /> : null}
       </Press>
       {sub ? <Text style={[k.ctaSub, { paddingHorizontal: 0, paddingBottom: 0, paddingTop: 6 }]}>{sub}</Text> : null}
     </View>
@@ -282,4 +286,19 @@ export function PlaceField({ value, onPick, placeholder, kind, seeded }: { value
   const [editing, setEditing] = React.useState(false);
   if (value && !editing) return <Picker icon="address" value={value.label} placeholder={placeholder} seeded={seeded} onPress={() => setEditing(true)} />;
   return <View style={seeded ? k.seeded : undefined}><PlacePickerLazy value={null} onPick={(p: any) => { onPick(p); if (p) setEditing(false); }} placeholder={placeholder} kind={kind} autoFocus={editing} /></View>;
+}
+
+/** A 30px circle with an initial: the guest in a list (lanes A and B: "avatars 999px"). */
+export function Avatar({ name, size = 30 }: { name: string; size?: number }) {
+  return <View style={{ width: size, height: size, borderRadius: 999, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colors.ink }}>{(name.trim()[0] ?? '?').toUpperCase()}</Text></View>;
+}
+
+/** INVITED · ACCEPTED · MIN · MAX — the status row's cell (C2). */
+export function StatCell({ label, value, hot }: { label: string; value: string; hot?: boolean }) {
+  return (
+    <View style={[{ flex: 1, borderWidth: 1, borderColor: colors.ruleSoft, paddingVertical: 9, paddingHorizontal: 8, gap: 2, minWidth: 0 }, hot && { borderWidth: 2, borderColor: colors.line, backgroundColor: colors.surfaceMuted, paddingVertical: 8, paddingHorizontal: 7 }]}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.52, color: colors.inkMuted, lineHeight: 12 }}>{label}</Text>
+      <Text style={{ fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.38, color: colors.ink, lineHeight: 23 }}>{value}</Text>
+    </View>
+  );
 }

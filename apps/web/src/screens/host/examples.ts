@@ -16,7 +16,7 @@ export type ShapeStory = { tag: string; title: string; eg: string; link: string;
 export const SHAPE_STORIES: Record<OfferShape, ShapeStory> = {
   oneoff: {
     tag: 'ONE-OFF', title: 'A thing that happens once', eg: 'A supper club, a skate jam, a whole day you have planned.', link: 'See how a one-off works ›',
-    sTitle: 'One date, one start time', sBlurb: 'You list the running order, and who else will be there.',
+    sTitle: 'One date, one start time', sBlurb: 'You list a running order and who else is there.',
     note: 'A wedding is a one-off too — the only difference is that you set it to invite-only.',
     egs: [
       { title: 'Our wedding at the barn', meta: 'Sat 14 Jun · invite-only · 86 RSVPs', vis: 'PRIVATE' },

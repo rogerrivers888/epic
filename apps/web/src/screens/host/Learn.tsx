@@ -53,7 +53,7 @@ export function LearnHome({ wide }: { wide: boolean }) {
               const s = SHAPE_STORIES[key];
               return (
                 <Press key={key} onPress={() => navigate(paths.hostLearn(key))} accessibilityRole="button" style={[styles.way, k.rule]}>
-                  <View style={[k.tile38, k.lime]}><Icon name={SHAPE_ICON[key]} size={19} color={INK} strokeWidth={2} /></View>
+                  <View style={[k.tile38, k.warm, { borderWidth: 1, borderColor: colors.ruleSoft }]}><Icon name={SHAPE_ICON[key]} size={19} color={INK} strokeWidth={2} /></View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.wayTag}>{s.tag}</Text>
                     <Text style={[t.h18, { marginTop: 1 }]}>{s.title}</Text>
@@ -113,7 +113,7 @@ export function LearnShape({ shape, wide }: { shape: OfferShape; wide: boolean }
         </View>
       </ScrollView>
       <View style={wide ? k.wide : undefined}>
-        <Cta label="Next · what we need" onPress={() => navigate(paths.hostNewOffer(shape))} style={{ paddingBottom: 14 }} />
+        <Cta label="Make it epic" onPress={() => navigate(paths.hostNewOffer(shape))} style={{ paddingBottom: 14 }} />
       </View>
     </View>
   );

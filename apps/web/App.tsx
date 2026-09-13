@@ -29,7 +29,7 @@ import { HostProfileScreen } from './src/screens/HostProfileScreen';
 import { ExperienceScreen } from './src/screens/ExperienceScreen';
 import { BookingScreen } from './src/screens/BookingScreen';
 import { PeopleScreen } from './src/screens/PeopleScreen';
-import { InvitedScreen } from './src/screens/InvitedScreen';
+import { InvitedScreen, InvitedLinkScreen } from './src/screens/InvitedScreen';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
 import { JoinScreen } from './src/screens/JoinScreen';
 import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
@@ -261,6 +261,7 @@ function Routed() {
   if (route.name === 'hostProfile') return <HostProfileScreen route={route} />;
   // An invitation to a private offer (13 Sep 2026): no account, no password — yes or no, and how many.
   if (route.name === 'invited') return <InvitedScreen token={route.token} />;
+  if (route.name === 'invitedLink') return <InvitedLinkScreen token={route.token} />;
   if (route.name === 'experience' && route.layer !== 'book' && route.layer !== 'ask') return <ExperienceScreen route={route} />;
   return <Gate route={route} />;
 }

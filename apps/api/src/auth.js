@@ -244,6 +244,7 @@ const PUBLIC = [
   (req) => req.method === 'GET' && /^\/api\/media\/[^/]+$/.test(req.path),
   // An invitation to a private offer (13 Sep 2026): the token is the credential, and the answer is yes or no.
   (req) => /^\/api\/invited\/[^/]+$/.test(req.path),
+  (req) => req.method === 'GET' && /^\/api\/invited\/link\/[^/]+$/.test(req.path),
   /**
    * A photograph with its own key.
    *

@@ -43,9 +43,9 @@ test('a series skips the dates the host tapped out and still runs its sessions',
 test('the set-up walks only the steps the three axes call for', async () => {
   const { stepsFor } = await import('../src/domain/hosting.js');
   assert.deepEqual(stepsFor({ shape: 'oneoff', visibility: 'invite', money: 'free' }, {}), ['plan', 'vis', 'event', 'invite', 'money', 'done'], 'a free private wedding is two steps and an invitation');
-  assert.deepEqual(stepsFor({ shape: 'series', visibility: 'link', money: 'direct' }, {}), ['plan', 'vis', 'event', 'weeks', 'invite', 'money', 'price', 'done']);
+  assert.deepEqual(stepsFor({ shape: 'series', visibility: 'link', money: 'direct' }, {}), ['plan', 'vis', 'event', 'weeks', 'invite', 'money', 'done']);
   assert.deepEqual(stepsFor({ shape: 'anytime', visibility: 'public', money: 'epic', checks: ['qual'] }, { type: 'meetups' }),
-    ['plan', 'vis', 'event', 'numbers', 'money', 'price', 'basics', 'kind', 'subdetail', 'video', 'extract', 'checks', 'evidence', 'done']);
+    ['plan', 'vis', 'event', 'numbers', 'money', 'basics', 'kind', 'subdetail', 'video', 'extract', 'checks', 'evidence', 'done']);
 });
 
 test('a guest document seeds only what the host has not filled, and says which', async () => {
@@ -282,4 +282,52 @@ test('stopping hosting takes the host, its offers and its media with it', async 
   assert.equal(await repo.offerById(offer.id), null, 'offers go with the host');
   assert.equal(await repo.mediaMeta(m.id), null);
   assert.ok(await repo.mediaMeta(theirs.id), 'the review photo survives');
+});
+
+// ---------------------------------------------------------------------------
+// lanes A and B: the invitation link, and my Epic contacts (migration 091)
+// ---------------------------------------------------------------------------
+
+test('every offer carries its own invitation link, and the token is what opens it', async () => {
+  const { household } = await aHousehold(query, 'a host with a link');
+  const host = await repo.insertHost(household.id, { name: 'Jay' });
+  const a = await repo.insertOffer(host.id, 'oneoff', { visibility: 'invite', title: 'Rachel and Jay' });
+  const b = await repo.insertOffer(host.id, 'oneoff', { visibility: 'link', title: 'The stag' });
+  assert.ok(a.link_token && b.link_token, 'a link exists from the first tap, before anything is filled in');
+  assert.notEqual(a.link_token, b.link_token, 'one link per offer, never shared');
+  assert.equal((await repo.offerByLinkToken(a.link_token)).id, a.id);
+  assert.equal(await repo.offerByLinkToken('not-a-token'), null);
+});
+
+test('my Epic contacts match on a mobile or an email, never on a name', async () => {
+  const { household } = await aHousehold(query, 'a host who remembers');
+  const kate = await repo.rememberContact(household.id, { name: 'Kate Patterson', mobile: '07700 900461', email: null }, { invited: true });
+  // The same person by the same number: one row, and the count goes up.
+  const again = await repo.rememberContact(household.id, { name: 'Kate P', mobile: '07700 900461', email: null }, { invited: true });
+  assert.equal(again.id, kate.id);
+  assert.equal(again.times_invited, 2);
+  assert.ok(again.last_invited_at, 'when they were last asked');
+  // An email fills in beside the mobile rather than making a second row.
+  const filled = await repo.rememberContact(household.id, { name: 'Kate Patterson', mobile: '07700 900461', email: 'kate@example.com' });
+  assert.equal(filled.id, kate.id);
+  assert.equal(filled.email, 'kate@example.com');
+  assert.equal(filled.times_invited, 2, 'saving a detail is not an invitation');
+  // The same name on a different number is a different person.
+  const other = await repo.rememberContact(household.id, { name: 'Kate Patterson', mobile: '07700 900999', email: null });
+  assert.notEqual(other.id, kate.id);
+  const all = await repo.contactsOf(household.id);
+  assert.equal(all.length, 2);
+  assert.equal(all[0].id, kate.id, 'the most-invited lead the list');
+  await repo.deleteContact(household.id, other.id);
+  assert.equal((await repo.contactsOf(household.id)).length, 1);
+});
+
+test('the price lives inside "is anyone paying", so a private paid event is still four steps', async () => {
+  const { stepsFor } = await import('../src/domain/hosting.js');
+  const laneA = stepsFor({ shape: 'oneoff', visibility: 'invite', money: 'epic' }, {});
+  assert.deepEqual(laneA, ['plan', 'vis', 'event', 'invite', 'money', 'done']);
+  assert.equal(laneA.filter((s) => s !== 'plan' && s !== 'done').length, 4, 'four steps after the branch');
+  const laneB = stepsFor({ shape: 'oneoff', visibility: 'link', money: 'direct' }, {});
+  assert.deepEqual(laneB, laneA, 'lane B is lane A, screen for screen');
+  assert.equal(stepsFor({ shape: 'oneoff', visibility: 'public', money: 'epic' }, { type: 'skill' }).filter((s) => s !== 'plan' && s !== 'done').length, 9);
 });

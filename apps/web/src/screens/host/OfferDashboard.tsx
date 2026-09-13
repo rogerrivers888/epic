@@ -142,6 +142,15 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
           <Tile label="paid out" value={o.takings.payoutOn ? dateOnly(o.takings.payoutOn) : '—'} />
         </Row>
 
+        {/* Who is invited (lanes A and B, C2h): the named list, each answer, and the link — reached from here once it is live. */}
+        {o.visibility !== 'public' ? (
+          <Press onPress={() => navigate(paths.hostOfferEdit(o.id, 'invite'))} accessibilityRole="button" style={styles.chatRow}>
+            <Icon name="household" size={18} color={colors.ink} />
+            <View style={{ flex: 1 }}><Text style={type.h3}>Who is invited</Text><Text style={type.small}>{o.invites.length} invited · {o.invites.filter((i) => i.rsvp === 'yes').length} coming · the link to share</Text></View>
+            <Icon name="more" size={16} color={colors.inkMuted} />
+          </Press>
+        ) : null}
+
         {/* Who is coming: people and bookings counted separately. */}
         <View style={styles.block}>
           <Kicker>WHO IS COMING · {heads} IN {live.length} BOOKING{live.length === 1 ? '' : 'S'}</Kicker>

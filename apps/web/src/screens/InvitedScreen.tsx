@@ -16,6 +16,8 @@ import { Button, Row, StatusLine } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
+import { paths } from '../routes';
+import { useRouter } from '../router';
 import { HostFace, Kicker, NumberBox, VENUE_ICON, VideoHero, dayLong, dayShort, durationWords, mediaUrl, money } from '../components/hosting';
 
 export function InvitedScreen({ token }: { token: string }) {
@@ -111,3 +113,27 @@ const styles = StyleSheet.create({
   link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
   rsvp: { marginTop: spacing.xl, padding: spacing.md, gap: spacing.md, backgroundColor: colors.surfaceMuted, minHeight: TARGET },
 });
+
+
+/**
+ * /i/<token> — the host's own invitation link (lanes A and B, C2). It names
+ * one offer; the page is the experience, opened with the link as the key, and
+ * booking it is the RSVP. Nothing is drawn here but the hop.
+ */
+export function InvitedLinkScreen({ token }: { token: string }) {
+  const { navigate } = useRouter();
+  const [said, setSaid] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    api.invitedLink(token).then((r) => { if (on) navigate(`${paths.experience(r.offerId)}?l=${encodeURIComponent(token)}`, { replace: true }); }).catch((e: any) => { if (on) setSaid(e.message); });
+    return () => { on = false; };
+  }, [token]);
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg, padding: 24, gap: 12, justifyContent: 'center' }}>
+      <Wordmark height={30} />
+      <Text style={type.h2}>{said ? 'Nothing at that address' : 'Opening…'}</Text>
+      {said ? <Text style={type.small}>{said}</Text> : null}
+      {said ? <Button label="Take me home" kind="secondary" onPress={() => navigate(paths.inspire(), { replace: true })} /> : null}
+    </View>
+  );
+}

@@ -284,6 +284,8 @@ export type Route =
   | { name: 'host'; page: HostPage; offerId: string | null; param?: string | null; chat?: ChatLayer }
   /** An invitation to a private offer (13 Sep 2026): outside the app, the token is the credential. */
   | { name: 'invited'; token: string }
+  /** The host's own invitation link, passed round (lanes A and B, C2): /i/<token> opens the offer it names. */
+  | { name: 'invitedLink'; token: string }
   /** A host's public profile, and the trust ladder over it. Works logged-out. */
   | { name: 'hostProfile'; hostId: string; layer: 'trust' | null }
   /** One experience, and the two layers over it: the booking sheet and the formats. */
@@ -479,6 +481,8 @@ export function parseRoute(path: string): Route {
 
     case 'invited':
       return a && !b ? { name: 'invited', token: a } : { name: 'unknown', path };
+    case 'i':
+      return a && !b ? { name: 'invitedLink', token: a } : { name: 'unknown', path };
 
     case 'shared':
       return a ? { name: 'shared', token: a } : { name: 'unknown', path };
@@ -526,6 +530,7 @@ export function hrefOf(route: Route): string {
                       : route.page === 'new' ? '/host/offers/new'
                         : buildHref(['host', 'offers', route.offerId, route.page === 'edit' ? 'edit' : null]);
     case 'invited': return buildHref(['invited', route.token]);
+    case 'invitedLink': return buildHref(['i', route.token]);
     case 'hostProfile': return buildHref(['hosts', route.hostId, route.layer]);
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
     case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
@@ -606,6 +611,7 @@ export const paths = {
   hostWho: () => '/host/learn/who',
   hostMe: () => '/host/profile',
   invited: (token: string) => buildHref(['invited', token]),
+  invitedLink: (token: string) => buildHref(['i', token]),
   hostNewOffer: (shape?: string | null) => (shape ? `/host/offers/new?shape=${shape}` : '/host/offers/new'),
   hostOffer: (id: string) => buildHref(['host', 'offers', id]),
   /** A step is named, not numbered: the sequence differs by shape, visibility and money. */
@@ -890,6 +896,7 @@ export function titleOf(route: Route): string {
     case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : 'You and yours');
     case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
     case 'invited': return epic('You are invited');
+    case 'invitedLink': return epic('You are invited');
     case 'hostProfile': return epic(route.layer === 'trust' ? 'How Epic checks hosts' : 'A host');
     case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
     case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');

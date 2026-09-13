@@ -134,6 +134,9 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = []) {
     venueLabel: o.venue_label, venueLat: o.venue_lat, venueLng: o.venue_lng,
     blockers: publishBlockers(o, host),
     steps: stepsFor(o, host),
+    // What the public lane would ask, so a shared screen can say "2 of 4 · 2 of 10 public".
+    publicSteps: stepsFor({ ...o, visibility: 'public' }, host),
+    linkToken: o.link_token, linkUrl: linkUrl(o.link_token),
     seeded: o.seeded ?? [], checks: o.checks ?? [], rulesAccepted: o.rules_accepted, transcript: o.transcript,
     checklist: pitchChecklist(o),
     licenceNumber: o.licence_number, licenceExpiry: ymd(o.licence_expiry),
@@ -710,6 +713,8 @@ router.post('/host/offers/:id/extract', async (req, res, next) => {
 // --- invitations -----------------------------------------------------------
 
 const inviteUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/invited/${token}`;
+/** The one link a host passes round: short, and the token is the credential (lanes A and B, C2). */
+const linkUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/i/${token}`;
 
 /** POST …/invites [{name, contact, heads}] — who is invited. A text with a link goes when a sender exists. */
 router.post('/host/offers/:id/invites', async (req, res, next) => {
@@ -717,11 +722,17 @@ router.post('/host/offers/:id/invites', async (req, res, next) => {
     const { host, offer } = await myOffer(req.params.id);
     const rows = list(req.body?.invites ?? [req.body], 200);
     const made = [];
+    const { household } = await myHost();
     for (const r of rows) {
       const name = str(r.name, 80);
       if (!name) continue;
-      const contact = str(r.contact, 120);
+      // A mobile and an email may both be given (C2c); the text goes to the mobile first.
+      const mobile = str(r.mobile, 40) ?? (str(r.contact, 120)?.includes('@') ? null : str(r.contact, 120));
+      const email = str(r.email, 120) ?? (str(r.contact, 120)?.includes('@') ? str(r.contact, 120) : null);
+      const contact = mobile ?? email;
       const kind = contact ? (contact.includes('@') ? 'email' : 'mobile') : null;
+      // Everyone invited is remembered as one of my Epic contacts (README: "Contacts are always saved").
+      if (mobile || email) await repo.rememberContact(household.id, { name, mobile, email }, { invited: true }).catch(() => null);
       const inv = await repo.insertInvite({ offerId: offer.id, name, contact, contactKind: kind, heads: Math.max(1, int(r.heads) ?? 1), token: crypto.randomBytes(9).toString('base64url') });
       made.push(inv);
     }
@@ -767,6 +778,49 @@ async function sendInvites(host, offer, invites) {
   }
   return { sentTo: invites.length, delivered, channel: mailConfigured() || smsConfigured() ? 'sender' : 'none' };
 }
+
+// --- my Epic contacts (C2a, C2f) ---------------------------------------------
+
+router.get('/host/contacts', async (req, res, next) => {
+  try {
+    const { household } = await myHost();
+    res.json({ contacts: (await repo.contactsOf(household.id)).map(contactPayload) });
+  } catch (err) { next(err); }
+});
+
+/** A new contact from the sheet (C2c): a name, and one of a mobile or an email (C2g). */
+router.post('/host/contacts', async (req, res, next) => {
+  try {
+    const { household } = await myHost();
+    const name = str(req.body?.name, 80);
+    const mobile = str(req.body?.mobile, 40);
+    const email = str(req.body?.email, 120);
+    if (!name) throw refuse(400, 'name_required', 'Give their name.');
+    if (!mobile && !email) throw refuse(400, 'contact_required', 'Give a mobile or an email — we need one way to send the invitation.');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw refuse(400, 'bad_email', 'That does not look like an email address.');
+    const c = await repo.rememberContact(household.id, { name, mobile, email });
+    res.status(201).json({ contact: contactPayload(c) });
+  } catch (err) { next(err); }
+});
+
+router.delete('/host/contacts/:id', async (req, res, next) => {
+  try {
+    const { household } = await myHost();
+    await repo.deleteContact(household.id, req.params.id);
+    res.status(204).end();
+  } catch (err) { next(err); }
+});
+
+const contactPayload = (c) => ({ id: c.id, name: c.name, mobile: c.mobile, email: c.email, timesInvited: c.times_invited, lastInvitedAt: c.last_invited_at });
+
+/** GET /api/invited/link/:token — where an invitation link goes. Public: the token is the credential. */
+publicRouter.get('/invited/link/:token', async (req, res, next) => {
+  try {
+    const o = await repo.offerByLinkToken(req.params.token);
+    if (!o || !['live', 'paused'].includes(o.state)) return res.status(404).json({ error: 'not_found', message: o?.state === 'ended' ? 'This one was called off.' : 'That link does not open anything yet.' });
+    res.json({ offerId: o.id, title: o.title, visibility: o.visibility });
+  } catch (err) { next(err); }
+});
 
 /** GET /api/invited/:token — what an invitation opens. Public: the token is the credential. */
 publicRouter.get('/invited/:token', async (req, res, next) => {
@@ -923,7 +977,9 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     // Only the people named can open an invite-only offer, even with the link.
     if (o.visibility === 'invite') {
       const inv = req.query.i ? await repo.inviteByToken(String(req.query.i)) : null;
-      if (!inv || inv.offer_id !== o.id) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
+      // …or with the host's own invitation link (`?l=`), which they pass round themselves (lane A, C2).
+      const viaLink = req.query.l && String(req.query.l) === o.link_token;
+      if (!viaLink && (!inv || inv.offer_id !== o.id)) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
     }
     const h = await repo.hostById(o.host_id);
     const [bookings, rating] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id)]);

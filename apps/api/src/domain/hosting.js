@@ -313,11 +313,12 @@ export function publishBlockers(offer, host) {
  */
 export function stepsFor(offer, host) {
   const pub = offer.visibility === 'public';
-  const paid = (offer.money ?? 'free') !== 'free';
   const steps = ['plan', 'vis', 'event'];
   if (offer.shape === 'series') steps.push('weeks');
+  // "Is anyone paying" is a drawer: the price, the minimum and the refund rule
+  // open inside the chosen answer, so there is no price step (lanes A and B,
+  // 13 Sep 2026: "This replaced a separate price step — there is no C4").
   steps.push(pub ? 'numbers' : 'invite', 'money');
-  if (paid) steps.push('price');
   if (pub) {
     steps.push('basics', 'kind');
     if (host?.type === 'meetups') steps.push('subdetail');

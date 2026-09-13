@@ -9,6 +9,9 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import crypto from 'node:crypto';
+
+const newToken = () => crypto.randomBytes(9).toString('base64url');
 
 const on = (client) => (client ? (t, p) => client.query(t, p) : query);
 
@@ -147,7 +150,7 @@ export async function offerOfHost(id, hostId) {
 }
 
 export async function insertOffer(hostId, shape, fields = {}) {
-  const created = await query('insert into host_offers (host_id, shape) values ($1, $2) returning *', [hostId, shape]);
+  const created = await query('insert into host_offers (host_id, shape, link_token) values ($1, $2, $3) returning *', [hostId, shape, newToken()]);
   return Object.keys(fields).length ? updateOffer(created.rows[0].id, fields) : created.rows[0];
 }
 
@@ -471,6 +474,51 @@ export async function markInviteSent(id) {
 
 export async function deleteInvite(id, offerId) {
   await query('delete from offer_invites where id = $1 and offer_id = $2', [id, offerId]);
+}
+
+/** The offer an invitation link opens (migration 091). */
+export async function offerByLinkToken(token) {
+  const { rows } = await query('select * from host_offers where link_token = $1', [token]);
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// my Epic contacts: everyone this household has invited (migration 091)
+// ---------------------------------------------------------------------------
+
+export async function contactsOf(householdId) {
+  const { rows } = await query('select * from host_contacts where household_id = $1 order by times_invited desc, name', [householdId]);
+  return rows;
+}
+
+/**
+ * One person, found by mobile or email — never by name — or made. Each
+ * invitation sent to them counts, so the list can lead with the people
+ * invited most often (C2f).
+ */
+export async function rememberContact(householdId, { name, mobile, email }, { invited = false } = {}) {
+  const { rows } = await query(
+    `select * from host_contacts where household_id = $1 and ((mobile is not null and mobile = $2) or (email is not null and lower(email) = lower($3))) limit 1`,
+    [householdId, mobile ?? null, email ?? null],
+  );
+  let row = rows[0];
+  if (row) {
+    const { rows: out } = await query(
+      `update host_contacts set name = coalesce($2, name), mobile = coalesce(mobile, $3), email = coalesce(email, $4),
+         times_invited = times_invited + $5, last_invited_at = case when $5 > 0 then now() else last_invited_at end where id = $1 returning *`,
+      [row.id, name ?? null, mobile ?? null, email ?? null, invited ? 1 : 0],
+    );
+    return out[0];
+  }
+  const { rows: made } = await query(
+    `insert into host_contacts (household_id, name, mobile, email, times_invited, last_invited_at) values ($1, $2, $3, $4, $5, $6) returning *`,
+    [householdId, name, mobile ?? null, email ?? null, invited ? 1 : 0, invited ? new Date() : null],
+  );
+  return made[0];
+}
+
+export async function deleteContact(householdId, id) {
+  await query('delete from host_contacts where household_id = $1 and id = $2', [householdId, id]);
 }
 
 export async function inviteByToken(token) {

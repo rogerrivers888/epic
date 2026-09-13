@@ -486,6 +486,8 @@ test('the Host tab, and every page inside it', () => {
   assert.equal(parentOf(parseRoute('/host/learn/examples/skateboarding')), '/host/learn/examples');
   // An invitation is outside the app.
   assert.deepEqual(roundTrip('/invited/tok'), { name: 'invited', token: 'tok' });
+  assert.deepEqual(roundTrip('/i/tok'), { name: 'invitedLink', token: 'tok' });
+  assert.equal(parseRoute('/i').name, 'unknown');
   assert.equal(tabOf(parseRoute('/invited/tok')), null);
   assert.equal(parseRoute('/invited').name, 'unknown');
   assert.equal(paths.hostVideo('o1'), '/host/video?offer=o1');
