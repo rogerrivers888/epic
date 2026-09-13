@@ -118,3 +118,34 @@ test('a failed sweep gives the area back without claiming to have swept it', asy
   assert.ok(await scout.markSweeping(CODE), 'and it can be swept again at once');
   await query('delete from scout_areas where code = $1', [CODE]);
 });
+
+test('a superseded sweep writes no places at all, not even half of them', async () => {
+  await anArea();
+  const place = (ref, name) => ({ venueRef: ref, name, epicScore: 5, ownedScore: 4, crowdBand: 'top', countBand: 'many', from: ['osm'] });
+
+  // The sweep that holds the area writes its selection.
+  const mine = await scout.markSweeping(CODE);
+  const first = await scout.commitSweep(CODE, {
+    lease: mine, places: [place('osm:1', 'The Good One'), place('osm:2', 'The Other')],
+    state: 'done', seen: 9, chains: 1, nextSweepAt: new Date(),
+  });
+  assert.ok(first);
+  assert.equal((await query('select count(*) from scout_places where area_code = $1', [CODE])).rows[0].count, '2');
+
+  // One that overran, was taken over, and only now got to its write phase.
+  const stale = await scout.markSweeping(CODE);
+  await ageLock(scout.SWEEP_LOCK_MINUTES + 1);
+  const replacement = await scout.markSweeping(CODE);
+  assert.ok(replacement && replacement !== stale);
+
+  assert.equal(
+    await scout.commitSweep(CODE, { lease: stale, places: [place('osm:9', 'Gone Stale')], state: 'done', nextSweepAt: new Date() }),
+    null,
+    'a lost lease commits nothing',
+  );
+  const { rows } = await query('select venue_ref from scout_places where area_code = $1 order by venue_ref', [CODE]);
+  assert.deepEqual(rows.map((r) => r.venue_ref), ['osm:1', 'osm:2'], 'the newer sweep’s places are untouched and nothing was pruned');
+
+  await query('delete from scout_places where area_code = $1', [CODE]);
+  await query('delete from scout_areas where code = $1', [CODE]);
+});

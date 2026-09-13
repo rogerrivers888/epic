@@ -5,7 +5,7 @@
 // review count that produced a band are folded in by the sweep and discarded
 // before anything reaches this file.
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { causeOf, CAUSES } from '../domain/menuCauses.js';
 
 export async function upsertArea(a) {
@@ -136,8 +136,8 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
  * The history row is our own number over time, which is how "has this place
  * changed?" is answered without ever having held the thing that changed.
  */
-export async function putPlace(areaCode, p) {
-  await query(
+export async function putPlace(areaCode, p, run = query) {
+  await run(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
                                accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, from_sources, last_seen, scored_at)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now(), now())
@@ -163,16 +163,50 @@ export async function putPlace(areaCode, p) {
       // about who to credit (migration 072).
       JSON.stringify(Array.isArray(p.from) && p.from.length ? p.from : [])],
   );
-  await query(
+  await run(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score, crowd_band, count_band, rank)
      values ($1,$2,$3,$4,$5,$6,$7) on conflict do nothing`,
     [areaCode, p.venueRef, p.epicScore, p.ownedScore, p.crowdBand, p.countBand, p.rank],
   );
 }
 
+/**
+ * Everything a finished sweep writes, in one go, or nothing at all.
+ *
+ * The lease fenced the finishing line but not the writing (Codex, 13 Sep
+ * 2026): a sweep that overran its half hour and woke up after somebody else
+ * had taken the area could still put its places and prune the newer sweep's,
+ * and only then be told its finish did not count. So the selection, the prune
+ * and the finish are one transaction that takes the area row first and checks
+ * the lease under that lock. A superseded sweep writes nothing.
+ *
+ * Answers with what was dropped, or null when the lease has gone.
+ */
+export async function commitSweep(code, { lease, places = [], state, why = null, seen = 0, chains = 0, nextSweepAt = null }) {
+  return withTransaction(async (client) => {
+    const run = (text, params) => client.query(text, params);
+    const { rows } = await run('select sweep_lease from scout_areas where code = $1 for update', [code]);
+    if (!rows.length) return null;
+    // `lease` null means a caller that never took a lock (a dry run, a test):
+    // it is not fenced, exactly as it was not before.
+    if (lease != null && rows[0].sweep_lease !== lease) return null;
+
+    for (const [i, p] of places.entries()) await putPlace(code, { ...p, rank: i + 1 }, run);
+    const dropped = await pruneArea(code, places.map((p) => p.venueRef), run);
+    await run(
+      `update scout_areas set state = $2, why = $3, seen = $4, chains = $5, kept = $6,
+              swept_at = now(), sweeps = sweeps + 1, next_sweep_at = $7,
+              sweeping_since = null, sweep_lease = null
+        where code = $1`,
+      [code, state, why, seen, chains, places.length, nextSweepAt],
+    );
+    return { dropped };
+  });
+}
+
 /** Drop anything the latest sweep did not see again — it has closed, or fallen out of the cut. */
-export async function pruneArea(areaCode, keepRefs) {
-  const { rows } = await query(
+export async function pruneArea(areaCode, keepRefs, run = query) {
+  const { rows } = await run(
     'delete from scout_places where area_code = $1 and not (venue_ref = any($2)) returning venue_ref',
     [areaCode, keepRefs],
   );

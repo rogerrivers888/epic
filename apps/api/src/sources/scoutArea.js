@@ -243,28 +243,38 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
   // waits for a sweep that could actually ask (found queueing Surrey, 5 Sep 2026).
   const provisional = !askedTheCrowd && !area.swept_at;
 
-  for (const [i, c] of kept.entries()) {
-    await scout.putPlace(code, { ...c, rank: i + 1 });
-    if (provisional) continue;
-    // Straight to the researcher: OpenStreetMap, their own page, the
-    // encyclopedias. Nothing licensed is asked for and nothing waits on it.
-    await owned.ensureRecord(c.venueRef);
-    queueEnrichment(c.venueRef, { seed: { name: c.name, lat: c.lat, lng: c.lng, website: c.website, category: c.category } });
-  }
-  const dropped = await scout.pruneArea(code, kept.map((c) => c.venueRef));
-
   // The daily Text Search cap is a fact about today rather than about the area,
   // so an area that could not ask comes back tomorrow instead of in six months
   // (found sweeping SL6–SL9, 5 Sep 2026).
   const next = new Date(Date.now() + (askedTheCrowd ? RESWEEP_DAYS : 1) * 86_400_000);
-  await scout.finishSweep(code, {
+  // The selection, the prune and the finish together, under the area's own
+  // lock and only while the lease still holds. A sweep that was taken over
+  // while it worked writes nothing at all rather than half of something.
+  const committed = await scout.commitSweep(code, {
+    lease,
+    places: kept,
     state: kept.length ? 'done' : 'failed',
     why: askedTheCrowd ? notes.join('; ')
       : `${notes.join('; ')} — ranked on open data alone${provisional ? ', research held until the crowd can be asked' : ''}; will try again tomorrow`,
-    seen, chains, kept: kept.length, nextSweepAt: next, lease,
+    seen, chains, nextSweepAt: next,
   });
+  if (!committed) {
+    // Not an error to shout about: another sweep of this area owns it now, and
+    // its answer is the one worth having.
+    return { code, state: 'superseded', why: 'Another sweep of this area took over while this one was working.', seen, chains, kept: 0, googleCalls, notes };
+  }
 
-  return { code, state: kept.length ? 'done' : 'failed', seen, chains, kept: kept.length, dropped: dropped.length, googleCalls, notes, nextSweepAt: next.toISOString() };
+  if (!provisional) {
+    // Straight to the researcher, once the places are actually written:
+    // OpenStreetMap, their own page, the encyclopedias. Nothing licensed is
+    // asked for and nothing waits on it.
+    for (const c of kept) {
+      await owned.ensureRecord(c.venueRef);
+      queueEnrichment(c.venueRef, { seed: { name: c.name, lat: c.lat, lng: c.lng, website: c.website, category: c.category } });
+    }
+  }
+
+  return { code, state: kept.length ? 'done' : 'failed', seen, chains, kept: kept.length, dropped: committed.dropped.length, googleCalls, notes, nextSweepAt: next.toISOString() };
 }
 
 /**
