@@ -379,7 +379,11 @@ function place(chain, rules, vocab, fallback) {
  */
 export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {}, rules = NO_RULES, vocab = NO_VOCAB) {
   const weights = BY_ATLAS_CATEGORY[category] ?? ATLAS_UNKNOWN;
-  const hits = labelHits(rules?.labels, labelsOfAtlas({ category, kinds, labels }));
+  // The owner's label rules first, Epic's only where none fires — the same
+  // precedence as a live venue (Codex, 13 Sep 2026).
+  const all = labelsOfAtlas({ category, kinds, labels });
+  const owned = labelHits(ownerOnly(rules?.labels), all);
+  const hits = owned.length ? owned : labelHits(rules?.labels, all);
   return place(
     [['place', [ref]], ['labels', hits], ['kind', kinds], ['category', [category]]],
     rules,

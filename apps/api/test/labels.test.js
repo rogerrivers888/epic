@@ -186,3 +186,12 @@ test('Epic\'s own one-word rules never out-vote Google\'s reading of a food plac
   const hits2 = labelHits(rules.labels, ['google:chicken_wings_restaurant', 'google:fast_food_restaurant']);
   assert.equal(hits2[0], 'google:chicken_wings_restaurant');
 });
+
+test('on the atlas side too, the owner\'s label rule beats Epic\'s', () => {
+  const rules = rulesOf(
+    { scope: 'labels', labels: ['wikidata:Q23413', 'atlas:heritage'], subcategory: 'museums', weights: {}, taught_by: 'Epic' },
+    { scope: 'labels', labels: ['wikidata:Q23413'], subcategory: 'castles', weights: {}, taught_by: 'roger' },
+  );
+  const filed = shelvesForAtlas({ ref: 'wikidata:Q9', category: 'heritage', kinds: ['Q23413'] }, rules, VOCAB);
+  assert.equal(filed.subcategory, 'castles');
+});
