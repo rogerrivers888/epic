@@ -709,7 +709,7 @@ router.post('/host/offers/:id/invites', async (req, res, next) => {
     // A draft is not sent: it may not have its title, date or place yet.
     // Invitations go out when the host publishes (submit), or at once on an
     // offer that is already live (Codex, 13 Sep 2026).
-    if (offer.state === 'live' && req.body?.send !== false) await sendInvites(host, offer, made);
+    if ((offer.state === 'live' || offer.state === 'paused') && req.body?.send !== false) await sendInvites(host, offer, made);
     res.status(201).json({ offer: await ownOfferPayload(offer, host) });
   } catch (err) { next(err); }
 });
@@ -717,7 +717,8 @@ router.post('/host/offers/:id/invites', async (req, res, next) => {
 router.post('/host/offers/:id/invites/send', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
-    if (offer.state !== 'live') throw refuse(409, 'not_live', 'Publish it first — the link would open nothing yet.');
+    // Only publication is waited for: a paused offer still opens and takes an answer.
+    if (offer.state === 'draft' || offer.state === 'in_review') throw refuse(409, 'not_live', 'Publish it first — the link would open nothing yet.');
     const pending = (await repo.invitesOf(offer.id)).filter((i) => !i.sent_at);
     const told = await sendInvites(host, offer, pending);
     res.json({ offer: await ownOfferPayload(offer, host), told });

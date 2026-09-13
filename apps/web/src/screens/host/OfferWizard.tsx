@@ -386,7 +386,8 @@ function Numbers({ offer: o, save }: { offer: OwnOffer; save: Save }) {
   const [exp, setExp] = useState(str(o.expectedCount));
   const [max, setMax] = useState(str(o.maxCount));
   const [age, setAge] = useState(str(o.ageLimit ?? 18));
-  const commit = () => void save({ expectedCount: num(exp), maxCount: num(max) });
+  // A free offer carries no minimum, whatever an older row held.
+  const commit = () => void save({ expectedCount: num(exp), maxCount: num(max), ...(o.money === 'free' ? { minCount: null } : {}) });
   const hint = focus === 'expect' ? 'Just your best guess. It is not shown to anyone.' : `At ${num(max) ?? '…'} it is full and the page stops taking bookings.`;
   const boxes = [{ k: 'expect' as const, l: 'Expecting', v: exp, s: setExp }, { k: 'max' as const, l: 'Maximum', v: max, s: setMax }];
   const restricted = o.ageLimit != null;
