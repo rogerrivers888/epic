@@ -20,7 +20,7 @@ import { canonical } from '../domain/labels.js';
  * label it names (migration 077) — sits above the type rules, because a rule
  * that names two things has said more than one that names one.
  */
-export const SCOPES = ['place', 'labels', 'kind', 'category', 'experience'];
+export const SCOPES = ['place', 'ours', 'labels', 'kind', 'category', 'experience'];
 
 /**
  * Keep only real shelves and real numbers, and drop a shelf claimed at zero.

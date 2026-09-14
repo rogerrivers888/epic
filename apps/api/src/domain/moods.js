@@ -226,7 +226,7 @@ const ATLAS_DRAWER = {
 };
 
 /** The shape `rulesFor` hands over, and what an empty teaching table looks like. */
-export const NO_RULES = { place: new Map(), labels: new Map(), kind: new Map(), category: new Map(), experience: new Map() };
+export const NO_RULES = { place: new Map(), ours: new Map(), labels: new Map(), kind: new Map(), category: new Map(), experience: new Map() };
 
 /**
  * Several rules, one set of weights: the strongest claim on each shelf wins.
@@ -258,8 +258,15 @@ function combine(matches, rank = RANK) {
  * Defaults to the eight in this file, so every pure caller — the tests, a
  * script, anything that has not read the table — still works without one.
  */
-export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), rank: RANK };
-export const vocabularyOf = (categories, subcategories) => ({
+export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), pointsAt: new Map(), rank: RANK };
+export const vocabularyOf = (categories, subcategories, pointsAt = new Map()) => ({
+  /**
+   * Which of our labels each provider's word means (migration 107). The owner,
+   * 14 Sep 2026: "we don't use Google words; we use our own words." A rule
+   * names our labels, so a place's provider words are read through this before
+   * any rule sees them, and one rule then answers for every provider.
+   */
+  pointsAt,
   parentOf: new Map((subcategories ?? []).map((s) => [s.key, s.category_key])),
   // The extra cabinets a drawer is listed in, beside its home. Read off the
   // subcategory rows, which `shelfTaxonomy.taxonomy()` fills from
@@ -406,8 +413,14 @@ export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {},
   const all = labelsOfAtlas({ category, kinds, labels });
   const owned = labelHits(ownerOnly(rules?.labels), all);
   const hits = owned.length ? owned : labelHits(rules?.labels, all);
+  // Windsor Castle arrives from Wikidata carrying no Google word at all, which
+  // is the whole reason rules are written in our words: said in ours, one rule
+  // answers for it and for a Google castle alike (14 Sep 2026).
+  const ours = ourLabelsOf(all, vocab);
+  const ourOwned = labelHits(ownerOnly(rules?.ours), ours);
+  const ourHits = ourOwned.length ? ourOwned : labelHits(rules?.ours, ours);
   return place(
-    [['place', [ref]], ['labels', hits], ['kind', kinds], ['category', [category]]],
+    [['place', [ref]], ['ours', ourHits], ['labels', hits], ['kind', kinds], ['category', [category]]],
     rules,
     vocab,
     {
@@ -435,6 +448,23 @@ export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {},
  * tags is still a day out, and hiding it because OpenStreetMap was terse would
  * lose real places.
  */
+/**
+ * A place's provider words, said in our words.
+ *
+ * Anything with no mapping yet simply drops out: it is in the queue on the
+ * Categories screen, and a rule cannot name a word we have not adopted.
+ */
+export function ourLabelsOf(labels, vocab = NO_VOCAB) {
+  const map = vocab?.pointsAt;
+  if (!map?.size) return [];
+  const out = [];
+  for (const l of labels ?? []) {
+    const ours = map.get(String(l));
+    if (ours && !out.includes(ours)) out.push(ours);
+  }
+  return out;
+}
+
 export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   const ref = venue?.source && venue?.sourcePlaceId ? `${venue.source}:${venue.sourcePlaceId}` : null;
   // The label rules that fire for this place: a provider's own word, or several
@@ -446,7 +476,11 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   // Epic's can out-vote the owner's word (Codex, 13 Sep 2026).
   const owned = labelHits(ownerOnly(rules?.labels), labels);
   const level = owned.length ? owned : labelHits(rules?.labels, labels);
-  const chain = [['place', [ref]], ['labels', level], ['experience', venue?.experiences ?? []]];
+  // The same place said in our words, so a rule written in them can read it.
+  const ours = ourLabelsOf(labels, vocab);
+  const ourOwned = labelHits(ownerOnly(rules?.ours), ours);
+  const ourLevel = ourOwned.length ? ourOwned : labelHits(rules?.ours, ours);
+  const chain = [['place', [ref]], ['ours', ourLevel], ['labels', level], ['experience', venue?.experiences ?? []]];
 
   // Somewhere to eat is Food unless somebody has said otherwise about this
   // place or about its labels — an ice-cream parlour typed as a cafe can be
@@ -455,7 +489,7 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   // Google word goes on its own, and google.js has already read the whole set
   // of a food place's types with its primary-type and fast-food rules; those
   // must not be out-voted by one of the words (Codex, 13 Sep 2026).
-  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['labels', owned]])) {
+  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['ours', ourOwned], ['labels', owned]])) {
     const weights = { food: 1 };
     const fast = (venue?.styles ?? []).some((s) => s === 'fast-food' || s === 'takeaway');
     const drawer = fast ? 'fast-food' : FOOD_DRAWER[venue.category] ?? null;

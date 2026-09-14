@@ -195,3 +195,35 @@ test('on the atlas side too, the owner\'s label rule beats Epic\'s', () => {
   const filed = shelvesForAtlas({ ref: 'wikidata:Q9', category: 'heritage', kinds: ['Q23413'] }, rules, VOCAB);
   assert.equal(filed.subcategory, 'castles');
 });
+
+test('a place is read in our words, and a rule written in them catches every provider', async () => {
+  // The owner, 14 Sep 2026: "we don't use Google words; we use our own words…
+  // We create rules using our own internal labels, which will change over time
+  // because we have other providers other than Google."
+  const { vocabularyOf, ourLabelsOf, shelvesForVenue, NO_RULES } = await import('../src/domain/moods.js');
+  const vocab = vocabularyOf(
+    [{ key: 'culture' }, { key: 'food' }],
+    [{ key: 'museums', category_key: 'culture' }, { key: 'cafes', category_key: 'food' }],
+    // Three providers, three words, one label of ours.
+    new Map([
+      ['google:museum', 'museums'],
+      ['osm:tourism=museum', 'museums'],
+      ['wikidata:Q33506', 'museums'],
+      ['google:cafe', 'cafes'],
+    ]),
+  );
+  assert.deepEqual(ourLabelsOf(['google:museum', 'google:cafe'], vocab), ['museums', 'cafes']);
+  // The same place from OpenStreetMap says exactly the same thing.
+  assert.deepEqual(ourLabelsOf(['osm:tourism=museum'], vocab), ['museums']);
+  // A word nobody has adopted drops out rather than being guessed at.
+  assert.deepEqual(ourLabelsOf(['google:nothing_we_know'], vocab), []);
+  // And one rule, written in our words, answers for both providers.
+  const rules = {
+    ...NO_RULES,
+    ours: new Map([['museums', { subject: 'museums', labels: ['museums'], subcategory: 'museums', weights: { culture: 1 } }]]),
+  };
+  const fromGoogle = shelvesForVenue({ source: 'g', sourcePlaceId: '1', category: 'attraction', labels: ['google:museum'] }, rules, vocab);
+  const fromOsm = shelvesForVenue({ source: 'o', sourcePlaceId: '2', category: 'attraction', labels: ['osm:tourism=museum'] }, rules, vocab);
+  assert.equal(fromGoogle.subcategory, 'museums');
+  assert.equal(fromOsm.subcategory, 'museums');
+});

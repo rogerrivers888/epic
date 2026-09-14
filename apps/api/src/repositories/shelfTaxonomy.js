@@ -30,11 +30,17 @@ export const forget = () => { cache = null; };
 /** Everything, in one read, in the shapes the resolver and the screens want. */
 export async function taxonomy() {
   if (cache && Date.now() - cachedAt < TTL_MS) return cache;
-  const [cats, subs, extra] = await Promise.all([
+  const [cats, subs, extra, points] = await Promise.all([
     query('select * from shelf_categories order by position, label'),
     query('select * from shelf_subcategories order by position, label'),
     // The extra cabinets a drawer is listed in, beside its home (14 Sep 2026).
     query('select subcategory_key, category_key from shelf_subcategory_categories order by position, category_key'),
+    // Which of our labels each provider's word means. A rule is written in our
+    // words, so this is what turns a place's provider words into something a
+    // rule can read (migration 107).
+    query(`select namespace || ':' || key as word, points_at from taxonomy_labels where points_at is not null
+           union all
+           select 'wikidata:' || qid as word, points_at from place_kinds where points_at is not null`),
   ]);
   const categories = cats.rows;
   // Every listing, live or not. Switching a category off must not quietly
@@ -61,7 +67,8 @@ export async function taxonomy() {
       categories: categories.filter((c) => c.active),
       subcategories: subcategories.filter((s) => s.active),
     },
-    vocab: vocabularyOf(categories.filter((c) => c.active), subcategories.filter((s) => s.active)),
+    vocab: vocabularyOf(categories.filter((c) => c.active), subcategories.filter((s) => s.active),
+      new Map(points.rows.map((r) => [r.word, r.points_at]))),
     byKey: new Map(categories.map((c) => [c.key, c])),
     subByKey: new Map(subcategories.map((s) => [s.key, s])),
   };
