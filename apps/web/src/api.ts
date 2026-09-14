@@ -2388,6 +2388,15 @@ export const api = {
   /** Name a secondary label, or change one. */
   taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
     put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
+  /** The places the labels could not settle, with the last few runs. */
+  taxonomyNotSure: (state?: string) =>
+    request<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[]; subcategories: ShelfSubcategory[]; categories: ShelfCategory[] }>(
+      `/api/admin/taxonomy/not-sure${qs({ state })}`),
+  /** Send a batch to be looked up. Nothing is applied by it. */
+  taxonomyResearch: (refs: string[]) => post<{ run: NotSureRun }>('/api/admin/taxonomy/not-sure/run', { refs }),
+  /** Your decision: one of our labels, or null to drop it from the list. */
+  taxonomySettle: (ref: string, as: string | null) =>
+    put<{ place: NotSurePlace }>('/api/admin/taxonomy/not-sure', { ref, as }),
   /** What one of our labels brings with it, and as what. A null value forgets it. */
   taxonomySetBrings: (body: { attribute: string; brings: string; value: AttributeValue | null }) =>
     put<{ attribute: string; brings: string; value: AttributeValue | null }>('/api/admin/taxonomy/attributes/brings', body),
@@ -2988,6 +2997,20 @@ export type TaxonomyExamples = {
   problem: string | null;
   subcategories: ShelfSubcategory[];
   categories: ShelfCategory[];
+};
+
+/** A place the labels could not settle, and what a run came back with. */
+export type NotSurePlace = {
+  venue_ref: string; name: string | null; words: string[]; would_be: string | null;
+  reason: string; state: 'waiting' | 'answered' | 'settled' | 'dropped';
+  said: string | null; because: string | null; source: string | null;
+  looked_at: string | null; settled_as: string | null; settled_by: string | null;
+};
+
+export type NotSureRun = {
+  id: string; asked_for: number; looked_at: number; answered: number;
+  cost_pence: number | null; note: string | null; by: string | null;
+  started_at: string; finished_at: string | null;
 };
 
 /** One of our secondary labels: something true about a place, not what it is. */

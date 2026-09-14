@@ -40,7 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
-  api, AttributeValue, MoodKey, PlaceAttribute, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
+  api, AttributeValue, MoodKey, NotSurePlace, NotSureRun, PlaceAttribute, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
   TaxonomyRule, TaxonomyTry,
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -54,7 +54,7 @@ const WIDE = 900;
 
 type View_ = 'subcategories' | 'providers' | 'google' | 'words' | 'left';
 /** The three doors across the top: a provider's words, ours, and the categories. */
-type Door = 'words' | 'ours' | 'cats';
+type Door = 'words' | 'ours' | 'cats' | 'notsure';
 const VIEWS: { key: View_; label: string; short: string; needsCategory: boolean }[] = [
   { key: 'subcategories', label: 'Our categories', short: 'Ours', needsCategory: true },
   { key: 'providers', label: 'Providers\' words, one of ours', short: 'Providers', needsCategory: true },
@@ -176,14 +176,14 @@ export function Categories({ canManage }: { canManage: boolean }) {
   const [cat, setCat] = useQueryState<string>('cat', '', asText);
   const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words', 'left'] as const, 'subcategories'));
   /** Which of the three doors is open (the handoff, 14 Sep 2026). */
-  const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats'] as const, 'words'));
+  const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats', 'notsure'] as const, 'words'));
   /**
    * The door decides which views are behind it, so a door and a view that do
    * not go together would draw nothing at all — which is what a clean address
    * with no query on it used to do (Codex, 14 Sep 2026). The view is read
    * through the door rather than beside it.
    */
-  const BEHIND: Record<Door, View_[]> = { words: ['google', 'left', 'providers', 'words'], ours: [], cats: ['subcategories'] };
+  const BEHIND: Record<Door, View_[]> = { words: ['google', 'left', 'providers', 'words'], ours: [], cats: ['subcategories'], notsure: [] };
   const shown: View_ = BEHIND[door].includes(view) ? view : (BEHIND[door][0] ?? view);
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
   const [note, setNote] = useState<string | null>(null);
@@ -203,6 +203,18 @@ export function Categories({ canManage }: { canManage: boolean }) {
   // How many of a provider's words there are and how many are answered, for the
   // door's own sub-line. Read once when the screen loads.
   const [googleCount, setGoogleCount] = useState('Google’s list');
+  const [notSureCount, setNotSureCount] = useState('none waiting');
+  useEffect(() => {
+    let live = true;
+    void api.taxonomyNotSure()
+      .then((d) => {
+        if (!live) return;
+        const waiting = d.counts.waiting ?? 0; const answered = d.counts.answered ?? 0;
+        setNotSureCount(waiting || answered ? `${waiting} waiting · ${answered} answered` : 'none waiting');
+      })
+      .catch(() => null);
+    return () => { live = false; };
+  }, [note]);
   useEffect(() => {
     let live = true;
     void api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 })
@@ -220,7 +232,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
   // Our labels has no views behind it and needs no category. Without this it
   // inherits the fallback view's requirement and asks you to pick one that is
   // not on screen (Codex, 14 Sep 2026).
-  const needsCategory = door !== 'ours' && (VIEWS.find((v) => v.key === shown)?.needsCategory ?? false);
+  const needsCategory = door === 'cats' && (VIEWS.find((v) => v.key === shown)?.needsCategory ?? false);
   const subs = category?.subcategories ?? [];
   const chosen = subs.find((s) => s.key === sub) ?? null;
   const rulesOf = (key: string) => (tax?.rules ?? []).filter((r) => r.subcategory === key);
@@ -248,6 +260,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
           words: googleCount,
           ours: `${(tax?.subcategories ?? []).filter((x) => x.active).length} primary`,
           cats: String((tax?.categories ?? []).filter((c) => c.active).length),
+          notsure: notSureCount,
         }}
       />
 
@@ -364,6 +377,10 @@ export function Categories({ canManage }: { canManage: boolean }) {
 
       {tax && door === 'ours' ? (
         <OurLabels tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
+      ) : null}
+
+      {tax && door === 'notsure' ? (
+        <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
       ) : null}
 
       <View style={{ marginTop: spacing.md }}>
@@ -793,12 +810,13 @@ const STANDINGS = [
  */
 function Doors({ at, on, counts }: {
   at: Door; on: (d: Door) => void;
-  counts: { words: string; ours: string; cats: string };
+  counts: { words: string; ours: string; cats: string; notsure: string };
 }) {
   const items: { key: Door; label: string; sub: string }[] = [
     { key: 'words', label: "Google's words", sub: counts.words },
     { key: 'ours', label: 'Our labels', sub: counts.ours },
     { key: 'cats', label: 'Categories', sub: counts.cats },
+    { key: 'notsure', label: 'Not sure', sub: counts.notsure },
   ];
   return (
     <View style={styles.doors}>
@@ -1305,6 +1323,139 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word }: {
                     </>
                   ) : null}
                 </View>
+  );
+}
+
+
+/**
+ * BO10 — the not-sure list, and the run that goes and finds out.
+ *
+ * A place the labels could not settle is named here with the reason, never
+ * quietly filed wrong. Tick some and send them to be looked up; what comes back
+ * carries the sentence it relied on and where that came from, and nothing is
+ * applied until you say so.
+ */
+function NotSure({ tax, wide, canManage, onChanged }: {
+  tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string) => Promise<void>;
+}) {
+  const [data, setData] = useState<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[] } | null>(null);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try { const d = await api.taxonomyNotSure(); setData(d); } catch { setData(null); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const places = data?.places ?? [];
+  const waiting = places.filter((p) => p.state === 'waiting');
+  const answered = places.filter((p) => p.state === 'answered');
+  const last = data?.runs?.[0] ?? null;
+  const subLabel = (k: string | null) => tax.subcategories.find((s) => s.key === k)?.label ?? k ?? null;
+
+  const run = async () => {
+    const refs = [...ticked];
+    if (!refs.length) return;
+    setBusy(true);
+    try {
+      const { run: r } = await api.taxonomyResearch(refs);
+      setTicked(new Set());
+      await load();
+      await onChanged(`Looked at ${r.looked_at} of ${r.asked_for}, answered ${r.answered}${r.cost_pence != null ? ` · £${(r.cost_pence / 100).toFixed(2)}` : ''}.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  const settle = async (p: NotSurePlace, as: string | null) => {
+    setBusy(true);
+    try {
+      await api.taxonomySettle(p.venue_ref, as);
+      await load();
+      await onChanged(as ? `${p.name ?? p.venue_ref} → ${subLabel(as)}.` : `${p.name ?? p.venue_ref} dropped from the list.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  const row = (p: NotSurePlace) => (
+    <View key={p.venue_ref} style={[styles.wordRow, openKey === p.venue_ref && { zIndex: 40 }, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
+      {canManage && p.state === 'waiting' ? (
+        <Press effect="none" onPress={() => setTicked((prev) => { const n = new Set(prev); if (n.has(p.venue_ref)) n.delete(p.venue_ref); else n.add(p.venue_ref); return n; })}
+               accessibilityRole="checkbox" accessibilityState={{ checked: ticked.has(p.venue_ref) }} style={styles.tickCell}>
+          <View style={[styles.tick, ticked.has(p.venue_ref) && styles.tickOn]}>
+            {ticked.has(p.venue_ref) ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}
+          </View>
+        </Press>
+      ) : null}
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={type.small}><Text style={{ fontWeight: '600' }}>{p.name ?? p.venue_ref}</Text></Text>
+        <Text style={[type.tiny, { lineHeight: 16 }]}>{p.reason}</Text>
+        {p.because ? (
+          <Text style={[type.tiny, { color: colors.accent, lineHeight: 16 }]} numberOfLines={3}>
+            {p.because}{p.source ? ` — ${p.source}` : ''}
+          </Text>
+        ) : null}
+      </View>
+      {canManage ? (
+        <View style={{ width: wide ? 300 : undefined, alignItems: 'flex-end', gap: 4 }}>
+          <DrillDropdown
+            label={p.said ? 'It says' : 'Nothing said yet'}
+            value={busy ? 'Working…' : subLabel(p.said) ?? 'choose one'} stacked set={Boolean(p.said)} align="right" width={300}
+            groups={tax.categories.filter((c) => c.active).map((c) => ({
+              key: c.key, label: c.label,
+              items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: p.said === sc.key })),
+            }))}
+            onPick={(k) => void settle(p, k)}
+            onOpenChange={(o) => setOpenKey(o ? p.venue_ref : null)}
+          />
+          <TextAction label="Not one of ours" disabled={busy} onPress={() => void settle(p, null)} />
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Band
+        kicker={`${waiting.length} waiting · ${answered.length} answered`}
+        title="Not sure"
+        stats={[
+          { label: 'Waiting', value: String(waiting.length) },
+          { label: 'Answered, waiting on you', value: String(answered.length) },
+          { label: 'Last run', value: last ? `${last.looked_at} looked at${last.cost_pence != null ? ` · £${(last.cost_pence / 100).toFixed(2)}` : ''}` : 'none yet' },
+        ]}
+      />
+      <Said lead="The labels could not settle these.">
+        Each one is named with the reason. Tick some and send them to be looked up: what comes back carries the sentence it
+        relied on and where that came from. Nothing is applied until you say so.
+      </Said>
+      {canManage && ticked.size ? (
+        <View style={[styles.line, { gap: spacing.md, justifyContent: 'flex-end' }]}>
+          <TextAction label="Clear" onPress={() => setTicked(new Set())} />
+          <Press effect="none" onPress={() => void run()} disabled={busy} accessibilityRole="button"
+                 style={({ hovered }: any) => [styles.approve, hovered && styles.approveOn, busy && { opacity: 0.5 }]}>
+            {({ hovered }: any) => (
+              <Text style={[type.small, { fontWeight: '700', color: hovered ? colors.selectedFg : colors.accent }]}>
+                {busy ? 'Looking…' : `Go and find out · ${ticked.size}`}
+              </Text>
+            )}
+          </Press>
+        </View>
+      ) : null}
+      {places.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing on the list. Every place the labels met was settled by them.</Text> : null}
+      {answered.length ? (
+        <View style={{ gap: 4 }}>
+          <Text style={styles.bandKicker}>Answered, waiting on you</Text>
+          {answered.map(row)}
+        </View>
+      ) : null}
+      {waiting.length ? (
+        <View style={{ gap: 4, paddingTop: answered.length ? spacing.md : 0 }}>
+          <Text style={styles.bandKicker}>Waiting to be looked at</Text>
+          {waiting.map(row)}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
