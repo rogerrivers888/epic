@@ -391,11 +391,13 @@ export async function refuseProposals(keys, client) {
  * ones still waiting are dropped. Needed when the test for a safe match changes
  * and the proposals already on the table were judged by the old one.
  */
-export async function clearProposals(client) {
+export async function clearProposals(keys, client) {
+  if (!keys?.length) return 0;
   const { rowCount } = await on(client)(
     `update host_skill_tags
         set proposed_id = null, proposed_label = null, proposed_note = null, proposed_exact = null, proposed_at = null
-      where external_id is null and not no_identifier and proposed_id is not null`,
+      where key = any($1) and external_id is null and not no_identifier and proposed_id is not null`,
+    [keys],
   );
   return rowCount;
 }

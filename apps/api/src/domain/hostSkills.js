@@ -331,23 +331,46 @@ export const expired = (credential, today = new Date().toISOString().slice(0, 10
  *
  * Needed because a unique name match is not a safe match. Wikidata has exactly
  * one item called "Bell Ringing" — an episode of Teletubbies — and exactly one
- * called "Beach Days", a painting by Joseph Syddall. Both are the only thing
+ * called "Beach Days", a painting by Joseph Syddall. Both were the only thing
  * carrying their name, so both looked like certainties, and neither is the
  * craft anybody meant (14 Sep 2026, reading the first run's output).
+ *
+ * Matched on whole words, not substrings: the description of bookbinding says
+ * "binding books", of animal husbandry says "husbandry", and of a display case
+ * says "display" — none of which are a book, a husband or a play (Codex,
+ * 14 Sep 2026).
  */
 const NOT_THE_THING = [
-  'painting', 'sculpture', 'drawing', 'photograph', 'artwork',
-  'episode', 'film', 'television', 'tv series', 'documentary', 'video game',
-  'album', 'song', 'single', 'musical', 'opera', 'band', 'musical group',
-  'novel', 'book', 'poem', 'play', 'short story', 'manga', 'anime', 'comic',
-  'journal article', 'scientific article', 'academic', 'published in',
-  'family name', 'given name', 'surname', 'human settlement', 'village', 'town',
-  'municipality', 'commune', 'company', 'brand', 'business',
+  // Works
+  'painting', 'paintings', 'sculpture', 'drawing', 'artwork', 'photograph',
+  'episode', 'series', 'film', 'movie', 'documentary', 'television', 'tv',
+  'album', 'song', 'single', 'ep', 'opera', 'musical', 'band', 'duo',
+  'novel', 'book', 'poem', 'play', 'manga', 'anime', 'comic', 'magazine',
+  'article', 'journal', 'paper', 'thesis', 'encyclopedia', 'dictionary',
+  // People
+  'actor', 'actress', 'musician', 'singer', 'songwriter', 'composer',
+  'writer', 'author', 'novelist', 'poet', 'journalist', 'painter', 'artist',
+  'politician', 'footballer', 'cricketer', 'athlete', 'player', 'wrestler',
+  'engineer', 'physician', 'scientist', 'historian', 'philosopher',
+  'businessman', 'businesswoman', 'entrepreneur', 'aristocrat', 'noble',
+  'surname', 'forename', 'nickname', 'pseudonym',
+  // Places and organisations
+  'city', 'town', 'village', 'hamlet', 'suburb', 'settlement', 'parish',
+  'county', 'district', 'region', 'province', 'prefecture', 'commune',
+  'municipality', 'island', 'river', 'mountain', 'lake', 'valley',
+  'company', 'brand', 'corporation', 'firm', 'charity', 'foundation',
+];
+const NOT_THE_THING_RE = new RegExp(`\\b(${NOT_THE_THING.join('|')})\\b`, 'i');
+/** Two-word marks a single word would miss or would over-reach on. */
+const NOT_THE_THING_PHRASES = [
+  'published in', 'directed by', 'written by', 'family name', 'given name',
+  'human settlement', 'video game', 'board game', 'fictional',
 ];
 
 /** Is this candidate the activity, or something merely named after it? */
 export function namesTheThing(description) {
   const d = String(description ?? '').toLowerCase();
   if (!d) return true; // no description at all is not evidence against it
-  return !NOT_THE_THING.some((w) => d.includes(w));
+  if (NOT_THE_THING_PHRASES.some((w) => d.includes(w))) return false;
+  return !NOT_THE_THING_RE.test(d);
 }

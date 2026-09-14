@@ -778,12 +778,19 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
     lookingUp = true;
     let todo;
     try {
-      // "Look again" drops the proposals nobody has acted on first, so a run
-      // can re-judge them. Accepted identifiers and refusals are decisions and
-      // are never touched.
-      if (req.body?.again) await repo.clearProposals();
       const limit = Math.min(600, Math.max(1, Number(req.body?.limit ?? 600)));
-      todo = (await repo.withoutIdentifier()).slice(0, limit);
+      if (req.body?.again) {
+        // "Look again" re-judges the proposals nobody has acted on, as well as
+        // the ones never looked up. The batch is chosen *first* and only its
+        // own proposals are cleared: clearing them all and then taking the
+        // first few hundred threw away the rest, which then read as never
+        // looked up (Codex, 14 Sep 2026).
+        const waiting = await repo.identifierProposals();
+        todo = [...waiting, ...(await repo.withoutIdentifier())].slice(0, limit);
+        await repo.clearProposals(todo.map((t) => t.key));
+      } else {
+        todo = (await repo.withoutIdentifier()).slice(0, limit);
+      }
     } catch (e) { lookingUp = false; throw e; }
     if (!todo.length) { lookingUp = false; return res.json({ started: 0 }); }
     res.json({ started: todo.length });

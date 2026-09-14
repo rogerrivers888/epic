@@ -385,8 +385,13 @@ test('a unique name is not a safe match', () => {
   assert.equal(namesTheThing('episode of Teletubbies'), false);
   assert.equal(namesTheThing('painting by Joseph Syddall (1864–1942)'), false);
   assert.equal(namesTheThing('journal article; published in 1929'), false);
+  // A person or a place is no better a match than a painting.
+  assert.equal(namesTheThing('British actor'), false);
+  assert.equal(namesTheThing('city in France'), false);
   assert.equal(namesTheThing('craft of shaping metal by heating and hammering'), true);
   assert.equal(namesTheThing('making of arrows'), true);
+  // Whole words only: bookbinding is about books and is still the craft.
+  assert.equal(namesTheThing('craft of binding books'), true);
   // Nothing said is not evidence against it: most of the craft items carry no
   // description at all.
   assert.equal(namesTheThing(null), true);
