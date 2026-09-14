@@ -897,6 +897,10 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   const secondary = (data?.attributes ?? []).filter((a) => a.active);
   const nameOf = (k: string) => (data?.attributes ?? []).find((o) => o.key === k)?.label ?? k;
   const [openKey, setOpenKey] = useState<string | null>(null);
+  /** Which brought label is waiting for its value to be said. */
+  const [asking, setAsking] = useState<{ from: PlaceAttribute; to: PlaceAttribute } | null>(null);
+  const [fromV, setFromV] = useState('');
+  const [toV, setToV] = useState('');
 
   /**
    * Add or take away a label that always comes with this one. It arrives as the
@@ -1563,6 +1567,49 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                               {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
                             </View>
                           ))}
+                          {/* BO9 — the shape is the rule worth writing. The words
+                              that travel with this one, how often, and the
+                              combination worth naming. Opened from the row it
+                              came from, holding that word. */}
+                          {eg.shapes?.length ? (
+                            <View style={{ paddingTop: 8, gap: 5 }}>
+                              <Text style={styles.bandKicker}>
+                                {eg.shapes[0].on > 1
+                                  ? `${eg.shapes[0].on} of ${eg.places.length} share one shape`
+                                  : `${eg.shapes.length} shapes from ${eg.places.length} places — no rule to write`}
+                              </Text>
+                              {eg.shapes[0].on > 1 ? (
+                                <>
+                                  {eg.travels.slice(0, 5).map((t) => (
+                                    <View key={t.key} style={{ gap: 2 }}>
+                                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                                        <Text style={type.tiny} numberOfLines={1}>
+                                          {t.label ?? t.key.replace(/_/g, ' ')}
+                                          {t.points_at ? '' : ' — points at no label of ours'}
+                                        </Text>
+                                        <Text style={type.tiny}>{t.on} of {eg.places.length}</Text>
+                                      </View>
+                                      <View style={styles.barTrack}>
+                                        <View style={[styles.barFill, { width: `${Math.round((t.on / Math.max(1, eg.places.length)) * 100)}%` }, !t.points_at && { backgroundColor: colors.lineSoft }]} />
+                                      </View>
+                                    </View>
+                                  ))}
+                                  {canManage && r.landing ? (
+                                    <View style={{ paddingTop: 6 }}>
+                                      <Text style={type.tiny}>
+                                        The rule worth writing: a place with {[r.label ?? r.key, ...eg.shapes[0].words.map((w) => eg.travels.find((t) => t.key === w)?.label ?? w)].join(' and ')}.
+                                      </Text>
+                                    </View>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <Text style={type.tiny}>
+                                  Every one is its own shape, so there is nothing here to name. The answer for this word is a
+                                  rule on our label, not on what Google happens to send with it.
+                                </Text>
+                              )}
+                            </View>
+                          ) : null}
                           {eg.alsoCalled.length ? (
                             <View style={{ paddingTop: 6, gap: 2 }}>
                               <Text style={styles.colHead}>Also called, on those places</Text>
@@ -1853,6 +1900,10 @@ const styles = StyleSheet.create({
   // Inside a category there is nothing to indent away from: it is the page.
   opened: { paddingBottom: spacing.sm },
   moveOn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  // The shape, drawn as a proportion rather than a list: what the count says
+  // matters more than which words are in it (the handoff, BO9).
+  barTrack: { height: 4, backgroundColor: colors.lineSoft, maxWidth: 420 },
+  barFill: { height: 4, backgroundColor: colors.lime },
   approve: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderBottomWidth: 2, borderBottomColor: colors.lime },
   approveOn: { backgroundColor: colors.lime },
   tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, overflow: 'hidden', backgroundColor: colors.panelWarm },

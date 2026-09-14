@@ -80,7 +80,8 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
     if (was[0] && was[0].kind !== kind) {
       const { rows: used } = await query(
         `select (select count(*) from shelf_subcategory_attributes where attribute_key = $1)
-              + (select count(*) from place_attribute_values where attribute_key = $1) as n`, [k]);
+              + (select count(*) from place_attribute_values where attribute_key = $1)
+              + (select count(*) from attribute_brings where brings_key = $1) as n`, [k]);
       if (Number(used[0]?.n ?? 0) > 0) {
         throw bad(`${k} is already set on ${used[0].n} of them as ${was[0].kind}. Clear those first, or make a new attribute.`);
       }

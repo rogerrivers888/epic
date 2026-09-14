@@ -2951,6 +2951,8 @@ export type TaxonomyLanding = {
 export type TaxonomyLabel = {
   namespace: string; key: string; label: string | null; note: string | null;
   seen_count: number; active: boolean; seeded: boolean;
+  /** Which of our labels this provider's word means, or null while it means nothing. */
+  points_at?: string | null;
   /**
    * Excluded from Epic, travel (getting there, parking), useful beside a day
    * out, or generic — a label the source puts on places all over Epic, which
@@ -2974,6 +2976,12 @@ export type TaxonomyExamples = {
   fenced: boolean;
   /** How many of those places carry no other word we have mapped, so this word is all we would know. */
   alone: number;
+  /** The places grouped by the set of words they carry: the biggest is the rule worth writing. */
+  shapes: { words: string[]; on: number; names: (string | null)[] }[];
+  /** How often each word travels with the one asked about, and where it points. */
+  travels: { key: string; on: number; label: string | null; points_at: string | null }[];
+  /** The words that sit on everything, said once rather than in every row. */
+  everywhere: { key: string; on: number }[];
   calls: number;
   problem: string | null;
   subcategories: ShelfSubcategory[];

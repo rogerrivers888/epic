@@ -456,6 +456,11 @@ app.use((err, _req, res, _next) => {
   if (!err.status && err.code === '23505') {
     return res.status(409).json({ error: 'already_taken', message: err.message });
   }
+  // A value that does not fit the shape it is going into. Ours, raised on
+  // purpose, and the person's to fix (Codex, 14 Sep 2026).
+  if (!err.status && err.code === '22023') {
+    return res.status(400).json({ error: 'wrong_shape', message: err.message });
+  }
   res.status(err.status || 500).json({ error: err.code || 'internal_error', message: err.message });
 });
 
