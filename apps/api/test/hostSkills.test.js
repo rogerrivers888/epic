@@ -395,6 +395,11 @@ test('a unique name is not a safe match', () => {
   assert.equal(namesTheThing('craft of binding books'), true);
   assert.equal(namesTheThing('craft of making paper by hand'), true);
   assert.equal(namesTheThing('academic paper on metallurgy'), false);
+  // And the phrases are whole words too: "ep by" sat inside "step by step".
+  assert.equal(namesTheThing('craft taught step by step'), true);
+  assert.equal(namesTheThing('display by a master craftsman'), true);
+  assert.equal(namesTheThing('radio play first broadcast in 1990'), false);
+  assert.equal(namesTheThing('web series about cooking'), false);
   // Nothing said is not evidence against it: most of the craft items carry no
   // description at all.
   assert.equal(namesTheThing(null), true);

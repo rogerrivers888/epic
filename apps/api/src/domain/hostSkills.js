@@ -361,21 +361,28 @@ const NOT_THE_THING = [
   'company', 'brand', 'corporation', 'firm', 'charity', 'foundation',
 ];
 const NOT_THE_THING_RE = new RegExp(`\\b(${NOT_THE_THING.join('|')})\\b`, 'i');
-/** Two-word marks a single word would miss or would over-reach on. */
+/**
+ * Marks of more than one word — either because a single word would over-reach
+ * (papermaking is described as the craft of making paper) or because no single
+ * word carries it (published in 1929).
+ *
+ * Matched on word boundaries like the rest: as plain substrings, "ep by" sat
+ * inside "step by step" and threw out every craft taught step by step (Codex,
+ * 14 Sep 2026).
+ */
 const NOT_THE_THING_PHRASES = [
   'published in', 'directed by', 'written by', 'family name', 'given name',
-  'human settlement', 'video game', 'board game', 'fictional',
-  // Words that are a craft in one reading and a work in another. Papermaking
-  // is described as "the craft of making paper", so `paper` cannot be a word
-  // on its own (Codex, 14 Sep 2026); only the phrases that can only be a work.
-  'academic paper', 'research paper', 'studio album', 'single by', 'play by',
-  'ep by', 'television series', 'stage play',
+  'human settlement', 'video game', 'board game', 'fictional', 'broadcast',
+  'podcast', 'radio play', 'stage play', 'play by', 'web series',
+  'television series', 'tv series', 'mini series', 'miniseries',
+  'academic paper', 'research paper', 'scientific paper', 'conference paper', 'studio album',
+  'single by', 'ep by', 'song by', 'poem by',
 ];
+const NOT_THE_THING_PHRASE_RE = new RegExp(`\\b(${NOT_THE_THING_PHRASES.join('|')})\\b`, 'i');
 
 /** Is this candidate the activity, or something merely named after it? */
 export function namesTheThing(description) {
   const d = String(description ?? '').toLowerCase();
   if (!d) return true; // no description at all is not evidence against it
-  if (NOT_THE_THING_PHRASES.some((w) => d.includes(w))) return false;
-  return !NOT_THE_THING_RE.test(d);
+  return !NOT_THE_THING_RE.test(d) && !NOT_THE_THING_PHRASE_RE.test(d);
 }
