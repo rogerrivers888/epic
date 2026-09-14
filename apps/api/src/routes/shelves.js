@@ -31,6 +31,7 @@ import { Router } from 'express';
 import { requires } from '../access.js';
 import { query } from '../db.js';
 import * as lib from '../repositories/library.js';
+import * as shelfRules from '../repositories/shelfRules.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import { parseLabel } from '../domain/labels.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';

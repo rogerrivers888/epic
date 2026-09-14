@@ -48,6 +48,8 @@ export const NAMESPACES = [
     what: 'How a food place serves: fast-food, takeaway' },
   { key: 'flag', label: 'Epic — flag', provider: 'epic', own: true,
     what: 'A yes/no a source stated: ticketed, good-for-children, not-for-children, quick-look, upmarket, reservable' },
+  { key: 'epic', label: 'Epic — our own label', provider: 'epic', own: true,
+    what: 'One of our own words, which every provider\'s word is mapped to and every rule is written in: a primary label (a subcategory) or a secondary one' },
 ];
 
 export const NAMESPACE_KEYS = NAMESPACES.map((n) => n.key);
@@ -163,9 +165,10 @@ export function scopeFor(labels) {
 export function labelsOfRule(rule) {
   if (!rule) return [];
   if (rule.scope === 'labels') return rule.labels ?? [];
-  // A rule said in our words names our labels, not a provider's. Without this
-  // the screen draws it with a blank identity (Codex, 14 Sep 2026).
-  if (rule.scope === 'ours') return rule.labels ?? [];
+  // A rule said in our words names our labels, not a provider's, and they are
+  // stored bare. Every reader of this list expects `namespace:key`, so ours
+  // arrive under a namespace of our own (Codex, 14 Sep 2026).
+  if (rule.scope === 'ours') return (rule.labels ?? []).map((l) => (l.includes(':') ? l : `epic:${l}`));
   if (rule.scope === 'kind') return [`wikidata:${rule.subject}`];
   if (rule.scope === 'category') return [`atlas:${rule.subject}`];
   if (rule.scope === 'experience') return [`experience:${rule.subject}`];
