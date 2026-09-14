@@ -2388,6 +2388,12 @@ export const api = {
   /** Name a secondary label, or change one. */
   taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
     put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
+  /** What is inside a place, or everything waiting to be confirmed. */
+  taxonomyParts: (parent?: string) =>
+    request<{ parent?: string; children?: PlacePart[]; proposed: PlacePart[] }>(`/api/admin/taxonomy/parts${qs({ parent })}`),
+  /** Say a place is inside another, or that it stands alone. */
+  taxonomySetPart: (body: { child: string; parent: string | null; note?: string | null }) =>
+    post<{ part: PlacePart | null }>('/api/admin/taxonomy/parts', body),
   /** The places the labels could not settle, with the last few runs. */
   taxonomyNotSure: (state?: string) =>
     request<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[]; subcategories: ShelfSubcategory[]; categories: ShelfCategory[] }>(
@@ -2861,7 +2867,8 @@ export type ShelfWeights = Partial<Record<MoodKey, number>>;
 export type ShelfRule = {
   id: string;
   /** `labels` fires only when a place carries every label in `labels` (migration 077). */
-  scope: 'place' | 'labels' | 'kind' | 'category' | 'experience';
+  /** 'ours' is a rule written in our own labels, which is where they are going. */
+  scope: 'place' | 'ours' | 'labels' | 'kind' | 'category' | 'experience';
   subject: string;
   labels?: string[] | null;
   subject_label: string | null;
@@ -3002,6 +3009,12 @@ export type TaxonomyExamples = {
   problem: string | null;
   subcategories: ShelfSubcategory[];
   categories: ShelfCategory[];
+};
+
+/** A place that sits inside another, and how that was decided. */
+export type PlacePart = {
+  child_ref: string; parent_ref: string; how: 'told' | 'proposed';
+  note: string | null; set_by: string | null;
 };
 
 /** A place the labels could not settle, and what a run came back with. */

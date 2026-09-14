@@ -40,7 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
-  api, AttributeValue, MoodKey, NotSurePlace, NotSureRun, PlaceAttribute, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
+  api, AttributeValue, MoodKey, NotSurePlace, NotSureRun, PlaceAttribute, PlacePart, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
   TaxonomyRule, TaxonomyTry,
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -380,7 +380,10 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {tax && door === 'notsure' ? (
-        <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
+        <>
+          <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
+          <PartsOfPlaces canManage={canManage} onChanged={changed} />
+        </>
       ) : null}
 
       <View style={{ marginTop: spacing.md }}>
@@ -470,6 +473,29 @@ function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChang
   const [name, setName] = useState(sc.label);
   const [moving, setMoving] = useState(false);
   const [adding, setAdding] = useState(false);
+  /**
+   * BO8 — what would land here, before you save. Twelve real places fetched
+   * once against the busiest provider word pointing at this drawer, each marked
+   * settled or not sure. Eight of twelve water parks were settled by the words;
+   * the four that were not go on the not-sure list rather than being quietly
+   * filed wrong. It costs a provider call, so it happens on a press.
+   */
+  const [landing, setLanding] = useState<TaxonomyExamples | null>(null);
+  const [looking, setLooking] = useState(false);
+  const busiest = useMemo(() => {
+    const words = rules
+      .filter((r) => r.scope === 'labels' || r.scope === 'ours')
+      .flatMap((r) => r.labelList.map((l) => l.label))
+      .filter((l) => l.startsWith('google:'));
+    return words[0] ?? null;
+  }, [rules]);
+  const lookAtIt = async () => {
+    if (!busiest) return;
+    setLooking(true);
+    try { setLanding(await api.taxonomyExamples(busiest, true)); await onChanged(`Looked at ${busiest.replace('google:', '')}.`); }
+    catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setLooking(false); }
+  };
 
   const rename = () => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); };
   const tri = (field: 'indoor' | 'forKids', value: boolean | null | undefined, word: string) => (
@@ -545,6 +571,44 @@ function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChang
           ) : null}
         </View>
       ))}
+
+      {/* BO8 — what would land here, before you save. */}
+      {canManage && busiest ? (
+        <View style={{ gap: 6, paddingTop: spacing.md }}>
+          <Text style={styles.bandKicker}>What would land here</Text>
+          {!landing ? (
+            <>
+              <Text style={type.tiny}>
+                Twelve real places, fetched once against {busiest.replace('google:', '').replace(/_/g, ' ')}. It costs one
+                provider call and nothing is stored.
+              </Text>
+              <TextAction label={looking ? 'Looking…' : 'Look at twelve real ones'} disabled={looking} onPress={() => void lookAtIt()} />
+            </>
+          ) : landing.problem ? (
+            <Text style={type.tiny}>Could not look: {landing.problem}</Text>
+          ) : (
+            <>
+              <Text style={type.tiny}>
+                {landing.places.length - landing.alone} of {landing.places.length} settled by the labels
+                {landing.alone ? ` · ${landing.alone} went to the not-sure list` : ' · none left over'}
+              </Text>
+              {landing.places.map((pl) => {
+                const settled = (pl.types ?? []).some((t) => t !== busiest.replace('google:', '')
+                  && landing.alsoCalled.some((w) => w.key === t && (w.landing?.subcategory || w.decision)));
+                return (
+                  <View key={pl.id} style={styles.egRow}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={type.small} numberOfLines={1}>{pl.name ?? pl.id}</Text>
+                      <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
+                    </View>
+                    <Text style={[type.tiny, settled ? null : { color: colors.overrun }]}>{settled ? 'settled' : 'not sure'}</Text>
+                  </View>
+                );
+              })}
+            </>
+          )}
+        </View>
+      ) : null}
     </Section>
   );
 }
@@ -1456,6 +1520,60 @@ function NotSure({ tax, wide, canManage, onChanged }: {
           {waiting.map(row)}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+
+/**
+ * BO11 — a place that is part of another place.
+ *
+ * The owner, 14 Sep 2026: "if you know something is part of Thorpe Park, it all
+ * lives in Thorpe Park, and we should only ever display Thorpe Park, not Amity
+ * Beach." A proposal from a research run waits here; confirming it takes the
+ * child off every list and sends what it knows up to its parent.
+ */
+function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged: (said: string) => Promise<void> }) {
+  const [rows, setRows] = useState<PlacePart[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try { const d = await api.taxonomyParts(); setRows(d.proposed); } catch { setRows([]); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const say = async (p: PlacePart, yes: boolean) => {
+    setBusy(true);
+    try {
+      await api.taxonomySetPart({ child: p.child_ref, parent: yes ? p.parent_ref : null, note: p.note });
+      await load();
+      await onChanged(yes ? `${p.child_ref} is part of ${p.parent_ref}; it is off its own lists now.`
+        : `${p.child_ref} stands on its own.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  if (!rows?.length) return null;
+  return (
+    <View style={{ gap: spacing.md, paddingTop: spacing.lg }}>
+      <Text style={styles.bandKicker}>Inside somewhere else · {rows.length} to confirm</Text>
+      <Said lead="No rule can tell these apart.">
+        Amity Beach and a standalone water park carry the same words, so what separates them is that one is inside the other.
+        Confirm and the child is never listed on its own; what it knows goes up to its parent instead.
+      </Said>
+      {rows.map((p) => (
+        <View key={p.child_ref} style={styles.wordRow}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text style={type.small}><Text style={{ fontWeight: '600' }}>{p.child_ref}</Text> is part of <Text style={{ fontWeight: '600' }}>{p.parent_ref}</Text></Text>
+            {p.note ? <Text style={[type.tiny, { lineHeight: 16 }]} numberOfLines={2}>{p.note}</Text> : null}
+          </View>
+          {canManage ? (
+            <View style={[styles.line, { gap: spacing.md }]}>
+              <TextAction label="It is" disabled={busy} onPress={() => void say(p, true)} />
+              <TextAction label="It stands alone" disabled={busy} onPress={() => void say(p, false)} />
+            </View>
+          ) : null}
+        </View>
+      ))}
     </View>
   );
 }
