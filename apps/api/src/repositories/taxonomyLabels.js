@@ -200,9 +200,9 @@ export async function list({ namespace = null, q = null, seenOnly = false, limit
   const off = args.length;
   const { rows } = await query(
     `with all_labels as (
-       select namespace, key, label, note, seen_count, active, seeded, decision from taxonomy_labels
+       select namespace, key, label, note, seen_count, active, seeded, decision, points_at from taxonomy_labels
        union all
-       select 'wikidata', qid, label, category, seen_count, admit, true, null from place_kinds
+       select 'wikidata', qid, label, category, seen_count, admit, true, null, points_at from place_kinds
        union all
        -- Our own words, which every provider's word is mapped to and every
        -- rule is written in. They live in the subcategory and secondary-label
@@ -210,10 +210,10 @@ export async function list({ namespace = null, q = null, seenOnly = false, limit
        -- them to write a rule at all (Codex, 14 Sep 2026).
        select 'epic', key, label, 'a primary label — one thing a place is',
               (select count(*)::int from taxonomy_labels t where t.points_at = shelf_subcategories.key),
-              active, seeded, null
+              active, seeded, null, null
          from shelf_subcategories
        union all
-       select 'epic', key, label, 'a secondary label — something true about a place', 0, active, seeded, null
+       select 'epic', key, label, 'a secondary label — something true about a place', 0, active, seeded, null, null
          from place_attributes
      )
      select * from all_labels

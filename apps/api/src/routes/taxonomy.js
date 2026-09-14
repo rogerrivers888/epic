@@ -427,8 +427,37 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
           landing: landingOf({ namespace: 'google', key }, rules, tax.vocab),
         };
       });
+    // The shape is the rule worth writing (the handoff, BO9). Group the places
+    // found by the set of words they carry, ignoring the queried word itself and
+    // the ones that sit on everything, and the biggest group is the combination
+    // to name. Where every place is its own shape there is no rule to write, and
+    // the screen says so rather than showing twelve rows of one.
+    const EVERYWHERE = new Set(['establishment', 'point_of_interest']);
+    const shapeOf = (p) => (p.types ?? [])
+      .filter((t) => t !== parsed.key && !EVERYWHERE.has(t))
+      .sort()
+      .join(' + ');
+    const byShape = new Map();
+    for (const p of out.places) {
+      const k = shapeOf(p);
+      byShape.set(k, [...(byShape.get(k) ?? []), p.name]);
+    }
+    const shapes = [...byShape.entries()]
+      .map(([k, names]) => ({ words: k ? k.split(' + ') : [], on: names.length, names: names.slice(0, 4) }))
+      .sort((a, b) => b.on - a.on || a.words.length - b.words.length);
+    // And how often each word travels with the one asked about, which is what
+    // the bars are drawn from.
+    const travels = [...seen.entries()]
+      .filter(([k]) => !EVERYWHERE.has(k))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 12)
+      .map(([key, on]) => ({ key, on, label: byKey.get(key)?.label ?? null, points_at: byKey.get(key)?.points_at ?? null }));
+
     res.json({
       label, near: household?.home_label ?? 'London', places: out.places,
+      shapes, travels,
+      // The words on everything, said once rather than in every row.
+      everywhere: [...seen.entries()].filter(([k]) => EVERYWHERE.has(k)).map(([key, on]) => ({ key, on })),
       // False where Google would not take the word as a filter: the search was
       // by words and the answers were then kept only if they really carry it.
       fenced: out.fenced !== false,
