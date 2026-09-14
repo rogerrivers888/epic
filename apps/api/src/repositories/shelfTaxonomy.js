@@ -19,6 +19,7 @@
 
 import { query } from '../db.js';
 import { vocabularyOf } from '../domain/moods.js';
+import { forget as attributesForget } from './placeAttributes.js';
 
 const TTL_MS = 5000;
 let cache = null;
@@ -179,6 +180,7 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
        active == null ? null : Boolean(active), triState(indoor), triState(forKids)]);
     const saved = rows[0] ?? null;
     if (saved) await setAlsoIn(saved.key, saved.category_key, alsoIn);
+    if (saved) await mirrorOldColumns(saved);
     forget();
     return saved ? { ...saved, also_in: await alsoInOf(saved.key, saved.category_key) } : null;
   }
@@ -200,8 +202,33 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
     [categoryKey, k, label ?? k, blurb ?? null, position ?? null, triState(indoor), triState(forKids)]);
   const saved = rows[0];
   await setAlsoIn(saved.key, saved.category_key, alsoIn);
+  await mirrorOldColumns(saved);
   forget();
   return { ...saved, also_in: await alsoInOf(saved.key, saved.category_key) };
+}
+
+/**
+ * Indoors and For kids are attributes now (migration 105), but they are still
+ * columns on this row and the old screen still writes them. Until that screen
+ * is folded into Categories, a write to either has to land in both places or
+ * the two disagree the moment he edits one (Codex, 14 Sep 2026). Rainy day
+ * follows Indoors only where nobody has parted them.
+ */
+async function mirrorOldColumns(sub) {
+  const pairs = [['indoor', sub.indoor], ['kid-friendly', sub.for_kids]];
+  for (const [attribute, value] of pairs) {
+    if (value == null) {
+      await query('delete from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',
+        [sub.key, attribute]);
+      continue;
+    }
+    await query(
+      `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno)
+       values ($1, $2, $3)
+       on conflict (subcategory_key, attribute_key) do update set yesno = excluded.yesno, updated_at = now()`,
+      [sub.key, attribute, value]);
+  }
+  attributesForget();
 }
 
 /** What a drawer is listed under now, for the answer a save sends back. */

@@ -60,6 +60,7 @@ import { distinguish } from '../domain/naming.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
+import * as placeAttributes from '../repositories/placeAttributes.js';
 import { publishedNear, heroesForPlaces } from '../repositories/library.js';
 import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
@@ -110,9 +111,23 @@ const weight = (v) => (v.rating ?? 0) * Math.log10((v.ratingCount ?? 0) + 2);
  * or out, and for children (migration 076, taught in the back office). Null
  * is "it depends" and leaves the place's own words to decide on the screen.
  */
-const marks = (subcategory, tax, goodForChildren) => {
-  const sub = subcategory ? tax.subByKey.get(subcategory) : null;
-  return { indoor: sub?.indoor ?? null, forKids: sub?.for_kids ?? goodForChildren ?? null };
+/**
+ * What a place is like, for the filters: read from the attributes (migration
+ * 105) rather than the two old columns, so what he sets on one screen is what
+ * the app narrows by. A place's own answer beats its drawer's; the provider's
+ * word about children is the last resort.
+ *
+ * `attrs` is every attribute resolved for this place, which is what a filter on
+ * anything he has since created will read (Codex, 14 Sep 2026: values written
+ * with no read path are write-only).
+ */
+const marks = (subcategory, goodForChildren, own, vocab) => {
+  const all = placeAttributes.resolveFor({ subcategory }, own, vocab);
+  return {
+    indoor: all.indoor?.yesno ?? null,
+    forKids: all['kid-friendly']?.yesno ?? goodForChildren ?? null,
+    attrs: all,
+  };
 };
 
 /**
@@ -260,12 +275,24 @@ inspire.get('/near', async (req, res, next) => {
     // provider's photo and then to the card drawing its own identity.
     const ourPictures = await heroesForPlaces(around.map((v) => `${v.source}:${v.sourcePlaceId}`));
 
+    // The attributes: the vocabulary with every drawer's defaults, and one read
+    // for whatever these particular places say for themselves. One query for
+    // the page, never one per place.
+    const [attrVocab, own] = await Promise.all([
+      placeAttributes.attributes(),
+      placeAttributes.valuesForMany(around.map((v) => `${v.source}:${v.sourcePlaceId}`)),
+    ]);
+
     const items = around.map((v) => ({
       venueRef: `${v.source}:${v.sourcePlaceId}`,
       source: v.source,
       name: v.name,
       category: v.category,
-      ...(() => { const p = shelvesForVenue(v, taught, tax.vocab); return { moods: p.shelves, subcategory: p.subcategory, ...marks(p.subcategory, tax, v.goodForChildren) }; })(),
+      ...(() => {
+        const p = shelvesForVenue(v, taught, tax.vocab);
+        const ref = `${v.source}:${v.sourcePlaceId}`;
+        return { moods: p.shelves, subcategory: p.subcategory, ...marks(p.subcategory, v.goodForChildren, own.get(ref), attrVocab) };
+      })(),
       experiences: v.experiences ?? [],
       cuisines: v.cuisines ?? [],
       rating: v.rating ?? null,
@@ -393,6 +420,9 @@ inspire.get('/near', async (req, res, next) => {
       // park next door just looks wrong (owner, 7 Sep 2026).
       illustratedOnly: false,
     });
+    // One read for what these atlas places say about themselves, before the loop.
+    const atlasOwn = await placeAttributes.valuesForMany(
+      atlas.map((a) => (a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`)));
     for (const a of atlas) {
       if (a.lat == null || a.lng == null) continue;
       // The box is generous at its corners; this is the honest ring.
@@ -410,7 +440,7 @@ inspire.get('/near', async (req, res, next) => {
         category: 'attraction',
         moods: shelf.shelves,
         subcategory: shelf.subcategory,
-        ...marks(shelf.subcategory, tax, null),
+        ...marks(shelf.subcategory, null, atlasOwn.get(ref), attrVocab),
         // What the atlas calls this place — heritage, outdoors, family, museum,
         // arts, animals, active, landmark. Its own field rather than smuggled
         // into `experiences`, which is a closed vocabulary that voice is

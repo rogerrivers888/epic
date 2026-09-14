@@ -252,6 +252,21 @@ taxonomyRoutes.put('/attributes/default', requires('manage_library'), async (req
 });
 
 /**
+ * GET /attributes/place?ref=&subcategory= — what one place is, attribute by
+ * attribute, with `setAt` saying whether the answer came from the place itself
+ * or was inherited from its drawer.
+ */
+taxonomyRoutes.get('/attributes/place', requires('view_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.query.ref || '').trim();
+    if (!ref) throw bad('Which place?');
+    const subcategory = req.query.subcategory ? String(req.query.subcategory) : null;
+    const [vocab, own] = await Promise.all([placeAttributes.attributes(), placeAttributes.valuesFor(ref)]);
+    res.json({ ref, subcategory, attributes: vocab.list, values: placeAttributes.resolveFor({ subcategory }, own, vocab) });
+  } catch (err) { next(err); }
+});
+
+/**
  * PUT /attributes/place { ref, attribute, value, reason } — what one place says
  * for itself, where it differs from its drawer. The reason is kept on purpose:
  * it is what a model is shown next time (owner, 14 Sep 2026).

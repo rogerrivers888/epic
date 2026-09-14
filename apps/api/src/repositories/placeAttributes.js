@@ -57,11 +57,25 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
   const k = key ? slug(key) : slug(label);
   if (!k) throw bad('An attribute needs a name.');
   if (kind && !['yesno', 'range', 'oneof'].includes(kind)) throw bad(`${kind} is not a kind of attribute.`);
+  // Changing the kind would leave every value already set in the old shape — a
+  // yes/no answer under an attribute that now wants a range. Refuse rather than
+  // hand a screen data its controls cannot draw (Codex, 14 Sep 2026).
+  if (kind) {
+    const { rows: was } = await query('select kind from place_attributes where key = $1', [k]);
+    if (was[0] && was[0].kind !== kind) {
+      const { rows: used } = await query(
+        `select (select count(*) from shelf_subcategory_attributes where attribute_key = $1)
+              + (select count(*) from place_attribute_values where attribute_key = $1) as n`, [k]);
+      if (Number(used[0]?.n ?? 0) > 0) {
+        throw bad(`${k} is already set on ${used[0].n} of them as ${was[0].kind}. Clear those first, or make a new attribute.`);
+      }
+    }
+  }
   const { rows } = await query(
     `insert into place_attributes (key, label, kind, blurb, options, range_min, range_max, unit, position, active)
      values ($1, $2, coalesce($3, 'yesno'), $4, coalesce($5::text[], '{}'), $6, $7, $8, coalesce($9, 100), coalesce($10, true))
      on conflict (key) do update
-        set label      = coalesce($2, place_attributes.label),
+        set label      = coalesce($11, place_attributes.label),
             kind       = coalesce($3, place_attributes.kind),
             blurb      = coalesce($4, place_attributes.blurb),
             options    = coalesce($5::text[], place_attributes.options),
@@ -72,8 +86,11 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
             active     = coalesce($10, place_attributes.active),
             updated_at = now()
      returning *`,
+    // The label is `$2` on insert and `$11` on update: binding the key as the
+    // label would rename "Kid friendly" to "kid-friendly" the first time
+    // anything else about it changed (Codex, 14 Sep 2026).
     [k, label ?? k, kind ?? null, blurb ?? null, options ?? null, rangeMin ?? null, rangeMax ?? null, unit ?? null,
-     position ?? null, active == null ? null : Boolean(active)]);
+     position ?? null, active == null ? null : Boolean(active), label ?? null]);
   forget();
   return rows[0];
 }
@@ -124,6 +141,23 @@ export async function setValue(venueRef, attributeKey, value, { reason = null, b
      returning *`,
     [venueRef, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null, reason, by]);
   return rows[0];
+}
+
+/**
+ * What several places have been told about themselves, in one read. The search
+ * path resolves a whole page of results, so it must not be a query per place.
+ */
+export async function valuesForMany(refs) {
+  const list = [...new Set((refs ?? []).filter(Boolean).map(String))];
+  if (!list.length) return new Map();
+  const { rows } = await query('select * from place_attribute_values where venue_ref = any($1::text[])', [list]);
+  const out = new Map();
+  for (const r of rows) {
+    const m = out.get(r.venue_ref) ?? new Map();
+    m.set(r.attribute_key, { ...valueOf(r), reason: r.reason, setBy: r.set_by });
+    out.set(r.venue_ref, m);
+  }
+  return out;
 }
 
 /** Everything one place has been told about itself. */
