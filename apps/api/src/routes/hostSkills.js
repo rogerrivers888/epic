@@ -785,7 +785,7 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
         // own proposals are cleared: clearing them all and then taking the
         // first few hundred threw away the rest, which then read as never
         // looked up (Codex, 14 Sep 2026).
-        const waiting = await repo.identifierProposals();
+        const waiting = await repo.identifierProposals({ oldestFirst: true });
         todo = [...waiting, ...(await repo.withoutIdentifier())].slice(0, limit);
         await repo.clearProposals(todo.map((t) => t.key));
       } else {

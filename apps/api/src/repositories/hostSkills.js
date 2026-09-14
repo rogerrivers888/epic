@@ -322,13 +322,15 @@ export async function propose({ key, qid, label, note, exact }, client) {
 }
 
 /** The identifier proposals still waiting on a person, the letter-for-letter ones first. */
-export async function identifierProposals({ exactOnly = false } = {}, client) {
+export async function identifierProposals({ exactOnly = false, oldestFirst = false } = {}, client) {
   const { rows } = await on(client)(
     `select key, label, proposed_id, proposed_label, proposed_note, proposed_exact, seen_count
        from host_skill_tags
       where proposed_id is not null and external_id is null and active
         ${exactOnly ? 'and proposed_exact' : ''}
-      order by proposed_exact desc nulls last, seen_count desc, key`,
+      -- Longest unlooked-at first for a rerun, so successive limited runs walk
+      -- the whole list instead of re-judging the same batch (Codex, 14 Sep 2026).
+      order by ${oldestFirst ? 'proposed_at asc nulls first, key' : 'proposed_exact desc nulls last, seen_count desc, key'}`,
   );
   return rows;
 }

@@ -344,9 +344,9 @@ const NOT_THE_THING = [
   // Works
   'painting', 'paintings', 'sculpture', 'drawing', 'artwork', 'photograph',
   'episode', 'series', 'film', 'movie', 'documentary', 'television', 'tv',
-  'album', 'song', 'single', 'ep', 'opera', 'musical', 'band', 'duo',
-  'novel', 'book', 'poem', 'play', 'manga', 'anime', 'comic', 'magazine',
-  'article', 'journal', 'paper', 'thesis', 'encyclopedia', 'dictionary',
+  'album', 'song', 'opera', 'musical', 'band',
+  'novel', 'book', 'poem', 'manga', 'anime', 'comic', 'magazine',
+  'article', 'journal', 'thesis', 'encyclopedia', 'dictionary',
   // People
   'actor', 'actress', 'musician', 'singer', 'songwriter', 'composer',
   'writer', 'author', 'novelist', 'poet', 'journalist', 'painter', 'artist',
@@ -365,6 +365,11 @@ const NOT_THE_THING_RE = new RegExp(`\\b(${NOT_THE_THING.join('|')})\\b`, 'i');
 const NOT_THE_THING_PHRASES = [
   'published in', 'directed by', 'written by', 'family name', 'given name',
   'human settlement', 'video game', 'board game', 'fictional',
+  // Words that are a craft in one reading and a work in another. Papermaking
+  // is described as "the craft of making paper", so `paper` cannot be a word
+  // on its own (Codex, 14 Sep 2026); only the phrases that can only be a work.
+  'academic paper', 'research paper', 'studio album', 'single by', 'play by',
+  'ep by', 'television series', 'stage play',
 ];
 
 /** Is this candidate the activity, or something merely named after it? */

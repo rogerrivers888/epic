@@ -390,8 +390,11 @@ test('a unique name is not a safe match', () => {
   assert.equal(namesTheThing('city in France'), false);
   assert.equal(namesTheThing('craft of shaping metal by heating and hammering'), true);
   assert.equal(namesTheThing('making of arrows'), true);
-  // Whole words only: bookbinding is about books and is still the craft.
+  // Whole words only: bookbinding is about books and is still the craft, and
+  // papermaking is about paper — only an academic paper is a work.
   assert.equal(namesTheThing('craft of binding books'), true);
+  assert.equal(namesTheThing('craft of making paper by hand'), true);
+  assert.equal(namesTheThing('academic paper on metallurgy'), false);
   // Nothing said is not evidence against it: most of the craft items carry no
   // description at all.
   assert.equal(namesTheThing(null), true);
