@@ -33,6 +33,7 @@ import * as shelfRules from '../repositories/shelfRules.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
+import * as placeParts from '../repositories/placeParts.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
@@ -199,6 +200,39 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
     }));
     res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /parts?parent=ref — what is inside a place, and what is waiting to be
+ * settled. POST /parts { child, parent, note } says so; a null parent forgets
+ * it.
+ *
+ * The owner, 14 Sep 2026: "if you know something is part of Thorpe Park, it all
+ * lives in Thorpe Park, and we should only ever display Thorpe Park, not Amity
+ * Beach." No rule can do this — a bit of a theme park and a standalone water
+ * park carry the same words — so it is a fact recorded about two places.
+ */
+taxonomyRoutes.get('/parts', requires('view_library'), async (req, res, next) => {
+  try {
+    const parent = req.query.parent ? String(req.query.parent) : null;
+    res.json(parent
+      ? { parent, children: await placeParts.childrenOf(parent) }
+      : { proposed: await placeParts.proposed(Number(req.query.limit) || 100) });
+  } catch (err) { next(err); }
+});
+
+taxonomyRoutes.post('/parts', requires('manage_library'), async (req, res, next) => {
+  try {
+    const child = String(req.body?.child || '').trim();
+    if (!child) throw bad('Which place is inside the other?');
+    const part = await placeParts.setPart(child, req.body?.parent ?? null,
+      { how: 'told', note: req.body?.note ?? null, by: actorOf(req) });
+    await query(
+      `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+       values ($1,$2,'taxonomy.part','place',null,$3,$4)`,
+      [req.account?.id ?? null, actorOf(req), child, JSON.stringify(part ?? { child, parent: null })]);
+    res.json({ part });
   } catch (err) { next(err); }
 });
 

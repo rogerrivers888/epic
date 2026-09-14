@@ -61,6 +61,7 @@ import { shelvesForAtlas, shelvesForVenue, FOOD_DRAWER } from '../domain/moods.j
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
+import * as placeParts from '../repositories/placeParts.js';
 import { publishedNear, heroesForPlaces } from '../repositories/library.js';
 import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
@@ -290,7 +291,7 @@ inspire.get('/near', async (req, res, next) => {
       placeAttributes.valuesForMany(everyRef),
     ]);
 
-    const items = around.map((v) => ({
+    let items = around.map((v) => ({
       venueRef: `${v.source}:${v.sourcePlaceId}`,
       source: v.source,
       name: v.name,
@@ -521,6 +522,14 @@ inspire.get('/near', async (req, res, next) => {
     // from the Wikipedia article, which is already disambiguated, and only
     // where something else in this answer shares the name.
     distinguish(items, { url: (i) => i.wikipediaUrl, area: (i) => i.outcode });
+
+    // Anything that is part of somewhere else goes, before anything is counted
+    // or drawn. The owner, 14 Sep 2026: "I've seen multiple times activities
+    // that actually exist in Thorpe Park being listed as separate activities on
+    // the Inspire tab, and we absolutely have to stop that happening." Amity
+    // Beach is Thorpe Park; only Thorpe Park is offered.
+    const { childToParent } = await placeParts.parts();
+    items = placeParts.withoutParts(items, childToParent);
 
     // The heart on each card: whether this household has already kept, been to
     // or made a special of the place. One query for the lot.
