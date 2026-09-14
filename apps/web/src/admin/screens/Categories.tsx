@@ -1169,6 +1169,17 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       {!egBusy && eg && eg.places.length ? (
                         <>
                           <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.{eg.fenced ? '' : ' Google will not filter by this word, so these were found by words and then kept only where it really appears.'}</Text>
+                          {/* Whether the word is worth keeping as a label even if it is
+                              not a category: if nothing else on the place is mapped,
+                              throwing it away leaves us knowing nothing (owner, 14 Sep
+                              2026: "the Activity Centre then gives us that context"). */}
+                          {eg.alone != null ? (
+                            <Text style={[type.tiny, eg.alone > eg.places.length / 2 && { color: colors.ink, fontWeight: '600' }]}>
+                              {eg.alone === 0
+                                ? 'Every one of them carries another word we have already mapped, so this word adds nothing on its own.'
+                                : `${eg.alone} of ${eg.places.length} carry nothing else we have mapped — for those, this word is all we would know.`}
+                            </Text>
+                          ) : null}
                           {eg.places.map((pl) => (
                             <View key={pl.id} style={styles.egRow}>
                               <View style={{ flex: 1, minWidth: 0 }}>

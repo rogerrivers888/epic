@@ -2959,6 +2959,8 @@ export type TaxonomyExamples = {
   alsoCalled: { key: string; on: number; label: string | null; decision: string | null; landing: TaxonomyLanding }[];
   /** False where Google would not fence the search by this word, so it was matched on words and then checked. */
   fenced: boolean;
+  /** How many of those places carry no other word we have mapped, so this word is all we would know. */
+  alone: number;
   calls: number;
   problem: string | null;
   subcategories: ShelfSubcategory[];

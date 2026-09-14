@@ -242,6 +242,21 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
         seen.set(t, (seen.get(t) ?? 0) + 1);
       }
     }
+    // How often this word is the only thing we know about a place.
+    //
+    // The owner, 14 Sep 2026: "we don't necessarily need to exclude Activity
+    // Centre or throw it away… The Activity Centre then gives us that context,
+    // which might be useful." The test is whether anything else on the place is
+    // mapped: adventure sports centre came back with twelve places and not one
+    // carried another word we had answered, so throwing it away leaves Epic
+    // knowing nothing at all about Activate or Wild Wood Adventure. A word like
+    // `establishment` is the opposite — a restaurant is nearly always there too.
+    const mapped = (t) => {
+      const row = byKey.get(t);
+      if (!row || row.decision) return false;
+      return Boolean(landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory);
+    };
+    const alone = out.places.filter((p) => !(p.types ?? []).some((t) => t !== parsed.key && mapped(t))).length;
     const alsoCalled = [...seen.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 24)
@@ -257,6 +272,8 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       // False where Google would not take the word as a filter: the search was
       // by words and the answers were then kept only if they really carry it.
       fenced: out.fenced !== false,
+      // Of the places found, how many carry nothing else we have mapped.
+      alone,
       alsoCalled, calls: out.calls, problem: out.problem,
       subcategories: tax.subcategories, categories: tax.categories,
     });
