@@ -450,6 +450,12 @@ app.use((_req, res) => res.status(404).json({ error: 'not_found' }));
 
 app.use((err, _req, res, _next) => {
   console.error(err);
+  // A name already taken is the person's to fix, not a fault. Postgres says
+  // 23505 and our own label-key trigger raises it deliberately, so it must not
+  // come back as a 500 (Codex, 14 Sep 2026).
+  if (!err.status && err.code === '23505') {
+    return res.status(409).json({ error: 'already_taken', message: err.message });
+  }
   res.status(err.status || 500).json({ error: err.code || 'internal_error', message: err.message });
 });
 
