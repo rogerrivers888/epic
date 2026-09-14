@@ -232,8 +232,11 @@ async function mirrorOldColumns(sub, sent) {
     const { rows: was } = await query(
       `select yesno from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = 'indoor'`,
       [sub.key]);
-    const parted = rows.length && was.length && rows[0].yesno !== was[0].yesno;
-    if (!parted) pairs.push(['rainy-day', sub.indoor]);
+    // Carried along only while the two still say the same thing. Rainy day set
+    // on its own, with Indoors never set or since cleared, is his answer and
+    // must not be trodden on (Codex, 14 Sep 2026).
+    const linked = !rows.length || (was.length && rows[0].yesno === was[0].yesno);
+    if (linked) pairs.push(['rainy-day', sub.indoor]);
   }
 
   for (const [attribute, value] of pairs) {
