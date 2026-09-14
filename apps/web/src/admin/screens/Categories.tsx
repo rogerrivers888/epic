@@ -1440,10 +1440,15 @@ function NotSure({ tax, wide, canManage, onChanged }: {
     if (!refs.length) return;
     setBusy(true);
     try {
-      const { run: r } = await api.taxonomyResearch(refs);
+      // The run answers straight away and reads afterwards, because six places
+      // of web search is minutes and a request gets twenty-eight seconds
+      // (14 Sep 2026). So the list is reloaded as the answers land rather than
+      // once at the end, and the run's own receipt fills in when it finishes.
+      const { started } = await api.taxonomyResearch(refs);
       setTicked(new Set());
       await load();
-      await onChanged(`Looked at ${r.looked_at} of ${r.asked_for}, answered ${r.answered}${r.cost_pence != null ? ` · £${(r.cost_pence / 100).toFixed(2)}` : ''}.`);
+      await onChanged(`Looking at ${started} place${started === 1 ? '' : 's'}. The answers fill in as they come back.`);
+      for (const wait of [15000, 30000, 45000, 60000]) setTimeout(() => void load(), wait);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusy(false); }
   };

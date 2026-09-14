@@ -2409,7 +2409,7 @@ export const api = {
     request<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[]; subcategories: ShelfSubcategory[]; categories: ShelfCategory[] }>(
       `/api/admin/taxonomy/not-sure${qs({ state })}`),
   /** Send a batch to be looked up. Nothing is applied by it. */
-  taxonomyResearch: (refs: string[]) => post<{ run: NotSureRun }>('/api/admin/taxonomy/not-sure/run', { refs }),
+  taxonomyResearch: (refs: string[]) => post<{ run: NotSureRun; started: number }>('/api/admin/taxonomy/not-sure/run', { refs }),
   /** Your decision: one of our labels, or null to drop it from the list. */
   taxonomySettle: (ref: string, as: string | null) =>
     put<{ place: NotSurePlace }>('/api/admin/taxonomy/not-sure', { ref, as }),

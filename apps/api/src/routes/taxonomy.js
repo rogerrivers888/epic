@@ -247,7 +247,14 @@ taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res
     // would undo his decision (Codex, 14 Sep 2026).
     const waiting = (await notSure.list({ state: 'waiting', limit: 500 })).filter((p) => refs.includes(p.venue_ref));
     const run = await notSure.startRun({ askedFor: waiting.length, by: actorOf(req) });
+    // The answer goes back now and the reading happens after it. Six places
+    // take minutes of web search and the gateway gives a request twenty-eight
+    // seconds, so waiting for the run meant the run always failed (14 Sep 2026,
+    // the same ceiling the area sweep hit). The screen watches the run and the
+    // places fill in as they are answered.
+    res.json({ run, started: waiting.length });
 
+    void (async () => {
     let looked = 0; let got = 0; let pence = 0;
     for (const p of waiting) {
       const meta = {};
@@ -289,8 +296,9 @@ taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res
         if (err?.code === 'model_budget_reached' || err?.code === 'spend_bound_reached') break;
       }
     }
-    const done = await notSure.finishRun(run.id, { lookedAt: looked, answered: got, costPence: pence, note: null });
-    res.json({ run: done });
+      await notSure.finishRun(run.id, { lookedAt: looked, answered: got, costPence: pence, note: null })
+        .catch(() => { /* the run is a receipt; losing it does not lose the answers */ });
+    })();
   } catch (err) { next(err); }
 });
 
