@@ -67,11 +67,6 @@ async function ready() {
     const open = await labelRepo.undecidedGoogle();
     const sure = open.map((r) => ({ key: r.key, decision: sureDecisionFor(r.key, r.note) })).filter((r) => r.decision);
     await labelRepo.decideMany(sure);
-    // Here, and not after the rule writes below: every generic decision has
-    // just been made, `observe` runs on the search path and cannot wait, and a
-    // search served while the rules are still being written would otherwise
-    // count no company at all (Codex, 13 Sep 2026).
-    await labelRepo.loadGenerics();
     // The mappings Epic is sure of become rules of its own, signed "Epic", so
     // the screen can show them as such and the owner can change any of them.
     const tax = await taxonomy.taxonomy();
@@ -85,7 +80,7 @@ async function ready() {
       const { scope, subject } = scopeFor([label]);
       await shelfRules.teach({ scope, subject, labels: [label], subjectLabel: r.key.replace(/_/g, ' '), weights: {}, subcategory: m.subcategory, reason: `Mapped by Epic: ${m.why}.`, by: 'Epic', known });
     }
-  } catch { decided = false; await labelRepo.loadGenerics(); }
+  } catch { decided = false; }
 }
 
 /** English names for a list of labels, from whichever table holds each. */

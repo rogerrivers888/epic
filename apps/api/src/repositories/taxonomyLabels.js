@@ -50,47 +50,19 @@ const FLUSH_MS = 20_000;
 const FLUSH_AT = 400;
 
 /**
- * Which words have been marked "generic" — a label, not a subcategory.
- *
- * A generic word is the only one we count company for: the point of
- * `taxonomy_label_pairs` is to answer "what does `tourist_attraction`
- * actually catch?", so only the pairs with a generic word on one side are
- * worth keeping. The set is read from the table and re-read on a minute's
- * timer; `observe` is called on the search path and must not wait for it, so
- * it uses whatever was last loaded and asks for a refresh behind itself.
+ * Epic's own derived words, which are not counted as company. `venue:*`,
+ * `experience:*`, `style:*` and `flag:*` are read *off* a place by us rather
+ * than said about it by anybody, so pairing them says nothing and there are a
+ * lot of them.
  */
-let genericSet = new Set();
-let genericAt = 0;
-let genericBusy = false;
-const GENERIC_TTL_MS = 60_000;
-
-function refreshGenerics() {
-  if (genericBusy || Date.now() - genericAt < GENERIC_TTL_MS) return;
-  genericBusy = true;
-  query(`select namespace, key from taxonomy_labels where decision = 'generic'`)
-    .then(({ rows }) => { genericSet = new Set(rows.map((r) => `${r.namespace}:${r.key}`)); genericAt = Date.now(); })
-    .catch(() => { genericAt = Date.now(); })
-    .finally(() => { genericBusy = false; });
-}
-
-/** A decision was written: the next `observe` should look the set up again. */
-export function forgetGenerics() { genericAt = 0; }
+const DERIVED = new Set(['venue', 'experience', 'style', 'flag', 'atlas']);
 
 /**
- * Load the set now, before anything is observed.
- *
- * `observe` runs on the search path and cannot wait, so without this the first
- * search after a restart would count no company at all — and with a twelve-hour
- * search cache it would not come round again for half a day (Codex, 13 Sep
- * 2026). `ready()` calls this at boot.
+ * A place with more words than this is not counted for company at all. Pairs
+ * grow with the square, so one freak row with forty words would put 1,560 rows
+ * in on its own, and a place typed forty ways is telling us nothing anyway.
  */
-export async function loadGenerics() {
-  try {
-    const { rows } = await query(`select namespace, key from taxonomy_labels where decision = 'generic'`);
-    genericSet = new Set(rows.map((r) => `${r.namespace}:${r.key}`));
-    genericAt = Date.now();
-  } catch { /* the next observe asks again */ }
-}
+const PAIR_CAP = 12;
 
 async function flush() {
   timer = null;
@@ -155,22 +127,30 @@ export function observe(labels) {
     pending.set(l, (pending.get(l) ?? 0) + 1);
     list.push(l);
   }
-  // What a generic word was seen *with*, so the screen can show what it
-  // catches (owner, 13 Sep 2026: "surface all the subcategories and map those
-  // accordingly"). Same source on both sides: Google's generic word is
-  // answered by Google's specific ones, not by our own derived vocabulary.
-  if (genericSet.size) {
-    for (const a of list) {
-      if (!genericSet.has(a)) continue;
-      const ns = a.slice(0, a.indexOf(':') + 1);
-      for (const b of list) {
-        if (b === a || genericSet.has(b) || !b.startsWith(ns)) continue;
+  // Which words turn up on the same place as which.
+  //
+  // This used to be kept only for the words marked as describing a place
+  // rather than naming it, to hold the table down. The owner, 14 Sep 2026,
+  // confirmed it for every word, because two things depend on it. Writing a
+  // rule needs to show which words actually travel together, so a combination
+  // worth naming can be told from a coincidence. And a word from one source
+  // landing on the same places as a word from another is how the two are known
+  // to mean the same thing, which is what proposes a mapping rather than
+  // leaving him to type 485 of them.
+  //
+  // Both directions are kept, so either word can be looked up. Epic's own
+  // derived words are left out: `venue:attraction` is on almost everything and
+  // would say nothing while doubling the table.
+  const counted = list.filter((l) => !DERIVED.has(l.slice(0, l.indexOf(':'))));
+  if (counted.length > 1 && counted.length <= PAIR_CAP) {
+    for (const a of counted) {
+      for (const b of counted) {
+        if (a === b) continue;
         const k = `${a}\u0000${b}`;
         pendingPairs.set(k, (pendingPairs.get(k) ?? 0) + 1);
       }
     }
   }
-  refreshGenerics();
   if (pending.size >= FLUSH_AT || pendingPairs.size >= FLUSH_AT) void flush();
   else if (!timer) { timer = setTimeout(() => void flush(), FLUSH_MS); timer.unref?.(); }
 }
@@ -292,8 +272,6 @@ export async function save({ namespace, key, label, note, active, decision }) {
             updated_at = now()
      returning *`,
     [namespace, key, label ?? null, note ?? null, a, d]);
-  // A word just made (or unmade) generic changes what `observe` counts company for.
-  if (d) forgetGenerics();
   return rows[0];
 }
 
@@ -315,6 +293,5 @@ export async function decideMany(items) {
        from (select unnest($1::text[]) as key, unnest($2::text[]) as decision) c
       where l.namespace = 'google' and l.key = c.key and l.decision is null`,
     [items.map((i) => i.key), items.map((i) => i.decision)]);
-  forgetGenerics();
   return rowCount;
 }
