@@ -273,3 +273,16 @@ test('a gate on a credential nobody checks is cleared by claiming it', async () 
   assert.equal(missingCredentials(offer, host, { types, credentials: [] }).length, 1);
   assert.deepEqual(missingCredentials(offer, host, { types, credentials: [{ type_key: 'years-at-it', state: 'stated' }] }), []);
 });
+
+test('a facet decision moves no categories, and says so without falling over', async () => {
+  // The browse category is derived from tags alone, so repointing a facet has
+  // nothing to re-file. It still has to answer with a list rather than a
+  // reference to a variable that is not there (Codex, 14 Sep 2026) — the
+  // approve and merge paths both read what it returns.
+  const repo = await import('../src/repositories/hostSkills.js');
+  assert.equal(typeof repo.repoint, 'function');
+  const src = await (await import('node:fs/promises')).readFile(new URL('../src/repositories/hostSkills.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export async function repoint('), src.indexOf('export async function recomputeCategories('));
+  assert.ok(!/return moved;/.test(body), 'repoint returns no undefined name');
+  assert.match(body, /if \(vocab !== 'tag'\) return \[\];/);
+});

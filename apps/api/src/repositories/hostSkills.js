@@ -766,7 +766,9 @@ export async function repoint(vocab, norm, targetKey, client) {
   );
   if (!touched.length) return [];
   await on(client)(`update ${table(vocab)} set seen_count = seen_count + $2 where key = $1`, [targetKey, touched.length]);
-  if (vocab !== 'tag') return moved;
+  // A facet moves nothing: the browse category is derived from tags alone, so
+  // there is nothing to re-file and nothing to report (Codex, 14 Sep 2026).
+  if (vocab !== 'tag') return [];
   return recomputeCategories(touched.map((r) => r.offer_id), targetKey, client);
 }
 
