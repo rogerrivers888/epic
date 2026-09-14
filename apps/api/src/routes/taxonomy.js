@@ -513,33 +513,45 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     // left, which no single word would answer for (Codex, 14 Sep 2026, three
     // passes: the short cut missed the combination, and dropping it let the
     // defaults back in).
-    const answersAlone = (t) => {
-      const row = byKey.get(t);
-      if (!row || row.decision) return false;
-      return Boolean(landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory);
+    // One question, asked one way. A word that was explicitly decided — an
+    // excluded night club, a generic tourist attraction — is taken out of the
+    // set before anything reads it, or Google's own defaults put it back:
+    // night_club becomes bar and an excluded place is reported as filed under
+    // Pubs and bars (Codex, 14 Sep 2026).
+    const live = (types) => (types ?? []).filter((t) => !byKey.get(t)?.decision);
+    // Where a set of words files a place, or null. The primary is named, because
+    // Google reads the same words differently depending on which one leads: a
+    // museum with a cafe in it is an attraction, not a cafe.
+    const filedAs = (types, primaryType) => {
+      const words = live(types);
+      const first = primaryType && words.includes(primaryType)
+        ? [primaryType, ...words.filter((t) => t !== primaryType)]
+        : words;
+      for (const t of first) {
+        const sub = landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory;
+        if (sub) return sub;
+      }
+      // And the combinations, which no single word answers for.
+      const derived = labelsOf(venueForGoogleTypes(first, first.includes(primaryType) ? primaryType : null));
+      for (const subject of labelHits(rules?.labels, derived)) {
+        const sub = rules?.labels?.get(subject)?.subcategory;
+        if (sub) return sub;
+      }
+      return null;
     };
-    // The derived set, built the way Google builds it for the whole place: a
-    // rule may name the experiences the words read into, and that reading
-    // depends on which type is primary (Codex, 14 Sep 2026).
-    const combinationFires = (types, primaryType) => {
-      const derived = labelsOf(venueForGoogleTypes(types, primaryType));
-      const hits = labelHits(rules?.labels, derived);
-      return hits.some((subject) => rules?.labels?.get(subject)?.subcategory);
-    };
+    // Where each place actually lands, asked of the resolver rather than guessed
+    // at from one word: a place filed by a combination has no single word that
+    // answers for it, so anything reading the words one at a time calls it
+    // unsettled and contradicts the count (Codex, 14 Sep 2026).
+    for (const p of out.places) p.landsIn = filedAs(p.types, p.primaryType ?? null);
+    // And how many the queried word is carrying on its own — the same question,
+    // with that word taken away. If it *was* the primary, what is left has no
+    // primary; promoting the next one would invent a reading.
     const alone = out.places.filter((p) => {
       const rest = (p.types ?? []).filter((t) => t !== parsed.key);
       if (!rest.length) return true;
-      // If the word being looked at *was* the primary, what is left has no
-      // primary. Promoting the next one would invent a reading (Codex, 14 Sep 2026).
-      const primary = p.primaryType && p.primaryType !== parsed.key ? p.primaryType : null;
-      return !rest.some(answersAlone) && !combinationFires(rest, primary);
+      return !filedAs(rest, p.primaryType && p.primaryType !== parsed.key ? p.primaryType : null);
     }).length;
-    // Where each place actually lands, asked of the resolver rather than
-    // guessed at from one word. A place filed by a combination has no single
-    // word that answers for it, so anything reading the words one at a time
-    // calls it unsettled and contradicts the count (Codex, 14 Sep 2026).
-    const landsIn = (p) => landingOfSet((p.types ?? []).map((t) => `google:${t}`), {}, rules, tax.vocab).subcategory;
-    for (const p of out.places) p.landsIn = landsIn(p);
 
     const alsoCalled = [...seen.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
