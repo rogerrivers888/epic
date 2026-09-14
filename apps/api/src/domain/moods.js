@@ -66,8 +66,13 @@ export const MOOD_KEYS = MOODS.map((m) => m.key);
 const RANK = Object.fromEntries(MOOD_KEYS.map((k, i) => [k, i]));
 
 /**
- * How many categories a place may appear under. One, and the owner's words are
- * the whole reason: "I don't want any duplication between categories."
+ * How many categories a place calls *home*. One, and the owner's words are the
+ * whole reason: "I don't want any duplication between categories."
+ *
+ * A drawer may still be *listed* in more than one cabinet (14 Sep 2026), so
+ * `shelves` can carry more than one key. The home is always first, and the
+ * screens that draw several categories at once give each place to one lane —
+ * its home if that lane is on screen — so nothing is ever drawn twice.
  */
 export const MAX_SHELVES = 1;
 
@@ -253,11 +258,28 @@ function combine(matches, rank = RANK) {
  * Defaults to the eight in this file, so every pure caller — the tests, a
  * script, anything that has not read the table — still works without one.
  */
-export const NO_VOCAB = { parentOf: new Map(), rank: RANK };
+export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), rank: RANK };
 export const vocabularyOf = (categories, subcategories) => ({
   parentOf: new Map((subcategories ?? []).map((s) => [s.key, s.category_key])),
+  // The extra cabinets a drawer is listed in, beside its home. Read off the
+  // subcategory rows, which `shelfTaxonomy.taxonomy()` fills from
+  // `shelf_subcategory_categories` (14 Sep 2026).
+  alsoIn: new Map((subcategories ?? []).map((s) => [s.key, (s.also_in ?? []).filter((k) => k && k !== s.category_key)])),
   rank: Object.fromEntries((categories ?? MOODS).map((c, i) => [c.key, i])),
 });
+
+/**
+ * The categories a place is drawn under: its home first, then any cabinet its
+ * drawer is also listed in. Only live categories, and never the home twice.
+ */
+export function shelvesOf(category, subcategory, vocab = NO_VOCAB) {
+  if (!category) return [];
+  const extra = subcategory ? vocab?.alsoIn?.get(subcategory) ?? [] : [];
+  const rank = vocab?.rank ?? RANK;
+  const out = [category];
+  for (const k of extra) if (k !== category && !out.includes(k) && rank[k] !== undefined) out.push(k);
+  return out;
+}
 
 /**
  * The one category a set of weights earns: the strongest claim, ties broken by
@@ -360,8 +382,8 @@ function place(chain, rules, vocab, fallback) {
     // Whether anybody would defend this. Used by the back office to list the
     // places worth teaching, never to hide one.
     confident: (weights?.[category] ?? 0) >= SHELF_FLOOR || Boolean(subcategory),
-    // The shape the screens already draw: one category, in a list.
-    shelves: category ? [category] : [],
+    // The shape the screens already draw: a list of categories, the home first.
+    shelves: shelvesOf(category, subcategory, vocab),
   };
 }
 
@@ -442,7 +464,7 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
       category: 'food',
       subcategory: known,
       weights,
-      shelves: ['food'],
+      shelves: shelvesOf('food', known, vocab),
       confident: true,
       because: [{
         scope: 'default', subject: venue.category,

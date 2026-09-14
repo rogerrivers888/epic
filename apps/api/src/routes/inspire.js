@@ -506,8 +506,11 @@ inspire.get('/near', async (req, res, next) => {
       moods: tax.active.categories.map((m) => ({
         key: m.key, label: m.label, icon: m.icon, isDoor: m.is_door,
         count: counts[m.key],
+        // A drawer listed in this cabinet as well as its home belongs in the
+        // list, or picking Fun would show skate parks with no drawer to put
+        // them in and they would all fall to "Everything else" (14 Sep 2026).
         subcategories: tax.active.subcategories
-          .filter((sc) => sc.category_key === m.key)
+          .filter((sc) => sc.category_key === m.key || (sc.also_in ?? []).includes(m.key))
           .map((sc) => ({ key: sc.key, label: sc.label, count: items.filter((i) => i.subcategory === sc.key).length }))
           .filter((sc) => sc.count > 0),
       })),

@@ -29,12 +29,25 @@ export const forget = () => { cache = null; };
 /** Everything, in one read, in the shapes the resolver and the screens want. */
 export async function taxonomy() {
   if (cache && Date.now() - cachedAt < TTL_MS) return cache;
-  const [cats, subs] = await Promise.all([
+  const [cats, subs, extra] = await Promise.all([
     query('select * from shelf_categories order by position, label'),
     query('select * from shelf_subcategories order by position, label'),
+    // The extra cabinets a drawer is listed in, beside its home (14 Sep 2026).
+    query('select subcategory_key, category_key from shelf_subcategory_categories order by position, category_key'),
   ]);
   const categories = cats.rows;
-  const subcategories = subs.rows;
+  const live = new Set(categories.filter((c) => c.active).map((c) => c.key));
+  const alsoIn = new Map();
+  for (const r of extra.rows) {
+    if (!live.has(r.category_key)) continue;
+    const list = alsoIn.get(r.subcategory_key) ?? [];
+    list.push(r.category_key);
+    alsoIn.set(r.subcategory_key, list);
+  }
+  const subcategories = subs.rows.map((s) => ({
+    ...s,
+    also_in: (alsoIn.get(s.key) ?? []).filter((k) => k !== s.category_key),
+  }));
   cache = {
     categories,
     subcategories,
@@ -120,7 +133,27 @@ export async function removeCategory(key) {
  * every place filed in that drawer moves shelf with it. That is the intended
  * way to reorganise: move the drawer, not the hundred places inside it.
  */
-export async function saveSubcategory({ id, key, categoryKey, label, blurb, position, active, indoor, forKids, by }) {
+/**
+ * Rewrite which extra cabinets a drawer is listed in.
+ *
+ * Left out entirely (`undefined`), the listing keeps; an empty array clears it.
+ * The home category is never written here — it lives on the row — so a listing
+ * that names it is dropped rather than stored twice.
+ */
+async function setAlsoIn(subcategoryKey, homeKey, alsoIn) {
+  if (alsoIn === undefined || alsoIn === null) return;
+  const wanted = [...new Set((alsoIn ?? []).map(String).filter((k) => k && k !== homeKey))];
+  await query('delete from shelf_subcategory_categories where subcategory_key = $1', [subcategoryKey]);
+  if (!wanted.length) return;
+  await query(
+    `insert into shelf_subcategory_categories (subcategory_key, category_key, position)
+     select $1, u.key, u.i
+       from unnest($2::text[]) with ordinality as u(key, i)
+     on conflict (subcategory_key, category_key) do nothing`,
+    [subcategoryKey, wanted]);
+}
+
+export async function saveSubcategory({ id, key, categoryKey, label, blurb, position, active, indoor, forKids, alsoIn, by }) {
   if (!categoryKey && !id) throw bad('A subcategory has to belong to a category.');
   const k = key ? slug(key) : slug(label);
   if (!k && !id) throw bad('A subcategory needs a name.');
@@ -141,8 +174,10 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
         where id = $1 returning *`,
       [id, categoryKey ?? null, label ?? null, blurb ?? null, position ?? null,
        active == null ? null : Boolean(active), triState(indoor), triState(forKids)]);
+    const saved = rows[0] ?? null;
+    if (saved) await setAlsoIn(saved.key, saved.category_key, alsoIn);
     forget();
-    return rows[0] ?? null;
+    return saved ? { ...saved, also_in: await alsoInOf(saved.key, saved.category_key) } : null;
   }
 
   const { rows } = await query(
@@ -160,8 +195,18 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
             updated_at   = now()
      returning *`,
     [categoryKey, k, label ?? k, blurb ?? null, position ?? null, triState(indoor), triState(forKids)]);
+  const saved = rows[0];
+  await setAlsoIn(saved.key, saved.category_key, alsoIn);
   forget();
-  return rows[0];
+  return { ...saved, also_in: await alsoInOf(saved.key, saved.category_key) };
+}
+
+/** What a drawer is listed under now, for the answer a save sends back. */
+async function alsoInOf(subcategoryKey, homeKey) {
+  const { rows } = await query(
+    `select category_key from shelf_subcategory_categories
+      where subcategory_key = $1 order by position, category_key`, [subcategoryKey]);
+  return rows.map((r) => r.category_key).filter((k) => k !== homeKey);
 }
 
 /**

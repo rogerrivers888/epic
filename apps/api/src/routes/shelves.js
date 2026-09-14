@@ -478,7 +478,11 @@ shelves.put('/subcategories', requires('manage_library'), async (req, res, next)
       id: req.body?.id, key: req.body?.key, categoryKey: req.body?.categoryKey,
       label: req.body?.label, blurb: req.body?.blurb,
       position: req.body?.position, active: req.body?.active,
-      indoor: req.body?.indoor, forKids: req.body?.forKids, by: actorOf(req),
+      indoor: req.body?.indoor, forKids: req.body?.forKids,
+      // The extra cabinets this drawer is listed in, beside its home. Left out,
+      // the listing keeps; an empty array clears it (14 Sep 2026).
+      alsoIn: Array.isArray(req.body?.alsoIn) ? req.body.alsoIn : undefined,
+      by: actorOf(req),
     });
     if (!subcategory) return res.status(404).json({ error: 'not_found' });
     res.json({ subcategory });

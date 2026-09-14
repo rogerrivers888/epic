@@ -694,6 +694,27 @@ function Taxonomy({ vocab, canManage, busy, onChanged, onFailed }: {
                         rainy afternoon with the kids" must not offer gardens). */}
                     {tri('indoor', sc.indoor, 'Indoors')}
                     {tri('forKids', sc.for_kids, 'For kids')}
+                    {/* Listed elsewhere as well as at home. A place still has one
+                        home category, so nothing is counted twice; this only
+                        decides which cabinets show the drawer (owner, 14 Sep
+                        2026: "someone goes straight to the category fun and
+                        would be well up for doing a skate park, but doesn't see
+                        the skate park because it's in sport"). */}
+                    <Row style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Text style={type.tiny}>Also show it in:</Text>
+                      {(vocab?.shelves ?? []).filter((other) => other.key !== sc.category_key).map((other) => {
+                        const on = (sc.also_in ?? []).includes(other.key as never);
+                        return (
+                          <Chip key={other.key} label={other.label} selected={on} onPress={() => {
+                            const next = on
+                              ? (sc.also_in ?? []).filter((k) => k !== other.key)
+                              : [...(sc.also_in ?? []), other.key as never];
+                            void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: next as never }),
+                              on ? `${sc.label} is no longer shown in ${other.label}.` : `${sc.label} is shown in ${other.label} as well.`);
+                          }} />
+                        );
+                      })}
+                    </Row>
                   </View>
                 );
               })() : null}

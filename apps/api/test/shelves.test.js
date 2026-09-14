@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const {
-  MAX_SHELVES, MOOD_KEYS, NO_RULES, SHELF_FLOOR, drawn, shelvesForAtlas, shelvesForVenue,
+  MAX_SHELVES, MOOD_KEYS, NO_RULES, SHELF_FLOOR, drawn, shelvesForAtlas, shelvesForVenue, shelvesOf,
   vocabularyOf, winner,
 } = await import('../src/domain/moods.js');
 
@@ -288,4 +288,28 @@ test('a drawer is only named where something actually named it', () => {
   );
   assert.equal(subcategory, null);
   assert.ok(because.every((r) => r.scope === 'default'));
+});
+
+test('a drawer listed in another cabinet is drawn there too, and the home comes first', () => {
+  // Owner, 14 Sep 2026: "someone just goes straight to the category fun and
+  // would be well up for doing a skate park, but doesn't see the skate park
+  // because it's in sport… we definitely want to solve for that problem."
+  const categories = [{ key: 'fun' }, { key: 'sport' }, { key: 'outdoors' }];
+  const subcategories = [
+    // Skateboard park lives in Sport and is listed under Fun and Outdoors.
+    { key: 'skateboard-park', category_key: 'sport', also_in: ['fun', 'outdoors'] },
+    { key: 'football', category_key: 'sport' },
+  ];
+  const vocab = vocabularyOf(categories, subcategories);
+  assert.deepEqual(shelvesOf('sport', 'skateboard-park', vocab), ['sport', 'fun', 'outdoors']);
+  // The home is never repeated, however it is listed.
+  const twice = vocabularyOf(categories, [{ key: 'x', category_key: 'sport', also_in: ['sport', 'fun'] }]);
+  assert.deepEqual(shelvesOf('sport', 'x', twice), ['sport', 'fun']);
+  // A drawer with no listing is exactly what it was.
+  assert.deepEqual(shelvesOf('sport', 'football', vocab), ['sport']);
+  // And a category that is not live is not drawn.
+  assert.deepEqual(shelvesOf('sport', 'skateboard-park', vocabularyOf([{ key: 'sport' }, { key: 'fun' }], subcategories)), ['sport', 'fun']);
+  // No drawer at all means no listing to read.
+  assert.deepEqual(shelvesOf('sport', null, vocab), ['sport']);
+  assert.deepEqual(shelvesOf(null, 'skateboard-park', vocab), []);
 });

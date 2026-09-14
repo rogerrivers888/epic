@@ -65,6 +65,9 @@ export function lanesFor<T extends Laned>(
   const order: string[] = [...vocab.order.filter((m) => m !== 'food'), OTHER_LANE];
   const by = new Map<string, T[]>();
   for (const item of items) {
+    // One lane per place, never two. `moods` arrives home-first, so a drawer
+    // listed in several cabinets lands in its home lane and is not repeated in
+    // the others (14 Sep 2026).
     const key = (item.moods ?? []).find((m) => m !== 'food') ?? OTHER_LANE;
     if (!order.includes(key)) order.splice(order.length - 1, 0, key);
     by.set(key, [...(by.get(key) ?? []), item]);

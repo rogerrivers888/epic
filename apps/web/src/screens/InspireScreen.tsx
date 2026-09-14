@@ -515,11 +515,33 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     const rank = (i: InspireItem) => (f.wantTypes.some((t) => words(i).includes(t)) ? 0 : 1) * 10 + (f.moods.length && !i.moods.some((m) => f.moods.includes(m)) ? 1 : 0);
     return [...kept].sort((a, b) => rank(a) - rank(b));
   }, [ask, intakeId, shown]);
-  const shelves = useMemo(
-    () => categories.map((c) => ({ key: c.key, label: c.label, items: shown.filter((i) => inCategory(i, c.key)) })).filter((s) => s.items.length)
-      .sort((a, b) => Number(b.key === leadMood) - Number(a.key === leadMood)),
-    [categories, shown, inCategory, leadMood],
-  );
+  /**
+   * The carousels, one per category, with every place in exactly one of them.
+   *
+   * A drawer may be listed in more than one cabinet now, so a skate park is in
+   * Sport and in Fun. Picking a category shows it either way, but here, where
+   * every category is on screen at once, it must be drawn once or the owner
+   * sees the same thing three times (14 Sep 2026). Each place goes to the first
+   * category it belongs to, and `moods` arrives home-first, so it lands in its
+   * home carousel whenever that carousel is being drawn.
+   */
+  const shelves = useMemo(() => {
+    if (mode === 'food') {
+      return categories.map((c) => ({ key: c.key, label: c.label, items: shown.filter((i) => inCategory(i, c.key)) }))
+        .filter((s) => s.items.length)
+        .sort((a, b) => Number(b.key === leadMood) - Number(a.key === leadMood));
+    }
+    const drawn = categories.map((c) => c.key);
+    const by = new Map<string, InspireItem[]>();
+    for (const i of shown) {
+      const key = i.moods.find((m) => drawn.includes(m));
+      if (!key) continue;
+      by.set(key, [...(by.get(key) ?? []), i]);
+    }
+    return categories.map((c) => ({ key: c.key, label: c.label, items: by.get(c.key) ?? [] }))
+      .filter((s) => s.items.length)
+      .sort((a, b) => Number(b.key === leadMood) - Number(a.key === leadMood));
+  }, [categories, shown, inCategory, leadMood, mode]);
 
   /** Inside one category or kind: what is in it, after the filters. */
   const inPick = useMemo(() => {

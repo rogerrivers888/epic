@@ -2360,7 +2360,7 @@ export const api = {
   shelfSaveCategory: (body: { key?: string; label?: string; blurb?: string | null; icon?: string | null; position?: number; isDoor?: boolean; active?: boolean }) =>
     put<{ category: ShelfCategory }>('/api/admin/shelves/categories', body),
   shelfDeleteCategory: (key: string) => del<{ removed: boolean }>(`/api/admin/shelves/categories/${key}`),
-  shelfSaveSubcategory: (body: { id?: string; key?: string; categoryKey?: MoodKey; label?: string; blurb?: string | null; position?: number; active?: boolean; indoor?: boolean | 'unset'; forKids?: boolean | 'unset' }) =>
+  shelfSaveSubcategory: (body: { id?: string; key?: string; categoryKey?: MoodKey; label?: string; blurb?: string | null; position?: number; active?: boolean; indoor?: boolean | 'unset'; forKids?: boolean | 'unset'; alsoIn?: MoodKey[] }) =>
     put<{ subcategory: ShelfSubcategory }>('/api/admin/shelves/subcategories', body),
   shelfDeleteSubcategory: (id: string) => del<{ removed: boolean }>(`/api/admin/shelves/subcategories/${id}`),
   shelfForget: (id: string) => del<{ removed: boolean; rule: ShelfRule }>(`/api/admin/shelves/rules/${id}`),
@@ -2899,6 +2899,12 @@ export type ShelfSubcategory = {
   position: number; active: boolean; seeded: boolean;
   /** Indoors or out, and for children: true, false, or null for "it depends" (migration 076). */
   indoor?: boolean | null; for_kids?: boolean | null;
+  /**
+   * The extra categories this drawer is *listed* in, beside its home
+   * `category_key` (migration 103). A place still has one home; this is only
+   * which cabinets show the drawer.
+   */
+  also_in?: MoodKey[];
   /** How many rules point at it, so the settings page is not a guess. */
   rules?: number;
 };

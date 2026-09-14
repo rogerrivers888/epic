@@ -326,7 +326,19 @@ export function Categories({ canManage }: { canManage: boolean }) {
             <Text style={type.small}>
               A rule says: places carrying all of these labels go in this subcategory. Narrowest wins — a rule about one place,
               then a combination of labels, then a Wikidata type, then the atlas word, then the experience. Naming a subcategory
-              settles the category, because a subcategory has exactly one parent.
+              settles the category, because a subcategory has exactly one home.
+            </Text>
+            <Text style={type.small}>
+              One place, one subcategory, one home category. That never changes, and it is what stops the same place being
+              counted twice. A subcategory may still be shown in more than one category: Skateboard park lives in Sport and is
+              listed under Fun and Outdoors, so somebody who opens Fun hoping for a skate park finds one. Set that on Shelves,
+              under “Also show it in”.
+            </Text>
+            <Text style={type.small}>
+              Where several categories are drawn at once — Inspire's carousels, a trip's Activities lanes — each place is given
+              to one of them, its home if that lane is on screen, so nothing is ever drawn twice. Where one category is open on
+              its own, everything listed under it shows, including the drawers whose home is elsewhere. The count on a category
+              is what is behind it, which is why it can be larger than the row of cards above it.
             </Text>
             <Text style={type.small}>
               Rename freely: keys never change. Move a subcategory and every place in it moves. Teach the type, not the place —
@@ -338,6 +350,19 @@ export function Categories({ canManage }: { canManage: boolean }) {
               parking), or useful nearby (a loo, a visitor centre). Whole categories that are plainly not for Epic — car dealers,
               banks, plumbers, petrol stations — and the travel and nearby kinds are decided by Epic without asking; the rest
               Epic maps where it is sure, and only the judgement calls wait for you.
+            </Text>
+            <Text style={type.small}>
+              The fifth answer is “just a label”. Some of Google's words sit on places all over Epic — establishment, point of
+              interest, tourist attraction — so they cannot decide anything, and marking one records that: it leaves the mapping
+              queue and every rule naming it goes, including a rule that only mentions it alongside another word. Open one and
+              “the words it catches” lists the specific words seen on the same places, each mappable from there. Use Showing to
+              find every word with the same answer.
+            </Text>
+            <Text style={type.small}>
+              Examples is one live Google search near your home, fenced to that word. It shows real places, what else Google
+              calls them, and where each of those words lands. Nothing is stored and it costs one provider call, so it only ever
+              happens on a press. It is the honest way to settle what one of Google's words actually holds: it is how event
+              venue turned out to be a room you hire, and dance hall a dance class.
             </Text>
           </View>
         </FoldLine>
@@ -693,6 +718,17 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
  * subcategory yet. The owner, 12 Sep 2026: "do we not just have mapped or
  * unmapped?" — so those are the two columns, and a total at the bottom.
  */
+/** The answers a Google word can carry, as the filter names them. */
+const STANDINGS = [
+  { key: '', label: 'Every answer' },
+  { key: 'mapped', label: 'Mapped to one of ours' },
+  { key: 'generic', label: 'Just a label' },
+  { key: 'travel', label: 'Travel' },
+  { key: 'nearby', label: 'Useful nearby' },
+  { key: 'aside', label: 'Excluded from Epic' },
+  { key: 'undecided', label: 'Nothing said yet' },
+];
+
 function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours';
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
@@ -706,6 +742,13 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const [noise, setNoise] = useQueryState<string>('noise', '', asText);
   /** Inside one of our categories: only the words mapped to this subcategory. */
   const [only, setOnly] = useQueryState<string>('only', '', asText);
+  /**
+   * One kind of answer at a time (owner, 14 Sep 2026: "where do I find these
+   * words? Can I have a filter for them on the categories list, and then I can
+   * do it myself?"). Sits over the tabs: Unmapped + Just a label is empty on
+   * purpose, because a word kept as a label is decided.
+   */
+  const [std, setStd] = useQueryState<string>('std', '', asText);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   /** The row whose dropdown is open, lifted over the rows after it. */
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -775,7 +818,8 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
 
   /** The rows every view is built from: without the noise unless asked, and by the tab. */
   const inView = (r: TaxonomyLabel) => {
-    if (noise !== '1' && standing(r) === 'aside') return false;
+    if (std && standing(r) !== std) return false;
+    if (noise !== '1' && standing(r) === 'aside' && std !== 'aside') return false;
     if (tab === 'mapped') return decided(r);
     if (tab === 'unmapped') return !decided(r);
     return true;
@@ -917,6 +961,11 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
             </Press>
           ))}
         </View>
+        <Dropdown
+          label="Showing" value={STANDINGS.find((o) => o.key === std)?.label ?? 'Every answer'}
+          options={STANDINGS.map((o) => ({ key: o.key, label: o.label, on: std === o.key }))}
+          onPick={(k) => { setStd(k); setGroup('-'); setTicked(new Set()); }}
+        />
         <View style={{ flex: 1 }} />
         <Press effect="none" onPress={() => setNoise(noise === '1' ? '' : '1')} accessibilityRole="switch" accessibilityState={{ checked: noise === '1' }}
                style={[styles.barControl, noise === '1' && styles.barControlOn]}>
