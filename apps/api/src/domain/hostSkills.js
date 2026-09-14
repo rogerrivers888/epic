@@ -324,3 +324,30 @@ export function credentialDisplay(credential, type, today = new Date().toISOStri
 /** Confirmed once, and past the date that confirmation was good for. */
 export const expired = (credential, today = new Date().toISOString().slice(0, 10)) =>
   Boolean(credential?.state === 'confirmed' && credential.expires_on && credential.expires_on < today);
+
+/**
+ * A Wikidata description that says this is a *work*, a person or a place rather
+ * than the thing itself.
+ *
+ * Needed because a unique name match is not a safe match. Wikidata has exactly
+ * one item called "Bell Ringing" — an episode of Teletubbies — and exactly one
+ * called "Beach Days", a painting by Joseph Syddall. Both are the only thing
+ * carrying their name, so both looked like certainties, and neither is the
+ * craft anybody meant (14 Sep 2026, reading the first run's output).
+ */
+const NOT_THE_THING = [
+  'painting', 'sculpture', 'drawing', 'photograph', 'artwork',
+  'episode', 'film', 'television', 'tv series', 'documentary', 'video game',
+  'album', 'song', 'single', 'musical', 'opera', 'band', 'musical group',
+  'novel', 'book', 'poem', 'play', 'short story', 'manga', 'anime', 'comic',
+  'journal article', 'scientific article', 'academic', 'published in',
+  'family name', 'given name', 'surname', 'human settlement', 'village', 'town',
+  'municipality', 'commune', 'company', 'brand', 'business',
+];
+
+/** Is this candidate the activity, or something merely named after it? */
+export function namesTheThing(description) {
+  const d = String(description ?? '').toLowerCase();
+  if (!d) return true; // no description at all is not evidence against it
+  return !NOT_THE_THING.some((w) => d.includes(w));
+}

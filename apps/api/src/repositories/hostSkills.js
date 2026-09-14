@@ -384,6 +384,22 @@ export async function refuseProposals(keys, client) {
   return rowCount;
 }
 
+/**
+ * Clear every proposal nobody has acted on, so a run can look again.
+ *
+ * Accepted identifiers and refusals are decisions and are left alone; only the
+ * ones still waiting are dropped. Needed when the test for a safe match changes
+ * and the proposals already on the table were judged by the old one.
+ */
+export async function clearProposals(client) {
+  const { rowCount } = await on(client)(
+    `update host_skill_tags
+        set proposed_id = null, proposed_label = null, proposed_note = null, proposed_exact = null, proposed_at = null
+      where external_id is null and not no_identifier and proposed_id is not null`,
+  );
+  return rowCount;
+}
+
 /** The tags a person said have no identifier, so the decision can be undone. */
 export async function refusedIdentifiers(client) {
   const { rows } = await on(client)(

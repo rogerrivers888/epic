@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 
 const {
   AGE_BANDS, FACET_CAP, PROMPTS, TAG_CAP, breadcrumb, categoryForPassion, categoryFrom,
-  credentialDisplay, expiryFor, flatters, gatingTypes, keyFor, normalise, promptFor, skillBlockers,
+  credentialDisplay, expiryFor, flatters, gatingTypes, keyFor, namesTheThing, normalise, promptFor, skillBlockers,
 } = await import('../src/domain/hostSkills.js');
 
 test('the four spellings of one thing collapse to one proposal', () => {
@@ -376,4 +376,19 @@ test('no canonical word resolves to somebody else', async () => {
     if (!keys.has(own) || own === target || reassigned.has(norm)) continue;
     assert.fail(`"${norm}" is a canonical row but its wording resolves to ${target}`);
   }
+});
+
+test('a unique name is not a safe match', () => {
+  // The only item Wikidata calls "Bell Ringing" is an episode of Teletubbies,
+  // and the only "Beach Days" is a painting. Both were the only thing carrying
+  // their name, and neither is the craft anybody meant.
+  assert.equal(namesTheThing('episode of Teletubbies'), false);
+  assert.equal(namesTheThing('painting by Joseph Syddall (1864–1942)'), false);
+  assert.equal(namesTheThing('journal article; published in 1929'), false);
+  assert.equal(namesTheThing('craft of shaping metal by heating and hammering'), true);
+  assert.equal(namesTheThing('making of arrows'), true);
+  // Nothing said is not evidence against it: most of the craft items carry no
+  // description at all.
+  assert.equal(namesTheThing(null), true);
+  assert.equal(namesTheThing(''), true);
 });

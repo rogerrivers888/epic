@@ -532,6 +532,19 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
           </Press>
         ) : null}
         {waiting.length ? (
+          <Press
+            onPress={async () => {
+              setBusy('Reading Wikidata again…');
+              try { await api.adminProposeSkillIdentifiers({ again: true }); } finally { setBusy(null); }
+              setTimeout(() => void load(), 4000);
+            }}
+            accessibilityRole="button"
+            style={s.identAct}
+          >
+            <Text style={s.identActText}>Look again at all {waiting.length}</Text>
+          </Press>
+        ) : null}
+        {waiting.length ? (
           <Press onPress={() => setOpen(!open)} accessibilityRole="button" style={s.identAct}>
             <Text style={s.identActText}>{open ? 'Hide' : `Review ${waiting.length}`}</Text>
           </Press>

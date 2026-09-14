@@ -30,7 +30,7 @@ import { hostByHousehold, hostById, offerById, offersOfHost, updateOffer } from 
 import { missingCredentials } from '../domain/hosting.js';
 import {
   AGE_BANDS, CREDENTIAL_STATES, FACET_CAP, FACET_KINDS, PROMPTS, PROPOSAL_STATES, TAG_CAP,
-  categoryFrom, credentialDisplay, expired, expiryFor, flatters, keyFor, normalise, promptFor,
+  categoryFrom, credentialDisplay, expired, expiryFor, flatters, keyFor, namesTheThing, normalise, promptFor,
 } from '../domain/hostSkills.js';
 
 export const router = Router();
@@ -778,6 +778,10 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
     lookingUp = true;
     let todo;
     try {
+      // "Look again" drops the proposals nobody has acted on first, so a run
+      // can re-judge them. Accepted identifiers and refusals are decisions and
+      // are never touched.
+      if (req.body?.again) await repo.clearProposals();
       const limit = Math.min(600, Math.max(1, Number(req.body?.limit ?? 600)));
       todo = (await repo.withoutIdentifier()).slice(0, limit);
     } catch (e) { lookingUp = false; throw e; }
@@ -797,11 +801,17 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
           // the animal behaviour — and taking the first of those in a batch of
           // four hundred is exactly the mistake this run exists to avoid
           // (Codex, 14 Sep 2026). Two of a name is an ambiguity for a person.
+          // Named the same *and* actually the thing. A unique name match is
+          // not a safe match: the only item called Bell Ringing is an episode
+          // of Teletubbies and the only one called Beach Days is a painting,
+          // and both looked like certainties on the first run (14 Sep 2026).
           const named = candidates.filter((c) => same(c.label, tag.label));
-          const best = named[0] ?? candidates[0];
+          const real = named.filter((c) => namesTheThing(c.description));
+          const best = real[0] ?? named[0] ?? candidates[0];
           if (!best) continue;
           await repo.propose({
-            key: tag.key, qid: best.qid, label: best.label, note: best.description, exact: named.length === 1,
+            key: tag.key, qid: best.qid, label: best.label, note: best.description,
+            exact: real.length === 1 && named.length === real.length,
           });
         } catch { /* one word failing is not the run failing */ }
       }
