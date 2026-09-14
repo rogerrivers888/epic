@@ -52,13 +52,14 @@ import { asOneOf, asText, useQueryState } from '../../router';
 
 const WIDE = 900;
 
-type View_ = 'subcategories' | 'providers' | 'google' | 'words';
+type View_ = 'subcategories' | 'providers' | 'google' | 'words' | 'left';
 /** The three doors across the top: a provider's words, ours, and the categories. */
 type Door = 'words' | 'ours' | 'cats';
 const VIEWS: { key: View_; label: string; short: string; needsCategory: boolean }[] = [
   { key: 'subcategories', label: 'Our categories', short: 'Ours', needsCategory: true },
   { key: 'providers', label: 'Providers\' words, one of ours', short: 'Providers', needsCategory: true },
   { key: 'google', label: 'Google mapped to ours', short: 'Google', needsCategory: false },
+  { key: 'left', label: 'What is left, hardest first', short: 'What is left', needsCategory: false },
   { key: 'words', label: 'Find a word', short: 'Find a word', needsCategory: false },
 ];
 
@@ -173,7 +174,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
   const [tax, setTax] = useState<Taxonomy | null>(null);
   // Which category, which view, which subcategory is open — all in the address.
   const [cat, setCat] = useQueryState<string>('cat', '', asText);
-  const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words'] as const, 'subcategories'));
+  const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words', 'left'] as const, 'subcategories'));
   /** Which of the three doors is open (the handoff, 14 Sep 2026). */
   const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats'] as const, 'words'));
   /**
@@ -182,7 +183,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
    * with no query on it used to do (Codex, 14 Sep 2026). The view is read
    * through the door rather than beside it.
    */
-  const BEHIND: Record<Door, View_[]> = { words: ['google', 'providers', 'words'], ours: [], cats: ['subcategories'] };
+  const BEHIND: Record<Door, View_[]> = { words: ['google', 'left', 'providers', 'words'], ours: [], cats: ['subcategories'] };
   const shown: View_ = BEHIND[door].includes(view) ? view : (BEHIND[door][0] ?? view);
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
   const [note, setNote] = useState<string | null>(null);
@@ -352,8 +353,8 @@ export function Categories({ canManage }: { canManage: boolean }) {
                        onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
 
-      {door === 'words' && tax && shown === 'google' ? (
-        <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
+      {door === 'words' && tax && (shown === 'google' || shown === 'left') ? (
+        <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} view={shown} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
       ) : null}
 
       {door === 'words' && tax && shown === 'words' ? (
@@ -906,17 +907,22 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
    * Add or take away a label that always comes with this one. It arrives as the
    * value its own kind can hold: a range as a range, never as a bare yes.
    */
-  const bring = async (a: PlaceAttribute, k: string) => {
-    const has = (a.brings ?? []).some((b) => b.key === k);
+  const bring = async (a: PlaceAttribute, k: string, value?: AttributeValue) => {
+    const has = (a.brings ?? []).some((b) => b.key === k) && value === undefined;
     const other = (data?.attributes ?? []).find((o) => o.key === k);
-    const asWhat = !other ? { yesno: true }
-      : other.kind === 'range' ? { from: other.range_min ?? 0, to: other.range_max ?? 99 }
-        : other.kind === 'oneof' ? { choice: other.options[0] ?? '' }
-          : { yesno: true };
+    // A range or a one-of has to be said, not guessed: "suits ages 0 to 7" is
+    // the whole point and 0 to 99 says nothing (Codex, 14 Sep 2026). So the row
+    // opens a small form rather than saving something nobody chose.
+    if (!has && !value && other && other.kind !== 'yesno') {
+      setAsking({ from: a, to: other });
+      setFromV(''); setToV('');
+      return;
+    }
     setBusy(true);
     try {
-      await api.taxonomySetBrings({ attribute: a.key, brings: k, value: has ? null : asWhat });
+      await api.taxonomySetBrings({ attribute: a.key, brings: k, value: has ? null : (value ?? { yesno: true }) });
       await load();
+      setAsking(null);
       await onChanged(has ? `${nameOf(k)} no longer comes with ${a.label}.` : `${nameOf(k)} comes with ${a.label} now.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusy(false); }
@@ -1046,6 +1052,34 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
         </View>
       )}
 
+      {/* Saying what a range or a one-of is brought as, rather than guessing it. */}
+      {asking ? (
+        <View style={styles.asking}>
+          <Text style={styles.bandKicker}>{asking.from.label} brings {asking.to.label}</Text>
+          {asking.to.kind === 'range' ? (
+            <View style={[styles.line, { gap: spacing.sm, flexWrap: 'wrap' }]}>
+              <Text style={type.small}>from</Text>
+              <TextInput value={fromV} onChangeText={setFromV} placeholder={String(asking.to.range_min ?? 0)}
+                         placeholderTextColor={colors.inkFaint} style={[styles.field, { minWidth: 60 }]} />
+              <Text style={type.small}>to</Text>
+              <TextInput value={toV} onChangeText={setToV} placeholder={String(asking.to.range_max ?? 99)}
+                         placeholderTextColor={colors.inkFaint} style={[styles.field, { minWidth: 60 }]} />
+              <TextAction label="Save" disabled={busy} onPress={() => void bring(asking.from, asking.to.key, {
+                from: Number(fromV || asking.to.range_min || 0), to: Number(toV || asking.to.range_max || 99),
+              })} />
+              <TextAction label="Cancel" onPress={() => setAsking(null)} />
+            </View>
+          ) : (
+            <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+              {asking.to.options.map((o) => (
+                <TextAction key={o} label={o} disabled={busy} onPress={() => void bring(asking.from, asking.to.key, { choice: o })} />
+              ))}
+              <TextAction label="Cancel" onPress={() => setAsking(null)} />
+            </View>
+          )}
+        </View>
+      ) : null}
+
       {/* The refusal, on the screen because the argument for it is the kind that
           gets forgotten and then made again. */}
       <View style={styles.refusal}>
@@ -1060,8 +1094,219 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   );
 }
 
-function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onChanged }: {
-  tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours';
+
+/**
+ * BO5 — what is left, hardest first.
+ *
+ * At 465 of 485 the job is no longer getting through a list, it is spending
+ * judgement where it moves something. Gym has been seen on 32 places and
+ * adventure sports centre on none, so alphabetical order puts the pointless one
+ * first. The default is by consequence and it stays that way.
+ */
+function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, onDecide, onExamples, egKey, children }: {
+  rows: TaxonomyLabel[]; tax: Taxonomy; wide: boolean;
+  catLabel: (k: string | null | undefined) => string;
+  subLabel: (k: string | null | undefined) => string | null;
+  canManage: boolean; busyKey: string | null;
+  onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }, why?: string) => void;
+  onExamples: (key: string) => void; egKey: string;
+  children?: (r: TaxonomyLabel) => React.ReactNode;
+}) {
+  const [order, setOrder] = useQueryState<'places' | 'az'>('order', 'places', asOneOf(['places', 'az'] as const, 'places'));
+  const left = useMemo(() => {
+    const list = [...rows];
+    return order === 'az'
+      ? list.sort((a, b) => (a.label ?? a.key).localeCompare(b.label ?? b.key))
+      : list.sort((a, b) => (b.seen_count ?? 0) - (a.seen_count ?? 0) || (a.label ?? a.key).localeCompare(b.label ?? b.key));
+  }, [rows, order]);
+  const nothingKnows = left.filter((r) => !r.seen_count);
+  const known = left.filter((r) => r.seen_count);
+  const places = left.reduce((n, r) => n + (r.seen_count ?? 0), 0);
+
+  const rowFor = (r: TaxonomyLabel) => {
+    const sug = r.suggestion ?? null;
+    const says = sug?.generic ? 'kept as a secondary label' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel'
+      : sug?.nearby ? 'useful nearby'
+        : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}` : null;
+    return (
+      <View key={r.key}>
+        <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
+            {r.why ? <Text style={[type.tiny, { lineHeight: 16 }]}>{r.why}</Text> : null}
+            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples'} onPress={() => onExamples(r.key)} /> : null}
+          </View>
+          <View style={[styles.tCell, { width: wide ? 90 : 60 }]}>
+            <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: r.seen_count ? colors.ink : colors.inkMuted }]}>{count(r.seen_count)}</Text>
+          </View>
+          {canManage ? (
+            <View style={{ width: wide ? 300 : undefined, alignItems: 'flex-end' }}>
+              <DrillDropdown
+                label={says ? 'Epic would say' : 'Nothing said yet'}
+                value={busyKey === r.key ? 'Saving…' : says ?? 'choose one'} stacked set={Boolean(says)} align="right" width={300}
+                extra={[
+                  { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: false },
+                  { key: '-', label: 'Excluded from Epic', on: false },
+                  { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
+                  { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
+                ]}
+                groups={tax.categories.filter((c) => c.active).map((c) => ({
+                  key: c.key, label: c.label,
+                  items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: false })),
+                }))}
+                onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+              />
+            </View>
+          ) : null}
+        </View>
+        {children ? children(r) : null}
+      </View>
+    );
+  };
+
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Band
+        kicker={`${rows.length} left`}
+        title="What is left"
+        stats={[
+          { label: 'Left', value: String(rows.length) },
+          { label: 'Places they decide', value: count(places) },
+          { label: 'Nothing knows these', value: String(nothingKnows.length) },
+        ]}
+      />
+      <View style={[styles.line, { gap: spacing.md }]}>
+        <Text style={styles.bandKicker}>Order by</Text>
+        <TextAction label="Places it decides" onPress={() => setOrder('places')} />
+        <TextAction label="A to Z" onPress={() => setOrder('az')} />
+        <Text style={type.tiny}>{order === 'places' ? 'Consequence first, and it stays that way' : 'Alphabetical, which puts the pointless one first'}</Text>
+      </View>
+      <View style={[styles.tRow, styles.tHeadSoft]}>
+        <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Google's word, and why it is a judgement call</Text></View>
+        <View style={[styles.tCell, styles.headCell, { width: wide ? 90 : 60 }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View>
+        {canManage ? <View style={[styles.tCell, styles.headCell, { width: wide ? 300 : 0 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Suggestion</Text></View> : null}
+      </View>
+      {known.map(rowFor)}
+      {nothingKnows.length ? (
+        <View style={{ gap: 4, paddingTop: spacing.md }}>
+          <Text style={styles.bandKicker}>Nothing knows these · {nothingKnows.length} words, {count(nothingKnows.reduce((n, r) => n + (r.seen_count ?? 0), 0))} places between them</Text>
+          <Text style={type.tiny}>Surfaced here so it is not a separate errand. Answering one costs nothing and gains nothing, so they go last.</Text>
+          {nothingKnows.map(rowFor)}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+
+/**
+ * BO1h / BO9 — real places carrying a word, and the shape they share.
+ *
+ * One live provider search, fenced to the word and fetched only on a press. It
+ * is used from the words list and from what-is-left alike, so it lives here
+ * rather than being written twice.
+ */
+function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word }: {
+  eg: TaxonomyExamples | null; egBusy: boolean; canManage: boolean; word: TaxonomyLabel;
+  catLabel: (k: string | null | undefined) => string;
+  subLabel: (k: string | null | undefined) => string | null;
+}) {
+  const r = word;
+  return (
+                <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
+                  {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
+                  {!egBusy && eg?.problem ? <Text style={type.tiny}>Could not look: {eg.problem}</Text> : null}
+                  {!egBusy && eg && !eg.problem && !eg.places.length ? <Text style={type.tiny}>Google knows no place of this type near {eg.near}.</Text> : null}
+                  {!egBusy && eg && eg.places.length ? (
+                    <>
+                      <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.{eg.fenced ? '' : ' Google will not filter by this word, so these were found by words and then kept only where it really appears.'}</Text>
+                      {/* Whether the word is worth keeping as a label even if it is
+                          not a category: if nothing else on the place is mapped,
+                          throwing it away leaves us knowing nothing (owner, 14 Sep
+                          2026: "the Activity Centre then gives us that context"). */}
+                      {eg.alone != null ? (
+                        <Text style={[type.tiny, eg.alone > eg.places.length / 2 && { color: colors.ink, fontWeight: '600' }]}>
+                          {eg.alone === 0
+                            ? 'Every one of them carries another word we have already mapped, so this word adds nothing on its own.'
+                            : `${eg.alone} of ${eg.places.length} carry nothing else we have mapped — for those, this word is all we would know.`}
+                        </Text>
+                      ) : null}
+                      {eg.places.map((pl) => (
+                        <View key={pl.id} style={styles.egRow}>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={type.small} numberOfLines={1}><Text style={{ fontWeight: '600' }}>{pl.name ?? pl.id}</Text></Text>
+                            <Text style={type.tiny} numberOfLines={1}>{[pl.address, pl.primaryType ? `Google leads with ${pl.primaryType.replace(/_/g, ' ')}` : null].filter(Boolean).join(' · ')}</Text>
+                          </View>
+                          {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
+                        </View>
+                      ))}
+                      {/* BO9 — the shape is the rule worth writing. The words
+                          that travel with this one, how often, and the
+                          combination worth naming. Opened from the row it
+                          came from, holding that word. */}
+                      {eg.shapes?.length ? (
+                        <View style={{ paddingTop: 8, gap: 5 }}>
+                          <Text style={styles.bandKicker}>
+                            {eg.shapes[0].on > 1
+                              ? `${eg.shapes[0].on} of ${eg.places.length} share one shape`
+                              : `${eg.shapes.length} shapes from ${eg.places.length} places — no rule to write`}
+                          </Text>
+                          {eg.shapes[0].on > 1 ? (
+                            <>
+                              {eg.travels.slice(0, 5).map((t) => (
+                                <View key={t.key} style={{ gap: 2 }}>
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                                    <Text style={type.tiny} numberOfLines={1}>
+                                      {t.label ?? t.key.replace(/_/g, ' ')}
+                                      {t.points_at ? '' : ' — points at no label of ours'}
+                                    </Text>
+                                    <Text style={type.tiny}>{t.on} of {eg.places.length}</Text>
+                                  </View>
+                                  <View style={styles.barTrack}>
+                                    <View style={[styles.barFill, { width: `${Math.round((t.on / Math.max(1, eg.places.length)) * 100)}%` }, !t.points_at && { backgroundColor: colors.lineSoft }]} />
+                                  </View>
+                                </View>
+                              ))}
+                              {canManage && r.landing ? (
+                                <View style={{ paddingTop: 6 }}>
+                                  <Text style={type.tiny}>
+                                    The rule worth writing: a place with {[r.label ?? r.key, ...eg.shapes[0].words.map((w) => eg.travels.find((t) => t.key === w)?.label ?? w)].join(' and ')}.
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </>
+                          ) : (
+                            <Text style={type.tiny}>
+                              Every one is its own shape, so there is nothing here to name. The answer for this word is a
+                              rule on our label, not on what Google happens to send with it.
+                            </Text>
+                          )}
+                        </View>
+                      ) : null}
+                      {eg.alsoCalled.length ? (
+                        <View style={{ paddingTop: 6, gap: 2 }}>
+                          <Text style={styles.colHead}>Also called, on those places</Text>
+                          {eg.alsoCalled.map((w) => (
+                            <Text key={w.key} style={type.tiny} numberOfLines={1}>
+                              <Text style={{ fontWeight: '600', color: colors.ink }}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
+                              {` · on ${w.on} of ${eg.places.length} · `}
+                              {w.decision === 'generic' ? 'an attribute'
+                                : w.decision === 'aside' ? 'excluded from Epic'
+                                : w.decision === 'travel' ? 'travel'
+                                : w.decision === 'nearby' ? 'useful nearby'
+                                : w.landing.subcategory ? `${catLabel(w.landing.category)} · ${subLabel(w.landing.subcategory)}` : 'unmapped'}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null}
+                </View>
+  );
+}
+
+function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage, onChanged }: {
+  tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours'; view: View_;
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; onChanged: (said: string) => Promise<void>;
 }) {
@@ -1286,6 +1531,21 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       {/* Lifted, like the Show/By row above it: every React Native Web view is
           its own stacking context, so without this the Showing menu opens
           underneath the table and reads as see-through (owner, 14 Sep 2026). */}
+      {/* BO5 — what is left, hardest first. Same rows, same actions, ordered by
+          what answering one actually moves. */}
+      {view === 'left' ? (
+        <WhatIsLeft
+          rows={(rows ?? []).filter((r) => !decided(r))}
+          tax={tax} wide={wide} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
+          busyKey={busyKey}
+          onDecide={(r, choice) => void decide(r, choice)}
+          onExamples={(k) => { setEg(egKey === k ? '' : k); setWith(''); }}
+          egKey={egKey}
+          children={(r) => (egKey === r.key ? <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} /> : null)}
+        />
+      ) : null}
+      {view === 'left' ? null : (
+      <>
       {/* Open a category and it becomes its own page: a way back carrying the
           local count, then a band for the category you are in (the handoff,
           BO1a). Closed, the band is the whole of Google's list. */}
@@ -1540,95 +1800,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                   {/* Real places carrying this word, so it can be looked at
                       rather than guessed at (owner, 13 Sep 2026). */}
                   {egKey === r.key ? (
-                    <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
-                      {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
-                      {!egBusy && eg?.problem ? <Text style={type.tiny}>Could not look: {eg.problem}</Text> : null}
-                      {!egBusy && eg && !eg.problem && !eg.places.length ? <Text style={type.tiny}>Google knows no place of this type near {eg.near}.</Text> : null}
-                      {!egBusy && eg && eg.places.length ? (
-                        <>
-                          <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.{eg.fenced ? '' : ' Google will not filter by this word, so these were found by words and then kept only where it really appears.'}</Text>
-                          {/* Whether the word is worth keeping as a label even if it is
-                              not a category: if nothing else on the place is mapped,
-                              throwing it away leaves us knowing nothing (owner, 14 Sep
-                              2026: "the Activity Centre then gives us that context"). */}
-                          {eg.alone != null ? (
-                            <Text style={[type.tiny, eg.alone > eg.places.length / 2 && { color: colors.ink, fontWeight: '600' }]}>
-                              {eg.alone === 0
-                                ? 'Every one of them carries another word we have already mapped, so this word adds nothing on its own.'
-                                : `${eg.alone} of ${eg.places.length} carry nothing else we have mapped — for those, this word is all we would know.`}
-                            </Text>
-                          ) : null}
-                          {eg.places.map((pl) => (
-                            <View key={pl.id} style={styles.egRow}>
-                              <View style={{ flex: 1, minWidth: 0 }}>
-                                <Text style={type.small} numberOfLines={1}><Text style={{ fontWeight: '600' }}>{pl.name ?? pl.id}</Text></Text>
-                                <Text style={type.tiny} numberOfLines={1}>{[pl.address, pl.primaryType ? `Google leads with ${pl.primaryType.replace(/_/g, ' ')}` : null].filter(Boolean).join(' · ')}</Text>
-                              </View>
-                              {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
-                            </View>
-                          ))}
-                          {/* BO9 — the shape is the rule worth writing. The words
-                              that travel with this one, how often, and the
-                              combination worth naming. Opened from the row it
-                              came from, holding that word. */}
-                          {eg.shapes?.length ? (
-                            <View style={{ paddingTop: 8, gap: 5 }}>
-                              <Text style={styles.bandKicker}>
-                                {eg.shapes[0].on > 1
-                                  ? `${eg.shapes[0].on} of ${eg.places.length} share one shape`
-                                  : `${eg.shapes.length} shapes from ${eg.places.length} places — no rule to write`}
-                              </Text>
-                              {eg.shapes[0].on > 1 ? (
-                                <>
-                                  {eg.travels.slice(0, 5).map((t) => (
-                                    <View key={t.key} style={{ gap: 2 }}>
-                                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-                                        <Text style={type.tiny} numberOfLines={1}>
-                                          {t.label ?? t.key.replace(/_/g, ' ')}
-                                          {t.points_at ? '' : ' — points at no label of ours'}
-                                        </Text>
-                                        <Text style={type.tiny}>{t.on} of {eg.places.length}</Text>
-                                      </View>
-                                      <View style={styles.barTrack}>
-                                        <View style={[styles.barFill, { width: `${Math.round((t.on / Math.max(1, eg.places.length)) * 100)}%` }, !t.points_at && { backgroundColor: colors.lineSoft }]} />
-                                      </View>
-                                    </View>
-                                  ))}
-                                  {canManage && r.landing ? (
-                                    <View style={{ paddingTop: 6 }}>
-                                      <Text style={type.tiny}>
-                                        The rule worth writing: a place with {[r.label ?? r.key, ...eg.shapes[0].words.map((w) => eg.travels.find((t) => t.key === w)?.label ?? w)].join(' and ')}.
-                                      </Text>
-                                    </View>
-                                  ) : null}
-                                </>
-                              ) : (
-                                <Text style={type.tiny}>
-                                  Every one is its own shape, so there is nothing here to name. The answer for this word is a
-                                  rule on our label, not on what Google happens to send with it.
-                                </Text>
-                              )}
-                            </View>
-                          ) : null}
-                          {eg.alsoCalled.length ? (
-                            <View style={{ paddingTop: 6, gap: 2 }}>
-                              <Text style={styles.colHead}>Also called, on those places</Text>
-                              {eg.alsoCalled.map((w) => (
-                                <Text key={w.key} style={type.tiny} numberOfLines={1}>
-                                  <Text style={{ fontWeight: '600', color: colors.ink }}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
-                                  {` · on ${w.on} of ${eg.places.length} · `}
-                                  {w.decision === 'generic' ? 'an attribute'
-                                    : w.decision === 'aside' ? 'excluded from Epic'
-                                    : w.decision === 'travel' ? 'travel'
-                                    : w.decision === 'nearby' ? 'useful nearby'
-                                    : w.landing.subcategory ? `${catLabel(w.landing.category)} · ${subLabel(w.landing.subcategory)}` : 'unmapped'}
-                                </Text>
-                              ))}
-                            </View>
-                          ) : null}
-                        </>
-                      ) : null}
-                    </View>
+                    <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} />
                   ) : null}
                   {/* What a generic word actually catches: the source's own
                       specific words seen on the same places, each mappable
@@ -1726,6 +1898,8 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           </View>
         </View>
       ) : null}
+      </>
+      )}
     </View>
   );
 }
@@ -1893,6 +2067,7 @@ const styles = StyleSheet.create({
   halfDivider: { borderLeftWidth: 1, borderLeftColor: colors.ruleMuted },
   halfOn: { backgroundColor: colors.selected },
   refusal: { borderLeftWidth: 1, borderLeftColor: colors.overrun, paddingLeft: 13, paddingVertical: 4, gap: 4, marginTop: spacing.sm },
+  asking: { borderLeftWidth: BORDER, borderLeftColor: colors.lime, paddingLeft: 13, paddingVertical: 6, gap: 6 },
   // Open, a category is marked by a lime rule beside it, never a lime band
   // across it (owner, 14 Sep 2026: "there's not supposed to be any green bar at
   // the top or in the middle").

@@ -38,7 +38,7 @@ import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet, venueForGoogleTypes } from '../domain/landing.js';
-import { suggestFor, sureDecisionFor, sureMappingFor } from '../domain/googleSuggest.js';
+import { suggestFor, sureDecisionFor, sureMappingFor, WHY_UNSURE } from '../domain/googleSuggest.js';
 import { examplesOfType } from '../sources/google.js';
 import { currentHousehold } from './household.js';
 import * as visitsRepo from '../repositories/visits.js';
@@ -205,6 +205,8 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       // Where a Google type could go, for the owner to approve or change
       // (domain/googleSuggest.js). A suggestion, never a decision.
       suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
+      // Why it is a judgement call, where it is one (the handoff, BO5).
+      why: r.namespace === 'google' ? WHY_UNSURE[r.key] ?? null : null,
     }));
     res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
   } catch (err) { next(err); }

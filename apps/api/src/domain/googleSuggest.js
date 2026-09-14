@@ -189,6 +189,36 @@ export function suggestFor(type, group, subcategoryKeys) {
  * you're correct, just map it, and I can view the mappings and pick anything
  * out that looks wrong").
  */
+/**
+ * Why a word is a judgement call, in a sentence.
+ *
+ * The handoff, BO5: each row carries "why it is a judgement call" so the list
+ * of what is left is a list of decisions rather than a list of words. Written
+ * from what the examples actually showed, not from the word alone.
+ */
+export const WHY_UNSURE = {
+  gym: 'Two different things under one word. A council leisure centre is a day out with the kids; a 24-hour weights room is not.',
+  fitness_center: 'The same call as gym, and it usually arrives alongside it rather than on its own.',
+  sports_complex: 'Nine of twelve carry nothing else we have mapped, so this word is all we would know about them.',
+  library: 'Free, indoors and genuinely a rainy afternoon, but most are a room with books and no programme.',
+  winery: 'A tasting is an experience; a shop that sells bottles is not, and Google does not tell them apart.',
+  ski_resort: 'Real, but every one in Britain is a dry slope or an indoor snow centre. Whether that is Adrenaline or its own thing is the call.',
+  marina: 'A place to keep a boat, not a place to get in one. Most also carry a hire or a school word, which is where the day out is.',
+  adventure_sports_center: 'Never seen on a real place, and all twelve found carried nothing else we had mapped. Answering it costs nothing and gains nothing.',
+  dog_park: 'A park you may bring a dog to, which is a fact about the park rather than a kind of day out.',
+  garden_center: 'A shop that sells plants, and a few that are a genuine afternoon with a cafe and a maze.',
+  indoor_golf_course: 'A simulator in a bar and a full crazy-golf course share this word.',
+  fishing_charter: 'A boat you book by the day. Real, but it is a booking rather than somewhere to turn up.',
+  landmark: 'Says a place is worth seeing without saying what it is, like tourist attraction.',
+  cafeteria: 'A canteen in somewhere else, almost always inside a place already in Epic.',
+  candy_store: 'A sweet shop. Browsing for some, a shop for most.',
+  chocolate_factory: 'A tour is a day out; a shop with a counter is not.',
+  salad_shop: 'A lunch counter, which is the Fast food and takeaways call rather than a new one.',
+  department_store: 'Browsing for some households and an errand for others.',
+  thrift_store: 'The same call as a department store, at a smaller size.',
+  toy_store: 'A shop, unless it is one of the few that run things for children.',
+};
+
 const UNSURE = new Set([
   'miniature_golf_course', 'adventure_sports_center', 'cultural_center', 'water_park', 'marina', 'gym', 'fitness_center', 'sports_complex',
   'indoor_golf_course', 'garden_center', 'library', 'dog_park', 'barbecue_area', 'event_venue', 'karaoke', 'dance_hall', 'night_club',
