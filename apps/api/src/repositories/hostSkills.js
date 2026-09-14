@@ -298,13 +298,23 @@ export async function saveTag({ key, label, parentKey, categoryKey, source, exte
  * nothing (Codex, 14 Sep 2026). A tag already carrying a proposal is waiting on
  * a person, not on a run, and a tag a person refused is settled.
  */
-export async function withoutIdentifier(client) {
+export async function withoutIdentifier({ again = false } = {}, client) {
   const { rows } = await on(client)(
     `select key, label from host_skill_tags
       where external_id is null and proposed_id is null and not no_identifier and active
+        ${again ? '' : 'and searched_at is null'}
       order by seen_count desc, key`,
   );
   return rows;
+}
+
+/** A run asked about this tag, whether or not anything came back. */
+export async function searched(keys, client) {
+  if (!keys?.length) return 0;
+  const { rowCount } = await on(client)(
+    `update host_skill_tags set searched_at = now() where key = any($1)`, [keys],
+  );
+  return rowCount;
 }
 
 /**
@@ -342,13 +352,16 @@ export async function identifierCounts(client) {
             count(*) filter (where external_id is null and proposed_id is not null and proposed_exact) as exact,
             count(*) filter (where external_id is null and proposed_id is not null and not proposed_exact) as close,
             count(*) filter (where external_id is null and no_identifier) as refused,
-            count(*) filter (where external_id is null and proposed_id is null and not no_identifier) as nothing
+            count(*) filter (where external_id is null and proposed_id is null and not no_identifier
+                             and searched_at is not null) as empty,
+            count(*) filter (where external_id is null and proposed_id is null and not no_identifier
+                             and searched_at is null) as nothing
        from host_skill_tags where active`,
   );
   const r = rows[0] ?? {};
   return {
     named: Number(r.named ?? 0), exact: Number(r.exact ?? 0), close: Number(r.close ?? 0),
-    refused: Number(r.refused ?? 0), nothing: Number(r.nothing ?? 0),
+    refused: Number(r.refused ?? 0), empty: Number(r.empty ?? 0), nothing: Number(r.nothing ?? 0),
   };
 }
 

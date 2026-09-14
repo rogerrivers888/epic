@@ -786,7 +786,9 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
         // first few hundred threw away the rest, which then read as never
         // looked up (Codex, 14 Sep 2026).
         const waiting = await repo.identifierProposals({ oldestFirst: true });
-        todo = [...waiting, ...(await repo.withoutIdentifier())].slice(0, limit);
+        // "Look again" also takes the ones that were searched and came back
+        // empty, because the test that judged them may have changed.
+        todo = [...waiting, ...(await repo.withoutIdentifier({ again: true }))].slice(0, limit);
         await repo.clearProposals(todo.map((t) => t.key));
       } else {
         todo = (await repo.withoutIdentifier()).slice(0, limit);
@@ -810,6 +812,10 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
           if (tried > 1) await new Promise((r) => setTimeout(r, 150));
           const candidates = await searchEntities(tag.label, { limit: 5 });
           asked += 1;
+          // Written down whether or not anything came back: 123 of the 465 have
+          // no Wikidata entry at all, and counting them as never looked up sent
+          // every later run back over them for nothing (14 Sep 2026).
+          await repo.searched([tag.key]);
           const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
           // Exact means *one* entity is called this, not "the first one that is".
           // Wikidata has several items called foraging — the human activity and

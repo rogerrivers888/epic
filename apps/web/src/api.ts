@@ -2020,14 +2020,14 @@ export const api = {
     request<{ vocab: string; rows: SkillVocabRow[] }>(`/api/admin/skills/vocabulary${qs({ vocab, ...p, all: p.all ? 1 : undefined })}`),
   adminSkillIdentifiers: (p: { exact?: boolean } = {}) =>
     request<{
-      counts: { named: number; exact: number; close: number; refused: number; nothing: number };
+      counts: { named: number; exact: number; close: number; refused: number; empty: number; nothing: number };
       waiting: { key: string; label: string; proposed_id: string; proposed_label: string | null; proposed_note: string | null; proposed_exact: boolean; seen_count: number }[];
       refused: { key: string; label: string }[];
     }>(`/api/admin/skills/identifiers${qs({ exact: p.exact ? 1 : undefined })}`),
   adminProposeSkillIdentifiers: (body: { limit?: number; again?: boolean } = {}) =>
     post<{ started: number }>('/api/admin/skills/identifiers/propose', body),
   adminSettleSkillIdentifiers: (body: { keys: string[]; take?: boolean; reopen?: boolean }) =>
-    put<{ changed: number; counts: { named: number; exact: number; close: number; refused: number; nothing: number } }>('/api/admin/skills/identifiers', body),
+    put<{ changed: number; counts: { named: number; exact: number; close: number; refused: number; empty: number; nothing: number } }>('/api/admin/skills/identifiers', body),
   adminSaveSkillCategory: (body: { key: string; label?: string; blurb?: string | null; icon?: string | null; position?: number; active?: boolean }) =>
     put<{ category: SkillCategory }>('/api/admin/skills/category', body),
   adminSaveSkillFormat: (body: { key: string; label?: string; blurb?: string | null; icon?: string | null; venueless?: boolean; position?: number; active?: boolean }) =>

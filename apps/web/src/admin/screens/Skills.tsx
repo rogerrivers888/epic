@@ -506,7 +506,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
   const close = waiting.filter((w) => !w.proposed_exact);
   // Every active tag, refusals included: a refused tag is still a tag, and
   // leaving it out made ten of fifteen read as ten of ten (Codex, 14 Sep 2026).
-  const all = counts.named + counts.nothing + counts.exact + counts.close + counts.refused;
+  const all = counts.named + counts.nothing + counts.exact + counts.close + counts.refused + counts.empty;
 
   return (
     <View style={s.identifiers}>
@@ -516,6 +516,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
           {counts.exact ? ` · ${counts.exact} matched letter for letter` : ''}
           {counts.close ? ` · ${counts.close} are close` : ''}
           {counts.refused ? ` · ${counts.refused} have none on purpose` : ''}
+          {counts.empty ? ` · ${counts.empty} have no Wikidata entry` : ''}
           {counts.nothing ? ` · ${counts.nothing} have not been looked up` : ''}
         </Text>
         {counts.nothing ? (
