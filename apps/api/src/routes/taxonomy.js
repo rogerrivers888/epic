@@ -98,6 +98,17 @@ async function namesFor(labels) {
       [others.map(([, p]) => p.namespace), others.map(([, p]) => p.key)]);
     for (const r of rows) out.set(`${r.namespace}:${r.key}`, r.label ?? null);
   }
+  // Our own words live in the subcategory and secondary-label vocabularies, so
+  // without this a rule said in our words shows a slug where its name should be
+  // (Codex, 14 Sep 2026).
+  const ourKeys = parsed.filter(([, p]) => p.namespace === 'epic').map(([, p]) => p.key);
+  if (ourKeys.length) {
+    const { rows } = await query(
+      `select key, label from shelf_subcategories where key = any($1::text[])
+       union all
+       select key, label from place_attributes where key = any($1::text[])`, [ourKeys]);
+    for (const r of rows) out.set(`epic:${r.key}`, r.label ?? null);
+  }
   return out;
 }
 
@@ -524,12 +535,15 @@ taxonomyRoutes.put('/rules', requires('manage_library'), async (req, res, next) 
     const subcategory = req.body?.subcategory ? String(req.body.subcategory) : null;
     if (subcategory && !tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
 
-    const { scope, subject } = scopeFor(labels);
+    // `scopeFor` normalises: our own words come back bare, because that is what
+    // a place's words are turned into before a rule sees them. Passing the
+    // typed ones on would store a rule that never fires (Codex, 14 Sep 2026).
+    const { scope, subject, labels: stored } = scopeFor(labels);
     const names = await namesFor(labels);
     const subjectLabel = req.body?.subjectLabel
       ?? labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + ');
     const rule = await shelfRules.teach({
-      scope, subject, subjectLabel, labels,
+      scope, subject, subjectLabel, labels: stored,
       weights: req.body?.weights ?? {}, subcategory,
       reason: req.body?.reason ?? null, by: actorOf(req),
       known: tax.categories.map((c) => c.key),
@@ -543,7 +557,10 @@ taxonomyRoutes.put('/rules', requires('manage_library'), async (req, res, next) 
     // is recorded as such (14 Sep 2026).
     if (labels.length === 1 && subcategory) {
       const p = parseLabel(labels[0]);
-      if (p) await labelRepo.pointAt(p.namespace, p.key, subcategory);
+      // Only a provider's word points at one of ours. One of ours *is* the
+      // destination, and recording it as pointing at itself would put a second
+      // copy of it in the vocabulary (Codex, 14 Sep 2026).
+      if (p && p.namespace !== 'epic') await labelRepo.pointAt(p.namespace, p.key, subcategory);
     }
     res.json({ rule: (await withLabels([rule]))[0] });
   } catch (err) { next(err); }
@@ -597,17 +614,17 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         }
         const subcategory = it.subcategory ? String(it.subcategory) : null;
         if (!subcategory || !tax.subByKey.has(subcategory)) throw new Error(`${subcategory} is not a subcategory`);
-        const { scope, subject } = scopeFor(labels);
+        const { scope, subject, labels: stored } = scopeFor(labels);
         const names = await namesFor(labels);
         const rule = await shelfRules.teach({
-          scope, subject, labels, subjectLabel: labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + '),
+          scope, subject, labels: stored, subjectLabel: labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + '),
           weights: {}, subcategory, reason: it.reason ?? 'Approved from the suggested mapping.', by: actorOf(req), known,
         });
         // A label decided earlier and now mapped is back in the list, its decision cleared.
         for (const l of labels) { const p = parseLabel(l); await labelRepo.save({ namespace: p.namespace, key: p.key, decision: 'none' }); }
         // Mapping one word to a subcategory *is* the statement that the word
         // means that label of ours, so it is recorded as one (14 Sep 2026).
-        if (labels.length === 1) { const p = parseLabel(labels[0]); await labelRepo.pointAt(p.namespace, p.key, subcategory); }
+        if (labels.length === 1) { const p = parseLabel(labels[0]); if (p.namespace !== 'epic') await labelRepo.pointAt(p.namespace, p.key, subcategory); }
         await query(
           `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
