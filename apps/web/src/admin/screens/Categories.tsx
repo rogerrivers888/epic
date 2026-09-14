@@ -1065,7 +1065,10 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
               <TextInput value={toV} onChangeText={setToV} placeholder={String(asking.to.range_max ?? 99)}
                          placeholderTextColor={colors.inkFaint} style={[styles.field, { minWidth: 60 }]} />
               <TextAction label="Save" disabled={busy} onPress={() => void bring(asking.from, asking.to.key, {
-                from: Number(fromV || asking.to.range_min || 0), to: Number(toV || asking.to.range_max || 99),
+                // Nullish, not falsy: a range whose top is 0 is a range, and || would
+                // quietly save 99 instead (Codex, 14 Sep 2026).
+                from: fromV.trim() ? Number(fromV) : asking.to.range_min ?? 0,
+                to: toV.trim() ? Number(toV) : asking.to.range_max ?? 99,
               })} />
               <TextAction label="Cancel" onPress={() => setAsking(null)} />
             </View>
