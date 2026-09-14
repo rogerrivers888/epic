@@ -9,7 +9,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
-import { passionsForCategory } from '../domain/hostSkills.js';
+import { categoryForPassion, passionsForCategory } from '../domain/hostSkills.js';
 import crypto from 'node:crypto';
 
 const newToken = () => crypto.randomBytes(9).toString('base64url');
@@ -232,17 +232,28 @@ export async function offersNear({ lat, lng, km = 40, category = null, limit = 6
    * migrated on a guess.
    */
   if (category) {
+    /**
+     * One word in, both vocabularies matched — in both directions.
+     *
+     * The browse row passes a bucket (`art-photography`) and the older passion
+     * chips still pass a passion (`painting`), and the two surfaces are on the
+     * same screen. So a bucket also collects the old words that map into it,
+     * and a passion also collects the bucket it maps to — otherwise picking
+     * Painting found the offers written last year and none of the ones written
+     * since (Codex, 14 Sep 2026).
+     *
+     * The old word only counts where nothing newer has been said: an offer
+     * moved from `painting` to Crafts belongs in Crafts and nowhere else.
+     */
     params.push(category);
     const key = params.length;
-    // …and the old words that land in the same bucket, so an offer written
-    // before the skills work is still found under it.
     params.push(passionsForCategory(category));
-    // The old word only counts where nothing newer has been said. An offer
-    // moved from `painting` to Crafts belongs in Crafts and nowhere else;
-    // leaving the fallback unconditional listed it under both for ever (Codex,
-    // 14 Sep 2026).
+    const olds = params.length;
+    params.push(categoryForPassion(category));
+    const bucket = params.length;
     where = `and (o.category_key = $${key}
-                  or (o.category_key is null and (o.category = $${key} or o.category = any($${params.length}))))`;
+                  or o.category_key = $${bucket}
+                  or (o.category_key is null and (o.category = $${key} or o.category = any($${olds}))))`;
   }
   const { rows } = await query(
     `select o.*, h.name as host_name, h.type as host_type, h.local_kind as host_local_kind, h.trust as host_trust, h.checks as host_checks,

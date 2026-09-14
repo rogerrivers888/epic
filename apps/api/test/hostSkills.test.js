@@ -286,3 +286,22 @@ test('a facet decision moves no categories, and says so without falling over', a
   assert.ok(!/return moved;/.test(body), 'repoint returns no undefined name');
   assert.match(body, /if \(vocab !== 'tag'\) return \[\];/);
 });
+
+test('one word finds both vocabularies, in both directions', async () => {
+  const { categoryForPassion: bucketOf, passionsForCategory: oldWordsFor } = await import('../src/domain/hostSkills.js');
+  /**
+   * The browse row passes a bucket and the older passion chips still pass a
+   * passion, and both are on the same screen. So Painting has to find the
+   * offers filed `painting` last year *and* the ones filed `art-photography`
+   * since, and picking Art and photography has to find the same two — otherwise
+   * one control quietly shows half the answer (Codex, 14 Sep 2026).
+   */
+  assert.equal(bucketOf('painting'), 'art-photography');
+  assert.ok(oldWordsFor('art-photography').includes('painting'));
+  // Round trip: every old word lands in a bucket that collects it back.
+  for (const old of ['pottery', 'cooking', 'yoga', 'history', 'records']) {
+    const bucket = bucketOf(old);
+    assert.ok(bucket, old);
+    assert.ok(oldWordsFor(bucket).includes(old), `${old} → ${bucket} → back`);
+  }
+});

@@ -831,6 +831,22 @@ export async function recomputeCategories(offerIds, tagKey, client, { wasCategor
   return moved;
 }
 
+/**
+ * Every live public offer in these buckets, whoever hosts it.
+ *
+ * For the moment a credential stops being a badge and becomes a condition: the
+ * offers already out there in that bucket are the ones the rule now applies to.
+ */
+export async function liveOffersIn(categoryKeys) {
+  if (!categoryKeys?.length) return [];
+  const { rows } = await query(
+    `select * from host_offers
+      where state = 'live' and visibility = 'public' and category_key = any($1)`,
+    [categoryKeys],
+  );
+  return rows;
+}
+
 /** Every offer carrying a tag — for when the tag itself is re-filed. */
 export async function offersWithTag(tagKey, client) {
   const { rows } = await on(client)(

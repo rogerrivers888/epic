@@ -2038,7 +2038,9 @@ export const api = {
   adminSkillParents: (qid: string) =>
     request<{ qid: string; parents: { qid: string; label: string | null }[]; note: string }>(`/api/admin/skills/parents${qs({ qid })}`),
   adminCredentials: () => request<{ types: CredentialType[]; waiting: CredentialWaiting[] }>('/api/admin/skills/credentials'),
-  adminSaveCredentialType: (body: Partial<CredentialType> & { key: string }) => put<{ type: CredentialType }>('/api/admin/skills/credential-type', body),
+  /** `paused` names the live offers a new condition just took off the window. */
+  adminSaveCredentialType: (body: Partial<CredentialType> & { key: string }) =>
+    put<{ type: CredentialType; paused: { offerId: string; title: string | null; hostId: string; host: string; why: string }[] }>('/api/admin/skills/credential-type', body),
   adminDecideCredential: (id: string, body: { state: 'confirmed' | 'rejected' | 'pending'; note?: string | null }) =>
     post<{ credential: CredentialWaiting }>(`/api/admin/skills/credentials/${id}`, body),
   adminVocabularySources: () => request<{ sources: VocabularySource[] }>('/api/admin/skills/sources'),

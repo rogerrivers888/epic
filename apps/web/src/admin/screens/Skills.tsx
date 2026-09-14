@@ -580,7 +580,16 @@ function Credentials({ canManage, onChanged, categories }: { canManage: boolean;
   /** A rule change is a write of the whole row, so the rest of it travels with the change. */
   const save = async (t: CredentialType, patch: Partial<CredentialType>) => {
     setSaid(null);
-    try { await api.adminSaveCredentialType({ ...t, ...patch }); await load(); onChanged(); } catch (e: any) { setSaid(e.message); }
+    try {
+      const r = await api.adminSaveCredentialType({ ...t, ...patch });
+      // Making one a condition applies it to what is already live, so the
+      // screen says whose listings it took down rather than letting them find
+      // out from a guest being turned away.
+      setSaid(r.paused?.length
+        ? `${r.paused.length} live offer${r.paused.length === 1 ? '' : 's'} came off the window: ${r.paused.map((p) => `${p.host} · ${p.title ?? 'untitled'}`).join(', ')}. Each host is told what would put it back.`
+        : null);
+      await load(); onChanged();
+    } catch (e: any) { setSaid(e.message); }
   };
 
   return (

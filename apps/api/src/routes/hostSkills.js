@@ -731,7 +731,25 @@ adminRouter.put('/credential-type', requires('manage_skills'), async (req, res, 
   try {
     const key = str(req.body?.key, 40);
     if (!key) throw bad('A credential type needs a key.');
-    res.json({ type: await repo.saveCredentialType({ ...req.body, key }) });
+    const [was] = (await repo.credentialTypes({ all: true })).filter((t) => t.key === key);
+    const type = await repo.saveCredentialType({ ...req.body, key });
+    /**
+     * Making a credential a condition applies it to what is already out there.
+     *
+     * Otherwise the rule sits there doing nothing until a guest happens to try
+     * to book — and the first person to find out is that guest, who is turned
+     * away (Codex, 14 Sep 2026). So every live listing in a bucket this rule
+     * now guards is checked at the moment the rule is made, and the ones whose
+     * host does not qualify come off the window with a reason.
+     */
+    const nowGated = type.gates_categories ?? [];
+    const before = new Set(was?.gates_categories ?? []);
+    const stricter = nowGated.filter((c) => !before.has(c)).length > 0
+      || (type.evidence_required && !was?.evidence_required)
+      || (was?.active === false && type.active);
+    const affected = stricter ? await repo.liveOffersIn(nowGated) : [];
+    const paused = await pauseWhatNoLongerQualifies(affected.map((o) => o.id));
+    res.json({ type, paused });
   } catch (e) { next(e); }
 });
 
