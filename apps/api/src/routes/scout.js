@@ -78,6 +78,30 @@ router.post('/areas/:code/sweep', requires('manage_library'), async (req, res, n
   } catch (err) { next(err); }
 });
 
+/**
+ * POST /areas/sweep { codes } — sweep several, in the background.
+ *
+ * One area takes longer than a gateway will wait, so asking for thirty-five of
+ * them down a single request cannot work: the platform cut the first one off at
+ * twenty-eight seconds and the area was never swept (14 Sep 2026). This answers
+ * at once and gets on with it, and `sweep_runs` is where the progress is.
+ *
+ * The areas are done one at a time on purpose. They share one provider budget,
+ * and a dozen at once is how a day's quota goes in a minute.
+ */
+router.post('/areas/sweep', requires('manage_library'), async (req, res, next) => {
+  try {
+    const codes = Array.isArray(req.body?.codes) ? req.body.codes.map((c) => String(c).toUpperCase()) : [];
+    if (!codes.length) throw Object.assign(new Error('Which areas?'), { status: 400, code: 'bad_request' });
+    res.json({ started: codes.length, codes });
+    void (async () => {
+      for (const code of codes) {
+        try { await sweep(code, {}); } catch { /* one area failing is not the run failing */ }
+      }
+    })();
+  } catch (err) { next(err); }
+});
+
 /** Score the area again from what we already own. Free: no network, no provider. */
 router.post('/areas/:code/rescore', requires('manage_library'), async (req, res, next) => {
   try {
