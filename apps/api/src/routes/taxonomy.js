@@ -34,6 +34,8 @@ import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import * as placeParts from '../repositories/placeParts.js';
+import * as notSure from '../repositories/notSure.js';
+import { research } from '../domain/research.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
@@ -209,6 +211,90 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       why: r.namespace === 'google' ? WHY_UNSURE[r.key] ?? null : null,
     }));
     res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /not-sure — the places the labels could not settle, and the last runs.
+ * POST /not-sure/run { refs } — look them up. PUT /not-sure { ref, as } — his
+ * decision, which is the only thing that files anything.
+ *
+ * The owner, 14 Sep 2026: "we'll be able to bulk say, 'Anthropic, go look and
+ * find this, and get the answers'", and "no ceiling on the automated Claude
+ * runs. I just want to concentrate on two specific areas: the area around
+ * Sunningdale and the area around Bristol." The geography is the bound, so a
+ * run reports what it read and what it cost rather than stopping at a number.
+ */
+taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next) => {
+  try {
+    const [rows, counts, runs] = await Promise.all([
+      notSure.list({ state: req.query.state ? String(req.query.state) : null }),
+      notSure.counts(),
+      notSure.runs(5),
+    ]);
+    const tax = await taxonomy.taxonomy();
+    res.json({ places: rows, counts, runs, subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = Array.isArray(req.body?.refs) ? req.body.refs.map(String).slice(0, 500) : [];
+    if (!refs.length) throw bad('Which places?');
+    const [tax, household] = await Promise.all([taxonomy.taxonomy(), currentHousehold()]);
+    const allowed = tax.active.subcategories.map((sc) => ({ key: sc.key, label: sc.label }));
+    const waiting = (await notSure.list({ limit: 500 })).filter((p) => refs.includes(p.venue_ref));
+    const run = await notSure.startRun({ askedFor: waiting.length, by: actorOf(req) });
+
+    let looked = 0; let got = 0; let pence = 0;
+    for (const p of waiting) {
+      const meta = {};
+      try {
+        const said = await research({
+          place: { ref: p.venue_ref, name: p.name, words: p.words },
+          allowed, householdId: household?.id ?? null, sessionId: null, meta,
+        });
+        looked += 1;
+        pence += Math.round((meta.costUsd ?? 0) * 79);
+        if (said) {
+          got += 1;
+          await notSure.answered(p.venue_ref, {
+            said: said.is, because: said.because, source: said.source,
+          });
+          // A part-of is a proposal, never applied: the owner confirms it.
+          if (said.partOf) {
+            await placeParts.setPart(p.venue_ref, `name:${said.partOf}`,
+              { how: 'proposed', note: said.because, by: 'Claude' });
+          }
+        }
+      } catch (err) {
+        // One place failing is not the run failing, and a spent budget stops it.
+        if (String(err?.name) === 'ModelBudgetError') break;
+      }
+    }
+    const done = await notSure.finishRun(run.id, { lookedAt: looked, answered: got, costPence: pence, note: null });
+    res.json({ run: done });
+  } catch (err) { next(err); }
+});
+
+taxonomyRoutes.put('/not-sure', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.body?.ref || '').trim();
+    if (!ref) throw bad('Which place?');
+    const as = req.body?.as ? String(req.body.as) : null;
+    const tax = await taxonomy.taxonomy();
+    if (as && !tax.subByKey.has(as)) throw bad(`${as} is not one of our labels.`);
+    const row = await notSure.settle(ref, as, actorOf(req));
+    // His answer is a rule about that one place, which is the narrowest there is.
+    if (as) {
+      await shelfRules.teach({
+        scope: 'place', subject: ref, subjectLabel: row?.name ?? ref, weights: {},
+        subcategory: as, reason: row?.because ? `Settled from the not-sure list: ${row.because}` : 'Settled from the not-sure list.',
+        by: actorOf(req), known: tax.categories.map((c) => c.key),
+      });
+      shelfRules.forget();
+    }
+    res.json({ place: row });
   } catch (err) { next(err); }
 });
 
