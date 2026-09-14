@@ -630,6 +630,19 @@ adminRouter.post('/queue/:id', requires('manage_skills'), async (req, res, next)
      * neither, this says so rather than quietly making a tag that does not
      * work. A facet is not asked — it is not what a browse row is built from.
      */
+    /**
+     * Approving into a key that already exists is a merge, and has to be said
+     * as one.
+     *
+     * `saveTag` upserts, so this would have quietly rewritten the label,
+     * parent and bucket of a canonical row while recording the proposal as
+     * approved — and a long wording truncating onto an existing key would do it
+     * without anybody typing the same thing twice (Codex, 14 Sep 2026).
+     */
+    const [clash] = await repo.byKeys(p.vocab, [key]);
+    if (clash) {
+      throw bad(`“${clash.label}” already has that name. Merge into it instead, or approve this one under a different one.`, 'already_exists');
+    }
     const parentKey = str(req.body?.parentKey, 60);
     let categoryKey = str(req.body?.categoryKey, 40);
     if (p.vocab === 'tag' && !categoryKey && parentKey) {

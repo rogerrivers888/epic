@@ -351,6 +351,17 @@ export async function hostCounts(vocab, keys) {
 const RESOLVE_FLOOR = 0.55;
 const RESOLVE_CLEAR = 0.12;
 /**
+ * A tag is only offered while the bucket it reads under is.
+ *
+ * Switching a category off takes it out of the browse row, so a tag still
+ * pointing at it would let a host publish into a bucket a guest cannot see
+ * (Codex, 14 Sep 2026). A tag with no bucket at all is a different case and is
+ * still offered; it is the back office's to file.
+ */
+const liveIn = (vocab, alias = 'v') => (vocab === 'facet' ? `${alias}.active` : `${alias}.active and (${alias}.category_key is null
+        or exists (select 1 from host_categories c where c.key = ${alias}.category_key and c.active))`);
+
+/**
  * One wording in, at most one canonical row out.
  *
  * Pass one is the alias table, which holds every canonical label, every seeded
@@ -366,7 +377,7 @@ export async function resolveOne(vocab, raw) {
   const { rows } = await query(
     `select v.* from host_skill_aliases a
        join ${table(vocab)} v on v.key = a.target_key
-      where a.vocab = $1 and a.norm = $2 and v.active`,
+      where a.vocab = $1 and a.norm = $2 and ${liveIn(vocab)}`,
     [vocab, norm],
   );
   if (rows[0]) return rows[0];
@@ -385,7 +396,7 @@ export async function resolveOne(vocab, raw) {
   const { rows: near } = await query(
     `select v.*, max(similarity(a.norm, $2)) as score
        from host_skill_aliases a
-       join ${table(vocab)} v on v.key = a.target_key and v.active
+       join ${table(vocab)} v on v.key = a.target_key and ${liveIn(vocab)}
       where a.vocab = $1 and similarity(a.norm, $2) > $3
       group by v.key
       order by score desc, v.seen_count desc
@@ -439,7 +450,7 @@ export async function suggest(vocab, raw, { limit = 8, categoryFirst = null } = 
               case when a.norm = $1 then 0 when a.norm like $3 then 1 when a.norm like $2 then 2 else 3 end as rank,
               ${score} as score
          from host_skill_aliases a
-         join ${t} v on v.key = a.target_key and v.active
+         join ${t} v on v.key = a.target_key and ${liveIn(vocab)}
          left join ${t} p on p.key = v.parent_key
         where a.vocab = $4 and ${match}
         order by v.key, rank, ${score} desc
@@ -899,6 +910,7 @@ export async function credentialTypes({ all = false } = {}) {
 
 export async function saveCredentialType(t) {
   const name = await labelFor('host_credential_types', t.key, t.label);
+  const { rows: [was] } = await query('select expires_months from host_credential_types where key = $1', [t.key]);
   const { rows } = await query(
     `insert into host_credential_types (key, label, note, host_types, evidence_required, gates_categories, expires_months, position, active)
      values ($1, $2, $3, coalesce($4, '{skill,meetups,expert}'::text[]), coalesce($5, true), coalesce($6, '{}'::text[]), $7, coalesce($8, 0), coalesce($9, true))
@@ -924,6 +936,25 @@ export async function saveCredentialType(t) {
      pick(t, 'gatesCategories', 'gates_categories'), pick(t, 'expiresMonths', 'expires_months'), pick(t, 'position'), pick(t, 'active'),
      t.expiresMonths !== undefined || t.expires_months !== undefined],
   );
+  /**
+   * A confirmation's date was worked out under the rule of the day, and every
+   * check reads that stored date. So changing the rule has to change them:
+   * turning a type from never-expires into twelve months otherwise left every
+   * confirmation good for ever, and shortening one did nothing at all (Codex,
+   * 14 Sep 2026). Measured from when it was confirmed, not from today, so
+   * nobody is given back time they had already used.
+   */
+  const months = rows[0].expires_months ?? null;
+  if (months !== (was?.expires_months ?? null)) {
+    await query(
+      months == null
+        ? `update host_credentials set expires_on = null, updated_at = now() where type_key = $1 and state = 'confirmed'`
+        : `update host_credentials
+              set expires_on = (coalesce(confirmed_at, created_at) + ($2 || ' months')::interval)::date, updated_at = now()
+            where type_key = $1 and state = 'confirmed'`,
+      months == null ? [t.key] : [t.key, String(months)],
+    );
+  }
   return rows[0];
 }
 
@@ -1139,7 +1170,7 @@ export async function neighbours(vocab, key, { limit = 4 } = {}) {
   const t = table(vocab);
   const { rows } = await query(
     `select v.* from ${t} v
-      where v.active and v.key <> $1
+      where ${liveIn(vocab)} and v.key <> $1
         and (v.parent_key = (select parent_key from ${t} where key = $1)
              or v.parent_key = $1
              or v.key = (select parent_key from ${t} where key = $1))
