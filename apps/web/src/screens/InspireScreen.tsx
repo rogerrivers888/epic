@@ -504,7 +504,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const answer = useMemo(() => {
     const f = ask?.resolved.filter;
     if (!intakeId || !f || (f.indoors == null && !f.kids && !f.moods.length && !f.wantTypes.length)) return null;
-    const words = (i: InspireItem) => `${i.name} ${i.category} ${i.subcategory ?? ''} ${(i.experiences ?? []).join(' ')}`.toLowerCase();
+    // `contains` too: a theme park with a water park inside it must answer
+    // somebody asking for a water park (Codex, 14 Sep 2026).
+    const words = (i: InspireItem) => `${i.name} ${i.category} ${i.subcategory ?? ''} ${(i.contains ?? []).join(' ')} ${(i.experiences ?? []).join(' ')}`.toLowerCase();
     const indoorsSaid = (i: InspireItem) => i.indoor === true || (i.indoor == null && INDOOR_WORDS.test(words(i)) && !OUTDOOR_WORDS.test(words(i)));
     const outdoorsSaid = (i: InspireItem) => i.indoor === false || (i.indoor == null && OUTDOOR_WORDS.test(words(i)));
     const kidsOk = (i: InspireItem) => i.forKids === true || i.goodForChildren === true || (i.forKids == null && i.goodForChildren == null && KIDS_WORDS.test(words(i)));
@@ -567,8 +569,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
       return rows;
     }
     const subs = pool?.moods.find((m) => m.key === pick)?.subcategories ?? [];
-    const rows = subs.map((sc) => ({ key: sc.key, label: sc.label, count: inPick.filter((i) => i.subcategory === sc.key).length })).filter((r) => r.count);
-    const other = inPick.filter((i) => !i.subcategory || !subs.some((sc) => sc.key === i.subcategory)).length;
+    const inDrawer = (i: InspireItem, key: string) => i.subcategory === key || (i.contains ?? []).includes(key);
+    const rows = subs.map((sc) => ({ key: sc.key, label: sc.label, count: inPick.filter((i) => inDrawer(i, sc.key)).length })).filter((r) => r.count);
+    const other = inPick.filter((i) => !subs.some((sc) => inDrawer(i, sc.key))).length;
     if (other && rows.length) rows.push({ key: OTHER, label: 'Everything else', count: other });
     return rows;
   }, [pick, pickIsCategory, mode, inPick, pool]);
@@ -585,8 +588,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
       if (within === OTHER) return inPick.filter((i) => !cuisineOf(i));
       return inPick.filter((i) => cuisineOf(i) === within);
     }
-    if (within === OTHER) return inPick.filter((i) => !i.subcategory || !subRows.some((r) => r.key === i.subcategory && r.key !== OTHER));
-    return inPick.filter((i) => i.subcategory === within);
+    // Opening a drawer shows what is in it, including a parent that holds one.
+    const inDrawer = (i: InspireItem, key: string) => i.subcategory === key || (i.contains ?? []).includes(key);
+    if (within === OTHER) return inPick.filter((i) => !subRows.some((r) => r.key !== OTHER && inDrawer(i, r.key)));
+    return inPick.filter((i) => inDrawer(i, within));
   }, [pick, pickIsCategory, within, inPick, mode, subRows]);
   const listTitle = !pick ? ''
     : !pickIsCategory ? cap1(pick)

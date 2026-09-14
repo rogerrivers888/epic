@@ -1167,6 +1167,8 @@ export type InspireItem = {
   moods: MoodKey[];
   /** The drawer inside it, or null while nobody has sorted it. */
   subcategory?: string | null;
+  /** The drawers of the places inside this one, so a theme park answers for its water park. */
+  contains?: string[];
   experiences: string[]; cuisines: string[];
   rating: number | null; ratingCount: number | null; priceLevel: number | null;
   goodForChildren: boolean | null;

@@ -571,7 +571,10 @@ inspire.get('/near', async (req, res, next) => {
         // them in and they would all fall to "Everything else" (14 Sep 2026).
         subcategories: tax.active.subcategories
           .filter((sc) => sc.category_key === m.key || (sc.also_in ?? []).includes(m.key))
-          .map((sc) => ({ key: sc.key, label: sc.label, count: items.filter((i) => i.subcategory === sc.key).length }))
+          // A parent counts for the drawers its children were in as well as its
+          // own: hiding Amity Beach must not empty the Water parks drawer
+          // (Codex, 14 Sep 2026).
+          .map((sc) => ({ key: sc.key, label: sc.label, count: items.filter((i) => i.subcategory === sc.key || (i.contains ?? []).includes(sc.key)).length }))
           .filter((sc) => sc.count > 0),
       })),
       items,
