@@ -216,7 +216,10 @@ export function Categories({ canManage }: { canManage: boolean }) {
   // No category until one is chosen (owner, 12 Sep 2026: "it should probably
   // be empty when I arrive on the page and I select the category").
   const category = categories.find((c) => c.key === cat) ?? null;
-  const needsCategory = VIEWS.find((v) => v.key === shown)?.needsCategory ?? false;
+  // Our labels has no views behind it and needs no category. Without this it
+  // inherits the fallback view's requirement and asks you to pick one that is
+  // not on screen (Codex, 14 Sep 2026).
+  const needsCategory = door !== 'ours' && (VIEWS.find((v) => v.key === shown)?.needsCategory ?? false);
   const subs = category?.subcategories ?? [];
   const chosen = subs.find((s) => s.key === sub) ?? null;
   const rulesOf = (key: string) => (tax?.rules ?? []).filter((r) => r.subcategory === key);
