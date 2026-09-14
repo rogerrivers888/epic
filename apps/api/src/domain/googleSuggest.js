@@ -157,7 +157,7 @@ const ASIDE_TYPES = new Set([
  */
 export function suggestFor(type, group, subcategoryKeys) {
   const has = (k) => subcategoryKeys.includes(k);
-  if (GENERIC_TYPES.has(type)) return { generic: true, why: 'a word Google puts on places all over Epic — the place\'s own words decide' };
+  if (GENERIC_TYPES.has(type)) return { generic: true, why: 'it describes a place without saying what kind of place it is' };
   if (TRAVEL_TYPES.has(type)) return { travel: true, why: 'getting there, or parking when you do' };
   if (NEARBY_TYPES.has(type)) return { nearby: true, why: 'useful beside a day out — a loo, a visitor centre' };
   const named = TO_SUBCATEGORY[type];

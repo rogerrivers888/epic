@@ -352,9 +352,10 @@ export function Categories({ canManage }: { canManage: boolean }) {
               Epic maps where it is sure, and only the judgement calls wait for you.
             </Text>
             <Text style={type.small}>
-              The fifth answer is “just a label”. Some of Google's words sit on places all over Epic — establishment, point of
-              interest, tourist attraction — so they cannot decide anything, and marking one records that: it leaves the mapping
-              queue and every rule naming it goes, including a rule that only mentions it alongside another word. Open one and
+              The fifth answer is “an attribute, not a category”. Some of Google's words describe a place without saying what
+              kind of place it is: tourist attraction, adventure sports centre, establishment. They cannot decide which
+              subcategory a place goes in, so marking one takes it out of the mapping queue and stops any rule filing by it.
+              What it still does is describe: the word stays on the place and hands out whatever it tells us. Open one and
               “the words it catches” lists the specific words seen on the same places, each mappable from there. Use Showing to
               find every word with the same answer.
             </Text>
@@ -725,7 +726,7 @@ const STANDINGS = [
   // A rule that names a category but no drawer is its own answer, and it is a
   // work queue: those words need a subcategory (Codex, 14 Sep 2026).
   { key: 'category', label: 'A category but no subcategory' },
-  { key: 'generic', label: 'Just a label' },
+  { key: 'generic', label: 'An attribute, not a category' },
   { key: 'travel', label: 'Travel' },
   { key: 'nearby', label: 'Useful nearby' },
   { key: 'aside', label: 'Excluded from Epic' },
@@ -748,7 +749,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   /**
    * One kind of answer at a time (owner, 14 Sep 2026: "where do I find these
    * words? Can I have a filter for them on the categories list, and then I can
-   * do it myself?"). Sits over the tabs: Unmapped + Just a label is empty on
+   * do it myself?"). Sits over the tabs: Unmapped + attributes is empty on
    * purpose, because a word kept as a label is decided.
    */
   const [std, setStd] = useQueryState<string>('std', '', asText);
@@ -853,7 +854,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       for (const c of tax.categories) {
         for (const r of rowsIn) if (r.active !== false && !r.decision && r.landing.category === c.key && r.landing.how !== 'fallback') put(c.key, c.label, r);
       }
-      for (const r of rowsIn) if (standing(r) === 'generic') put('_generic', 'Just a label', r);
+      for (const r of rowsIn) if (standing(r) === 'generic') put('_generic', 'Attributes, not categories', r);
       for (const r of rowsIn) if (standing(r) === 'travel') put('_travel', 'Travel', r);
       for (const r of rowsIn) if (standing(r) === 'nearby') put('_nearby', 'Useful nearby', r);
       for (const r of rowsIn) if (standing(r) === 'aside') put('_aside', 'Excluded from Epic', r);
@@ -1045,7 +1046,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                     <DrillDropdown
                       label={busyKey === '*' ? 'Saving…' : `Apply to ${tickedHere.length} ticked`} value="choose one" align="right" width={300} set
                       extra={[
-                        { key: '=', label: 'Just a label \u2014 it spans our categories, the place\u2019s own words decide', on: false },
+                        { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: false },
                         { key: '-', label: 'Excluded from Epic', on: false },
                         { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
                         { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
@@ -1079,12 +1080,12 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
               {shown.map((r) => {
                 const st = standing(r);
                 const sug = r.suggestion ?? null;
-                const sugText = sug?.generic ? 'just a label' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
+                const sugText = sug?.generic ? 'an attribute' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
                 // What the control says: where it is, or where it could go, or that nobody knows.
                 const ctlLabel = st === 'aside' ? 'Excluded' : st === 'generic' ? 'Kept as' : st === 'nearby' || st === 'travel' || st === 'mapped' ? 'Mapped' : sugText ? 'Suggested' : 'Choose a subcategory';
                 const ctlValue = busyKey === r.key ? 'Saving…'
                   : st === 'aside' ? 'from Epic'
-                    : st === 'generic' ? 'just a label'
+                    : st === 'generic' ? 'an attribute'
                     : st === 'travel' ? 'travel'
                     : st === 'nearby' ? 'useful nearby'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
@@ -1132,7 +1133,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[
-                            { key: '=', label: 'Just a label — it spans our categories, the place\u2019s own words decide', on: st === 'generic' },
+                            { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
                             { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
                             { key: '>', label: 'Travel — getting there, parking', on: st === 'travel' },
                             { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: st === 'nearby' },
@@ -1196,7 +1197,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                                 <Text key={w.key} style={type.tiny} numberOfLines={1}>
                                   <Text style={{ fontWeight: '600', color: colors.ink }}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
                                   {` · on ${w.on} of ${eg.places.length} · `}
-                                  {w.decision === 'generic' ? 'just a label'
+                                  {w.decision === 'generic' ? 'an attribute'
                                     : w.decision === 'aside' ? 'excluded from Epic'
                                     : w.decision === 'travel' ? 'travel'
                                     : w.decision === 'nearby' ? 'useful nearby'
@@ -1244,11 +1245,11 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                                       label={wst === 'mapped' ? 'Mapped' : wst === 'aside' ? 'Excluded' : wst === 'generic' ? 'Kept as' : wst === 'travel' || wst === 'nearby' ? 'Mapped' : 'Choose a subcategory'}
                                       value={busyKey === w.key ? 'Saving…'
                                         : wst === 'mapped' ? `${catLabel(w.landing.category)} · ${subLabel(w.landing.subcategory)}`
-                                          : wst === 'aside' ? 'from Epic' : wst === 'generic' ? 'just a label'
+                                          : wst === 'aside' ? 'from Epic' : wst === 'generic' ? 'an attribute'
                                             : wst === 'travel' ? 'travel' : wst === 'nearby' ? 'useful nearby' : '…'}
                                       align="right" width={300}
                                       extra={[
-                                        { key: '=', label: 'Just a label — it spans our categories, the place\u2019s own words decide', on: wst === 'generic' },
+                                        { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: wst === 'generic' },
                                         { key: '-', label: 'Excluded from Epic', on: wst === 'aside' },
                                         { key: '>', label: 'Travel — getting there, parking', on: wst === 'travel' },
                                         { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: wst === 'nearby' },
