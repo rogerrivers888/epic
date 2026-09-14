@@ -358,6 +358,12 @@ const RESOLVE_CLEAR = 0.12;
  * (Codex, 14 Sep 2026). A tag with no bucket at all is a different case and is
  * still offered; it is the back office's to file.
  */
+/** Is this bucket still one a guest can browse? */
+async function categoryLive(key) {
+  const { rows } = await query('select 1 from host_categories where key = $1 and active', [key]);
+  return rows.length > 0;
+}
+
 const liveIn = (vocab, alias = 'v') => (vocab === 'facet' ? `${alias}.active` : `${alias}.active and (${alias}.category_key is null
         or exists (select 1 from host_categories c where c.key = ${alias}.category_key and c.active))`);
 
@@ -551,9 +557,17 @@ export async function setOfferSkills(offerId, vocab, items) {
     let target = null;
     if (item?.key) {
       const [found] = await byKeys(vocab, [item.key]);
-      // Active, or already this offer's: a value switched off since they chose
-      // it is still theirs.
-      if (found && (found.active || had.get(norm) === found.key)) target = found.key;
+      /**
+       * Offered, or already this offer's.
+       *
+       * "Offered" is the same test the resolver applies — active, and under a
+       * bucket that is still in the browse row — because a stale client holding
+       * a key from before a category was switched off would otherwise file an
+       * offer into a bucket no guest can see (Codex, 14 Sep 2026). A value
+       * switched off *since they chose it* is a different case and stays.
+       */
+      const offered = found?.active && (vocab === 'facet' || !found.category_key || await categoryLive(found.category_key));
+      if (found && (offered || had.get(norm) === found.key)) target = found.key;
     }
     /**
      * `asIs` is the host having tapped "Add “foss” as it is" with the
@@ -785,6 +799,25 @@ export async function repoint(vocab, norm, targetKey, client) {
   const { rows: touched } = await on(client)(
     'update host_offer_skills set target_key = $3 where vocab = $1 and norm = $2 returning offer_id', [vocab, norm, targetKey],
   );
+  /**
+   * One offer, one row per canonical word.
+   *
+   * Uniqueness here is on the wording, not on what it resolves to, so an offer
+   * that carried both *Fossil hunting* and a near-miss added "as it is" ends a
+   * merge carrying the same tag twice: two chips, two of the six slots, and
+   * that category counted twice when the bucket is derived (Codex, 14 Sep
+   * 2026). The one the host put first is the one that stays.
+   */
+  if (touched.length) {
+    await on(client)(
+      `delete from host_offer_skills s
+        where s.vocab = $1 and s.target_key = $2 and s.offer_id = any($3)
+          and exists (select 1 from host_offer_skills k
+                       where k.offer_id = s.offer_id and k.vocab = s.vocab and k.target_key = s.target_key
+                         and (k.position < s.position or (k.position = s.position and k.norm < s.norm)))`,
+      [vocab, targetKey, touched.map((r) => r.offer_id)],
+    );
+  }
   if (!touched.length) return [];
   await on(client)(`update ${table(vocab)} set seen_count = seen_count + $2 where key = $1`, [targetKey, touched.length]);
   // A facet moves nothing: the browse category is derived from tags alone, so
@@ -876,12 +909,29 @@ export async function offersWithTag(tagKey, client) {
   return rows.map((r) => r.offer_id);
 }
 
-export async function addAlias(vocab, norm, targetKey, raw, client) {
-  await on(client)(
+/**
+ * One wording resolving to one row.
+ *
+ * `steal` is the difference between a merge and a rename, and it matters.
+ * **Merging** is somebody deciding on purpose that this wording now means the
+ * survivor, so it takes the alias over. **Renaming** a tag must not: calling
+ * another tag "Palaeontology" would quietly take that word off the row that has
+ * it, and every search for it would land on the wrong one while the original
+ * sat there unchanged (Codex, 14 Sep 2026). So a rename that collides does
+ * nothing, and says so.
+ *
+ * Returns the row it landed on, or null when it stood aside.
+ */
+export async function addAlias(vocab, norm, targetKey, raw, client, { steal = false } = {}) {
+  const { rows } = await on(client)(
     `insert into host_skill_aliases (vocab, norm, target_key, raw) values ($1, $2, $3, $4)
-     on conflict (vocab, norm) do update set target_key = $3, raw = coalesce($4, host_skill_aliases.raw)`,
-    [vocab, norm, targetKey, raw ?? null],
+     on conflict (vocab, norm) do update set
+       target_key = case when $5 or host_skill_aliases.target_key = $3 then $3 else host_skill_aliases.target_key end,
+       raw = coalesce($4, host_skill_aliases.raw)
+     returning *`,
+    [vocab, norm, targetKey, raw ?? null, steal],
   );
+  return rows[0]?.target_key === targetKey ? rows[0] : null;
 }
 
 export async function aliasesFor(vocab, targetKey) {

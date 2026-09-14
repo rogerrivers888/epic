@@ -2022,9 +2022,9 @@ export const api = {
     put<{ format: SkillFormat }>('/api/admin/skills/format', body),
   adminRemoveSkillValue: (what: 'category' | 'format', key: string) => del<{ removed: string }>(`/api/admin/skills/${what}/${encodeURIComponent(key)}`),
   adminSaveTag: (body: { key?: string; label?: string; parentKey?: string | null; categoryKey?: string | null; source?: string | null; externalId?: string | null; note?: string | null; active?: boolean }) =>
-    put<{ tag: SkillVocabRow }>('/api/admin/skills/tag', body),
+    put<{ tag: SkillVocabRow; paused?: { offerId: string; title: string | null; host: string; why: string }[]; taken?: string | null }>('/api/admin/skills/tag', body),
   adminSaveFacet: (body: { key?: string; kind?: string; label?: string; parentKey?: string | null; source?: string | null; externalId?: string | null; note?: string | null; active?: boolean }) =>
-    put<{ facet: SkillVocabRow }>('/api/admin/skills/facet', body),
+    put<{ facet: SkillVocabRow; taken?: string | null }>('/api/admin/skills/facet', body),
   /** The queue, ordered by how often each has been typed. Merge is the most-used button on it. */
   adminSkillQueue: (state: 'open' | 'approved' | 'merged' | 'rejected' | 'all' = 'open') =>
     request<{ proposals: SkillProposal[]; n: number; oldest: string | null }>(`/api/admin/skills/queue${qs({ state })}`),

@@ -486,8 +486,16 @@ function VocabDetail({ row, vocab, categories, kinds, canManage, onSaved }: {
   const save = async (patch: Record<string, unknown>) => {
     setSaid(null);
     try {
-      if (vocab === 'tag') await api.adminSaveTag({ key: row.key, ...patch } as any);
-      else await api.adminSaveFacet({ key: row.key, ...patch } as any);
+      const r = vocab === 'tag'
+        ? await api.adminSaveTag({ key: row.key, ...patch } as any)
+        : await api.adminSaveFacet({ key: row.key, ...patch } as any);
+      // A rename that collided stood aside rather than taking the word off
+      // whoever has it, and this is where that is said.
+      const paused = (r as any).paused as { host: string; title: string | null }[] | undefined;
+      setSaid([
+        (r as any).taken as string | null,
+        paused?.length ? `${paused.length} live offer${paused.length === 1 ? '' : 's'} moved with it and came off the window.` : null,
+      ].filter(Boolean).join(' ') || null);
       onSaved();
     } catch (e: any) { setSaid(e.message); }
   };

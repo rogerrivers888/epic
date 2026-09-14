@@ -272,6 +272,29 @@ export async function offersNear({ lat, lng, km = 40, category = null, limit = 6
   return rows;
 }
 
+/**
+ * How many hosts are in each bucket within reach — over the whole radius, not
+ * a page of it.
+ *
+ * The browse row's numbers used to be counted off the cards, which stop at
+ * sixty, so in a busy area a category read "0 people" and then opened onto a
+ * list of them (Codex, 14 Sep 2026). The same two columns the filter honours,
+ * folded the same way.
+ */
+export async function hostsByCategoryNear({ lat, lng, km = 40 }) {
+  const { rows } = await query(
+    `select o.category_key, o.category, count(distinct o.host_id)::int as hosts
+       from host_offers o join hosts h on h.id = o.host_id
+      where o.state in ('live', 'paused') and o.visibility = 'public'
+        and coalesce(o.venue_lat, h.lat) is not null
+        and (o.shape <> 'oneoff' or o.starts_on >= current_date)
+        and sqrt(power((coalesce(o.venue_lat, h.lat) - $1) * 111.32, 2) + power((coalesce(o.venue_lng, h.lng) - $2) * 111.32 * cos(radians($1)), 2)) <= $3
+      group by o.category_key, o.category`,
+    [lat, lng, km],
+  );
+  return rows;
+}
+
 /** Everything waiting for a reviewer, oldest first. */
 export async function offersInReview() {
   const { rows } = await query(

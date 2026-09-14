@@ -479,7 +479,17 @@ adminRouter.put('/tag', requires('manage_skills'), async (req, res, next) => {
     if (req.body?.parentKey === key) throw bad('A tag cannot be its own parent.');
     const [was] = await repo.byKeys('tag', [key]);
     const tag = await repo.saveTag({ ...req.body, key });
-    if (req.body?.label) await repo.addAlias('tag', normalise(req.body.label), key, req.body.label);
+    /**
+     * A rename claims its new wording only if nobody else has it. It stands
+     * aside rather than taking it, and the screen is told: two rows quietly
+     * answering to one word is the failure this whole vocabulary exists to
+     * avoid (Codex, 14 Sep 2026).
+     */
+    let taken = null;
+    if (req.body?.label) {
+      const landed = await repo.addAlias('tag', normalise(req.body.label), key, req.body.label);
+      if (!landed) taken = `Somebody already answers to “${req.body.label}”, so searches for it still go there. Merge them if they are the same thing.`;
+    }
     /**
      * Moving a tag into another bucket re-files the offers that carry it.
      *
@@ -493,7 +503,7 @@ adminRouter.put('/tag', requires('manage_skills'), async (req, res, next) => {
       const moved = await repo.recomputeCategories(await repo.offersWithTag(key), key, undefined, { wasCategory: was.category_key });
       paused = await pauseWhatNoLongerQualifies(moved);
     }
-    res.json({ tag, paused });
+    res.json({ tag, paused, taken });
   } catch (e) { next(e); }
 });
 
@@ -507,8 +517,12 @@ adminRouter.put('/facet', requires('manage_skills'), async (req, res, next) => {
     // 14 Sep 2026).
     if (req.body?.parentKey === key) throw bad('A facet cannot be its own parent.');
     const facet = await repo.saveFacet({ ...req.body, key });
-    if (req.body?.label) await repo.addAlias('facet', normalise(req.body.label), key, req.body.label);
-    res.json({ facet });
+    let taken = null;
+    if (req.body?.label) {
+      const landed = await repo.addAlias('facet', normalise(req.body.label), key, req.body.label);
+      if (!landed) taken = `Somebody already answers to “${req.body.label}”, so searches for it still go there. Merge them if they are the same thing.`;
+    }
+    res.json({ facet, taken });
   } catch (e) { next(e); }
 });
 
@@ -610,7 +624,7 @@ adminRouter.post('/queue/:id', requires('manage_skills'), async (req, res, next)
       const done = await repo.withTransaction(async (client) => {
         const proposal = await repo.decideProposal(p.id, { state: 'merged', targetKey: target, note: str(req.body?.note, 400), by }, client);
         if (!proposal) return null;
-        await repo.addAlias(p.vocab, p.norm, target, p.raw, client);
+        await repo.addAlias(p.vocab, p.norm, target, p.raw, client, { steal: true });
         const moved = await repo.repoint(p.vocab, p.norm, target, client);
         return { proposal, moved };
       });
@@ -665,7 +679,7 @@ adminRouter.post('/queue/:id', requires('manage_skills'), async (req, res, next)
         ? await repo.saveFacet({ key, label, kind: str(req.body?.kind, 20) ?? 'subject', parentKey, note: str(req.body?.note, 400), source: str(req.body?.source, 40), externalId: str(req.body?.externalId, 40) }, client)
         : await repo.saveTag({ key, label, parentKey, categoryKey, note: str(req.body?.note, 400), source: str(req.body?.source, 40), externalId: str(req.body?.externalId, 40) }, client);
       await repo.addAlias(p.vocab, normalise(label), key, label, client);
-      await repo.addAlias(p.vocab, p.norm, key, p.raw, client);
+      await repo.addAlias(p.vocab, p.norm, key, p.raw, client, { steal: true });
       const moved = await repo.repoint(p.vocab, p.norm, key, client);
       return { proposal, saved, moved };
     });

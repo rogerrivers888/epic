@@ -1284,17 +1284,22 @@ router.get('/experiences/near', async (req, res, next) => {
     // table rather than from the passions constant, and it does not grow with
     // the tag vocabulary — thousands of tags live behind search, the cards and
     // the tag pages, and a filter row that grows stops working in month three.
+    /**
+     * The row's numbers come from the whole radius, not from the cards.
+     *
+     * The same mapping the filter uses, so an offer written before the skills
+     * work counts under the bucket it belongs to — and counted over everything
+     * within reach rather than the sixty nearest, or a category reads "0
+     * people" and then opens onto a list of them (Codex, 13 and 14 Sep 2026).
+     */
     const inCategory = {};
-    for (const o of all) {
-      // The same mapping the filter uses: an offer written before the skills
-      // work still counts under the bucket it belongs to, or a category would
-      // read "0 people" and then open onto a list of them (Codex, 13 Sep 2026).
-      const bucket = o.category_key ?? categoryForPassion(o.category);
+    for (const row of await repo.hostsByCategoryNear({ lat, lng, km })) {
+      const bucket = row.category_key ?? categoryForPassion(row.category);
       if (!bucket) continue;
-      (inCategory[bucket] ??= new Set()).add(o.host_id);
+      inCategory[bucket] = (inCategory[bucket] ?? 0) + row.hosts;
     }
     const browse = (await skills.categories()).map((c) => ({
-      key: c.key, label: c.label, icon: c.icon, people: inCategory[c.key]?.size ?? 0,
+      key: c.key, label: c.label, icon: c.icon, people: inCategory[c.key] ?? 0,
     }));
     res.json({
       cards,
