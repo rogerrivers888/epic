@@ -551,7 +551,17 @@ export async function setOfferSkills(offerId, vocab, items) {
      * the one thing the design insists on: never a nudge to pick something
      * broader (Codex, 14 Sep 2026).
      */
-    if (!target && !item?.asIs) target = (await resolveOne(vocab, raw))?.key ?? null;
+    /**
+     * A wording this offer already carried *unresolved* stays unresolved.
+     *
+     * `asIs` only travels on the request that set it — reload the offer and the
+     * pending chip comes back without it, so the next save (adding a second
+     * tag, dragging one to the front) would run the fuzzy pass over a word the
+     * host had explicitly declined to match (Codex, 14 Sep 2026). The row
+     * itself is the record of that decision: it is here, and it has no key.
+     */
+    const declined = had.has(norm) && had.get(norm) == null;
+    if (!target && !item?.asIs && !declined) target = (await resolveOne(vocab, raw))?.key ?? null;
     // The fallback that keeps a deactivated value attached must not undo that
     // either: a host who says "as it is" is answering, not omitting.
     if (!target && !item?.asIs && had.get(norm)) target = had.get(norm);
