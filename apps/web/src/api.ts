@@ -2992,7 +2992,12 @@ export type TaxonomyExamples = {
   label: string;
   /** The area the search was fenced to — the household's home, or London. */
   near: string;
-  places: { id: string; name: string | null; address: string | null; primaryType: string | null; types: string[]; mapsUrl: string | null; website: string | null }[];
+  places: {
+    id: string; name: string | null; address: string | null; primaryType: string | null;
+    types: string[]; mapsUrl: string | null; website: string | null;
+    /** Where the whole set of its words lands it today, or null if nothing does. */
+    landsIn: string | null;
+  }[];
   /** Every other Google word on those places, commonest first, with where each lands. */
   alsoCalled: { key: string; on: number; label: string | null; decision: string | null; landing: TaxonomyLanding }[];
   /** False where Google would not fence the search by this word, so it was matched on words and then checked. */

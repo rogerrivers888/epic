@@ -579,8 +579,8 @@ function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChang
           {!landing ? (
             <>
               <Text style={type.tiny}>
-                Twelve real places, fetched once against {busiest.replace('google:', '').replace(/_/g, ' ')}. It costs one
-                provider call and nothing is stored.
+                Twelve real places carrying {busiest.replace('google:', '').replace(/_/g, ' ')}, one of the words that fills
+                this drawer. It costs one provider call and nothing is stored.
               </Text>
               <TextAction label={looking ? 'Looking…' : 'Look at twelve real ones'} disabled={looking} onPress={() => void lookAtIt()} />
             </>
@@ -589,12 +589,15 @@ function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChang
           ) : (
             <>
               <Text style={type.tiny}>
-                {landing.places.length - landing.alone} of {landing.places.length} settled by the labels
-                {landing.alone ? ` · ${landing.alone} went to the not-sure list` : ' · none left over'}
+                {landing.places.filter((pl) => pl.landsIn).length} of {landing.places.length} settled by the labels
+                {landing.places.filter((pl) => !pl.landsIn).length
+                  ? ` · ${landing.places.filter((pl) => !pl.landsIn).length} went to the not-sure list`
+                  : ' · none left over'}
               </Text>
               {landing.places.map((pl) => {
-                const settled = (pl.types ?? []).some((t) => t !== busiest.replace('google:', '')
-                  && landing.alsoCalled.some((w) => w.key === t && (w.landing?.subcategory || w.decision)));
+                // The resolver's answer, sent with the place, so the row and the
+                // count above it can never disagree (Codex, 14 Sep 2026).
+                const settled = Boolean(pl.landsIn);
                 return (
                   <View key={pl.id} style={styles.egRow}>
                     <View style={{ flex: 1, minWidth: 0 }}>

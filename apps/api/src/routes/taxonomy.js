@@ -534,6 +534,13 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       const primary = p.primaryType && p.primaryType !== parsed.key ? p.primaryType : null;
       return !rest.some(answersAlone) && !combinationFires(rest, primary);
     }).length;
+    // Where each place actually lands, asked of the resolver rather than
+    // guessed at from one word. A place filed by a combination has no single
+    // word that answers for it, so anything reading the words one at a time
+    // calls it unsettled and contradicts the count (Codex, 14 Sep 2026).
+    const landsIn = (p) => landingOfSet((p.types ?? []).map((t) => `google:${t}`), {}, rules, tax.vocab).subcategory;
+    for (const p of out.places) p.landsIn = landsIn(p);
+
     const alsoCalled = [...seen.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 24)
@@ -576,13 +583,10 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     // their words; the four that were not are exactly these.
     if (req.query.queue === '1') {
       for (const p of out.places) {
-        // The whole set, this word included. If the word being looked at already
-        // files the place, the place is settled and has no business on the list
-        // (Codex, 14 Sep 2026).
-        const all = p.types ?? [];
-        const settled = all.some(answersAlone) || combinationFires(all, p.primaryType ?? null);
-        if (settled) continue;
-        const rest = all.filter((t) => t !== parsed.key);
+        // The resolver's answer, not a guess from one word. Where it lands
+        // somewhere, it is settled and has no business on the list.
+        if (p.landsIn) continue;
+        const rest = (p.types ?? []).filter((t) => t !== parsed.key);
         await notSure.notSettled({
           ref: `google:${p.id}`,
           name: p.name,
