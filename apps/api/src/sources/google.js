@@ -746,6 +746,12 @@ export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 
           openingHours: v.openingHours,
           crowdBand: crowdBand(p.rating, p.userRatingCount),
           countBand: countBand(p.userRatingCount),
+          // Google's own words, for the length of this sweep and no longer.
+          // They are read once to work out Epic's own secondary labels for the
+          // place and then dropped — the same rented-and-read pattern as the
+          // rating above, which is banded here and never leaves as a number
+          // (Codex, 14 Sep 2026: without these the carries never fired at all).
+          labels: v.labels ?? [],
           matchedQuery: q,
         });
       }

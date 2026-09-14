@@ -146,6 +146,8 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
         lat: v.lat, lng: v.lng, address: v.address, website: v.website,
         openingHours: v.openingHours, brand: v.brand ?? null,
         crowdBand: null, countBand: null, from: ['osm'],
+        // The open map's own words, kept for as long as this sweep runs.
+        labels: v.labels ?? [],
       });
     }
     notes.push(`the open map listed ${found.length}`);
@@ -179,6 +181,10 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
         twin.address = twin.address || g.address;
         twin.openingHours = twin.openingHours || g.openingHours;
         twin.cuisines = twin.cuisines?.length ? twin.cuisines : (g.cuisines ?? []);
+        // Both sources' words, because both map to labels of ours and a place
+        // the open map called a restaurant may be the one Google calls fine
+        // dining (Codex, 14 Sep 2026).
+        twin.labels = [...new Set([...(twin.labels ?? []), ...(g.labels ?? [])])];
         twin.from.push('google');
         continue;
       }
@@ -188,6 +194,7 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
         lat: g.lat, lng: g.lng, address: g.address, website: g.website,
         openingHours: g.openingHours, brand: null,
         crowdBand: g.crowdBand, countBand: g.countBand, from: ['google'],
+        labels: g.labels ?? [],
       });
     }
     notes.push(`the crowd pass rated ${places.length} in ${calls} requests`);
@@ -233,7 +240,10 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
     // in with while we still have them. The words themselves are not kept —
     // licensed content is rented — so this is the only chance to read them
     // (Codex, 14 Sep 2026: the fine dining went out with the types).
-    c.secondary = carried(c.labels ?? []);
+    // Null, not empty, where this pass never saw a word: an empty object means
+    // "looked, and they carry nothing", and only that should clear what an
+    // earlier sweep found (Codex, 14 Sep 2026).
+    c.secondary = (c.labels ?? []).length ? carried(c.labels) : null;
   }
 
   // A place nobody has rated and nothing is known about is not "the top-rated

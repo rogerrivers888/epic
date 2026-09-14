@@ -154,9 +154,10 @@ export async function putPlace(areaCode, p, run = query) {
        -- Kept if this sweep could not tell: a place we already know is a pub
        -- does not become an unknown because one pass read it thinly.
        category = coalesce(excluded.category, scout_places.category),
-       -- Kept if this pass found none, for the same reason as the category.
-       secondary = case when excluded.secondary = '{}'::jsonb
-                        then scout_places.secondary else excluded.secondary end,
+       -- Null means this pass never saw a word, so what an earlier one found
+       -- stands. An empty object means it looked and they carry nothing, which
+       -- is an answer and does clear it (Codex, 14 Sep 2026).
+       secondary = coalesce(excluded.secondary, scout_places.secondary),
        last_seen = now(), scored_at = now()`,
     [areaCode, p.venueRef, p.name ?? null, p.rank, p.epicScore, p.ownedScore, p.crowdBand, p.countBand,
       JSON.stringify(p.accolades ?? []), JSON.stringify(p.cuisines ?? []), p.chain === true,
@@ -167,7 +168,7 @@ export async function putPlace(areaCode, p, run = query) {
       JSON.stringify(Array.isArray(p.from) && p.from.length ? p.from : []),
       // Epic's own secondary labels for this place, worked out at sweep time
       // from the words it came in with. The words themselves are not kept.
-      JSON.stringify(p.secondary ?? {})],
+      p.secondary == null ? null : JSON.stringify(p.secondary)],
   );
   await run(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score, crowd_band, count_band, rank)
