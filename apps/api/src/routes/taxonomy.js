@@ -34,7 +34,7 @@ import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
-import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
+import { NAMESPACES, labelHits, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
 import { suggestFor, sureDecisionFor, sureMappingFor } from '../domain/googleSuggest.js';
 import { examplesOfType } from '../sources/google.js';
@@ -255,13 +255,27 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     // combination rule names several words and none of them answers alone, so
     // asking singly would call a place alone that Epic can in fact file (Codex,
     // 14 Sep 2026).
+    //
+    // Two ways a companion word can save the place, and both have to be asked.
+    // A word that answers on its own, unless it has been explicitly decided —
+    // an excluded night club must not be read back as a bar through Google's
+    // own defaults. Or a combination rule that actually fires over what is
+    // left, which no single word would answer for (Codex, 14 Sep 2026, three
+    // passes: the short cut missed the combination, and dropping it let the
+    // defaults back in).
+    const answersAlone = (t) => {
+      const row = byKey.get(t);
+      if (!row || row.decision) return false;
+      return Boolean(landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory);
+    };
+    const combinationFires = (types) => {
+      const hits = labelHits(rules?.labels, types.map((t) => `google:${t}`));
+      return hits.some((subject) => rules?.labels?.get(subject)?.subcategory);
+    };
     const alone = out.places.filter((p) => {
-      const rest = (p.types ?? []).filter((t) => t !== parsed.key).map((t) => `google:${t}`);
+      const rest = (p.types ?? []).filter((t) => t !== parsed.key);
       if (!rest.length) return true;
-      // No short cut for "all the rest are excluded": a combination rule naming
-      // them may still file the place, and only the resolver knows (Codex, 14
-      // Sep 2026, second pass). Ask it, and nothing else.
-      return !landingOfSet(rest, {}, rules, tax.vocab).subcategory;
+      return !rest.some(answersAlone) && !combinationFires(rest);
     }).length;
     const alsoCalled = [...seen.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
