@@ -55,11 +55,11 @@ test('a label brings its own along, and never treads on an answer', () => {
   // is added. It comes with these other labels."
   const vocab = {
     list: [
-      { key: 'splash-pad', kind: 'yesno', active: true, comes_with: ['free', 'suits-ages'] },
-      { key: 'free', kind: 'yesno', active: true, comes_with: [] },
-      { key: 'suits-ages', kind: 'range', active: true, comes_with: ['kid-friendly'] },
-      { key: 'kid-friendly', kind: 'yesno', active: true, comes_with: [] },
-      { key: 'retired', kind: 'yesno', active: false, comes_with: [] },
+      { key: 'splash-pad', kind: 'yesno', active: true, brings: [{ key: 'free', value: { yesno: true } }, { key: 'suits-ages', value: { from: 0, to: 7 } }] },
+      { key: 'free', kind: 'yesno', active: true, brings: [] },
+      { key: 'suits-ages', kind: 'range', active: true, brings: [{ key: 'kid-friendly', value: { yesno: true } }] },
+      { key: 'kid-friendly', kind: 'yesno', active: true, brings: [] },
+      { key: 'retired', kind: 'yesno', active: false, brings: [] },
     ],
     bySubcategory: new Map([['splash', new Map([['splash-pad', { yesno: true }]])]]),
   };
@@ -69,14 +69,16 @@ test('a label brings its own along, and never treads on an answer', () => {
   // And it carries on: suits ages brings kid friendly with it.
   assert.equal(got['kid-friendly'].setAt, 'came');
   assert.equal(got['kid-friendly'].came, 'suits-ages');
+  // A range arrives as a range, never as a bare yes (Codex, 14 Sep 2026).
+  assert.deepEqual(got['suits-ages'], { from: 0, to: 7, setAt: 'came', came: 'splash-pad' });
 });
 
 test('what comes along never overwrites what was said, and a retired one is not brought', () => {
   const vocab = {
     list: [
-      { key: 'splash-pad', kind: 'yesno', active: true, comes_with: ['free', 'retired'] },
-      { key: 'free', kind: 'yesno', active: true, comes_with: [] },
-      { key: 'retired', kind: 'yesno', active: false, comes_with: [] },
+      { key: 'splash-pad', kind: 'yesno', active: true, brings: [{ key: 'free', value: { yesno: true } }, { key: 'retired', value: { yesno: true } }] },
+      { key: 'free', kind: 'yesno', active: true, brings: [] },
+      { key: 'retired', kind: 'yesno', active: false, brings: [] },
     ],
     bySubcategory: new Map([['splash', new Map([['splash-pad', { yesno: true }]])]]),
   };
@@ -89,12 +91,40 @@ test('what comes along never overwrites what was said, and a retired one is not 
 test('a label that brings itself, or a ring of them, still finishes', () => {
   const vocab = {
     list: [
-      { key: 'a', kind: 'yesno', active: true, comes_with: ['b'] },
-      { key: 'b', kind: 'yesno', active: true, comes_with: ['a'] },
+      { key: 'a', kind: 'yesno', active: true, brings: [{ key: 'b', value: { yesno: true } }] },
+      { key: 'b', kind: 'yesno', active: true, brings: [{ key: 'a', value: { yesno: true } }] },
     ],
     bySubcategory: new Map([['x', new Map([['a', { yesno: true }]])]]),
   };
   const got = resolveFor({ subcategory: 'x' }, new Map(), vocab);
   assert.equal(got.a.setAt, 'subcategory');
   assert.equal(got.b.setAt, 'came');
+});
+
+test('a label the place has not got brings nothing', () => {
+  // Codex, 14 Sep 2026: "not a splash pad" must not hand out free.
+  const vocab = {
+    list: [
+      { key: 'splash-pad', kind: 'yesno', active: true, brings: [{ key: 'free', value: { yesno: true } }] },
+      { key: 'free', kind: 'yesno', active: true, brings: [] },
+    ],
+    bySubcategory: new Map([['x', new Map([['splash-pad', { yesno: false }]])]]),
+  };
+  const got = resolveFor({ subcategory: 'x' }, new Map(), vocab);
+  assert.equal(got['splash-pad'].yesno, false);
+  assert.equal(got.free, undefined);
+});
+
+test('a label brought as a no does not pass the chain on', () => {
+  const vocab = {
+    list: [
+      { key: 'a', kind: 'yesno', active: true, brings: [{ key: 'b', value: { yesno: false } }] },
+      { key: 'b', kind: 'yesno', active: true, brings: [{ key: 'c', value: { yesno: true } }] },
+      { key: 'c', kind: 'yesno', active: true, brings: [] },
+    ],
+    bySubcategory: new Map([['x', new Map([['a', { yesno: true }]])]]),
+  };
+  const got = resolveFor({ subcategory: 'x' }, new Map(), vocab);
+  assert.equal(got.b.yesno, false);
+  assert.equal(got.c, undefined);
 });

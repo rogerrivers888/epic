@@ -270,13 +270,24 @@ taxonomyRoutes.put('/attributes', requires('manage_library'), async (req, res, n
       options: Array.isArray(req.body?.options) ? req.body.options.map(String) : undefined,
       rangeMin: req.body?.rangeMin, rangeMax: req.body?.rangeMax, unit: req.body?.unit,
       position: req.body?.position, active: req.body?.active,
-      comesWith: Array.isArray(req.body?.comesWith) ? req.body.comesWith.map(String) : undefined,
     });
     await query(
       `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
        values ($1,$2,'taxonomy.attribute','place_attribute',null,$3,$4)`,
       [req.account?.id ?? null, actorOf(req), attribute.label, JSON.stringify(attribute)]);
     res.json({ attribute });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /attributes/brings { attribute, brings, value } — what one of our labels
+ * brings with it, and as what. A null value forgets it.
+ */
+taxonomyRoutes.put('/attributes/brings', requires('manage_library'), async (req, res, next) => {
+  try {
+    const value = await placeAttributes.setBrings(
+      String(req.body?.attribute || ''), String(req.body?.brings || ''), req.body?.value ?? null);
+    res.json({ attribute: req.body?.attribute, brings: req.body?.brings, value });
   } catch (err) { next(err); }
 });
 

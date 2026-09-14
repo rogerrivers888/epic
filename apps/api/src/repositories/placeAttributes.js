@@ -35,9 +35,10 @@ const valueOf = (row) => {
 /** The vocabulary and every default, in one read. */
 export async function attributes() {
   if (cache && Date.now() - cachedAt < TTL_MS) return cache;
-  const [attrs, defs] = await Promise.all([
+  const [attrs, defs, brings] = await Promise.all([
     query('select * from place_attributes order by position, label'),
     query('select * from shelf_subcategory_attributes'),
+    query('select * from attribute_brings'),
   ]);
   const bySub = new Map();
   for (const d of defs.rows) {
@@ -47,13 +48,21 @@ export async function attributes() {
     m.set(d.attribute_key, v);
     bySub.set(d.subcategory_key, m);
   }
-  cache = { list: attrs.rows, byKey: new Map(attrs.rows.map((a) => [a.key, a])), bySubcategory: bySub };
+  // What each label brings, and as what (migration 114).
+  const broughtBy = new Map();
+  for (const r of brings.rows) {
+    const v = valueOf(r);
+    if (!v) continue;
+    broughtBy.set(r.attribute_key, [...(broughtBy.get(r.attribute_key) ?? []), { key: r.brings_key, value: v }]);
+  }
+  const list = attrs.rows.map((a) => ({ ...a, brings: broughtBy.get(a.key) ?? [] }));
+  cache = { list, byKey: new Map(list.map((a) => [a.key, a])), bySubcategory: bySub };
   cachedAt = Date.now();
   return cache;
 }
 
 /** Name one, or change it. The key never moves once it exists, so renaming is free. */
-export async function saveAttribute({ key, label, kind, blurb, options, rangeMin, rangeMax, unit, position, active, comesWith }) {
+export async function saveAttribute({ key, label, kind, blurb, options, rangeMin, rangeMax, unit, position, active }) {
   const k = key ? slug(key) : slug(label);
   if (!k) throw bad('An attribute needs a name.');
   // Our labels are one vocabulary, so a secondary label may not take the name
@@ -78,8 +87,8 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
     }
   }
   const { rows } = await query(
-    `insert into place_attributes (key, label, kind, blurb, options, range_min, range_max, unit, position, active, comes_with)
-     values ($1, $2, coalesce($3, 'yesno'), $4, coalesce($5::text[], '{}'), $6, $7, $8, coalesce($9, 100), coalesce($10, true), coalesce($12::text[], '{}'))
+    `insert into place_attributes (key, label, kind, blurb, options, range_min, range_max, unit, position, active)
+     values ($1, $2, coalesce($3, 'yesno'), $4, coalesce($5::text[], '{}'), $6, $7, $8, coalesce($9, 100), coalesce($10, true))
      on conflict (key) do update
         set label      = coalesce($11, place_attributes.label),
             kind       = coalesce($3, place_attributes.kind),
@@ -90,17 +99,42 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
             unit       = coalesce($8, place_attributes.unit),
             position   = coalesce($9, place_attributes.position),
             active     = coalesce($10, place_attributes.active),
-            comes_with = coalesce($12::text[], place_attributes.comes_with),
             updated_at = now()
      returning *`,
     // The label is `$2` on insert and `$11` on update: binding the key as the
     // label would rename "Kid friendly" to "kid-friendly" the first time
     // anything else about it changed (Codex, 14 Sep 2026).
     [k, label ?? k, kind ?? null, blurb ?? null, options ?? null, rangeMin ?? null, rangeMax ?? null, unit ?? null,
-     position ?? null, active == null ? null : Boolean(active), label ?? null,
-     comesWith === undefined ? null : [...new Set((comesWith ?? []).map(String).filter((c) => c && c !== k))]]);
+     position ?? null, active == null ? null : Boolean(active), label ?? null]);
   forget();
   return rows[0];
+}
+
+/**
+ * What one of our labels brings with it, and as what. A null value forgets it.
+ *
+ * The owner, 14 Sep 2026: "let us add labels that are always added when one
+ * label is added." Both sides are ours, and it is stored the way a drawer's
+ * default is, because it is the same kind of statement.
+ */
+export async function setBrings(attributeKey, bringsKey, value) {
+  if (!attributeKey || !bringsKey) throw bad('Which label, and what does it bring?');
+  if (attributeKey === bringsKey) throw bad('A label cannot bring itself.');
+  if (value == null) {
+    await query('delete from attribute_brings where attribute_key = $1 and brings_key = $2', [attributeKey, bringsKey]);
+    forget();
+    return null;
+  }
+  const { rows } = await query(
+    `insert into attribute_brings (attribute_key, brings_key, yesno, from_value, to_value, choice)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (attribute_key, brings_key) do update
+        set yesno = excluded.yesno, from_value = excluded.from_value,
+            to_value = excluded.to_value, choice = excluded.choice
+     returning *`,
+    [attributeKey, bringsKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null]);
+  forget();
+  return valueOf(rows[0]);
 }
 
 /**
@@ -205,16 +239,21 @@ export function resolveFor({ subcategory }, own, vocab) {
   // chose. Anything already said stands: what comes along never overwrites.
   const byKey = new Map((vocab?.list ?? []).map((a) => [a.key, a]));
   const seen = new Set(Object.keys(out));
-  const queue = [...seen];
+  // Only a label the place actually has brings anything: "not a splash pad"
+  // must not hand out free (Codex, 14 Sep 2026).
+  const says = (v) => v && v.yesno !== false;
+  const queue = Object.keys(out).filter((k) => says(out[k]));
   while (queue.length) {
     const from = byKey.get(queue.shift());
-    for (const k of from?.comes_with ?? []) {
-      if (seen.has(k)) continue;
-      const brought = byKey.get(k);
+    for (const b of from?.brings ?? []) {
+      if (seen.has(b.key)) continue;
+      const brought = byKey.get(b.key);
       if (!brought?.active) continue;
-      seen.add(k);
-      queue.push(k);
-      out[k] = { yesno: true, setAt: 'came', came: from.key };
+      seen.add(b.key);
+      // It arrives as the value it is brought as, which is how a range can be
+      // brought at all: splash pad brings suits ages 0 to 7, not a bare yes.
+      out[b.key] = { ...b.value, setAt: 'came', came: from.key };
+      if (says(b.value)) queue.push(b.key);
     }
   }
   return out;

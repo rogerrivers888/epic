@@ -40,7 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
-  api, MoodKey, PlaceAttribute, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
+  api, AttributeValue, MoodKey, PlaceAttribute, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
   TaxonomyRule, TaxonomyTry,
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -898,17 +898,32 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   const nameOf = (k: string) => (data?.attributes ?? []).find((o) => o.key === k)?.label ?? k;
   const [openKey, setOpenKey] = useState<string | null>(null);
 
-  /** Add or take away one of the labels that always come with this one. */
+  /**
+   * Add or take away a label that always comes with this one. It arrives as the
+   * value its own kind can hold: a range as a range, never as a bare yes.
+   */
   const bring = async (a: PlaceAttribute, k: string) => {
-    const has = (a.comes_with ?? []).includes(k);
-    const next = has ? (a.comes_with ?? []).filter((x) => x !== k) : [...(a.comes_with ?? []), k];
+    const has = (a.brings ?? []).some((b) => b.key === k);
+    const other = (data?.attributes ?? []).find((o) => o.key === k);
+    const asWhat = !other ? { yesno: true }
+      : other.kind === 'range' ? { from: other.range_min ?? 0, to: other.range_max ?? 99 }
+        : other.kind === 'oneof' ? { choice: other.options[0] ?? '' }
+          : { yesno: true };
     setBusy(true);
     try {
-      await api.taxonomySaveAttribute({ key: a.key, comesWith: next });
+      await api.taxonomySetBrings({ attribute: a.key, brings: k, value: has ? null : asWhat });
       await load();
       await onChanged(has ? `${nameOf(k)} no longer comes with ${a.label}.` : `${nameOf(k)} comes with ${a.label} now.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusy(false); }
+  };
+
+  /** What a brought label reads as: its name, and its value where it has one. */
+  const broughtAs = (b: { key: string; value: AttributeValue }) => {
+    const v = b.value ?? {};
+    if (v.from != null || v.to != null) return `${nameOf(b.key)} ${v.from ?? 0} to ${v.to ?? 99}`;
+    if (v.choice) return `${nameOf(b.key)} · ${v.choice}`;
+    return v.yesno === false ? `not ${nameOf(b.key)}` : nameOf(b.key);
   };
   const primary = tax.subcategories.filter((sc) => sc.active);
   const total = tax.rules.filter((r) => r.subcategory).length;
@@ -971,21 +986,21 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
                       with what somebody chose (owner, 14 Sep 2026). */}
                   {canManage ? (
                     <DrillDropdown
-                      label={(a.comes_with ?? []).length ? 'Comes with' : 'Add one'}
-                      value={(a.comes_with ?? []).map((k) => nameOf(k)).join(' · ') || 'nothing chosen'}
-                      set={(a.comes_with ?? []).length > 0} align="right" width={280}
+                      label={(a.brings ?? []).length ? 'Comes with' : 'Add one'}
+                      value={(a.brings ?? []).map(broughtAs).join(' · ') || 'nothing chosen'}
+                      set={(a.brings ?? []).length > 0} align="right" width={280}
                       groups={[{
                         key: 'secondary',
                         label: 'Our secondary labels',
                         items: secondary.filter((o) => o.key !== a.key)
-                          .map((o) => ({ key: o.key, label: o.label, on: (a.comes_with ?? []).includes(o.key) })),
+                          .map((o) => ({ key: o.key, label: o.label, on: (a.brings ?? []).some((b) => b.key === o.key) })),
                       }]}
                       onPick={(k) => void bring(a, k)}
                       onOpenChange={(o) => setOpenKey(o ? a.key : null)}
                     />
                   ) : (
-                    <Text style={[type.small, (a.comes_with ?? []).length ? { color: colors.accent } : null]}>
-                      {(a.comes_with ?? []).map((k) => nameOf(k)).join(' · ') || 'nothing chosen'}
+                    <Text style={[type.small, (a.brings ?? []).length ? { color: colors.accent } : null]}>
+                      {(a.brings ?? []).map(broughtAs).join(' · ') || 'nothing chosen'}
                     </Text>
                   )}
                 </View>
