@@ -2386,7 +2386,7 @@ export const api = {
   /** Our own secondary labels, with what every drawer is taken to be. */
   taxonomyAttributes: () => request<TaxonomyAttributes>('/api/admin/taxonomy/attributes'),
   /** Name a secondary label, or change one. */
-  taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
+  taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean; comesWith?: string[] }) =>
     put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
   /** What every place in a drawer is taken to be. A null value clears it. */
   taxonomySetDefault: (body: { subcategory: string; attribute: string; value: AttributeValue | null }) =>
@@ -2982,10 +2982,19 @@ export type PlaceAttribute = {
   key: string; label: string; kind: 'yesno' | 'range' | 'oneof'; blurb: string | null;
   options: string[]; range_min: number | null; range_max: number | null; unit: string | null;
   position: number; active: boolean; seeded: boolean;
+  /** Other labels of ours that always arrive with this one. Never a provider's word. */
+  comes_with: string[];
 };
 
 /** A value one carries: a yes or no, a range, or one of a list. */
-export type AttributeValue = { yesno?: boolean; from?: number | null; to?: number | null; choice?: string };
+export type AttributeValue = {
+  yesno?: boolean; from?: number | null; to?: number | null; choice?: string;
+  /** Where the answer came from. `came` means another label brought it, so it is drawn in lime. */
+  setAt?: 'place' | 'subcategory' | 'came';
+  /** Which label brought it, where `setAt` is `came`. */
+  came?: string;
+  reason?: string | null;
+};
 
 export type TaxonomyAttributes = {
   attributes: PlaceAttribute[];

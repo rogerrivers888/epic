@@ -270,6 +270,7 @@ taxonomyRoutes.put('/attributes', requires('manage_library'), async (req, res, n
       options: Array.isArray(req.body?.options) ? req.body.options.map(String) : undefined,
       rangeMin: req.body?.rangeMin, rangeMax: req.body?.rangeMax, unit: req.body?.unit,
       position: req.body?.position, active: req.body?.active,
+      comesWith: Array.isArray(req.body?.comesWith) ? req.body.comesWith.map(String) : undefined,
     });
     await query(
       `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)

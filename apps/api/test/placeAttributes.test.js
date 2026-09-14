@@ -49,3 +49,52 @@ test('a place in no drawer at all still carries what it was told', () => {
   const own = new Map([['indoor', { yesno: false }]]);
   assert.deepEqual(resolveFor({ subcategory: null }, own, VOCAB).indoor, { yesno: false, setAt: 'place' });
 });
+
+test('a label brings its own along, and never treads on an answer', () => {
+  // Owner, 14 Sep 2026: "let us add labels that are always added when one label
+  // is added. It comes with these other labels."
+  const vocab = {
+    list: [
+      { key: 'splash-pad', kind: 'yesno', active: true, comes_with: ['free', 'suits-ages'] },
+      { key: 'free', kind: 'yesno', active: true, comes_with: [] },
+      { key: 'suits-ages', kind: 'range', active: true, comes_with: ['kid-friendly'] },
+      { key: 'kid-friendly', kind: 'yesno', active: true, comes_with: [] },
+      { key: 'retired', kind: 'yesno', active: false, comes_with: [] },
+    ],
+    bySubcategory: new Map([['splash', new Map([['splash-pad', { yesno: true }]])]]),
+  };
+  const got = resolveFor({ subcategory: 'splash' }, new Map(), vocab);
+  // What came along says so, and says what brought it.
+  assert.deepEqual(got.free, { yesno: true, setAt: 'came', came: 'splash-pad' });
+  // And it carries on: suits ages brings kid friendly with it.
+  assert.equal(got['kid-friendly'].setAt, 'came');
+  assert.equal(got['kid-friendly'].came, 'suits-ages');
+});
+
+test('what comes along never overwrites what was said, and a retired one is not brought', () => {
+  const vocab = {
+    list: [
+      { key: 'splash-pad', kind: 'yesno', active: true, comes_with: ['free', 'retired'] },
+      { key: 'free', kind: 'yesno', active: true, comes_with: [] },
+      { key: 'retired', kind: 'yesno', active: false, comes_with: [] },
+    ],
+    bySubcategory: new Map([['splash', new Map([['splash-pad', { yesno: true }]])]]),
+  };
+  // This place is explicitly not free, whatever splash pad usually brings.
+  const got = resolveFor({ subcategory: 'splash' }, new Map([['free', { yesno: false }]]), vocab);
+  assert.deepEqual(got.free, { yesno: false, setAt: 'place' });
+  assert.equal(got.retired, undefined);
+});
+
+test('a label that brings itself, or a ring of them, still finishes', () => {
+  const vocab = {
+    list: [
+      { key: 'a', kind: 'yesno', active: true, comes_with: ['b'] },
+      { key: 'b', kind: 'yesno', active: true, comes_with: ['a'] },
+    ],
+    bySubcategory: new Map([['x', new Map([['a', { yesno: true }]])]]),
+  };
+  const got = resolveFor({ subcategory: 'x' }, new Map(), vocab);
+  assert.equal(got.a.setAt, 'subcategory');
+  assert.equal(got.b.setAt, 'came');
+});

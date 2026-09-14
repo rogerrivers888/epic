@@ -895,6 +895,21 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   };
 
   const secondary = (data?.attributes ?? []).filter((a) => a.active);
+  const nameOf = (k: string) => (data?.attributes ?? []).find((o) => o.key === k)?.label ?? k;
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  /** Add or take away one of the labels that always come with this one. */
+  const bring = async (a: PlaceAttribute, k: string) => {
+    const has = (a.comes_with ?? []).includes(k);
+    const next = has ? (a.comes_with ?? []).filter((x) => x !== k) : [...(a.comes_with ?? []), k];
+    setBusy(true);
+    try {
+      await api.taxonomySaveAttribute({ key: a.key, comesWith: next });
+      await load();
+      await onChanged(has ? `${nameOf(k)} no longer comes with ${a.label}.` : `${nameOf(k)} comes with ${a.label} now.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
   const primary = tax.subcategories.filter((sc) => sc.active);
   const total = tax.rules.filter((r) => r.subcategory).length;
 
@@ -944,7 +959,7 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
           </View>
           {secondary.length === 0 ? <Text style={[type.small, styles.emptyRow]}>None yet.</Text> : null}
           {secondary.map((a) => (
-            <View key={a.key} style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
+            <View key={a.key} style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, openKey === a.key && { zIndex: 40 }]}>
               <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
                 <Text style={type.small}><Text style={{ fontWeight: '600' }}>{a.label}</Text></Text>
                 {a.blurb ? <Text style={type.tiny} numberOfLines={2}>{a.blurb}</Text> : null}
@@ -952,8 +967,27 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
               {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={type.small}>{kindOf(a)}</Text></View> : null}
               {wide ? (
                 <View style={[styles.tCell, { width: 210 }]}>
-                  {/* Nothing yet: what a label brings with it is agreed and not built. */}
-                  <Text style={type.small}>nothing chosen</Text>
+                  {/* What arrives automatically is lime, so it is never confused
+                      with what somebody chose (owner, 14 Sep 2026). */}
+                  {canManage ? (
+                    <DrillDropdown
+                      label={(a.comes_with ?? []).length ? 'Comes with' : 'Add one'}
+                      value={(a.comes_with ?? []).map((k) => nameOf(k)).join(' · ') || 'nothing chosen'}
+                      set={(a.comes_with ?? []).length > 0} align="right" width={280}
+                      groups={[{
+                        key: 'secondary',
+                        label: 'Our secondary labels',
+                        items: secondary.filter((o) => o.key !== a.key)
+                          .map((o) => ({ key: o.key, label: o.label, on: (a.comes_with ?? []).includes(o.key) })),
+                      }]}
+                      onPick={(k) => void bring(a, k)}
+                      onOpenChange={(o) => setOpenKey(o ? a.key : null)}
+                    />
+                  ) : (
+                    <Text style={[type.small, (a.comes_with ?? []).length ? { color: colors.accent } : null]}>
+                      {(a.comes_with ?? []).map((k) => nameOf(k)).join(' · ') || 'nothing chosen'}
+                    </Text>
+                  )}
                 </View>
               ) : null}
               <View style={[styles.tCell, { width: wide ? 190 : 120 }]}>

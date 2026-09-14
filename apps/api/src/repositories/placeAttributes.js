@@ -53,7 +53,7 @@ export async function attributes() {
 }
 
 /** Name one, or change it. The key never moves once it exists, so renaming is free. */
-export async function saveAttribute({ key, label, kind, blurb, options, rangeMin, rangeMax, unit, position, active }) {
+export async function saveAttribute({ key, label, kind, blurb, options, rangeMin, rangeMax, unit, position, active, comesWith }) {
   const k = key ? slug(key) : slug(label);
   if (!k) throw bad('An attribute needs a name.');
   // Our labels are one vocabulary, so a secondary label may not take the name
@@ -78,8 +78,8 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
     }
   }
   const { rows } = await query(
-    `insert into place_attributes (key, label, kind, blurb, options, range_min, range_max, unit, position, active)
-     values ($1, $2, coalesce($3, 'yesno'), $4, coalesce($5::text[], '{}'), $6, $7, $8, coalesce($9, 100), coalesce($10, true))
+    `insert into place_attributes (key, label, kind, blurb, options, range_min, range_max, unit, position, active, comes_with)
+     values ($1, $2, coalesce($3, 'yesno'), $4, coalesce($5::text[], '{}'), $6, $7, $8, coalesce($9, 100), coalesce($10, true), coalesce($12::text[], '{}'))
      on conflict (key) do update
         set label      = coalesce($11, place_attributes.label),
             kind       = coalesce($3, place_attributes.kind),
@@ -90,13 +90,15 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
             unit       = coalesce($8, place_attributes.unit),
             position   = coalesce($9, place_attributes.position),
             active     = coalesce($10, place_attributes.active),
+            comes_with = coalesce($12::text[], place_attributes.comes_with),
             updated_at = now()
      returning *`,
     // The label is `$2` on insert and `$11` on update: binding the key as the
     // label would rename "Kid friendly" to "kid-friendly" the first time
     // anything else about it changed (Codex, 14 Sep 2026).
     [k, label ?? k, kind ?? null, blurb ?? null, options ?? null, rangeMin ?? null, rangeMax ?? null, unit ?? null,
-     position ?? null, active == null ? null : Boolean(active), label ?? null]);
+     position ?? null, active == null ? null : Boolean(active), label ?? null,
+     comesWith === undefined ? null : [...new Set((comesWith ?? []).map(String).filter((c) => c && c !== k))]]);
   forget();
   return rows[0];
 }
@@ -196,6 +198,24 @@ export function resolveFor({ subcategory }, own, vocab) {
     // `setAt`, not `from`: a range's own lower bound is called `from`, and
     // naming the provenance the same thing silently ate it.
     out[a.key] = { ...value, setAt: mine ? 'place' : 'subcategory' };
+  }
+  // What the labels it already has bring with them (owner, 14 Sep 2026: "let us
+  // add labels that are always added when one label is added"). Marked so a
+  // screen can draw it in lime and never confuse it with something somebody
+  // chose. Anything already said stands: what comes along never overwrites.
+  const byKey = new Map((vocab?.list ?? []).map((a) => [a.key, a]));
+  const seen = new Set(Object.keys(out));
+  const queue = [...seen];
+  while (queue.length) {
+    const from = byKey.get(queue.shift());
+    for (const k of from?.comes_with ?? []) {
+      if (seen.has(k)) continue;
+      const brought = byKey.get(k);
+      if (!brought?.active) continue;
+      seen.add(k);
+      queue.push(k);
+      out[k] = { yesno: true, setAt: 'came', came: from.key };
+    }
   }
   return out;
 }
