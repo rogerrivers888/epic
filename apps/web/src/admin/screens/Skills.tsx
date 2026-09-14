@@ -532,7 +532,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
             <Text style={s.identActText}>Look up the {counts.nothing} nobody has looked up</Text>
           </Press>
         ) : null}
-        {waiting.length ? (
+        {waiting.length || counts.empty ? (
           <Press
             onPress={async () => {
               setBusy('Reading Wikidata again…');
@@ -542,7 +542,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
             accessibilityRole="button"
             style={s.identAct}
           >
-            <Text style={s.identActText}>Look again at all {waiting.length}</Text>
+            <Text style={s.identActText}>Look again at all {waiting.length + counts.empty}</Text>
           </Press>
         ) : null}
         {waiting.length ? (

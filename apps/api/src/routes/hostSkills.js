@@ -812,10 +812,6 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
           if (tried > 1) await new Promise((r) => setTimeout(r, 150));
           const candidates = await searchEntities(tag.label, { limit: 5 });
           asked += 1;
-          // Written down whether or not anything came back: 123 of the 465 have
-          // no Wikidata entry at all, and counting them as never looked up sent
-          // every later run back over them for nothing (14 Sep 2026).
-          await repo.searched([tag.key]);
           const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
           // Exact means *one* entity is called this, not "the first one that is".
           // Wikidata has several items called foraging — the human activity and
@@ -829,11 +825,18 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
           const named = candidates.filter((c) => same(c.label, tag.label));
           const real = named.filter((c) => namesTheThing(c.description));
           const best = real[0] ?? named[0] ?? candidates[0];
-          if (!best) continue;
-          await repo.propose({
-            key: tag.key, qid: best.qid, label: best.label, note: best.description,
-            exact: real.length === 1 && named.length === real.length,
-          });
+          if (best) {
+            await repo.propose({
+              key: tag.key, qid: best.qid, label: best.label, note: best.description,
+              exact: real.length === 1 && named.length === real.length,
+            });
+          }
+          // Written down last, and only once the proposal is safely saved:
+          // marking it first meant a failed write left a tag with neither an
+          // identifier nor a proposal, looking like a successful empty result
+          // and skipped for ever (Codex, 14 Sep 2026). 123 of the 465 really do
+          // have no Wikidata entry, and this is what tells those apart.
+          await repo.searched([tag.key]);
         } catch { /* one word failing is not the run failing */ }
       }
       } finally { lookingUp = false; }

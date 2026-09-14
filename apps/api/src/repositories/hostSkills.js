@@ -280,6 +280,9 @@ export async function saveTag({ key, label, parentKey, categoryKey, source, exte
        -- flag says whether the caller named the field at all (Codex, 13 Sep 2026).
        source = case when $11 then $5 else host_skill_tags.source end,
        external_id = case when $12 then $6 else host_skill_tags.external_id end,
+       -- Clearing the identifier by hand puts the tag back to the runs, which
+       -- it cannot do while it still reads as searched (Codex, 14 Sep 2026).
+       searched_at = case when $12 and $6 is null then null else host_skill_tags.searched_at end,
        note = case when $13 then $7 else host_skill_tags.note end,
        active = coalesce($8, host_skill_tags.active),
        updated_at = now()
@@ -426,11 +429,18 @@ export async function refusedIdentifiers(client) {
   return rows;
 }
 
-/** A person changes their mind: the tag goes back to the runs. */
+/**
+ * A person changes their mind: the tag goes back to the runs.
+ *
+ * The search marker goes with it. Without that, a reopened tag reads as
+ * searched-and-empty and no ordinary run would ever pick it up again (Codex,
+ * 14 Sep 2026).
+ */
 export async function reopenIdentifiers(keys, client) {
   if (!keys?.length) return 0;
   const { rowCount } = await on(client)(
-    `update host_skill_tags set no_identifier = false, updated_at = now() where key = any($1)`,
+    `update host_skill_tags set no_identifier = false, searched_at = null, updated_at = now()
+      where key = any($1)`,
     [keys],
   );
   return rowCount;
