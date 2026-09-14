@@ -386,7 +386,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
           screen's own (owner, 13 Sep 2026: merge them). It is the same work seen
           from the other end — the words and the rules are written here, and what
           they actually did to real places is behind this door. */}
-      {door === 'shelves' ? <Shelves canManage={canManage} /> : null}
+      {door === 'shelves' ? <Shelves canManage={canManage} embedded /> : null}
 
       {tax && door === 'ours' ? (
         <OurLabels tax={tax} wide={wide} canManage={canManage} onChanged={changed} />

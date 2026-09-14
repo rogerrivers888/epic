@@ -501,16 +501,18 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
   };
 
   if (!state) return null;
-  const { counts, waiting } = state;
+  const { counts, waiting, refused } = state;
   const exact = waiting.filter((w) => w.proposed_exact);
   const close = waiting.filter((w) => !w.proposed_exact);
-  const left = counts.nothing + counts.exact + counts.close;
+  // Every active tag, refusals included: a refused tag is still a tag, and
+  // leaving it out made ten of fifteen read as ten of ten (Codex, 14 Sep 2026).
+  const all = counts.named + counts.nothing + counts.exact + counts.close + counts.refused;
 
   return (
     <View style={s.identifiers}>
       <View style={s.identBar}>
         <Text style={[type.small, { flex: 1, minWidth: 0 }]}>
-          {counts.named} of {counts.named + left} tags are named
+          {counts.named} of {all} tags are named
           {counts.exact ? ` · ${counts.exact} matched letter for letter` : ''}
           {counts.close ? ` · ${counts.close} are close` : ''}
           {counts.refused ? ` · ${counts.refused} have none on purpose` : ''}
@@ -532,6 +534,21 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
         {waiting.length ? (
           <Press onPress={() => setOpen(!open)} accessibilityRole="button" style={s.identAct}>
             <Text style={s.identActText}>{open ? 'Hide' : `Review ${waiting.length}`}</Text>
+          </Press>
+        ) : null}
+        {/* Saying no is a decision, not a dead end: it can be taken back
+            (Codex, 14 Sep 2026). */}
+        {refused.length ? (
+          <Press
+            onPress={async () => {
+              setBusy('Putting them back…');
+              try { await api.adminSettleSkillIdentifiers({ keys: refused.map((r) => r.key), reopen: true }); await load(); onChanged(); }
+              finally { setBusy(null); }
+            }}
+            accessibilityRole="button"
+            style={s.identAct}
+          >
+            <Text style={s.identActText}>Look again at the {refused.length} set aside</Text>
           </Press>
         ) : null}
       </View>

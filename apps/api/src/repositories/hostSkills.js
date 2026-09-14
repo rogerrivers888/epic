@@ -384,6 +384,15 @@ export async function refuseProposals(keys, client) {
   return rowCount;
 }
 
+/** The tags a person said have no identifier, so the decision can be undone. */
+export async function refusedIdentifiers(client) {
+  const { rows } = await on(client)(
+    `select key, label from host_skill_tags where no_identifier and external_id is null and active
+      order by seen_count desc, key`,
+  );
+  return rows;
+}
+
 /** A person changes their mind: the tag goes back to the runs. */
 export async function reopenIdentifiers(keys, client) {
   if (!keys?.length) return 0;

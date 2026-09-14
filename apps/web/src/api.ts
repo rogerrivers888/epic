@@ -2022,6 +2022,7 @@ export const api = {
     request<{
       counts: { named: number; exact: number; close: number; refused: number; nothing: number };
       waiting: { key: string; label: string; proposed_id: string; proposed_label: string | null; proposed_note: string | null; proposed_exact: boolean; seen_count: number }[];
+      refused: { key: string; label: string }[];
     }>(`/api/admin/skills/identifiers${qs({ exact: p.exact ? 1 : undefined })}`),
   adminProposeSkillIdentifiers: (body: { limit?: number } = {}) =>
     post<{ started: number }>('/api/admin/skills/identifiers/propose', body),

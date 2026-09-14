@@ -746,11 +746,12 @@ adminRouter.get('/candidates', requires('manage_skills'), async (req, res, next)
  */
 adminRouter.get('/identifiers', requires('view_skills'), async (req, res, next) => {
   try {
-    const [counts, waiting] = await Promise.all([
+    const [counts, waiting, refused] = await Promise.all([
       repo.identifierCounts(),
       repo.identifierProposals({ exactOnly: req.query.exact === '1' }),
+      repo.refusedIdentifiers(),
     ]);
-    res.json({ counts, waiting });
+    res.json({ counts, waiting, refused });
   } catch (e) { next(e); }
 });
 
@@ -770,13 +771,17 @@ adminRouter.get('/identifiers', requires('view_skills'), async (req, res, next) 
 let lookingUp = false;
 adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, res, next) => {
   try {
-    // One run at a time. Two clicks used to send the same few hundred words to
-    // Wikidata twice over (Codex, 14 Sep 2026).
+    // One run at a time, and the flag is taken *before* the first await: two
+    // clicks arriving together both saw it clear while the queue was still
+    // being read, and both ran (Codex, 14 Sep 2026, twice).
     if (lookingUp) return res.json({ started: 0, already: true });
-    const limit = Math.min(600, Math.max(1, Number(req.body?.limit ?? 600)));
-    const todo = (await repo.withoutIdentifier()).slice(0, limit);
-    if (!todo.length) return res.json({ started: 0 });
     lookingUp = true;
+    let todo;
+    try {
+      const limit = Math.min(600, Math.max(1, Number(req.body?.limit ?? 600)));
+      todo = (await repo.withoutIdentifier()).slice(0, limit);
+    } catch (e) { lookingUp = false; throw e; }
+    if (!todo.length) { lookingUp = false; return res.json({ started: 0 }); }
     res.json({ started: todo.length });
     const household = await currentHousehold().catch(() => null);
     void (async () => {

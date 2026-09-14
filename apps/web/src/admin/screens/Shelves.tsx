@@ -94,7 +94,18 @@ function drawn(weights: ShelfWeights, order: MoodKey[], floor: number, max: numb
 
 // ---------------------------------------------------------------------------
 
-export function Shelves({ canManage }: { canManage: boolean }) {
+/**
+ * @param embedded  Drawn inside the Categories screen's own page rather than as
+ *   one of its own. Two vertical ScrollViews nested inside each other trap the
+ *   gesture on a phone and leave the inner content unreachable (Codex, 14 Sep
+ *   2026), so behind that door the page wrapper and its heading come off.
+ */
+/** The page, or nothing at all when this is drawn inside another one. */
+function Page({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded ? <View style={{ gap: spacing.lg }}>{children}</View> : <AdminPage>{children}</AdminPage>;
+}
+
+export function Shelves({ canManage, embedded = false }: { canManage: boolean; embedded?: boolean }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
 
@@ -214,7 +225,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
   const rows = section === 'find' ? found : section === 'food' ? food : items;
 
   return (
-    <AdminPage>
+    <Page embedded={embedded}>
       <PageHead
         title="Shelves"
         sub="What the home screen calls each place, and how to tell it when that is wrong"
@@ -455,7 +466,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
           ))}
         </Panel>
       ) : null}
-    </AdminPage>
+    </Page>
   );
 }
 
