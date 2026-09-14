@@ -242,8 +242,10 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
     // (Codex, 14 Sep 2026: the fine dining went out with the types).
     // Null, not empty, where this pass never saw a word: an empty object means
     // "looked, and they carry nothing", and only that should clear what an
-    // earlier sweep found (Codex, 14 Sep 2026).
-    c.secondary = (c.labels ?? []).length ? carried(c.labels) : null;
+    // earlier sweep found (Codex, 14 Sep 2026). A vocabulary we could not read
+    // is the same thing as not having looked -- otherwise one failed query
+    // wipes the labels off a whole area until its next sweep.
+    c.secondary = attrVocab && (c.labels ?? []).length ? carried(c.labels) : null;
   }
 
   // A place nobody has rated and nothing is known about is not "the top-rated
