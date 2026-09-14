@@ -31,7 +31,8 @@ import { Router } from 'express';
 import { requires } from '../access.js';
 import { query } from '../db.js';
 import * as lib from '../repositories/library.js';
-import * as shelfRules from '../repositories/shelfRules.js';
+import * as labelRepo from '../repositories/taxonomyLabels.js';
+import { parseLabel } from '../domain/labels.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import { currentHousehold } from './household.js';
 import {
@@ -387,6 +388,14 @@ shelves.delete('/rules/:id', requires('manage_library'), async (req, res, next) 
   try {
     const rule = await shelfRules.forgetRule(req.params.id);
     if (!rule) return res.status(404).json({ error: 'not_found' });
+    // Forgetting a rule about one provider word forgets what that word meant.
+    // Left behind, the mapping would keep filing the place through the rule
+    // said in our words and Forget would visibly do nothing (Codex, 14 Sep 2026).
+    if (rule.scope === 'labels' && (rule.labels ?? []).length === 1) {
+      const p = parseLabel(rule.labels[0]);
+      if (p) await labelRepo.pointAt(p.namespace, p.key, null);
+    }
+    if (rule.scope === 'kind' && rule.subject) await labelRepo.pointAt('wikidata', rule.subject, null);
     await query(
       `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, before)
        values ($1,$2,'shelf.forget','shelf_rule',$3,$4,$5)`,

@@ -420,7 +420,7 @@ export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {},
   const ourOwned = labelHits(ownerOnly(rules?.ours), ours);
   const ourHits = ourOwned.length ? ourOwned : labelHits(rules?.ours, ours);
   return place(
-    [['place', [ref]], ['ours', ourHits], ['labels', hits], ['kind', kinds], ['category', [category]]],
+    [['place', [ref]], ['labels', hits], ['ours', ourHits], ['kind', kinds], ['category', [category]]],
     rules,
     vocab,
     {
@@ -480,7 +480,11 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   const ours = ourLabelsOf(labels, vocab);
   const ourOwned = labelHits(ownerOnly(rules?.ours), ours);
   const ourLevel = ourOwned.length ? ourOwned : labelHits(rules?.ours, ours);
-  const chain = [['place', [ref]], ['ours', ourLevel], ['labels', level], ['experience', venue?.experiences ?? []]];
+  // `ours` sits *below* `labels`, not above it. The rules said in our words are
+  // one label each, and a combination the owner wrote by hand is more specific
+  // than any of them, so it has to keep winning until it too is said in our
+  // words (Codex, 14 Sep 2026).
+  const chain = [['place', [ref]], ['labels', level], ['ours', ourLevel], ['experience', venue?.experiences ?? []]];
 
   // Somewhere to eat is Food unless somebody has said otherwise about this
   // place or about its labels — an ice-cream parlour typed as a cafe can be
@@ -489,7 +493,7 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   // Google word goes on its own, and google.js has already read the whole set
   // of a food place's types with its primary-type and fast-food rules; those
   // must not be out-voted by one of the words (Codex, 13 Sep 2026).
-  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['ours', ourOwned], ['labels', owned]])) {
+  if (EATING.has(venue?.category) && !taught(rules, [['place', [ref]], ['labels', owned], ['ours', ourOwned]])) {
     const weights = { food: 1 };
     const fast = (venue?.styles ?? []).some((s) => s === 'fast-food' || s === 'takeaway');
     const drawer = fast ? 'fast-food' : FOOD_DRAWER[venue.category] ?? null;

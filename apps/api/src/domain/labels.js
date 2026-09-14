@@ -163,6 +163,9 @@ export function scopeFor(labels) {
 export function labelsOfRule(rule) {
   if (!rule) return [];
   if (rule.scope === 'labels') return rule.labels ?? [];
+  // A rule said in our words names our labels, not a provider's. Without this
+  // the screen draws it with a blank identity (Codex, 14 Sep 2026).
+  if (rule.scope === 'ours') return rule.labels ?? [];
   if (rule.scope === 'kind') return [`wikidata:${rule.subject}`];
   if (rule.scope === 'category') return [`atlas:${rule.subject}`];
   if (rule.scope === 'experience') return [`experience:${rule.subject}`];

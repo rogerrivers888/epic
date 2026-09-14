@@ -16,6 +16,7 @@
  */
 
 import { query } from '../db.js';
+import { forget as forgetTaxonomy } from './shelfTaxonomy.js';
 
 let known = false;
 
@@ -287,12 +288,16 @@ export async function pointAt(namespace, key, ourLabel) {
   if (!namespace || !key) return null;
   if (namespace === 'wikidata') {
     await query('update place_kinds set points_at = $2, updated_at = now() where qid = $1', [key, ourLabel ?? null]);
-    return ourLabel ?? null;
+  } else {
+    await query(
+      `insert into taxonomy_labels (namespace, key, points_at) values ($1, $2, $3)
+       on conflict (namespace, key) do update set points_at = excluded.points_at, updated_at = now()`,
+      [namespace, key, ourLabel ?? null]);
   }
-  await query(
-    `insert into taxonomy_labels (namespace, key, points_at) values ($1, $2, $3)
-     on conflict (namespace, key) do update set points_at = excluded.points_at, updated_at = now()`,
-    [namespace, key, ourLabel ?? null]);
+  // The resolver reads this mapping out of the taxonomy's five-second cache, so
+  // without this a word he has just remapped keeps landing where it used to for
+  // the next few seconds (Codex, 14 Sep 2026).
+  forgetTaxonomy();
   return ourLabel ?? null;
 }
 
