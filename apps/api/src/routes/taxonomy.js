@@ -38,13 +38,13 @@ import * as notSure from '../repositories/notSure.js';
 import { research } from '../domain/research.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
-import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
+import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet, venueForGoogleTypes } from '../domain/landing.js';
 import { suggestFor, sureDecisionFor, sureMappingFor, WHY_UNSURE } from '../domain/googleSuggest.js';
 import { examplesOfType } from '../sources/google.js';
 import { currentHousehold } from './household.js';
 import * as visitsRepo from '../repositories/visits.js';
-import { SHELF_FLOOR } from '../domain/moods.js';
+import { SHELF_FLOOR, shelvesForVenue } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
 
@@ -505,44 +505,27 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     // combination rule names several words and none of them answers alone, so
     // asking singly would call a place alone that Epic can in fact file (Codex,
     // 14 Sep 2026).
+
+    // One question, asked one way — by the resolver itself.
     //
-    // Two ways a companion word can save the place, and both have to be asked.
-    // A word that answers on its own, unless it has been explicitly decided —
-    // an excluded night club must not be read back as a bar through Google's
-    // own defaults. Or a combination rule that actually fires over what is
-    // left, which no single word would answer for (Codex, 14 Sep 2026, three
-    // passes: the short cut missed the combination, and dropping it let the
-    // defaults back in).
-    // One question, asked one way. A word that was explicitly decided — an
-    // excluded night club, a generic tourist attraction — is taken out of the
-    // set before anything reads it, or Google's own defaults put it back:
-    // night_club becomes bar and an excluded place is reported as filed under
-    // Pubs and bars (Codex, 14 Sep 2026).
+    // Rewriting it here got it wrong three times running: it missed the
+    // combinations no single word answers for, it let Google's defaults read an
+    // excluded night club back as a bar, it gave a single word precedence over
+    // a longer rule, and it never saw the rules written in our own words at all.
+    // So it is not rewritten. The words are turned into a place the way Google
+    // turns them into a place, and shelvesForVenue answers (Codex, 14 Sep 2026,
+    // four passes).
+    //
+    // A word that was explicitly decided — an excluded night club, a generic
+    // tourist attraction — comes out of the set before any of that, or the
+    // defaults put it back.
     const live = (types) => (types ?? []).filter((t) => !byKey.get(t)?.decision);
-    // Where a set of words files a place, or null. The primary is named, because
-    // Google reads the same words differently depending on which one leads: a
-    // museum with a cafe in it is an attraction, not a cafe.
     const filedAs = (types, primaryType) => {
       const words = live(types);
-      const first = primaryType && words.includes(primaryType)
-        ? [primaryType, ...words.filter((t) => t !== primaryType)]
-        : words;
-      for (const t of first) {
-        const sub = landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory;
-        if (sub) return sub;
-      }
-      // And the combinations, which no single word answers for.
-      const derived = labelsOf(venueForGoogleTypes(first, first.includes(primaryType) ? primaryType : null));
-      for (const subject of labelHits(rules?.labels, derived)) {
-        const sub = rules?.labels?.get(subject)?.subcategory;
-        if (sub) return sub;
-      }
-      return null;
+      if (!words.length) return null;
+      const venue = venueForGoogleTypes(words, words.includes(primaryType) ? primaryType : null);
+      return shelvesForVenue(venue, rules, tax.vocab).subcategory ?? null;
     };
-    // Where each place actually lands, asked of the resolver rather than guessed
-    // at from one word: a place filed by a combination has no single word that
-    // answers for it, so anything reading the words one at a time calls it
-    // unsettled and contradicts the count (Codex, 14 Sep 2026).
     for (const p of out.places) p.landsIn = filedAs(p.types, p.primaryType ?? null);
     // And how many the queried word is carrying on its own — the same question,
     // with that word taken away. If it *was* the primary, what is left has no

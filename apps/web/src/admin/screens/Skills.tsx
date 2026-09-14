@@ -451,6 +451,7 @@ function Vocabulary({ vocab, categories, kinds = [], canManage }: {
         <Text style={type.small}>{rows ? `${rows.length} shown` : ''}{unmapped ? ` · ${unmapped} unmapped` : ''}</Text>
       </View>
       {said ? <Text style={type.small}>{said}</Text> : null}
+      {vocab === 'tag' && canManage ? <Identifiers onChanged={load} /> : null}
       {(rows ?? []).map((r) => (
         <View key={r.key}>
           <Press onPress={() => setOpen(open === r.key ? null : r.key)} accessibilityRole="button" style={[s.row, open === r.key && { backgroundColor: colors.selected }]}>
@@ -470,6 +471,101 @@ function Vocabulary({ vocab, categories, kinds = [], canManage }: {
         </View>
       ))}
     </Section>
+  );
+}
+
+/**
+ * Naming the vocabulary, a few hundred tags at a time.
+ *
+ * Doing this one row at a time is one act per tag, and there are hundreds with
+ * nothing on them. A run asks Wikidata once per tag and puts its answer
+ * *beside* the tag; nothing becomes an identifier without a tap here, because a
+ * plain search cannot tell *foraging* the human activity from *foraging* the
+ * animal behaviour. The ones that matched letter for letter are separated out,
+ * because those are the only ones worth taking in a batch.
+ */
+function Identifiers({ onChanged }: { onChanged: () => void }) {
+  const [state, setState] = useState<Awaited<ReturnType<typeof api.adminSkillIdentifiers>> | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try { setState(await api.adminSkillIdentifiers()); } catch { /* the list is an aid, not the screen */ }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const settle = async (keys: string[], take: boolean) => {
+    setBusy(take ? 'Taking…' : 'Clearing…');
+    try { await api.adminSettleSkillIdentifiers({ keys, take }); await load(); onChanged(); }
+    finally { setBusy(null); }
+  };
+
+  if (!state) return null;
+  const { counts, waiting } = state;
+  const exact = waiting.filter((w) => w.proposed_exact);
+  const close = waiting.filter((w) => !w.proposed_exact);
+  const left = counts.nothing + counts.exact + counts.close;
+
+  return (
+    <View style={s.identifiers}>
+      <View style={s.identBar}>
+        <Text style={[type.small, { flex: 1, minWidth: 0 }]}>
+          {counts.named} of {counts.named + left} tags are named
+          {counts.exact ? ` · ${counts.exact} matched letter for letter` : ''}
+          {counts.close ? ` · ${counts.close} are close` : ''}
+          {counts.nothing ? ` · ${counts.nothing} have nothing yet` : ''}
+        </Text>
+        {counts.nothing ? (
+          <Press
+            onPress={async () => {
+              setBusy('Reading Wikidata…');
+              try { await api.adminProposeSkillIdentifiers({}); } finally { setBusy(null); }
+              setTimeout(() => void load(), 4000);
+            }}
+            accessibilityRole="button"
+            style={s.identAct}
+          >
+            <Text style={s.identActText}>Look up the {counts.nothing} with nothing</Text>
+          </Press>
+        ) : null}
+        {waiting.length ? (
+          <Press onPress={() => setOpen(!open)} accessibilityRole="button" style={s.identAct}>
+            <Text style={s.identActText}>{open ? 'Hide' : `Review ${waiting.length}`}</Text>
+          </Press>
+        ) : null}
+      </View>
+      {busy ? <Text style={type.small}>{busy} It reads in the background; this list fills as it goes.</Text> : null}
+      {open ? (
+        <View>
+          {exact.length ? (
+            <Press onPress={() => void settle(exact.map((w) => w.key), true)} accessibilityRole="button" style={s.identTakeAll}>
+              <Text style={s.identActText}>Take all {exact.length} that matched letter for letter</Text>
+            </Press>
+          ) : null}
+          {[...exact, ...close].map((w) => (
+            <View key={w.key} style={s.identRow}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.rowLabel} numberOfLines={1}>{w.label}</Text>
+                <Text style={type.small} numberOfLines={2}>
+                  {w.proposed_label} · {w.proposed_id}
+                  {w.proposed_exact ? '' : ' — the wording is not the same'}
+                  {w.proposed_note ? ` · ${w.proposed_note}` : ''}
+                </Text>
+              </View>
+              <Press onPress={() => void settle([w.key], true)} accessibilityRole="button" style={s.identAct}>
+                <Text style={s.identActText}>Take it</Text>
+              </Press>
+              <Press onPress={() => void settle([w.key], false)} accessibilityRole="button" style={s.identAct}>
+                <Text style={s.identActText}>Not this</Text>
+              </Press>
+            </View>
+          ))}
+          <Text style={type.tiny}>
+            A tag with no identifier is a legitimate answer — it reads as unmapped and nothing a host or a guest sees changes.
+          </Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -752,6 +848,12 @@ const s = StyleSheet.create({
   rowLabel: { ...type.small, fontWeight: '700', color: colors.ink },
   pos: { ...type.small, color: colors.inkMuted, width: 20, fontVariant: ['tabular-nums'] },
   detail: { gap: 12, paddingVertical: 12, paddingLeft: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  identifiers: { gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  identBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  identAct: { paddingVertical: 4 },
+  identActText: { ...type.small, fontWeight: '700', color: colors.ink, textDecorationLine: 'underline' },
+  identTakeAll: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  identRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   input: { flex: 1, ...type.small, color: colors.ink, paddingVertical: 6, outlineStyle: 'none' as any },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },

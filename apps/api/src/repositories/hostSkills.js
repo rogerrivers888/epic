@@ -290,6 +290,84 @@ export async function saveTag({ key, label, parentKey, categoryKey, source, exte
   return rows[0];
 }
 
+/**
+ * Tags with no identifier, oldest work first — what a proposal run has to read.
+ */
+export async function withoutIdentifier(client) {
+  const { rows } = await on(client)(
+    `select key, label from host_skill_tags where external_id is null and active order by seen_count desc, key`,
+  );
+  return rows;
+}
+
+/**
+ * What a run put forward. It goes beside the identifier, never into it: a plain
+ * Wikidata search puts *fossil collector* above *fossil collecting*, and only a
+ * person can tell which sense Epic meant.
+ */
+export async function propose({ key, qid, label, note, exact }, client) {
+  await on(client)(
+    `update host_skill_tags
+        set proposed_id = $2, proposed_label = $3, proposed_note = $4, proposed_exact = $5, proposed_at = now()
+      where key = $1 and external_id is null`,
+    [key, qid ?? null, label ?? null, note ?? null, Boolean(exact)],
+  );
+}
+
+/** The identifier proposals still waiting on a person, the letter-for-letter ones first. */
+export async function identifierProposals({ exactOnly = false } = {}, client) {
+  const { rows } = await on(client)(
+    `select key, label, proposed_id, proposed_label, proposed_note, proposed_exact, seen_count
+       from host_skill_tags
+      where proposed_id is not null and external_id is null and active
+        ${exactOnly ? 'and proposed_exact' : ''}
+      order by proposed_exact desc nulls last, seen_count desc, key`,
+  );
+  return rows;
+}
+
+/** How much is left to do, for the bar at the top of the tags list. */
+export async function identifierCounts(client) {
+  const { rows } = await on(client)(
+    `select count(*) filter (where external_id is not null) as named,
+            count(*) filter (where external_id is null and proposed_id is not null and proposed_exact) as exact,
+            count(*) filter (where external_id is null and proposed_id is not null and not proposed_exact) as close,
+            count(*) filter (where external_id is null and proposed_id is null) as nothing
+       from host_skill_tags where active`,
+  );
+  const r = rows[0] ?? {};
+  return { named: Number(r.named ?? 0), exact: Number(r.exact ?? 0), close: Number(r.close ?? 0), nothing: Number(r.nothing ?? 0) };
+}
+
+/**
+ * A person takes the proposal. Only then does it become the identifier, and the
+ * proposal is cleared so the list is always the work left.
+ */
+export async function acceptProposals(keys, client) {
+  if (!keys?.length) return 0;
+  const { rowCount } = await on(client)(
+    `update host_skill_tags
+        set external_id = proposed_id, source = 'wikidata',
+            proposed_id = null, proposed_label = null, proposed_note = null, proposed_exact = null,
+            updated_at = now()
+      where key = any($1) and external_id is null and proposed_id is not null`,
+    [keys],
+  );
+  return rowCount;
+}
+
+/** A person says no. The tag keeps no identifier, which is a legitimate answer. */
+export async function refuseProposals(keys, client) {
+  if (!keys?.length) return 0;
+  const { rowCount } = await on(client)(
+    `update host_skill_tags
+        set proposed_id = null, proposed_label = null, proposed_note = null, proposed_exact = null, updated_at = now()
+      where key = any($1)`,
+    [keys],
+  );
+  return rowCount;
+}
+
 export async function saveFacet({ key, kind, label, parentKey, lat, lng, source, externalId, note, active, seeded = false }, client) {
   const name = await labelFor('host_facets', key, label, client);
   const { rows } = await on(client)(

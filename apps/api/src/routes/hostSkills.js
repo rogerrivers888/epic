@@ -742,6 +742,75 @@ adminRouter.get('/candidates', requires('manage_skills'), async (req, res, next)
 });
 
 /**
+ * GET /api/admin/skills/identifiers — how much of the vocabulary is named.
+ */
+adminRouter.get('/identifiers', requires('view_skills'), async (req, res, next) => {
+  try {
+    const [counts, waiting] = await Promise.all([
+      repo.identifierCounts(),
+      repo.identifierProposals({ exactOnly: req.query.exact === '1' }),
+    ]);
+    res.json({ counts, waiting });
+  } catch (e) { next(e); }
+});
+
+/**
+ * POST /api/admin/skills/identifiers/propose — one run over every unnamed tag.
+ *
+ * It writes nothing into `external_id`. Wikidata is asked once per tag and the
+ * best candidate is put *beside* the tag with the description that tells the
+ * senses apart, because a plain search cannot: *foraging* has an
+ * animal-behaviour sense and *fossil collector* outranks *fossil collecting*.
+ * A proposal whose wording matches letter for letter is marked exact, which is
+ * the only thing safe to accept in a batch.
+ *
+ * It answers straight away and reads in the background — 465 lookups is well
+ * past what a gateway will hold a request open for.
+ */
+adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, res, next) => {
+  try {
+    const limit = Math.min(600, Math.max(1, Number(req.body?.limit ?? 600)));
+    const todo = (await repo.withoutIdentifier()).slice(0, limit);
+    res.json({ started: todo.length });
+    const household = await currentHousehold().catch(() => null);
+    void (async () => {
+      let asked = 0;
+      for (const tag of todo) {
+        try {
+          const candidates = await searchEntities(tag.label, { limit: 5 });
+          asked += 1;
+          const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+          const exact = candidates.find((c) => same(c.label, tag.label));
+          const best = exact ?? candidates[0];
+          if (!best) continue;
+          await repo.propose({
+            key: tag.key, qid: best.qid, label: best.label, note: best.description, exact: Boolean(exact),
+          });
+        } catch { /* one word failing is not the run failing */ }
+      }
+      await providerCalls.record(household?.id ?? null, 'wikidata', 'skills identifier run', asked).catch(() => {});
+    })();
+  } catch (e) { next(e); }
+});
+
+/**
+ * PUT /api/admin/skills/identifiers — a person accepts or refuses proposals.
+ *
+ * This is the only thing that turns a proposal into an identifier. Refusing
+ * leaves the tag with none, which is a legitimate state and reads as unmapped.
+ */
+adminRouter.put('/identifiers', requires('manage_skills'), async (req, res, next) => {
+  try {
+    const keys = Array.isArray(req.body?.keys) ? req.body.keys.map((k) => str(k, 80)).filter(Boolean) : [];
+    if (!keys.length) throw bad('Which tags?');
+    const took = req.body?.take === false
+      ? await repo.refuseProposals(keys)
+      : await repo.acceptProposals(keys);
+    res.json({ changed: took, counts: await repo.identifierCounts() });
+  } catch (e) { next(e); }
+});
+
+/**
  * GET /api/admin/skills/parents?qid= — what Wikidata says it is a subclass of.
  *
  * A suggestion for a person placing a tag, and nothing else. P279 never writes
