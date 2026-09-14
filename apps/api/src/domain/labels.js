@@ -152,6 +152,17 @@ export function labelHits(labelRules, labels) {
  */
 export function scopeFor(labels) {
   const { labels: clean, subject } = canonical(labels);
+  // Our own words are a rule said in our words. They are stored bare, because
+  // that is what a place's words are turned into before a rule sees them;
+  // stored namespaced they would be accepted and never fire (Codex, 14 Sep 2026).
+  const ours = clean.filter((l) => parseLabel(l)?.namespace === 'epic');
+  if (ours.length) {
+    if (ours.length !== clean.length) {
+      throw Object.assign(new Error('A rule is written in our words or in a provider\'s, never both.'), { status: 400 });
+    }
+    const bare = canonical(ours.map((l) => parseLabel(l).key));
+    return { scope: 'ours', subject: bare.subject, labels: bare.labels };
+  }
   if (clean.length === 1) {
     const one = parseLabel(clean[0]);
     if (one?.namespace === 'wikidata') return { scope: 'kind', subject: one.key, labels: clean };

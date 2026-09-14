@@ -203,6 +203,18 @@ export async function list({ namespace = null, q = null, seenOnly = false, limit
        select namespace, key, label, note, seen_count, active, seeded, decision from taxonomy_labels
        union all
        select 'wikidata', qid, label, category, seen_count, admit, true, null from place_kinds
+       union all
+       -- Our own words, which every provider's word is mapped to and every
+       -- rule is written in. They live in the subcategory and secondary-label
+       -- vocabularies rather than here, and the screen has to be able to search
+       -- them to write a rule at all (Codex, 14 Sep 2026).
+       select 'epic', key, label, 'a primary label — one thing a place is',
+              (select count(*)::int from taxonomy_labels t where t.points_at = shelf_subcategories.key),
+              active, seeded, null
+         from shelf_subcategories
+       union all
+       select 'epic', key, label, 'a secondary label — something true about a place', 0, active, seeded, null
+         from place_attributes
      )
      select * from all_labels
      ${where.length ? `where ${where.join(' and ')}` : ''}
@@ -219,6 +231,11 @@ export async function counts() {
        select namespace, seen_count from taxonomy_labels
        union all
        select 'wikidata', seen_count from place_kinds
+       union all
+       select 'epic', (select count(*)::int from taxonomy_labels t where t.points_at = shelf_subcategories.key)
+         from shelf_subcategories
+       union all
+       select 'epic', 0 from place_attributes
      )
      select namespace, count(*)::int as total, count(*) filter (where seen_count > 0)::int as seen
        from all_labels group by namespace`);
