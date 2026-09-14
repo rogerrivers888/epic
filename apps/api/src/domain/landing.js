@@ -105,6 +105,24 @@ const eventVenue = (source, key, experience) => ({
  * when the word cannot be a place on its own (an atlas word, a Wikidata type —
  * those go through the atlas side — or a tag the map reader refuses).
  */
+/**
+ * The venue Google's own `toVenue` builds for a whole set of its types, with the
+ * primary one in its place.
+ *
+ * Asking word by word is not the same thing: Google's reading is
+ * primary-sensitive, so a museum that also serves coffee is an attraction, not
+ * a cafe, and a secondary stadium does not make a place ticketed (Codex, 14 Sep
+ * 2026). Anything asking "what would Epic know from these words" has to go
+ * through here.
+ */
+export const venueForGoogleTypes = (types, primaryType = null) => googleVenue({
+  id: 'label',
+  displayName: { text: (types ?? [])[0] ?? 'label' },
+  types: types ?? [],
+  primaryType: primaryType ?? (types ?? [])[0] ?? null,
+  location: { latitude: 0, longitude: 0 },
+});
+
 export function venueForLabel(namespace, key) {
   switch (namespace) {
     case 'google':

@@ -35,7 +35,7 @@ import * as labelRepo from '../repositories/taxonomyLabels.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
-import { knownLabels, landingOf, landingOfSet, venueForSet } from '../domain/landing.js';
+import { knownLabels, landingOf, landingOfSet, venueForGoogleTypes } from '../domain/landing.js';
 import { suggestFor, sureDecisionFor, sureMappingFor } from '../domain/googleSuggest.js';
 import { examplesOfType } from '../sources/google.js';
 import { currentHousehold } from './household.js';
@@ -268,18 +268,19 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       if (!row || row.decision) return false;
       return Boolean(landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory);
     };
-    const combinationFires = (types) => {
-      // The *derived* set, not the raw words: a rule may be written against the
-      // experiences the words read into, and the live resolver sees those
-      // (Codex, 14 Sep 2026).
-      const derived = labelsOf(venueForSet(types.map((t) => `google:${t}`)));
+    // The derived set, built the way Google builds it for the whole place: a
+    // rule may name the experiences the words read into, and that reading
+    // depends on which type is primary (Codex, 14 Sep 2026).
+    const combinationFires = (types, primaryType) => {
+      const derived = labelsOf(venueForGoogleTypes(types, primaryType));
       const hits = labelHits(rules?.labels, derived);
       return hits.some((subject) => rules?.labels?.get(subject)?.subcategory);
     };
     const alone = out.places.filter((p) => {
       const rest = (p.types ?? []).filter((t) => t !== parsed.key);
       if (!rest.length) return true;
-      return !rest.some(answersAlone) && !combinationFires(rest);
+      const primary = p.primaryType && p.primaryType !== parsed.key ? p.primaryType : rest[0] ?? null;
+      return !rest.some(answersAlone) && !combinationFires(rest, primary);
     }).length;
     const alsoCalled = [...seen.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
