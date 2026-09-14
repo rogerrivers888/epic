@@ -98,7 +98,8 @@ export const monthLabel = (key: string) => {
  * say; `stats` is the new part, and is what the kicker is counting.
  */
 export function PageHead({ title, sub, kicker, stats, right }: {
-  title: string;
+  /** Absent where the page already has a heading and this is a band inside it. */
+  title?: string;
   sub?: string;
   /** The uppercase line over the name — "465 OF 485 ANSWERED". */
   kicker?: string;
@@ -113,7 +114,7 @@ export function PageHead({ title, sub, kicker, stats, right }: {
     <View style={styles.band}>
       <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 4 }}>
         {kicker ? <Text style={styles.bandKicker}>{kicker}</Text> : null}
-        <Text style={[styles.bandTitle, width < 900 && styles.bandTitlePhone]}>{title}</Text>
+        {title ? <Text style={[styles.bandTitle, width < 900 && styles.bandTitlePhone]}>{title}</Text> : null}
         {sub ? <Text style={type.small}>{sub}</Text> : null}
       </View>
       {stats?.length ? (

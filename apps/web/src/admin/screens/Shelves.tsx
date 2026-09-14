@@ -226,9 +226,12 @@ export function Shelves({ canManage, embedded = false }: { canManage: boolean; e
 
   return (
     <Page embedded={embedded}>
+      {/* Behind the Categories door the page already has a heading, and a second
+          one saying Shelves under it reads as a mistake (Codex, 14 Sep 2026).
+          The action is not a heading and stays either way. */}
       <PageHead
-        title="Shelves"
-        sub="What the home screen calls each place, and how to tell it when that is wrong"
+        title={embedded ? undefined : 'Shelves'}
+        sub={embedded ? undefined : 'What the home screen calls each place, and how to tell it when that is wrong'}
         right={canManage ? (
           <Button
             label="Name the types"
