@@ -705,14 +705,29 @@ router.patch('/host/offers/:id', async (req, res, next) => {
     if (b.tags !== undefined) await skills.setOfferSkills(offer.id, 'tag', list(b.tags, TAG_CAP + 2));
     if (b.facets !== undefined) await skills.setOfferSkills(offer.id, 'facet', list(b.facets, FACET_CAP + 2));
     if (b.tags !== undefined && b.categoryKey === undefined) {
+      /**
+       * Decided under the offer's own lock, against what is in the row now.
+       *
+       * `updated` is this request's snapshot, and a second tab saving an
+       * explicit Change while this one was resolving wordings would be
+       * overwritten by a derivation taken before their choice existed (Codex,
+       * 14 Sep 2026). So the comparison is made against a fresh read behind the
+       * lock, and the write happens there.
+       *
+       * Including when nothing derives one any more — every tag removed, or all
+       * of them now words Epic has not heard. Leaving the old inference behind
+       * would list the offer under something it is no longer about; clearing it
+       * puts the question back at Publish (Codex, 13 Sep 2026).
+       */
       const carried = await skills.offerSkills(offer.id);
       const derived = categoryFrom(carried.filter((r) => r.vocab === 'tag' && r.target_key));
-      const chosen = updated.category_key && updated.category_key !== before;
-      // Including when nothing derives one any more — every tag removed, or all
-      // of them now words Epic has not heard. Leaving the old inference behind
-      // would list the offer under something it is no longer about; clearing it
-      // puts the question back at Publish (Codex, 13 Sep 2026).
-      if (!chosen && derived !== updated.category_key) updated = await repo.updateOffer(offer.id, { categoryKey: derived });
+      const after = await withTransaction(async (client) => {
+        const { rows: [now] } = await client.query('select category_key from host_offers where id = $1 for update', [offer.id]);
+        const chosen = now?.category_key && now.category_key !== before;
+        if (chosen || derived === now?.category_key) return null;
+        return repo.updateOffer(offer.id, { categoryKey: derived }, client);
+      });
+      if (after) updated = after;
     }
     /**
      * A live offer edited into a state it could not have been published in.
