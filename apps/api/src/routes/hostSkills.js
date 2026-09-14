@@ -744,9 +744,15 @@ adminRouter.put('/credential-type', requires('manage_skills'), async (req, res, 
      */
     const nowGated = type.gates_categories ?? [];
     const before = new Set(was?.gates_categories ?? []);
+    const hostsBefore = new Set(was?.host_types ?? []);
+    // Stricter by any of its four axes: a bucket added, evidence now asked for,
+    // the whole type switched back on — or a kind of host newly covered by a
+    // rule that was already a condition, which is the same thing for everyone
+    // who has just been brought inside it (Codex, 14 Sep 2026).
     const stricter = nowGated.filter((c) => !before.has(c)).length > 0
       || (type.evidence_required && !was?.evidence_required)
-      || (was?.active === false && type.active);
+      || (was?.active === false && type.active)
+      || (nowGated.length > 0 && (type.host_types ?? []).some((h) => !hostsBefore.has(h)));
     const affected = stricter ? await repo.liveOffersIn(nowGated) : [];
     const paused = await pauseWhatNoLongerQualifies(affected.map((o) => o.id));
     res.json({ type, paused });

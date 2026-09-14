@@ -94,7 +94,12 @@ export function TagPicker({
         if (!live) return;
         setRows(r.suggestions.filter((s) => !held.has(s.key)));
         setUnmatched(r.suggestions.length === 0 ? term : null);
-      } catch { if (live) setRows([]); }
+      } catch {
+        // Both, not just the rows: leaving the last query's unmatched word
+        // behind would offer them one word while the field showed another, and
+        // tapping Add would have saved the wrong one (Codex, 14 Sep 2026).
+        if (live) { setRows([]); setUnmatched(null); }
+      }
     }, 110);
     return () => { live = false; clearTimeout(timer); };
   }, [q, vocab, guest, category, held]);
