@@ -34,8 +34,8 @@ import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
-import { NAMESPACES, labelHits, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
-import { knownLabels, landingOf, landingOfSet } from '../domain/landing.js';
+import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
+import { knownLabels, landingOf, landingOfSet, venueForSet } from '../domain/landing.js';
 import { suggestFor, sureDecisionFor, sureMappingFor } from '../domain/googleSuggest.js';
 import { examplesOfType } from '../sources/google.js';
 import { currentHousehold } from './household.js';
@@ -269,7 +269,11 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       return Boolean(landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory);
     };
     const combinationFires = (types) => {
-      const hits = labelHits(rules?.labels, types.map((t) => `google:${t}`));
+      // The *derived* set, not the raw words: a rule may be written against the
+      // experiences the words read into, and the live resolver sees those
+      // (Codex, 14 Sep 2026).
+      const derived = labelsOf(venueForSet(types.map((t) => `google:${t}`)));
+      const hits = labelHits(rules?.labels, derived);
       return hits.some((subject) => rules?.labels?.get(subject)?.subcategory);
     };
     const alone = out.places.filter((p) => {

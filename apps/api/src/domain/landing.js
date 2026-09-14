@@ -192,7 +192,19 @@ export function landingOfSet(labels, { kindCategory = null } = {}, rules = NO_RU
     return shelvesForAtlas({ category: atlas ?? kindCategory, kinds, labels: extra }, rules, vocab);
   }
 
-  // One venue carrying everything the words say.
+  return shelvesForVenue(venueForSet(rest), rules, vocab);
+}
+
+/**
+ * One venue carrying everything a set of words says, as each provider's own
+ * `toVenue` would build it. Exported so a caller can ask what the *derived*
+ * label set is — the experiences and venue kinds the words read into — rather
+ * than only the raw words, which is what a combination rule may be written
+ * against (Codex, 14 Sep 2026).
+ */
+export function venueForSet(parsed) {
+  const rest = (parsed ?? []).map((p) => (typeof p === 'string' ? parseLabel(p) : p)).filter(Boolean)
+    .filter((p) => p.namespace !== 'wikidata' && p.namespace !== 'atlas');
   const merged = { source: 'epic', sourcePlaceId: 'try', name: 'try', category: null, experiences: [], styles: [], labels: [] };
   for (const p of rest) {
     const v = venueForLabel(p.namespace, p.key);
@@ -206,5 +218,5 @@ export function landingOfSet(labels, { kindCategory = null } = {}, rules = NO_RU
     if (v.goodForChildren != null) merged.goodForChildren = v.goodForChildren;
   }
   if (!merged.category) merged.category = 'attraction';
-  return shelvesForVenue(merged, rules, vocab);
+  return merged;
 }
