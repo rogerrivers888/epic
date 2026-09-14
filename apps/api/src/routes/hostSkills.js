@@ -678,7 +678,16 @@ adminRouter.post('/queue/:id', requires('manage_skills'), async (req, res, next)
       const saved = p.vocab === 'facet'
         ? await repo.saveFacet({ key, label, kind: str(req.body?.kind, 20) ?? 'subject', parentKey, note: str(req.body?.note, 400), source: str(req.body?.source, 40), externalId: str(req.body?.externalId, 40) }, client)
         : await repo.saveTag({ key, label, parentKey, categoryKey, note: str(req.body?.note, 400), source: str(req.body?.source, 40), externalId: str(req.body?.externalId, 40) }, client);
-      await repo.addAlias(p.vocab, normalise(label), key, label, client);
+      /**
+       * The new row has to answer to its own name.
+       *
+       * If that wording is already another row's alias this stands aside — and
+       * ignoring that left a canonical row whose own label searched to
+       * somebody else (Codex, 14 Sep 2026). Inside the transaction, so the
+       * refusal takes the row and the decision with it.
+       */
+      const named = await repo.addAlias(p.vocab, normalise(label), key, label, client);
+      if (!named) throw bad(`Something else already answers to “${label}”. Merge into it, or give this one a name of its own.`, 'already_exists');
       await repo.addAlias(p.vocab, p.norm, key, p.raw, client, { steal: true });
       const moved = await repo.repoint(p.vocab, p.norm, key, client);
       return { proposal, saved, moved };

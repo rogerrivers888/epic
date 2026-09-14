@@ -305,3 +305,16 @@ test('one word finds both vocabularies, in both directions', async () => {
     assert.ok(oldWordsFor(bucket).includes(old), `${old} → ${bucket} → back`);
   }
 });
+
+test('a plural meets its singular, including the awkward ones', () => {
+  // The fold decides whether two hosts typing the same thing meet before an
+  // administrator sees them, so the words it gets wrong are duplicates in the
+  // queue for ever (Codex, 14 Sep 2026).
+  for (const [one, many] of [
+    ['house', 'houses'], ['course', 'courses'], ['horse', 'horses'],
+    ['glass', 'glasses'], ['church', 'churches'], ['dish', 'dishes'], ['box', 'boxes'],
+    ['lens', 'lenses'], ['gas', 'gases'], ['fossil', 'fossils'], ['ammonite', 'ammonites'],
+  ]) {
+    assert.equal(normalise(one), normalise(many), `${one} / ${many}`);
+  }
+});

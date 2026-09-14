@@ -76,7 +76,16 @@ function singular(word) {
   if (word.length < 4 || KEEPS_ITS_S.has(word)) return word;
   if (/[^aeiou]ies$/.test(word)) return `${word.slice(0, -3)}y`;          // ammonites stays; potteries → pottery
   if (/(ss|us|is)$/.test(word)) return word;                              // glass, fungus, basis
-  if (/(ches|shes|xes|zes|ses)$/.test(word)) return word.slice(0, -2);    // churches → church
+  if (/sses$/.test(word)) return word.slice(0, -2);                       // glasses → glass
+  // `-ses` takes one letter, not two: the singular of *houses*, *courses* and
+  // *horses* keeps its e, and taking two gave `hous` — so the plural and the
+  // singular stopped meeting and each raised its own proposal (Codex,
+  // 14 Sep 2026). Unless two letters lands on a word that keeps its own s,
+  // which is how *lenses* finds *lens*.
+  if (/ses$/.test(word)) {
+    return KEEPS_ITS_S.has(word.slice(0, -2)) ? word.slice(0, -2) : word.slice(0, -1);
+  }
+  if (/(ches|shes|xes|zes)$/.test(word)) return word.slice(0, -2);        // churches → church
   if (/s$/.test(word)) return word.slice(0, -1);                          // fossils → fossil
   return word;
 }
