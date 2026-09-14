@@ -265,11 +265,14 @@ taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res
           // A parent comes back as a name, which is not a venue reference. It is
           // kept as a name and only becomes a proposal where the name matches a
           // place we already know (Codex, 14 Sep 2026).
+          // Only where the name matches exactly one place we know. Two
+          // attractions of the same name in different towns would otherwise make
+          // this pick one at random (Codex, 14 Sep 2026).
           let parentRef = null;
           if (said.partOf) {
             const { rows: found } = await query(
-              `select venue_ref from place_records where lower(name) = lower($1) limit 1`, [said.partOf]);
-            parentRef = found[0]?.venue_ref ?? null;
+              `select venue_ref from place_records where lower(name) = lower($1) limit 2`, [said.partOf]);
+            parentRef = found.length === 1 ? found[0].venue_ref : null;
           }
           await notSure.answered(p.venue_ref, {
             said: said.is, because: said.because, source: said.source, partOfName: said.partOf ?? null,
@@ -573,9 +576,13 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     // their words; the four that were not are exactly these.
     if (req.query.queue === '1') {
       for (const p of out.places) {
-        const rest = (p.types ?? []).filter((t) => t !== parsed.key);
-        const settled = rest.some(answersAlone) || combinationFires(rest, p.primaryType && p.primaryType !== parsed.key ? p.primaryType : null);
+        // The whole set, this word included. If the word being looked at already
+        // files the place, the place is settled and has no business on the list
+        // (Codex, 14 Sep 2026).
+        const all = p.types ?? [];
+        const settled = all.some(answersAlone) || combinationFires(all, p.primaryType ?? null);
         if (settled) continue;
+        const rest = all.filter((t) => t !== parsed.key);
         await notSure.notSettled({
           ref: `google:${p.id}`,
           name: p.name,
