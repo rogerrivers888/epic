@@ -139,8 +139,8 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
 export async function putPlace(areaCode, p, run = query) {
   await run(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
-                               accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, from_sources, last_seen, scored_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now(), now())
+                               accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, from_sources, secondary, last_seen, scored_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, now(), now())
      on conflict (area_code, venue_ref) do update set
        name = coalesce(excluded.name, scout_places.name), rank = excluded.rank,
        epic_score = excluded.epic_score, owned_score = excluded.owned_score,
@@ -154,6 +154,9 @@ export async function putPlace(areaCode, p, run = query) {
        -- Kept if this sweep could not tell: a place we already know is a pub
        -- does not become an unknown because one pass read it thinly.
        category = coalesce(excluded.category, scout_places.category),
+       -- Kept if this pass found none, for the same reason as the category.
+       secondary = case when excluded.secondary = '{}'::jsonb
+                        then scout_places.secondary else excluded.secondary end,
        last_seen = now(), scored_at = now()`,
     [areaCode, p.venueRef, p.name ?? null, p.rank, p.epicScore, p.ownedScore, p.crowdBand, p.countBand,
       JSON.stringify(p.accolades ?? []), JSON.stringify(p.cuisines ?? []), p.chain === true,
@@ -161,7 +164,10 @@ export async function putPlace(areaCode, p, run = query) {
       p.category ?? null,
       // Which sources actually contributed, so the device can be told the truth
       // about who to credit (migration 072).
-      JSON.stringify(Array.isArray(p.from) && p.from.length ? p.from : [])],
+      JSON.stringify(Array.isArray(p.from) && p.from.length ? p.from : []),
+      // Epic's own secondary labels for this place, worked out at sweep time
+      // from the words it came in with. The words themselves are not kept.
+      JSON.stringify(p.secondary ?? {})],
   );
   await run(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score, crowd_band, count_band, rank)
@@ -629,7 +635,7 @@ export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
   const dLng = km / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
   const { rows } = await query(
     `select distinct on (p.venue_ref)
-            p.venue_ref, p.name, p.lat, p.lng, p.website, p.cuisines, p.cuisine_group,
+            p.venue_ref, p.name, p.lat, p.lng, p.website, p.cuisines, p.cuisine_group, p.secondary,
             p.accolades, p.crowd_band, p.count_band, p.chain, p.chain_scale, p.epic_score,
             p.from_sources,
             -- What kind of place, from the sweep first and the open map second.

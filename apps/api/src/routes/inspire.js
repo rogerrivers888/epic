@@ -123,6 +123,21 @@ const weight = (v) => (v.rating ?? 0) * Math.log10((v.ratingCount ?? 0) + 2);
  * anything he has since created will read (Codex, 14 Sep 2026: values written
  * with no read path are write-only).
  */
+/**
+ * A place swept before the sweep started writing its secondary labels down.
+ *
+ * Its own `cuisines` are Epic's, kept since the first sweep — "italian",
+ * "middle eastern" — so the first one the Cuisine label knows by name is the
+ * answer. Matched without regard to case, because ours are written for reading.
+ */
+const fromCuisines = (cuisines, vocab) => {
+  const a = vocab?.byKey?.get('cuisine');
+  if (!a?.active || !Array.isArray(cuisines) || !cuisines.length) return null;
+  const same = (x) => (a.options ?? []).find((o) => o.toLowerCase() === String(x).toLowerCase());
+  for (const c of cuisines) { const hit = same(c); if (hit) return { cuisine: { choice: hit } }; }
+  return null;
+};
+
 const marks = (subcategory, goodForChildren, own, vocab, words = [], alsoTrue = null) => {
   // The place's own provider words go in: italian_restaurant says Italian and
   // fine_dining_restaurant says fine dining, which is everything those words
@@ -390,11 +405,17 @@ inspire.get('/near', async (req, res, next) => {
           // Its drawer, not its cuisine group: a cuisine is not one of our 59,
           // so asking by it would inherit nothing at all.
           const drawer = FOOD_DRAWER[FOOD_CATEGORIES.has(f.category) ? f.category : 'restaurant'] ?? null;
-          // A swept place keeps no provider words, so what the sweep worked out
-          // for itself answers instead: its cuisine group is Epic's own word for
-          // the same thing the Google type was saying (Codex, 14 Sep 2026).
-          const group = f.cuisine_group && f.cuisine_group !== 'not said' ? String(f.cuisine_group) : null;
-          const alsoTrue = group ? { cuisine: { choice: group.replace(/^./, (c) => c.toUpperCase()) } } : null;
+          // A swept place keeps no provider words, so what the sweep wrote down
+          // for itself answers instead. `secondary` is exactly that, resolved
+          // at sweep time from the same table the words list edits.
+          //
+          // Not `cuisine_group`: that is a deliberately coarse bucket for the
+          // menu queue, in which Pakistani, Bangladeshi and Sri Lankan are all
+          // "Indian" (Codex, 14 Sep 2026). Where a place was swept before this
+          // existed, its own `cuisines` are read instead — the first one that
+          // is a cuisine we know by name.
+          const said = f.secondary && Object.keys(f.secondary).length ? f.secondary : null;
+          const alsoTrue = said ?? fromCuisines(f.cuisines, attrVocab);
           const m = marks(drawer, null, own.get(f.venue_ref), attrVocab, [], alsoTrue);
           return { ...m, indoor: m.indoor ?? true };
         })(),

@@ -37,6 +37,7 @@ import { sweepArea as googleSweep } from './google.js';
 import { chainScale, detectChain } from '../domain/chains.js';
 import { score } from '../domain/scoring.js';
 import { cuisineGroup } from '../domain/cuisines.js';
+import * as placeAttributes from '../repositories/placeAttributes.js';
 import { queueEnrichment } from './own.js';
 import { accoladesFor } from './accolades.js';
 import { childMenus, findMenuUrl } from './menuLink.js';
@@ -119,6 +120,15 @@ export async function sweep(code, opts = {}) {
 }
 
 async function runSweep(area, code, { dryRun = false, householdId = null, lease = null } = {}) {
+  // What our own table says a provider's word carries, read once for the area.
+  const attrVocab = await placeAttributes.attributes().catch(() => null);
+  const carried = (labels) => {
+    const out = {};
+    for (const l of labels) {
+      for (const c of attrVocab?.carriedBy?.get(l) ?? []) if (!(c.key in out)) out[c.key] = c.value;
+    }
+    return out;
+  };
   const center = { lat: area.lat, lng: area.lng };
   const radiusKm = area.radius_km;
   const notes = [];
@@ -219,6 +229,11 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
     // What kind of food this is, coarsely — decided here so the menu queue can
     // ask for "the best two Chinese" with a window function (migration 048).
     c.cuisineGroup = cuisineGroup(c.cuisines);
+    // And Epic's own secondary labels for it, resolved from the words it came
+    // in with while we still have them. The words themselves are not kept —
+    // licensed content is rented — so this is the only chance to read them
+    // (Codex, 14 Sep 2026: the fine dining went out with the types).
+    c.secondary = carried(c.labels ?? []);
   }
 
   // A place nobody has rated and nothing is known about is not "the top-rated
