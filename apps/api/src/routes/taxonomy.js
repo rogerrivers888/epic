@@ -32,6 +32,7 @@ import { query, withTransaction } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
+import * as placeAttributes from '../repositories/placeAttributes.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelHits, labelsOf, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
@@ -198,6 +199,70 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
     }));
     res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /attributes — the vocabulary, with every drawer's defaults.
+ *
+ * The owner, 14 Sep 2026: "I feel like we need the ability to create these
+ * attributes." An attribute says what a place is *like*, never what it is, so
+ * it never competes with a subcategory: a climbing wall is in Climbing, and it
+ * is indoors, and it suits ages eight upward, all at once.
+ */
+taxonomyRoutes.get('/attributes', requires('view_library'), async (req, res, next) => {
+  try {
+    const [vocab, tax] = await Promise.all([placeAttributes.attributes(), taxonomy.taxonomy()]);
+    res.json({
+      attributes: vocab.list,
+      defaults: Object.fromEntries([...vocab.bySubcategory].map(([k, m]) => [k, Object.fromEntries(m)])),
+      subcategories: tax.subcategories, categories: tax.categories,
+    });
+  } catch (err) { next(err); }
+});
+
+/** PUT /attributes — name one, or change it. */
+taxonomyRoutes.put('/attributes', requires('manage_library'), async (req, res, next) => {
+  try {
+    const attribute = await placeAttributes.saveAttribute({
+      key: req.body?.key, label: req.body?.label, kind: req.body?.kind, blurb: req.body?.blurb,
+      options: Array.isArray(req.body?.options) ? req.body.options.map(String) : undefined,
+      rangeMin: req.body?.rangeMin, rangeMax: req.body?.rangeMax, unit: req.body?.unit,
+      position: req.body?.position, active: req.body?.active,
+    });
+    await query(
+      `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+       values ($1,$2,'taxonomy.attribute','place_attribute',null,$3,$4)`,
+      [req.account?.id ?? null, actorOf(req), attribute.label, JSON.stringify(attribute)]);
+    res.json({ attribute });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /attributes/default { subcategory, attribute, value } — what every place
+ * in a drawer is taken to be. A null value clears it back to "nothing said",
+ * which is not the same as "no".
+ */
+taxonomyRoutes.put('/attributes/default', requires('manage_library'), async (req, res, next) => {
+  try {
+    const value = await placeAttributes.setDefault(
+      String(req.body?.subcategory || ''), String(req.body?.attribute || ''), req.body?.value ?? null);
+    res.json({ subcategory: req.body?.subcategory, attribute: req.body?.attribute, value });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /attributes/place { ref, attribute, value, reason } — what one place says
+ * for itself, where it differs from its drawer. The reason is kept on purpose:
+ * it is what a model is shown next time (owner, 14 Sep 2026).
+ */
+taxonomyRoutes.put('/attributes/place', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.body?.ref || '').trim();
+    if (!ref) throw bad('Which place?');
+    const saved = await placeAttributes.setValue(ref, String(req.body?.attribute || ''), req.body?.value ?? null,
+      { reason: req.body?.reason ?? null, by: actorOf(req) });
+    res.json({ ref, attribute: req.body?.attribute, value: saved });
   } catch (err) { next(err); }
 });
 
