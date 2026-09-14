@@ -280,3 +280,28 @@ where key = 'read-by-hand';
 -- self-alias only where the wording is free (Codex, 14 Sep 2026).
 update host_skill_aliases set target_key = 'knife-making'
  where vocab = 'tag' and norm = 'knife making' and target_key = 'bladesmithing';
+
+-- Two the keyword pass filed by their material rather than by what they are.
+--
+-- A steel pan is steel and a woodwind is wood, so they landed under Metalwork
+-- and Woodwork while every other instrument sat under Instrument making — and
+-- a tag's parent is what the browse category is derived from, so those two
+-- would have filed their offers under Crafts and drawn a breadcrumb about the
+-- material (Codex, 14 Sep 2026). A pan tuner is an instrument maker.
+update host_skill_tags set parent_key = 'instrument-making', category_key = 'music', updated_at = now()
+ where key in ('steel-pan-making', 'woodwind-instrument-making');
+
+-- …and the offers that were already resolved against the old answer.
+--
+-- Repointing the alias only changes what happens next: an offer saved with the
+-- wording "knife making" before today holds `bladesmithing` on its row, and
+-- would go on showing and searching as that however many times it was saved
+-- again (Codex, 14 Sep 2026). The counts move with them, so the vocabulary is
+-- still ordered by what is actually used.
+with moved as (
+  update host_offer_skills set target_key = 'knife-making'
+   where vocab = 'tag' and norm = 'knife making' and target_key = 'bladesmithing'
+  returning 1
+)
+update host_skill_tags t set seen_count = greatest(0, t.seen_count + case when t.key = 'knife-making' then (select count(*) from moved) else -(select count(*) from moved) end)
+ where t.key in ('knife-making', 'bladesmithing');
