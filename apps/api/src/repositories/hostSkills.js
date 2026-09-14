@@ -960,7 +960,7 @@ export async function credentialTypes({ all = false } = {}) {
 
 export async function saveCredentialType(t) {
   const name = await labelFor('host_credential_types', t.key, t.label);
-  const { rows: [was] } = await query('select expires_months from host_credential_types where key = $1', [t.key]);
+  const { rows: [was] } = await query('select expires_months, evidence_required from host_credential_types where key = $1', [t.key]);
   const { rows } = await query(
     `insert into host_credential_types (key, label, note, host_types, evidence_required, gates_categories, expires_months, position, active)
      values ($1, $2, $3, coalesce($4, '{skill,meetups,expert}'::text[]), coalesce($5, true), coalesce($6, '{}'::text[]), $7, coalesce($8, 0), coalesce($9, true))
@@ -994,6 +994,27 @@ export async function saveCredentialType(t) {
    * 14 Sep 2026). Measured from when it was confirmed, not from today, so
    * nobody is given back time they had already used.
    */
+  /**
+   * Changing whether we check it moves the claims that were made under the old
+   * rule.
+   *
+   * Stop asking for evidence and a claim waiting in the queue should simply be
+   * the host's own words; start asking, and a claim shown as their own words
+   * has to be looked at. Left alone, the first sat hidden in a queue nobody
+   * needs to work and the second went on showing unchecked (Codex,
+   * 14 Sep 2026). A confirmation and a refusal are decisions somebody made and
+   * are not touched either way.
+   */
+  const checks = rows[0].evidence_required;
+  if (was && checks !== was.evidence_required) {
+    await query(
+      checks
+        ? `update host_credentials set state = 'pending', updated_at = now() where type_key = $1 and state = 'stated'`
+        : `update host_credentials set state = 'stated', updated_at = now() where type_key = $1 and state = 'pending'`,
+      [t.key],
+    );
+  }
+
   const months = rows[0].expires_months ?? null;
   if (months !== (was?.expires_months ?? null)) {
     await query(

@@ -1292,12 +1292,9 @@ router.get('/experiences/near', async (req, res, next) => {
      * within reach rather than the sixty nearest, or a category reads "0
      * people" and then opens onto a list of them (Codex, 13 and 14 Sep 2026).
      */
-    const inCategory = {};
-    for (const row of await repo.hostsByCategoryNear({ lat, lng, km })) {
-      const bucket = row.category_key ?? categoryForPassion(row.category);
-      if (!bucket) continue;
-      inCategory[bucket] = (inCategory[bucket] ?? 0) + row.hosts;
-    }
+    const inCategory = Object.fromEntries(
+      (await repo.hostsByCategoryNear({ lat, lng, km })).map((r) => [r.bucket, r.hosts]),
+    );
     const browse = (await skills.categories()).map((c) => ({
       key: c.key, label: c.label, icon: c.icon, people: inCategory[c.key] ?? 0,
     }));

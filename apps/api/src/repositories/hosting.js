@@ -9,7 +9,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
-import { categoryForPassion, passionsForCategory } from '../domain/hostSkills.js';
+import { categoryForPassion, passionBuckets, passionsForCategory } from '../domain/hostSkills.js';
 import crypto from 'node:crypto';
 
 const newToken = () => crypto.randomBytes(9).toString('base64url');
@@ -282,15 +282,21 @@ export async function offersNear({ lat, lng, km = 40, category = null, limit = 6
  * folded the same way.
  */
 export async function hostsByCategoryNear({ lat, lng, km = 40 }) {
+  // The bucket is worked out in the query, so a host whose two old words fall
+  // in the same one is one person and not two (Codex, 14 Sep 2026).
+  const { passions, buckets } = passionBuckets();
   const { rows } = await query(
-    `select o.category_key, o.category, count(distinct o.host_id)::int as hosts
-       from host_offers o join hosts h on h.id = o.host_id
+    `select coalesce(o.category_key, m.bucket) as bucket, count(distinct o.host_id)::int as hosts
+       from host_offers o
+       join hosts h on h.id = o.host_id
+       left join (select unnest($4::text[]) as passion, unnest($5::text[]) as bucket) m on m.passion = o.category
       where o.state in ('live', 'paused') and o.visibility = 'public'
         and coalesce(o.venue_lat, h.lat) is not null
         and (o.shape <> 'oneoff' or o.starts_on >= current_date)
+        and coalesce(o.category_key, m.bucket) is not null
         and sqrt(power((coalesce(o.venue_lat, h.lat) - $1) * 111.32, 2) + power((coalesce(o.venue_lng, h.lng) - $2) * 111.32 * cos(radians($1)), 2)) <= $3
-      group by o.category_key, o.category`,
-    [lat, lng, km],
+      group by 1`,
+    [lat, lng, km, passions, buckets],
   );
   return rows;
 }

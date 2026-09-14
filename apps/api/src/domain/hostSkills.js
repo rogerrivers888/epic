@@ -197,6 +197,16 @@ const FROM_PASSION = {
 export const categoryForPassion = (passion) => (passion ? FROM_PASSION[passion] ?? null : null);
 
 /**
+ * The same map as two parallel lists, for a query that has to do the folding
+ * itself. Counting in JavaScript over grouped rows counted a host twice when
+ * two of their old words fell in one bucket (Codex, 14 Sep 2026).
+ */
+export const passionBuckets = () => {
+  const pairs = Object.entries(FROM_PASSION).filter(([, bucket]) => bucket);
+  return { passions: pairs.map(([p]) => p), buckets: pairs.map(([, b]) => b) };
+};
+
+/**
  * The same map read the other way: which old words land in this bucket.
  *
  * The browse row filters on the new column *and* on these, so an offer written
