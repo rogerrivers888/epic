@@ -93,7 +93,11 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
       const { rows: used } = await query(
         `select (select count(*) from shelf_subcategory_attributes where attribute_key = $1)
               + (select count(*) from place_attribute_values where attribute_key = $1)
-              + (select count(*) from attribute_brings where brings_key = $1) as n`, [k]);
+              + (select count(*) from attribute_brings where brings_key = $1)
+              -- And what provider words carry, which is 128 values on Cuisine
+              -- alone: changing the kind under them would leave every one of
+              -- them the wrong shape (Codex, 14 Sep 2026).
+              + (select count(*) from taxonomy_label_carries where attribute_key = $1) as n`, [k]);
       if (Number(used[0]?.n ?? 0) > 0) {
         throw bad(`${k} is already set on ${used[0].n} of them as ${was[0].kind}. Clear those first, or make a new attribute.`);
       }
@@ -276,7 +280,7 @@ export async function valuesFor(venueRef) {
  * its drawer says, else nothing. `from` says which of the two answered, so a
  * screen can show what was inherited beside what was changed.
  */
-export function resolveFor({ subcategory, words = [] }, own, vocab) {
+export function resolveFor({ subcategory, words = [], alsoTrue = null }, own, vocab) {
   const out = {};
   const drawer = (subcategory && vocab?.bySubcategory?.get(subcategory)) || new Map();
   // What this place's own provider words say. A word is more specific than the
@@ -285,6 +289,21 @@ export function resolveFor({ subcategory, words = [] }, own, vocab) {
   const fromWords = new Map();
   for (const w of words) {
     for (const c of vocab?.carriedBy?.get(w) ?? []) if (!fromWords.has(c.key)) fromWords.set(c.key, c.value);
+  }
+  // Epic's own derived fields say the same thing for a place that came from the
+  // sweep. A swept place keeps no provider words -- licensed content is rented,
+  // and Google's type list is Google's -- so the cuisine the sweep worked out
+  // for itself is what answers here (Codex, 14 Sep 2026: otherwise a stored
+  // place typed fine dining never gets the label in a swept area, which is
+  // every area that matters). Same standing as a word: below a hand-set value.
+  for (const [k, v] of Object.entries(alsoTrue ?? {})) {
+    if (!v || fromWords.has(k)) continue;
+    const a = vocab?.byKey?.get(k);
+    if (!a?.active) continue;
+    // A one-of value has to be on its own list, or a filter would offer a
+    // choice nothing can ever match.
+    if (a.kind === 'oneof' && !(a.options ?? []).includes(v.choice)) continue;
+    fromWords.set(k, v);
   }
   for (const a of vocab?.list ?? []) {
     if (!a.active) continue;

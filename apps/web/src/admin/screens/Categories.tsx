@@ -2004,6 +2004,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
               {/* Every React Native Web view is its own stacking context, so a
                   menu opened in the bar has to lift the bar itself or the rows
                   under it paint straight over the panel (13 Sep 2026). */}
+              <View style={[styles.stickGroup, openKey === `bulk:${g.key}` && { zIndex: 60 }]}>
               <View style={[styles.groupBar, openKey === `bulk:${g.key}` && { zIndex: 60 }]}>
                 {subsHere.length ? (
                   <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
@@ -2054,6 +2055,24 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                     )}
                   </Press>
                 ) : null}
+              </View>
+              {/* The columns this view actually has — which are not the group
+                  table's. He asked for the duplicated header to go (13 Sep 2026:
+                  "it looks really weird to duplicate the header") and these are
+                  not it: Word, Places and the answer, held in place so a list of
+                  166 food words still says what its columns are 900px down
+                  (owner, 14 Sep 2026: "the column header should be sticky so
+                  that when I scroll, I can still see the stuff at the top"). */}
+              <View style={[styles.tRow, styles.tHeadSoft, { paddingVertical: 6 }]}>
+                <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.colHead} numberOfLines={1}>Word</Text></View>
+                {wide ? <View style={{ width: COL }} /> : null}
+                {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View> : null}
+                {canManage ? (
+                  <View style={{ width: wide ? COL * 2 + LAST : undefined, alignItems: 'flex-end' }}>
+                    <Text style={styles.colHead} numberOfLines={1}>What it means, and what else it says</Text>
+                  </View>
+                ) : null}
+              </View>
               </View>
               {/* No second header. It repeated the one above it word for word,
                   and the indent and the lime bar already say whose subcategories
@@ -2421,6 +2440,10 @@ const styles = StyleSheet.create({
    * from its headings otherwise. Web only — there is no sticky on native, and
    * `position` is typed loosely enough in React Native Web to say so here.
    */
+  /** The bar and the column heads together, so both stay put while the list runs under them. */
+  stickGroup: Platform.OS === 'web'
+    ? ({ position: 'sticky', top: 0, zIndex: 4, backgroundColor: colors.bg } as any)
+    : {},
   stick: Platform.OS === 'web'
     ? ({ position: 'sticky', top: 0, zIndex: 3, backgroundColor: colors.bg } as any)
     : {},

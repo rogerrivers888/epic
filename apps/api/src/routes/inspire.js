@@ -123,11 +123,11 @@ const weight = (v) => (v.rating ?? 0) * Math.log10((v.ratingCount ?? 0) + 2);
  * anything he has since created will read (Codex, 14 Sep 2026: values written
  * with no read path are write-only).
  */
-const marks = (subcategory, goodForChildren, own, vocab, words = []) => {
+const marks = (subcategory, goodForChildren, own, vocab, words = [], alsoTrue = null) => {
   // The place's own provider words go in: italian_restaurant says Italian and
   // fine_dining_restaurant says fine dining, which is everything those words
   // were saying besides where the place lives (owner, 14 Sep 2026).
-  const all = placeAttributes.resolveFor({ subcategory, words }, own, vocab);
+  const all = placeAttributes.resolveFor({ subcategory, words, alsoTrue }, own, vocab);
   return {
     indoor: all.indoor?.yesno ?? null,
     forKids: all['kid-friendly']?.yesno ?? goodForChildren ?? null,
@@ -390,7 +390,12 @@ inspire.get('/near', async (req, res, next) => {
           // Its drawer, not its cuisine group: a cuisine is not one of our 59,
           // so asking by it would inherit nothing at all.
           const drawer = FOOD_DRAWER[FOOD_CATEGORIES.has(f.category) ? f.category : 'restaurant'] ?? null;
-          const m = marks(drawer, null, own.get(f.venue_ref), attrVocab);
+          // A swept place keeps no provider words, so what the sweep worked out
+          // for itself answers instead: its cuisine group is Epic's own word for
+          // the same thing the Google type was saying (Codex, 14 Sep 2026).
+          const group = f.cuisine_group && f.cuisine_group !== 'not said' ? String(f.cuisine_group) : null;
+          const alsoTrue = group ? { cuisine: { choice: group.replace(/^./, (c) => c.toUpperCase()) } } : null;
+          const m = marks(drawer, null, own.get(f.venue_ref), attrVocab, [], alsoTrue);
           return { ...m, indoor: m.indoor ?? true };
         })(),
         atlasCategory: null,
