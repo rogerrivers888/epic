@@ -251,12 +251,16 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     // carried another word we had answered, so throwing it away leaves Epic
     // knowing nothing at all about Activate or Wild Wood Adventure. A word like
     // `establishment` is the opposite — a restaurant is nearly always there too.
-    const mapped = (t) => {
-      const row = byKey.get(t);
-      if (!row || row.decision) return false;
-      return Boolean(landingOf({ namespace: 'google', key: t }, rules, tax.vocab).subcategory);
-    };
-    const alone = out.places.filter((p) => !(p.types ?? []).some((t) => t !== parsed.key && mapped(t))).length;
+    // The rest of the place's words are asked *as a set*, not one at a time: a
+    // combination rule names several words and none of them answers alone, so
+    // asking singly would call a place alone that Epic can in fact file (Codex,
+    // 14 Sep 2026).
+    const alone = out.places.filter((p) => {
+      const rest = (p.types ?? []).filter((t) => t !== parsed.key).map((t) => `google:${t}`);
+      if (!rest.length) return true;
+      if (rest.every((l) => byKey.get(l.slice('google:'.length))?.decision)) return true;
+      return !landingOfSet(rest, {}, rules, tax.vocab).subcategory;
+    }).length;
     const alsoCalled = [...seen.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 24)
