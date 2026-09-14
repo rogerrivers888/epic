@@ -57,7 +57,7 @@ import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
 import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.js';
 import { dwellFor } from '../domain/options.js';
 import { distinguish } from '../domain/naming.js';
-import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
+import { shelvesForAtlas, shelvesForVenue, FOOD_DRAWER } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
@@ -278,9 +278,16 @@ inspire.get('/near', async (req, res, next) => {
     // The attributes: the vocabulary with every drawer's defaults, and one read
     // for whatever these particular places say for themselves. One query for
     // the page, never one per place.
+    // Every ref known at this point: the live pool and the swept food places.
+    // The atlas is fetched further down and its refs are added to the same map
+    // there, so the food pool is never left out (Codex, 14 Sep 2026).
+    const everyRef = [
+      ...around.map((v) => `${v.source}:${v.sourcePlaceId}`),
+      ...(food ?? []).map((f) => f.venue_ref),
+    ];
     const [attrVocab, own] = await Promise.all([
       placeAttributes.attributes(),
-      placeAttributes.valuesForMany(around.map((v) => `${v.source}:${v.sourcePlaceId}`)),
+      placeAttributes.valuesForMany(everyRef),
     ]);
 
     const items = around.map((v) => ({
@@ -371,7 +378,15 @@ inspire.get('/near', async (req, res, next) => {
         category: FOOD_CATEGORIES.has(f.category) ? f.category : 'restaurant',
         moods: ['food'],
         subcategory: f.cuisine_group ?? null,
-        indoor: true, forKids: null,
+        // Indoors unless somebody has said otherwise about this place or its
+        // drawer: a beer garden and a food market are not (14 Sep 2026).
+        ...(() => {
+          // Its drawer, not its cuisine group: a cuisine is not one of our 59,
+          // so asking by it would inherit nothing at all.
+          const drawer = FOOD_DRAWER[FOOD_CATEGORIES.has(f.category) ? f.category : 'restaurant'] ?? null;
+          const m = marks(drawer, null, own.get(f.venue_ref), attrVocab);
+          return { ...m, indoor: m.indoor ?? true };
+        })(),
         atlasCategory: null,
         experiences: [],
         cuisines: f.cuisine_group ? [f.cuisine_group, ...cuisines.filter((c) => c !== f.cuisine_group)] : cuisines,
@@ -420,9 +435,9 @@ inspire.get('/near', async (req, res, next) => {
       // park next door just looks wrong (owner, 7 Sep 2026).
       illustratedOnly: false,
     });
-    // One read for what these atlas places say about themselves, before the loop.
-    const atlasOwn = await placeAttributes.valuesForMany(
-      atlas.map((a) => (a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`)));
+    // The atlas refs, into the same map the rest of the answer reads from.
+    for (const [ref, v] of await placeAttributes.valuesForMany(
+      atlas.map((a) => (a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`)))) own.set(ref, v);
     for (const a of atlas) {
       if (a.lat == null || a.lng == null) continue;
       // The box is generous at its corners; this is the honest ring.
@@ -440,7 +455,7 @@ inspire.get('/near', async (req, res, next) => {
         category: 'attraction',
         moods: shelf.shelves,
         subcategory: shelf.subcategory,
-        ...marks(shelf.subcategory, null, atlasOwn.get(ref), attrVocab),
+        ...marks(shelf.subcategory, null, own.get(ref), attrVocab),
         // What the atlas calls this place — heritage, outdoors, family, museum,
         // arts, animals, active, landmark. Its own field rather than smuggled
         // into `experiences`, which is a closed vocabulary that voice is

@@ -180,7 +180,7 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
        active == null ? null : Boolean(active), triState(indoor), triState(forKids)]);
     const saved = rows[0] ?? null;
     if (saved) await setAlsoIn(saved.key, saved.category_key, alsoIn);
-    if (saved) await mirrorOldColumns(saved);
+    if (saved) await mirrorOldColumns(saved, { indoor, forKids });
     forget();
     return saved ? { ...saved, also_in: await alsoInOf(saved.key, saved.category_key) } : null;
   }
@@ -202,7 +202,7 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
     [categoryKey, k, label ?? k, blurb ?? null, position ?? null, triState(indoor), triState(forKids)]);
   const saved = rows[0];
   await setAlsoIn(saved.key, saved.category_key, alsoIn);
-  await mirrorOldColumns(saved);
+  await mirrorOldColumns(saved, { indoor, forKids });
   forget();
   return { ...saved, also_in: await alsoInOf(saved.key, saved.category_key) };
 }
@@ -214,8 +214,28 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
  * the two disagree the moment he edits one (Codex, 14 Sep 2026). Rainy day
  * follows Indoors only where nobody has parted them.
  */
-async function mirrorOldColumns(sub) {
-  const pairs = [['indoor', sub.indoor], ['kid-friendly', sub.for_kids]];
+async function mirrorOldColumns(sub, sent) {
+  // Only what this save actually sent. Reading the row instead would push a
+  // stale column over a newer answer set on the attributes screen, every time
+  // the drawer was renamed or moved (Codex, 14 Sep 2026).
+  const pairs = [];
+  if (sent.indoor !== undefined) pairs.push(['indoor', sub.indoor]);
+  if (sent.forKids !== undefined) pairs.push(['kid-friendly', sub.for_kids]);
+  if (!pairs.length) return;
+
+  // Rainy day was seeded from Indoors and follows it until he parts them, so a
+  // change to Indoors carries it along only where the two still agree.
+  if (sent.indoor !== undefined) {
+    const { rows } = await query(
+      `select yesno from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = 'rainy-day'`,
+      [sub.key]);
+    const { rows: was } = await query(
+      `select yesno from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = 'indoor'`,
+      [sub.key]);
+    const parted = rows.length && was.length && rows[0].yesno !== was[0].yesno;
+    if (!parted) pairs.push(['rainy-day', sub.indoor]);
+  }
+
   for (const [attribute, value] of pairs) {
     if (value == null) {
       await query('delete from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',

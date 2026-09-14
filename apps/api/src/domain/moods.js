@@ -102,7 +102,7 @@ const EATING = new Set(['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'bakery'
  * enough. `styles` overrides it, because Google types a chicken shop as a
  * restaurant that also does takeaway and the takeaway is the truer word.
  */
-const FOOD_DRAWER = {
+export const FOOD_DRAWER = {
   restaurant: 'restaurants',
   cafe: 'cafes',
   bakery: 'cafes',

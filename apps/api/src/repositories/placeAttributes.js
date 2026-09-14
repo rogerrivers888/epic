@@ -128,7 +128,9 @@ export async function setDefault(subcategoryKey, attributeKey, value) {
  */
 export async function setValue(venueRef, attributeKey, value, { reason = null, by = null } = {}) {
   if (!venueRef || !attributeKey) throw bad('Which place, and which attribute?');
-  if (value == null) {
+  // An empty object says nothing, and saying nothing is clearing it.
+  const empty = value != null && value.yesno == null && value.from == null && value.to == null && value.choice == null;
+  if (value == null || empty) {
     await query('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
     return null;
   }
@@ -153,8 +155,12 @@ export async function valuesForMany(refs) {
   const { rows } = await query('select * from place_attribute_values where venue_ref = any($1::text[])', [list]);
   const out = new Map();
   for (const r of rows) {
+    // A row with nothing in it is nothing said, not an override. Left in, it
+    // would silence the drawer's answer (Codex, 14 Sep 2026).
+    const v = valueOf(r);
+    if (!v) continue;
     const m = out.get(r.venue_ref) ?? new Map();
-    m.set(r.attribute_key, { ...valueOf(r), reason: r.reason, setBy: r.set_by });
+    m.set(r.attribute_key, { ...v, reason: r.reason, setBy: r.set_by });
     out.set(r.venue_ref, m);
   }
   return out;
@@ -163,7 +169,8 @@ export async function valuesForMany(refs) {
 /** Everything one place has been told about itself. */
 export async function valuesFor(venueRef) {
   const { rows } = await query('select * from place_attribute_values where venue_ref = $1', [venueRef]);
-  return new Map(rows.map((r) => [r.attribute_key, { ...valueOf(r), reason: r.reason, setBy: r.set_by }]));
+  return new Map(rows.map((r) => [r.attribute_key, valueOf(r) ? { ...valueOf(r), reason: r.reason, setBy: r.set_by } : null])
+    .filter(([, v]) => v));
 }
 
 /**
