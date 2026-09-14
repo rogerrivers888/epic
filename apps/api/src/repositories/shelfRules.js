@@ -79,9 +79,14 @@ export async function teach({ scope, subject, subjectLabel, weights, subcategory
   // A labels rule is known by the labels it names, in one spelling, so that
   // "castle + museum" and "museum + castle" are one rule and not two.
   let need = null;
-  if (scope === 'labels') {
+  if (scope === 'labels' || scope === 'ours') {
+    // `ours` is the same shape said in our own words, so it is canonicalised
+    // the same way. Without this the row would store no labels at all and the
+    // rule would never fire (Codex, 14 Sep 2026).
     const c = canonical(labels);
-    if (!c.labels.length) throw Object.assign(new Error('A labels rule has to name at least one label.'), { status: 400 });
+    if (!c.labels.length) {
+      throw Object.assign(new Error(`A ${scope} rule has to name at least one label.`), { status: 400 });
+    }
     need = c.labels;
     subject = c.subject;
   }

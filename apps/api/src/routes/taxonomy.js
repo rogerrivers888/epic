@@ -79,6 +79,7 @@ async function ready() {
       const label = `google:${r.key}`;
       const { scope, subject } = scopeFor([label]);
       await shelfRules.teach({ scope, subject, labels: [label], subjectLabel: r.key.replace(/_/g, ' '), weights: {}, subcategory: m.subcategory, reason: `Mapped by Epic: ${m.why}.`, by: 'Epic', known });
+      await labelRepo.pointAt('google', r.key, m.subcategory);
     }
   } catch { decided = false; }
 }
@@ -538,6 +539,12 @@ taxonomyRoutes.put('/rules', requires('manage_library'), async (req, res, next) 
        values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
       [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
        JSON.stringify({ labels, subcategory, weights: rule.weights, reason: rule.reason })]);
+    // One word named, one subcategory given: that is the word's meaning, so it
+    // is recorded as such (14 Sep 2026).
+    if (labels.length === 1 && subcategory) {
+      const p = parseLabel(labels[0]);
+      if (p) await labelRepo.pointAt(p.namespace, p.key, subcategory);
+    }
     res.json({ rule: (await withLabels([rule]))[0] });
   } catch (err) { next(err); }
 });
@@ -582,6 +589,9 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
             await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
           }
           shelfRules.forget();
+          // The word no longer means one of our labels, so nothing written in
+          // our words may keep firing for it (Codex, 14 Sep 2026).
+          await labelRepo.pointAt(namespace, key, null);
           done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel', generic: decision === 'generic' });
           continue;
         }
@@ -595,6 +605,9 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         });
         // A label decided earlier and now mapped is back in the list, its decision cleared.
         for (const l of labels) { const p = parseLabel(l); await labelRepo.save({ namespace: p.namespace, key: p.key, decision: 'none' }); }
+        // Mapping one word to a subcategory *is* the statement that the word
+        // means that label of ours, so it is recorded as one (14 Sep 2026).
+        if (labels.length === 1) { const p = parseLabel(labels[0]); await labelRepo.pointAt(p.namespace, p.key, subcategory); }
         await query(
           `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
@@ -655,7 +668,20 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
             set subcategory = excluded.subcategory, weights = excluded.weights, reason = excluded.reason, taught_by = excluded.taught_by, seeded = false, labels = excluded.labels, updated_at = now()
          returning *`,
         [subject, name, sc.key, `Adopted Google's own word, ${name}.`, actorOf(req), [label]]);
-      await c.query(`update taxonomy_labels set decision = null, active = true, updated_at = now() where namespace = $1 and key = $2`, [parsed.namespace, parsed.key]);
+      // Adopting a word is the plainest statement of all that it means this
+      // label of ours, so it is recorded inside the same transaction (Codex,
+      // 14 Sep 2026).
+      await c.query(
+        `update taxonomy_labels set decision = null, active = true, points_at = $3, updated_at = now()
+          where namespace = $1 and key = $2`,
+        [parsed.namespace, parsed.key, sc.key]);
+      // And a rule in our words, so every other provider's word for the same
+      // thing reaches the new subcategory too.
+      await c.query(
+        `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded, labels)
+         values ('ours', $1, $2, '{}'::jsonb, $1, $3, $4, false, array[$1])
+         on conflict (scope, subject) do update set subcategory = excluded.subcategory, updated_at = now()`,
+        [sc.key, sc.label, `Said in our words: every provider word pointing at ${sc.label} reaches this.`, actorOf(req)]);
       await c.query(
         `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
          values ($1,$2,'taxonomy.adopt','shelf_subcategory',$3,$4,$5)`,

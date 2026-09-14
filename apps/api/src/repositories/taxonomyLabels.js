@@ -275,6 +275,27 @@ export async function save({ namespace, key, label, note, active, decision }) {
   return rows[0];
 }
 
+/**
+ * Which of our labels a provider's word means.
+ *
+ * The owner, 14 Sep 2026: "the first exercise is to map Google words to our
+ * labels." Set it when a word is mapped and clear it when the word is given
+ * any other answer, or a rule written in our words would keep firing for a
+ * word he has since excluded (Codex, 14 Sep 2026).
+ */
+export async function pointAt(namespace, key, ourLabel) {
+  if (!namespace || !key) return null;
+  if (namespace === 'wikidata') {
+    await query('update place_kinds set points_at = $2, updated_at = now() where qid = $1', [key, ourLabel ?? null]);
+    return ourLabel ?? null;
+  }
+  await query(
+    `insert into taxonomy_labels (namespace, key, points_at) values ($1, $2, $3)
+     on conflict (namespace, key) do update set points_at = excluded.points_at, updated_at = now()`,
+    [namespace, key, ourLabel ?? null]);
+  return ourLabel ?? null;
+}
+
 /** Google's words nobody has decided about: no decision, still active, and no rule naming them. */
 export async function undecidedGoogle() {
   const { rows } = await query(
