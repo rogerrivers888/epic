@@ -41,11 +41,11 @@ import {
   api, AttractionFacts, AttractionFactsRow, ExtractionLesson,
   LibraryAttraction, LibraryAttractionDetail, LibraryType, PlaceContent, ReadingStats,
 } from '../../api';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
+import { colors, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, Chip, Row, Wrap } from '../../components/ui';
+import { Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { Banner, FilterChip, FilterRow, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
+import { Banner, FilterChip, FilterRow, Panel, Pill, Tile, TileRow, ago, count, plural, Button } from '../kit';
 import { asText, useQueryState } from '../../router';
 
 const WIDE = 1000;
@@ -599,27 +599,23 @@ const styles = StyleSheet.create({
   split: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    backgroundColor: colors.surface, borderWidth: BORDER, borderColor: colors.line,
-    borderRadius: radius.lg, paddingHorizontal: spacing.sm, minHeight: TARGET,
+    backgroundColor: 'transparent', borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    minHeight: TARGET,
   },
   searchInput: { ...type.small, color: colors.ink, flex: 1, minWidth: 0, paddingVertical: spacing.sm },
-  columnHead: { ...type.tiny, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  columnHead: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
   pick: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, minHeight: TARGET,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft, minHeight: TARGET,
   },
   head: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    padding: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line,
+    paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted,
   },
-  source: {
-    backgroundColor: colors.surfaceMuted, borderRadius: radius.sm,
-    padding: spacing.sm, gap: 2,
-  },
+  source: { borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4, gap: 2 },
   field: {
-    borderLeftWidth: 2, borderLeftColor: colors.line,
-    paddingLeft: spacing.sm, paddingVertical: spacing.xs,
+    borderLeftWidth: 2, borderLeftColor: colors.ruleMuted,
+    paddingLeft: 13, paddingVertical: spacing.xs,
   },
   fieldWrong: { borderLeftColor: colors.overrun },
   quote: {
@@ -628,11 +624,9 @@ const styles = StyleSheet.create({
   },
   judged: { ...type.tiny, color: colors.inkFaint, marginTop: 2 },
   teach: {
-    ...type.small, color: colors.ink, backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.sm, padding: spacing.sm, minHeight: 72, textAlignVertical: 'top',
+    ...type.small, color: colors.ink, backgroundColor: 'transparent',
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: spacing.sm, minHeight: 72, textAlignVertical: 'top',
   },
-  lesson: {
-    padding: spacing.sm, gap: 2,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line,
-  },
+  lesson: { paddingVertical: spacing.sm, gap: 2, borderTopWidth: 1, borderTopColor: colors.lineSoft },
 });

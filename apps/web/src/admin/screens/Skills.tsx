@@ -747,7 +747,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const s = StyleSheet.create({
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingBottom: 4, flexWrap: 'wrap' },
-  kicker: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
+  kicker: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: '700', color: colors.inkMuted },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   rowLabel: { ...type.small, fontWeight: '700', color: colors.ink },
   pos: { ...type.small, color: colors.inkMuted, width: 20, fontVariant: ['tabular-nums'] },
@@ -768,7 +768,11 @@ const s = StyleSheet.create({
   /** The one filled button. */
   primary: { backgroundColor: LIME, paddingHorizontal: 16, paddingVertical: 9 },
   primaryText: { ...type.small, fontWeight: '700', color: INK },
-  /** Edit and Reject: 1px ink, ink type. Red is retired (owner, 13 Sep 2026). */
-  outline: { borderWidth: 1, borderColor: colors.line, paddingHorizontal: 16, paddingVertical: 9 },
-  outlineText: { ...type.small, fontWeight: '600', color: colors.ink },
+  /**
+   * Edit and Reject. An outlined box each was the thing the owner named; the
+   * v2 brief draws a secondary action as its word over a 1.5px underline, so
+   * twenty of them read as a quiet column rather than twenty buttons.
+   */
+  outline: { borderBottomWidth: 1.5, borderBottomColor: colors.ink, paddingHorizontal: 2, paddingVertical: 7, marginTop: 2 },
+  outlineText: { ...type.small, fontWeight: '700', color: colors.ink },
 });

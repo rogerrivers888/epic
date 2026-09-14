@@ -18,12 +18,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, ApiError, AuditRow, Capability, Role, SubscriptionPlan } from '../../api';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
-import { Button, Row, Wrap } from '../../components/ui';
+import { colors, spacing, TARGET, type, BORDER } from '../../theme';
+import { Row, Wrap } from '../../components/ui';
 import { Icon } from '../../components/Icon';
 import { SideSheet } from '../../components/SideSheet';
 import {
-  AdminPage, Banner, Column, DataTable, FilterChip, PageHead, Panel, Pill,
+  AdminPage, Button, Banner, Column, DataTable, FilterChip, PageHead, Panel, Pill,
   ago, count, day, pounds,
 } from '../kit';
 
@@ -209,7 +209,7 @@ function RoleDrawer({ role, capabilities, areas, doors, canManage, onClose, onSa
                   accessibilityState={{ checked: on }}
                   style={[styles.tick, on && styles.tickOn]}
                 >
-                  {on ? <Icon name="check" size={12} color={colors.primaryFg} /> : null}
+                  {on ? <Icon name="check" size={13} color={colors.selectedFg} strokeWidth={2.8} /> : null}
                 </Text>
                 <View style={{ flex: 1 }}>
                   <Row style={{ gap: 6 }}>
@@ -300,7 +300,7 @@ export function Plans({ canManage }: { canManage: boolean }) {
           ] as Column<any>[]}
         />
       </Panel>
-      <Text style={type.tiny}>An empty box is a free plan, which is a different statement from a plan priced at zero.</Text>
+      <Text style={type.tiny}>An empty field is a free plan, which is a different statement from a plan priced at zero.</Text>
     </AdminPage>
   );
 }
@@ -350,17 +350,21 @@ export function Audit() {
 }
 
 const styles = StyleSheet.create({
+  // A field is a line to write on, not a box: the handoff's constraint is
+  // hairlines, and a bordered input is the same white box the owner named.
   input: {
-    flex: 1, minHeight: TARGET, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
-    paddingHorizontal: spacing.md, color: colors.ink, backgroundColor: colors.surface,
+    flex: 1, minHeight: TARGET, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    color: colors.ink, backgroundColor: 'transparent',
   },
   price: {
-    width: 84, minHeight: 34, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
-    paddingHorizontal: spacing.sm, textAlign: 'right', color: colors.ink, backgroundColor: colors.surface,
+    width: 84, minHeight: 34, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    textAlign: 'right', color: colors.ink, backgroundColor: 'transparent',
   },
+  // A checkbox is the one thing that keeps an outline, because without one
+  // there is nothing to tick. Square, a hairline, lime with an ink tick when on.
   tick: {
-    width: 18, height: 18, borderRadius: 4, borderWidth: BORDER, borderColor: colors.line,
-    alignItems: 'center', justifyContent: 'center', marginTop: 2, backgroundColor: colors.surface,
+    width: 18, height: 18, borderWidth: 1, borderColor: colors.decor,
+    alignItems: 'center', justifyContent: 'center', marginTop: 2,
   },
-  tickOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tickOn: { backgroundColor: colors.selected, borderColor: colors.selected },
 });

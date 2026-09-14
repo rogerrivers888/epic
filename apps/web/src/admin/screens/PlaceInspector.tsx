@@ -29,10 +29,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, CategoryProposal, LibraryAttractionDetail, ShelfWeights } from '../../api';
-import { colors, radius, spacing, type, BORDER } from '../../theme';
+import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, Chip, Row, Wrap } from '../../components/ui';
-import { AdminPage, Banner, Panel, Pill, count, plural } from '../kit';
+import { Chip, Row, Wrap } from '../../components/ui';
+import { AdminPage, Button, Banner, Panel, Pill, count, plural } from '../kit';
 import { MOODS } from '../../routes';
 
 /** Epic's own eight words, for the fallback when there is no Claude key. */
@@ -338,49 +338,40 @@ function Teach({ row, onCancel, onSaved }: {
 }
 
 const styles = StyleSheet.create({
-  hero: { height: 130, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.well, justifyContent: 'flex-end' },
+  hero: { height: 130, overflow: 'hidden', backgroundColor: colors.well, justifyContent: 'flex-end' },
   credit: { ...type.tiny, color: colors.bg, opacity: 0.9, padding: 5, textAlign: 'right' },
 
   fact: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
-    paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
   factOpen: { borderTopColor: colors.accent },
-  factKey: {
-    ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700',
-    width: 84, paddingTop: 2,
-  },
+  factKey: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted, width: 84, paddingTop: 2 },
   editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingHorizontal: 6 },
 
-  teach: {
-    borderWidth: BORDER, borderColor: colors.accent, borderRadius: radius.md,
-    backgroundColor: colors.accentSoft, padding: spacing.md, gap: spacing.sm,
-  },
+  // Teaching a place is a consequence — what you say here changes what Epic
+  // does next — so it is the lime left rule, not a tinted panel.
+  teach: { borderLeftWidth: BORDER, borderLeftColor: colors.lime, paddingLeft: 13, paddingVertical: 4, gap: spacing.sm },
   say: {
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm, backgroundColor: colors.surface,
-    padding: spacing.sm, minHeight: 74, ...type.small, color: colors.ink,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line, backgroundColor: 'transparent',
+    paddingVertical: spacing.sm, minHeight: 74, ...type.small, color: colors.ink,
     textAlignVertical: 'top', outlineStyle: 'none' as any,
   },
-  legend: {
-    ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', marginTop: 2,
-  },
+  legend: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: '700', marginTop: 2 },
+  // One of a few: a row you pick, marked by its radio and a hairline between
+  // them. It was a bordered white box per choice, which is three boxes.
   scope: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    backgroundColor: colors.surface, padding: spacing.sm,
+    paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
   },
-  scopeOn: { borderColor: colors.accent },
-  radio: { width: 15, height: 15, borderRadius: 8, borderWidth: BORDER, borderColor: colors.inkFaint, marginTop: 1 },
-  check: { borderRadius: 4 },
+  scopeOn: {},
+  radio: { width: 15, height: 15, borderRadius: 8, borderWidth: BORDER, borderColor: colors.decor, marginTop: 1 },
+  /** A tick is square where a radio is round: one of many against one of a few. */
+  check: { borderRadius: 0 },
   radioOn: { borderColor: colors.accent, backgroundColor: colors.accent },
 
-  summary: {
-    borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.sm,
-  },
+  summary: { borderTopWidth: BORDER, borderTopColor: colors.ruleMuted, paddingTop: spacing.sm },
 
-  thumb: { width: 84, height: 60, borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.well },
-  heroTag: {
-    ...type.tiny, position: 'absolute', top: 4, left: 4, backgroundColor: colors.surface,
-    paddingHorizontal: 5, borderRadius: 999, fontWeight: '700',
-  },
+  thumb: { width: 84, height: 60, overflow: 'hidden', backgroundColor: colors.well },
+  heroTag: { ...type.tiny, position: 'absolute', top: 4, left: 4, backgroundColor: colors.bg, paddingHorizontal: 5, fontWeight: '700' },
 });

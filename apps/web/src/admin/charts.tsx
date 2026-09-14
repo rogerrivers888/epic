@@ -33,7 +33,7 @@ import React, { useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg';
-import { colors, radius, spacing, type, BORDER } from '../theme';
+import { colors, spacing, type } from '../theme';
 
 /** A point on any of the time charts. */
 export type Point = { label: string; value: number; hint?: string };
@@ -117,22 +117,20 @@ export function Columns({ points, height = 140, format = shortNumber, tone, empt
         <>
           <Svg width={w} height={height}>
             {/* Two hairlines, solid and recessive: the top of the scale and the baseline. */}
-            <Line x1={0} y1={0.5} x2={w} y2={0.5} stroke={colors.line} strokeWidth={1} />
-            <Line x1={0} y1={plot + 0.5} x2={w} y2={plot + 0.5} stroke={colors.line} strokeWidth={1} />
+            <Line x1={0} y1={0.5} x2={w} y2={0.5} stroke={colors.lineSoft} strokeWidth={1} />
+            <Line x1={0} y1={plot + 0.5} x2={w} y2={plot + 0.5} stroke={colors.lineSoft} strokeWidth={1} />
             {points.map((p, i) => {
               const h = max > 0 ? Math.max(p.value > 0 ? 2 : 0, (p.value / max) * (plot - HEADROOM)) : 0;
               const x = i * slot + (slot - bar) / 2;
               return (
                 <G key={`${p.label}-${i}`}>
+                  {/* Square at both ends: the pack is square corners throughout,
+                      and a rounded data-end reads as a cap the figure does not have. */}
                   <Rect
                     x={x} y={plot - h} width={bar} height={h}
-                    // 4px rounded data-end, square at the baseline: the radius is
-                    // drawn on the top only by over-rounding and clipping at the base.
-                    rx={Math.min(4, bar / 2)}
                     fill={fill}
                     opacity={over == null || over === i ? 1 : 0.45}
                   />
-                  {h > 4 ? <Rect x={x} y={plot - Math.min(h, 4)} width={bar} height={Math.min(h, 4)} fill={fill} opacity={over == null || over === i ? 1 : 0.45} /> : null}
                 </G>
               );
             })}
@@ -206,8 +204,8 @@ export function TrendLine({ points, height = 140, format = shortNumber }: {
       {w > 0 && points.length ? (
         <>
           <Svg width={w} height={height}>
-            <Line x1={0} y1={0.5} x2={w} y2={0.5} stroke={colors.line} strokeWidth={1} />
-            <Line x1={0} y1={plot + 0.5} x2={w} y2={plot + 0.5} stroke={colors.line} strokeWidth={1} />
+            <Line x1={0} y1={0.5} x2={w} y2={0.5} stroke={colors.lineSoft} strokeWidth={1} />
+            <Line x1={0} y1={plot + 0.5} x2={w} y2={plot + 0.5} stroke={colors.lineSoft} strokeWidth={1} />
             <Path d={area} fill={colors.accent} opacity={0.1} />
             <Path d={path} stroke={colors.accent} strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round" />
             {/* The end marker: 8px, with a 2px ring in the surface colour. */}
@@ -346,24 +344,21 @@ const styles = StyleSheet.create({
   axisText: { ...type.tiny, color: colors.inkMuted },
   peak: { position: 'absolute', ...type.tiny, color: colors.inkMuted, width: 60, textAlign: 'center' },
 
-  tip: {
-    position: 'absolute', top: 4, backgroundColor: colors.ink, borderRadius: radius.md,
-    paddingHorizontal: 8, paddingVertical: 4,
-  },
+  tip: { position: 'absolute', top: 4, backgroundColor: colors.ink, paddingHorizontal: 8, paddingVertical: 4 },
   tipText: { ...type.tiny, color: colors.bg, textAlign: 'center' },
 
   rankHead: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
   rankValue: { ...type.small, fontWeight: '700', color: colors.ink, fontVariant: ['tabular-nums'] },
-  rankTrack: { height: 8, borderRadius: 4, backgroundColor: colors.well, overflow: 'hidden' },
-  rankFill: { height: 8, borderRadius: 4, backgroundColor: colors.accent },
+  // Square, like every other bar in Epic — and the proportion bars the v2 rule
+  // builder is drawn with.
+  rankTrack: { height: 8, backgroundColor: colors.well, overflow: 'hidden' },
+  rankFill: { height: 8, backgroundColor: colors.accent },
 
   cohortRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  cohortHead: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, color: colors.inkMuted },
+  cohortHead: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
   cell: { width: 40, textAlign: 'center' },
-  cellBox: {
-    height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm,
-    borderWidth: BORDER, borderColor: colors.line,
-  },
+  // The fill is the datum; a 2px edge on every cell drew a grid of boxes over it.
+  cellBox: { height: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.lineSoft },
 });
 
 /** Web-only nicety: hover works, touch falls back to a tap. Kept here so screens do not ask. */

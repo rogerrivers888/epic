@@ -27,11 +27,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, FactKey, Locality, LocalityPage, LocalityRow, PlaceTree } from '../../api';
-import { colors, radius, spacing, type, BORDER } from '../../theme';
+import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
-import { Button, Chip, Row, Wrap } from '../../components/ui';
+import { Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
+import { AdminPage, Button, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 import { PlaceInspector } from './PlaceInspector';
 
@@ -62,16 +62,9 @@ const KIND: Record<Locality['kind'], { word: string; icon: IconName }> = {
  * no colour-coding of rows and keeps red for the heart — and the number is
  * printed in every band, so the shade is a hint and never the information.
  */
-const shadeOf = (pc: number | null) => {
-  if (pc == null) return { bg: colors.surface, fg: colors.inkFaint };
-  if (pc >= 90) return { bg: colors.accent, fg: colors.primaryFg };
-  // The same ramp as Coverage: ink, lime, lime tint. Ink type throughout.
-  if (pc >= 70) return { bg: colors.primary, fg: colors.primaryFg };
-  if (pc >= 45) return { bg: colors.lime, fg: colors.ink };
-  if (pc >= 20) return { bg: colors.surfaceMuted, fg: colors.ink };
-  if (pc > 0) return { bg: colors.accentSoft, fg: colors.ink };
-  return { bg: colors.well, fg: colors.inkMuted };
-};
+const shadeOf = (pc: number | null) => (pc == null
+  ? { fg: colors.inkFaint, fill: colors.lineSoft }
+  : { fg: colors.ink, fill: pc >= 70 ? colors.accent : pc > 0 ? colors.lime : colors.lineSoft });
 
 export function Places({ canManage }: { canManage: boolean }) {
   const { width } = useViewport();
@@ -429,17 +422,22 @@ function Place({ page, wide, busy, missing, onMissing, side, onSide, onOpen, ope
                 accessibilityLabel={`${f.label}: ${applies ? `${c.pc}%` : 'not applicable here'}`}
                 style={({ hovered }: any) => [
                   styles.band,
-                  { backgroundColor: shade.bg },
                   hovered && applies && styles.bandHover,
                   on && styles.bandOn,
                 ]}
               >
-                <Text style={[styles.bandLabel, { color: shade.fg }]} numberOfLines={1}>{f.label}</Text>
+                <Text style={styles.bandLabel} numberOfLines={1}>{f.label}</Text>
                 <Text style={[styles.bandPc, { color: shade.fg }]}>{applies ? `${c.pc}%` : 'n/a'}</Text>
+                {/* The proportion, said twice: as the figure and as the bar under
+                    it. The bar is the v2 rule builder's own device, and it is what
+                    the six coloured blocks here used to be doing badly. */}
+                <View style={styles.bandTrack}>
+                  <View style={[styles.bandFill, { width: `${applies && c.pc ? c.pc : 0}%` as const, backgroundColor: shade.fill }]} />
+                </View>
                 {applies && c.held < c.of ? (
-                  <Text style={[styles.bandGap, { color: shade.fg }]}>{count(c.of - c.held)} without</Text>
+                  <Text style={styles.bandGap}>{count(c.of - c.held)} without</Text>
                 ) : (
-                  <Text style={[styles.bandGap, { color: shade.fg }]}>{applies ? 'all of them' : '—'}</Text>
+                  <Text style={styles.bandGap}>{applies ? 'all of them' : '—'}</Text>
                 )}
               </Press>
             );
@@ -582,14 +580,14 @@ const styles = StyleSheet.create({
 
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
-    paddingHorizontal: spacing.sm, paddingVertical: 7, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: 7, backgroundColor: 'transparent',
   },
   searchInput: { flex: 1, ...type.small, color: colors.ink, outlineStyle: 'none' as any },
 
   group: {
-    ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700',
-    paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: 2,
+    ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: '700',
+    paddingTop: spacing.md, paddingBottom: 4,
   },
   leaf: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
@@ -601,15 +599,19 @@ const styles = StyleSheet.create({
 
   crumb: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
 
-  strip: { flexDirection: 'row', gap: 3, flexWrap: 'wrap' },
+  strip: { flexDirection: 'row', rowGap: spacing.md, columnGap: spacing.xl, flexWrap: 'wrap' },
+  // One fact's coverage: a left rule and the figure, the same shape as every
+  // other figure in the back office. It was six bordered cells in a row.
   band: {
-    flexGrow: 1, flexBasis: 96, borderRadius: radius.sm, paddingVertical: 7, paddingHorizontal: 8,
-    borderWidth: BORDER, borderColor: colors.line, gap: 1,
+    flexGrow: 1, flexBasis: 110, paddingVertical: 2, paddingLeft: 11, gap: 1,
+    borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted,
   },
-  bandHover: { borderColor: colors.ink },
-  bandOn: { borderColor: colors.ink, borderWidth: 2 },
-  bandLabel: { ...type.tiny, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  bandPc: { ...type.body, fontWeight: '800' },
+  bandHover: { borderLeftColor: colors.ink },
+  bandOn: { borderLeftColor: colors.lime },
+  bandLabel: { ...type.tiny, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.7, color: colors.inkMuted },
+  bandPc: { ...type.body, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  bandTrack: { height: 4, backgroundColor: colors.well, marginTop: 2, marginBottom: 1 },
+  bandFill: { height: 4 },
   bandGap: { ...type.tiny },
 
   lower: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
@@ -617,11 +619,10 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
   thumb: {
-    width: 40, height: 30, borderRadius: radius.sm, backgroundColor: colors.well,
+    width: 40, height: 30, backgroundColor: colors.well,
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flex: 0,
   },
   rowHover: { backgroundColor: colors.well },
@@ -629,9 +630,9 @@ const styles = StyleSheet.create({
   rowName: { ...type.body, fontWeight: '700' },
 
   dots: { flexDirection: 'row', gap: 3, flexGrow: 0, flexShrink: 0, width: 69 },
-  dot: { width: 9, height: 9, borderRadius: 2.5, backgroundColor: colors.line },
+  dot: { width: 9, height: 9, backgroundColor: colors.decor },
   dotYes: { backgroundColor: colors.accent },
-  dotNo: { backgroundColor: 'transparent', borderWidth: BORDER, borderColor: colors.overrun },
+  dotNo: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.overrun },
 
   score: { ...type.small, fontWeight: '800', width: 52, textAlign: 'right', flexGrow: 0, flexShrink: 0 },
 });

@@ -25,7 +25,7 @@ import React, { useEffect, useState } from 'react';
 import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api } from '../../api';
-import { colors, fonts, radius, spacing, type, BORDER } from '../../theme';
+import { colors, fonts, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
 
@@ -514,16 +514,14 @@ export function HowItWorks() {
 }
 
 const styles = StyleSheet.create({
-  row: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: 6 },
-  rowLine: { borderTopWidth: BORDER, borderTopColor: colors.line },
+  row: { paddingVertical: 13, gap: 6 },
+  rowLine: { borderTopWidth: 1, borderTopColor: colors.lineSoft },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   why: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', marginTop: 2 },
   whyLabel: { width: 34, paddingTop: 2, fontWeight: '700', letterSpacing: 0.6, color: colors.inkFaint },
   quote: { fontFamily: fonts.body, fontSize: 13, fontStyle: 'italic', color: colors.headerSub, lineHeight: 18 },
-  where: {
-    fontFamily: MONO, fontSize: 11, color: colors.inkFaint,
-    backgroundColor: colors.surfaceMuted, alignSelf: 'flex-start',
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm, overflow: 'hidden',
-  },
+  // Where a rule lives: the monospace is what marks it as a path, so it needs
+  // no fill behind it. A filled token in a list of them reads as a row of chips.
+  where: { fontFamily: MONO, fontSize: 11, color: colors.inkMuted, alignSelf: 'flex-start', paddingVertical: 2 },
   link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
 });

@@ -34,11 +34,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, HarvestRun, LibraryAttraction, LibraryVisiting, LibraryVisitingImpact, VisitingPlace, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../../theme';
+import { colors, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, Chip, Row, Wrap } from '../../components/ui';
+import { Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
+import { AdminPage, Button, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 import { Reading } from './Reading';
 
@@ -140,7 +140,7 @@ export function Library({ canManage }: { canManage: boolean }) {
           <Press key={s.key} onPress={() => setSection(s.key)}
                      style={[styles.tab, section === s.key && styles.tabOn]} accessibilityRole="tab"
                      accessibilityState={{ selected: section === s.key }}>
-            <Text style={[type.small, section === s.key && { color: colors.primaryFg, fontWeight: '700' }]}>{s.label}</Text>
+            <Text style={[type.small, { color: section === s.key ? colors.selectedFg : colors.inkMuted, fontWeight: section === s.key ? '700' : '500' }]}>{s.label}</Text>
           </Press>
         ))}
       </ScrollView>
@@ -935,41 +935,36 @@ function Types({ canManage }: { canManage: boolean }) {
 const styles = StyleSheet.create({
   visitRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    paddingVertical: spacing.sm, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
   },
-  tab: {
-    paddingHorizontal: spacing.md, height: 34, justifyContent: 'center',
-    borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
-  },
-  tabOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  // A tab at rest is the word; chosen it is a flat lime block with ink type.
+  tab: { paddingHorizontal: spacing.md, height: 34, justifyContent: 'center' },
+  tabOn: { backgroundColor: colors.selected },
 
-  log: { backgroundColor: colors.surfaceMuted, borderRadius: radius.lg, padding: spacing.sm, gap: 2 },
+  log: { borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4, gap: 2 },
   logLine: { ...type.tiny, color: colors.ink },
 
   regionRow: {
     flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
-  rowHover: { backgroundColor: colors.surfaceMuted },
+  rowHover: { backgroundColor: colors.well },
   rowName: { ...type.body, fontWeight: '700', color: colors.ink },
   rowAction: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
 
   attractionRow: {
     flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'flex-start',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
-  thumb: {
-    width: 96, height: 72, borderRadius: radius.lg, overflow: 'hidden',
-    backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center',
-  },
+  // A picture's own ground is not a UI box: it is what a photograph sits on
+  // while it loads, and it is square like everything else.
+  thumb: { width: 96, height: 72, overflow: 'hidden', backgroundColor: colors.well, alignItems: 'center', justifyContent: 'center' },
   score: { ...type.body, fontWeight: '700', color: colors.ink, fontVariant: ['tabular-nums'] },
 
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flex: 1, minWidth: 0,
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.lg,
-    paddingHorizontal: spacing.sm, height: TARGET, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    height: TARGET, backgroundColor: 'transparent',
   },
   searchInput: { flex: 1, minWidth: 0, ...type.body, color: colors.ink, outlineStyle: 'none' as any },
 
@@ -977,25 +972,18 @@ const styles = StyleSheet.create({
   // stretch past a size a photograph stops looking like one.
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   cell: { flexGrow: 1, flexBasis: 170, minWidth: 150, maxWidth: 280, gap: 4 },
-  cellShot: {
-    width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, overflow: 'hidden',
-    backgroundColor: colors.surfaceMuted,
-  },
+  cellShot: { width: '100%', aspectRatio: 4 / 3, overflow: 'hidden', backgroundColor: colors.well },
   cellTitle: { ...type.small, color: colors.ink, fontWeight: '600' },
 
   detail: { gap: spacing.md },
-  detailShot: {
-    width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, overflow: 'hidden',
-    backgroundColor: colors.surfaceMuted,
-  },
+  detailShot: { width: '100%', aspectRatio: 4 / 3, overflow: 'hidden', backgroundColor: colors.well },
 
   boardRow: {
     gap: spacing.sm, alignItems: 'center', flexWrap: 'wrap',
-    paddingVertical: spacing.xs, borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
   typeRow: {
     gap: spacing.sm, alignItems: 'center', flexWrap: 'wrap',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
 });

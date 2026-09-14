@@ -28,11 +28,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, BenchResult, BenchRun, MenuCause, ScoutArea, ScoutMenuMiss, ScoutPlace } from '../../api';
-import { colors, radius, spacing, type, BORDER } from '../../theme';
+import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button, Row, Wrap } from '../../components/ui';
+import { Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count } from '../kit';
+import { AdminPage, Button, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 
 const WIDE = 900;
@@ -607,14 +607,17 @@ function AreaPicker({ areas, chosen, onChoose }: {
 
 const styles = StyleSheet.create({
   input: {
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 8, color: colors.ink, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: 8, color: colors.ink, backgroundColor: 'transparent',
   },
   areaRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft,
+    borderLeftWidth: 3, borderLeftColor: 'transparent', paddingLeft: 0,
   },
-  areaRowOn: { backgroundColor: colors.headerBg },
+  // Open, an area is marked by a lime rule beside it, never a lime band across
+  // it (owner, 14 Sep 2026: "there's not supposed to be any green bar").
+  areaRowOn: { borderLeftColor: colors.lime, paddingLeft: 10 },
   areaCode: { ...type.body, fontWeight: '800' },
   placeRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

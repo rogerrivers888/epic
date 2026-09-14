@@ -42,11 +42,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, MoodKey, ShelfPlace, ShelfProposal, ShelfRule, ShelfVocabulary, ShelfWeights } from '../../api';
-import { colors, radius, spacing, type, BORDER } from '../../theme';
+import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
-import { Button, Chip, Row, Stepper, Wrap } from '../../components/ui';
+import { Chip, Row, Stepper, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count } from '../kit';
+import { AdminPage, Button, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 import { MOODS } from '../../routes';
 
@@ -987,51 +987,46 @@ function TeachForm({ place, vocab, order, floor, max, wide, onClose, onSaved, on
 }
 
 const styles = StyleSheet.create({
+  // Fields are lines to write on. A box each made a column of white boxes,
+  // which is the thing the v2 brief forbids outright.
   search: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line, backgroundColor: 'transparent',
   },
   searchInput: { flex: 1, paddingVertical: 9, color: colors.ink, outlineStyle: 'none' as never },
   input: {
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 9, color: colors.ink, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: 9, color: colors.ink, backgroundColor: 'transparent',
   },
   say: {
-    borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 9, color: colors.ink, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: 9, color: colors.ink, backgroundColor: 'transparent',
     minHeight: 72, textAlignVertical: 'top',
   },
   placeRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, flexWrap: 'wrap',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    paddingVertical: 13,
   },
-  ruleRow: {
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
-  },
+  ruleRow: { gap: spacing.sm, paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft },
   rowName: { ...type.body, fontWeight: '700' },
-  thumb: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  thumb: { width: 44, height: 44, backgroundColor: colors.well },
   thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
   weights: { gap: 4, width: '100%' },
   weightsWide: { gap: 4, justifyContent: 'flex-end', maxWidth: 260 },
-  divider: { height: 1, backgroundColor: colors.line, marginVertical: spacing.xs },
+  divider: { height: 1, backgroundColor: colors.lineSoft, marginVertical: spacing.xs },
   grid: { gap: spacing.xs },
   gridWide: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md },
   weightCell: { width: '100%' },
 
-  placeWrap: { borderTopWidth: BORDER, borderTopColor: colors.line },
-  thumbTap: { borderRadius: radius.sm },
+  placeWrap: { borderTopWidth: 1, borderTopColor: colors.lineSoft },
+  thumbTap: {},
   // The quick move, opened under the row it belongs to rather than in a sheet:
-  // it has to be obvious which place is being moved.
+  // it has to be obvious which place is being moved — so the row it hangs off
+  // is marked by a lime rule beside it rather than a tint behind it.
   picker: {
-    gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.md,
-    backgroundColor: colors.surfaceMuted,
+    gap: spacing.sm, paddingBottom: spacing.md, paddingLeft: 13,
+    borderLeftWidth: BORDER, borderLeftColor: colors.lime,
   },
   pickerGroup: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs, flexWrap: 'wrap' },
-  catBlock: {
-    gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderTopWidth: BORDER, borderTopColor: colors.line,
-  },
+  catBlock: { gap: spacing.xs, paddingVertical: 13, borderTopWidth: 1, borderTopColor: colors.lineSoft },
 });

@@ -27,7 +27,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, CoverageRow, FactKey, Locality, PlaceTree } from '../../api';
-import { colors, radius, spacing, type, BORDER } from '../../theme';
+import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Row } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
@@ -49,7 +49,7 @@ const FACTS: { key: FactKey; label: string; short: string }[] = [
 const KIND_WORD: Record<Locality['kind'], string> = { county: 'county', town: 'town', postcode: 'postcode' };
 
 const shadeOf = (pc: number | null) => {
-  if (pc == null) return { bg: 'transparent', fg: colors.inkFaint, edge: colors.line };
+  if (pc == null) return { bg: 'transparent', fg: colors.inkFaint, edge: colors.lineSoft };
   if (pc >= 90) return { bg: colors.accent, fg: colors.primaryFg, edge: 'transparent' };
   // A sequential ramp cut from the brand: ink at the top, through lime, to the
   // lime tint. Ink type on every step of it — cream on lime is never allowed.
@@ -57,7 +57,7 @@ const shadeOf = (pc: number | null) => {
   if (pc >= 45) return { bg: colors.lime, fg: colors.ink, edge: 'transparent' };
   if (pc >= 20) return { bg: colors.surfaceMuted, fg: colors.ink, edge: 'transparent' };
   if (pc > 0) return { bg: colors.accentSoft, fg: colors.ink, edge: 'transparent' };
-  return { bg: colors.well, fg: colors.inkMuted, edge: colors.line };
+  return { bg: colors.well, fg: colors.inkMuted, edge: colors.lineSoft };
 };
 
 export function Coverage() {
@@ -111,6 +111,7 @@ export function Coverage() {
   return (
     <AdminPage>
       <PageHead
+        kicker={`${rows.length} ${rows.length === 1 ? 'PLACE' : 'PLACES'} MEASURED · ${count(totals.gaps)} FACTS MISSING`}
         title="Coverage"
         sub="Where the holes are. Every cell is how much we hold — and a way into the ones we do not."
       />
@@ -131,8 +132,8 @@ export function Coverage() {
         ) : null}
       </TileRow>
 
-      <Panel title="Which part of the country" padded={false}>
-        <View style={{ padding: spacing.md }}>
+      <Panel title="Which part of the country">
+        <View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.xs }}>
             <FilterChip label="Every county" on={!county} onPress={() => setCounty(null)} />
             {counties.map((c) => (
@@ -150,7 +151,7 @@ export function Coverage() {
         padded={false}
       >
         {!rows.length ? (
-          <View style={{ padding: spacing.lg }}>
+          <View style={{ paddingVertical: spacing.lg }}>
             <Text style={type.small}>{busy ? 'Counting…' : 'Nothing measured yet — run a harvest or a sweep.'}</Text>
           </View>
         ) : (
@@ -229,29 +230,32 @@ export function Coverage() {
 
 const styles = StyleSheet.create({
   head: {
-    flexDirection: 'row', gap: 3, paddingHorizontal: spacing.md, paddingBottom: 5,
-    borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    flexDirection: 'row', gap: 3, paddingBottom: 9,
+    borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted,
   },
   headCell: { paddingTop: spacing.sm },
   cellHead: {
-    ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700',
+    ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted,
     width: 84, textAlign: 'center',
   },
   matrixRow: {
-    flexDirection: 'row', gap: 3, alignItems: 'stretch',
-    paddingHorizontal: spacing.md, paddingVertical: 3,
+    flexDirection: 'row', gap: 3, alignItems: 'stretch', paddingVertical: 3,
   },
   rowHead: { width: 168, justifyContent: 'center', paddingRight: spacing.sm, gap: 1 },
   rowName: { ...type.small, fontWeight: '700', color: colors.ink },
+  // The fill *is* the datum, so the cell carries no frame of its own: a 2px
+  // edge on every cell turned the matrix into a grid of boxes. A hairline only
+  // where there is no fill to see, and the ink edge kept for hover, which is
+  // the one moment a cell has to say it is a doorway.
   cell: {
-    width: 84, borderRadius: radius.sm, borderWidth: BORDER,
-    alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 0,
+    width: 84, borderWidth: 1, borderColor: 'transparent',
+    alignItems: 'center', justifyContent: 'center', paddingVertical: 7, gap: 0,
   },
-  cellHover: { borderColor: colors.ink, borderWidth: 2 },
+  cellHover: { borderColor: colors.ink },
   cellPc: { ...type.small, fontWeight: '800' },
   cellGap: { ...type.tiny, fontSize: 9.5 },
   foot: {
     flexDirection: 'row', gap: spacing.xs, alignItems: 'flex-start',
-    padding: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line,
+    paddingTop: spacing.md, marginTop: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.ruleMuted,
   },
 });

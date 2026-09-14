@@ -26,9 +26,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
-import { Row, Wrap } from '../components/ui';
+import { Button as BaseButton, Row, Wrap } from '../components/ui';
 import { useViewport } from '../hooks/useViewport';
 
 // ---------------------------------------------------------------------------
@@ -84,22 +84,59 @@ export const monthLabel = (key: string) => {
 // the page
 // ---------------------------------------------------------------------------
 
-export function PageHead({ title, sub, right }: { title: string; sub?: string; right?: React.ReactNode }) {
+/**
+ * The band at the top of a screen — the Categories v2 grammar, now every
+ * screen's (handoff "Category screens v2", 14 Sep 2026).
+ *
+ * A small uppercase kicker saying what is being counted, the screen's name at
+ * 31px, and the figures that matter set to the right 34px apart. One 2px muted
+ * rule under the lot. No box: the rule is the only drawn thing, which is the
+ * handoff's first constraint — "no tiles, panels, outlined chips or boxes of
+ * any kind. Hairlines."
+ *
+ * `sub` is kept because a sentence under the name is often the honest thing to
+ * say; `stats` is the new part, and is what the kicker is counting.
+ */
+export function PageHead({ title, sub, kicker, stats, right }: {
+  title: string;
+  sub?: string;
+  /** The uppercase line over the name — "465 OF 485 ANSWERED". */
+  kicker?: string;
+  /** Figures to the right of the name, in the band rather than in tiles. */
+  stats?: { label: string; value: React.ReactNode }[];
+  right?: React.ReactNode;
+}) {
+  // 31px wide, 24px on a phone — the handoff draws 390 as its own artboard
+  // rather than a squeeze, and its title is the smaller one (BO1m).
+  const { width } = useViewport();
   return (
-    <Row style={{ alignItems: 'flex-start', gap: spacing.md, marginBottom: spacing.sm }}>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={type.title}>{title}</Text>
+    <View style={styles.band}>
+      <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 4 }}>
+        {kicker ? <Text style={styles.bandKicker}>{kicker}</Text> : null}
+        <Text style={[styles.bandTitle, width < 900 && styles.bandTitlePhone]}>{title}</Text>
         {sub ? <Text style={type.small}>{sub}</Text> : null}
       </View>
+      {stats?.length ? (
+        <View style={styles.bandStats}>
+          {stats.map((s) => (
+            <View key={s.label} style={{ gap: 2 }}>
+              <Text style={styles.bandKicker}>{s.label}</Text>
+              <Text style={styles.bandValue}>{s.value}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {right}
-    </Row>
+    </View>
   );
 }
 
 export type Tone = 'plain' | 'ok' | 'warn' | 'crit' | 'accent';
 
+// The handoff's colour roles: a plain fact is a *muted* rule, not an ink one —
+// at 2px down the left of every figure on a page, ink reads as a frame.
 const RULE: Record<Tone, string> = {
-  plain: colors.line,
+  plain: colors.ruleMuted,
   ok: colors.like,
   warn: colors.dislike,
   crit: colors.overrun,
@@ -107,8 +144,13 @@ const RULE: Record<Tone, string> = {
 };
 
 /**
- * One figure. The tone is the 4px rule down its left edge — never the number's
+ * One figure. The tone is the 2px rule down its left edge — never the number's
  * colour, which is PV's rule and the design guide's own device.
+ *
+ * There is no box around it any more: the v2 handoff draws a fact as a left
+ * rule and nothing else, and a row of bordered tiles was exactly the thing the
+ * owner called "these big white boxes" (12 Sep 2026). The rule alone still
+ * separates one figure from the next, which is all the border was doing.
  */
 export function Tile({ label, value, sub, tone = 'plain', onPress }: {
   label: string;
@@ -131,7 +173,7 @@ export function Tile({ label, value, sub, tone = 'plain', onPress }: {
     </View>
   );
   return onPress
-    ? <Press onPress={onPress} style={{ flexGrow: 1, flexBasis: 180, minWidth: 150, maxWidth: 420 }}>{body}</Press>
+    ? <Press onPress={onPress} style={{ flexGrow: 1, flexBasis: 160, minWidth: 140, maxWidth: 420 }}>{body}</Press>
     : body;
 }
 
@@ -140,14 +182,21 @@ export function TileRow({ children }: { children: React.ReactNode }) {
   return <View style={styles.tileRow}>{children}</View>;
 }
 
-/** A section of the page: a heading, an optional control on the right, a card body. */
+/**
+ * A section of the page: a heading, an optional control on the right, a body.
+ *
+ * It used to be a bordered card. In the v2 grammar a section is its **heading
+ * over one 2px muted rule** — the heading at 17px/800 the way the doors are
+ * set, and the body hanging off the page's own left edge rather than being
+ * inset by a border. Everything a card was doing, a rule does more quietly.
+ */
 export function Panel({ title, sub, right, children, padded = true }: {
   title?: string; sub?: string; right?: React.ReactNode; children: React.ReactNode; padded?: boolean;
 }) {
   return (
     <View style={styles.panel}>
       {title ? (
-        <Row style={{ alignItems: 'flex-start', gap: spacing.sm, padding: spacing.md, paddingBottom: 0 }}>
+        <Row style={{ alignItems: 'flex-end', gap: spacing.sm, paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted }}>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={styles.panelTitle}>{title}</Text>
             {sub ? <Text style={type.tiny}>{sub}</Text> : null}
@@ -155,7 +204,7 @@ export function Panel({ title, sub, right, children, padded = true }: {
           {right}
         </Row>
       ) : null}
-      <View style={padded ? { padding: spacing.md, gap: spacing.sm } : undefined}>{children}</View>
+      <View style={padded ? { paddingTop: spacing.md, gap: spacing.sm } : undefined}>{children}</View>
     </View>
   );
 }
@@ -178,21 +227,33 @@ export function Withheld({ what, capability }: { what: string; capability: strin
   );
 }
 
+/**
+ * Something the screen has to say — a left rule and the sentence, no fill and
+ * no frame. The handoff's own colour roles: a 2px muted rule is a plain fact, a
+ * lime one is a consequence, a red one is a refusal.
+ */
 export function Banner({ tone = 'plain', children }: { tone?: Tone; children: React.ReactNode }) {
   return (
-    <View style={[styles.banner, { borderLeftColor: RULE[tone] }]}>
-      <Text style={[type.small, { flex: 1 }]}>{children}</Text>
+    <View style={[styles.banner, { borderLeftColor: RULE[tone], borderLeftWidth: tone === 'crit' ? 1 : BORDER }]}>
+      <Text style={[type.small, { flex: 1, color: tone === 'crit' ? colors.overrun : colors.inkMuted }]}>{children}</Text>
     </View>
   );
 }
 
-/** A small state word: a status, a plan, a role. Never a colour on its own. */
+/**
+ * A small state word: a status, a plan, a role.
+ *
+ * Not a pill any more, whatever it is still called. The handoff settled this
+ * one explicitly — "labels are not pills… pills would be a deliberate reversal
+ * of the standing instruction" — so it is weight and, where the state is one
+ * worth stopping on, colour. The name stays so twelve screens keep compiling.
+ */
 export function Pill({ label, tone = 'plain', icon }: { label: string; tone?: Tone; icon?: IconName }) {
-  const colour = RULE[tone];
+  const colour = tone === 'plain' ? colors.ink : RULE[tone];
   return (
-    <View style={[styles.pill, { borderColor: colour }]}>
+    <View style={styles.pill}>
       {icon ? <Icon name={icon} size={12} color={colour} /> : null}
-      <Text style={[type.tiny, { color: colors.ink }]}>{label}</Text>
+      <Text style={[type.tiny, { color: colour, fontWeight: '700' }]}>{label}</Text>
     </View>
   );
 }
@@ -299,22 +360,35 @@ export function FilterRow({ children }: { children: React.ReactNode }) {
   return <Wrap style={{ marginBottom: spacing.sm }}>{children}</Wrap>;
 }
 
+/**
+ * One filter. An outlined chip at rest was the thing the owner named — "the
+ * buttons with white boxes around them" — so at rest it is the word alone, and
+ * chosen it is a flat lime block with ink type. Square, as everything is.
+ */
 export function FilterChip({ label, on, onPress, count: n }: { label: string; on?: boolean; onPress: () => void; count?: number }) {
   return (
     <Press onPress={onPress} style={[styles.filter, on && styles.filterOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
-      <Text style={[type.tiny, on && { color: colors.primaryFg }]}>{label}{n != null ? ` ${n}` : ''}</Text>
+      <Text style={[type.small, { color: on ? colors.selectedFg : colors.inkMuted, fontWeight: on ? '700' : '500' }]}>
+        {label}{n != null ? ` ${n}` : ''}
+      </Text>
     </Press>
   );
 }
 
-/** The window every reporting screen is read through. Days, because that is what the API takes. */
+/**
+ * The window every reporting screen is read through. Days, because that is what
+ * the API takes.
+ *
+ * Drawn as the handoff's segmented control: one 1px muted frame around the set,
+ * a hairline between the cells, and the one you are in filled lime.
+ */
 export function RangePicker({ days, onDays }: { days: number; onDays: (d: number) => void }) {
   const options = [7, 30, 90, 365];
   return (
     <Row style={styles.range}>
-      {options.map((d) => (
-        <Press key={d} onPress={() => onDays(d)} style={[styles.rangeItem, days === d && styles.rangeItemOn]}>
-          <Text style={[type.tiny, days === d && { color: colors.primaryFg, fontWeight: '700' }]}>
+      {options.map((d, i) => (
+        <Press key={d} onPress={() => onDays(d)} style={[styles.rangeItem, i > 0 && styles.rangeDivider, days === d && styles.rangeItemOn]}>
+          <Text style={[type.small, { color: days === d ? colors.selectedFg : colors.inkMuted, fontWeight: days === d ? '700' : '600' }]}>
             {d === 365 ? '1y' : `${d}d`}
           </Text>
         </Press>
@@ -323,20 +397,36 @@ export function RangePicker({ days, onDays }: { days: number; onDays: (d: number
   );
 }
 
-/** A scrollable page with the back office's own padding. */
+/** A scrollable page with the back office's own padding — the handoff's 28px. */
 export function AdminPage({ children }: { children: React.ReactNode }) {
   const { width } = useViewport();
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={[styles.page, width >= 1200 && { maxWidth: 1320, alignSelf: 'center', width: '100%' }]}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }}
+                contentContainerStyle={[styles.page, width < 900 && styles.pagePhone, width >= 1200 && { maxWidth: 1400, alignSelf: 'center', width: '100%' }]}>
       {children}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  // 28px, the handoff's content padding, and a wider gap between the parts of a
+  // screen now that nothing is fenced off by a border.
+  page: { padding: 28, gap: spacing.xl, paddingBottom: spacing.xxl },
+  /** 18px on a phone, the handoff's own 390 artboard. */
+  pagePhone: { padding: 18, paddingBottom: spacing.xxl, gap: spacing.lg },
 
-  tileRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  band: {
+    flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
+    gap: spacing.xl, flexWrap: 'wrap',
+    borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 18,
+  },
+  bandKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
+  bandTitle: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
+  bandTitlePhone: { fontSize: 24, letterSpacing: -0.84, lineHeight: 26 },
+  bandStats: { flexDirection: 'row', alignItems: 'flex-end', gap: 34, flexWrap: 'wrap' },
+  bandValue: { ...type.small, fontSize: 15, fontWeight: '600', color: colors.ink, fontVariant: ['tabular-nums'] },
+
+  tileRow: { flexDirection: 'row', flexWrap: 'wrap', rowGap: spacing.md, columnGap: spacing.xl },
   /** Inside a Pressable the wrapper does the growing, so the tile must not. */
   tileInner: { flexGrow: 0, flexBasis: 'auto', minWidth: 0, maxWidth: undefined, width: '100%' },
   tile: {
@@ -344,36 +434,39 @@ const styles = StyleSheet.create({
     // row of a wrap would otherwise stretch the full width of the page and read
     // as a banner rather than a figure. (CSS grid's auto-fit does not have this
     // problem; flex-wrap does, and this is the fix that keeps one tree.)
-    flexGrow: 1, flexBasis: 180, minWidth: 150, maxWidth: 420,
-    borderWidth: BORDER, borderLeftWidth: 4, borderColor: colors.line, borderRadius: radius.lg,
-    backgroundColor: colors.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 2,
+    flexGrow: 1, flexBasis: 160, minWidth: 140, maxWidth: 420,
+    borderLeftWidth: BORDER, borderColor: colors.ruleMuted,
+    paddingLeft: 13, paddingVertical: 2, gap: 2,
   },
-  tileLabel: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
+  tileLabel: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: '700', color: colors.inkMuted },
   tileValue: { ...type.h2, color: colors.ink, fontVariant: ['tabular-nums'] },
 
-  panel: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.lg, backgroundColor: colors.surface, overflow: 'hidden' },
-  panelTitle: { ...type.small, fontWeight: '700', color: colors.ink },
+  panel: { gap: 0 },
+  panelTitle: { ...type.title, fontSize: 17, fontWeight: '800', letterSpacing: -0.34, lineHeight: 21 },
 
-  withheld: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', padding: spacing.md, backgroundColor: colors.well, borderRadius: radius.md },
-  banner: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, borderWidth: BORDER, borderLeftWidth: 4, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface },
+  withheld: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4 },
+  banner: { flexDirection: 'row', gap: spacing.sm, borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4 },
 
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: BORDER, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
 
-  head: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line },
-  headText: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted },
-  row: { borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: TARGET },
-  rowWide: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  rowNarrow: { gap: 6, padding: spacing.md },
+  // The head is a 2px muted rule — toned down from ink, which the owner found
+  // "very bright white" on the Google table (13 Sep 2026).
+  head: { gap: spacing.sm, paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
+  headText: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
+  row: { borderBottomWidth: 1, borderBottomColor: colors.lineSoft, minHeight: TARGET },
+  rowWide: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 13 },
+  rowNarrow: { gap: 6, paddingVertical: 13 },
   rowHover: { backgroundColor: colors.well },
   cellLabel: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, color: colors.inkMuted },
-  empty: { padding: spacing.lg, alignItems: 'center' },
+  empty: { paddingVertical: spacing.lg },
 
-  filter: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.surface },
-  filterOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filter: { paddingHorizontal: 10, paddingVertical: 4 },
+  filterOn: { backgroundColor: colors.selected },
 
-  range: { gap: 2, backgroundColor: colors.well, borderRadius: radius.pill, padding: 2 },
-  rangeItem: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
-  rangeItemOn: { backgroundColor: colors.primary },
+  range: { borderWidth: 1, borderColor: colors.ruleMuted, alignSelf: 'flex-start' },
+  rangeItem: { paddingHorizontal: 14, paddingVertical: 6 },
+  rangeDivider: { borderLeftWidth: 1, borderLeftColor: colors.ruleMuted },
+  rangeItemOn: { backgroundColor: colors.selected },
 
   mono: { fontFamily: Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', default: 'monospace' }) },
 });
@@ -684,7 +777,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
 
 const plain = StyleSheet.create({
   kicker: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: 32 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, minHeight: 32 },
   action: { ...type.small, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline' },
   choice: { paddingHorizontal: 8, paddingVertical: 3 },
   choiceOn: { backgroundColor: colors.selected },
@@ -701,9 +794,9 @@ const dd = StyleSheet.create({
   panel: {
     position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
-    paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
+    paddingVertical: 4,
   },
-  panelSoft: { borderColor: colors.lineSoft, borderRadius: 8 },
+  panelSoft: { borderColor: colors.lineSoft },
   /** Hung from the control's right edge, for a control at the end of a row. */
   // `left: 'auto'`, not undefined: StyleSheet.create drops an undefined value, so
   // the panel kept `left: 0` and ran off the page to the right (owner, 13 Sep 2026).
@@ -715,4 +808,161 @@ const dd = StyleSheet.create({
   item: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },
   itemHover: { backgroundColor: colors.well },
   itemOn: { backgroundColor: colors.well },
+});
+
+// ---------------------------------------------------------------------------
+// the back office's own button
+// ---------------------------------------------------------------------------
+
+/**
+ * `Button`, with the back office's secondary.
+ *
+ * The pack's secondary is a 2px ink outline (§07), which is right in the
+ * household app and wrong here: the v2 brief's first constraint is "no tiles,
+ * panels, outlined chips or boxes of any kind. Hairlines", and a screen with
+ * seven of them on it reads as seven boxes rather than seven actions. The brief
+ * names the replacement itself, on Approve: *an outline that fills on hover —
+ * a green label on a 1.5px green underline, going to a solid lime block with
+ * ink type.* Twenty of them read as a quiet right-hand column; twenty solid
+ * buttons do not.
+ *
+ * Lime is the *fill*, never the label: lime type on cream is 1.25:1 and the
+ * pack forbids it outright, so the resting label is `accent` — moss on cream,
+ * the lifted green in the dark — which is the palette's own readable green.
+ *
+ * Every other kind is the shared `Button` untouched, so a primary here is still
+ * the one the pack describes: ink on light grounds, lime on dark.
+ */
+export function Button(props: React.ComponentProps<typeof BaseButton>) {
+  if (props.kind !== 'secondary') return <BaseButton {...props} />;
+  const { label, onPress, disabled, loading, style, icon, iconFill } = props;
+  return (
+    <Press
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      style={({ hovered, pressed }: any) => [
+        btn.secondary,
+        (hovered || pressed) && !disabled && btn.secondaryOn,
+        disabled && { opacity: 0.45 },
+        style,
+      ]}
+    >
+      {({ hovered, pressed }: any) => {
+        const fg = (hovered || pressed) && !disabled ? colors.selectedFg : colors.accent;
+        return (
+          <Row style={{ gap: 6, alignItems: 'center' }}>
+            {icon ? <Icon name={icon} size={15} color={fg} fill={iconFill} /> : null}
+            <Text style={[type.small, { fontSize: 13.5, fontWeight: '700', color: fg }]}>{loading ? '…' : label}</Text>
+          </Row>
+        );
+      }}
+    </Press>
+  );
+}
+
+const btn = StyleSheet.create({
+  secondary: {
+    alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 7,
+    borderBottomWidth: 1.5, borderBottomColor: colors.accent,
+  },
+  /** Hover and press are the same moment: the underline becomes the block. */
+  secondaryOn: { backgroundColor: colors.selected, borderBottomColor: colors.selected },
+});
+
+/**
+ * `Segmented`, with the back office's weight.
+ *
+ * Structurally the pack's Selection panel and untouched: a row of choices
+ * inside one rule, the chosen one a flat lime block with ink type. Only the
+ * rule changes — 1px muted rather than 2px ink, which is what the v2 brief
+ * draws (`1px solid` at the 2px rule's colour) and what keeps one control from
+ * out-shouting a page whose every other line is a hairline.
+ */
+export function Segmented<T extends string>({ value, options, onChange }: {
+  value: T;
+  options: { value: T; label: string; icon?: IconName }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View style={seg.wrap}>
+      {options.map((o, i) => {
+        const on = o.value === value;
+        return (
+          <Press
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            style={[seg.item, i > 0 && seg.divider, on && seg.itemOn]}
+          >
+            {o.icon ? <Icon name={o.icon} size={13} color={on ? colors.selectedFg : colors.ink} /> : null}
+            <Text numberOfLines={1} style={[type.small, { fontSize: 12.5, fontWeight: on ? '700' : '600', color: on ? colors.selectedFg : colors.inkMuted, flexShrink: 1 }]}>
+              {o.label}
+            </Text>
+          </Press>
+        );
+      })}
+    </View>
+  );
+}
+
+const seg = StyleSheet.create({
+  wrap: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted, overflow: 'hidden' },
+  item: { flex: 1, minWidth: 0, minHeight: 36, paddingHorizontal: 14, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center' },
+  divider: { borderLeftWidth: 1, borderLeftColor: colors.ruleMuted },
+  itemOn: { backgroundColor: colors.selected },
+});
+
+/**
+ * `Card`, which in the back office is not one.
+ *
+ * The household app's card is a bordered surface and right to be; the back
+ * office's own brief forbids it outright — "no tiles, panels, outlined chips or
+ * boxes of any kind. Hairlines." So the block keeps its spacing and its job of
+ * separating one thing from the next, and the frame becomes the rule under it.
+ * Named `Card` so the screens that were built on one need only change an import.
+ */
+export function Card({ children, style }: { children: React.ReactNode; style?: any }) {
+  return <View style={[card.card, style]}>{children}</View>;
+}
+
+/**
+ * `Chip`, which in the back office is a word.
+ *
+ * "Labels are not pills… pills would be a deliberate reversal of the standing
+ * instruction" (v2 handoff). A chip that only says something is its text; a
+ * chip you choose between is the `Choice` grammar — a flat lime block with ink
+ * type when it is the one you are in, and nothing at all when it is not.
+ */
+export function Chip({ label, onPress, selected, icon, iconFill }: {
+  label: string;
+  onPress?: () => void;
+  selected?: boolean;
+  icon?: IconName;
+  iconFill?: boolean;
+  /** Accepted and ignored: the back office has no chip tones, only words. */
+  tone?: string;
+  onRemove?: () => void;
+}) {
+  const fg = selected ? colors.selectedFg : onPress ? colors.inkMuted : colors.ink;
+  const body = (
+    <Row style={{ gap: 5, alignItems: 'center' }}>
+      {icon ? <Icon name={icon} size={13} color={fg} fill={iconFill} /> : null}
+      <Text style={[type.small, { color: fg, fontWeight: selected ? '700' : '600', flexShrink: 1 }]} numberOfLines={1}>{label}</Text>
+    </Row>
+  );
+  if (!onPress) return <View style={card.chip}>{body}</View>;
+  return (
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }}
+           style={[card.chip, selected && card.chipOn]}>
+      {body}
+    </Press>
+  );
+}
+
+const card = StyleSheet.create({
+  card: { paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, gap: spacing.sm },
+  chip: { paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
+  chipOn: { backgroundColor: colors.selected },
 });

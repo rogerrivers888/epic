@@ -22,7 +22,7 @@ import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { Access } from '../api';
 import { AdminScreen } from '../routes';
-import { colors, radius, spacing, type, BORDER } from '../theme';
+import { colors, spacing, type } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
@@ -146,7 +146,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {desktop ? (
         <View style={styles.rail}>
           <View style={styles.brand}>
-            <Wordmark height={34} ground={colors.surface} />
+            <Wordmark height={30} ground={colors.bg} />
             <Text style={styles.badge}>Back office</Text>
           </View>
 
@@ -159,9 +159,9 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
                 accessibilityRole="tab"
                 accessibilityState={{ selected: screen === n.key }}
               >
-                <Icon name={n.icon} size={17} color={screen === n.key ? colors.ink : colors.inkMuted} />
+                <Icon name={n.icon} size={15} strokeWidth={1.8} color={screen === n.key ? colors.selectedFg : colors.ink} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.navLabel, screen === n.key && { color: colors.ink, fontWeight: '700' }]}>{n.label}</Text>
+                  <Text style={[styles.navLabel, screen === n.key && { color: colors.selectedFg, fontWeight: '700' }]}>{n.label}</Text>
                 </View>
               </Press>
             </React.Fragment>
@@ -198,8 +198,8 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
                 accessibilityRole="tab"
                 accessibilityState={{ selected: screen === n.key }}
               >
-                <Icon name={n.icon} size={13} color={screen === n.key ? colors.primaryFg : colors.inkMuted} />
-                <Text style={[type.tiny, screen === n.key && { color: colors.primaryFg, fontWeight: '700' }]}>{n.label}</Text>
+                <Icon name={n.icon} size={13} color={screen === n.key ? colors.selectedFg : colors.ink} />
+                <Text style={[type.tiny, { color: screen === n.key ? colors.selectedFg : colors.ink }, screen === n.key && { fontWeight: '700' }]}>{n.label}</Text>
               </Press>
             ))}
           </ScrollView>
@@ -215,36 +215,38 @@ const styles = StyleSheet.create({
   root: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
   content: { flex: 1 },
 
+  // 196px and a hairline edge — the handoff's own measurements ("Category
+  // screens v2", 14 Sep 2026). The rail stands on the same ground as the page:
+  // a second surface colour behind it would be the panel the handoff forbids,
+  // and the one rule is enough to say where the page starts.
   rail: {
-    width: 208, backgroundColor: colors.surface, borderRightWidth: BORDER, borderRightColor: colors.line,
-    paddingVertical: spacing.lg, paddingHorizontal: spacing.md, gap: 2,
+    width: 196, borderRightWidth: 1, borderRightColor: colors.lineSoft,
+    paddingVertical: 20, paddingHorizontal: spacing.sm, gap: 1,
   },
-  brand: { gap: 4, marginBottom: spacing.lg },
+  brand: { gap: 3, marginBottom: 20, paddingHorizontal: spacing.xs },
   badge: {
-    ...type.tiny, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700',
+    ...type.tiny, fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1.3, fontWeight: '700',
     color: colors.inkMuted,
   },
-  navItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 9, paddingHorizontal: spacing.sm, borderRadius: radius.md },
-  navItemOn: { backgroundColor: colors.well },
-  /** A folder in the rail: a small heading, and its items set in a little. */
-  navGroup: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: spacing.md, paddingBottom: 2 },
-  navItemGrouped: { marginLeft: spacing.sm },
-  navLabel: { ...type.small, color: colors.inkMuted },
+  navItem: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 7, paddingHorizontal: spacing.md },
+  /** The live row is a flat lime block with ink type — the brand moment, square. */
+  navItemOn: { backgroundColor: colors.selected },
+  /** A folder in the rail: a small heading over the items it holds. */
+  navGroup: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.md, paddingTop: 18, paddingBottom: 7 },
+  navItemGrouped: {},
+  navLabel: { ...type.small, fontSize: 13.5, color: colors.ink },
 
-  profile: { gap: 2, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
-  leave: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.sm },
+  profile: { gap: 1, paddingTop: spacing.lg, marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.lineSoft, paddingHorizontal: spacing.xs },
+  leave: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 13 },
 
   rootPhone: { flexDirection: 'column' },
   phoneHead: {
-    backgroundColor: colors.surface, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
     paddingTop: Platform.OS === 'web' ? spacing.sm : spacing.lg, gap: 6,
   },
   phoneHeadTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md },
   leaveSmall: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   chips: { gap: 6, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
-  chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: radius.pill,
-    borderWidth: BORDER, borderColor: colors.line, paddingHorizontal: 10, paddingVertical: 5,
-  },
-  chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5 },
+  chipOn: { backgroundColor: colors.selected },
 });

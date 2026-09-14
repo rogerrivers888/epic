@@ -28,9 +28,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api, VoiceCaptureMode, VoiceLabInfo, VoiceModeResult, VoiceProbe, VoiceRun, VoiceRuns, VoiceUtterance } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
-import { Button, Row, Wrap } from '../../components/ui';
+import { Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Banner, DataTable, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago } from '../kit';
+import { AdminPage, Button, Banner, DataTable, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago } from '../kit';
 import { LiveTranscriber, LiveState } from '../../voice/live';
 import { Recorder, closeMicrophone, openMicrophone, pickMime, recordingSupported } from '../../voice/recorder';
 import { transcribeRecording } from '../../voice/client';
@@ -330,16 +330,18 @@ export function VoiceLab() {
 }
 
 const styles = StyleSheet.create({
-  reference: { gap: 4, padding: spacing.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
+  // Four framed panels became four left rules. The sentence being read aloud is
+  // a plain fact; what came back is the consequence, so it takes the lime rule.
+  reference: { gap: 4, borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4 },
   referenceText: { fontSize: 18, lineHeight: 26, color: colors.ink },
-  dot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.overrun },
-  captions: { gap: 4, padding: spacing.md, borderWidth: BORDER, borderColor: colors.accent, minHeight: 80 },
+  dot: { width: 10, height: 10, backgroundColor: colors.overrun },
+  captions: { gap: 4, borderLeftWidth: BORDER, borderLeftColor: colors.lime, paddingLeft: 13, paddingVertical: 4, minHeight: 80 },
   captionText: { fontSize: 18, lineHeight: 26, color: colors.ink },
-  columns: { flexDirection: 'row', gap: spacing.md },
+  columns: { flexDirection: 'row', gap: spacing.xl },
   columnsPhone: { flexDirection: 'column' },
-  column: { flex: 1, gap: 6, padding: spacing.md, borderWidth: BORDER, borderColor: colors.line, minWidth: 0 },
+  column: { flex: 1, gap: 6, borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4, minWidth: 0 },
   columnPhone: { flex: 0 },
   transcript: { fontSize: 15, lineHeight: 22, color: colors.ink },
-  plan: { gap: 3, marginTop: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.line },
-  detail: { gap: 6, padding: spacing.md, borderWidth: BORDER, borderColor: colors.line, marginTop: spacing.sm },
+  plan: { gap: 3, marginTop: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.lineSoft },
+  detail: { gap: 6, borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4, marginTop: spacing.sm },
 });

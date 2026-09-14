@@ -58,10 +58,9 @@ import { Press } from '../../components/press';
 import { api, LookupCompare, LookupCompareColumn, LookupItem, LookupOpened, LookupResult, LookupSource } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { Button } from '../../components/ui';
 import { CrumbHead } from '../../components/ControlRow';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Dropdown, PageHead, Pill, count, plural } from '../kit';
+import { AdminPage, Button, Dropdown, PageHead, Pill, count, plural } from '../kit';
 import { asFlag, asNumber, asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../../router';
 
 const WIDE = 900;
@@ -727,28 +726,30 @@ const HAIR = 1;
 const styles = StyleSheet.create({
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', zIndex: 20, position: 'relative' },
   controlsNarrow: { gap: spacing.xs },
-  // One height, one grey, one corner for everything on the line (owner, 12
-  // Sep 2026: "the dropdowns are a different size… I don't like the black
-  // squares. Maybe they can be light grey. Maybe they can have rounded corners").
+  // One height for everything on the line (owner, 12 Sep 2026: "the dropdowns
+  // are a different size… I don't like the black squares. Maybe they can be
+  // light grey. Maybe they can have rounded corners"). The light grey stays;
+  // the box and the rounded corners do not, because the v2 brief is hairlines
+  // and square throughout and this was the last framed field on the screen.
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 6, flexGrow: 1, minWidth: 200,
-    borderWidth: 1, borderColor: colors.lineSoft, borderRadius: 8, paddingHorizontal: 12, minHeight: 40, backgroundColor: colors.surface,
+    borderBottomWidth: BORDER, borderBottomColor: colors.line, minHeight: 40, backgroundColor: 'transparent',
   },
   searchInput: { flex: 1, minWidth: 0, ...type.small, color: colors.ink, paddingVertical: 6, outlineStyle: 'none' as any },
-  look: { minHeight: 40, borderRadius: 8, paddingHorizontal: 18 },
+  look: { minHeight: 40, paddingHorizontal: 18 },
   within: { flexDirection: 'row', alignItems: 'center', gap: 6, zIndex: 30 },
 
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingVertical: 2 },
 
-  tabs: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap', borderBottomWidth: BORDER, borderBottomColor: colors.line, paddingBottom: 6, marginTop: spacing.sm },
+  tabs: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap', borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 9, marginTop: spacing.sm },
   lens: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  kicker: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '700', color: colors.inkMuted, marginRight: 4 },
+  kicker: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: '700', color: colors.inkMuted, marginRight: 4 },
   choice: { paddingHorizontal: 8, paddingVertical: 3 },
   choiceBig: { paddingHorizontal: 10, paddingVertical: 5 },
   choiceOn: { backgroundColor: colors.selected },
 
-  headText: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted },
-  gridHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: HAIR, borderBottomColor: colors.line },
+  headText: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
+  gridHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
   gridRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 40, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft },
   gridRowSub: { backgroundColor: colors.surfaceMuted },
   label: { width: 190, flexGrow: 1, flexShrink: 1, minWidth: 0 },
@@ -762,7 +763,7 @@ const styles = StyleSheet.create({
   cellNum: { ...type.small, color: colors.ink, fontVariant: ['tabular-nums'], textAlign: 'right' },
   foot: { ...type.tiny, paddingVertical: spacing.sm },
 
-  listHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: HAIR, borderBottomColor: colors.line },
+  listHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, paddingHorizontal: 4, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft },
   rowNarrow: { flexDirection: 'column', alignItems: 'flex-start', gap: 3 },
   name: { ...type.small, color: colors.ink, fontWeight: '700' },
@@ -772,7 +773,7 @@ const styles = StyleSheet.create({
   inline: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   empty: { ...type.small, color: colors.inkMuted, paddingVertical: spacing.md },
 
-  compareHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: HAIR, borderBottomColor: colors.line },
+  compareHead: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
   compareHeadNarrow: { flexDirection: 'column', alignItems: 'stretch' },
   compareRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 5, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft },
   compareRowNarrow: { flexDirection: 'column', alignItems: 'stretch', gap: 4 },
@@ -784,9 +785,9 @@ const styles = StyleSheet.create({
   /** A hole: what one side has and the other does not. The tint, not a colour, so it reads without being loud. */
   compareCellHole: { backgroundColor: colors.surfaceMuted, paddingHorizontal: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingVertical: spacing.sm, alignItems: 'center' },
-  action: { minHeight: 36, borderRadius: 8, paddingHorizontal: 14 },
-  said: { gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: BORDER, borderBottomColor: colors.line, marginBottom: spacing.sm },
-  fold: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: HAIR, borderBottomColor: colors.line, flexWrap: 'wrap' },
+  action: { minHeight: 36, paddingHorizontal: 14 },
+  said: { gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, marginBottom: spacing.sm },
+  fold: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft, flexWrap: 'wrap' },
   field: { flexDirection: 'row', gap: spacing.sm, paddingVertical: 5, paddingLeft: 22, borderBottomWidth: HAIR, borderBottomColor: colors.lineSoft, alignItems: 'flex-start' },
   fieldNarrow: { flexDirection: 'column', gap: 2 },
   fieldKey: { ...type.tiny, fontFamily: MONO, color: colors.inkMuted, paddingTop: 1 },

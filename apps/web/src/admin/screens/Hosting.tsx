@@ -20,8 +20,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api, AdminHosting, AdminIdCheck, TrustLevel } from '../../api';
 import { colors, fonts, spacing, type, BORDER, TARGET } from '../../theme';
-import { Button, Row, Segmented, StatusLine } from '../../components/ui';
-import { AdminPage, Banner, PageHead, Panel, Pill, Tile, TileRow, ago } from '../kit';
+import { Row, StatusLine } from '../../components/ui';
+import { AdminPage, Button, Banner, PageHead, Panel, Pill, Segmented, Tile, TileRow, ago } from '../kit';
 import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { SHAPE_LABEL, TRUST_LABEL, TYPE_LABEL, VENUE_LABEL, metaLine, money, priceWords } from '../../components/hosting';
@@ -174,8 +174,8 @@ function IdImage({ path, label, onError }: { path: string | null; label: string;
     <View style={{ gap: 4 }}>
       <Text style={styles.label}>{label}</Text>
       {src
-        ? <Image source={{ uri: src }} style={{ width: 150, height: 105, backgroundColor: colors.warm }} resizeMode="contain" />
-        : <View style={{ width: 150, height: 105, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' }}><Text style={type.tiny}>{path ? 'Opening…' : 'Not sent'}</Text></View>}
+        ? <Image source={{ uri: src }} style={{ width: 150, height: 105 }} resizeMode="contain" />
+        : <View style={{ width: 150, height: 105, borderWidth: 1, borderColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center' }}><Text style={type.tiny}>{path ? 'Opening…' : 'Not sent'}</Text></View>}
     </View>
   );
 }
@@ -238,7 +238,8 @@ function IdChecks({ canManage, onError }: { canManage: boolean; onError: (e: str
 const styles = StyleSheet.create({
   pitch: { paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
   label: { fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: colors.inkMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
-  input: { minHeight: 72, paddingHorizontal: spacing.md, paddingTop: 10, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 14, color: colors.ink, fontFamily: fonts.body },
+  // A line to write on, not a box (handoff: hairlines, nothing framed).
+  input: { minHeight: 72, paddingTop: 10, borderBottomWidth: BORDER, borderBottomColor: colors.line, backgroundColor: 'transparent', fontSize: 14, color: colors.ink, fontFamily: fonts.body },
   host: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft, flexWrap: 'wrap' },
   report: { alignItems: 'flex-start', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft, minHeight: TARGET },
 });

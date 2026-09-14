@@ -23,8 +23,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { api, Account, AccountsResponse, ApiError, Invitation } from '../api';
-import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { Button, Card, Chip, Row, SectionTitle, StatusLine, Wrap, Meter, FoldLine } from '../components/ui';
+import { colors, spacing, TARGET, type, BORDER } from '../theme';
+import { Row, SectionTitle, StatusLine, Wrap, Meter, FoldLine } from '../components/ui';
+// The back office's own Button, Card and Chip: the same components without the
+// frames, because this screen is only ever drawn inside /admin (AdminApp) and
+// the v2 brief for those screens is hairlines and nothing boxed.
+import { Banner, Button, Card, Chip } from '../admin/kit';
 import { Icon } from '../components/Icon';
 import { useViewport } from '../hooks/useViewport';
 
@@ -111,10 +115,16 @@ export function AccountsScreen() {
   const owner = data?.accounts.find((a) => a.role === 'owner') ?? null;
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={[styles.content, wide && styles.contentWide]}>
+    <ScrollView style={styles.page} contentContainerStyle={[styles.content, !wide && styles.contentPhone, wide && styles.contentWide]}>
+      {/* The band every back-office screen opens with: the name at 31px over
+          one 2px muted rule, with what it counts said in the kicker. */}
       <Row style={styles.head}>
-        <Icon name="accounts" size={22} color={colors.ink} />
-        <Text style={[type.title, { flex: 1 }]}>Accounts</Text>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={styles.kicker}>
+            {data ? `${data.accounts.length} ${data.accounts.length === 1 ? 'HOUSEHOLD' : 'HOUSEHOLDS'} · ${data.accounts.filter((a) => a.liveDevices > 0).length} SIGNED IN NOW` : 'THE ESTATE'}
+          </Text>
+          <Text style={[wide ? styles.title : styles.titlePhone]}>Accounts</Text>
+        </View>
         <Button label="Refresh" icon="refresh" kind="secondary" onPress={() => void load()} disabled={busy} />
       </Row>
 
@@ -124,7 +134,7 @@ export function AccountsScreen() {
           matters when the free allowances are one pot. */}
       {data ? (
         <Card>
-          <Row style={{ gap: spacing.lg, flexWrap: 'wrap' }}>
+          <Row style={{ rowGap: spacing.md, columnGap: spacing.xl, flexWrap: 'wrap' }}>
             <Figure label="Households" value={String(data.accounts.length)} />
             <Figure label="Signed in now" value={String(data.accounts.filter((a) => a.liveDevices > 0).length)} />
             <Figure label="Calls this month" value={data.totals.callsMonth.toLocaleString()} />
@@ -137,7 +147,7 @@ export function AccountsScreen() {
       {/* Whether an invitation can actually be sent. The answer to "why did
           that not send" belongs on the screen that tried to send it. */}
       {data && !data.mail.configured ? (
-        <Card>
+        <Banner tone="crit">
           <Row style={{ gap: spacing.sm, alignItems: 'flex-start' }}>
             <Icon name="mail" size={16} color={colors.overrun} />
             <View style={{ flex: 1, gap: 4 }}>
@@ -149,7 +159,7 @@ export function AccountsScreen() {
               </Text>
             </View>
           </Row>
-        </Card>
+        </Banner>
       ) : null}
 
       {invitation ? <InvitationCard invitation={invitation} onDone={() => setInvitation(null)} /> : null}
@@ -223,11 +233,12 @@ export function AccountsScreen() {
 
 // --- pieces -----------------------------------------------------------------
 
+/** One figure, in the back office's own grammar: a left rule, a kicker, a number. */
 function Figure({ label, value }: { label: string; value: string }) {
   return (
-    <View style={{ gap: 2 }}>
-      <Text style={type.tiny}>{label}</Text>
-      <Text style={[type.h2, { color: colors.ink }]}>{value}</Text>
+    <View style={styles.figure}>
+      <Text style={styles.kicker}>{label}</Text>
+      <Text style={[type.h2, { color: colors.ink, fontVariant: ['tabular-nums'] }]}>{value}</Text>
     </View>
   );
 }
@@ -529,28 +540,35 @@ function AddAccount({ plans, defaultBound, canSend, busy, onAdd }: {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xl * 2 },
-  contentWide: { maxWidth: 1180, width: '100%', alignSelf: 'center' },
-  head: { gap: spacing.sm, alignItems: 'center' },
-  headings: { gap: spacing.sm, paddingHorizontal: spacing.md },
+  content: { padding: 28, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
+  contentPhone: { padding: 18 },
+  contentWide: { maxWidth: 1400, width: '100%', alignSelf: 'center' },
+  head: { gap: spacing.md, alignItems: 'flex-end', borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 18 },
+  title: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
+  titlePhone: { ...type.title, fontSize: 24, letterSpacing: -0.84, lineHeight: 26 },
+  kicker: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: '700', color: colors.inkMuted },
+  figure: { borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 2, gap: 2 },
+  headings: { gap: spacing.sm },
   rowWide: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowNarrow: { gap: 6 },
-  details: { gap: spacing.md, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.line },
+  details: { gap: spacing.md, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: BORDER, borderTopColor: colors.ruleMuted },
+  // Fields are lines to write on, not boxes — the whole of this screen is
+  // drawn inside the back office, whose brief is hairlines.
   input: {
-    minHeight: TARGET, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
-    paddingHorizontal: spacing.md, color: colors.ink, backgroundColor: colors.surface,
+    minHeight: TARGET, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    color: colors.ink, backgroundColor: 'transparent',
   },
   numberBox: {
-    width: 92, minHeight: TARGET, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
-    paddingHorizontal: spacing.sm, textAlign: 'right', color: colors.ink, backgroundColor: colors.surface,
+    width: 92, minHeight: TARGET, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    textAlign: 'right', color: colors.ink, backgroundColor: 'transparent',
   },
   noteBox: {
-    minHeight: TARGET * 1.6, borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md,
-    padding: spacing.sm, color: colors.ink, backgroundColor: colors.surface,
+    minHeight: TARGET * 1.6, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    paddingVertical: spacing.sm, color: colors.ink, backgroundColor: 'transparent',
   },
   link: {
-    ...type.tiny, color: colors.ink, backgroundColor: colors.well,
-    borderRadius: radius.sm, padding: spacing.sm,
+    ...type.tiny, color: colors.ink,
+    borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 4,
     fontFamily: Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', default: 'monospace' }),
   },
   mono: { fontFamily: Platform.select({ web: 'ui-monospace, SFMono-Regular, Menlo, monospace', default: 'monospace' }) },
