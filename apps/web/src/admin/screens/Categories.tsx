@@ -955,7 +955,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const asideCount = (rows ?? []).filter((r) => standing(r) === 'aside').length;
   return (
     <View>
-      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md }]}>
+      {/* Lifted, like the Show/By row above it: every React Native Web view is
+          its own stacking context, so without this the Showing menu opens
+          underneath the table and reads as see-through (owner, 14 Sep 2026). */}
+      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md, zIndex: 20 }]}>
         <View style={[styles.tabs, { width: wide ? 360 : '100%' }]}>
           {([['mapped', 'Mapped'], ['unmapped', 'Unmapped'], ['all', 'All']] as const).map(([v, l], i) => (
             <Press key={v} effect="none" onPress={() => { setTab(v); setGroup('-'); setTicked(new Set()); }} accessibilityRole="button" accessibilityState={{ selected: tab === v }}
