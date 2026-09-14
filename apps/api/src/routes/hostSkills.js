@@ -762,10 +762,16 @@ adminRouter.put('/credential-type', requires('manage_skills'), async (req, res, 
     // the whole type switched back on — or a kind of host newly covered by a
     // rule that was already a condition, which is the same thing for everyone
     // who has just been brought inside it (Codex, 14 Sep 2026).
+    // …and a shortened life, which `saveCredentialType` has just applied to
+    // every confirmation it made — some of which may now be in the past
+    // (Codex, 14 Sep 2026).
+    const shorter = nowGated.length > 0 && type.expires_months != null
+      && (was?.expires_months == null || type.expires_months < was.expires_months);
     const stricter = nowGated.filter((c) => !before.has(c)).length > 0
       || (type.evidence_required && !was?.evidence_required)
       || (was?.active === false && type.active)
-      || (nowGated.length > 0 && (type.host_types ?? []).some((h) => !hostsBefore.has(h)));
+      || (nowGated.length > 0 && (type.host_types ?? []).some((h) => !hostsBefore.has(h)))
+      || shorter;
     const affected = stricter ? await repo.liveOffersIn(nowGated) : [];
     const paused = await pauseWhatNoLongerQualifies(affected.map((o) => o.id));
     res.json({ type, paused });
@@ -781,8 +787,17 @@ adminRouter.put('/credential-type', requires('manage_skills'), async (req, res, 
  */
 adminRouter.post('/credentials/:id', requires('manage_skills'), async (req, res, next) => {
   try {
+    /**
+     * Two answers, and only two.
+     *
+     * `CREDENTIAL_STATES` is the column's whole vocabulary; this door is the
+     * one where somebody says whether they have seen the evidence. Letting it
+     * write `stated` would take a required claim out of the queue without
+     * anybody deciding it, and `pending` would stamp a decision that had not
+     * been made (Codex, 14 Sep 2026).
+     */
     const state = str(req.body?.state, 20);
-    if (!CREDENTIAL_STATES.includes(state)) throw bad('Not one of the credential states.');
+    if (!['confirmed', 'rejected'].includes(state)) throw bad('Confirm it, or refuse it.');
     const types = await repo.credentialTypes({ all: true });
     const waiting = await repo.credentialsWaiting();
     const row = waiting.find((c) => c.id === req.params.id) ?? null;

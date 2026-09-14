@@ -1586,7 +1586,10 @@ function Skills({ offer, save, hostType }: { offer: OwnOffer; save: Save; hostTy
       ) : null}
 
       {/* Where it happens, offered rather than assumed. */}
-      {place && !placeHeld && !placeAsked ? (
+      {/* Not when they already hold as many as an offer may carry: the server
+          would keep the first two and the screen would go on claiming a third
+          until the next reload (Codex, 14 Sep 2026). */}
+      {place && !placeHeld && !placeAsked && facets.length < (setup?.facetCap ?? 2) ? (
         <View style={{ gap: 9 }}>
           <Text style={t.kicker}>Where it happens</Text>
           <View style={[k.panelTint, { gap: 10 }]}>
