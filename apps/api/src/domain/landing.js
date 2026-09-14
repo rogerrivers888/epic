@@ -119,7 +119,10 @@ export const venueForGoogleTypes = (types, primaryType = null) => googleVenue({
   id: 'label',
   displayName: { text: (types ?? [])[0] ?? 'label' },
   types: types ?? [],
-  primaryType: primaryType ?? (types ?? [])[0] ?? null,
+  // No fallback to the first type. A caller that has no primary to give means
+  // it, and promoting a secondary would invent a reading Google never gave —
+  // a secondary stadium would make the place ticketed (Codex, 14 Sep 2026).
+  primaryType: primaryType ?? null,
   location: { latitude: 0, longitude: 0 },
 });
 

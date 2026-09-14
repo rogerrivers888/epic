@@ -279,7 +279,9 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     const alone = out.places.filter((p) => {
       const rest = (p.types ?? []).filter((t) => t !== parsed.key);
       if (!rest.length) return true;
-      const primary = p.primaryType && p.primaryType !== parsed.key ? p.primaryType : rest[0] ?? null;
+      // If the word being looked at *was* the primary, what is left has no
+      // primary. Promoting the next one would invent a reading (Codex, 14 Sep 2026).
+      const primary = p.primaryType && p.primaryType !== parsed.key ? p.primaryType : null;
       return !rest.some(answersAlone) && !combinationFires(rest, primary);
     }).length;
     const alsoCalled = [...seen.entries()]
