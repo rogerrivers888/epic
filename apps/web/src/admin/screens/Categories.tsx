@@ -1267,6 +1267,37 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
       {/* Lifted, like the Show/By row above it: every React Native Web view is
           its own stacking context, so without this the Showing menu opens
           underneath the table and reads as see-through (owner, 14 Sep 2026). */}
+      {/* Open a category and it becomes its own page: a way back carrying the
+          local count, then a band for the category you are in (the handoff,
+          BO1a). Closed, the band is the whole of Google's list. */}
+      {chosen ? (
+        <View style={{ gap: spacing.md }}>
+          <TextAction
+            label={`All ${groups.length} ${by === 'ours' ? 'of our categories' : "Google's categories"} · ${total.mapped} of ${total.types} answered`}
+            onPress={() => { setGroup('-'); setOnly(''); setTicked(new Set()); setEg(''); }}
+          />
+          <Band
+            kicker={by === 'ours' ? 'Our category' : "Google's category"}
+            title={chosen.name}
+            stats={[
+              { label: 'Subcategories', value: String(chosen.types.length) },
+              { label: 'Mapped', value: String(chosen.mapped) },
+              { label: 'Unmapped', value: String(chosen.unmapped) },
+              { label: 'Lands in', value: chosen.aside },
+            ]}
+          />
+        </View>
+      ) : (
+        <Band
+          kicker={by === 'ours' ? 'By our categories' : "By Google's categories"}
+          title="Google's words"
+          stats={[
+            { label: 'Words', value: count(total.types) },
+            { label: 'Answered', value: count(total.mapped) },
+            { label: 'Left', value: count(total.unmapped) },
+          ]}
+        />
+      )}
       <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md, zIndex: 20 }]}>
         <View style={[styles.tabs, { width: wide ? 360 : '100%' }]}>
           {([['mapped', 'Mapped'], ['unmapped', 'Unmapped'], ['all', 'All']] as const).map(([v, l], i) => (
@@ -1287,12 +1318,14 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           <Text style={[type.small, { fontWeight: '700', color: noise === '1' ? colors.selectedFg : colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} excluded · {asideCount}</Text>
         </Press>
       </View>
-      <View style={[styles.tRow, styles.tHeadSoft, styles.gRow]}>
-        <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={2}>{first}</Text></View>
-        {COLS.map((h) => <View key={h} style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
-        {wide ? <View style={[styles.tCell, styles.headCell, styles.gLast, { width: LAST }]}><Text style={styles.colHead} numberOfLines={1}>{last}</Text></View> : null}
-      </View>
-      {groups.map((g) => {
+      {chosen ? null : (
+        <View style={[styles.tRow, styles.tHeadSoft, styles.gRow]}>
+          <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={2}>{first}</Text></View>
+          {COLS.map((h) => <View key={h} style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
+          {wide ? <View style={[styles.tCell, styles.headCell, styles.gLast, { width: LAST }]}><Text style={styles.colHead} numberOfLines={1}>{last}</Text></View> : null}
+        </View>
+      )}
+      {(chosen ? [chosen] : groups).map((g) => {
         const on = chosen?.key === g.key;
         // Inside one of our categories, one subcategory at a time if asked.
         const subsHere = by === 'ours' && !g.key.startsWith('_')
@@ -1314,7 +1347,8 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           {/* Opening another category clears the ticks: they mean "these rows,
               here", and a bulk apply must never quietly skip ones out of sight
               (Codex, 13 Sep 2026). */}
-          <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); setTicked(new Set()); setEg(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && styles.gRowOpen]}>
+          {on ? null : (
+          <Press effect="none" onPress={() => { setGroup(g.key); setOnly(''); setTicked(new Set()); setEg(''); }} accessibilityRole="button" style={[styles.tRow, styles.gRow, { alignItems: 'center' }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
               {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
@@ -1329,9 +1363,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
             ))}
             {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]}><Text style={[type.tiny, { lineHeight: 17 }]} numberOfLines={2}>{g.aside}</Text></View> : null}
           </Press>
-          {/* The group's subcategories, right under its row — never below the fold. */}
+          )}
+          {/* Inside a category: its words, and nothing else on the page. */}
           {on ? (
-            <View style={styles.inset}>
+            <View style={styles.opened}>
               {/* Every React Native Web view is its own stacking context, so a
                   menu opened in the bar has to lift the bar itself or the rows
                   under it paint straight over the panel (13 Sep 2026). */}
@@ -1369,13 +1404,20 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                     />
                   </>
                 ) : null}
+                {/* An outline that fills when you reach for it. Twenty solid lime
+                    buttons read as a band across the page; twenty outlines read
+                    as a quiet right-hand column (the handoff, BO1a). */}
                 {canManage && (tickedWithSuggestion.length || (!tickedHere.length && suggestible)) ? (
                   <Press effect="none" onPress={() => void approveAll(tickedHere.length ? tickedWithSuggestion : g.types)} disabled={busyKey != null} accessibilityRole="button"
-                         style={[styles.barControl, styles.barButton, busyKey != null && { opacity: 0.5 }]}>
-                    <Icon name="check" size={14} color={colors.primaryFg} />
-                    <Text style={[type.small, { fontWeight: '700', color: colors.primaryFg }]}>
-                      {busyKey === '*' ? 'Approving…' : tickedWithSuggestion.length ? `Approve ${tickedWithSuggestion.length} suggested` : `Approve all ${suggestible} suggestions`}
-                    </Text>
+                         style={({ hovered }: any) => [styles.approve, hovered && styles.approveOn, busyKey != null && { opacity: 0.5 }]}>
+                    {({ hovered }: any) => (
+                      <>
+                        <Icon name="check" size={13} color={hovered ? colors.selectedFg : colors.accent} strokeWidth={2.6} />
+                        <Text style={[type.small, { fontWeight: '700', color: hovered ? colors.selectedFg : colors.accent }]}>
+                          {busyKey === '*' ? 'Approving…' : tickedWithSuggestion.length ? `Approve ${tickedWithSuggestion.length} suggested` : `Approve all ${suggestible} suggestions`}
+                        </Text>
+                      </>
+                    )}
                   </Press>
                 ) : null}
               </View>
@@ -1390,14 +1432,22 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                 const sug = r.suggestion ?? null;
                 const sugText = sug?.generic ? 'an attribute' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
                 // What the control says: where it is, or where it could go, or that nobody knows.
-                const ctlLabel = st === 'aside' ? 'Excluded' : st === 'generic' ? 'Kept as' : st === 'nearby' || st === 'travel' || st === 'mapped' ? 'Mapped' : sugText ? 'Suggested' : 'Choose a subcategory';
+                // The kicker names the kind of answer, the line beneath is the
+                // answer itself, so a word's state reads without a single chip
+                // (the handoff, BO1c).
+                const ctlLabel = st === 'aside' ? 'Excluded'
+                  : st === 'generic' ? 'Secondary label'
+                    : st === 'travel' ? 'Travel'
+                      : st === 'nearby' ? 'Useful nearby'
+                        : st === 'mapped' ? 'Mapped to'
+                          : sugText ? 'Suggested' : 'Nothing said yet';
                 const ctlValue = busyKey === r.key ? 'Saving…'
                   : st === 'aside' ? 'from Epic'
-                    : st === 'generic' ? 'an attribute'
-                    : st === 'travel' ? 'travel'
-                    : st === 'nearby' ? 'useful nearby'
+                    : st === 'generic' ? 'it describes, it does not name'
+                    : st === 'travel' ? 'getting there, parking'
+                    : st === 'nearby' ? 'a loo, a visitor centre'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
-                      : sugText ?? (st === 'category' ? `${catLabel(r.landing.category)} · …` : '…');
+                      : sugText ?? (st === 'category' ? `${catLabel(r.landing.category)} · choose one` : 'choose one');
                 return (
                   <View key={r.key} style={openKey === r.key ? { zIndex: 40 } : undefined}>
                   <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
@@ -1439,7 +1489,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                     {canManage ? (
                       <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? COL * 2 + LAST : undefined }}>
                         <DrillDropdown
-                          label={ctlLabel} value={ctlValue} set={!decided(r) && Boolean(sugText)} align="right" width={300}
+                          label={ctlLabel} value={ctlValue} stacked set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[
                             { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
                             { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
@@ -1587,14 +1637,33 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           </View>
         );
       })}
-      {/* The total, at the bottom, over one ink rule. */}
-      <View style={[styles.tRow, styles.tTotal, styles.gRow]}>
-        <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={[type.small, { fontWeight: '700' }]}>Total</Text></View>
-        {cellsTotal.map((n, i) => (
-          <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'center', fontWeight: '700', fontVariant: ['tabular-nums'], color: i === placesAt ? colors.inkMuted : colors.ink }]}>{i === placesAt ? '—' : count(n)}</Text></View>
-        ))}
-        {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]} /> : null}
-      </View>
+      {/* The total, at the bottom of the list, over one ink rule. */}
+      {chosen ? null : (
+        <View style={[styles.tRow, styles.tTotal, styles.gRow]}>
+          <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={[type.small, { fontWeight: '700' }]}>Total</Text></View>
+          {cellsTotal.map((n, i) => (
+            <View key={i} style={[styles.tCell, { width: COL }]}><Text style={[type.small, { textAlign: 'center', fontWeight: '700', fontVariant: ['tabular-nums'], color: i === placesAt ? colors.inkMuted : colors.ink }]}>{i === placesAt ? '—' : count(n)}</Text></View>
+          ))}
+          {wide ? <View style={[styles.tCell, styles.gLast, { width: LAST }]} /> : null}
+        </View>
+      )}
+
+      {/* Move on without going back: the other categories and how far each is,
+          so finishing one does not mean a trip back to the list (BO1a). */}
+      {chosen ? (
+        <View style={{ gap: 6, paddingTop: spacing.lg }}>
+          <Text style={styles.bandKicker}>Move on without going back</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
+            {groups.filter((g) => g.key !== chosen.key).map((g) => (
+              <Press key={g.key} effect="none" onPress={() => { setGroup(g.key); setOnly(''); setTicked(new Set()); setEg(''); }}
+                     accessibilityRole="button" style={styles.moveOn}>
+                <Text style={type.small} numberOfLines={1}>{g.name}</Text>
+                <Text style={[type.tiny, g.unmapped ? { color: colors.ink, fontWeight: '700' } : null]}>{g.mapped}/{g.types.length}</Text>
+              </Press>
+            ))}
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1766,6 +1835,11 @@ const styles = StyleSheet.create({
   // across it (owner, 14 Sep 2026: "there's not supposed to be any green bar at
   // the top or in the middle").
   gRowOpen: { borderLeftWidth: 3, borderLeftColor: colors.lime, marginLeft: -3 },
+  // Inside a category there is nothing to indent away from: it is the page.
+  opened: { paddingBottom: spacing.sm },
+  moveOn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  approve: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderBottomWidth: 2, borderBottomColor: colors.lime },
+  approveOn: { backgroundColor: colors.lime },
   tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, overflow: 'hidden', backgroundColor: colors.panelWarm },
   tabItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.decor },

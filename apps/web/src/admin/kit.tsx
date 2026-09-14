@@ -627,7 +627,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * panel hangs directly under the control; `align: 'right'` hangs it from the
  * control's right edge for a control at the end of a row.
  */
-export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0 }: {
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0, stacked = false }: {
   label: string;
   value: string;
   groups: { key: string; label: string; items: DropdownOption[] }[];
@@ -654,6 +654,12 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   adopt?: { label: string; onPick: (groupKey: string) => void } | null;
   /** Pixels to hold a right-aligned panel off whatever sits to its right. */
   nudge?: number;
+  /**
+   * The label above the value as an uppercase kicker, rather than beside it.
+   * The kicker names the *kind* of answer and the line beneath is the answer,
+   * which is how a word's state reads without a chip (the handoff, 14 Sep 2026).
+   */
+  stacked?: boolean;
 }) {
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
@@ -674,9 +680,21 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
         style={dd.ctl}
         hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
       >
-        <Text style={dd.ctlLabel}>{label}</Text>
-        <Text style={[dd.ctlValue, set && { color: colors.accent }]} numberOfLines={1}>{value}</Text>
-        <Icon name={open ? 'collapse' : 'expand'} size={12} color={set ? colors.accent : colors.ink} strokeWidth={2.6} />
+        {stacked ? (
+          <View style={{ gap: 2, alignItems: align === 'right' ? 'flex-end' : 'flex-start', flexShrink: 1, minWidth: 0 }}>
+            <Text style={dd.ctlKicker}>{label}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 }}>
+              <Text style={[dd.ctlValue, set && { color: colors.accent }]} numberOfLines={1}>{value}</Text>
+              <Icon name={open ? 'collapse' : 'expand'} size={12} color={set ? colors.accent : colors.ink} strokeWidth={2.6} />
+            </View>
+          </View>
+        ) : (
+          <>
+            <Text style={dd.ctlLabel}>{label}</Text>
+            <Text style={[dd.ctlValue, set && { color: colors.accent }]} numberOfLines={1}>{value}</Text>
+            <Icon name={open ? 'collapse' : 'expand'} size={12} color={set ? colors.accent : colors.ink} strokeWidth={2.6} />
+          </>
+        )}
       </Press>
       {open ? (
         <>
@@ -789,6 +807,7 @@ const dd = StyleSheet.create({
   wrapOpen: { zIndex: 60 },
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32, flexShrink: 1, minWidth: 0 },
   ctlLabel: { ...type.small, color: colors.inkMuted },
+  ctlKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
   ctlValue: { ...type.small, color: colors.ink, fontWeight: '700', maxWidth: 220 },
   scrim: { position: 'fixed' as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 25 } as any,
   panel: {
