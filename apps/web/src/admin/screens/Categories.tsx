@@ -867,7 +867,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
     }
     // A category with nothing left in it after the switch and the tab is noise too.
     return out.filter((g) => g.types.length);
-  }, [rows, by, tab, noise, tax, catLabel, subLabel]);
+  }, [rows, by, tab, noise, std, tax, catLabel, subLabel]);
 
   const chosen = group === '-' ? null : groups.find((g) => g.key === group) ?? null;
   const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, places: t.places + g.places, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, places: 0, mapped: 0, unmapped: 0 });
