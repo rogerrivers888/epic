@@ -796,14 +796,18 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
     res.json({ started: todo.length });
     const household = await currentHousehold().catch(() => null);
     void (async () => {
-      let asked = 0;
+      let asked = 0; let tried = 0;
       try {
       for (const tag of todo) {
         try {
+          tried += 1;
           // A courtesy pause. Four hundred lookups back to back left the same
           // 123 unanswered on two runs in a row, which is a rate limit rather
           // than bad luck; Wikidata asks for a gap and this is one (14 Sep 2026).
-          if (asked) await new Promise((r) => setTimeout(r, 150));
+          // Counted on attempts, not answers: a run whose first lookups fail
+          // would otherwise go out with no gap at all, which is exactly the
+          // case the pause is for (Codex, 14 Sep 2026).
+          if (tried > 1) await new Promise((r) => setTimeout(r, 150));
           const candidates = await searchEntities(tag.label, { limit: 5 });
           asked += 1;
           const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
