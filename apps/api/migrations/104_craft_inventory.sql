@@ -269,3 +269,14 @@ update vocabulary_sources set
   note = 'Craft Courses, ClassBento, Meetup and the Heritage Crafts inventory, read once on 13 September 2026 and transcribed into the brief''s Appendix A. A craft name is a few words and carries no copyright; what would carry weight is a compilation taken wholesale as live data, or a crawler run against somebody''s terms, and neither is happening — there is no scheduled job here and nothing refreshes. The names were rewritten and the list is Epic''s own. The grading the source publishes alongside its list is deliberately not taken: whether a craft is endangered is that charity''s judgement about the craft, not a fact about the skill, and Epic has no use for it (owner, 14 Sep 2026).',
   last_refreshed = now()
 where key = 'read-by-hand';
+
+-- One word that now belongs to somebody else.
+--
+-- 102 seeded "knife making" as an alias for Blacksmithing's *Bladesmithing*,
+-- when there was no better row for it to mean. The inventory has both, and they
+-- are different crafts — a bladesmith forges blades, a knife maker makes
+-- knives, and the source lists them apart — so the alias has to let go, or the
+-- new row could never be reached by its own name: `ensureAliases` writes a
+-- self-alias only where the wording is free (Codex, 14 Sep 2026).
+update host_skill_aliases set target_key = 'knife-making'
+ where vocab = 'tag' and norm = 'knife making' and target_key = 'bladesmithing';

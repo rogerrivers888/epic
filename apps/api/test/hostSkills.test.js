@@ -354,3 +354,26 @@ test('the craft inventory is all there, and carries no grading', async () => {
     assert.ok(!/endangered|extinct|red list/i.test(label), label);
   }
 });
+
+test('no canonical word resolves to somebody else', async () => {
+  /**
+   * A self-alias is only written where the wording is free, so a row added
+   * after an alias claimed its name could never be reached by that name —
+   * typing "knife making" found *Bladesmithing*, which 102 had pointed it at
+   * when there was nothing better (Codex, 14 Sep 2026). The check that matters
+   * is that the seeds do not leave one shadowed, so 104 lets that alias go.
+   */
+  const fs = await import('node:fs/promises');
+  const dir = new URL('../migrations/', import.meta.url);
+  const seeds = ['102_host_skills.sql', '104_craft_inventory.sql'];
+  const sql = (await Promise.all(seeds.map((f) => fs.readFile(new URL(f, dir), 'utf8')))).join('\n');
+  // Every alias the seeds write, and every key they create.
+  const aliases = new Map([...sql.matchAll(/\('tag',\s*'([^']+)',\s*'([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const keys = new Set([...sql.matchAll(/^\s*\('([a-z0-9-]+)',\s*'/gm)].map((m) => m[1]));
+  const reassigned = new Set([...sql.matchAll(/set target_key = '([a-z0-9-]+)'\s*\n\s*where vocab = 'tag' and norm = '([^']+)'/g)].map((m) => m[2]));
+  for (const [norm, target] of aliases) {
+    const own = norm.replace(/ /g, '-');
+    if (!keys.has(own) || own === target || reassigned.has(norm)) continue;
+    assert.fail(`"${norm}" is a canonical row but its wording resolves to ${target}`);
+  }
+});
