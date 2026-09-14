@@ -48,13 +48,14 @@ import { Icon } from '../../components/Icon';
 import { Button, FoldLine } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
 import { AdminPage, DrillDropdown, Dropdown, PageHead, ago, count } from '../kit';
+import { Shelves } from './Shelves';
 import { asOneOf, asText, useQueryState } from '../../router';
 
 const WIDE = 900;
 
 type View_ = 'subcategories' | 'providers' | 'google' | 'words' | 'left';
 /** The three doors across the top: a provider's words, ours, and the categories. */
-type Door = 'words' | 'ours' | 'cats' | 'notsure';
+type Door = 'words' | 'ours' | 'cats' | 'notsure' | 'shelves';
 const VIEWS: { key: View_; label: string; short: string; needsCategory: boolean }[] = [
   { key: 'subcategories', label: 'Our categories', short: 'Ours', needsCategory: true },
   { key: 'providers', label: 'Providers\' words, one of ours', short: 'Providers', needsCategory: true },
@@ -167,7 +168,7 @@ function Field({ value, onChangeText, placeholder, autoFocus, onSubmitEditing, s
 
 // ---------------------------------------------------------------------------
 
-export function Categories({ canManage }: { canManage: boolean }) {
+export function Categories({ canManage, startAt }: { canManage: boolean; startAt?: Door }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
 
@@ -176,14 +177,19 @@ export function Categories({ canManage }: { canManage: boolean }) {
   const [cat, setCat] = useQueryState<string>('cat', '', asText);
   const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words', 'left'] as const, 'subcategories'));
   /** Which of the three doors is open (the handoff, 14 Sep 2026). */
-  const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats', 'notsure'] as const, 'words'));
-  /**
+  const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats', 'notsure', 'shelves'] as const, 'words'));
+
+  // Anyone arriving on the old /admin/shelves address gets the door it became,
+  // rather than the words list they did not ask for. The address is read by the
+  // router and handed down, never read here.
+  useEffect(() => { if (startAt && door !== startAt) setDoor(startAt); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);  /**
    * The door decides which views are behind it, so a door and a view that do
    * not go together would draw nothing at all — which is what a clean address
    * with no query on it used to do (Codex, 14 Sep 2026). The view is read
    * through the door rather than beside it.
    */
-  const BEHIND: Record<Door, View_[]> = { words: ['google', 'left', 'providers', 'words'], ours: [], cats: ['subcategories'], notsure: [] };
+  const BEHIND: Record<Door, View_[]> = { words: ['google', 'left', 'providers', 'words'], ours: [], cats: ['subcategories'], notsure: [], shelves: [] };
   const shown: View_ = BEHIND[door].includes(view) ? view : (BEHIND[door][0] ?? view);
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
   const [note, setNote] = useState<string | null>(null);
@@ -261,12 +267,13 @@ export function Categories({ canManage }: { canManage: boolean }) {
           ours: `${(tax?.subcategories ?? []).filter((x) => x.active).length} primary`,
           cats: String((tax?.categories ?? []).filter((c) => c.active).length),
           notsure: notSureCount,
+          shelves: 'what the rules actually did',
         }}
       />
 
       {/* The controls, left-aligned, each panel hanging directly under its own box
           (owner, 12 Sep 2026: "they should both be left-aligned with the start of the text"). */}
-      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.lg, zIndex: 20 }, door === 'ours' && { display: 'none' }]}>
+      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.lg, zIndex: 20 }, (door === 'ours' || door === 'shelves') && { display: 'none' }]}>
         {/* The door decides the view, so Show only offers the ways of looking
             *within* it: the provider matrix and Find a word live behind Google's
             words (14 Sep 2026). */}
@@ -374,6 +381,12 @@ export function Categories({ canManage }: { canManage: boolean }) {
         <FindWord tax={tax} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
                   onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
+
+      {/* Shelves was its own rail item with a tab called Categories, beside this
+          screen's own (owner, 13 Sep 2026: merge them). It is the same work seen
+          from the other end — the words and the rules are written here, and what
+          they actually did to real places is behind this door. */}
+      {door === 'shelves' ? <Shelves canManage={canManage} /> : null}
 
       {tax && door === 'ours' ? (
         <OurLabels tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
@@ -877,13 +890,14 @@ const STANDINGS = [
  */
 function Doors({ at, on, counts }: {
   at: Door; on: (d: Door) => void;
-  counts: { words: string; ours: string; cats: string; notsure: string };
+  counts: { words: string; ours: string; cats: string; notsure: string; shelves: string };
 }) {
   const items: { key: Door; label: string; sub: string }[] = [
     { key: 'words', label: "Google's words", sub: counts.words },
     { key: 'ours', label: 'Our labels', sub: counts.ours },
     { key: 'cats', label: 'Categories', sub: counts.cats },
     { key: 'notsure', label: 'Not sure', sub: counts.notsure },
+    { key: 'shelves', label: 'Shelves', sub: counts.shelves },
   ];
   return (
     <View style={styles.doors}>

@@ -513,7 +513,8 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
           {counts.named} of {counts.named + left} tags are named
           {counts.exact ? ` · ${counts.exact} matched letter for letter` : ''}
           {counts.close ? ` · ${counts.close} are close` : ''}
-          {counts.nothing ? ` · ${counts.nothing} have nothing yet` : ''}
+          {counts.refused ? ` · ${counts.refused} have none on purpose` : ''}
+          {counts.nothing ? ` · ${counts.nothing} have not been looked up` : ''}
         </Text>
         {counts.nothing ? (
           <Press
@@ -525,7 +526,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
             accessibilityRole="button"
             style={s.identAct}
           >
-            <Text style={s.identActText}>Look up the {counts.nothing} with nothing</Text>
+            <Text style={s.identActText}>Look up the {counts.nothing} nobody has looked up</Text>
           </Press>
         ) : null}
         {waiting.length ? (
@@ -539,7 +540,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
         <View>
           {exact.length ? (
             <Press onPress={() => void settle(exact.map((w) => w.key), true)} accessibilityRole="button" style={s.identTakeAll}>
-              <Text style={s.identActText}>Take all {exact.length} that matched letter for letter</Text>
+              <Text style={s.identActText}>Take all {exact.length} where one thing only is called that</Text>
             </Press>
           ) : null}
           {[...exact, ...close].map((w) => (
@@ -548,7 +549,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
                 <Text style={s.rowLabel} numberOfLines={1}>{w.label}</Text>
                 <Text style={type.small} numberOfLines={2}>
                   {w.proposed_label} · {w.proposed_id}
-                  {w.proposed_exact ? '' : ' — the wording is not the same'}
+                  {w.proposed_exact ? '' : ' — either the wording differs or more than one thing is called that'}
                   {w.proposed_note ? ` · ${w.proposed_note}` : ''}
                 </Text>
               </View>
@@ -561,7 +562,7 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
             </View>
           ))}
           <Text style={type.tiny}>
-            A tag with no identifier is a legitimate answer — it reads as unmapped and nothing a host or a guest sees changes.
+            A tag with no identifier is a legitimate answer — Not this writes that down, so no later run proposes the same thing again. It reads as unmapped and nothing a host or a guest sees changes.
           </Text>
         </View>
       ) : null}

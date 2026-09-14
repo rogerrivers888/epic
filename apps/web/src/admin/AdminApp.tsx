@@ -38,7 +38,6 @@ import { Places } from './screens/Places';
 import { Coverage } from './screens/Coverage';
 import { Lookup } from './screens/Lookup';
 import { Scout } from './screens/Scout';
-import { Shelves } from './screens/Shelves';
 import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
 import { Hosting } from './screens/Hosting';
@@ -74,7 +73,6 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'coverage', label: 'Coverage', icon: 'plan', needs: 'view_library', sub: 'Where the holes are, and a way into each one' },
   { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'A county, a town or a postcode district, and everything in it' },
   { key: 'library', label: 'Atlas', icon: 'owned', needs: 'view_library', sub: 'Attractions by county, and the pictures we own' },
-  { key: 'shelves', label: 'Shelves', icon: 'themePark', needs: 'view_library', sub: 'What the home screen calls a place, and how to teach it' },
   { key: 'scout', label: 'The sweep', icon: 'search', needs: 'view_library', sub: 'Postcode areas, their best restaurants and their menus' },
   { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
   { key: 'categories', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Categories and subcategories, every provider\'s words, and the rules that map one onto the other', group: 'Data' },
@@ -123,10 +121,12 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}
       {screen === 'library' ? <Library canManage={can('manage_library')} /> : null}
-      {screen === 'shelves' ? <Shelves canManage={can('manage_library')} /> : null}
       {screen === 'scout' ? <Scout canManage={can('manage_library')} /> : null}
       {screen === 'sources' ? <Sources /> : null}
-      {screen === 'categories' ? <Categories canManage={can('manage_library')} /> : null}
+      {/* Shelves stopped being its own rail item when the two were merged
+          (owner, 13 Sep 2026); every link anybody has kept still lands. */}
+      {screen === 'categories' || screen === 'shelves'
+        ? <Categories canManage={can('manage_library')} startAt={screen === 'shelves' ? 'shelves' : undefined} /> : null}
       {screen === 'voice' ? <VoiceLab /> : null}
       {screen === 'hosting' ? <Hosting canManage={can('manage_hosting')} /> : null}
       {screen === 'skills' ? <Skills canManage={can('manage_skills')} /> : null}

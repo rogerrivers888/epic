@@ -767,27 +767,40 @@ adminRouter.get('/identifiers', requires('view_skills'), async (req, res, next) 
  * It answers straight away and reads in the background — 465 lookups is well
  * past what a gateway will hold a request open for.
  */
+let lookingUp = false;
 adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, res, next) => {
   try {
+    // One run at a time. Two clicks used to send the same few hundred words to
+    // Wikidata twice over (Codex, 14 Sep 2026).
+    if (lookingUp) return res.json({ started: 0, already: true });
     const limit = Math.min(600, Math.max(1, Number(req.body?.limit ?? 600)));
     const todo = (await repo.withoutIdentifier()).slice(0, limit);
+    if (!todo.length) return res.json({ started: 0 });
+    lookingUp = true;
     res.json({ started: todo.length });
     const household = await currentHousehold().catch(() => null);
     void (async () => {
       let asked = 0;
+      try {
       for (const tag of todo) {
         try {
           const candidates = await searchEntities(tag.label, { limit: 5 });
           asked += 1;
           const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
-          const exact = candidates.find((c) => same(c.label, tag.label));
-          const best = exact ?? candidates[0];
+          // Exact means *one* entity is called this, not "the first one that is".
+          // Wikidata has several items called foraging — the human activity and
+          // the animal behaviour — and taking the first of those in a batch of
+          // four hundred is exactly the mistake this run exists to avoid
+          // (Codex, 14 Sep 2026). Two of a name is an ambiguity for a person.
+          const named = candidates.filter((c) => same(c.label, tag.label));
+          const best = named[0] ?? candidates[0];
           if (!best) continue;
           await repo.propose({
-            key: tag.key, qid: best.qid, label: best.label, note: best.description, exact: Boolean(exact),
+            key: tag.key, qid: best.qid, label: best.label, note: best.description, exact: named.length === 1,
           });
         } catch { /* one word failing is not the run failing */ }
       }
+      } finally { lookingUp = false; }
       await providerCalls.record(household?.id ?? null, 'wikidata', 'skills identifier run', asked).catch(() => {});
     })();
   } catch (e) { next(e); }
@@ -803,8 +816,8 @@ adminRouter.put('/identifiers', requires('manage_skills'), async (req, res, next
   try {
     const keys = Array.isArray(req.body?.keys) ? req.body.keys.map((k) => str(k, 80)).filter(Boolean) : [];
     if (!keys.length) throw bad('Which tags?');
-    const took = req.body?.take === false
-      ? await repo.refuseProposals(keys)
+    const took = req.body?.reopen ? await repo.reopenIdentifiers(keys)
+      : req.body?.take === false ? await repo.refuseProposals(keys)
       : await repo.acceptProposals(keys);
     res.json({ changed: took, counts: await repo.identifierCounts() });
   } catch (e) { next(e); }

@@ -291,11 +291,18 @@ export async function saveTag({ key, label, parentKey, categoryKey, source, exte
 }
 
 /**
- * Tags with no identifier, oldest work first — what a proposal run has to read.
+ * Tags nobody has looked up yet — what a proposal run has to read.
+ *
+ * Not "everything without an identifier": that put the 464 already waiting on a
+ * person back through Wikidata every time somebody looked up the one that had
+ * nothing (Codex, 14 Sep 2026). A tag already carrying a proposal is waiting on
+ * a person, not on a run, and a tag a person refused is settled.
  */
 export async function withoutIdentifier(client) {
   const { rows } = await on(client)(
-    `select key, label from host_skill_tags where external_id is null and active order by seen_count desc, key`,
+    `select key, label from host_skill_tags
+      where external_id is null and proposed_id is null and not no_identifier and active
+      order by seen_count desc, key`,
   );
   return rows;
 }
@@ -309,7 +316,7 @@ export async function propose({ key, qid, label, note, exact }, client) {
   await on(client)(
     `update host_skill_tags
         set proposed_id = $2, proposed_label = $3, proposed_note = $4, proposed_exact = $5, proposed_at = now()
-      where key = $1 and external_id is null`,
+      where key = $1 and external_id is null and not no_identifier`,
     [key, qid ?? null, label ?? null, note ?? null, Boolean(exact)],
   );
 }
@@ -332,11 +339,15 @@ export async function identifierCounts(client) {
     `select count(*) filter (where external_id is not null) as named,
             count(*) filter (where external_id is null and proposed_id is not null and proposed_exact) as exact,
             count(*) filter (where external_id is null and proposed_id is not null and not proposed_exact) as close,
-            count(*) filter (where external_id is null and proposed_id is null) as nothing
+            count(*) filter (where external_id is null and no_identifier) as refused,
+            count(*) filter (where external_id is null and proposed_id is null and not no_identifier) as nothing
        from host_skill_tags where active`,
   );
   const r = rows[0] ?? {};
-  return { named: Number(r.named ?? 0), exact: Number(r.exact ?? 0), close: Number(r.close ?? 0), nothing: Number(r.nothing ?? 0) };
+  return {
+    named: Number(r.named ?? 0), exact: Number(r.exact ?? 0), close: Number(r.close ?? 0),
+    refused: Number(r.refused ?? 0), nothing: Number(r.nothing ?? 0),
+  };
 }
 
 /**
@@ -356,13 +367,28 @@ export async function acceptProposals(keys, client) {
   return rowCount;
 }
 
-/** A person says no. The tag keeps no identifier, which is a legitimate answer. */
+/**
+ * A person says no. The tag keeps no identifier, which is a legitimate answer
+ * and is written down as one — otherwise the next run proposes the same
+ * candidate again and the decision never sticks (Codex, 14 Sep 2026).
+ */
 export async function refuseProposals(keys, client) {
   if (!keys?.length) return 0;
   const { rowCount } = await on(client)(
     `update host_skill_tags
-        set proposed_id = null, proposed_label = null, proposed_note = null, proposed_exact = null, updated_at = now()
+        set no_identifier = true,
+            proposed_id = null, proposed_label = null, proposed_note = null, proposed_exact = null, updated_at = now()
       where key = any($1)`,
+    [keys],
+  );
+  return rowCount;
+}
+
+/** A person changes their mind: the tag goes back to the runs. */
+export async function reopenIdentifiers(keys, client) {
+  if (!keys?.length) return 0;
+  const { rowCount } = await on(client)(
+    `update host_skill_tags set no_identifier = false, updated_at = now() where key = any($1)`,
     [keys],
   );
   return rowCount;

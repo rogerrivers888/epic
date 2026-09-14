@@ -52,14 +52,14 @@ import { MOODS } from '../../routes';
 
 const WIDE = 900;
 
-type Section = 'shelf' | 'food' | 'find' | 'taught' | 'taxonomy';
+type Section = 'shelf' | 'food' | 'find' | 'taught' | 'onoff';
 
 const SECTIONS: { key: Section; label: string }[] = [
   { key: 'shelf', label: 'On a shelf' },
   { key: 'food', label: 'Somewhere to eat' },
   { key: 'find', label: 'Find a place' },
-  { key: 'taxonomy', label: 'Categories' },
   { key: 'taught', label: 'What you have taught' },
+  { key: 'onoff', label: 'On and off' },
 ];
 
 /** The six, as pictures. Adrenaline is a mountain because it is a thing you do. */
@@ -100,7 +100,7 @@ export function Shelves({ canManage }: { canManage: boolean }) {
 
   const [vocab, setVocab] = useState<ShelfVocabulary | null>(null);
   // Which view, and which shelf is being taught, are in the address.
-  const [section, setSection] = useQueryState<Section>('tab', 'shelf', asOneOf(['shelf', 'food', 'find', 'taught', 'taxonomy'] as const, 'shelf'));
+  const [section, setSection] = useQueryState<Section>('tab', 'shelf', asOneOf(['shelf', 'food', 'find', 'taught', 'onoff'] as const, 'shelf'));
   const [mood, setMood] = useQueryState<MoodKey>('mood', 'adrenaline', asOneOf(MOODS, 'adrenaline'));
   const [items, setItems] = useState<ShelfPlace[]>([]);
   const [nearly, setNearly] = useState<ShelfPlace[]>([]);
@@ -409,7 +409,11 @@ export function Shelves({ canManage }: { canManage: boolean }) {
         </Panel>
       ) : null}
 
-      {section === 'taxonomy' ? (
+      {/* The whole editor used to be a second tab called Categories, beside the
+          Categories screen's own (owner, 13 Sep 2026). It is the same rows, but
+          the only thing here that Categories cannot do is switch a whole
+          category off, so that is what it is called now. */}
+      {section === 'onoff' ? (
         <Taxonomy vocab={vocab} canManage={canManage} busy={busy}
                   onChanged={async (said) => { setNote(said); await refresh(); }}
                   onFailed={(said) => setNote(said)} />
