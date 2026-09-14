@@ -800,6 +800,10 @@ adminRouter.post('/identifiers/propose', requires('manage_skills'), async (req, 
       try {
       for (const tag of todo) {
         try {
+          // A courtesy pause. Four hundred lookups back to back left the same
+          // 123 unanswered on two runs in a row, which is a rate limit rather
+          // than bad luck; Wikidata asks for a gap and this is one (14 Sep 2026).
+          if (asked) await new Promise((r) => setTimeout(r, 150));
           const candidates = await searchEntities(tag.label, { limit: 5 });
           asked += 1;
           const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
