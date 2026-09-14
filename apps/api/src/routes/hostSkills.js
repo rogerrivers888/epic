@@ -502,6 +502,10 @@ adminRouter.put('/facet', requires('manage_skills'), async (req, res, next) => {
     const key = str(req.body?.key, 60) || keyFor(req.body?.label ?? '');
     if (!key) throw bad('A facet needs a label.');
     if (req.body?.kind && !FACET_KINDS.includes(req.body.kind)) throw bad('Not one of the facet kinds.');
+    // The same guard the tag endpoint has: Postgres is happy with a row that
+    // points at itself, and the breadcrumb and the neighbours are not (Codex,
+    // 14 Sep 2026).
+    if (req.body?.parentKey === key) throw bad('A facet cannot be its own parent.');
     const facet = await repo.saveFacet({ ...req.body, key });
     if (req.body?.label) await repo.addAlias('facet', normalise(req.body.label), key, req.body.label);
     res.json({ facet });

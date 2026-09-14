@@ -1361,6 +1361,20 @@ router.post('/experiences/:id/book', async (req, res, next) => {
       if (!host) throw refuse(409, 'not_bookable', 'This experience is not taking bookings.');
       if (host.household_id === household.id) throw refuse(409, 'own_offer', 'You cannot book your own experience.');
       /**
+       * And asked again under the lock.
+       *
+       * The check above is what takes the listing off the window, and has to be
+       * outside the transaction or the pause rolls back with the refusal. But a
+       * gate switched on while this request was queuing for the lock would
+       * otherwise let one last booking through, because the administrator's own
+       * pause is waiting behind it (Codex, 14 Sep 2026). So it is asked twice:
+       * once to change the world, once to be sure of it.
+       */
+      const gated = await Promise.all([skills.credentialTypes({ all: true }), skills.credentialsFor(host.id)]);
+      if (missingCredentials(o, host, { types: gated[0], credentials: gated[1] }).length) {
+        throw refuse(409, 'not_bookable', 'This one has just come off the list while the host sorts something out. Try their other dates.');
+      }
+      /**
        * A private offer is booked by somebody holding its credential, and the
        * credential is checked again here rather than only where the page was
        * read: an id copied out of an address bar is not an invitation
