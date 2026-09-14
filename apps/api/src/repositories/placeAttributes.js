@@ -56,6 +56,12 @@ export async function attributes() {
 export async function saveAttribute({ key, label, kind, blurb, options, rangeMin, rangeMax, unit, position, active }) {
   const k = key ? slug(key) : slug(label);
   if (!k) throw bad('An attribute needs a name.');
+  // Our labels are one vocabulary, so a secondary label may not take the name
+  // of a primary one. Two rows answering to `epic:water-park` would make a rule
+  // written against it mean whichever the database happened to return first
+  // (Codex, 14 Sep 2026).
+  const { rows: clash } = await query('select label from shelf_subcategories where key = $1', [k]);
+  if (clash[0]) throw bad(`${clash[0].label} is already one of our labels. Pick another name.`);
   if (kind && !['yesno', 'range', 'oneof'].includes(kind)) throw bad(`${kind} is not a kind of attribute.`);
   // Changing the kind would leave every value already set in the old shape — a
   // yes/no answer under an attribute that now wants a range. Refuse rather than

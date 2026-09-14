@@ -168,6 +168,12 @@ export async function saveSubcategory({ id, key, categoryKey, label, blurb, posi
   if (!categoryKey && !id) throw bad('A subcategory has to belong to a category.');
   const k = key ? slug(key) : slug(label);
   if (!k && !id) throw bad('A subcategory needs a name.');
+  // The other half of the same rule: a primary label may not take the name of a
+  // secondary one (Codex, 14 Sep 2026).
+  if (k) {
+    const { rows: clash } = await query('select label from place_attributes where key = $1', [k]);
+    if (clash[0]) throw bad(`${clash[0].label} is already one of our labels. Pick another name.`);
+  }
 
   if (id) {
     const { rows } = await query(
