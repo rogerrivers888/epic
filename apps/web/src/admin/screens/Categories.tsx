@@ -176,6 +176,14 @@ export function Categories({ canManage }: { canManage: boolean }) {
   const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words'] as const, 'subcategories'));
   /** Which of the three doors is open (the handoff, 14 Sep 2026). */
   const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats'] as const, 'words'));
+  /**
+   * The door decides which views are behind it, so a door and a view that do
+   * not go together would draw nothing at all — which is what a clean address
+   * with no query on it used to do (Codex, 14 Sep 2026). The view is read
+   * through the door rather than beside it.
+   */
+  const BEHIND: Record<Door, View_[]> = { words: ['google', 'providers', 'words'], ours: [], cats: ['subcategories'] };
+  const shown: View_ = BEHIND[door].includes(view) ? view : (BEHIND[door][0] ?? view);
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -208,7 +216,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
   // No category until one is chosen (owner, 12 Sep 2026: "it should probably
   // be empty when I arrive on the page and I select the category").
   const category = categories.find((c) => c.key === cat) ?? null;
-  const needsCategory = VIEWS.find((v) => v.key === view)?.needsCategory ?? false;
+  const needsCategory = VIEWS.find((v) => v.key === shown)?.needsCategory ?? false;
   const subs = category?.subcategories ?? [];
   const chosen = subs.find((s) => s.key === sub) ?? null;
   const rulesOf = (key: string) => (tax?.rules ?? []).filter((r) => r.subcategory === key);
@@ -246,28 +254,28 @@ export function Categories({ canManage }: { canManage: boolean }) {
             *within* it: the provider matrix and Find a word live behind Google's
             words (14 Sep 2026). */}
         {door === 'words' ? (
-          <Dropdown label="Show" value={VIEWS.find((v) => v.key === view)?.label ?? ''} width={300}
-                    options={VIEWS.filter((v) => v.key !== 'subcategories').map((v) => ({ key: v.key, label: v.label, on: v.key === view }))}
+          <Dropdown label="Show" value={VIEWS.find((v) => v.key === shown)?.label ?? ''} width={300}
+                    options={VIEWS.filter((v) => v.key !== 'subcategories').map((v) => ({ key: v.key, label: v.label, on: v.key === shown }))}
                     onPick={(k) => { setView(k as View_); setEditing(null); }} />
         ) : null}
-        {door === 'cats' && needsCategory ? (
+        {needsCategory ? (
           <Dropdown label="Category" value={category?.label ?? 'Select a category'} width={240}
                     options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
                     onPick={(k) => { setCat(k); setSub(''); setEditing(null); }} />
         ) : null}
-        {view === 'subcategories' && !wide && subs.length ? (
+        {shown === 'subcategories' && !wide && subs.length ? (
           <Dropdown label="Subcategory" value={chosen?.label ?? 'All'} width={260}
                     options={[{ key: '', label: 'All subcategories', on: !chosen }, ...subs.map((s) => ({ key: s.key, label: s.label, count: `${s.rules ?? 0}`, on: s.key === chosen?.key }))]}
                     onPick={(k) => setSub(k)} />
         ) : null}
-        {view === 'google' ? (
+        {shown === 'google' ? (
           <Dropdown label="By" value={by === 'ours' ? 'our categories' : "Google's categories"} width={220}
                     options={[{ key: 'google', label: "Google's categories", on: by === 'google' }, { key: 'ours', label: 'Our categories', on: by === 'ours' }]}
                     onPick={(k) => setBy(k as 'google' | 'ours')} />
         ) : null}
       </View>
 
-      {door !== 'ours' && category && (view === 'subcategories' || view === 'providers') ? (
+      {door !== 'ours' && category && (shown === 'subcategories' || shown === 'providers') ? (
         <View style={styles.catLine}>
           <Text style={[type.small, { flex: 1, minWidth: 200 }]}>
             {category.blurb ? `${category.blurb} ` : ''}
@@ -296,9 +304,9 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {!tax ? <Text style={type.small}>Loading…</Text> : null}
-      {door === 'cats' && tax && needsCategory && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
+      {needsCategory && tax && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
 
-      {door === 'cats' && tax && category && view === 'subcategories' ? (
+      {door === 'cats' && tax && category && shown === 'subcategories' ? (
         <View style={[styles.split, wide && styles.splitWide]}>
           {/* Every subcategory of this category with its attributes, in one table. */}
           <Section title="Subcategories and their attributes" style={{ flex: 1, minWidth: 0 }}
@@ -336,16 +344,16 @@ export function Categories({ canManage }: { canManage: boolean }) {
         </View>
       ) : null}
 
-      {door === 'words' && tax && category && view === 'providers' ? (
+      {door === 'words' && tax && category && shown === 'providers' ? (
         <ProviderWords tax={tax} category={category.key} wide={wide} subLabel={subLabel}
                        onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
 
-      {door === 'words' && tax && view === 'google' ? (
+      {door === 'words' && tax && shown === 'google' ? (
         <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
       ) : null}
 
-      {door === 'words' && tax && view === 'words' ? (
+      {door === 'words' && tax && shown === 'words' ? (
         <FindWord tax={tax} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
                   onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
