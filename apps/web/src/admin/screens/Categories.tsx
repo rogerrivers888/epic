@@ -37,10 +37,10 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
-  api, AttributeValue, MoodKey, NotSurePlace, NotSureRun, PlaceAttribute, PlacePart, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
+  api, AttributeValue, MoodKey, SecondaryLabel, NotSurePlace, NotSureRun, PlaceAttribute, PlacePart, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
   TaxonomyRule, TaxonomyTry,
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -332,8 +332,8 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
 
       {door === 'cats' && tax && category && shown === 'subcategories' ? (
         <View style={[styles.split, wide && styles.splitWide]}>
-          {/* Every subcategory of this category with its attributes, in one table. */}
-          <Section title="Subcategories and their attributes" style={{ flex: 1, minWidth: 0 }}
+          {/* Every subcategory of this category with its secondary labels, in one table. */}
+          <Section title="Subcategories and their secondary labels" style={{ flex: 1, minWidth: 0 }}
                    right={canManage ? <AddSubcategory category={category.key as MoodKey} label={category.label} busy={busy} run={run} /> : undefined}>
             {subs.length === 0 ? <Text style={[type.small, styles.emptyRow]}>No subcategories yet.</Text> : null}
             {subs.filter((s) => wide || !chosen || s.key === chosen.key).map((s) => {
@@ -352,7 +352,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
                   <View style={[styles.attrs, wide ? { flex: 1, minWidth: 0 } : { width: '100%' }]}>
                     {words.slice(0, wide ? 14 : 8).map((w, i) => <Text key={`${w}-${i}`} style={styles.attr}>{w}</Text>)}
                     {words.length > (wide ? 14 : 8) ? <Text style={[styles.attr, { color: colors.inkMuted }]}>+{words.length - (wide ? 14 : 8)} more</Text> : null}
-                    {words.length === 0 ? <Text style={[type.small, { color: colors.inkMuted }]}>No attributes yet — only places moved here by hand.</Text> : null}
+                    {words.length === 0 ? <Text style={[type.small, { color: colors.inkMuted }]}>No secondary labels yet — only places moved here by hand.</Text> : null}
                   </View>
                   {wide ? <Text style={[type.tiny, styles.subCount]}>{rules.length}</Text> : null}
                   {wide ? <Icon name={on ? 'collapse' : 'more'} size={14} color={colors.inkMuted} /> : null}
@@ -404,7 +404,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
           <View style={{ gap: spacing.xs, paddingVertical: spacing.xs }}>
             <Text style={type.small}>
               A place carries labels: what each source called it, in that source's own words (Google's type, the map's tag, the
-              Wikidata type), plus what Epic read those into (an experience, a venue kind). Those are the attributes.
+              Wikidata type), plus what Epic read those into (an experience, a venue kind). Those are the secondary labels.
             </Text>
             <Text style={type.small}>
               A rule says: places carrying all of these labels go in this subcategory. Narrowest wins — a rule about one place,
@@ -435,7 +435,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
               Epic maps where it is sure, and only the judgement calls wait for you.
             </Text>
             <Text style={type.small}>
-              The fifth answer is “an attribute, not a category”. Some of Google's words describe a place without saying what
+              The fifth answer is “a secondary label, not a category”. Some of Google's words describe a place without saying what
               kind of place it is: tourist attraction, adventure sports centre, establishment. They cannot decide which
               subcategory a place goes in, so marking one takes it out of the mapping queue and stops any rule filing by it.
               What it still does is describe: the word stays on the place and hands out whatever it tells us. Open one and
@@ -873,7 +873,7 @@ const STANDINGS = [
   // A rule that names a category but no drawer is its own answer, and it is a
   // work queue: those words need a subcategory (Codex, 14 Sep 2026).
   { key: 'category', label: 'A category but no subcategory' },
-  { key: 'generic', label: 'An attribute, not a category' },
+  { key: 'generic', label: 'A secondary label, not a category' },
   { key: 'travel', label: 'Travel' },
   { key: 'nearby', label: 'Useful nearby' },
   { key: 'aside', label: 'Excluded from Epic' },
@@ -1247,7 +1247,7 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
                 label={says ? 'Epic would say' : 'Nothing said yet'}
                 value={busyKey === r.key ? 'Saving…' : says ?? 'choose one'} stacked set={Boolean(says)} align="right" width={300}
                 extra={[
-                  { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: false },
+                  { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: false },
                   { key: '-', label: 'Excluded from Epic', on: false },
                   { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
                   { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
@@ -1392,7 +1392,7 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word }: {
                             <Text key={w.key} style={type.tiny} numberOfLines={1}>
                               <Text style={{ fontWeight: '600', color: colors.ink }}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
                               {` · on ${w.on} of ${eg.places.length} · `}
-                              {w.decision === 'generic' ? 'an attribute'
+                              {w.decision === 'generic' ? 'a secondary label'
                                 : w.decision === 'aside' ? 'excluded from Epic'
                                 : w.decision === 'travel' ? 'travel'
                                 : w.decision === 'nearby' ? 'useful nearby'
@@ -1600,6 +1600,62 @@ function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged
   );
 }
 
+/** A secondary label's value, in one short phrase. */
+function said(v: AttributeValue): string {
+  if (v.choice) return v.choice;
+  if (v.from != null || v.to != null) return `${v.from ?? ''}\u2013${v.to ?? ''}`;
+  return v.yesno === false ? 'no' : 'yes';
+}
+
+/**
+ * What a provider's word says besides where it sends a place.
+ *
+ * The owner, 14 Sep 2026: "I see a fine dining restaurant, but no label for
+ * fine dining. It's just mapped to food and drinks, restaurants." Both answers
+ * live on the same row because they are both answers about the same word, and
+ * they never compete: `italian_restaurant` lands a place in Restaurants *and*
+ * says Italian. Drawn in lime, because nobody typed it on the place.
+ */
+function Carries({ r, secondary, onChanged }: {
+  r: TaxonomyLabel; secondary: SecondaryLabel[]; onChanged: (said: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const label = `${r.namespace}:${r.key}`;
+  const has = r.carries ?? [];
+  const set = async (attribute: string, value: AttributeValue | null) => {
+    setBusy(true);
+    try {
+      await api.taxonomySetCarries({ label, attribute, value });
+      const name = secondary.find((x) => x.key === attribute)?.label ?? attribute;
+      await onChanged(value ? `${r.key.replace(/_/g, ' ')} also says ${name} \u00b7 ${said(value)}.` : `${r.key.replace(/_/g, ' ')} no longer says ${name}.`);
+    } finally { setBusy(false); }
+  };
+  // Only the one-of labels are offered here: a yes/no or a range belongs to a
+  // drawer or a place, not to a word Google happens to use.
+  const offerable = secondary.filter((a) => a.kind === 'oneof');
+  if (!offerable.length) return null;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
+      {offerable.map((a) => {
+        const on = has.find((c) => c.key === a.key);
+        return (
+          <DrillDropdown
+            key={a.key}
+            label={a.label}
+            value={on ? said(on.value) : '\u2014'}
+            set={Boolean(on)}
+            width={260}
+            groups={[{ key: a.key, label: a.label, items: a.options.map((o) => ({ key: o, label: o, on: on?.value.choice === o })) }]}
+            startIn={a.key}
+            extra={on ? [{ key: '\u2717', label: `Not ${a.label.toLowerCase()}`, on: false }] : []}
+            onPick={(k) => { if (!busy) void set(a.key, k === '\u2717' ? null : { choice: k }); }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours'; view: View_;
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
@@ -1667,14 +1723,16 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   }, []);
   useEffect(() => { if (!withKey) { setWithWords(null); return; } setWithWords(null); void loadWith(withKey); }, [withKey, loadWith]);
 
+  /** The secondary labels a word can be given, for the control on its row. */
+  const [secondary, setSecondary] = useState<SecondaryLabel[]>([]);
   const reload = useCallback(async () => {
     const d = await api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 });
-    setRows(d.labels);
+    setRows(d.labels); setSecondary(d.secondary ?? []);
   }, []);
   useEffect(() => {
     let live = true;
     void api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 })
-      .then((d) => { if (live) setRows(d.labels); })
+      .then((d) => { if (live) { setRows(d.labels); setSecondary(d.secondary ?? []); } })
       .catch(() => { if (live) setRows([]); });
     return () => { live = false; };
   }, [tax]);
@@ -1723,7 +1781,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
       for (const c of tax.categories) {
         for (const r of rowsIn) if (r.active !== false && !r.decision && r.landing.category === c.key && r.landing.how !== 'fallback') put(c.key, c.label, r);
       }
-      for (const r of rowsIn) if (standing(r) === 'generic') put('_generic', 'Attributes, not categories', r);
+      for (const r of rowsIn) if (standing(r) === 'generic') put('_generic', 'Secondary labels, not categories', r);
       for (const r of rowsIn) if (standing(r) === 'travel') put('_travel', 'Travel', r);
       for (const r of rowsIn) if (standing(r) === 'nearby') put('_nearby', 'Useful nearby', r);
       for (const r of rowsIn) if (standing(r) === 'aside') put('_aside', 'Excluded from Epic', r);
@@ -1895,7 +1953,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         </Press>
       </View>
       {chosen ? null : (
-        <View style={[styles.tRow, styles.tHeadSoft, styles.gRow]}>
+        <View style={[styles.tRow, styles.tHeadSoft, styles.gRow, styles.stick]}>
           <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={2}>{first}</Text></View>
           {COLS.map((h) => <View key={h} style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
           {wide ? <View style={[styles.tCell, styles.headCell, styles.gLast, { width: LAST }]}><Text style={styles.colHead} numberOfLines={1}>{last}</Text></View> : null}
@@ -1965,7 +2023,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                     <DrillDropdown
                       label={busyKey === '*' ? 'Saving…' : `Apply to ${tickedHere.length} ticked`} value="choose one" align="right" width={300} set
                       extra={[
-                        { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: false },
+                        { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: false },
                         { key: '-', label: 'Excluded from Epic', on: false },
                         { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
                         { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
@@ -2006,7 +2064,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
               {shown.map((r) => {
                 const st = standing(r);
                 const sug = r.suggestion ?? null;
-                const sugText = sug?.generic ? 'an attribute' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
+                const sugText = sug?.generic ? 'a secondary label' : sug?.aside ? 'excluded from Epic' : sug?.travel ? 'travel' : sug?.nearby ? 'useful nearby' : sug?.subcategory ? `${catLabel(tax.subcategories.find((s) => s.key === sug.subcategory)?.category_key)} · ${subLabel(sug.subcategory)}${sug.cuisine ? ` · ${sug.cuisine}` : ''}` : null;
                 // What the control says: where it is, or where it could go, or that nobody knows.
                 // The kicker names the kind of answer, the line beneath is the
                 // answer itself, so a word's state reads without a single chip
@@ -2054,6 +2112,19 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           </View>
                         );
                       })()}
+                      {/* What else the word says. The owner, 14 Sep 2026: "I see a
+                          fine dining restaurant, but no label for fine dining. It's
+                          just mapped to food and drinks, restaurants." Where it
+                          sends a place is one answer; this is the other, and the
+                          two never compete — italian_restaurant still lands in
+                          Restaurants and also says Italian. */}
+                      {canManage ? (
+                        <Carries r={r} secondary={secondary} onChanged={onChanged} />
+                      ) : (r.carries ?? []).length ? (
+                        <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>
+                          Also says {(r.carries ?? []).map((c) => `${c.label} · ${said(c.value)}`).join(' · ')}
+                        </Text>
+                      ) : null}
                     </View>
                     </View>
                     {wide ? <View style={{ width: COL }} /> : null}
@@ -2067,7 +2138,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} stacked set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[
-                            { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
+                            { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
                             { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
                             { key: '>', label: 'Travel — getting there, parking', on: st === 'travel' },
                             { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: st === 'nearby' },
@@ -2134,11 +2205,11 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                                       label={wst === 'mapped' ? 'Mapped' : wst === 'aside' ? 'Excluded' : wst === 'generic' ? 'Kept as' : wst === 'travel' || wst === 'nearby' ? 'Mapped' : 'Choose a subcategory'}
                                       value={busyKey === w.key ? 'Saving…'
                                         : wst === 'mapped' ? `${catLabel(w.landing.category)} · ${subLabel(w.landing.subcategory)}`
-                                          : wst === 'aside' ? 'from Epic' : wst === 'generic' ? 'an attribute'
+                                          : wst === 'aside' ? 'from Epic' : wst === 'generic' ? 'a secondary label'
                                             : wst === 'travel' ? 'travel' : wst === 'nearby' ? 'useful nearby' : '…'}
                                       align="right" width={300}
                                       extra={[
-                                        { key: '=', label: 'Keep as an attribute \u2014 it describes the place, it does not say what it is', on: wst === 'generic' },
+                                        { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: wst === 'generic' },
                                         { key: '-', label: 'Excluded from Epic', on: wst === 'aside' },
                                         { key: '>', label: 'Travel — getting there, parking', on: wst === 'travel' },
                                         { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: wst === 'nearby' },
@@ -2343,6 +2414,16 @@ const styles = StyleSheet.create({
   // A header's rule and the tab frame sit between the ink rule and the hairline:
   // the owner found the ink one too bright and the hairline invisible (13 Sep 2026).
   tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
+  /**
+   * The column header stays put while the list scrolls under it (owner, 14 Sep
+   * 2026: "the column header should be sticky so that when I scroll, I can
+   * still see the stuff at the top"). A list of 166 food words is a long way
+   * from its headings otherwise. Web only — there is no sticky on native, and
+   * `position` is typed loosely enough in React Native Web to say so here.
+   */
+  stick: Platform.OS === 'web'
+    ? ({ position: 'sticky', top: 0, zIndex: 3, backgroundColor: colors.bg } as any)
+    : {},
   headCell: { paddingTop: 10, paddingBottom: 2 },
   colHead: { ...type.small, fontWeight: '500', color: colors.inkMuted },
   // The three doors: 30px apart, a 2px rule under the lot, a lime one under the

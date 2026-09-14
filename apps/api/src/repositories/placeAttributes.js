@@ -35,10 +35,11 @@ const valueOf = (row) => {
 /** The vocabulary and every default, in one read. */
 export async function attributes() {
   if (cache && Date.now() - cachedAt < TTL_MS) return cache;
-  const [attrs, defs, brings] = await Promise.all([
+  const [attrs, defs, brings, carries] = await Promise.all([
     query('select * from place_attributes order by position, label'),
     query('select * from shelf_subcategory_attributes'),
     query('select * from attribute_brings'),
+    query('select * from taxonomy_label_carries'),
   ]);
   const bySub = new Map();
   for (const d of defs.rows) {
@@ -56,7 +57,18 @@ export async function attributes() {
     broughtBy.set(r.attribute_key, [...(broughtBy.get(r.attribute_key) ?? []), { key: r.brings_key, value: v }]);
   }
   const list = attrs.rows.map((a) => ({ ...a, brings: broughtBy.get(a.key) ?? [] }));
-  cache = { list, byKey: new Map(list.map((a) => [a.key, a])), bySubcategory: bySub };
+  // What a provider's word says besides where it sends a place (migration 123).
+  // The owner, 14 Sep 2026: "I see a fine dining restaurant, but no label for
+  // fine dining. It's just mapped to food and drinks, restaurants." The drawer
+  // was right and everything else the word said was going on the floor.
+  const carriedBy = new Map();
+  for (const r of carries.rows) {
+    const v = valueOf(r);
+    if (!v) continue;
+    const label = `${r.namespace}:${r.key}`;
+    carriedBy.set(label, [...(carriedBy.get(label) ?? []), { key: r.attribute_key, value: v }]);
+  }
+  cache = { list, byKey: new Map(list.map((a) => [a.key, a])), bySubcategory: bySub, carriedBy };
   cachedAt = Date.now();
   return cache;
 }
@@ -136,6 +148,49 @@ export async function setBrings(attributeKey, bringsKey, value) {
     [attributeKey, bringsKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null]);
   forget();
   return valueOf(rows[0]);
+}
+
+/**
+ * What a provider's word carries besides where it sends a place.
+ *
+ * The owner, 14 Sep 2026: "I see a fine dining restaurant, but no label for
+ * fine dining." `points_at` says where a word sends a place; this says what
+ * else it tells us, and the two are set independently — italian_restaurant
+ * still sends a place to Restaurants and now also says Italian.
+ */
+export async function setCarries(label, attributeKey, value) {
+  const [namespace, ...rest] = String(label ?? '').split(':');
+  const key = rest.join(':');
+  if (!namespace || !key || !attributeKey) throw bad('Which word, and which label?');
+  if (value == null) {
+    await query('delete from taxonomy_label_carries where namespace = $1 and key = $2 and attribute_key = $3',
+      [namespace, key, attributeKey]);
+    forget();
+    return null;
+  }
+  const { rows } = await query(
+    `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno, from_value, to_value, choice)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     on conflict (namespace, key, attribute_key) do update
+        set yesno = excluded.yesno, from_value = excluded.from_value,
+            to_value = excluded.to_value, choice = excluded.choice
+     returning *`,
+    [namespace, key, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null]);
+  forget();
+  return valueOf(rows[0]);
+}
+
+/** Every word that carries a secondary label, for the words list. */
+export async function carriedByWord() {
+  const { rows } = await query('select * from taxonomy_label_carries');
+  const out = new Map();
+  for (const r of rows) {
+    const v = valueOf(r);
+    if (!v) continue;
+    const label = `${r.namespace}:${r.key}`;
+    out.set(label, [...(out.get(label) ?? []), { key: r.attribute_key, value: v }]);
+  }
+  return out;
 }
 
 /**
@@ -221,18 +276,26 @@ export async function valuesFor(venueRef) {
  * its drawer says, else nothing. `from` says which of the two answered, so a
  * screen can show what was inherited beside what was changed.
  */
-export function resolveFor({ subcategory }, own, vocab) {
+export function resolveFor({ subcategory, words = [] }, own, vocab) {
   const out = {};
   const drawer = (subcategory && vocab?.bySubcategory?.get(subcategory)) || new Map();
+  // What this place's own provider words say. A word is more specific than the
+  // drawer's default -- every restaurant is not Italian -- and less specific
+  // than something set on the place by hand, so it sits between them.
+  const fromWords = new Map();
+  for (const w of words) {
+    for (const c of vocab?.carriedBy?.get(w) ?? []) if (!fromWords.has(c.key)) fromWords.set(c.key, c.value);
+  }
   for (const a of vocab?.list ?? []) {
     if (!a.active) continue;
     const mine = own?.get(a.key) ?? null;
+    const said = fromWords.get(a.key) ?? null;
     const theirs = drawer.get(a.key) ?? null;
-    const value = mine ?? theirs;
+    const value = mine ?? said ?? theirs;
     if (!value) continue;
     // `setAt`, not `from`: a range's own lower bound is called `from`, and
     // naming the provenance the same thing silently ate it.
-    out[a.key] = { ...value, setAt: mine ? 'place' : 'subcategory' };
+    out[a.key] = { ...value, setAt: mine ? 'place' : said ? 'word' : 'subcategory' };
   }
   // What the labels it already has bring with them (owner, 14 Sep 2026: "let us
   // add labels that are always added when one label is added"). Marked so a

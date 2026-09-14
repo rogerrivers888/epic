@@ -58,6 +58,7 @@ import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.j
 import { dwellFor } from '../domain/options.js';
 import { distinguish } from '../domain/naming.js';
 import { shelvesForAtlas, shelvesForVenue, FOOD_DRAWER } from '../domain/moods.js';
+import { labelsOf } from '../domain/labels.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
@@ -122,8 +123,11 @@ const weight = (v) => (v.rating ?? 0) * Math.log10((v.ratingCount ?? 0) + 2);
  * anything he has since created will read (Codex, 14 Sep 2026: values written
  * with no read path are write-only).
  */
-const marks = (subcategory, goodForChildren, own, vocab) => {
-  const all = placeAttributes.resolveFor({ subcategory }, own, vocab);
+const marks = (subcategory, goodForChildren, own, vocab, words = []) => {
+  // The place's own provider words go in: italian_restaurant says Italian and
+  // fine_dining_restaurant says fine dining, which is everything those words
+  // were saying besides where the place lives (owner, 14 Sep 2026).
+  const all = placeAttributes.resolveFor({ subcategory, words }, own, vocab);
   return {
     indoor: all.indoor?.yesno ?? null,
     forKids: all['kid-friendly']?.yesno ?? goodForChildren ?? null,
@@ -299,7 +303,8 @@ inspire.get('/near', async (req, res, next) => {
       ...(() => {
         const p = shelvesForVenue(v, taught, tax.vocab);
         const ref = `${v.source}:${v.sourcePlaceId}`;
-        return { moods: p.shelves, subcategory: p.subcategory, ...marks(p.subcategory, v.goodForChildren, own.get(ref), attrVocab) };
+        return { moods: p.shelves, subcategory: p.subcategory,
+                 ...marks(p.subcategory, v.goodForChildren, own.get(ref), attrVocab, labelsOf(v)) };
       })(),
       experiences: v.experiences ?? [],
       cuisines: v.cuisines ?? [],

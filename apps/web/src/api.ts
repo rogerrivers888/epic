@@ -2382,7 +2382,9 @@ export const api = {
   // --- the taxonomy: categories, every provider's words, and the rules between --
   taxonomy: () => request<Taxonomy>('/api/admin/taxonomy/'),
   taxonomyLabels: (p: { namespace?: string | null; q?: string; all?: boolean; limit?: number; offset?: number } = {}) =>
-    request<{ namespace: string | null; labels: TaxonomyLabel[]; offset: number; more: boolean }>(`/api/admin/taxonomy/labels${qs({ ...p, all: p.all ? 1 : undefined })}`),
+    request<{ namespace: string | null; labels: TaxonomyLabel[]; offset: number; more: boolean; secondary: SecondaryLabel[] }>(`/api/admin/taxonomy/labels${qs({ ...p, all: p.all ? 1 : undefined })}`),
+  taxonomySetCarries: (body: { label: string; attribute: string; value: AttributeValue | null }) =>
+    put<{ label: string; attribute: string; value: AttributeValue | null }>('/api/admin/taxonomy/labels/carries', body),
   taxonomyMatrix: (all = false) => request<TaxonomyMatrix>(`/api/admin/taxonomy/matrix${qs({ all: all ? 1 : undefined })}`),
   taxonomyRules: (subcategory: string) => request<{ subcategory: string; rules: TaxonomyRule[] }>(`/api/admin/taxonomy/rules${qs({ subcategory })}`),
   /** These labels → this subcategory. One type/atlas/experience label is written at that level; anything else is a labels rule. */
@@ -2995,6 +2997,17 @@ export type TaxonomyLabel = {
   why?: string | null;
   /** For a Google type: where it could go, for the owner to approve or change. */
   suggestion?: { subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; cuisine?: string; why: string } | null;
+  /**
+   * What else the word says, besides where it sends a place. `italian_restaurant`
+   * still sends a place to Restaurants; it also says Cuisine · Italian.
+   */
+  carries?: { key: string; label: string; kind: 'yesno' | 'range' | 'oneof'; value: AttributeValue }[];
+};
+
+/** A secondary label a word can be given, and the shape of its control. */
+export type SecondaryLabel = {
+  key: string; label: string; kind: 'yesno' | 'range' | 'oneof';
+  options: string[]; range_min: number | null; range_max: number | null; unit: string | null;
 };
 
 /** A handful of real places carrying one Google word, read live and never stored. */
@@ -3060,8 +3073,12 @@ export type PlaceAttribute = {
 /** A value one carries: a yes or no, a range, or one of a list. */
 export type AttributeValue = {
   yesno?: boolean; from?: number | null; to?: number | null; choice?: string;
-  /** Where the answer came from. `came` means another label brought it, so it is drawn in lime. */
-  setAt?: 'place' | 'subcategory' | 'came';
+  /**
+   * Where the answer came from. `came` means another label brought it and
+   * `word` means one of the place's own provider words said it, so both are
+   * drawn in lime: nobody typed them.
+   */
+  setAt?: 'place' | 'subcategory' | 'came' | 'word';
   /** Which label brought it, where `setAt` is `came`. */
   came?: string;
   reason?: string | null;

@@ -189,12 +189,13 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
     if (namespace && !NAMESPACES.some((n) => n.key === namespace)) throw bad(`${namespace} is not a source of labels`);
     const q = String(req.query.q || '').trim() || null;
     const all = req.query.all === '1' || req.query.all === 'true';
-    const [rows, rules, tax] = await Promise.all([
+    const [rows, rules, tax, attrs, carried] = await Promise.all([
       labelRepo.list({
         namespace, q, seenOnly: !all && (namespace === 'wikidata' || !namespace),
         limit: Math.min(2000, Number(req.query.limit) || 400), offset: Number(req.query.offset) || 0,
       }),
       shelfRules.rules(), taxonomy.taxonomy(),
+      placeAttributes.attributes(), placeAttributes.carriedByWord(),
     ]);
     const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
     const labels = rows.map((r) => ({
@@ -209,8 +210,26 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
       // Why it is a judgement call, where it is one (the handoff, BO5).
       why: r.namespace === 'google' ? WHY_UNSURE[r.key] ?? null : null,
+      // What else the word says, besides where it sends a place. The owner,
+      // 14 Sep 2026: "I see a fine dining restaurant, but no label for fine
+      // dining." A word's second label is named here, beside its first.
+      carries: (carried.get(`${r.namespace}:${r.key}`) ?? []).map((c) => ({
+        key: c.key,
+        label: attrs.byKey.get(c.key)?.label ?? c.key,
+        kind: attrs.byKey.get(c.key)?.kind ?? 'yesno',
+        value: c.value,
+      })),
     }));
-    res.json({ namespace, q, all, labels, offset: Number(req.query.offset) || 0, more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)), subcategories: tax.subcategories, categories: tax.categories });
+    res.json({
+      namespace, q, all, labels, offset: Number(req.query.offset) || 0,
+      more: rows.length >= (Math.min(2000, Number(req.query.limit) || 400)),
+      subcategories: tax.subcategories, categories: tax.categories,
+      // The secondary labels a word can be given, so the control has its list.
+      secondary: attrs.list.filter((a) => a.active).map((a) => ({
+        key: a.key, label: a.label, kind: a.kind, options: a.options ?? [],
+        range_min: a.range_min, range_max: a.range_max, unit: a.unit,
+      })),
+    });
   } catch (err) { next(err); }
 });
 
@@ -417,6 +436,23 @@ taxonomyRoutes.put('/attributes/brings', requires('manage_library'), async (req,
 });
 
 /**
+ * PUT /labels/carries { label, attribute, value } — what a provider's word says
+ * besides where it sends a place. A null value forgets it.
+ *
+ * The owner, 14 Sep 2026: "Is the type of restaurant like French restaurants or
+ * fine dining, for example? I see a fine dining restaurant, but no label for
+ * fine dining." Where the word points is one question and what else it says is
+ * another; this is the second, and setting it never moves a place.
+ */
+taxonomyRoutes.put('/labels/carries', requires('manage_library'), async (req, res, next) => {
+  try {
+    const value = await placeAttributes.setCarries(
+      String(req.body?.label || ''), String(req.body?.attribute || ''), req.body?.value ?? null);
+    res.json({ label: req.body?.label, attribute: req.body?.attribute, value });
+  } catch (err) { next(err); }
+});
+
+/**
  * PUT /attributes/default { subcategory, attribute, value } — what every place
  * in a drawer is taken to be. A null value clears it back to "nothing said",
  * which is not the same as "no".
@@ -439,8 +475,15 @@ taxonomyRoutes.get('/attributes/place', requires('view_library'), async (req, re
     const ref = String(req.query.ref || '').trim();
     if (!ref) throw bad('Which place?');
     const subcategory = req.query.subcategory ? String(req.query.subcategory) : null;
+    // Its own words, so what they carry shows up here too: a place typed
+    // fine_dining_restaurant reads as fine dining without anybody saying so.
+    const words = Array.isArray(req.query.words) ? req.query.words.map(String)
+      : req.query.words ? String(req.query.words).split(',').filter(Boolean) : [];
     const [vocab, own] = await Promise.all([placeAttributes.attributes(), placeAttributes.valuesFor(ref)]);
-    res.json({ ref, subcategory, attributes: vocab.list, values: placeAttributes.resolveFor({ subcategory }, own, vocab) });
+    res.json({
+      ref, subcategory, attributes: vocab.list,
+      values: placeAttributes.resolveFor({ subcategory, words }, own, vocab),
+    });
   } catch (err) { next(err); }
 });
 
