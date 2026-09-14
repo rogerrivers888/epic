@@ -288,6 +288,51 @@ update host_skill_aliases set target_key = 'knife-making'
 -- a tag's parent is what the browse category is derived from, so those two
 -- would have filed their offers under Crafts and drawn a breadcrumb about the
 -- material (Codex, 14 Sep 2026). A pan tuner is an instrument maker.
+--
+-- **The offers move first, while the tags still say what they used to say.**
+-- A browse category is worked out from the tags and then *stored*, so moving a
+-- tag has to move the offers carrying it — which is why the admin edit path
+-- calls `recomputeCategories`. Doing it in this order is what lets the old
+-- category be read rather than assumed: a tag approved through the queue before
+-- today may have been filed anywhere, and guessing it was Crafts would leave
+-- those offers in whatever bucket they were actually in (Codex, 14 Sep 2026).
+--
+-- Only where nobody chose: an offer whose stored category is still what its
+-- tags derive was inferred and follows; one holding anything else was somebody
+-- pressing Change, and stays.
+--
+-- Nothing matches on a fresh database — both tags arrive above — but an
+-- environment where a host typed "steel pan making" and somebody approved it
+-- has rows here, and they are exactly the ones nobody would think to look for.
+with carried as (
+  select s.offer_id, s.position,
+         t.category_key as was,
+         case when t.key in ('steel-pan-making', 'woodwind-instrument-making') then 'music' else t.category_key end as is_now
+    from host_offer_skills s
+    join host_skill_tags t on t.key = s.target_key
+   where s.vocab = 'tag' and t.category_key is not null
+     and s.offer_id in (select offer_id from host_offer_skills
+                         where vocab = 'tag' and target_key in ('steel-pan-making', 'woodwind-instrument-making'))
+),
+-- the commonest bucket, with the earliest tag breaking a tie — `categoryFrom`,
+-- in SQL, once for what the tags say now and once for what they are about to
+before_ as (
+  select distinct on (offer_id) offer_id, was as cat from (
+    select offer_id, was, count(*) as n, min(position) as first_at from carried group by offer_id, was
+  ) g order by offer_id, n desc, first_at
+),
+after_ as (
+  select distinct on (offer_id) offer_id, is_now as cat from (
+    select offer_id, is_now, count(*) as n, min(position) as first_at from carried group by offer_id, is_now
+  ) g order by offer_id, n desc, first_at
+)
+update host_offers o set category_key = a.cat, updated_at = now()
+  from before_ b join after_ a on a.offer_id = b.offer_id
+ where o.id = b.offer_id
+   and o.category_key is not distinct from b.cat
+   and a.cat is distinct from b.cat;
+
+-- …and now the tags themselves.
 update host_skill_tags set parent_key = 'instrument-making', category_key = 'music', updated_at = now()
  where key in ('steel-pan-making', 'woodwind-instrument-making');
 
@@ -306,43 +351,3 @@ with moved as (
 update host_skill_tags t set seen_count = greatest(0, t.seen_count + case when t.key = 'knife-making' then (select count(*) from moved) else -(select count(*) from moved) end)
  where t.key in ('knife-making', 'bladesmithing');
 
--- …and the offers those two tags had already filed.
---
--- A browse category is worked out from the tags and then *stored*, so moving a
--- tag has to move the offers carrying it — which is why the admin edit path
--- calls `recomputeCategories` and why this has to do the same (Codex,
--- 14 Sep 2026). Only where nobody chose: an offer whose stored category is
--- still what its tags used to derive was inferred and follows the tag; one
--- holding anything else was somebody pressing Change, and stays.
---
--- Nothing will match on a fresh database — both tags arrive above — but an
--- environment where a host typed "steel pan making" and somebody approved it
--- through the queue has rows here, and they are exactly the ones nobody would
--- think to look for.
-with carried as (
-  select s.offer_id, s.position, t.key,
-         case when t.key in ('steel-pan-making', 'woodwind-instrument-making') then 'crafts' else t.category_key end as was,
-         t.category_key as is_now
-    from host_offer_skills s
-    join host_skill_tags t on t.key = s.target_key
-   where s.vocab = 'tag' and t.category_key is not null
-     and s.offer_id in (select offer_id from host_offer_skills
-                         where vocab = 'tag' and target_key in ('steel-pan-making', 'woodwind-instrument-making'))
-),
--- the commonest bucket, with the earliest tag breaking a tie — `categoryFrom`,
--- in SQL, once for what the tags used to say and once for what they say now
-before_ as (
-  select distinct on (offer_id) offer_id, was as cat from (
-    select offer_id, was, count(*) as n, min(position) as first_at from carried group by offer_id, was
-  ) g order by offer_id, n desc, first_at
-),
-after_ as (
-  select distinct on (offer_id) offer_id, is_now as cat from (
-    select offer_id, is_now, count(*) as n, min(position) as first_at from carried group by offer_id, is_now
-  ) g order by offer_id, n desc, first_at
-)
-update host_offers o set category_key = a.cat, updated_at = now()
-  from before_ b join after_ a on a.offer_id = b.offer_id
- where o.id = b.offer_id
-   and o.category_key is not distinct from b.cat
-   and a.cat is distinct from b.cat;
