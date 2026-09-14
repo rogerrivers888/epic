@@ -534,7 +534,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * panel hangs directly under the control; `align: 'right'` hangs it from the
  * control's right edge for a control at the end of a row.
  */
-export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null }: {
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0 }: {
   label: string;
   value: string;
   groups: { key: string; label: string; items: DropdownOption[] }[];
@@ -559,6 +559,8 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
    * like a new one called water park").
    */
   adopt?: { label: string; onPick: (groupKey: string) => void } | null;
+  /** Pixels to hold a right-aligned panel off whatever sits to its right. */
+  nudge?: number;
 }) {
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
@@ -586,7 +588,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
       {open ? (
         <>
           <Press style={dd.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={[dd.panel, align === 'right' && dd.panelRight, { width }]} accessibilityRole="menu">
+          <View style={[dd.panel, align === 'right' && dd.panelRight, align === 'right' && nudge ? { right: nudge } : null, { width }]} accessibilityRole="menu">
             <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
               {adopting ? (
                 <>

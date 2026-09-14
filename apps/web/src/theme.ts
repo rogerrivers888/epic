@@ -104,6 +104,13 @@ const LIGHT = {
    */
   warm: '#F3F1EC',
   ruleSoft: '#D7D3D3',
+  /**
+   * A rule that has to be seen but not heard: heavier than the hairline, well
+   * short of `decor`. The back office's column-header bands use it (owner,
+   * 13 Sep 2026, twice: "that bar still needs to be a lighter white as well…
+   * it should just be a bit toned down from what it was").
+   */
+  ruleMuted: '#BDB8B1',
   ghost: '#9B9797',
   // Links and the small text that has to read "green" on cream
   accent: MOSS,
@@ -210,6 +217,7 @@ const DARK: typeof LIGHT = {
   inkFaint: D.grey700,     // grey 500 is never text, in either mode
   warm: D.panelWarm,
   ruleSoft: D.ruleSoft,
+  ruleMuted: '#5A5450',
   ghost: D.grey500,
   decor: D.grey500,
   // The strong rule is the type colour, as the table says. It only reads as

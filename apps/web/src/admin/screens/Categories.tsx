@@ -902,7 +902,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
   const cells = (g: { types: TaxonomyLabel[]; places: number; mapped: number; unmapped: number }) => (wide ? [g.types.length, g.places, g.mapped, g.unmapped] : [g.types.length, g.mapped, g.unmapped]);
   const cellsTotal = wide ? [total.types, total.places, total.mapped, total.unmapped] : [total.types, total.mapped, total.unmapped];
   const placesAt = wide ? 1 : -1; const unmappedAt = wide ? 3 : 2;
-  const first = by === 'google' ? "Google's category" : 'Our category';
+  const first = by === 'google' ? "Google's category / subcategory" : 'Our category / subcategory';
   const last = by === 'google' ? 'Lands in' : 'Our subcategories';
 
   const asideCount = (rows ?? []).filter((r) => standing(r) === 'aside').length;
@@ -924,7 +924,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
         </Press>
       </View>
       <View style={[styles.tRow, styles.tHeadSoft, styles.gRow]}>
-        <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={1}>{first}</Text></View>
+        <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={2}>{first}</Text></View>
         {COLS.map((h) => <View key={h} style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
         {wide ? <View style={[styles.tCell, styles.headCell, styles.gLast, { width: LAST }]}><Text style={styles.colHead} numberOfLines={1}>{last}</Text></View> : null}
       </View>
@@ -968,7 +968,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           {/* The group's subcategories, right under its row — never below the fold. */}
           {on ? (
             <View style={styles.inset}>
-              <View style={styles.groupBar}>
+              {/* Every React Native Web view is its own stacking context, so a
+                  menu opened in the bar has to lift the bar itself or the rows
+                  under it paint straight over the panel (13 Sep 2026). */}
+              <View style={[styles.groupBar, openKey === `bulk:${g.key}` && { zIndex: 60 }]}>
                 {subsHere.length ? (
                   <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
                     <Choice label={`All · ${g.types.length}`} on={!only} onPress={() => setOnly('')} />
@@ -977,6 +980,10 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                 ) : <View style={{ flex: 1 }} />}
                 {/* Ticked rows get one answer between them, from the same control
                     the single rows use. */}
+                {canManage && tickable.length ? (
+                  <TextAction label={allTicked ? 'Untick all' : `Tick all ${tickable.length}`}
+                              onPress={() => setTicked((prev) => { const n = new Set(prev); for (const r of tickable) { if (allTicked) n.delete(r.key); else n.add(r.key); } return n; })} />
+                ) : null}
                 {canManage && tickedHere.length ? (
                   <>
                     <TextAction label="Clear" onPress={() => setTicked(new Set())} />
@@ -994,6 +1001,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                       }))}
                       onPick={(k) => void applyMany(tickedHere, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
                       onOpenChange={(o) => setOpenKey(o ? `bulk:${g.key}` : null)}
+                      nudge={10}
                     />
                   </>
                 ) : null}
@@ -1007,24 +1015,11 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
                   </Press>
                 ) : null}
               </View>
-              {shown.length ? (
-                <View style={[styles.tRow, styles.tHeadSoft, { alignItems: 'center' }]}>
-                  {canManage ? (
-                    <Press effect="none" disabled={!tickable.length} onPress={() => setTicked((prev) => { const n = new Set(prev); for (const r of tickable) { if (allTicked) n.delete(r.key); else n.add(r.key); } return n; })}
-                           accessibilityRole="checkbox" accessibilityState={{ checked: allTicked }} accessibilityLabel="Tick every word shown" style={styles.tickCell}>
-                      <View style={[styles.tick, allTicked && styles.tickOn, !tickable.length && { opacity: 0.3 }]}>{allTicked ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
-                    </Press>
-                  ) : null}
-                  {/* The tick box and the name are a gap apart on the rows below;
-                      the header has to carry the same gap or it sits proud of the
-                      words (owner, 13 Sep 2026: "move it to the right about 2 mm"). */}
-                  <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }, canManage && { marginLeft: spacing.sm }]}><Text style={styles.colHead}>Google's subcategory</Text></View>
-                  {/* The same columns as the category rows above, so Places sits under Places. */}
-                  {wide ? <View style={{ width: COL }} /> : null}
-                  {wide ? <View style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View> : null}
-                  {wide ? <View style={[styles.tCell, styles.headCell, { width: COL * 2 + LAST }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Mapped to</Text></View> : null}
-                </View>
-              ) : null}
+              {/* No second header. It repeated the one above it word for word,
+                  and the indent and the lime bar already say whose subcategories
+                  these are (owner, 13 Sep 2026: "it looks really weird to
+                  duplicate the header… I'm wondering whether we just show it
+                  indented, and that's enough"). Tick-all moved up into the bar. */}
               {shown.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing here.</Text> : null}
               {shown.map((r) => {
                 const st = standing(r);
@@ -1370,9 +1365,9 @@ const styles = StyleSheet.create({
   /** The Google table's header rule: soft, not ink (owner, 13 Sep 2026: "very bright white"). */
   // A header's rule and the tab frame sit between the ink rule and the hairline:
   // the owner found the ink one too bright and the hairline invisible (13 Sep 2026).
-  tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.decor },
+  tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
   headCell: { paddingTop: 10, paddingBottom: 2 },
-  colHead: { ...type.small, fontWeight: '600', color: colors.inkMuted },
+  colHead: { ...type.small, fontWeight: '500', color: colors.inkMuted },
   tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, overflow: 'hidden', backgroundColor: colors.panelWarm },
   tabItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.decor },
