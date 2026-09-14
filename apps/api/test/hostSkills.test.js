@@ -318,3 +318,39 @@ test('a plural meets its singular, including the awkward ones', () => {
     assert.equal(normalise(one), normalise(many), `${one} / ${many}`);
   }
 });
+
+test('the craft inventory is all there, and carries no grading', async () => {
+  /**
+   * Owner, 14 Sep 2026: "It's just a list of skills… I asked for us to be able
+   * to just extract that list and utilise it", and "we don't need to have this
+   * attribute around endangered or not".
+   *
+   * So: the long tail is seeded — these are the words no marketplace taxonomy
+   * has, and the reason the tag layer exists — and nothing anywhere records
+   * whether a craft is dying out.
+   */
+  const fs = await import('node:fs/promises');
+  const sql = await fs.readFile(new URL('../migrations/104_craft_inventory.sql', import.meta.url), 'utf8');
+  for (const craft of ['withy-pot-making', 'swill-basket-making', 'sussex-trug-making', 'nalbinding',
+    'sgian-dubh-and-dirk-making', 'pargeting-and-scagliola', 'gansey-knitting', 'coracle-making']) {
+    assert.ok(sql.includes(`'${craft}'`), craft);
+  }
+  /**
+   * And no grading is held. Checked against the tables and the rows rather than
+   * the prose: the comments say out loud why the status is not taken, and a
+   * word search would catch the explanation and call it the thing it warns
+   * against.
+   */
+  const schema = (await fs.readFile(new URL('../migrations/102_host_skills.sql', import.meta.url), 'utf8'))
+    .replace(/^\s*--.*$/gm, '');
+  const columns = schema.slice(schema.indexOf('create table if not exists host_skill_tags'));
+  for (const word of ['endangered', 'extinct', 'status', 'viability', 'red_list']) {
+    assert.ok(!new RegExp(word, 'i').test(columns.slice(0, columns.indexOf(');'))), `no ${word} column on a tag`);
+  }
+  // …and no craft is labelled with one either.
+  const labels = [...sql.matchAll(/\(\s*'[a-z0-9-]+',\s*'([^']+(?:''[^']*)*)'/g)].map((m) => m[1]);
+  assert.ok(labels.length > 200, `${labels.length} craft labels read back`);
+  for (const label of labels) {
+    assert.ok(!/endangered|extinct|red list/i.test(label), label);
+  }
+});
