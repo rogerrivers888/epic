@@ -40,7 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import {
-  api, MoodKey, ShelfSubcategory, Taxonomy, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
+  api, MoodKey, PlaceAttribute, ShelfSubcategory, Taxonomy, TaxonomyAttributes, TaxonomyExamples, TaxonomyLabel, TaxonomyLanding, TaxonomyMatrix, TaxonomyMatrixEntry,
   TaxonomyRule, TaxonomyTry,
 } from '../../api';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -53,6 +53,8 @@ import { asOneOf, asText, useQueryState } from '../../router';
 const WIDE = 900;
 
 type View_ = 'subcategories' | 'providers' | 'google' | 'words';
+/** The three doors across the top: a provider's words, ours, and the categories. */
+type Door = 'words' | 'ours' | 'cats';
 const VIEWS: { key: View_; label: string; short: string; needsCategory: boolean }[] = [
   { key: 'subcategories', label: 'Our categories', short: 'Ours', needsCategory: true },
   { key: 'providers', label: 'Providers\' words, one of ours', short: 'Providers', needsCategory: true },
@@ -172,6 +174,8 @@ export function Categories({ canManage }: { canManage: boolean }) {
   // Which category, which view, which subcategory is open — all in the address.
   const [cat, setCat] = useQueryState<string>('cat', '', asText);
   const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words'] as const, 'subcategories'));
+  /** Which of the three doors is open (the handoff, 14 Sep 2026). */
+  const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats'] as const, 'words'));
   const [sub, setSub] = useQueryState<string>('sub', '', asText);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -187,6 +191,20 @@ export function Categories({ canManage }: { canManage: boolean }) {
   useEffect(() => { void load(); }, [load]);
 
   const categories = tax?.categories ?? [];
+  // How many of a provider's words there are and how many are answered, for the
+  // door's own sub-line. Read once when the screen loads.
+  const [googleCount, setGoogleCount] = useState('Google’s list');
+  useEffect(() => {
+    let live = true;
+    void api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 })
+      .then((d) => {
+        if (!live) return;
+        const answered = d.labels.filter((r) => r.decision || r.landing.subcategory).length;
+        setGoogleCount(`${d.labels.length} · ${answered} answered`);
+      })
+      .catch(() => null);
+    return () => { live = false; };
+  }, []);
   // No category until one is chosen (owner, 12 Sep 2026: "it should probably
   // be empty when I arrive on the page and I select the category").
   const category = categories.find((c) => c.key === cat) ?? null;
@@ -208,15 +226,31 @@ export function Categories({ canManage }: { canManage: boolean }) {
 
   return (
     <AdminPage>
-      <PageHead title="Categories" sub="One category at a time: its subcategories, the attributes that put a place in each, and every provider's words against them" />
+      {/* Three doors, one screen: a provider's words, our own labels, and the
+          eight categories. The head that used to sit here is now the band under
+          whichever door is open (the handoff, 14 Sep 2026). */}
+      <Doors
+        at={door}
+        on={(d) => { setDoor(d); setEditing(null); if (d === 'words') setView('google'); if (d === 'cats') setView('subcategories'); }}
+        counts={{
+          words: googleCount,
+          ours: `${(tax?.subcategories ?? []).filter((x) => x.active).length} primary`,
+          cats: String((tax?.categories ?? []).filter((c) => c.active).length),
+        }}
+      />
 
       {/* The controls, left-aligned, each panel hanging directly under its own box
           (owner, 12 Sep 2026: "they should both be left-aligned with the start of the text"). */}
-      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.lg, zIndex: 20 }]}>
-        <Dropdown label="Show" value={VIEWS.find((v) => v.key === view)?.label ?? ''} width={300}
-                  options={VIEWS.map((v) => ({ key: v.key, label: v.label, on: v.key === view }))}
-                  onPick={(k) => { setView(k as View_); setEditing(null); }} />
-        {needsCategory ? (
+      <View style={[styles.line, { flexWrap: 'wrap', gap: spacing.lg, zIndex: 20 }, door === 'ours' && { display: 'none' }]}>
+        {/* The door decides the view, so Show only offers the ways of looking
+            *within* it: the provider matrix and Find a word live behind Google's
+            words (14 Sep 2026). */}
+        {door === 'words' ? (
+          <Dropdown label="Show" value={VIEWS.find((v) => v.key === view)?.label ?? ''} width={300}
+                    options={VIEWS.filter((v) => v.key !== 'subcategories').map((v) => ({ key: v.key, label: v.label, on: v.key === view }))}
+                    onPick={(k) => { setView(k as View_); setEditing(null); }} />
+        ) : null}
+        {door === 'cats' && needsCategory ? (
           <Dropdown label="Category" value={category?.label ?? 'Select a category'} width={240}
                     options={categories.map((c) => ({ key: c.key, label: c.label, count: `${c.subcategories.length}`, on: c.key === category?.key }))}
                     onPick={(k) => { setCat(k); setSub(''); setEditing(null); }} />
@@ -233,7 +267,7 @@ export function Categories({ canManage }: { canManage: boolean }) {
         ) : null}
       </View>
 
-      {category && (view === 'subcategories' || view === 'providers') ? (
+      {door !== 'ours' && category && (view === 'subcategories' || view === 'providers') ? (
         <View style={styles.catLine}>
           <Text style={[type.small, { flex: 1, minWidth: 200 }]}>
             {category.blurb ? `${category.blurb} ` : ''}
@@ -262,9 +296,9 @@ export function Categories({ canManage }: { canManage: boolean }) {
       ) : null}
 
       {!tax ? <Text style={type.small}>Loading…</Text> : null}
-      {tax && needsCategory && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
+      {door === 'cats' && tax && needsCategory && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
 
-      {tax && category && view === 'subcategories' ? (
+      {door === 'cats' && tax && category && view === 'subcategories' ? (
         <View style={[styles.split, wide && styles.splitWide]}>
           {/* Every subcategory of this category with its attributes, in one table. */}
           <Section title="Subcategories and their attributes" style={{ flex: 1, minWidth: 0 }}
@@ -302,18 +336,22 @@ export function Categories({ canManage }: { canManage: boolean }) {
         </View>
       ) : null}
 
-      {tax && category && view === 'providers' ? (
+      {door === 'words' && tax && category && view === 'providers' ? (
         <ProviderWords tax={tax} category={category.key} wide={wide} subLabel={subLabel}
                        onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
       ) : null}
 
-      {tax && view === 'google' ? (
+      {door === 'words' && tax && view === 'google' ? (
         <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
       ) : null}
 
-      {tax && view === 'words' ? (
+      {door === 'words' && tax && view === 'words' ? (
         <FindWord tax={tax} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
                   onPick={(label, subcategory) => setEditing({ labels: [label], subcategory })} />
+      ) : null}
+
+      {tax && door === 'ours' ? (
+        <OurLabels tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
       ) : null}
 
       <View style={{ marginTop: spacing.md }}>
@@ -733,6 +771,231 @@ const STANDINGS = [
   { key: 'undecided', label: 'Nothing said yet' },
 ];
 
+
+/**
+ * The three doors, from the handoff (BO1a…BO11, 14 Sep 2026).
+ *
+ * One screen holding three vocabularies: the provider's words, our own labels,
+ * and the eight categories. A 2px rule underneath with a lime one under the
+ * door you are in — the only lime on the screen bar an action.
+ */
+function Doors({ at, on, counts }: {
+  at: Door; on: (d: Door) => void;
+  counts: { words: string; ours: string; cats: string };
+}) {
+  const items: { key: Door; label: string; sub: string }[] = [
+    { key: 'words', label: "Google's words", sub: counts.words },
+    { key: 'ours', label: 'Our labels', sub: counts.ours },
+    { key: 'cats', label: 'Categories', sub: counts.cats },
+  ];
+  return (
+    <View style={styles.doors}>
+      {items.map((d) => (
+        <Press key={d.key} effect="none" onPress={() => on(d.key)} accessibilityRole="tab"
+               accessibilityState={{ selected: at === d.key }}
+               style={[styles.door, at === d.key && styles.doorOn]}>
+          <Text style={[styles.doorLabel, { color: at === d.key ? colors.ink : colors.inkMuted }]}>{d.label}</Text>
+          <Text style={styles.doorSub}>{d.sub}</Text>
+        </Press>
+      ))}
+    </View>
+  );
+}
+
+/** The band under the doors: what this is, and the numbers that matter about it. */
+function Band({ kicker, title, stats }: { kicker: string; title: string; stats: { label: string; value: string }[] }) {
+  return (
+    <View style={styles.band}>
+      <View style={{ gap: 6, minWidth: 0, flexShrink: 1 }}>
+        <Text style={styles.bandKicker}>{kicker}</Text>
+        <Text style={styles.bandTitle}>{title}</Text>
+      </View>
+      <View style={styles.bandStats}>
+        {stats.map((st) => (
+          <View key={st.label} style={{ gap: 2 }}>
+            <Text style={styles.bandKicker}>{st.label}</Text>
+            <Text style={styles.bandValue}>{st.value}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** A sentence that changes what you do next: a 2px rule beside it, never a box. */
+function Said({ lead, children }: { lead: string; children: string }) {
+  return (
+    <View style={styles.said}>
+      <Text style={[type.small, { color: colors.inkMuted, lineHeight: 19 }]}>
+        <Text style={{ color: colors.ink, fontWeight: '700' }}>{lead}</Text> {children}
+      </Text>
+    </View>
+  );
+}
+
+
+/**
+ * BO7a — our labels.
+ *
+ * A primary label is a subcategory's own name; a place gets exactly one,
+ * because it is what prints under the name. Everything else true about a place
+ * is a secondary label and a place can carry any number.
+ *
+ * What arrives automatically is drawn in lime, so it is never confused with
+ * what somebody chose. Nothing is in a box.
+ */
+function OurLabels({ tax, wide, canManage, onChanged }: {
+  tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string) => Promise<void>;
+}) {
+  const [data, setData] = useState<TaxonomyAttributes | null>(null);
+  const [half, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'secondary', asOneOf(['secondary', 'primary'] as const, 'secondary'));
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setData(await api.taxonomyAttributes()); } catch { setData(null); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const pointing = useMemo(() => {
+    // How many of a provider's words point at each of ours, from the rules.
+    const n = new Map<string, number>();
+    for (const r of tax.rules) {
+      if (!r.subcategory) continue;
+      n.set(r.subcategory, (n.get(r.subcategory) ?? 0) + 1);
+    }
+    return n;
+  }, [tax.rules]);
+
+  const kindOf = (a: PlaceAttribute) => (a.kind === 'yesno' ? 'Yes or no'
+    : a.kind === 'range' ? `A range · ${a.range_min ?? 0} to ${a.range_max ?? 99}`
+      : `One of ${a.options.length}`);
+  const setIn = (key: string) => Object.values(data?.defaults ?? {}).filter((m) => m[key]).length;
+
+  const add = async () => {
+    const l = name.trim();
+    setAdding(false); setName('');
+    if (!l) return;
+    setBusy(true);
+    try { await api.taxonomySaveAttribute({ label: l, kind: 'yesno' }); await load(); await onChanged(`${l} is one of our secondary labels now.`); }
+    catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  const secondary = (data?.attributes ?? []).filter((a) => a.active);
+  const primary = tax.subcategories.filter((sc) => sc.active);
+  const total = tax.rules.filter((r) => r.subcategory).length;
+
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Band
+        kicker={`${primary.length} primary · ${secondary.length} secondary`}
+        title="Our labels"
+        stats={[
+          { label: 'Primary', value: String(primary.length) },
+          { label: 'Secondary', value: String(secondary.length) },
+          { label: 'Provider words pointing at them', value: count(total) },
+        ]}
+      />
+      <Said lead="A primary label is a subcategory’s own name.">
+        {`There are ${primary.length} and a place gets exactly one, because it is what prints under the name. Everything else true about a place is a secondary label, and a place can carry any number.`}
+      </Said>
+
+      <View style={[styles.line, { justifyContent: 'space-between', flexWrap: 'wrap' }]}>
+        <View style={styles.halves}>
+          {([['secondary', 'Secondary'], ['primary', `Primary · ${primary.length}`]] as const).map(([k, l], i) => (
+            <Press key={k} effect="none" onPress={() => setHalf(k)} accessibilityRole="button"
+                   accessibilityState={{ selected: half === k }}
+                   style={[styles.halfItem, i > 0 && styles.halfDivider, half === k && styles.halfOn]}>
+              <Text style={[type.small, { fontWeight: '700', color: half === k ? colors.selectedFg : colors.inkMuted }]}>{l}</Text>
+            </Press>
+          ))}
+        </View>
+        <View style={[styles.line, { gap: spacing.md }]}>
+          <Text style={type.tiny}><Text style={{ color: colors.accent, fontWeight: '700' }}>lime</Text> comes automatically</Text>
+          {canManage && half === 'secondary' ? (
+            adding ? (
+              <TextInput value={name} onChangeText={setName} placeholder="Name it" placeholderTextColor={colors.inkFaint}
+                         autoFocus onSubmitEditing={() => void add()} style={[styles.field, { minWidth: 180 }]} />
+            ) : <TextAction label="New secondary label" disabled={busy} onPress={() => { setAdding(true); setName(''); }} />
+          ) : null}
+        </View>
+      </View>
+
+      {half === 'secondary' ? (
+        <View>
+          <View style={[styles.tRow, styles.tHeadSoft]}>
+            <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Secondary label</Text></View>
+            {wide ? <View style={[styles.tCell, styles.headCell, { width: 150 }]}><Text style={styles.colHead}>Kind</Text></View> : null}
+            {wide ? <View style={[styles.tCell, styles.headCell, { width: 210 }]}><Text style={styles.colHead}>Always comes with it</Text></View> : null}
+            <View style={[styles.tCell, styles.headCell, { width: wide ? 190 : 120 }]}><Text style={styles.colHead}>Set by default in</Text></View>
+          </View>
+          {secondary.length === 0 ? <Text style={[type.small, styles.emptyRow]}>None yet.</Text> : null}
+          {secondary.map((a) => (
+            <View key={a.key} style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
+              <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+                <Text style={type.small}><Text style={{ fontWeight: '600' }}>{a.label}</Text></Text>
+                {a.blurb ? <Text style={type.tiny} numberOfLines={2}>{a.blurb}</Text> : null}
+              </View>
+              {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={type.small}>{kindOf(a)}</Text></View> : null}
+              {wide ? (
+                <View style={[styles.tCell, { width: 210 }]}>
+                  {/* Nothing yet: what a label brings with it is agreed and not built. */}
+                  <Text style={type.small}>nothing chosen</Text>
+                </View>
+              ) : null}
+              <View style={[styles.tCell, { width: wide ? 190 : 120 }]}>
+                <Text style={type.small}>{setIn(a.key) ? `${setIn(a.key)} of ${primary.length} subcategories` : 'nowhere yet'}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <View>
+          <View style={[styles.tRow, styles.tHeadSoft]}>
+            <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Primary label</Text></View>
+            <View style={[styles.tCell, styles.headCell, { width: wide ? 200 : 120 }]}><Text style={styles.colHead}>Its category</Text></View>
+            {wide ? <View style={[styles.tCell, styles.headCell, { width: 210 }]}><Text style={styles.colHead}>Also shown in</Text></View> : null}
+            <View style={[styles.tCell, styles.headCell, { width: wide ? 160 : 90 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Rules</Text></View>
+          </View>
+          {primary.map((sc) => (
+            <View key={sc.key} style={styles.wordRow}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={type.small}><Text style={{ fontWeight: '600' }}>{sc.label}</Text> <Text style={{ color: colors.inkMuted }}>{sc.key}</Text></Text>
+              </View>
+              <View style={[styles.tCell, { width: wide ? 200 : 120 }]}>
+                <Text style={type.small}>{tax.categories.find((c) => c.key === sc.category_key)?.label ?? sc.category_key}</Text>
+              </View>
+              {wide ? (
+                <View style={[styles.tCell, { width: 210 }]}>
+                  <Text style={[type.small, { color: colors.accent }]} numberOfLines={1}>
+                    {(sc.also_in ?? []).map((k) => tax.categories.find((c) => c.key === k)?.label ?? k).join(' · ') || ''}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={[styles.tCell, { width: wide ? 160 : 90 }]}>
+                <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'] }]}>{pointing.get(sc.key) ?? 0}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* The refusal, on the screen because the argument for it is the kind that
+          gets forgotten and then made again. */}
+      <View style={styles.refusal}>
+        <Text style={[styles.bandKicker, { color: colors.overrun }]}>One label that will not be made</Text>
+        <Text style={[type.small, { color: colors.inkMuted, lineHeight: 19 }]}>
+          <Text style={{ color: colors.ink, fontWeight: '700' }}>There is no secondary label called “outdoors”. </Text>
+          Indoors already exists as a yes or no, and outdoors is simply Indoors set to no. The Outdoors category is a kind of
+          day out; Indoors is a property of a place. Two different things that were about to share a word.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours';
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
@@ -1006,7 +1269,7 @@ function GoogleView({ tax, wide, roomy, by, catLabel, subLabel, canManage, onCha
           {/* Opening another category clears the ticks: they mean "these rows,
               here", and a bulk apply must never quietly skip ones out of sight
               (Codex, 13 Sep 2026). */}
-          <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); setTicked(new Set()); setEg(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && { backgroundColor: colors.well }]}>
+          <Press effect="none" onPress={() => { setGroup(on ? '-' : g.key); setOnly(''); setTicked(new Set()); setEg(''); }} accessibilityRole="button" accessibilityState={{ expanded: on }} style={[styles.tRow, styles.gRow, { alignItems: 'center' }, on && styles.gRowOpen]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined }]}>
               <Text style={[type.small, { fontWeight: on ? '700' : '600' }]} numberOfLines={2}>{g.name}</Text>
               {!wide && g.aside !== '—' ? <Text style={type.tiny} numberOfLines={1}>{g.aside}</Text> : null}
@@ -1435,6 +1698,29 @@ const styles = StyleSheet.create({
   tHeadSoft: { borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
   headCell: { paddingTop: 10, paddingBottom: 2 },
   colHead: { ...type.small, fontWeight: '500', color: colors.inkMuted },
+  // The three doors: 30px apart, a 2px rule under the lot, a lime one under the
+  // door you are in. Measurements from the handoff.
+  doors: { flexDirection: 'row', gap: 30, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, flexWrap: 'wrap' },
+  door: { gap: 3, paddingBottom: 11, marginBottom: -BORDER, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
+  doorOn: { borderBottomColor: colors.lime },
+  doorLabel: { ...type.title, fontSize: 17, fontWeight: '800', letterSpacing: -0.34, lineHeight: 20 },
+  doorSub: { ...type.tiny, color: colors.inkMuted },
+  band: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.xl,
+    borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 18, flexWrap: 'wrap' },
+  bandTitle: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
+  bandStats: { flexDirection: 'row', alignItems: 'flex-end', gap: 34, flexWrap: 'wrap' },
+  bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
+  said: { borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 2 },
+  bandKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
+  halves: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted, overflow: 'hidden' },
+  halfItem: { minHeight: 34, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  halfDivider: { borderLeftWidth: 1, borderLeftColor: colors.ruleMuted },
+  halfOn: { backgroundColor: colors.selected },
+  refusal: { borderLeftWidth: 1, borderLeftColor: colors.overrun, paddingLeft: 13, paddingVertical: 4, gap: 4, marginTop: spacing.sm },
+  // Open, a category is marked by a lime rule beside it, never a lime band
+  // across it (owner, 14 Sep 2026: "there's not supposed to be any green bar at
+  // the top or in the middle").
+  gRowOpen: { borderLeftWidth: 3, borderLeftColor: colors.lime, marginLeft: -3 },
   tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, overflow: 'hidden', backgroundColor: colors.panelWarm },
   tabItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.decor },

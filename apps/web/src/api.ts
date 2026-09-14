@@ -2383,6 +2383,14 @@ export const api = {
     post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
   /** The specific words seen on the same places as a generic one, commonest first. */
   taxonomyPairs: (label: string) => request<TaxonomyPairs>(`/api/admin/taxonomy/pairs${qs({ label })}`),
+  /** Our own secondary labels, with what every drawer is taken to be. */
+  taxonomyAttributes: () => request<TaxonomyAttributes>('/api/admin/taxonomy/attributes'),
+  /** Name a secondary label, or change one. */
+  taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
+    put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
+  /** What every place in a drawer is taken to be. A null value clears it. */
+  taxonomySetDefault: (body: { subcategory: string; attribute: string; value: AttributeValue | null }) =>
+    put<{ subcategory: string; attribute: string; value: AttributeValue | null }>('/api/admin/taxonomy/attributes/default', body),
   /** Real places carrying a Google word — one live provider call, so only on a press. */
   taxonomyExamples: (label: string) => request<TaxonomyExamples>(`/api/admin/taxonomy/examples${qs({ label })}`),
   /** Google's own word becomes a subcategory of ours under this category, and the word is mapped to it — one transaction. */
@@ -2965,6 +2973,24 @@ export type TaxonomyExamples = {
   alone: number;
   calls: number;
   problem: string | null;
+  subcategories: ShelfSubcategory[];
+  categories: ShelfCategory[];
+};
+
+/** One of our secondary labels: something true about a place, not what it is. */
+export type PlaceAttribute = {
+  key: string; label: string; kind: 'yesno' | 'range' | 'oneof'; blurb: string | null;
+  options: string[]; range_min: number | null; range_max: number | null; unit: string | null;
+  position: number; active: boolean; seeded: boolean;
+};
+
+/** A value one carries: a yes or no, a range, or one of a list. */
+export type AttributeValue = { yesno?: boolean; from?: number | null; to?: number | null; choice?: string };
+
+export type TaxonomyAttributes = {
+  attributes: PlaceAttribute[];
+  /** Drawer key → what every place in it is taken to be. */
+  defaults: Record<string, Record<string, AttributeValue>>;
   subcategories: ShelfSubcategory[];
   categories: ShelfCategory[];
 };

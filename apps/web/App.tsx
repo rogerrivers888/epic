@@ -747,7 +747,10 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   toolbar: {
     height: TOOLBAR, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.md,
-    paddingHorizontal: spacing.lg, backgroundColor: colors.surfaceMuted, borderBottomWidth: BORDER, borderBottomColor: colors.line,
+    // A warm neutral, not the lime tint: this is chrome, and lime means the
+    // live thing (owner, 14 Sep 2026: "there is not supposed to be any green
+    // bar at the top").
+    paddingHorizontal: spacing.lg, backgroundColor: colors.panelWarm, borderBottomWidth: BORDER, borderBottomColor: colors.line,
   },
   modeSwitch: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.pill, borderWidth: BORDER, borderColor: colors.line, padding: 2 },
   modeBtn: { minHeight: 28, paddingHorizontal: spacing.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
