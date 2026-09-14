@@ -722,6 +722,9 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
 const STANDINGS = [
   { key: '', label: 'Every answer' },
   { key: 'mapped', label: 'Mapped to one of ours' },
+  // A rule that names a category but no drawer is its own answer, and it is a
+  // work queue: those words need a subcategory (Codex, 14 Sep 2026).
+  { key: 'category', label: 'A category but no subcategory' },
   { key: 'generic', label: 'Just a label' },
   { key: 'travel', label: 'Travel' },
   { key: 'nearby', label: 'Useful nearby' },

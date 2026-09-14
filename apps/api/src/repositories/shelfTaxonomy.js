@@ -36,10 +36,13 @@ export async function taxonomy() {
     query('select subcategory_key, category_key from shelf_subcategory_categories order by position, category_key'),
   ]);
   const categories = cats.rows;
-  const live = new Set(categories.filter((c) => c.active).map((c) => c.key));
+  // Every listing, live or not. Switching a category off must not quietly
+  // delete the listings that named it: the admin screen writes back whatever
+  // it was given, so a filtered list here would wipe them on the next edit
+  // (Codex, 14 Sep 2026). `vocabularyOf` builds its rank from the live
+  // categories alone, so `shelvesOf` already refuses to draw a dead one.
   const alsoIn = new Map();
   for (const r of extra.rows) {
-    if (!live.has(r.category_key)) continue;
     const list = alsoIn.get(r.subcategory_key) ?? [];
     list.push(r.category_key);
     alsoIn.set(r.subcategory_key, list);

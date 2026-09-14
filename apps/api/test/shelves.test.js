@@ -312,4 +312,11 @@ test('a drawer listed in another cabinet is drawn there too, and the home comes 
   // No drawer at all means no listing to read.
   assert.deepEqual(shelvesOf('sport', null, vocab), ['sport']);
   assert.deepEqual(shelvesOf(null, 'skateboard-park', vocab), []);
+  // A listing to a category that has been switched off is kept on the row but
+  // never drawn: the rank is built from the live categories alone, so turning
+  // Outdoors back on brings the listing back rather than losing it (Codex, 14
+  // Sep 2026).
+  const outdoorsOff = vocabularyOf([{ key: 'fun' }, { key: 'sport' }], subcategories);
+  assert.deepEqual(shelvesOf('sport', 'skateboard-park', outdoorsOff), ['sport', 'fun']);
+  assert.deepEqual(outdoorsOff.alsoIn.get('skateboard-park'), ['fun', 'outdoors']);
 });
