@@ -17,18 +17,22 @@ import { query } from '../db.js';
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 
 /** Put a place on the list, or update why it is there. */
-export async function notSettled({ ref, name, words = [], wouldBe = null, reason }) {
+export async function notSettled({ ref, name, address = null, words = [], wouldBe = null, reason }) {
   if (!ref) throw bad('Which place?');
   if (!reason) throw bad('Say why the labels did not settle it.');
   const { rows } = await query(
-    `insert into not_sure (venue_ref, name, words, would_be, reason)
-     values ($1, $2, $3, $4, $5)
+    `insert into not_sure (venue_ref, name, address, words, would_be, reason)
+     values ($1, $2, $3, $4, $5, $6)
      on conflict (venue_ref) do update
         set name = coalesce(excluded.name, not_sure.name),
+            address = coalesce(excluded.address, not_sure.address),
             words = excluded.words, would_be = excluded.would_be,
-            reason = excluded.reason, updated_at = now()
+            -- A place he has already settled stays settled: putting it back on
+            -- the list would undo his decision (Codex, 14 Sep 2026).
+            reason = case when not_sure.state in ('settled', 'dropped') then not_sure.reason else excluded.reason end,
+            updated_at = case when not_sure.state in ('settled', 'dropped') then not_sure.updated_at else now() end
      returning *`,
-    [String(ref), name ?? null, words.map(String), wouldBe, reason]);
+    [String(ref), name ?? null, address, words.map(String), wouldBe, reason]);
   return rows[0];
 }
 
@@ -48,12 +52,15 @@ export async function counts() {
 }
 
 /** What a run came back with. Nothing is applied by this: he still decides. */
-export async function answered(ref, { said, because, source }) {
+export async function answered(ref, { said, because, source, partOfName = null }) {
   const { rows } = await query(
     `update not_sure
-        set state = 'answered', said = $2, because = $3, source = $4, looked_at = now(), updated_at = now()
-      where venue_ref = $1 returning *`,
-    [String(ref), said ?? null, because ?? null, source ?? null]);
+        set state = 'answered', said = $2, because = $3, source = $4, part_of_name = $5,
+            looked_at = now(), updated_at = now()
+      -- Only something still waiting. A place already settled or dropped must
+      -- not be dragged back onto the list (Codex, 14 Sep 2026).
+      where venue_ref = $1 and state = 'waiting' returning *`,
+    [String(ref), said ?? null, because ?? null, source ?? null, partOfName]);
   return rows[0] ?? null;
 }
 

@@ -67,10 +67,16 @@ export async function research({ place, allowed, householdId, sessionId, meta = 
   // Only an answer from the list. A model that invents a key is answering a
   // question nobody asked.
   const is = allowed.some((a) => a.key === said.is) ? said.is : null;
+  // An answer with nothing behind it is a guess wearing a suit. No sentence and
+  // no source means no answer, whatever it said (Codex, 14 Sep 2026).
+  const because = said.because ? String(said.because).trim() : '';
+  const source = said.source ? String(said.source).trim() : '';
+  if (!because || !/^https?:\/\//i.test(source)) return null;
+  if (!is && !said.partOf) return null;
   return {
     is,
     partOf: said.partOf ? String(said.partOf).slice(0, 200) : null,
-    because: said.because ? String(said.because).slice(0, 600) : null,
-    source: said.source ? String(said.source).slice(0, 400) : null,
+    because: because.slice(0, 600),
+    source: source.slice(0, 400),
   };
 }

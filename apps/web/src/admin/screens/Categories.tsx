@@ -1389,7 +1389,8 @@ function NotSure({ tax, wide, canManage, onChanged }: {
       ) : null}
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <Text style={type.small}><Text style={{ fontWeight: '600' }}>{p.name ?? p.venue_ref}</Text></Text>
-        <Text style={[type.tiny, { lineHeight: 16 }]}>{p.reason}</Text>
+        <Text style={[type.tiny, { lineHeight: 16 }]}>{p.address ? `${p.address} · ` : ''}{p.reason}</Text>
+        {p.part_of_name ? <Text style={[type.tiny, { color: colors.accent }]}>It says this sits inside {p.part_of_name}.</Text> : null}
         {p.because ? (
           <Text style={[type.tiny, { color: colors.accent, lineHeight: 16 }]} numberOfLines={3}>
             {p.because}{p.source ? ` — ${p.source}` : ''}
@@ -1505,7 +1506,9 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   const wantedEg = useRef('');
   const loadEg = useCallback(async (key: string) => {
     wantedEg.current = key; setEgBusy(true);
-    try { const d = await api.taxonomyExamples(`google:${key}`); if (wantedEg.current === key) setEgData(d); }
+    // `queue`: the ones the labels could not settle go on the not-sure list
+    // rather than being quietly filed wrong (the handoff, BO8).
+    try { const d = await api.taxonomyExamples(`google:${key}`, true); if (wantedEg.current === key) setEgData(d); }
     catch { if (wantedEg.current === key) setEgData(null); }
     finally { if (wantedEg.current === key) setEgBusy(false); }
   }, []);

@@ -2403,8 +2403,13 @@ export const api = {
   /** What every place in a drawer is taken to be. A null value clears it. */
   taxonomySetDefault: (body: { subcategory: string; attribute: string; value: AttributeValue | null }) =>
     put<{ subcategory: string; attribute: string; value: AttributeValue | null }>('/api/admin/taxonomy/attributes/default', body),
-  /** Real places carrying a Google word — one live provider call, so only on a press. */
-  taxonomyExamples: (label: string) => request<TaxonomyExamples>(`/api/admin/taxonomy/examples${qs({ label })}`),
+  /**
+   * Real places carrying a Google word — one live provider call, so only on a
+   * press. `queue` puts the ones the labels could not settle on the not-sure
+   * list rather than leaving them to be filed wrong.
+   */
+  taxonomyExamples: (label: string, queue = false) =>
+    request<TaxonomyExamples>(`/api/admin/taxonomy/examples${qs({ label, queue: queue ? 1 : undefined })}`),
   /** Google's own word becomes a subcategory of ours under this category, and the word is mapped to it — one transaction. */
   taxonomyAdopt: (body: { label: string; categoryKey: string; name?: string }) =>
     post<{ subcategory: ShelfSubcategory; rule: TaxonomyRule; created: boolean }>('/api/admin/taxonomy/adopt', body),
@@ -3001,7 +3006,9 @@ export type TaxonomyExamples = {
 
 /** A place the labels could not settle, and what a run came back with. */
 export type NotSurePlace = {
-  venue_ref: string; name: string | null; words: string[]; would_be: string | null;
+  venue_ref: string; name: string | null; address: string | null; words: string[]; would_be: string | null;
+  /** A larger place a run thought this sits inside, as a name. */
+  part_of_name: string | null;
   reason: string; state: 'waiting' | 'answered' | 'settled' | 'dropped';
   said: string | null; because: string | null; source: string | null;
   looked_at: string | null; settled_as: string | null; settled_by: string | null;

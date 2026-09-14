@@ -243,7 +243,9 @@ taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res
     if (!refs.length) throw bad('Which places?');
     const [tax, household] = await Promise.all([taxonomy.taxonomy(), currentHousehold()]);
     const allowed = tax.active.subcategories.map((sc) => ({ key: sc.key, label: sc.label }));
-    const waiting = (await notSure.list({ limit: 500 })).filter((p) => refs.includes(p.venue_ref));
+    // Only what is still waiting. A settled place dragged back through a run
+    // would undo his decision (Codex, 14 Sep 2026).
+    const waiting = (await notSure.list({ state: 'waiting', limit: 500 })).filter((p) => refs.includes(p.venue_ref));
     const run = await notSure.startRun({ askedFor: waiting.length, by: actorOf(req) });
 
     let looked = 0; let got = 0; let pence = 0;
@@ -251,25 +253,37 @@ taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res
       const meta = {};
       try {
         const said = await research({
-          place: { ref: p.venue_ref, name: p.name, words: p.words },
+          // The address goes with it: without it a run cannot tell the Bristol
+          // one from the Sunningdale one (Codex, 14 Sep 2026).
+          place: { ref: p.venue_ref, name: p.name, address: p.address, words: p.words },
           allowed, householdId: household?.id ?? null, sessionId: null, meta,
         });
         looked += 1;
         pence += Math.round((meta.costUsd ?? 0) * 79);
         if (said) {
           got += 1;
+          // A parent comes back as a name, which is not a venue reference. It is
+          // kept as a name and only becomes a proposal where the name matches a
+          // place we already know (Codex, 14 Sep 2026).
+          let parentRef = null;
+          if (said.partOf) {
+            const { rows: found } = await query(
+              `select venue_ref from place_records where lower(name) = lower($1) limit 1`, [said.partOf]);
+            parentRef = found[0]?.venue_ref ?? null;
+          }
           await notSure.answered(p.venue_ref, {
-            said: said.is, because: said.because, source: said.source,
+            said: said.is, because: said.because, source: said.source, partOfName: said.partOf ?? null,
           });
           // A part-of is a proposal, never applied: the owner confirms it.
-          if (said.partOf) {
-            await placeParts.setPart(p.venue_ref, `name:${said.partOf}`,
-              { how: 'proposed', note: said.because, by: 'Claude' });
+          if (parentRef && parentRef !== p.venue_ref) {
+            await placeParts.setPart(p.venue_ref, parentRef, { how: 'proposed', note: said.because, by: 'Claude' });
           }
         }
       } catch (err) {
-        // One place failing is not the run failing, and a spent budget stops it.
-        if (String(err?.name) === 'ModelBudgetError') break;
+        // One place failing is not the run failing, but a spent budget is: going
+        // on would be hundreds of calls that cannot succeed. Matched on the code
+        // rather than the class name, which was never set (Codex, 14 Sep 2026).
+        if (err?.code === 'model_budget_reached' || err?.code === 'spend_bound_reached') break;
       }
     }
     const done = await notSure.finishRun(run.id, { lookedAt: looked, answered: got, costPence: pence, note: null });
@@ -284,16 +298,28 @@ taxonomyRoutes.put('/not-sure', requires('manage_library'), async (req, res, nex
     const as = req.body?.as ? String(req.body.as) : null;
     const tax = await taxonomy.taxonomy();
     if (as && !tax.subByKey.has(as)) throw bad(`${as} is not one of our labels.`);
-    const row = await notSure.settle(ref, as, actorOf(req));
-    // His answer is a rule about that one place, which is the narrowest there is.
-    if (as) {
-      await shelfRules.teach({
-        scope: 'place', subject: ref, subjectLabel: row?.name ?? ref, weights: {},
-        subcategory: as, reason: row?.because ? `Settled from the not-sure list: ${row.because}` : 'Settled from the not-sure list.',
-        by: actorOf(req), known: tax.categories.map((c) => c.key),
-      });
-      shelfRules.forget();
-    }
+    // Both or neither: a row that says it is settled while no rule was written
+    // has left the list without being filed anywhere (Codex, 14 Sep 2026).
+    const row = await withTransaction(async (c) => {
+      const { rows } = await c.query(
+        `update not_sure set state = $2, settled_as = $3, settled_by = $4, updated_at = now()
+          where venue_ref = $1 returning *`,
+        [ref, as ? 'settled' : 'dropped', as ?? null, actorOf(req)]);
+      const found = rows[0] ?? null;
+      if (as) {
+        await c.query(
+          `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded)
+           values ('place', $1, $2, '{}'::jsonb, $3, $4, $5, false)
+           on conflict (scope, subject) do update
+              set subcategory = excluded.subcategory, reason = excluded.reason,
+                  taught_by = excluded.taught_by, updated_at = now()`,
+          [ref, found?.name ?? ref, as,
+           found?.because ? `Settled from the not-sure list: ${found.because}` : 'Settled from the not-sure list.',
+           actorOf(req)]);
+      }
+      return found;
+    });
+    shelfRules.forget();
     res.json({ place: row });
   } catch (err) { next(err); }
 });
@@ -540,6 +566,28 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 12)
       .map(([key, on]) => ({ key, on, label: byKey.get(key)?.label ?? null, points_at: byKey.get(key)?.points_at ?? null }));
+
+    // The ones the labels could not settle go on the not-sure list rather than
+    // being quietly filed wrong (the handoff, BO8; Codex, 14 Sep 2026: nothing
+    // was putting anything on it). Eight of twelve water parks were settled by
+    // their words; the four that were not are exactly these.
+    if (req.query.queue === '1') {
+      for (const p of out.places) {
+        const rest = (p.types ?? []).filter((t) => t !== parsed.key);
+        const settled = rest.some(answersAlone) || combinationFires(rest, p.primaryType && p.primaryType !== parsed.key ? p.primaryType : null);
+        if (settled) continue;
+        await notSure.notSettled({
+          ref: `google:${p.id}`,
+          name: p.name,
+          address: p.address,
+          words: p.types ?? [],
+          wouldBe: landingOf({ namespace: 'google', key: parsed.key }, rules, tax.vocab).subcategory,
+          reason: rest.length
+            ? `Carries ${parsed.key.replace(/_/g, ' ')} and nothing else we have mapped.`
+            : `Carries nothing but ${parsed.key.replace(/_/g, ' ')}.`,
+        });
+      }
+    }
 
     res.json({
       label, near: household?.home_label ?? 'London', places: out.places,
