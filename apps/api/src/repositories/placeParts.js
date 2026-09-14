@@ -123,6 +123,13 @@ export function rollUp(places, childToParent, refOf = (p) => p.venueRef) {
       parent.contains = [...new Set([...(parent.contains ?? []), child.subcategory])];
     }
     for (const m of child.moods ?? []) if (!(parent.moods ?? []).includes(m)) parent.moods = [...(parent.moods ?? []), m];
+    // The child's experiences too. Those are the closed vocabulary voice is
+    // interpreted against, so without them "somewhere with a gallery" would not
+    // reach the house that has one: a drawer key and a spoken word are two
+    // different vocabularies (Codex, 14 Sep 2026).
+    for (const e of child.experiences ?? []) {
+      if (!(parent.experiences ?? []).includes(e)) parent.experiences = [...(parent.experiences ?? []), e];
+    }
     // Attributes the parent has nothing to say about. Its own always stand.
     parent.attrs = { ...(child.attrs ?? {}), ...(parent.attrs ?? {}) };
     if (parent.indoor == null && child.indoor != null) parent.indoor = child.indoor;

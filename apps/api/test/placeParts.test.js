@@ -45,12 +45,14 @@ test('the parent comes away knowing what was inside it', () => {
   // Owner, 14 Sep 2026: "it appears in theme park, and we have an attribute of
   // that theme park to say it has a water park."
   const items = [
-    { venueRef: 'wikidata:thorpe', name: 'Thorpe Park', moods: ['fun'], subcategory: 'theme-parks', attrs: { indoor: { yesno: false } }, indoor: false, forKids: null },
-    { venueRef: 'wikidata:amity', name: 'Amity Beach', moods: ['fun'], subcategory: 'water-park', attrs: { 'suits-ages': { from: 5, to: 99 } }, indoor: null, forKids: true },
+    { venueRef: 'wikidata:thorpe', name: 'Thorpe Park', moods: ['fun'], subcategory: 'theme-parks', experiences: [], attrs: { indoor: { yesno: false } }, indoor: false, forKids: null },
+    { venueRef: 'wikidata:amity', name: 'Amity Beach', moods: ['fun'], subcategory: 'water-park', experiences: ['swimming'], attrs: { 'suits-ages': { from: 5, to: 99 } }, indoor: null, forKids: true },
   ];
   rollUp(items, new Map([['wikidata:amity', 'wikidata:thorpe']]));
   const thorpe = items[0];
   assert.deepEqual(thorpe.contains, ['water-park']);
+  // The spoken vocabulary comes up too, so "somewhere we can swim" reaches it.
+  assert.deepEqual(thorpe.experiences, ['swimming']);
   // What the parent already said stands; what it had nothing to say about it takes.
   assert.equal(thorpe.indoor, false);
   assert.equal(thorpe.forKids, true);
