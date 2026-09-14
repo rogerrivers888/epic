@@ -258,7 +258,9 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     const alone = out.places.filter((p) => {
       const rest = (p.types ?? []).filter((t) => t !== parsed.key).map((t) => `google:${t}`);
       if (!rest.length) return true;
-      if (rest.every((l) => byKey.get(l.slice('google:'.length))?.decision)) return true;
+      // No short cut for "all the rest are excluded": a combination rule naming
+      // them may still file the place, and only the resolver knows (Codex, 14
+      // Sep 2026, second pass). Ask it, and nothing else.
       return !landingOfSet(rest, {}, rules, tax.vocab).subcategory;
     }).length;
     const alsoCalled = [...seen.entries()]
