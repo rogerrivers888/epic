@@ -34,20 +34,31 @@ export async function parts() {
 export async function setPart(childRef, parentRef, { how = 'told', note = null, by = null } = {}) {
   const child = String(childRef ?? '').trim();
   if (!child) throw Object.assign(new Error('Which place?'), { status: 400, code: 'bad_request' });
-  if (!parentRef) {
+  // Trimmed before it is judged: a parent of "   " is nothing, and taken as
+  // something it would hide the child behind a reference nobody can reach
+  // (Codex, 14 Sep 2026).
+  const parent = String(parentRef ?? '').trim();
+  if (!parent) {
     await query('delete from place_parts where child_ref = $1', [child]);
     forget();
     return null;
   }
-  const parent = String(parentRef).trim();
   if (parent === child) {
     throw Object.assign(new Error('A place cannot be part of itself.'), { status: 400, code: 'bad_request' });
   }
-  // One step only. A part of a part would need the reader to walk a chain, and
-  // nothing in Epic has ever needed more than "this is inside that".
+  // One step only, checked from both ends. A part of a part would need the
+  // reader to walk a chain, and nothing in Epic has ever needed more than
+  // "this is inside that" (Codex, 14 Sep 2026: the first check only asked one
+  // of the two questions).
   const { rows: up } = await query(`select parent_ref from place_parts where child_ref = $1 and how = 'told'`, [parent]);
   if (up[0]) {
     throw Object.assign(new Error(`${parent} is itself part of ${up[0].parent_ref}. Name that one instead.`),
+      { status: 400, code: 'bad_request' });
+  }
+  const { rows: down } = await query(
+    `select child_ref from place_parts where parent_ref = $1 and how = 'told' limit 1`, [child]);
+  if (down[0]) {
+    throw Object.assign(new Error(`${child} already has ${down[0].child_ref} inside it, so it cannot be inside something else.`),
       { status: 400, code: 'bad_request' });
   }
   const { rows } = await query(
@@ -88,4 +99,34 @@ export async function proposed(limit = 100) {
 export function withoutParts(places, childToParent, refOf = (p) => p.venueRef) {
   if (!childToParent?.size) return places ?? [];
   return (places ?? []).filter((p) => !childToParent.has(refOf(p)));
+}
+
+/**
+ * Give the parent what its children knew, before the children are dropped.
+ *
+ * The owner, 14 Sep 2026: "it appears in theme park, and we have an attribute
+ * of that theme park to say it has a water park." Hiding Amity Beach is only
+ * half of it; Thorpe Park has to come away knowing there is a water park in it,
+ * or the knowledge is simply thrown away (Codex, 14 Sep 2026).
+ *
+ * The parent's own answers always win. A child only ever adds.
+ */
+export function rollUp(places, childToParent, refOf = (p) => p.venueRef) {
+  if (!childToParent?.size) return places ?? [];
+  const byRef = new Map((places ?? []).map((p) => [refOf(p), p]));
+  for (const child of places ?? []) {
+    const parent = byRef.get(childToParent.get(refOf(child)) ?? '');
+    if (!parent || parent === child) continue;
+    // What is inside it, named by the drawer each child is in, so a theme park
+    // with a water park in it can be found by somebody looking for one.
+    if (child.subcategory) {
+      parent.contains = [...new Set([...(parent.contains ?? []), child.subcategory])];
+    }
+    for (const m of child.moods ?? []) if (!(parent.moods ?? []).includes(m)) parent.moods = [...(parent.moods ?? []), m];
+    // Attributes the parent has nothing to say about. Its own always stand.
+    parent.attrs = { ...(child.attrs ?? {}), ...(parent.attrs ?? {}) };
+    if (parent.indoor == null && child.indoor != null) parent.indoor = child.indoor;
+    if (parent.forKids == null && child.forKids != null) parent.forKids = child.forKids;
+  }
+  return places ?? [];
 }

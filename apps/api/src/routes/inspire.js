@@ -529,6 +529,12 @@ inspire.get('/near', async (req, res, next) => {
     // the Inspire tab, and we absolutely have to stop that happening." Amity
     // Beach is Thorpe Park; only Thorpe Park is offered.
     const { childToParent } = await placeParts.parts();
+    // The parent takes what its children knew first, then the children go.
+    placeParts.rollUp(items, childToParent);
+    // An atlas place that turned out to be part of another is not an atlas
+    // place this answer shows, so it cannot justify the wider radius. Only the
+    // atlas ones count here: a dropped food place says nothing about reach.
+    atlasCount -= items.filter((i) => i.source === 'atlas' && childToParent.has(i.venueRef)).length;
     items = placeParts.withoutParts(items, childToParent);
 
     // The heart on each card: whether this household has already kept, been to

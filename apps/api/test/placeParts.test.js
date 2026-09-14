@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { withoutParts } = await import('../src/repositories/placeParts.js');
+const { withoutParts, rollUp } = await import('../src/repositories/placeParts.js');
 
 const LIST = [
   { venueRef: 'wikidata:thorpe', name: 'Thorpe Park' },
@@ -39,4 +39,30 @@ test('a child is dropped even where its parent did not make the list', () => {
 test('nothing recorded changes nothing', () => {
   assert.equal(withoutParts(LIST, new Map()).length, 3);
   assert.equal(withoutParts(LIST, null).length, 3);
+});
+
+test('the parent comes away knowing what was inside it', () => {
+  // Owner, 14 Sep 2026: "it appears in theme park, and we have an attribute of
+  // that theme park to say it has a water park."
+  const items = [
+    { venueRef: 'wikidata:thorpe', name: 'Thorpe Park', moods: ['fun'], subcategory: 'theme-parks', attrs: { indoor: { yesno: false } }, indoor: false, forKids: null },
+    { venueRef: 'wikidata:amity', name: 'Amity Beach', moods: ['fun'], subcategory: 'water-park', attrs: { 'suits-ages': { from: 5, to: 99 } }, indoor: null, forKids: true },
+  ];
+  rollUp(items, new Map([['wikidata:amity', 'wikidata:thorpe']]));
+  const thorpe = items[0];
+  assert.deepEqual(thorpe.contains, ['water-park']);
+  // What the parent already said stands; what it had nothing to say about it takes.
+  assert.equal(thorpe.indoor, false);
+  assert.equal(thorpe.forKids, true);
+  assert.deepEqual(thorpe.attrs['suits-ages'], { from: 5, to: 99 });
+  assert.deepEqual(thorpe.attrs.indoor, { yesno: false });
+  // And only then is the child dropped.
+  assert.deepEqual(withoutParts(items, new Map([['wikidata:amity', 'wikidata:thorpe']])).map((p) => p.name), ['Thorpe Park']);
+});
+
+test('a child whose parent is not in the list rolls up into nothing, and is still dropped', () => {
+  const items = [{ venueRef: 'wikidata:amity', name: 'Amity Beach', moods: ['fun'], subcategory: 'water-park' }];
+  const inside = new Map([['wikidata:amity', 'wikidata:thorpe']]);
+  rollUp(items, inside);
+  assert.equal(withoutParts(items, inside).length, 0);
 });
