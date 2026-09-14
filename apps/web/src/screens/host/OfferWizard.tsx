@@ -39,10 +39,12 @@ import { pickPhotoBlob } from '../../components/pickPhoto';
 import { dayShort, money as pounds, weekdayName } from '../../components/hosting';
 import { Avatar, Bullet, CheckBox, Cta, Field, Input, Nav, PickChip, Picker, PlaceField, Segments, StatCell, Tick, UnitBox, Weekdays, k, t } from '../../components/hostKit';
 import { KindChooser } from './ProfileScreen';
+import { PickedTag, TagPicker, fromOfferSkills } from '../../components/TagPicker';
+import { HostSkillsSetup, SkillFormat } from '../../api';
 
 /** What each step is called on the button that leads to it, and in the progress line. */
-const LABEL: Record<string, string> = { plan: 'what we need', vis: 'who can come', event: 'what it is', weeks: 'the run', invite: 'who is coming', numbers: 'how many', money: 'is anyone paying', basics: 'about you', kind: 'what kind of host', subdetail: 'the detail', video: 'tell us what you do', extract: 'your listing', checks: 'what backs it up', evidence: 'the details', done: 'done' };
-const TITLE: Record<string, string> = { basics: 'About you', kind: 'What kind of host', vis: 'Who can come', video: 'Tell us what you do', extract: 'Your listing', checks: 'What backs it up', evidence: 'The details', subdetail: 'The detail', weeks: 'The run', event: 'What it is, and when', invite: 'Who is coming', numbers: 'How many', money: 'Is anyone paying' };
+const LABEL: Record<string, string> = { skills: 'what actually happens', plan: 'what we need', vis: 'who can come', event: 'what it is', weeks: 'the run', invite: 'who is coming', numbers: 'how many', money: 'is anyone paying', basics: 'about you', kind: 'what kind of host', subdetail: 'the detail', video: 'tell us what you do', extract: 'your listing', checks: 'what backs it up', evidence: 'the details', done: 'done' };
+const TITLE: Record<string, string> = { skills: 'What you are expert in', basics: 'About you', kind: 'What kind of host', vis: 'Who can come', video: 'Tell us what you do', extract: 'Your listing', checks: 'What backs it up', evidence: 'The details', subdetail: 'The detail', weeks: 'The run', event: 'What it is, and when', invite: 'Who is coming', numbers: 'How many', money: 'Is anyone paying' };
 /** What the wizard's chrome shows while a step has taken it over (My Epic contacts, C2f). */
 type Chrome = { title: string; cta: { label: string; lime?: boolean; onPress: () => void } | null; back: () => void } | null;
 const pence = (s: string) => (s.trim() === '' ? null : Math.round(Number(s.replace(/[^0-9.]/g, '')) * 100) || null);
@@ -132,6 +134,7 @@ export function OfferWizard({ offerId, home, onChanged }: { offerId: string; hom
         {step === 'basics' ? <Basics home={home} onChanged={onChanged} /> : null}
         {step === 'kind' ? <Kind home={home} onChanged={onChanged} save={save} /> : null}
         {step === 'subdetail' ? <SubDetail offer={o} save={save} sub={home?.host?.localKind ?? 'already_do'} /> : null}
+        {step === 'skills' ? <Skills offer={o} save={save} hostType={home?.host?.type ?? 'skill'} /> : null}
         {step === 'video' ? <VideoStep offer={o} onRecord={() => navigate(paths.hostVideo(o.id))} /> : null}
         {step === 'extract' ? <Extract offer={o} save={save} setOffer={setOffer} setError={setError} /> : null}
         {step === 'checks' ? <Checks offer={o} save={save} kind={home?.host?.type ?? 'skill'} town={home?.host?.location ?? null} /> : null}
@@ -1173,6 +1176,96 @@ function Checks({ offer: o, save, kind, town }: { offer: OwnOffer; save: Save; k
         })}
         <View style={[k.panelTint, { marginTop: 2 }]}><Text style={[t.small, { lineHeight: 18, color: colors.accent }]}>A licence is only asked for where the city legally requires one.{o.regulated ? ` ${o.regulated.country} does.` : town ? ` ${town} does not.` : ''}</Text></View>
       </View>
+      <Credentials offer={o} kind={kind} />
+    </View>
+  );
+}
+
+/**
+ * The named credentials, on the step that already says "What backs it up?"
+ *
+ * A credential is **evidence, and never expertise**, which is why it lives here
+ * and not within a stone's throw of the tag field. Most are a badge; a few are a
+ * condition of hosting in one category at all — a food business registration is
+ * the law, not a boast — and those are marked, because a host told at Publish
+ * that something is required deserves to have seen it here first (Codex,
+ * 13 Sep 2026).
+ *
+ * **Nobody confirms their own.** A type that asks for evidence goes to the back
+ * office and shows nothing to a guest until somebody has looked; one that does
+ * not shows as the host's own words, labelled as stated. That is the same rule
+ * as the trust ladder, for the same reason.
+ */
+function Credentials({ offer, kind }: { offer: OwnOffer; kind: string }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.hostCredentials>> | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [said, setSaid] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try { setData(await api.hostCredentials()); setSaid(null); } catch (e: any) { setSaid(e.message); }
+  }, []);
+  useEffect(() => { void load(); }, [load, kind]);
+
+  const held = new Map((data?.held ?? []).map((c) => [c.typeKey, c]));
+  const claim = async (typeKey: string) => {
+    try { await api.claimCredential({ typeKey, reference: draft.trim() || null }); setOpen(null); setDraft(''); await load(); }
+    catch (e: any) { setSaid(e.message); }
+  };
+  const drop = async (typeKey: string) => {
+    try { await api.dropCredential(typeKey); await load(); } catch (e: any) { setSaid(e.message); }
+  };
+
+  const types = data?.types ?? [];
+  if (!types.length) return null;
+  // The ones this offer's category makes a condition rather than a badge.
+  const required = new Set(types.filter((t) => offer.categoryKey && t.gatesCategories.includes(offer.categoryKey)).map((t) => t.key));
+
+  return (
+    <View style={[k.gutter, { paddingTop: 20, gap: 10 }]}>
+      <Text style={t.kicker}>Anything named</Text>
+      {required.size ? (
+        <View style={k.panelTint}>
+          <Text style={[t.small, { lineHeight: 18, color: colors.accent }]}>
+            One of these is needed before this kind of offer can go live. We check it, and it shows on your page with the date we saw it.
+          </Text>
+        </View>
+      ) : null}
+      {types.map((ct) => {
+        const mine = held.get(ct.key);
+        const state = mine?.state ?? null;
+        return (
+          <View key={ct.key} style={[k.rule, { paddingBottom: 10, gap: 6 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>
+                  {ct.label}{required.has(ct.key) ? <Text style={{ color: colors.accent }}> · needed for this one</Text> : null}
+                </Text>
+                <Text style={[t.small, { lineHeight: 17 }]}>
+                  {mine?.expired ? `We saw this, but it ran out${mine.expiresOn ? ` on ${mine.expiresOn}` : ''}. Send the current one and we will check it again.`
+                    : state === 'confirmed' ? 'Seen and confirmed. It shows on your page with the date.'
+                    : state === 'pending' ? 'With us to check. Nothing shows until somebody has looked.'
+                      : state === 'rejected' ? `Not accepted.${mine?.note ? ` ${mine.note}` : ''} You can send it again.`
+                        : state === 'stated' ? 'Showing as your own words.'
+                          : ct.evidenceRequired ? 'We check this one before it shows.' : 'Shown as your own words — we do not check it.'}
+                </Text>
+              </View>
+              {state ? (
+                <Press onPress={() => drop(ct.key)} hitSlop={8} accessibilityRole="button"><Text style={t.link}>Remove</Text></Press>
+              ) : (
+                <Press onPress={() => { setOpen(open === ct.key ? null : ct.key); setDraft(''); }} hitSlop={8} accessibilityRole="button"><Text style={t.link}>{open === ct.key ? 'Cancel' : 'I have this'}</Text></Press>
+              )}
+            </View>
+            {open === ct.key ? (
+              <View style={{ gap: 8 }}>
+                <Input value={draft} onChangeText={setDraft} placeholder="The number, the body, or the year" autoFocus />
+                <Press onPress={() => claim(ct.key)} accessibilityRole="button" style={styles.skillAdd}><Text style={styles.skillAddText}>Add it</Text></Press>
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+      {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
     </View>
   );
 }
@@ -1314,6 +1407,13 @@ function Done({ offer: o }: { offer: OwnOffer }) {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
+  // What you are expert in (Host Skills, S3 and S9).
+  skillAdd: { backgroundColor: LIME, paddingHorizontal: 16, paddingVertical: 10 },
+  skillAddText: { fontSize: 13.5, fontWeight: '700', color: INK },
+  skillNot: { borderWidth: 1, borderColor: colors.line, paddingHorizontal: 16, paddingVertical: 10 },
+  skillNotText: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
+  pickSheet: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: colors.surface, borderTopWidth: 2, borderTopColor: colors.line, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24, gap: 4 },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 10 },
   scroll: { paddingBottom: 16 },
   planRow: { flexDirection: 'row', gap: 13, alignItems: 'flex-start', paddingVertical: 12 },
   planN: { ...t.h16, fontSize: 14, letterSpacing: 0, lineHeight: 17 },
@@ -1371,3 +1471,236 @@ const styles = StyleSheet.create({
   doneRow: { flexDirection: 'row', gap: 11, alignItems: 'flex-start', paddingVertical: 11 },
   addSkill: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, height: 44, backgroundColor: LIME, marginTop: 2 },
 });
+
+/**
+ * What you are expert in (Host Skills handoff, S1–S9, 13 September 2026).
+ *
+ * The design rule the whole step exists to serve: **the model gets more
+ * precise while the host is asked less.** Five fields sit behind an offer and
+ * this screen shows two of them — the tags, which the host types, and what
+ * actually happens. The browse category is inferred from the tags and shown
+ * back for a nod; the place facet is inferred from where the offer happens and
+ * offered as a suggestion. Every field the host does not have to think about is
+ * a field that ends up correct.
+ *
+ * The prompt branches on the host type the wizard already knows (S6–S8), and
+ * the copy difference is the design: ask the **Local** host what he is an
+ * expert in and he types nothing and abandons the wizard, and Epic loses the
+ * warmest category it has. So he is asked what he is *into*, and who it is good
+ * for. The **Guide**'s Blue Badge is said to be somewhere else, out loud,
+ * because a badge is evidence and not expertise.
+ *
+ * The step is skippable. Both the category and the format are asked for again
+ * at publish, where the host is already being told what is missing.
+ */
+function Skills({ offer, save, hostType }: { offer: OwnOffer; save: Save; hostType: string }) {
+  const [setup, setSetup] = useState<HostSkillsSetup | null>(null);
+  const [tags, setTags] = useState<PickedTag[]>(() => fromOfferSkills(offer.tags));
+  const [facets, setFacets] = useState<PickedTag[]>(() => fromOfferSkills(offer.facets));
+  const [bands, setBands] = useState<string[]>(() => (offer.subDetail as any)?.whoFor ?? []);
+  const [placeAsked, setPlaceAsked] = useState(false);
+  /** Change, on the place line, opens the facet field rather than doing nothing. */
+  const [editingPlace, setEditingPlace] = useState(false);
+  const [changing, setChanging] = useState<null | 'category' | 'format'>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.hostSkills({ hostType, lat: offer.venueLat, lng: offer.venueLng })
+      .then((r) => { if (live) setSetup(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [hostType, offer.venueLat, offer.venueLng]);
+
+  const prompt = setup?.prompt ?? null;
+  const cap = setup?.cap ?? 6;
+  const categories = setup?.categories ?? [];
+  const formats = setup?.formats ?? [];
+  const category = categories.find((c) => c.key === offer.categoryKey) ?? null;
+  const format = formats.find((f) => f.key === offer.formatKey) ?? null;
+  // The old single word, offered as a starting point the first time round.
+  const suggested = categories.find((c) => c.key === offer.categorySuggestion) ?? null;
+
+  /**
+   * Every change saves as it is made, like every other field in the wizard —
+   * but **one at a time**.
+   *
+   * The list is saved whole, because the order is part of the answer, so two
+   * requests in flight can land out of order and an older list can overwrite a
+   * newer one. Dragging a chip fires several of these in a second, which is
+   * exactly where that happens (Codex, 13 Sep 2026). Chaining them costs
+   * nothing on a field that saves as you leave it, and makes the last thing the
+   * host did the thing that wins.
+   */
+  const queued = useRef<Promise<unknown>>(Promise.resolve());
+  const inOrder = (run: () => Promise<unknown>) => {
+    queued.current = queued.current.then(run, run);
+    return queued.current;
+  };
+  const writeTags = (next: PickedTag[]) => { setTags(next); void inOrder(() => save({ tags: next.map((t) => ({ key: t.key, raw: t.raw, asIs: t.asIs })) })); };
+  const writeFacets = (next: PickedTag[]) => { setFacets(next); void inOrder(() => save({ facets: next.map((t) => ({ key: t.key, raw: t.raw, asIs: t.asIs })) })); };
+  const place = setup?.placeSuggestion ?? null;
+  const placeHeld = facets.some((f) => f.key === place?.key);
+
+  return (
+    <View style={[k.gutter, { paddingTop: 16, gap: 16, paddingBottom: 20 }]}>
+      <View style={{ gap: 5 }}>
+        {prompt ? <Text style={[t.kicker, { color: colors.accent }]}>{prompt.badge}</Text> : null}
+        <Text style={t.h25}>{prompt?.title ?? 'What are you an expert in?'}</Text>
+        <Text style={t.sub}>{prompt?.sub ?? ' '}</Text>
+        {!tags.length ? <Text style={t.sub}>Up to {cap} — pick the ones you would want to be found for.</Text> : null}
+      </View>
+
+      <TagPicker
+        value={tags}
+        onChange={writeTags}
+        cap={cap}
+        placeholder={prompt?.placeholder ?? 'Type it the way you would say it'}
+        starters={setup?.starters ?? []}
+        category={tags[0] ? categories.find((c) => c.key === offer.categoryKey)?.key ?? null : null}
+      />
+
+      {/* The Guide's separate axis, said out loud so it never lands in the tag list. */}
+      {prompt?.aside ? (
+        <View style={k.panelWarm}>
+          <Text style={[t.body, { fontWeight: '700' }]}>{prompt.asideTitle}</Text>
+          <Text style={[t.small, { lineHeight: 17, marginTop: 3 }]}>{prompt.aside}</Text>
+        </View>
+      ) : null}
+
+      {/* The Local host's third axis: a place plus an activity plus a family shape. */}
+      {hostType === 'meetups' && setup ? (
+        <View style={{ gap: 9 }}>
+          <Text style={t.kicker}>Who is it good for?</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {setup.ageBands.map((b) => (
+              <PickChip
+                key={b.key} label={b.label} on={bands.includes(b.key)}
+                onPress={() => {
+                  const next = bands.includes(b.key) ? bands.filter((x) => x !== b.key) : [...bands, b.key];
+                  setBands(next);
+                  void inOrder(() => save({ subDetail: { ...(offer.subDetail as any), whoFor: next } }));
+                }}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Where it happens, offered rather than assumed. */}
+      {place && !placeHeld && !placeAsked ? (
+        <View style={{ gap: 9 }}>
+          <Text style={t.kicker}>Where it happens</Text>
+          <View style={[k.panelTint, { gap: 10 }]}>
+            <Text style={[t.body, { lineHeight: 19 }]}>
+              You are in {offer.venueArea ?? 'this area'} — add <Text style={{ fontWeight: '700' }}>{place.label}</Text>?
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Press onPress={() => writeFacets([...facets, { key: place.key, raw: place.label, label: place.label, pending: false }])} accessibilityRole="button" style={styles.skillAdd}>
+                <Text style={styles.skillAddText}>Add</Text>
+              </Press>
+              <Press onPress={() => setPlaceAsked(true)} accessibilityRole="button" style={styles.skillNot}>
+                <Text style={styles.skillNotText}>Not now</Text>
+              </Press>
+            </View>
+          </View>
+        </View>
+      ) : null}
+      {facets.length || editingPlace ? (
+        <TagPicker
+          value={facets} onChange={writeFacets} cap={setup?.facetCap ?? 2} vocab="facet"
+          placeholder="A coast, a park, a quarter, a period" label="Place or subject" cardLine={false}
+        />
+      ) : null}
+
+      {/**
+       * S9 — three lines the host only has to nod at. No dropdown, no third
+       * question.
+       *
+       * Drawn whether or not there are tags. The step is skippable and the
+       * category is what Publish asks for, so hiding these behind a tag would
+       * leave a host who skipped with a blocker and no control that clears it
+       * (Codex, 13 Sep 2026). With tags they read as a nod; without them they
+       * read as the two questions still open.
+       */}
+      {true ? (
+        <View style={{ gap: 9, paddingTop: 4 }}>
+          <Text style={t.kicker}>{tags.length ? 'That is everything we needed' : 'The two we still need'}</Text>
+          <NodRow
+            tint label={category ? 'We will list you under' : 'Which list should you be on?'}
+            value={category?.label ?? suggested?.label ?? 'Not yet — pick one'}
+            onChange={() => setChanging('category')}
+          />
+          {facets[0] ? <NodRow tint label="Place, from where it happens —" value={facets[0].label} onChange={() => setEditingPlace(true)} /> : null}
+          <NodRow
+            label="What happens —"
+            value={format ? `${format.label.toLowerCase()}${offer.durationMin ? `, ${Math.round(offer.durationMin / 60)} hours` : ''}` : 'Not yet — pick one'}
+            onChange={() => setChanging('format')}
+          />
+          {/* How the card will read: the first tag and the place, and nothing else. */}
+          {tags.length ? <View style={{ gap: 8, paddingTop: 6 }}>
+            <Text style={t.kicker}>How your card will read</Text>
+            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+              <View style={[k.tag, { backgroundColor: colors.primary }]}><Text style={[k.tagText, { color: colors.primaryFg }]}>{(setup?.prompts?.[hostType]?.badge ?? 'Host').toUpperCase()}</Text></View>
+              <View style={[k.tag, { backgroundColor: LIME }]}><Text style={[k.tagText, { color: INK }]}>{tags[0].label}</Text></View>
+              {facets[0] ? <View style={[k.tag, { borderWidth: 1, borderColor: colors.ruleSoft }]}><Text style={k.tagText}>{facets[0].label}</Text></View> : null}
+            </View>
+          </View> : null}
+        </View>
+      ) : null}
+
+      {changing ? (
+        <PickOne
+          title={changing === 'category' ? 'Which list should you be on?' : 'What actually happens?'}
+          options={(changing === 'category' ? categories : formats).map((o: any) => ({ key: o.key, label: o.label, blurb: o.blurb }))}
+          value={changing === 'category' ? offer.categoryKey : offer.formatKey}
+          onPick={(key) => { void inOrder(() => save(changing === 'category' ? { categoryKey: key } : { formatKey: key })); setChanging(null); }}
+          onClose={() => setChanging(null)}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/** One line the host nods at: what we worked out, and a way to disagree with it. */
+function NodRow({ label, value, onChange, tint }: { label: string; value: string; onChange: () => void; tint?: boolean }) {
+  return (
+    <View style={[tint ? k.panelTint : k.panelWarm, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+      <Text style={[t.body, { flex: 1, lineHeight: 19 }]}>
+        {label} <Text style={{ fontWeight: '700' }}>{value}</Text>
+      </Text>
+      <Press onPress={onChange} hitSlop={8} accessibilityRole="button"><Text style={t.link}>Change</Text></Press>
+    </View>
+  );
+}
+
+/** The list behind a Change: one thing at a time, never a dropdown on the step itself. */
+function PickOne({ title, options, value, onPick, onClose }: {
+  title: string; options: { key: string; label: string; blurb?: string | null }[]; value: string | null;
+  onPick: (key: string) => void; onClose: () => void;
+}) {
+  const { width, height, framed, origin } = useViewport();
+  const frameBox = framed && origin ? { position: 'absolute' as const, left: origin.x, top: origin.y, width, height, overflow: 'hidden' as const } : null;
+  return (
+    <Modal transparent animationType="slide" visible onRequestClose={onClose}>
+      <View style={[StyleSheet.absoluteFill, frameBox]}>
+        <Press effect="none" onPress={onClose} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(32,30,29,0.32)' }]} accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={styles.pickSheet}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 4 }}>
+            <Text style={[t.h21, { flex: 1 }]}>{title}</Text>
+            <Press onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close"><Icon name="close" size={18} color={colors.ink} strokeWidth={2} /></Press>
+          </View>
+          <ScrollView style={{ maxHeight: 420 }}>
+            {options.map((o) => (
+              <Press key={o.key} onPress={() => onPick(o.key)} accessibilityRole="button" accessibilityState={{ selected: o.key === value }} style={[styles.pickRow, k.rule, o.key === value && { backgroundColor: LIME }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[t.body, { fontWeight: '700', color: o.key === value ? INK : colors.ink }]}>{o.label}</Text>
+                  {o.blurb ? <Text style={[t.small, { color: o.key === value ? colors.onLime : colors.inkMuted }]}>{o.blurb}</Text> : null}
+                </View>
+                {o.key === value ? <Icon name="check" size={16} color={INK} strokeWidth={2.4} /> : null}
+              </Press>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}

@@ -39,9 +39,11 @@ import { sendSms, smsConfigured } from '../sources/sms.js';
 import {
   ADULT_AGE, CHECK_KINDS, DAY_PARTS, EVIDENCE_FIELDS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, MONEY, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
   REGULATED_COUNTRIES, REPEATS, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S, VISIBILITIES,
-  ageGate, anytimeSlots, decideBy, hostMediaPurpose, isRegulated, lastDate, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
+  ageGate, anytimeSlots, decideBy, hostMediaPurpose, isRegulated, lastDate, missingCredentials, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
   opensPrivately, readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
 } from '../domain/hosting.js';
+import * as skills from '../repositories/hostSkills.js';
+import { FACET_CAP, TAG_CAP, categoryForPassion, categoryFrom, credentialDisplay } from '../domain/hostSkills.js';
 import { pdfText } from '../sources/menuRead.js';
 import { extract as extractWith, openaiEnabled, transcribe } from '../sources/openai.js';
 
@@ -72,7 +74,20 @@ function publicHost(h, rating = { rating: null, count: 0, guests: 0 }, extra = {
     id: h.id, name: h.name, type: h.type, localKind: h.local_kind, trust: h.trust, checks: h.checks,
     introText: h.intro_text, introVideo: mediaRef(h.intro_video_id), photo: mediaRef(h.photo_id),
     location: h.location_label, lat: h.lat, lng: h.lng, countryCode: h.country_code,
-    credentials: h.credentials ?? [], languages: h.languages ?? [], childrenAges: h.children_ages ?? [],
+    /**
+     * The old free-text list the host typed about themselves. Kept, because it
+     * is theirs and nothing was removed, but it is a claim and not evidence.
+     */
+    credentials: h.credentials ?? [],
+    /**
+     * What Epic has actually seen, or what the host stated where no evidence is
+     * asked for (Host Skills, 13 Sep 2026). Each carries *how* it is known, so
+     * the page can say "seen" and "stated" differently — collapsing the two
+     * would undo the trust work. Supplied by the caller; absent means not
+     * loaded, which is different from none.
+     */
+    credentialsShown: extra.credentialsShown ?? [],
+    languages: h.languages ?? [], childrenAges: h.children_ages ?? [],
     rating: rating.rating, reviewCount: rating.count, guests: rating.guests,
     // "New on Epic" is not a fourth level: Verified with no reviews yet.
     isNew: rating.count === 0,
@@ -102,6 +117,11 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
   return {
     id: o.id, hostId: o.host_id, shape: o.shape, state: o.state, pausedUntil: ymd(o.paused_until), visibility: o.visibility, money: o.money ?? 'free',
     title: o.title, summary: o.summary, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
+    // The five fields. `tags` and `facets` are in the host's own order — the
+    // first tag is what shows on the card — and a pending one is live on the
+    // offer with its word in the queue.
+    categoryKey: o.category_key ?? null, formatKey: o.format_key ?? null,
+    tags: o.tags ?? [], facets: o.facets ?? [],
     photos: (o.photo_ids ?? []).map(mediaRef), video: mediaRef(o.video_id), doc: mediaRef(o.doc_id),
     facts: o.facts ?? [], endsAt: o.ends_at?.slice(0, 5) ?? null, repeatEvery: o.repeat_every ?? 'weekly', endDate: ymd(o.end_date), themesDiffer: o.themes_differ !== false,
     noticeDays: o.notice_days, subDetail: o.sub_detail ?? {},
@@ -124,7 +144,7 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
 }
 
 /** The host's own offer adds the roster, the money and what stands between it and Publish. */
-function ownOffer(o, host, bookings, broadcasts = [], invites = []) {
+function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = null) {
   const live = bookings.filter((b) => b.state !== 'cancelled');
   const collected = live.filter((b) => b.payment_status === 'paid').reduce((n, b) => n + b.amount_pence, 0);
   const recorded = live.filter((b) => b.payment_status === 'recorded').reduce((n, b) => n + b.amount_pence, 0);
@@ -134,8 +154,15 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = []) {
   return {
     ...publicOffer(o, bookings, { revealed: true }),
     venueLabel: o.venue_label, venueLat: o.venue_lat, venueLng: o.venue_lng,
-    blockers: publishBlockers(o, host),
+    blockers: publishBlockers(o, host, evidence),
     steps: stepsFor(o, host),
+    /**
+     * The old single word, offered as a starting suggestion the first time this
+     * offer is edited after the skills work. Deliberately not written by a data
+     * migration: a guess in the column is indistinguishable afterwards from the
+     * host's own answer.
+     */
+    categorySuggestion: o.category_key ? null : categoryForPassion(o.category),
     // What the public lane would ask, so a shared screen can say "2 of 4 · 2 of 10 public".
     publicSteps: stepsFor({ ...o, visibility: 'public' }, host),
     linkToken: o.link_token, linkUrl: linkUrl(o.link_token),
@@ -224,11 +251,15 @@ router.get('/host', async (req, res, next) => {
     const rating = await repo.ratingOf(host.id);
     const live = bookings.filter((b) => b.state !== 'cancelled');
     const evidence = await repo.evidenceOf(host.id);
+    // The same credentials the submit endpoint checks, so the dashboard cannot
+    // say "everything is in place" about an offer Publish will refuse (Codex,
+    // 13 Sep 2026). And the tags, so the offer rows draw their chips.
+    const [credentials, withTags] = await Promise.all([evidenceFor(host), attachSkills(offers)]);
     res.json({
       host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload) },
       // What guests wrote when they booked: each one is a second offer waiting to be written (S4).
       asks: live.map((b) => b.note_to_host).filter(Boolean).slice(-6),
-      offers: offers.map((o) => ownOffer(o, host, byOffer(o.id))),
+      offers: withTags.map((o) => ownOffer(o, host, byOffer(o.id), [], [], credentials)),
       stats: {
         live: offers.filter((o) => o.state === 'live').length,
         booked: live.reduce((n, b) => n + b.heads, 0),
@@ -465,8 +496,55 @@ async function myOffer(id) {
 }
 
 async function ownOfferPayload(offer, host) {
-  const [bookings, broadcasts, invites] = await Promise.all([repo.bookingsOfOffer(offer.id), repo.broadcastsOf(offer.id), repo.invitesOf(offer.id)]);
-  return ownOffer(offer, host, bookings, broadcasts, invites);
+  const [bookings, broadcasts, invites, withTags, evidence] = await Promise.all([
+    repo.bookingsOfOffer(offer.id), repo.broadcastsOf(offer.id), repo.invitesOf(offer.id), attachSkills([offer]),
+    evidenceFor(host),
+  ]);
+  return ownOffer(withTags[0], host, bookings, broadcasts, invites, evidence);
+}
+
+/**
+ * The credential types Epic gates on, and what this host actually holds.
+ *
+ * Loaded wherever `publishBlockers` is asked, so a host is told before they
+ * press Publish and again when they do — a blocker only the server knows about
+ * is one the wizard cannot explain.
+ */
+/**
+ * A host's credentials, as a guest may read them: the label, and whether Epic
+ * saw it or the host said it. Never the reference number.
+ */
+async function shownEvidence(hostId) {
+  const [types, byHost] = await Promise.all([skills.credentialTypes({ all: true }), skills.shownCredentialsFor([hostId])]);
+  const byKey = Object.fromEntries(types.map((t) => [t.key, t]));
+  return (byHost[hostId] ?? [])
+    .map((c) => credentialDisplay(c, byKey[c.type_key]))
+    .filter(Boolean);
+}
+
+async function evidenceFor(host) {
+  if (!host?.id) return null;
+  const [types, credentials] = await Promise.all([skills.credentialTypes(), skills.credentialsFor(host.id)]);
+  return { types, credentials };
+}
+
+/**
+ * The tags and the facet, hung on the offer rows before anything shapes them.
+ *
+ * One query for the whole set: the card, the grid, the profile and the tag page
+ * all draw chips, and a query per offer would make the grid the slowest screen
+ * in the app for the sake of two words on each card.
+ */
+async function attachSkills(offers) {
+  const rows = offers.filter(Boolean);
+  if (!rows.length) return rows;
+  const byOffer = await skills.skillsForOffers(rows.map((o) => o.id));
+  for (const o of rows) {
+    const found = byOffer[o.id] ?? { tags: [], facets: [] };
+    o.tags = found.tags;
+    o.facets = found.facets;
+  }
+  return rows;
 }
 
 /** POST /api/host/offers — a draft, of one shape. Step 1 is the fork. */
@@ -499,6 +577,7 @@ function offerBody(b, current) {
   set('shape', oneOf(SHAPES, b.shape) ?? current.shape);
   set('title', str(b.title, 120)); set('description', str(b.description, 4000)); set('whyYou', str(b.whyYou, 2000)); set('includes', str(b.includes, 400));
   set('category', b.category == null ? null : (PASSIONS.includes(b.category) ? b.category : str(b.category, 40)));
+  set('categoryKey', str(b.categoryKey, 40)); set('formatKey', str(b.formatKey, 40));
   set('venue', oneOf(VENUES, b.venue) ?? current.venue);
   set('venueLabel', str(b.venueLabel, 240)); set('venueArea', str(b.venueArea, 120));
   set('venueLat', b.venueLat == null ? null : Number(b.venueLat)); set('venueLng', b.venueLng == null ? null : Number(b.venueLng));
@@ -556,7 +635,102 @@ router.patch('/host/offers/:id', async (req, res, next) => {
     if ((patch.visibility ?? offer.visibility) === 'public' && (patch.money ?? offer.money) === 'direct') patch.money = 'epic';
     // A night out stays 18+ whatever the form sends.
     if (host.local_kind === 'night_out') patch.ageLimit = 18;
-    const updated = await repo.updateOffer(offer.id, patch);
+    /**
+     * Both keys are checked against what is actually offered.
+     *
+     * Unchecked, a stale client could put an offer in a category an
+     * administrator had switched off — and a key that does not exist at all
+     * came back as a foreign-key violation and a 500, where the honest answer
+     * is that it is not one of the sixteen (Codex, 13 Sep 2026). Clearing
+     * either is allowed; the publish gate is what insists on them.
+     */
+    for (const [field, list_] of [['categoryKey', skills.categories], ['formatKey', skills.formats]]) {
+      if (patch[field] == null) continue;
+      const known = (await list_()).some((r) => r.key === patch[field]);
+      if (!known) throw refuse(400, 'unknown_key', field === 'categoryKey' ? 'That is not one of the browse categories.' : 'That is not one of the formats.');
+    }
+    /**
+     * A venueless format is an online offer, and says so on the row.
+     *
+     * `host_formats.venueless` answers §9's "does a format ever gate another
+     * field" — the wizard suppresses the venue step for one. Without this the
+     * offer kept `out_about`, so an online call published as an in-person one,
+     * was drawn with a place it does not have, and fell out of every nearby
+     * search for want of a coordinate (Codex, 13 Sep 2026). Done here rather
+     * than in the screen, so it holds however the format is set.
+     */
+    if (patch.formatKey) {
+      const format = (await skills.formats({ all: true })).find((f) => f.key === patch.formatKey);
+      if (format?.venueless) {
+        patch.venue = 'online';
+        // Every trace of a place, not just the label: a retained country still
+        // fires the regulated-city question at an offer that no longer happens
+        // anywhere (Codex, 13 Sep 2026).
+        patch.venueLabel = null; patch.venueLat = null; patch.venueLng = null;
+        patch.venueArea = null; patch.venueCountry = null; patch.venueNotes = null;
+        patch.travelRadiusMin = null; patch.travelChargePence = null;
+      } else if (offer.venue === 'online' && b.venue === undefined) {
+        // …and changing back to something that happens somewhere must not leave
+        // it online, asking for a platform and missing from every nearby search
+        // (Codex, 13 Sep 2026). The wizard's venue step asks again.
+        patch.venue = 'out_about';
+        patch.onlinePlatform = null;
+      }
+    }
+    let updated = await repo.updateOffer(offer.id, patch);
+    /**
+     * The tags and the facet, when the step sent them.
+     *
+     * Whole-list, in the host's order, because the order *is* an answer: the
+     * first tag is what shows on the card and it is what they dragged there. A
+     * wording nothing matches keeps its place, the offer publishes, and the
+     * word goes to the queue — never an error, never a dead end, and never a
+     * nudge to pick something broader.
+     */
+    /**
+     * The browse category is inferred from the tags and shown back for a nod,
+     * never chosen from a dropdown — "we will list you under Geology and
+     * fossils — change".
+     *
+     * Two things follow, and both are about not overwriting an answer:
+     *
+     *   · only a **tag** change re-derives it. A place facet says nothing about
+     *     which list the offer belongs on, and re-deriving on a facet edit
+     *     would quietly undo a Change the host had made (Codex, 13 Sep 2026).
+     *   · it is only written when the column is empty or still holds what the
+     *     *previous* tags derived — which is to say, when it was inferred and
+     *     not chosen. A host who used Change keeps their answer.
+     */
+    const before = b.tags !== undefined ? categoryFrom((await skills.offerSkills(offer.id)).filter((r) => r.vocab === 'tag' && r.target_key)) : null;
+    if (b.tags !== undefined) await skills.setOfferSkills(offer.id, 'tag', list(b.tags, TAG_CAP + 2));
+    if (b.facets !== undefined) await skills.setOfferSkills(offer.id, 'facet', list(b.facets, FACET_CAP + 2));
+    if (b.tags !== undefined && b.categoryKey === undefined) {
+      const carried = await skills.offerSkills(offer.id);
+      const derived = categoryFrom(carried.filter((r) => r.vocab === 'tag' && r.target_key));
+      const chosen = updated.category_key && updated.category_key !== before;
+      // Including when nothing derives one any more — every tag removed, or all
+      // of them now words Epic has not heard. Leaving the old inference behind
+      // would list the offer under something it is no longer about; clearing it
+      // puts the question back at Publish (Codex, 13 Sep 2026).
+      if (!chosen && derived !== updated.category_key) updated = await repo.updateOffer(offer.id, { categoryKey: derived });
+    }
+    /**
+     * A live offer edited into a state it could not have been published in.
+     *
+     * Publish is not the only door any more: a host can move a live listing
+     * into a credential-gated category, clear its format, or take away the
+     * place it happens (Codex, 14 Sep 2026). Refusing the edit would be wrong —
+     * their words are theirs, and saving a half-finished thought is a normal
+     * thing to do — so the listing comes out of the window instead, and says
+     * why. Resuming asks again, so there is one way back and it is checked.
+     */
+    if (updated.state === 'live') {
+      const blockers = publishBlockers(updated, host, await evidenceFor(host));
+      if (blockers.length) {
+        updated = await repo.updateOffer(updated.id, { state: 'paused', pausedUntil: null });
+        return res.json({ offer: await ownOfferPayload(updated, host), paused: blockers });
+      }
+    }
     res.json({ offer: await ownOfferPayload(updated, host) });
   } catch (err) { next(err); }
 });
@@ -580,7 +754,10 @@ router.delete('/host/offers/:id', async (req, res, next) => {
 router.post('/host/offers/:id/submit', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
-    const blockers = publishBlockers(offer, host);
+    // The offer's own tags decide its category, and the category decides which
+    // credentials are a condition rather than a badge — so this is loaded here
+    // as well as on the payload, because this is the call that publishes.
+    const blockers = publishBlockers(offer, host, await evidenceFor(host));
     if (blockers.length) return res.status(422).json({ error: 'not_ready', message: blockers[0], blockers });
     const offers = await repo.offersOfHost(host.id);
     // Nothing private is advertised, so nothing private is read: invitations
@@ -612,6 +789,16 @@ router.post('/host/offers/:id/resume', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
     if (offer.state !== 'paused') throw refuse(409, 'not_paused', 'This offer is not paused.');
+    /**
+     * Coming back is going live, so it is checked like going live.
+     *
+     * A paused offer is not bookable, which is why pausing one is the way a
+     * host is allowed to withdraw a credential holding it up. That only works
+     * if resuming asks again (Codex, 14 Sep 2026) — otherwise pause, remove,
+     * resume walks straight round the gate.
+     */
+    const blockers = publishBlockers(offer, host, await evidenceFor(host));
+    if (blockers.length) throw Object.assign(refuse(422, 'not_ready', blockers[0]), { blockers });
     const updated = await repo.updateOffer(offer.id, { state: 'live', pausedUntil: null });
     res.json({ offer: await ownOfferPayload(updated, host) });
   } catch (err) { next(err); }
@@ -936,7 +1123,32 @@ router.post('/host/offers/:id/dates', async (req, res, next) => {
     if (offer.shape !== 'oneoff') throw refuse(409, 'not_oneoff', 'Only a one-off gets another date; a series has its weeks and an anytime offer its diary.');
     const startsOn = req.body?.startsOn ? ymd(req.body.startsOn) : null;
     if (!startsOn) throw refuse(400, 'date_required', 'Pick the date.');
-    const copy = await repo.cloneOfferOnDate(offer, startsOn, req.body?.startsAt ? String(req.body.startsAt).slice(0, 5) : null);
+    /**
+     * A copy of a live listing goes live without passing Publish, so what it
+     * copies has to be publishable already. An offer written before the skills
+     * work carries neither of the two fields that are now required — they are
+     * asked for on next edit rather than guessed at — so cloning it would make
+     * a second public listing that could never have been published (Codex,
+     * 13 Sep 2026).
+     */
+    const missing = publishBlockers(offer, host, await evidenceFor(host));
+    if (offer.visibility === 'public' && missing.length) {
+      throw refuse(422, 'not_ready', `${missing[0]} Open this one first, then add the date.`);
+    }
+    /**
+     * The copy and its tags are one act.
+     *
+     * The same thing on another date is the same expertise — without the copy
+     * the clone went up live with no tags at all and vanished from the browse
+     * row and every tag page (Codex, 13 Sep 2026) — and a failure between the
+     * two would leave a live public listing that is not the offer it claims to
+     * be a second date of (Codex, 14 Sep 2026).
+     */
+    const copy = await withTransaction(async (client) => {
+      const made = await repo.cloneOfferOnDate(offer, startsOn, req.body?.startsAt ? String(req.body.startsAt).slice(0, 5) : null, client);
+      await skills.copyOfferSkills(offer.id, made.id, client);
+      return made;
+    });
     res.status(201).json({ offer: await ownOfferPayload(copy, host) });
   } catch (err) { next(err); }
 });
@@ -969,10 +1181,17 @@ async function tellBooked(bookings, text) {
 /** A public host with its rating and its offer menu. */
 async function hostPage(h) {
   const [rating, offers, reviews] = await Promise.all([repo.ratingOf(h.id), repo.offersOfHost(h.id), repo.publishedReviews(h.id)]);
-  const shown = offers.filter((o) => ['live', 'paused'].includes(o.state) && o.visibility === 'public');
+  const shown = await attachSkills(offers.filter((o) => ['live', 'paused'].includes(o.state) && o.visibility === 'public'));
   const bookings = await repo.bookingsOfOffers(shown.map((o) => o.id));
   return {
-    host: publicHost(h, rating),
+    host: publicHost(h, rating, { credentialsShown: await shownEvidence(h.id) }),
+    /**
+     * What this person knows, across their offers — derived, never stored
+     * (owner, 13 Sep 2026). Tags belong to the offer, not the person: the same
+     * host is *Fossils* on one and *Sourdough* on another, and the profile
+     * shows that range rather than flattening it into one bio.
+     */
+    tags: (await skills.tagsForHost(h.id)).map((t) => ({ key: t.key, label: t.label, offers: t.offers })),
     offers: shown.map((o) => publicOffer(o, bookings.filter((b) => b.offer_id === o.id))),
     reviews: reviews.map((r) => ({ stars: r.stars, chips: r.chips ?? [], text: r.text, on: ymd(r.publish_on), title: r.title })),
   };
@@ -1015,9 +1234,10 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
       if (!opensPrivately(o, { linkToken: str(req.query.l, 64), invite })) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
     }
     const h = await repo.hostById(o.host_id);
-    const [bookings, rating] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id)]);
+    await attachSkills([o]);
+    const [bookings, rating, evidence] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id), shownEvidence(h.id)]);
     const others = (await repo.offersOfHost(h.id)).filter((x) => x.id !== o.id && x.state === 'live' && x.visibility === 'public').length;
-    res.json({ offer: publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others }) }), payments: paymentsConfig() });
+    res.json({ offer: publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others, credentialsShown: evidence }) }), payments: paymentsConfig() });
   } catch (err) { next(err); }
 });
 
@@ -1045,7 +1265,7 @@ router.get('/experiences/near', async (req, res, next) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw refuse(400, 'where', 'Say where to look.');
     const km = Math.min(200, Math.max(2, Number(req.query.km) || 40));
     const love = req.query.love ? String(req.query.love) : null;
-    const rows = await repo.offersNear({ lat, lng, km, category: love });
+    const rows = await attachSkills(await repo.offersNear({ lat, lng, km, category: love }));
     const bookings = await repo.bookingsOfOffers(rows.map((o) => o.id));
     const ratings = new Map();
     for (const o of rows) if (!ratings.has(o.host_id)) ratings.set(o.host_id, await repo.ratingOf(o.host_id));
@@ -1059,8 +1279,26 @@ router.get('/experiences/near', async (req, res, next) => {
     const all = love ? await repo.offersNear({ lat, lng, km }) : rows;
     const passions = {};
     for (const o of all) { if (!o.category) continue; (passions[o.category] ??= new Set()).add(o.host_id); }
+    // The browse row (Host Skills, S17): sixteen categories, chosen once, with
+    // how many hosts near you are in each. It is drawn from the categories
+    // table rather than from the passions constant, and it does not grow with
+    // the tag vocabulary — thousands of tags live behind search, the cards and
+    // the tag pages, and a filter row that grows stops working in month three.
+    const inCategory = {};
+    for (const o of all) {
+      // The same mapping the filter uses: an offer written before the skills
+      // work still counts under the bucket it belongs to, or a category would
+      // read "0 people" and then open onto a list of them (Codex, 13 Sep 2026).
+      const bucket = o.category_key ?? categoryForPassion(o.category);
+      if (!bucket) continue;
+      (inCategory[bucket] ??= new Set()).add(o.host_id);
+    }
+    const browse = (await skills.categories()).map((c) => ({
+      key: c.key, label: c.label, icon: c.icon, people: inCategory[c.key]?.size ?? 0,
+    }));
     res.json({
       cards,
+      browse,
       passions: Object.entries(passions).map(([key, hosts]) => ({ key, label: passionLabel(key), people: hosts.size })).sort((a, b) => b.people - a.people),
       allPassions: PASSIONS.map((key) => ({ key, label: passionLabel(key) })),
     });
@@ -1080,6 +1318,33 @@ router.post('/experiences/:id/book', async (req, res, next) => {
     const party = list(b.party, 12).map((p) => ({ name: str(p.name, 80), age: p.age == null ? null : int(p.age), child: Boolean(p.child) })).filter((p) => p.name);
     if (!party.length) throw refuse(400, 'party_required', 'Say who is coming.');
     const today = ymd(new Date());
+
+    /**
+     * The credentials this offer needs, asked again before anything is locked.
+     *
+     * A confirmation goes stale on a date, and nothing about that date makes
+     * anything happen on its own: the host could be a year past a lapsed award
+     * and the listing would still be taking bookings, because every other check
+     * runs when somebody *does* something (Codex, 14 Sep 2026). This is the
+     * last door, so it is the one that asks.
+     *
+     * Before the transaction, not inside it: pausing and then throwing would
+     * roll the pause back with everything else, and the listing would stay in
+     * the window refusing one guest after another. So it comes off the window
+     * here, and the next person never reaches this point. What the guest reads
+     * says nothing about the host's paperwork.
+     */
+    const ahead = await repo.offerById(req.params.id);
+    if (ahead?.state === 'live') {
+      const aheadHost = await repo.hostById(ahead.host_id);
+      const [types, credentials] = aheadHost
+        ? await Promise.all([skills.credentialTypes({ all: true }), skills.credentialsFor(aheadHost.id)])
+        : [[], []];
+      if (aheadHost && missingCredentials(ahead, aheadHost, { types, credentials }).length) {
+        await repo.updateOffer(ahead.id, { state: 'paused', pausedUntil: null });
+        throw refuse(409, 'not_bookable', 'This one has just come off the list while the host sorts something out. Try their other dates.');
+      }
+    }
 
     /**
      * Everything about the offer is read under its lock and decided there —
@@ -1262,6 +1527,20 @@ adminRouter.post('/offers/:id/decide', requires('manage_hosting'), async (req, r
     const note = str(req.body?.note, 1000);
     if (decision === 'changes' && !note) throw refuse(400, 'note_required', 'Say what would make it stronger — coaching, not rejection.');
     const checklist = req.body?.checklist && typeof req.body.checklist === 'object' ? req.body.checklist : pitchChecklist(o);
+    /**
+     * The checks run again at the last gate, not only at Submit.
+     *
+     * An offer waiting to be read can still be edited, and this is the call
+     * that actually makes it public — so a category removed, a venue cleared or
+     * a credential withdrawn after submission would otherwise go live anyway,
+     * as would anything queued before these fields existed (Codex, 13 Sep
+     * 2026). Asking for changes is never blocked; that is the way back.
+     */
+    if (decision === 'live') {
+      const host = await repo.hostById(o.host_id);
+      const blockers = publishBlockers(o, host ?? {}, await evidenceFor(host));
+      if (blockers.length) throw Object.assign(refuse(422, 'not_ready', `${blockers[0]} Send it back for changes instead.`), { blockers });
+    }
     const updated = await repo.updateOffer(o.id, {
       state: decision === 'live' ? 'live' : 'draft',
       publishedAt: decision === 'live' ? new Date() : null,

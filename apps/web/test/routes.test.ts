@@ -221,7 +221,22 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/sources'), { name: 'admin', screen: 'sources' });
   // Data › Categories: the two levels, every provider's words, and the rules between (12 Sep 2026).
   assert.deepEqual(roundTrip('/admin/categories'), { name: 'admin', screen: 'categories' });
+  // Hosting › Skills: the five vocabularies, the review queue and the source register (13 Sep 2026).
+  assert.deepEqual(roundTrip('/admin/skills'), { name: 'admin', screen: 'skills' });
   assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'overview' });
+});
+
+test('a tag has a page of its own, and so does a facet', () => {
+  // Host Skills, S14: this is where "fossil hunting Jurassic Coast" lands, so
+  // the tag is the path rather than a query on a list — and a facet gets its
+  // own head rather than the same page set two ways.
+  assert.deepEqual(roundTrip('/tags/fossil-hunting'), { name: 'tag', key: 'fossil-hunting', vocab: 'tag' });
+  assert.deepEqual(roundTrip('/places-known/jurassic-coast'), { name: 'tag', key: 'jurassic-coast', vocab: 'facet' });
+  // Nothing below a tag: a tag page is a leaf, not a tree to walk.
+  assert.equal(parseRoute('/tags/fossil-hunting/hosts').name, 'unknown');
+  assert.equal(parseRoute('/tags').name, 'unknown');
+  // Up from a tag is the people who do what you love, not the home screen.
+  assert.equal(parentOf(parseRoute('/tags/fossil-hunting')), '/inspire/people');
 });
 
 test('an invite link is its own page and never a query on somebody else’s', () => {

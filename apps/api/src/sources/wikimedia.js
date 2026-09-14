@@ -41,7 +41,7 @@ const PAGEVIEWS = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-artic
  * Who we are. The Wikimedia policy asks for a real contact, and a bot that does
  * not give one gets blocked without warning — so this is not cosmetic.
  */
-export const UA = userAgent('epic atlas harvest; rogerrivers@gmail.com');
+export const UA = userAgent('epic atlas harvest');
 
 const SPARQL_TIMEOUT = 60_000;   // WDQS's own ceiling is 60s; a county takes ~2s
 const API_TIMEOUT = 20_000;
@@ -856,4 +856,61 @@ export async function fetchImage(url) {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// the skills vocabulary: candidate identifiers, for a person to choose between
+// ---------------------------------------------------------------------------
+// Wikidata is the identifier space for host skills — CC0, stable, and it has an
+// entity for essentially every discipline, craft, hobby, place, monument and
+// species a host will name, including the ones occupational taxonomies have no
+// word for. **We take the QID and nothing else.** Labels are Epic's own, in
+// Epic's voice, so a vandalised Wikidata label can never reach a guest.
+//
+// Neither call below is ever on a host's typing path (Host Skills brief §5):
+// suggestions in the wizard come from Epic's own tables. These run only when an
+// administrator asks, on the review screen, and the route ledgers them.
+//
+// The two traps here are for a person to resolve, not for automation:
+// *foraging* has a human-activity sense and an animal-behaviour sense, and
+// searching a concept usually surfaces the occupation above it (*fossil
+// collector* outranks *fossil collecting*). So the description comes back for
+// display and is deliberately not stored.
+
+const WIKIDATA_API = 'https://www.wikidata.org/w/api.php';
+
+/** Candidates for one wording, each with the description that tells them apart. */
+export async function searchEntities(term, { limit = 8, language = 'en' } = {}) {
+  const url = `${WIKIDATA_API}?${new URLSearchParams({
+    action: 'wbsearchentities', search: String(term).slice(0, 120), language,
+    uselang: language, type: 'item', limit: String(Math.min(20, limit)), format: 'json', origin: '*',
+  })}`;
+  const body = await getJson(url);
+  return (body?.search ?? []).map((r) => ({
+    qid: r.id,
+    label: r.label ?? r.match?.text ?? r.id,
+    description: r.description ?? null,
+    url: r.concepturi ?? `https://www.wikidata.org/wiki/${r.id}`,
+  }));
+}
+
+/**
+ * What Wikidata says this thing is a subclass of — **shown as a suggestion to
+ * an administrator placing a tag, and never written unattended.**
+ *
+ * The class graph has documented cycles and items that are simultaneously
+ * second- and third-order classes, and a naive closure from *foraging* pulls in
+ * animal-behaviour and psychology branches. One hop, for a person to read.
+ */
+export async function subclassOf(entity) {
+  if (!/^Q\d+$/.test(String(entity ?? ''))) return [];
+  const rows = await sparql(`
+    select ?parent ?parentLabel where {
+      wd:${entity} wdt:P279 ?parent .
+      service wikibase:label { bd:serviceParam wikibase:language "en" }
+    } limit 8`);
+  // `sparql()` has already flattened each binding to its string, so the value
+  // is on the key itself — reading `.value` gave undefined and every parent was
+  // filtered away (Codex, 14 Sep 2026).
+  return rows.map((r) => ({ qid: qid(r.parent), label: r.parentLabel ?? null })).filter((r) => r.qid);
 }

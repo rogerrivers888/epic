@@ -44,6 +44,7 @@ import { startOwnLoop } from './sources/own.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
+import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
 import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
@@ -174,6 +175,10 @@ app.use('/api/admin/library', requireDoor('admin'), libraryAdminRoutes);
 app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);
 // The taxonomy: categories, subcategories, every provider's words and the rules between (routes/taxonomy.js).
 app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
+// Host skills: the five vocabularies, the review queue, credentials and the
+// source register (routes/hostSkills.js). Its own capability pair, because
+// approving a word is not the same privilege as reading the queue.
+app.use('/api/admin/skills', requireDoor('admin'), skillsAdminRoutes);
 app.use('/api/admin/places', requireDoor('admin'), localityRoutes);
 // Lookup: what every source has for one place, and what each record holds (routes/lookup.js).
 app.use('/api/admin/lookup', requireDoor('admin'), lookupRoutes);
@@ -227,10 +232,16 @@ app.use('/api/join', joinChatRoutes);
 app.use('/api', groupRoutes);
 // Hosts and events. The experience page, a host's profile and their video are
 // public (auth.js) so a link works logged-out; booking and hosting are not.
+// The tag landing pages and the browse row: public, because that is where the
+// long tail of search arrives (routes/hostSkills.js).
+app.use('/api', skillsPublicRoutes);
 app.use('/api', hostingPublicRoutes);
 // The FAQ on a listing is public for the same reason the listing is (Chat screens, C7).
 app.use('/api', chatPublicRoutes);
 app.use('/api', hostingRoutes);
+// What a host types into the expertise field, answered from Epic's own tables
+// and never from anybody else's API (Host Skills §5).
+app.use('/api/host', hostSkillRoutes);
 // The other door into one trip: a link somebody was sent. Public (auth.js), and
 // everything in it is resolved from the token rather than from a session.
 app.use('/api/shared', sharedTripRoutes);
@@ -479,6 +490,10 @@ startScoutLoop();
 // screen is opened, so a search filed by them behaves the same on a fresh
 // deploy (Codex, 13 Sep 2026). Off the boot path itself, like the loops.
 setTimeout(() => { ensureTaxonomyReady().catch(() => null); }, 5000).unref?.();
+// Every canonical skill label gets its self-alias before anybody types into the
+// field, or the resolver's first pass misses the rows whose hand-written key is
+// not the normalisation of their own label (routes/hostSkills.js).
+setTimeout(() => { ensureSkillsReady().catch(() => null); }, 5000).unref?.();
 // Epic chases the group, the organiser does not (owner, 4 Sep 2026): any run
 // whose morning has passed is written once, whether or not anyone is looking.
 startReminderLoop();

@@ -9,6 +9,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { passionsForCategory } from '../domain/hostSkills.js';
 import crypto from 'node:crypto';
 
 const newToken = () => crypto.randomBytes(9).toString('base64url');
@@ -157,6 +158,11 @@ export async function insertOffer(hostId, shape, fields = {}) {
 const OFFER_COLUMNS = {
   shape: 'shape', state: 'state', pausedUntil: 'paused_until', visibility: 'visibility', title: 'title', description: 'description',
   whyYou: 'why_you', includes: 'includes', category: 'category', videoId: 'video_id',
+  // The browse category and the format (Host Skills, 13 Sep 2026). `category`
+  // is the old single word and stays where it is: an offer carrying one is
+  // asked on next edit, with that word as the starting suggestion, rather than
+  // being guessed at in a data migration.
+  categoryKey: 'category_key', formatKey: 'format_key',
   venue: 'venue', venueLabel: 'venue_label', venueArea: 'venue_area', venueLat: 'venue_lat', venueLng: 'venue_lng', venueCountry: 'venue_country',
   venueNotes: 'venue_notes', travelRadiusMin: 'travel_radius_min', travelChargePence: 'travel_charge_pence', onlinePlatform: 'online_platform',
   durationMin: 'duration_min', minCount: 'min_count', expectedCount: 'expected_count', maxCount: 'max_count', partyMax: 'party_max', ageLimit: 'age_limit',
@@ -195,13 +201,13 @@ export async function deleteOffer(id, hostId) {
 }
 
 /** A copy of a one-off on another date: the dashboard's "Add another date". */
-export async function cloneOfferOnDate(offer, startsOn, startsAt) {
-  const { rows } = await query(
-    `insert into host_offers (host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, photo_ids, video_id, doc_id, facts, transcript,
+export async function cloneOfferOnDate(offer, startsOn, startsAt, client) {
+  const { rows } = await on(client)(
+    `insert into host_offers (host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, category_key, format_key, photo_ids, video_id, doc_id, facts, transcript,
         venue, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
         min_count, expected_count, max_count, party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, starts_on, starts_at, running_order, featured_people,
         sub_detail, rules_accepted, checks, regulated_answer, licence_number, licence_expiry, published_at, submitted_at)
-     select host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, photo_ids, video_id, doc_id, facts, transcript,
+     select host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, category_key, format_key, photo_ids, video_id, doc_id, facts, transcript,
         venue, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
         min_count, expected_count, max_count, party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, $2::date, coalesce($3::time, starts_at), running_order, featured_people,
         sub_detail, rules_accepted, checks, regulated_answer, licence_number, licence_expiry, now(), now()
@@ -218,7 +224,26 @@ export async function cloneOfferOnDate(offer, startsOn, startsAt) {
 export async function offersNear({ lat, lng, km = 40, category = null, limit = 60 }) {
   const params = [lat, lng, km, limit];
   let where = '';
-  if (category) { params.push(category); where = `and o.category = $${params.length}`; }
+  /**
+   * One filter, two columns, because the browse row moved (Host Skills, S17).
+   * `category_key` is one of the sixteen buckets; `category` is the old single
+   * word. Both are honoured so the row keeps working while offers carrying the
+   * old word are asked to pick a bucket on next edit, rather than being
+   * migrated on a guess.
+   */
+  if (category) {
+    params.push(category);
+    const key = params.length;
+    // …and the old words that land in the same bucket, so an offer written
+    // before the skills work is still found under it.
+    params.push(passionsForCategory(category));
+    // The old word only counts where nothing newer has been said. An offer
+    // moved from `painting` to Crafts belongs in Crafts and nowhere else;
+    // leaving the fallback unconditional listed it under both for ever (Codex,
+    // 14 Sep 2026).
+    where = `and (o.category_key = $${key}
+                  or (o.category_key is null and (o.category = $${key} or o.category = any($${params.length}))))`;
+  }
   const { rows } = await query(
     `select o.*, h.name as host_name, h.type as host_type, h.local_kind as host_local_kind, h.trust as host_trust, h.checks as host_checks,
             h.photo_id as host_photo_id, h.location_label as host_location, h.children_ages as host_children_ages,

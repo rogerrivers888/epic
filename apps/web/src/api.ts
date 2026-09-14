@@ -1967,7 +1967,8 @@ export const api = {
   removeHostContact: (id: string) => request<void>(`/api/host/contacts/${id}`, { method: 'DELETE' }),
   answerInvite: (token: string, rsvp: 'yes' | 'no', heads?: number | null) => post<{ invite: OfferInvite }>(`/api/invited/${token}`, { rsvp, heads }),
   hostOffer: (id: string) => request<{ offer: OwnOffer }>(`/api/host/offers/${id}`),
-  updateOffer: (id: string, body: OfferInput) => patch<{ offer: OwnOffer }>(`/api/host/offers/${id}`, body),
+  /** `paused` comes back when an edit took a live listing out of the window, and says what would put it back. */
+  updateOffer: (id: string, body: OfferInput) => patch<{ offer: OwnOffer; paused?: string[] }>(`/api/host/offers/${id}`, body),
   deleteOffer: (id: string) => del<void>(`/api/host/offers/${id}`),
   submitOffer: (id: string) => post<{ offer: OwnOffer; inReview: boolean }>(`/api/host/offers/${id}/submit`, {}),
   pauseOffer: (id: string, until: string | null) => post<{ offer: OwnOffer }>(`/api/host/offers/${id}/pause`, { until }),
@@ -1981,6 +1982,67 @@ export const api = {
   experiencesNear: (q: { lat: number; lng: number; km?: number; love?: string | null }) => request<ExperiencesNear>(`/api/experiences/near${qs(q)}`),
   bookExperience: (id: string, body: BookingInput) => post<{ booking: Booking; payments: PaymentsConfig }>(`/api/experiences/${id}/book`, body),
   hostProfile: (id: string) => request<HostProfile>(`/api/hosts/${id}`),
+
+  // --- host skills: the open vocabulary both ends of the app share ----------
+  /** The tag step's whole answer: the prompt for this host's kind, the lists, the cap. */
+  hostSkills: (p: { hostType?: string | null; lat?: number | null; lng?: number | null } = {}) => request<HostSkillsSetup>(`/api/host/skills${qs(p)}`),
+  /**
+   * The type-ahead, from Epic's own tables and nothing else — no external call
+   * sits in a host's typing path. `guest` reads the same rows logged-out; the
+   * only difference is that a guest is never offered "add it as it is".
+   */
+  skillSuggest: (q: string, opts: { vocab?: 'tag' | 'facet'; category?: string | null; guest?: boolean; limit?: number } = {}) =>
+    request<{ q: string; vocab: 'tag' | 'facet'; normalised: string; suggestions: SkillSuggestion[] }>(
+      `${opts.guest ? '/api/skills/suggest' : '/api/host/skills/suggest'}${qs({ q, vocab: opts.vocab, category: opts.category, limit: opts.limit })}`,
+    ),
+  /** The detail sheet: the one line, the count, and the near-collision that tells two senses apart. */
+  skillDetail: (key: string, opts: { vocab?: 'tag' | 'facet'; guest?: boolean } = {}) =>
+    request<{ tag: SkillSuggestion & { note: string | null; externalId: string | null; source: string | null }; near: SkillSuggestion[] }>(
+      `${opts.guest ? '/api/skills' : '/api/host/skills'}/tag/${encodeURIComponent(key)}${qs({ vocab: opts.vocab })}`,
+    ),
+  /** The browse row and the formats. Public. */
+  skills: () => request<{ categories: SkillCategory[]; formats: SkillFormat[] }>('/api/skills'),
+  /** A tag's own page: every host carrying it, and what sits close to it. Works logged-out. */
+  tagPage: (key: string, opts: { vocab?: 'tag' | 'facet'; country?: string | null } = {}) =>
+    request<TagPage>(`/api/skills/tag/${encodeURIComponent(key)}/hosts${qs({ vocab: opts.vocab, country: opts.country })}`),
+  skillAttribution: () => request<{ sources: { key: string; label: string; attribution: string; url: string | null }[] }>('/api/skills/attribution'),
+  /** What a host may claim, and what they have claimed. Evidence, never expertise. */
+  hostCredentials: () => request<{ types: { key: string; label: string; note: string | null; evidenceRequired: boolean; gatesCategories: string[] }[]; held: HostCredential[] }>('/api/host/credentials'),
+  claimCredential: (body: { typeKey: string; reference?: string | null; detail?: string | null }) =>
+    put<{ credential: { id: string; typeKey: string; state: string } }>('/api/host/credentials', body),
+  dropCredential: (typeKey: string) => del<{ removed: string }>(`/api/host/credentials/${encodeURIComponent(typeKey)}`),
+
+  // --- the back office -----------------------------------------------------
+  adminSkills: () => request<SkillsOverview>('/api/admin/skills/'),
+  adminSkillVocabulary: (vocab: 'tag' | 'facet', p: { q?: string | null; all?: boolean; limit?: number } = {}) =>
+    request<{ vocab: string; rows: SkillVocabRow[] }>(`/api/admin/skills/vocabulary${qs({ vocab, ...p, all: p.all ? 1 : undefined })}`),
+  adminSaveSkillCategory: (body: { key: string; label?: string; blurb?: string | null; icon?: string | null; position?: number; active?: boolean }) =>
+    put<{ category: SkillCategory }>('/api/admin/skills/category', body),
+  adminSaveSkillFormat: (body: { key: string; label?: string; blurb?: string | null; icon?: string | null; venueless?: boolean; position?: number; active?: boolean }) =>
+    put<{ format: SkillFormat }>('/api/admin/skills/format', body),
+  adminRemoveSkillValue: (what: 'category' | 'format', key: string) => del<{ removed: string }>(`/api/admin/skills/${what}/${encodeURIComponent(key)}`),
+  adminSaveTag: (body: { key?: string; label?: string; parentKey?: string | null; categoryKey?: string | null; source?: string | null; externalId?: string | null; note?: string | null; active?: boolean }) =>
+    put<{ tag: SkillVocabRow }>('/api/admin/skills/tag', body),
+  adminSaveFacet: (body: { key?: string; kind?: string; label?: string; parentKey?: string | null; source?: string | null; externalId?: string | null; note?: string | null; active?: boolean }) =>
+    put<{ facet: SkillVocabRow }>('/api/admin/skills/facet', body),
+  /** The queue, ordered by how often each has been typed. Merge is the most-used button on it. */
+  adminSkillQueue: (state: 'open' | 'approved' | 'merged' | 'rejected' | 'all' = 'open') =>
+    request<{ proposals: SkillProposal[]; n: number; oldest: string | null }>(`/api/admin/skills/queue${qs({ state })}`),
+  adminSkillProposal: (id: string) =>
+    request<{ proposal: SkillProposal; offers: { id: string; title: string | null; state: string; host_id: string; host_name: string; raw: string; created_at: string }[]; targets: SkillSuggestion[] }>(`/api/admin/skills/queue/${id}`),
+  adminDecideProposal: (id: string, body: { decision: 'approve' | 'merge' | 'reject'; targetKey?: string; label?: string; parentKey?: string | null; categoryKey?: string | null; kind?: string; note?: string | null; source?: string | null; externalId?: string | null }) =>
+    post<{ proposal: SkillProposal; tag?: SkillVocabRow; target?: SkillVocabRow }>(`/api/admin/skills/queue/${id}`, body),
+  /** Wikidata, asked by a person. The description is shown so two senses can be told apart, and is not stored. */
+  adminSkillCandidates: (q: string) =>
+    request<{ q: string; candidates: { qid: string; label: string; description: string | null; url: string }[] }>(`/api/admin/skills/candidates${qs({ q })}`),
+  adminSkillParents: (qid: string) =>
+    request<{ qid: string; parents: { qid: string; label: string | null }[]; note: string }>(`/api/admin/skills/parents${qs({ qid })}`),
+  adminCredentials: () => request<{ types: CredentialType[]; waiting: CredentialWaiting[] }>('/api/admin/skills/credentials'),
+  adminSaveCredentialType: (body: Partial<CredentialType> & { key: string }) => put<{ type: CredentialType }>('/api/admin/skills/credential-type', body),
+  adminDecideCredential: (id: string, body: { state: 'confirmed' | 'rejected' | 'pending'; note?: string | null }) =>
+    post<{ credential: CredentialWaiting }>(`/api/admin/skills/credentials/${id}`, body),
+  adminVocabularySources: () => request<{ sources: VocabularySource[] }>('/api/admin/skills/sources'),
+  adminSaveVocabularySource: (body: { key: string } & Record<string, unknown>) => put<{ source: VocabularySource }>('/api/admin/skills/source', body),
   reportHost: (id: string, reason: string, offerId?: string | null) => post<{ ok: true; message: string }>(`/api/hosts/${id}/report`, { reason, offerId }),
   bookings: () => request<{ bookings: Booking[] }>('/api/bookings'),
   booking: (id: string) => request<{ booking: Booking; payments: PaymentsConfig }>(`/api/bookings/${id}`),
@@ -3389,7 +3451,11 @@ export type PublicHost = {
   id: string; name: string; type: HostType | null; localKind: LocalKind | null; trust: TrustLevel; checks: 'running' | 'passed';
   introText: string | null; introVideo: string | null; photo: string | null;
   location: string | null; lat: number | null; lng: number | null; countryCode: string | null;
-  credentials: string[]; languages: string[]; childrenAges: number[];
+  /** What the host wrote about themselves. A claim, and labelled as one. */
+  credentials: string[];
+  /** What Epic has seen, or what was stated where no evidence is asked for. Never the reference number. */
+  credentialsShown: { label: string; how: 'confirmed' | 'stated'; at: string | null }[];
+  languages: string[]; childrenAges: number[];
   rating: number | null; reviewCount: number; guests: number; isNew: boolean; since: string;
   otherOffers?: number; km?: number; liveOffers?: number;
 };
@@ -3427,6 +3493,8 @@ export type Experience = {
   outcome: string | null; arc: string | null; weeks: Week[]; joinMode: 'whole' | 'drop_in' | 'both' | null; dropInPence: number | null; missedNote: string | null;
   availability: Availability; slots: { date: string; times: string[] }[]; slotMin: number | null;
   standing: Standing; price: OfferPrice;
+  /** The five fields (Host Skills, 13 Sep 2026). `category` above is the old single word. */
+  categoryKey: string | null; formatKey: string | null; tags: OfferSkill[]; facets: OfferSkill[];
   regulated: { country: string; answer: string | null } | null;
   cancelledNote: string | null;
   host: PublicHost | null;
@@ -3504,6 +3572,8 @@ export type OpenMatch = {
 /** One of my Epic contacts: everyone this household has invited (lanes A and B, C2f). */
 export type HostContact = { id: string; name: string; mobile: string | null; email: string | null; timesInvited: number; lastInvitedAt: string | null };
 export type OwnOffer = Experience & {
+  /** The old single word, offered as a starting suggestion on next edit. Never written by a migration. */
+  categorySuggestion: string | null;
   blockers: string[]; checklist: PitchChecklist; licenceNumber: string | null; licenceExpiry: string | null;
   /** The steps this offer's set-up walks, derived from its three axes. The progress bar counts these. */
   steps: string[];
@@ -3532,6 +3602,15 @@ export type OfferInput = Partial<{
   visibility: Visibility; money: Money; summary: string | null; endsAt: string | null; repeatEvery: RepeatEvery; endDate: string | null;
   themesDiffer: boolean; noticeDays: number | null; subDetail: SubDetail; rulesAccepted: boolean; checks: CheckKind[];
   facts: { key: string; value: string }[]; seeded: string[]; docId: string | null;
+  categoryKey: string | null; formatKey: string | null;
+  /**
+   * Whole-list, in the host's order: the order is the answer, and a partial
+   * update cannot express a drag. `asIs` is the host having chosen their own
+   * words with the suggestions in front of them, so the server does not go
+   * looking for something near enough.
+   */
+  tags: { key?: string | null; raw: string; asIs?: boolean }[];
+  facets: { key?: string | null; raw: string; asIs?: boolean }[];
 }>;
 
 export type HostHome = {
@@ -3545,8 +3624,111 @@ export type HostHome = {
   you?: { name: string | null; email: string | null };
   firstListingRead?: boolean;
 };
-export type HostProfile = { host: PublicHost; offers: Experience[]; reviews: { stars: number; chips: string[]; text: string | null; on: string; title: string | null }[] };
-export type ExperiencesNear = { cards: Experience[]; passions: { key: string; label: string; people: number }[]; allPassions: { key: string; label: string }[] };
+export type HostProfile = {
+  host: PublicHost;
+  /** What this person knows across their offers — derived, never stored. Tags belong to the offer, not the person. */
+  tags: { key: string; label: string; offers: number }[];
+  offers: Experience[];
+  reviews: { stars: number; chips: string[]; text: string | null; on: string; title: string | null }[];
+};
+export type ExperiencesNear = {
+  cards: Experience[];
+  /** The browse row: sixteen categories, chosen once, with how many hosts near you are in each. */
+  browse: { key: string; label: string; icon: string | null; people: number }[];
+  passions: { key: string; label: string; people: number }[];
+  allPassions: { key: string; label: string }[];
+};
+
+// ---------------------------------------------------------------------------
+// Host skills (13 Sep 2026): five fields where there was one word
+// ---------------------------------------------------------------------------
+/**
+ * A resolved row in the open vocabulary, exactly as the screens draw it.
+ *
+ * `breadcrumb` is context in one glance — "Geology and fossils › Palaeontology"
+ * — and is never navigation: not tappable, and there is no tree to walk.
+ * `hostCount` is null unless it flatters; "0 hosts" reads as an empty shelf.
+ */
+export type SkillSuggestion = {
+  key: string; label: string; breadcrumb: string | null; parent: string | null;
+  kind: string | null; categoryKey: string | null; note: string | null;
+  hostCount: number | null;
+  /** No external identifier yet. Legitimate, and shown as such in the back office only. */
+  unmapped: boolean;
+};
+/** What an offer carries, in the host's own order. The first tag is what shows on the card. */
+export type OfferSkill = {
+  key: string | null; raw: string; label: string;
+  /** Nothing matched: live on the offer, in the queue, drawn dashed — never red. */
+  pending: boolean;
+  kind?: string | null; categoryKey?: string | null;
+};
+/** `offers` is the public count on the guest side and every offer on the admin side — two screens, two meanings. */
+export type SkillCategory = { key: string; label: string; blurb: string | null; icon: string | null; offers?: number; public_offers?: number };
+export type SkillFormat = { key: string; label: string; blurb: string | null; icon: string | null; venueless?: boolean };
+export type SkillPrompt = { badge: string; title: string; sub: string; placeholder: string; kicker: string; asideTitle?: string; aside?: string };
+export type HostSkillsSetup = {
+  householdId: string | null;
+  /** "You are in Charmouth — add Jurassic Coast?" Offered, never filled in silently. */
+  placeSuggestion: { key: string; label: string; km: number } | null;
+  prompt: SkillPrompt;
+  prompts: Record<string, SkillPrompt>;
+  cap: number; facetCap: number;
+  ageBands: { key: string; label: string }[];
+  categories: SkillCategory[];
+  formats: SkillFormat[];
+  starters: SkillSuggestion[];
+};
+export type TagPage = {
+  tag: SkillSuggestion & { note: string | null; hostCount: number };
+  hosts: {
+    hostId: string; name: string; type: HostType | null; trust: string | null; location: string | null; photoId: string | null;
+    offerId: string; title: string | null; shape: OfferShape; state: OfferState; area: string | null; category: string | null;
+    priceMode: PriceMode; pricePence: number | null; totalPence: number | null; per: 'person' | 'household';
+  }[];
+  near: SkillSuggestion[];
+};
+export type SkillProposal = {
+  id: string; vocab: 'tag' | 'facet'; norm: string; raw: string; count: number;
+  state: 'open' | 'approved' | 'merged' | 'rejected'; targetKey: string | null;
+  note: string | null; decidedBy: string | null; decidedAt: string | null; createdAt: string; offers: number;
+  targets: SkillSuggestion[];
+};
+export type SkillVocabRow = {
+  key: string; label: string; parent_key: string | null; parent_label: string | null; category_key: string | null;
+  kind?: string | null; source: string | null; external_id: string | null; note: string | null;
+  seen_count: number; active: boolean; seeded: boolean; offers: number; hosts: number;
+};
+export type CredentialType = {
+  key: string; label: string; note: string | null; host_types: string[]; evidence_required: boolean;
+  gates_categories: string[]; expires_months: number | null; position: number; active: boolean; seeded: boolean;
+};
+export type CredentialWaiting = {
+  id: string; host_id: string; host_name: string; host_type: string; type_key: string; label: string;
+  reference: string | null; detail: string | null; state: string; created_at: string; evidence_required: boolean;
+};
+export type VocabularySource = {
+  key: string; label: string; what_we_take: string; licence: string; attribution: string | null; may_retain: boolean;
+  resolves: string | null; url: string | null; note: string | null; last_refreshed: string | null; active: boolean;
+  position: number; tags: number; facets: number;
+};
+export type SkillsOverview = {
+  categories: (SkillCategory & { position: number; active: boolean; seeded: boolean; offers: number })[];
+  formats: (SkillFormat & { position: number; active: boolean; seeded: boolean; offers: number })[];
+  credentialTypes: CredentialType[];
+  sources: VocabularySource[];
+  queue: { open: number; oldest: string | null };
+  credentialsWaiting: number;
+  cap: number;
+  facetKinds: string[];
+  /** Whether trigram matching is available; without it the resolver matches on prefix and substring only. */
+  trigram: boolean;
+};
+export type HostCredential = {
+  id: string; typeKey: string; label: string; reference: string | null; detail: string | null;
+  state: 'stated' | 'pending' | 'confirmed' | 'rejected'; confirmedAt: string | null; expiresOn: string | null; expired: boolean; note: string | null;
+  shows: { label: string; how: 'confirmed' | 'stated'; at: string | null } | null;
+};
 
 export type PartyMember = { id?: string; name: string; age: number | null; child: boolean; avatarUrl?: string | null };
 export type BookingState = 'pending' | 'confirmed' | 'waitlisted' | 'cancelled' | 'attended';

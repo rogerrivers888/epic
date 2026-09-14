@@ -774,6 +774,42 @@ A visit holds a venue identifier from the rented layer and everything else from 
 
 The word "strangers" is never used anywhere in this feature.
 
+### 13.20 Host skills and expertise — **built** (owner, 13 Sep 2026; Supporting docs/Groups & events NEW/Specialist skills; migration 102)
+
+> Owner, 13 Sep 2026: "Please can you go ahead and build both end-to-end?"
+
+**One free-text word becomes five fields.** A host offer carried one category the host chose, matched against nothing and reused by nobody, so a fossil walk on the Jurassic Coast and a talk about the Norman conquest were both filed as "History". `migrations/102_host_skills.sql`, `domain/hostSkills.js`, `repositories/hostSkills.js`, `routes/hostSkills.js`, `components/TagPicker.tsx`, `screens/TagScreen.tsx`, `admin/screens/Skills.tsx`. The governing rule of the design: **the model gets more precise while the host is asked less.**
+
+**Five fields, five vocabularies, because they are five kinds of fact.** A *browse category* (sixteen buckets, guest-facing, deliberately shallow); a *format* (walk, workshop, dig, online call); *expertise tags* (open, grown from what hosts type, capped at six); a *place or subject facet* (one table with a `kind` — the specialism a host has instead of a discipline, which exists because the Local host has no discipline and his expertise is a place plus an activity plus a family shape); and *credential types*, which are evidence and not expertise and never enter the tag list.
+
+**The host sees two of them.** The tags, which they type, and what actually happens. The **browse category is inferred from the tags** and shown back for a nod — "we will list you under Geology and fossils — change", never a dropdown — and the **place facet is inferred from where the offer happens** and offered with Add / Not now. Every field the host does not have to think about is a field that ends up correct.
+
+**Three prompts, one field, and the copy difference is the design.** The prompt branches on `hosts.type`, which the wizard already knows: Practitioner is asked what they are expert in, Guide what they guide on, and the **Local host what he is *into*, and who it is good for**. Ask the Local host what he is an expert in and he types nothing and abandons the wizard, and Epic loses the warmest category it has. The Guide is told out loud that a Blue Badge goes in the trust step.
+
+**No external call sits in the host's typing path** (§13.7 and the same reasoning). Suggestions come from Epic's own tables: the resolver is an alias match on the normalised wording, then trigram similarity ranked, then nothing — and nothing is a legitimate answer. `pg_trgm` is not assumed; the resolver asks once and falls back to prefix and substring matching. Outward calls happen in exactly two places, both in the back office and both ledgered in `provider_calls`: an administrator asking Wikidata for candidate identifiers, and asking what it says a thing is a subclass of.
+
+**Wikidata is the identifier space, never the hierarchy.** We take the QID and nothing else — no labels, descriptions, aliases or statements — so a vandalised label can never reach a guest, and CC0 means nothing propagates into Epic's licensing. **Parent is set by a person, always**: the class graph has documented cycles and a naive closure from *foraging* pulls in animal-behaviour and psychology branches, so P279 is shown as a suggestion and never writes unattended. A tag with no identifier is legitimate and reads as unmapped. The Wikimedia User-Agent carries a contact address, set centrally in `origins.js` from `EPIC_CONTACT_EMAIL`.
+
+**An offer publishes even when Epic has never heard of the words.** A wording nothing matched is kept on the offer beside a null key, the offer goes live with a dashed pending chip, and a proposal is raised — never red, never a dead end, never a nudge to pick something broader, because that moment is the only way the vocabulary grows. **Normalisation decides whether the queue is workable**: *fossils*, *Fossils*, *fossil hunting* and *Fossil Hunting* collapse before anybody sees them, and the plural fold is deliberately shallow so *lens* does not become *len*. Approving repoints every offer carrying those words; merging repoints them and keeps the wording as an alias, which is also what makes a guest searching it find the survivor; rejecting keeps the row, so the same wording never raises a new proposal.
+
+**Nothing deactivates by disappearing.** Every vocabulary carries `active` and `seeded`. A category no longer offered still renders on offers already carrying it; deleting one in use is refused with a count. `host_offers.category` stays where it is and offers carrying the old word are asked on next edit with that word as a suggestion — never migrated on a guess, because a guess in the column is indistinguishable afterwards from the host's own answer.
+
+**Tags belong to the offer, not the person** (owner, 13 Sep 2026). The same host is *Fossils* on one offer and *Sourdough* on another; a profile shows that range through its offer rows rather than flattening it into one bio, and a host's own tag list is the union of what their live offers carry — derived, never stored, so nobody can claim an expertise no offer evidences.
+
+**Both the category and the format are required to go live, and neither to draft** (owner, 13 Sep 2026). The step keeps its own "Skip for now" and the two facts are asked for at publish. The step is in the **public branch only**: a private offer goes to named people who were sent it, and adding a step to the four the lanes work fixed would be friction for nothing.
+
+**The filter row must not grow with the vocabulary.** Sixteen categories, horizontally scrollable, chosen once. Thousands of tags live behind search, the cards and the tag pages; a filter row that grows stops working by month three. A card carries **one tag plus the place — two chips maximum**, or the grid turns to soup. **No tag ever gets a badge of its own**: credibility comes from the trust ladder, and a third one here would undermine both. Evidence sits next to expertise on the offer page and never inside it.
+
+**Every tag has a page** (`/tags/<key>`, `/places-known/<key>`), public and logged-out, because that is where the long tail of search arrives. The sparse state is designed: one host is the rarest thing on Epic this week, and the page says so rather than drawing an empty shelf.
+
+**One component, both ends.** The guest asking "What do you love doing?" and the host saying "What are you an expert in?" are the same component over the same rows. Two differences: the guest side never offers "add it as it is", and the host side never shows a zero count — a count is drawn only where it flatters, because "0 hosts" tells a host they are alone on a platform they have not joined yet.
+
+**Reading a vocabulary and changing it are separate capabilities** (`view_skills`, `manage_skills`), as §034 requires — approving a word is a word every host is offered afterwards, which is not the same privilege as reading the queue. **Reject is an ink outline, not the red the canvas draws** (owner, 13 Sep 2026): red stays retired apart from allergens, overruns and the Plan screen's Stop.
+
+**Only `/api/skills` is held on a device** — the sixteen buckets and the thirteen formats, Epic's own words and a couple of kilobytes, so the filter row draws with no signal. The suggest endpoint and the tag pages are deliberately absent: a stale suggestion would offer a word that has since been merged away, and a tag page is other people's live offers.
+
+**Seed sources are read once and are never a runtime dependency.** `vocabulary_sources` records what each gives us, its licence, the exact attribution wording at import time, and whether the data itself may be kept — which, because we take identifiers and write our own labels, is usually no. Only the CC BY and ODC-By sources oblige anything on screen, never Wikidata. Craft Courses, ClassBento, Meetup and the Heritage Crafts inventory were **read by hand once and rewritten in Epic's voice**: no scheduled crawler, no ingestion of anyone's list as live data, no refresh job pointed at a competitor. Writing your own list informed by public pages is ordinary product work; the *compilation* is what carries weight, and that is not engaged by reading four pages once. **Heritage Crafts is the one to handle differently** — an e-mail asking to reference the Red List properly is the owner's to send.
+
 ---
 
 ## 14. Spend containment patterns

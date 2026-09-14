@@ -325,6 +325,37 @@ export function LinkRow({ label, value, onPress, icon, tone }: { label: string; 
 // the meta line that changes by shape, price, how many are in.
 // ---------------------------------------------------------------------------
 
+/**
+ * The one line of expertise a card carries (Host Skills, S10).
+ *
+ * **One tag plus the place. Two chips maximum**, or the grid turns to soup —
+ * the handoff greys the rest out to make the point. Which tag? The first one
+ * the host dragged into order. A pending word is drawn dashed rather than lime,
+ * because it is the host's own wording and has not been resolved yet; it is
+ * never shown to a guest as though it were canonical.
+ */
+export function SkillChips({ item, onTag }: { item: Experience; onTag?: (key: string) => void }) {
+  const tag = item.tags?.[0] ?? null;
+  const place = item.facets?.[0] ?? null;
+  if (!tag && !place) return null;
+  const chip = (label: string, kind: 'tag' | 'place' | 'pending', key: string | null) => {
+    const body = (
+      <View style={[styles.chip, kind === 'tag' ? styles.chipLime : kind === 'pending' ? styles.chipPendingTag : styles.chipOutlineSoft]}>
+        <Text style={[styles.chipText, { color: kind === 'tag' ? INK : kind === 'pending' ? colors.accent : colors.inkMuted, fontWeight: kind === 'place' ? '600' : '700' }]} numberOfLines={1}>{label}</Text>
+      </View>
+    );
+    return onTag && key && kind !== 'pending'
+      ? <Press key={`${kind}:${label}`} onPress={() => onTag(key)} accessibilityRole="button">{body}</Press>
+      : <View key={`${kind}:${label}`}>{body}</View>;
+  };
+  return (
+    <View style={styles.skillRow}>
+      {tag ? chip(tag.label, tag.pending ? 'pending' : 'tag', tag.key) : null}
+      {place ? chip(place.label, 'place', place.key) : null}
+    </View>
+  );
+}
+
 export function ExperienceCard({ item, onOpen, width }: { item: Experience; onOpen: () => void; width?: number }) {
   const poster = item.photos[0] ?? item.host?.photo ?? null;
   const paused = item.state === 'paused';
@@ -340,6 +371,8 @@ export function ExperienceCard({ item, onOpen, width }: { item: Experience; onOp
         {item.video ? <View style={styles.cardPlay}><Icon name="resume" size={14} color={INK} fill /></View> : null}
       </View>
       <View style={{ gap: 3, paddingTop: spacing.sm }}>
+        {/* "Fossils · Jurassic Coast" on a card does more selling than any category name ever will. */}
+        <SkillChips item={item} />
         <Text style={styles.cardTitle} numberOfLines={2}>{item.title ?? 'Untitled'}</Text>
         <Text style={type.small} numberOfLines={1}>{paused && item.pausedUntil ? `Paused · back ${dateOnly(item.pausedUntil)}` : metaLine(item)}</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -365,6 +398,9 @@ export function OfferRow({ item, onPress, own }: { item: Experience & { state: O
           <ShapeChip shape={item.shape} small />
           {own ? <StateChip state={item.state} pausedUntil={item.pausedUntil} /> : null}
           {own?.visibility ? <View style={[styles.chip, styles.chipOutlineSoft]}><Text style={[styles.chipText, { color: colors.inkMuted }]}>{own.visibility.toUpperCase()}</Text></View> : null}
+          {/* Four offers, four tag sets: the same host is not one category, and a
+              single bio would have flattened her into "History" (S13). */}
+          <SkillChips item={item} />
         </View>
         <Text style={[type.h3, { fontWeight: '600' }]} numberOfLines={2}>{item.title ?? 'Untitled'}</Text>
         <Text style={type.small} numberOfLines={1}>{item.whyYou && !own ? item.whyYou : metaLine(item)}</Text>
@@ -413,6 +449,11 @@ const styles = StyleSheet.create({
   chipSmall: { height: 18, paddingHorizontal: 6 },
   chipOutline: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.ink },
   chipOutlineSoft: { borderWidth: 1, borderColor: colors.ruleSoft },
+  // The expertise line on a card (S10): a lime tag, a ruled place, and a dashed
+  // moss chip for a word still in the queue.
+  chipLime: { backgroundColor: LIME },
+  chipPendingTag: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.accent },
+  skillRow: { flexDirection: 'row', gap: 5, flexWrap: 'wrap', paddingBottom: 2 },
   chipText: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.6 },
   chipTextSmall: { fontSize: 9 },
   face: { backgroundColor: LIME_TINT, alignItems: 'center', justifyContent: 'center' },

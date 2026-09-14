@@ -64,8 +64,20 @@ export function canonicalRedirect(req) {
 }
 
 /**
+ * An address somebody upstream can actually reach us on.
+ *
+ * Wikimedia's User-Agent policy asks for a contact and blocks without warning
+ * when it does not get one, and several other open services ask the same. The
+ * owner set `EPIC_CONTACT_EMAIL` in Doppler (13 Sep 2026) pointing at a real
+ * mailbox; the fallback is that same mailbox, so a local checkout with no
+ * environment is still polite rather than anonymous.
+ */
+export const contact = () => process.env.EPIC_CONTACT_EMAIL || 'support@epic.day';
+
+/**
  * What Epic calls itself when it fetches somebody else's page, and where they
  * can read about it. One string: eleven copies of a hostname is how the last
- * one went stale.
+ * one went stale — and one contact address, set centrally here rather than
+ * written out per call.
  */
-export const userAgent = (purpose) => `EpicBot/1.0 (+${APP_URL}; ${purpose})`;
+export const userAgent = (purpose) => `EpicBot/1.0 (+${APP_URL}; ${contact()}${purpose ? `; ${purpose}` : ''})`;

@@ -26,6 +26,7 @@ import { TellScreen } from './src/screens/voice/TellScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { HostScreen } from './src/screens/host/HostScreen';
 import { HostProfileScreen } from './src/screens/HostProfileScreen';
+import { TagScreen } from './src/screens/TagScreen';
 import { ExperienceScreen } from './src/screens/ExperienceScreen';
 import { BookingScreen } from './src/screens/BookingScreen';
 import { PeopleScreen } from './src/screens/PeopleScreen';
@@ -265,6 +266,12 @@ function Routed() {
   if (route.name === 'invited') return <InvitedScreen token={route.token} />;
   if (route.name === 'invitedLink') return <InvitedLinkScreen token={route.token} />;
   if (route.name === 'experience' && route.layer !== 'book' && route.layer !== 'ask') return <ExperienceScreen route={route} />;
+  /**
+   * A tag's page (Host Skills, S14): public for the same reason an experience
+   * page is — it is where "fossil hunting Jurassic Coast" lands, and asking a
+   * stranger for a passcode first would throw the traffic away.
+   */
+  if (route.name === 'tag') return <TagScreen tagKey={route.key} vocab={route.vocab} />;
   return <Gate route={route} />;
 }
 

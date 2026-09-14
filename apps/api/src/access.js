@@ -46,6 +46,11 @@ export const CAPABILITIES = [
   { key: 'manage_settings', area: 'Governance', label: 'Manage settings', note: 'Providers, sources and estate-wide configuration.', manages: true },
   { key: 'view_hosting', area: 'Hosting', label: 'See hosts and offers', note: 'Who hosts, what is waiting to be read, and what has been reported.' },
   { key: 'manage_hosting', area: 'Hosting', label: 'Review hosts and offers', note: 'Pass or send back a first pitch, set a host’s trust level, and resolve reports.', manages: true },
+  // Reading a vocabulary and changing it are separate, as 034 requires. A word
+  // approved into the tag list is a word every host is offered afterwards, so
+  // it is not the same privilege as reading the queue.
+  { key: 'view_skills', area: 'Hosting', label: 'See host skills', note: 'The browse categories, formats, tags, facets, credential types and the review queue.' },
+  { key: 'manage_skills', area: 'Hosting', label: 'Manage host skills', note: 'Approve, merge and reject proposed words, edit the vocabularies, and confirm credentials.', manages: true },
 ];
 
 export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));

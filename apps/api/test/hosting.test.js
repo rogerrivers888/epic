@@ -44,8 +44,15 @@ test('the set-up walks only the steps the three axes call for', async () => {
   const { stepsFor } = await import('../src/domain/hosting.js');
   assert.deepEqual(stepsFor({ shape: 'oneoff', visibility: 'invite', money: 'free' }, {}), ['plan', 'vis', 'event', 'invite', 'money', 'done'], 'a free private wedding is two steps and an invitation');
   assert.deepEqual(stepsFor({ shape: 'series', visibility: 'link', money: 'direct' }, {}), ['plan', 'vis', 'event', 'weeks', 'invite', 'money', 'done']);
+  // Public adds `skills` — what they are expert in, and what actually happens
+  // (Host Skills, 13 Sep 2026). It sits after `kind` because the prompt branches
+  // on the host type, and asking before that is known would put the Practitioner's
+  // question to the Local host, who would type nothing and leave.
   assert.deepEqual(stepsFor({ shape: 'anytime', visibility: 'public', money: 'epic', checks: ['qual'] }, { type: 'meetups' }),
-    ['plan', 'vis', 'event', 'numbers', 'money', 'basics', 'kind', 'subdetail', 'video', 'extract', 'checks', 'evidence', 'done']);
+    ['plan', 'vis', 'event', 'numbers', 'money', 'basics', 'kind', 'subdetail', 'skills', 'video', 'extract', 'checks', 'evidence', 'done']);
+  // A private offer is never asked: it goes to named people, and browse, filter
+  // and the tag pages are public surfaces.
+  assert.ok(!stepsFor({ shape: 'oneoff', visibility: 'invite', money: 'free' }, {}).includes('skills'));
 });
 
 test('a guest document seeds only what the host has not filled, and says which', async () => {
@@ -119,8 +126,13 @@ test('a held booking is decided two days before it runs; reviews publish a fortn
 
 test('what stops an offer publishing follows the brief', () => {
   const host = { type: 'skill', trust: 'verified', payout_status: 'connected', date_of_birth: '1980-01-01' };
-  const ok = { shape: 'oneoff', visibility: 'public', money: 'free', title: 'Supper', description: 'Three courses from the garden.', starts_on: '2026-10-01', price_mode: 'free', venue: 'out_about', video_id: 'v' };
+  // `category_key` and `format_key` are both required to go live and neither to
+  // draft (owner, 13 Sep 2026): browse and filter are public surfaces, and an
+  // offer nobody can find under anything is one nobody books.
+  const ok = { shape: 'oneoff', visibility: 'public', money: 'free', title: 'Supper', description: 'Three courses from the garden.', starts_on: '2026-10-01', price_mode: 'free', venue: 'out_about', venue_area: 'central Windsor', video_id: 'v', category_key: 'food-drink', format_key: 'workshop' };
   assert.deepEqual(publishBlockers(ok, host), []);
+  assert.match(publishBlockers({ ...ok, category_key: null }, host).join(' '), /what it is about/);
+  assert.match(publishBlockers({ ...ok, format_key: null }, host).join(' '), /what actually happens/);
   assert.match(publishBlockers({ ...ok, venue: 'their_place' }, host).join(' '), /Checked/);
   assert.match(publishBlockers({ ...ok, money: 'epic', price_mode: 'same_each', price_pence: 12000 }, host).join(' '), /above £100/);
   assert.deepEqual(publishBlockers({ ...ok, money: 'epic', price_mode: 'same_each', price_pence: 12000 }, { ...host, trust: 'checked' }), []);
@@ -142,7 +154,7 @@ test('a regulated city asks its one question and flags listing copy that reads l
   assert.equal(readsLikeCommentary('A tour of the Duomo'), true);
   assert.equal(readsLikeCommentary('A morning cooking together'), false);
   const host = { type: 'skill', trust: 'checked', payout_status: 'connected', date_of_birth: '1980-01-01' };
-  const florence = { shape: 'anytime', visibility: 'public', money: 'free', video_id: 'v', title: 'A morning cooking together', why_you: 'Twenty years in a trattoria kitchen.', venue_country: 'IT', venue: 'their_place', price_mode: 'free', availability: { days: [1], parts: ['morning'] } };
+  const florence = { shape: 'anytime', visibility: 'public', money: 'free', video_id: 'v', title: 'A morning cooking together', why_you: 'Twenty years in a trattoria kitchen.', venue_country: 'IT', venue: 'their_place', venue_area: 'central Florence', price_mode: 'free', availability: { days: [1], parts: ['morning'] }, category_key: 'food-drink', format_key: 'workshop' };
   assert.match(publishBlockers(florence, host).join(' '), /Italy/);
   assert.deepEqual(publishBlockers({ ...florence, regulated_answer: 'no_commentary' }, host), []);
   assert.match(publishBlockers({ ...florence, title: 'A tour of the Duomo', regulated_answer: 'no_commentary' }, host).join(' '), /reads like a guided tour/);
@@ -329,7 +341,10 @@ test('the price lives inside "is anyone paying", so a private paid event is stil
   assert.equal(laneA.filter((s) => s !== 'plan' && s !== 'done').length, 4, 'four steps after the branch');
   const laneB = stepsFor({ shape: 'oneoff', visibility: 'link', money: 'direct' }, {});
   assert.deepEqual(laneB, laneA, 'lane B is lane A, screen for screen');
-  assert.equal(stepsFor({ shape: 'oneoff', visibility: 'public', money: 'epic' }, { type: 'skill' }).filter((s) => s !== 'plan' && s !== 'done').length, 9);
+  // Public is ten after the branch, not nine, since Host Skills added the one
+  // that asks what they are expert in. The private lanes are untouched — which
+  // is the thing this test exists to hold.
+  assert.equal(stepsFor({ shape: 'oneoff', visibility: 'public', money: 'epic' }, { type: 'skill' }).filter((s) => s !== 'plan' && s !== 'done').length, 10);
 });
 
 test('a private offer is opened by its credential, never by its id', async () => {

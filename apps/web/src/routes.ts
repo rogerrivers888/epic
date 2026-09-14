@@ -242,9 +242,9 @@ export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips'
 
 export type AdminScreen =
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
-  | 'lookup' | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
+  | 'lookup' | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
 export const ADMIN_SCREENS: AdminScreen[] = [
-  'overview', 'accounts', 'households', 'activity', 'reporting', 'lookup', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'mail', 'roles', 'plans', 'audit', 'how',
+  'overview', 'accounts', 'households', 'activity', 'reporting', 'lookup', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'mail', 'roles', 'plans', 'audit', 'how',
 ];
 
 /**
@@ -301,6 +301,13 @@ export type Route =
   | { name: 'booking'; id: string; rate: boolean; chat?: ChatLayer }
   /** Passion-led discovery: the people near a trip who do what you love (`?trip=`, `?love=`). */
   | { name: 'people' }
+  /**
+   * A tag's own page (Host Skills, S14–S15): every host in Britain listed for
+   * it. Public and logged-out, because "fossil hunting Jurassic Coast" is a
+   * search people actually make and the long tail is built out of exactly these
+   * pages. `?where=` narrows it to where the guest is going.
+   */
+  | { name: 'tag'; key: string; vocab: 'tag' | 'facet' }
   | { name: 'prototypes'; section: PrototypeSection | null }
   | { name: 'admin'; screen: AdminScreen }
   /**
@@ -482,6 +489,17 @@ export function parseRoute(path: string): Route {
       return screen ? { name: 'admin', screen } : { name: 'unknown', path };
     }
 
+    /**
+     * A tag's page, and a facet's. Two heads rather than one with a query,
+     * because the path is the page: `/tags/fossil-hunting` and
+     * `/places-known/jurassic-coast` are different pages, not one page set two
+     * ways, and both are addresses somebody shares.
+     */
+    case 'tags':
+      return a && !b ? { name: 'tag', key: a, vocab: 'tag' } : { name: 'unknown', path };
+    case 'places-known':
+      return a && !b ? { name: 'tag', key: a, vocab: 'facet' } : { name: 'unknown', path };
+
     case 'join':
       return a ? { name: 'join', token: a } : { name: 'unknown', path };
 
@@ -574,6 +592,7 @@ export function hrefOf(route: Route): string {
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
     case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
     case 'people': return '/inspire/people';
+    case 'tag': return route.vocab === 'facet' ? buildHref(['places-known', route.key]) : buildHref(['tags', route.key]);
     case 'say':
       return route.steps ? '/say/steps'
         : route.intakeId ? buildHref(['say', route.intakeId, route.ask ? 'ask' : null])
@@ -685,6 +704,8 @@ export const paths = {
     const qs = q.toString();
     return qs ? `/inspire/people?${qs}` : '/inspire/people';
   },
+  /** A tag's page: everyone on Epic listed for it (S14). A facet has its own word in the path. */
+  tag: (key: string, vocab: 'tag' | 'facet' = 'tag') => buildHref([vocab === 'facet' ? 'places-known' : 'tags', key]),
   /** Trips › Booked with hosts. */
   bookings: () => '/trips?when=hosts',
   /** The spoken layer over one person: the recording, then the card of what was heard (D3, D4). */
@@ -851,6 +872,7 @@ export function tabOf(route: Route): Tab | null {
     // Saying what you are up for belongs to hosting; a trip's intake belongs to that trip.
     case 'open': return route.tripId ? 'trips' : 'host';
     case 'people': return 'inspire';
+    case 'tag': return 'inspire';
     case 'booking': return 'trips';
     case 'prototypes': return 'prototypes';
     default: return null;
@@ -912,6 +934,7 @@ export function parentOf(route: Route): string {
     case 'experience': return route.layer ? paths.experience(route.id) : '/inspire';
     case 'booking': return route.chat ? (route.chat.page === 'list' ? paths.booking(route.id) : paths.bookingChat(route.id)) : route.rate ? paths.booking(route.id) : paths.bookings();
     case 'people': return '/inspire';
+    case 'tag': return '/inspire/people';
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
     case 'welcome': return '/inspire';
@@ -960,6 +983,7 @@ export function titleOf(route: Route): string {
     case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
     case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');
     case 'people': return epic('Who does what you love?');
+    case 'tag': return epic(route.key.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
     case 'prototypes': return epic('Prototypes');
     case 'admin': return epic(`Back office — ${route.screen}`);
     case 'join': return epic('Your trip');

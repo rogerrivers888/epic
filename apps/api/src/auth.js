@@ -242,6 +242,15 @@ const PUBLIC = [
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/faq$/.test(req.path),
   (req) => req.method === 'POST' && /^\/api\/hosts\/[^/]+\/report$/.test(req.path),
   (req) => req.method === 'GET' && /^\/api\/media\/[^/]+$/.test(req.path),
+  /**
+   * The skills vocabulary, read-only (Host Skills, 13 Sep 2026). A tag landing
+   * page — "fossil hunting on the Jurassic Coast" — is where search traffic
+   * arrives, so it has to answer logged-out, and the guest's "what do you love
+   * doing?" picker reads the same rows as the host's. Nothing here is anybody's
+   * data: it is Epic's own words, the browse categories, and a count of public
+   * offers. Writing to any of it is the back office's, behind the admin door.
+   */
+  (req) => req.method === 'GET' && (req.path === '/api/skills' || req.path.startsWith('/api/skills/')),
   // An invitation to a private offer (13 Sep 2026): the token is the credential, and the answer is yes or no.
   (req) => /^\/api\/invited\/[^/]+$/.test(req.path),
   (req) => req.method === 'GET' && /^\/api\/invited\/link\/[^/]+$/.test(req.path),

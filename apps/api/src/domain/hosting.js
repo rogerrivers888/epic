@@ -275,7 +275,7 @@ export function ageGate(offer, party) {
  * their place and anything involving children need Checked; a night out is
  * 18+ with a minimum party; a regulated city needs its answer.
  */
-export function publishBlockers(offer, host) {
+export function publishBlockers(offer, host, evidence = null) {
   const out = [];
   const pub = offer.visibility === 'public';
   const paid = (offer.money ?? 'free') !== 'free';
@@ -291,6 +291,22 @@ export function publishBlockers(offer, host) {
   if (offer.money === 'epic' && host.payout_status !== 'connected') out.push('Connect payouts before charging — you can publish a free one now.');
   // Public means we advertise a person: identity, a video, and what backs it up.
   if (pub) {
+    // Both mandatory to go live, neither to draft (owner, 13 Sep 2026). The
+    // step keeps its own "Skip for now" — the category is inferred from the
+    // tags and can be set directly — so this is asked here, where a host is
+    // already being told what is missing, rather than blocking the wizard.
+    if (!offer.category_key) out.push('Say what it is about — tag it, or pick a category.');
+    if (!offer.format_key) out.push('Say what actually happens — a walk, a workshop, a dig.');
+    /**
+     * A credential that is a condition of hosting rather than a badge.
+     *
+     * A food business registration is the law, not a boast, and `walking`,
+     * `on-the-water` and `families` carry one each. `evidence` is the types and
+     * what this host holds, loaded by the caller; when it is not supplied the
+     * check is skipped, so a pure caller still gets an honest answer about
+     * everything else (Codex, 13 Sep 2026).
+     */
+    for (const missing of missingCredentials(offer, host, evidence)) out.push(missing);
     if (!host.date_of_birth) out.push('Your date of birth — hosts are eighteen or over.');
     if (!host.type) out.push('Say what kind of host you are.');
     if (!offer.video_id) out.push('A video for this offer — people book the person.');
@@ -307,6 +323,18 @@ export function publishBlockers(offer, host) {
       if (!night.venues?.trim()) out.push('Name the venues. Guests see them before they book.');
       if (!night.endTime) out.push('Give the night an end time.');
     }
+    /**
+     * Somewhere to turn up to.
+     *
+     * An offer that is not online has to say where, at least as an area. It is
+     * asked at the venue step, but a host can arrive here without one — by
+     * moving an online offer back to a walk, for instance, which clears the
+     * place the online switch took away (Codex, 13 Sep 2026). "A meeting point"
+     * and no meeting point are not the same listing.
+     */
+    if (offer.venue !== 'online' && !offer.venue_area?.trim() && !offer.venue_label?.trim()) {
+      out.push('Say where it happens — the area is enough before they book.');
+    }
     if (offer.venue === 'their_place' && host.trust === 'verified') out.push('Hosting at your place needs the Checked level. Ask for it from your profile.');
     if (host.type === 'skill' && (offer.price_pence ?? 0) > CHECKED_ABOVE_PENCE && host.trust === 'verified') out.push('A skill offer above £100 needs the Checked level.');
     if (isRegulated(offer.venue_country) && !offer.regulated_answer) out.push(`Hosting in ${REGULATED_COUNTRIES[offer.venue_country.toUpperCase()]} asks one more question.`);
@@ -316,6 +344,70 @@ export function publishBlockers(offer, host) {
     }
   }
   return out;
+}
+
+/**
+ * Which credentials this offer's category requires and this host does not hold.
+ *
+ * Held, here, means **confirmed and in date**. A claim waiting in the back
+ * office is not evidence yet, a refused one never was, and a confirmation that
+ * has gone stale is a document nobody has looked at for three years — so none
+ * of the three opens a gated category. A type that asks for no evidence cannot
+ * gate anything and is filtered out with the rest.
+ */
+export function missingCredentials(offer, host, evidence) {
+  if (!evidence?.types?.length || !offer.category_key) return [];
+  const held = new Map((evidence.credentials ?? []).map((c) => [c.type_key, c]));
+  const today = new Date().toISOString().slice(0, 10);
+
+  /**
+   * The credentials this category gates are **alternatives, not a set**.
+   *
+   * `on-the-water` is gated by both a paddlesport award and an open-water swim
+   * award; requiring both would mean nobody could run a sailing morning without
+   * two qualifications, one of them for a different activity (Codex, 13 Sep
+   * 2026). So the rule is: where a category is gated, the host must hold **one**
+   * of the credentials that gate it.
+   *
+   * A category needing two things at once cannot be expressed here, and
+   * deliberately: that is a rule about one activity, not about a bucket of
+   * sixteen, and it belongs on the offer rather than on the browse category.
+   */
+  const gates = evidence.types.filter((type) => type.active
+    && (type.gates_categories ?? []).includes(offer.category_key)
+    && (!host?.type || (type.host_types ?? []).includes(host.type)));
+  if (!gates.length) return [];
+
+  /**
+   * Holding it. Confirmed and in date — or, for a type that asks for no
+   * evidence, stated.
+   *
+   * A gate on a no-evidence type could otherwise never be cleared: a host can
+   * only ever put one of those in `stated`, and requiring `confirmed` would
+   * lock that category shut for ever (Codex, 13 Sep 2026). A gate like that is
+   * a weak gate, and the back office says so where it is set — but a weak gate
+   * is better than one nobody can pass.
+   */
+  const current = (type) => {
+    const mine = held.get(type.key);
+    if (!mine) return false;
+    if (!type.evidence_required) return mine.state === 'stated' || mine.state === 'confirmed';
+    return mine.state === 'confirmed' && (!mine.expires_on || mine.expires_on >= today);
+  };
+  if (gates.some(current)) return [];
+
+  // Nothing in date. Say it once, naming what would clear it, and say where
+  // each of them stands — a claim waiting to be checked is not the same news as
+  // never having sent one.
+  const waiting = gates.filter((t) => t.evidence_required && held.get(t.key)?.state === 'pending');
+  if (waiting.length) {
+    return [`${waiting.map((t) => t.label).join(' or ')} is with us to check. This kind of offer goes live once somebody has seen it.`];
+  }
+  const stale = gates.filter((t) => t.evidence_required && held.get(t.key)?.state === 'confirmed');
+  if (stale.length) {
+    return [`${stale.map((t) => t.label).join(' or ')} needs renewing — the one we saw has run out.`];
+  }
+  return [`${gates.map((t) => t.label).join(' or ')} is needed to host this kind of thing. Add it under what backs you up.`];
 }
 
 /**
@@ -355,6 +447,17 @@ export function stepsFor(offer, host) {
   if (pub) {
     steps.push('basics', 'kind');
     if (host?.type === 'meetups') steps.push('subdetail');
+    // What they are expert in, and what actually happens (Host Skills, 13 Sep
+    // 2026). **After `kind`, not before it**: the prompt and the suggestion
+    // order are the only things that change between a Practitioner, a Guide and
+    // a Local, and asking before the host type is known would put the wrong
+    // question to the one host a skills taxonomy loses.
+    //
+    // Public only. Browse, filter and the tag pages are public surfaces, and a
+    // private offer goes to named people who were sent it — adding a step to
+    // the four the lanes work fixed would be friction for nothing. A private
+    // offer may still carry tags; it is simply never asked for them.
+    steps.push('skills');
     steps.push('video', 'extract', 'checks');
     if ((offer.checks ?? []).length) steps.push('evidence');
   }

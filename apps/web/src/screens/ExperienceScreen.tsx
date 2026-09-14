@@ -20,8 +20,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { api, Booking, Experience, PartyMember, PaymentsConfig } from '../api';
-import { colors, fonts, spacing, TARGET, type, BORDER } from '../theme';
+import { api, Booking, Experience, PartyMember, PaymentsConfig, PublicHost, TrustLevel } from '../api';
+import { colors, fonts, spacing, INK, LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Row, Segmented, StatusLine } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
@@ -189,6 +189,9 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
             {host.isNew ? <NewOnEpic /> : <View />}
             <Press onPress={() => navigate(paths.hostTrust(host.id))} accessibilityRole="button"><Text style={styles.link}>What {host.checks === 'running' ? 'checks running' : TRUST_LABEL[host.trust]} means ›</Text></Press>
           </Row>
+
+          {/* Three different kinds of claim, adjacent and distinct (Host Skills, S12). */}
+          <Expertise offer={offer} host={host} onTag={(key, vocab) => navigate(paths.tag(key, vocab))} onTrust={() => navigate(paths.hostTrust(host.id))} />
 
           {/* What changes by shape. */}
           {offer.shape === 'oneoff' ? <OneOffBody offer={offer} /> : offer.shape === 'series' ? <SeriesBody offer={offer} /> : <AnytimeBody offer={offer} onPick={() => navigate(keyed(paths.experienceBook(offer.id)))} />}
@@ -669,7 +672,104 @@ export function ReportBox({ hostId, offerId, onDone }: { hostId: string; offerId
   );
 }
 
+/**
+ * What this person is expert in, where, and what backs it up (S12).
+ *
+ * Three claims of different kinds, sitting next to each other and never inside
+ * each other:
+ *
+ *   1. **the tags** — what she does, tappable through to what each means and
+ *      everyone else who does it;
+ *   2. **the place facet** — a different kind of fact, so a different chip;
+ *   3. **a 2px ink rule, then the evidence** — the trust shield and what we
+ *      have actually seen.
+ *
+ * *Evidence sits next to expertise and never inside it.* Tags say what she
+ * does; the shield says what we have checked. **No tag ever gets a badge of its
+ * own** — no verified expertise, no expert score. Credibility comes from the
+ * trust ladder already designed, and a third ladder here would undermine both.
+ */
+function Expertise({ offer, host, onTag, onTrust }: {
+  offer: Experience; host: PublicHost; onTag: (key: string, vocab: 'tag' | 'facet') => void; onTrust: () => void;
+}) {
+  const tags = offer.tags ?? [];
+  const place = (offer.facets ?? [])[0] ?? null;
+  const first = host.name.split(' ')[0];
+  // The expertise half is drawn only when there is some; the evidence half is
+  // always drawn, because an offer with a category and no tags — or one written
+  // before any of this existed — still has a trust level and credentials, and
+  // hiding them was hiding the thing a guest reads before booking (Codex,
+  // 13 Sep 2026).
+  return (
+    <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
+      {tags.length || place ? (
+        <>
+      <Kicker>WHAT {first.toUpperCase()} IS EXPERT IN</Kicker>
+      <Row style={{ flexWrap: 'wrap' }}>
+        {tags.map((t, i) => (
+          <Press
+            key={`${t.key ?? t.raw}-${i}`}
+            onPress={() => t.key && onTag(t.key, 'tag')}
+            disabled={!t.key}
+            accessibilityRole={t.key ? 'button' : undefined}
+            style={[styles.tagChip, i === 0 && !t.pending ? styles.tagChipFirst : null, t.pending && styles.tagChipPending]}
+          >
+            <Text style={[styles.tagChipText, i === 0 && !t.pending ? { color: INK } : null, t.pending && { color: colors.accent }]}>{t.label}</Text>
+            {t.key ? <Icon name="more" size={13} color={i === 0 ? INK : colors.inkMuted} /> : null}
+          </Press>
+        ))}
+      </Row>
+      <Text style={type.small}>Tap a tag for what it means, and everyone else who does it.</Text>
+      {place ? (
+        <Press onPress={() => place.key && onTag(place.key, 'facet')} disabled={!place.key} accessibilityRole={place.key ? 'button' : undefined} style={styles.facetRow}>
+          <Icon name="address" size={16} color={colors.inkMuted} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[type.body, { fontWeight: '700' }]}>{place.label}</Text>
+            {offer.venueArea ? <Text style={type.small}>{offer.venueArea}</Text> : null}
+          </View>
+        </Press>
+      ) : null}
+        </>
+      ) : null}
+      {/* The rule is the point: what we have seen is not what she says she does. */}
+      <View style={styles.evidenceRule} />
+      <Kicker>WHAT BACKS IT UP</Kicker>
+      <Press onPress={onTrust} accessibilityRole="button" style={styles.evidenceRow}>
+        <TrustBadge trust={host.trust} checks={host.checks} />
+        <Text style={[type.small, { flex: 1 }]}>{TRUST_LABEL[host.trust as TrustLevel]} — what that means ›</Text>
+      </Press>
+      {/**
+       * The credentials, each saying how it is known. "We have seen this" and
+       * "she told us this" are different facts, and a page that draws them the
+       * same way is worth less than one that draws neither.
+       */}
+      {(host.credentialsShown ?? []).map((e) => (
+        <View key={e.label} style={styles.evidenceRow}>
+          <Icon name={e.how === 'confirmed' ? 'checked' : 'info'} size={15} color={e.how === 'confirmed' ? colors.accent : colors.inkMuted} />
+          <Text style={[type.small, { flex: 1 }]}>
+            {e.label}
+            <Text style={{ color: colors.inkMuted }}>
+              {e.how === 'confirmed' ? ` · seen${e.at ? ` ${dateOnly(e.at)}` : ''}` : ' · as stated'}
+            </Text>
+          </Text>
+        </View>
+      ))}
+      {/* What the host wrote about themselves, kept and labelled as theirs. */}
+      {(host.credentials ?? []).length ? (
+        <Text style={type.small}>{(host.credentials ?? []).join(' · ')} <Text style={{ color: colors.inkMuted }}>· in their own words</Text></Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  tagChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.warm, borderWidth: 1, borderColor: colors.ruleSoft, paddingHorizontal: 10, paddingVertical: 7 },
+  tagChipFirst: { backgroundColor: LIME, borderColor: LIME },
+  tagChipPending: { backgroundColor: colors.surface, borderStyle: 'dashed', borderColor: colors.accent },
+  tagChipText: { fontSize: 13.5, fontWeight: '700', color: colors.ink },
+  facetRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: colors.ruleSoft, backgroundColor: colors.warm, paddingHorizontal: 11, paddingVertical: 10 },
+  evidenceRule: { height: 2, backgroundColor: colors.line, marginTop: spacing.sm },
+  evidenceRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
   scroll: { paddingBottom: 140, backgroundColor: colors.bg },
   scrollWide: { maxWidth: 760, alignSelf: 'center', width: '100%' },

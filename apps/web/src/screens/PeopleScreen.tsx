@@ -9,6 +9,23 @@
  *
  * `/inspire/people?trip=<id>&love=painting`. A page of Inspire: it keeps the
  * tab bar and draws its own head.
+ *
+ * Host Skills (13 Sep 2026) gives this screen the guest end of the vocabulary.
+ * Two things arrive:
+ *
+ *   · **the picker (S16)** — "What do you love doing?" is the same component
+ *     over the same rows as the host's "What are you an expert in?", with the
+ *     same breadcrumbs and the same counts. The only differences are that a
+ *     guest is never offered "add it as it is", and the host side never shows a
+ *     zero count. Picking one goes to that tag's page.
+ *   · **the browse row (S17)** — sixteen categories, horizontally scrollable,
+ *     chosen once. It must not grow with the vocabulary: thousands of tags live
+ *     behind search, the cards and the tag pages, and a filter row that grows
+ *     stops working by month three.
+ *
+ * The older passion chips stay under the row while offers still carry the
+ * single word. They empty out on their own as those offers are edited; nothing
+ * was taken away to make room.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -23,6 +40,7 @@ import { useViewport } from '../hooks/useViewport';
 import { useRouter, useQueryState, asText } from '../router';
 import { paths } from '../routes';
 import { ExperienceCard } from '../components/hosting';
+import { TagPicker, PickedTag } from '../components/TagPicker';
 
 const WIDE = 900;
 const dates = (t: TripDetail | null) => (t?.trip.startDate ? `${new Date(`${t.trip.startDate}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric' })}–${new Date(`${(t.trip.endDate ?? t.trip.startDate)}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : null);
@@ -69,6 +87,9 @@ export function PeopleScreen({ household }: { household: HouseholdResponse | nul
   const top = (near?.passions ?? []).slice(0, 4);
   const rest = (near?.allPassions ?? []).filter((p) => !top.some((t) => t.key === p.key));
   const [more, setMore] = useState(false);
+  /** The guest's picker holds nothing: choosing a tag is a move to its page, not a filter. */
+  const [picked, setPicked] = useState<PickedTag[]>([]);
+  const browseLabel = near?.browse?.find((c) => c.key === love)?.label ?? null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -82,6 +103,34 @@ export function PeopleScreen({ household }: { household: HouseholdResponse | nul
         <Text style={[type.small, { marginTop: 4 }]}>
           {trip ? `You are there ${dates(trip) ?? 'soon'}. ` : ''}Pick what you are into and meet the people near {trip ? 'your trip' : 'you'} who do it too.
         </Text>
+
+        {/* The guest end of the vocabulary: the same field the host types into. */}
+        <View style={{ marginTop: spacing.lg }}>
+          <TagPicker
+            value={picked}
+            onChange={(next) => { setPicked([]); const first = next[next.length - 1]; if (first?.key) navigate(paths.tag(first.key)); }}
+            guest
+            cap={1}
+            cardLine={false}
+            label="What you love"
+            placeholder="Search anything — fossils, sourdough, playgrounds"
+          />
+        </View>
+
+        {/* Sixteen buckets, scrolled sideways, chosen once. */}
+        {near?.browse?.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.browseRow} style={{ marginTop: spacing.md, marginHorizontal: -20 }}>
+            {near.browse.map((c) => {
+              const on = love === c.key;
+              return (
+                <Press key={c.key} onPress={() => setLove(on ? null : c.key)} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.browseChip, on && styles.browseChipOn]}>
+                  <Text style={[styles.browseChipText, on && { color: colors.primaryFg }]}>{c.label}</Text>
+                  {c.people ? <Text style={[styles.browseChipCount, on && { color: colors.primaryFg }]}>{c.people}</Text> : null}
+                </Press>
+              );
+            })}
+          </ScrollView>
+        ) : null}
 
         {/* The passions with somebody behind them, big; the rest as a row. */}
         {top.length ? (
@@ -110,7 +159,7 @@ export function PeopleScreen({ household }: { household: HouseholdResponse | nul
         </Row>
 
         <View style={styles.head}>
-          <Text style={type.h2}>{love ? `${near?.allPassions.find((p) => p.key === love)?.label ?? love} in ${place}` : `People in ${place}`}{shown.length ? ` · ${new Set(shown.map((s) => s.hostId)).size}` : ''}</Text>
+          <Text style={type.h2}>{love ? `${browseLabel ?? near?.allPassions.find((p) => p.key === love)?.label ?? love} in ${place}` : `People in ${place}`}{shown.length ? ` · ${new Set(shown.map((s) => s.hostId)).size}` : ''}</Text>
           {trip ? <Text style={type.small}>While you are there</Text> : null}
         </View>
 
@@ -156,4 +205,10 @@ const styles = StyleSheet.create({
   cell: { width: '100%' },
   cellWide: { width: '48%' },
   who: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: colors.accent },
+  /** The browse row (S17): first chip ink when chosen, the rest ruled warm grey. */
+  browseRow: { flexDirection: 'row', gap: 7, paddingHorizontal: 20 },
+  browseChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.ruleSoft, backgroundColor: colors.warm, paddingHorizontal: 12, paddingVertical: 9 },
+  browseChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  browseChipText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink },
+  browseChipCount: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: colors.inkMuted },
 });

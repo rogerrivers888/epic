@@ -110,6 +110,24 @@ export function storable(fullPath: string, body: any): any | null {
   if (/^\/api\/experiences\/[^/]+$/.test(p) && !/\/(near|passions)$/.test(p)) return body;
   if (/^\/api\/hosts\/[^/]+$/.test(p)) return body;
 
+  /**
+   * The host-skills vocabulary (13 Sep 2026).
+   *
+   * `/api/skills` is the sixteen browse categories and the thirteen formats:
+   * Epic's own words, written here, a couple of kilobytes, and the thing a
+   * filter row needs to draw at all. It is named deliberately so that row still
+   * draws with no signal.
+   *
+   * Nothing else from the skills work is here, and that is the decision rather
+   * than an omission. `/api/host/skills/suggest` is a query answered against a
+   * table that grows every day, so a stale copy would quietly suggest a word
+   * that has since been merged away; `/api/skills/tag/…/hosts` is a page of
+   * other people's live offers, which is exactly the kind of thing that goes
+   * wrong when it is a day old. Both are online-only, and the fallback — an
+   * endpoint not named here is not saved — is what keeps them that way.
+   */
+  if (p === '/api/skills') return body;
+
   // --- the owned layer: researched by us, under licences that do not run out ---
   if (p === '/api/offline/records' || p === '/api/places/record') return body;
 
