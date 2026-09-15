@@ -211,7 +211,7 @@ export async function carriedByWord() {
  * triggers do this for a brought value; a drawer's default and a place's own
  * answer had no equivalent.
  */
-async function mustFit(attributeKey, value) {
+export async function mustFit(attributeKey, value) {
   const { byKey } = await attributes();
   const a = byKey.get(attributeKey);
   if (!a) throw bad(`${attributeKey} is not one of our secondary labels.`);

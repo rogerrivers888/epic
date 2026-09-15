@@ -1062,6 +1062,12 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
             namespace: 'wikidata', key: parsed.key, decision: null,
             active: rows[0]?.active ?? null, points_at: rows[0]?.points_at ?? null,
           });
+          // `taxonomy_label_carries` is keyed on namespace and key, so a
+          // Wikidata type carries labels like any other word, and skipping it
+          // here meant Undo could not put those back (Codex, 15 Sep 2026).
+          const { rows: hadW } = await query(
+            'select * from taxonomy_label_carries where namespace = $1 and key = $2', ['wikidata', parsed.key]);
+          undo.carries.push({ namespace: 'wikidata', key: parsed.key, rows: hadW });
           continue;
         }
         const { rows } = await query(
@@ -1102,10 +1108,15 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           done.push({ labels, unanswered: true });
           continue;
         }
-        // An item may say what the word *also* means. Applied with the answer,
-        // so taking a recommendation is one act: the answer and the labels go
-        // together or neither does (Codex, 15 Sep 2026).
+        // An item may say what the word *also* means, applied with the answer
+        // so that taking a recommendation is one act. Every value is checked
+        // *before* anything is written: a bad one used to fail the item after
+        // the answer had already committed, leaving it half applied with no
+        // undo token (Codex, 15 Sep 2026).
         const carries = Array.isArray(it.carries) ? it.carries : [];
+        for (const c of carries) {
+          if (c?.value != null) await placeAttributes.mustFit(String(c?.attribute ?? ''), c.value);
+        }
         if (it.aside || it.nearby || it.travel || it.generic) {
           if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
@@ -1172,7 +1183,9 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
     // Only where something actually changed: a batch that failed wholesale has
     // nothing to take back and an Undo that does nothing is worse than none.
     let undoId = null;
-    if (done.length) {
+    // Anything that changed, not only what succeeded: an item that wrote and
+    // then threw is exactly the one somebody needs to take back.
+    if (done.length || undo.labels.length || undo.deleted.length || undo.made.length) {
       const { rows } = await query(
         'insert into taxonomy_undo (by, snapshot) values ($1, $2) returning id',
         [actorOf(req), JSON.stringify(undo)]);
