@@ -39,7 +39,7 @@ import * as notSure from '../repositories/notSure.js';
 import { recommendForWord, research } from '../domain/research.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
-import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
+import { NAMESPACES, labelsOfAtlas, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
 import { knownLabels, landingOf, landingOfSet, venueForGoogleTypes } from '../domain/landing.js';
 import { suggestFor, sureDecisionFor, sureMappingFor, WHY_UNSURE } from '../domain/googleSuggest.js';
 import { examplesOfType } from '../sources/google.js';
@@ -372,20 +372,38 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
       taxonomy.taxonomy(), shelfRules.rules(), placeAttributes.attributes(),
     ]);
     if (!tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
-    const all = await library.listAttractions({ limit: 4000 });
+    // Every page, not the first four thousand: the atlas is bigger than one
+    // page and a drawer's list has to be the drawer (Codex, 15 Sep 2026).
+    const all = [];
+    for (let offset = 0; ; offset += 1000) {
+      const page = await library.listAttractions({ limit: 1000, offset });
+      all.push(...page);
+      if (page.length < 1000) break;
+    }
+    // Most harvested attractions have no venue_ref, and keying them all on null
+    // made them one place: a bulk edit would have written every change against
+    // the string "null" (Codex, 15 Sep 2026).
+    const refOf = (a) => a.venue_ref
+      ?? (a.wikidata_id ? `wikidata:${a.wikidata_id}` : null)
+      ?? (a.external_ref ? String(a.external_ref) : null)
+      ?? (a.slug ? `atlas:${a.slug}` : null);
     // Where each one lands is the resolver's answer, not a stored column: a
     // place's drawer is worked out from its labels every time.
-    const mine = all.filter((a) => shelvesForAtlas({
-      ref: a.venue_ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
-    }, rules, tax.vocab).subcategory === subcategory);
-    const own = await placeAttributes.valuesForMany(mine.map((a) => a.venue_ref).filter(Boolean));
+    const mine = all
+      .map((a) => ({ a, ref: refOf(a), words: labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] }) }))
+      .filter(({ a, ref }) => ref && shelvesForAtlas({
+        ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
+      }, rules, tax.vocab).subcategory === subcategory);
+    const own = await placeAttributes.valuesForMany(mine.map((x) => x.ref));
     res.json({
       subcategory,
       attributes: vocab.list.filter((a) => a.active),
-      places: mine.map((a) => ({
-        ref: a.venue_ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
+      places: mine.map(({ a, ref, words }) => ({
+        ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
         website: a.website ?? null,
-        values: placeAttributes.resolveFor({ subcategory }, own.get(a.venue_ref) ?? new Map(), vocab),
+        // The same words it was filed by, so a label its own words carry shows
+        // as carried rather than as unset (Codex, 15 Sep 2026).
+        values: placeAttributes.resolveFor({ subcategory, words }, own.get(ref) ?? new Map(), vocab),
       })).sort((x, y) => String(x.name).localeCompare(String(y.name))),
     });
   } catch (err) { next(err); }

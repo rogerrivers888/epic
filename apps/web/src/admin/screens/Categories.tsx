@@ -1493,6 +1493,8 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState('');
+  /** Which range is being typed — one place's, or every ticked one ('*'). */
+  const [range, setRange] = useState<{ ref: string; key: string; from: string; to: string } | null>(null);
 
   const load = useCallback(async () => {
     try { setData(await api.taxonomyDrawer(sc.key)); } catch { setData(null); }
@@ -1500,7 +1502,9 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   useEffect(() => { void load(); }, [load]);
 
   if (!data) return null;
-  const cols = data.attributes.filter((a) => a.kind !== 'range');
+  // Ranges included. "Suits ages X to Y" is the example he gave for what this
+  // screen is for, and I had filtered its column out (Codex, 15 Sep 2026).
+  const cols = data.attributes;
   const needle = q.trim().toLowerCase();
   const rows = needle ? data.places.filter((p) => p.name.toLowerCase().includes(needle)) : data.places;
 
@@ -1532,7 +1536,11 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
       {canManage && ticked.size ? (
         <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
           <Text style={[type.small, { fontWeight: '700' }]}>{ticked.size} ticked</Text>
-          {cols.map((a) => (
+          {cols.filter((a) => a.kind === 'range').map((a) => (
+            <TextAction key={a.key} label={a.label} disabled={busy}
+                        onPress={() => setRange({ ref: '*', key: a.key, from: '', to: '' })} />
+          ))}
+          {cols.filter((a) => a.kind !== 'range').map((a) => (
             <DrillDropdown
               key={a.key} label={a.label} value={a.label} width={240}
               groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
@@ -1574,7 +1582,12 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
             const mine = v?.setAt === 'place';
             return (
               <View key={a.key} style={[styles.tCell, { width: 116, alignItems: 'flex-end' }]}>
-                {canManage ? (
+                {canManage && a.kind === 'range' ? (
+                  <Press effect="none" onPress={() => setRange({ ref: pl.ref, key: a.key, from: String(v?.from ?? ''), to: String(v?.to ?? '') })}
+                         accessibilityRole="button" accessibilityLabel={`Set ${a.label} for ${pl.name}`}>
+                    <Text style={[type.small, v && !mine ? { color: colors.accent } : null]}>{reads(v)}</Text>
+                  </Press>
+                ) : canManage ? (
                   <DrillDropdown
                     label={a.label} showLabel={false} value={reads(v)} set={Boolean(v) && !mine} align="right" width={220}
                     groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
@@ -1601,6 +1614,41 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
         </View>
       ))}
       {!rows.length ? <Text style={[type.small, styles.emptyRow]}>Nothing matches.</Text> : null}
+      {/* Two numbers, for the one kind of label that takes them. */}
+      {range ? (
+        <View style={[styles.line, { gap: spacing.sm, paddingTop: spacing.sm }]}>
+          <Text style={type.tiny}>{data.attributes.find((a) => a.key === range.key)?.label}</Text>
+          <Field value={range.from} onChangeText={(t) => setRange({ ...range, from: t })} autoFocus style={{ width: 62 }} />
+          <Text style={type.tiny}>to</Text>
+          <Field value={range.to} onChangeText={(t) => setRange({ ...range, to: t })} style={{ width: 62 }} />
+          <TextAction label="Set" disabled={busy} onPress={() => {
+            const num = (t: string) => (t.trim() === '' ? null : Number.isFinite(Number(t)) ? Number(t) : null);
+            const value = { from: num(range.from), to: num(range.to) };
+            void (async () => {
+              setBusy(true);
+              try {
+                if (range.ref === '*') await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value });
+                else await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value });
+                setRange(null); if (range.ref === '*') setTicked(new Set());
+                await load();
+                await onChanged('Set.');
+              } catch (err) { await onChanged(String((err as Error).message)); }
+              finally { setBusy(false); }
+            })();
+          }} />
+          <TextAction label="Clear it" tone="muted" disabled={busy} onPress={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                if (range.ref === '*') await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value: null });
+                else await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value: null });
+                setRange(null); await load(); await onChanged('Back to what it inherits.');
+              } finally { setBusy(false); }
+            })();
+          }} />
+          <TextAction label="Cancel" tone="muted" onPress={() => setRange(null)} />
+        </View>
+      ) : null}
     </View>
   );
 }
