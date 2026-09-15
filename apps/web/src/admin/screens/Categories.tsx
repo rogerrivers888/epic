@@ -185,6 +185,14 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
   const [cat, setCat] = useQueryState<string>('cat', '', asText);
   const [view, setView] = useQueryState<View_>('view', 'subcategories', asOneOf(['subcategories', 'providers', 'google', 'words', 'left'] as const, 'subcategories'));
   /** Which of the three doors is open (the handoff, 14 Sep 2026). */
+  /**
+   * The same two keys `OurLabels` reads. Both are in the address, so setting
+   * them here and letting that screen pick them up is how a word row opens the
+   * drawer it lands in (owner, 15 Sep 2026: "when I click on any of these rows
+   * it does not open into a new screen? That was my expectation").
+   */
+  const [, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'secondary', asOneOf(['secondary', 'primary'] as const, 'secondary'));
+  const [, setOpenLabel] = useQueryState<string>('label', '', asText);
   const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats', 'notsure', 'shelves'] as const, 'words'));
 
   // Anyone arriving on the old /admin/shelves address gets the door it became,
@@ -428,7 +436,8 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       ) : null}
 
       {door === 'words' && tax && (shown === 'google' || shown === 'left') ? (
-        <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} view={shown} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed} />
+        <GoogleView tax={tax} wide={wide} roomy={width >= 1200} by={by} view={shown} catLabel={catLabel} subLabel={subLabel} canManage={canManage} onChanged={changed}
+                    onOpenDrawer={(k) => { setDoor('ours'); setHalf('primary'); setOpenLabel(k); }} />
       ) : null}
 
       {door === 'words' && tax && shown === 'words' ? (
@@ -2906,10 +2915,12 @@ function Carries({ r, secondary, onChanged }: {
   );
 }
 
-function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage, onChanged }: {
+function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage, onChanged, onOpenDrawer }: {
   tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours' | 'subs'; view: View_;
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
+  /** Open one of our subcategories on its own page (BO8). */
+  onOpenDrawer: (key: string) => void;
 }) {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [group, setGroup] = useQueryState<string>('group', '', asText);
@@ -3502,6 +3513,19 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           }}
                           startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
+                        {/* The drawer a word lands in is a way into that drawer.
+                            The owner, 15 Sep 2026: "when I click on any of these
+                            rows it does not open into a new screen? That was my
+                            expectation." BO8 is a page about one of *our*
+                            subcategories, not about Google's word — but the
+                            answer on this row names that subcategory, and from
+                            there it should be one press. */}
+                        {st === 'mapped' && r.landing.subcategory ? (
+                          <TextAction
+                            label={`Open ${subLabel(r.landing.subcategory)}`}
+                            onPress={() => onOpenDrawer(r.landing.subcategory as string)}
+                          />
+                        ) : null}
                         {/* "Approve is an outline that fills on hover — lime label
                             on a 1.5px lime underline, going to solid lime
                             ink-on-lime. Twenty of them read as a quiet right-hand
