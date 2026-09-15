@@ -1659,7 +1659,14 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                     </View>
                   </View>
                 ))}
-                {compound.map(({ rule, words }) => (
+                {/* Every label, including the drawer's own where a rule names
+                    it alongside another: hiding it left "All together · Art
+                    galleries" beside a Remove that deleted two conditions
+                    (Codex, 15 Sep 2026). It is only dropped where it is the
+                    whole rule, which is drawn nowhere. */}
+                {compound.map(({ rule }) => {
+                  const words = rule.labelList ?? [];
+                  return (
                   <View key={rule.id} style={styles.wordRow}>
                     <Text style={[type.small, { width: 130, color: colors.inkMuted }]} numberOfLines={1}>All together</Text>
                     {/* Every condition, not a truncated line: the Remove beside
@@ -1688,7 +1695,8 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                                   )} />
                     ) : null}
                   </View>
-                ))}
+                  );
+                })}
               </>
             );
           })()}
