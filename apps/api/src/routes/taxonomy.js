@@ -374,9 +374,13 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
     if (!tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
     // Every page, not the first four thousand: the atlas is bigger than one
     // page and a drawer's list has to be the drawer (Codex, 15 Sep 2026).
+    // The library, not the harvest. `candidate` rows are raw finds — many with
+    // no name yet, which is why the list opened on five places called "(art
+    // gallery)" (15 Sep 2026, on production). They can be asked for.
+    const state = req.query.state === 'all' ? null : String(req.query.state || 'published');
     const all = [];
     for (let offset = 0; ; offset += 1000) {
-      const page = await library.listAttractions({ limit: 1000, offset });
+      const page = await library.listAttractions({ limit: 1000, offset, ...(state ? { state } : {}) });
       all.push(...page);
       if (page.length < 1000) break;
     }
@@ -396,7 +400,7 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
       }, rules, tax.vocab).subcategory === subcategory);
     const own = await placeAttributes.valuesForMany(mine.map((x) => x.ref));
     res.json({
-      subcategory,
+      subcategory, state: state ?? 'all',
       attributes: vocab.list.filter((a) => a.active),
       places: mine.map(({ a, ref, words }) => ({
         ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,

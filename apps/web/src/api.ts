@@ -2451,12 +2451,12 @@ export const api = {
       said: { primary: string | null; secondary: { key: string; label: string; choice: string | null }[]; because: string; source: string } | null;
     }>('/api/admin/taxonomy/word', body),
   /** Every place the labels file into one drawer, with its secondary labels. */
-  taxonomyDrawer: (subcategory: string) =>
+  taxonomyDrawer: (subcategory: string, state?: 'published' | 'candidate' | 'all') =>
     request<{
-      subcategory: string;
+      subcategory: string; state: string;
       attributes: PlaceAttribute[];
       places: { ref: string; name: string; region: string | null; website: string | null; values: Record<string, AttributeValue> }[];
-    }>(`/api/admin/taxonomy/drawer${qs({ subcategory })}`),
+    }>(`/api/admin/taxonomy/drawer${qs({ subcategory, state })}`),
   /** One secondary label, set on many places at once. */
   taxonomySetMany: (body: { attribute: string; refs: string[]; value: AttributeValue | null; reason?: string | null }) =>
     put<{ changed: number; attribute: string }>('/api/admin/taxonomy/drawer', body),

@@ -1496,9 +1496,11 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   /** Which range is being typed — one place's, or every ticked one ('*'). */
   const [range, setRange] = useState<{ ref: string; key: string; from: string; to: string } | null>(null);
 
+  /** The library by default; the raw harvest only if asked for. */
+  const [state, setState] = useState<'published' | 'all'>('published');
   const load = useCallback(async () => {
-    try { setData(await api.taxonomyDrawer(sc.key)); } catch { setData(null); }
-  }, [sc.key]);
+    try { setData(await api.taxonomyDrawer(sc.key, state)); } catch { setData(null); }
+  }, [sc.key, state]);
   useEffect(() => { void load(); }, [load]);
 
   if (!data) return null;
@@ -1530,6 +1532,8 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
     <View style={{ gap: 0 }}>
       <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
         <Text style={[styles.h2, { flex: 1, minWidth: 0 }]}>Every {sc.label.toLowerCase()} we hold · {data.places.length}</Text>
+        <Choice label={state === 'all' ? 'Everything harvested' : 'In the library'} on={state === 'all'}
+                onPress={() => setState(state === 'all' ? 'published' : 'all')} />
         <Field value={q} onChangeText={setQ} placeholder="Find one" style={{ minWidth: 160 }} icon="search" />
       </View>
       {/* One label, changed on everything ticked. */}
