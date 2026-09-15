@@ -219,13 +219,19 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
     if (namespace && !NAMESPACES.some((n) => n.key === namespace)) throw bad(`${namespace} is not a source of labels`);
     const q = String(req.query.q || '').trim() || null;
     const all = req.query.all === '1' || req.query.all === 'true';
-    const [rows, rules, tax, attrs, carried] = await Promise.all([
+    const [rows, rules, tax, attrs, carried, catches] = await Promise.all([
       labelRepo.list({
         namespace, q, seenOnly: !all && (namespace === 'wikidata' || !namespace),
         limit: Math.min(2000, Number(req.query.limit) || 400), offset: Number(req.query.offset) || 0,
       }),
       shelfRules.rules(), taxonomy.taxonomy(),
       placeAttributes.attributes(), placeAttributes.carriedByWord(),
+      // How many specific words each word is seen beside — what "Catches N
+      // words" says on a word kept as a secondary label. One query, because the
+      // screen was asking once per such word (the audit, 15 Sep 2026).
+      query(`select label, count(*)::int as n from taxonomy_label_pairs group by label`)
+        .then((r) => new Map(r.rows.map((x) => [x.label, x.n])))
+        .catch(() => new Map()),
     ]);
     const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
     const labels = rows.map((r) => ({
@@ -240,6 +246,8 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       suggestion: r.namespace === 'google' ? suggestFor(r.key, r.note, subKeys) : null,
       // Why it is a judgement call, where it is one (the handoff, BO5).
       why: r.namespace === 'google' ? WHY_UNSURE[r.key] ?? null : null,
+      /** The specific words seen beside this one — what it catches. */
+      catches: catches.get(`${r.namespace}:${r.key}`) ?? 0,
       // What else the word says, besides where it sends a place. The owner,
       // 14 Sep 2026: "I see a fine dining restaurant, but no label for fine
       // dining." A word's second label is named here, beside its first.

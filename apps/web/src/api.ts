@@ -3027,6 +3027,8 @@ export type TaxonomyLabel = {
   landing: TaxonomyLanding;
   /** Why this one is a judgement call rather than an oversight, where it is one. */
   why?: string | null;
+  /** How many specific words this one is seen beside — what it catches. */
+  catches?: number;
   /** For a Google type: where it could go, for the owner to approve or change. */
   suggestion?: { subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; cuisine?: string; why: string } | null;
   /**

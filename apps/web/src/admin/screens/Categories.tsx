@@ -2791,13 +2791,8 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   const [busyKey, setBusyKey] = useState<string | null>(null);
   /** The row whose dropdown is open, lifted over the rows after it. */
   const [openKey, setOpenKey] = useState<string | null>(null);
-  /**
-   * How many specific words a generic one is seen beside — what "the words it
-   * catches" would open on. Read from the pairs the API already computes, and
-   * only for the words that are answers of that kind, so it costs one call.
-   */
-  const [catchesBy, setCatchesBy] = useState<Record<string, number>>({});
-  const catches = (r: TaxonomyLabel) => catchesBy[r.key] ?? 0;
+  /** How many specific words a word is seen beside, sent with the row itself. */
+  const catches = (r: TaxonomyLabel) => r.catches ?? 0;
   /**
    * The generic word whose company is open (owner, 13 Sep 2026: "instead
    * surface all the subcategories and map those accordingly"). A word like
@@ -2841,18 +2836,6 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
     catch { if (wantedWith.current === key) setWithWords([]); }
   }, []);
   useEffect(() => { if (!withKey) { setWithWords(null); return; } setWithWords(null); void loadWith(withKey); }, [withKey, loadWith]);
-  // The counts for every word kept as a secondary label, asked once when the
-  // list lands rather than per row.
-  useEffect(() => {
-    const generic = (rows ?? []).filter((r) => r.decision === 'generic').map((r) => r.key);
-    if (!generic.length) return;
-    let live = true;
-    void Promise.all(generic.map((k) => api.taxonomyPairs(`google:${k}`)
-      .then((d) => [k, d.words.length] as const).catch(() => [k, 0] as const)))
-      .then((pairs) => { if (live) setCatchesBy(Object.fromEntries(pairs)); });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows?.length]);
 
   /** The secondary labels a word can be given, for the control on its row. */
   const [secondary, setSecondary] = useState<SecondaryLabel[]>([]);
@@ -3193,7 +3176,9 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                 {/* Ticked rows get one answer between them, from the same control
                     the single rows use. */}
                 {canManage && tickable.length ? (
-                  <TextAction label={!wide && tickedHere.length ? String(tickedHere.length) : allTicked ? 'Untick all' : `Tick all ${tickable.length}`}
+                  <TextAction label={!wide && tickedHere.length ? String(tickedHere.length)
+                    : tickedHere.length ? `${tickedHere.length} ticked`
+                      : allTicked ? 'Untick all' : `Tick all ${tickable.length}`}
                               onPress={() => setTicked((prev) => { const n = new Set(prev); for (const r of tickable) { if (allTicked) n.delete(r.key); else n.add(r.key); } return n; })} />
                 ) : null}
                 {canManage && tickedHere.length ? (
@@ -3277,7 +3262,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                     // "Catches N words" — what a word kept as a secondary label
                     // is actually worth is the specific words seen beside it,
                     // and the count belongs on the row (the audit, 15 Sep 2026).
-                    : st === 'generic' ? `it describes, it does not name${catches(r) ? ` · catches ${catches(r)} words` : ''}`
+                    : st === 'generic' ? (catches(r) ? `Catches ${catches(r)} words` : 'it describes, it does not name')
                     : st === 'travel' ? 'getting there, parking'
                     : st === 'nearby' ? 'a loo, a visitor centre'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
@@ -3388,6 +3373,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                     <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: withKey === r.key ? spacing.sm : 6 }}>
                       <TextAction label={withKey === r.key ? 'Hide the words it catches' : 'The words it catches'}
                                   onPress={() => { setWith(withKey === r.key ? '' : r.key); setOnly(''); }} />
+                      {withKey === r.key ? <Text style={styles.bandKicker}>Seen on the same places · each needs its own answer</Text> : null}
                       {withKey === r.key ? (
                         withWords == null ? <Text style={type.tiny}>Looking…</Text>
                           : withWords.length === 0
