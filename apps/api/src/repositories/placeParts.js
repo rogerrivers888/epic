@@ -123,8 +123,9 @@ async function withNames(rows) {
   // Resolved the way rollUp() resolves, not read off the raw tables: a label a
   // child *inherits* from its drawer, or one another label brought it, travels
   // up too, and an inactive one does not (Codex, 15 Sep 2026).
-  const own = new Map();
-  for (const ref of children) own.set(ref, await placeAttributes.valuesFor(ref));
+  // One query, not one per child: a hundred proposals was a hundred round trips
+  // (Codex, 15 Sep 2026).
+  const own = await placeAttributes.valuesForMany(children);
   return rows.map((r) => {
     const resolved = placeAttributes.resolveFor(
       { subcategory: filed.get(r.child_ref) ?? null, words: wordsOf.get(r.child_ref) ?? [], alsoTrue: sweptSays.get(r.child_ref) ?? null },

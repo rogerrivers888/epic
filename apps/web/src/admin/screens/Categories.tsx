@@ -2547,8 +2547,15 @@ function PartsOfPlaces({ canManage, tax, onChanged }: {
           {(() => {
             // With its value: "Suits ages 0 to 12", not "Suits ages" (Codex,
             // 15 Sep 2026 — the example the handoff itself gives).
-            const reads = (v: AttributeValue) => (v.from != null || v.to != null ? ` ${v.from ?? 0} to ${v.to ?? 99}`
-              : v.choice ? ` · ${v.choice}` : v.yesno === false ? ' — no' : '');
+            // An open end reads as open. Filling in 0 or 99 invents a bound
+            // the attribute may not have, and "12 to 99" is a false statement
+            // about a place (Codex, 15 Sep 2026).
+            const reads = (v: AttributeValue) => {
+              if (v.from != null && v.to != null) return ` ${v.from} to ${v.to}`;
+              if (v.from != null) return ` ${v.from} and up`;
+              if (v.to != null) return ` up to ${v.to}`;
+              return v.choice ? ` · ${v.choice}` : v.yesno === false ? ' — no' : '';
+            };
             const up = [
               p.goes_up?.primary ? subLabel(p.goes_up.primary) : null,
               ...(p.goes_up?.secondary ?? []).map((x) => `${x.label}${reads(x.value)}`),
