@@ -615,8 +615,8 @@ function Taxonomy({ vocab, canManage, busy, onChanged, onFailed }: {
   return (
     <>
       <Panel
-        title="Categories and subcategories"
-        sub="A subcategory belongs to exactly one category — that is what stops a place appearing twice. Renaming is safe; moving a subcategory moves every place in it."
+        title="Switching a category or a drawer off"
+        sub="Everything else about a subcategory — its rule, its labels, its name, where else it is listed — is on its own page, behind Our labels. This is the one thing that is not: switching a whole category off."
         padded={false}
       >
         {(vocab?.shelves ?? []).map((c) => {

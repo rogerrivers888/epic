@@ -47,7 +47,7 @@ import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, FoldLine } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, DrillDropdown, Dropdown, PageHead, ago, count } from '../kit';
+import { AdminPage, DrillDropdown, Dropdown, ago, count } from '../kit';
 import { Shelves } from './Shelves';
 import { asOneOf, asText, useQueryState } from '../../router';
 
@@ -442,7 +442,8 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
           <View style={{ gap: spacing.xs, paddingVertical: spacing.xs }}>
             <Text style={type.small}>
               A place carries labels: what each source called it, in that source's own words (Google's type, the map's tag, the
-              Wikidata type), plus what Epic read those into (an experience, a venue kind). Those are the secondary labels.
+              Wikidata type), plus what Epic read those into (an experience, a venue kind). Those are a provider's words, and
+              each one is mapped to a label of ours — which is a different thing from a secondary label.
             </Text>
             <Text style={type.small}>
               A rule says: places carrying all of these labels go in this subcategory. Narrowest wins — a rule about one place,
@@ -543,7 +544,9 @@ function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChang
   const lookAtIt = async () => {
     if (!busiest) return;
     setLooking(true);
-    try { setLanding(await api.taxonomyExamples(busiest, true)); await onChanged(`Looked at ${busiest.replace('google:', '')}.`); }
+    // Never `queue=1`: looking is not deciding, and this wrote places onto the
+    // not-sure list with nobody pressing anything (the audit, 15 Sep 2026).
+    try { setLanding(await api.taxonomyExamples(busiest, false)); await onChanged(`Looked at ${busiest.replace('google:', '')}.`); }
     catch (err) { await onChanged(String((err as Error).message)); }
     finally { setLooking(false); }
   };
@@ -964,6 +967,13 @@ function Doors({ at, on, counts }: {
  */
 function Toast({ at, onGone }: { at: { text: string; undo?: () => Promise<void> } | null; onGone: () => void }) {
   const [busy, setBusy] = useState(false);
+  // Pinned to the phone frame, not the browser window. Anything fixed escapes
+  // the frame unless it is told where the frame is, which is the rule the
+  // drawer already follows (CLAUDE.md; the audit, 15 Sep 2026).
+  const { width, height, framed, origin } = useViewport();
+  const inFrame = framed && origin
+    ? { left: origin.x, right: 'auto' as never, width, bottom: 'auto' as never, top: origin.y + height - 76 }
+    : null;
   useEffect(() => {
     if (!at) return undefined;
     const t = setTimeout(onGone, 4000);
@@ -971,7 +981,7 @@ function Toast({ at, onGone }: { at: { text: string; undo?: () => Promise<void> 
   }, [at, onGone]);
   if (!at) return null;
   return (
-    <View style={styles.toast} accessibilityRole="alert">
+    <View style={[styles.toast, inFrame]} accessibilityRole="alert">
       <Icon name="check" size={15} color={colors.selectedFg} strokeWidth={3.2} />
       <Text style={styles.toastText} numberOfLines={2}>{at.text}</Text>
       {at.undo ? (
@@ -1296,6 +1306,10 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
   /** One of ours, by its own name — a primary label or a secondary one. */
   const subLabelOf = (k: string) => tax.subcategories.find((x) => x.key === k)?.label
     ?? secondary.find((a) => a.key === k)?.label ?? k.replace(/-/g, ' ');
+  /** Whether every word in every rule here means one of ours. */
+  const allOurs = (rules ?? [])
+    .filter((r) => r.scope === 'ours' || r.scope === 'labels')
+    .every((r) => (r.labelList ?? []).every((l) => l.pointsAt));
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -1316,9 +1330,21 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
         {/* ---- the rule that fills it ---------------------------------- */}
         <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
           <Text style={styles.bandKicker}>The rule that fills it · written in our labels</Text>
-          <Said lead="No provider word appears here.">
-            {`Google\u2019s word, OpenStreetMap\u2019s tag and Wikidata\u2019s type all point at our label first, so one rule serves every provider \u2014 including ones we have not signed up.`}
-          </Said>
+          {/* The claim is made only where it is true. A rule can still be stored
+              against a provider's word — 383 are — and asserting "no provider
+              word appears here" above one is a contradiction whether or not the
+              source prefix is shown (the audit, twice). Where every word means
+              something of ours, the sentence stands; where one does not, the
+              screen says that instead. */}
+          {allOurs ? (
+            <Said lead="No provider word appears here.">
+              {`Google\u2019s word, OpenStreetMap\u2019s tag and Wikidata\u2019s type all point at our label first, so one rule serves every provider \u2014 including ones we have not signed up.`}
+            </Said>
+          ) : (
+            <Said lead="One of these is still a provider’s own word.">
+              {`A rule is meant to be written in our labels, so that it serves every provider at once. Map the word marked below on Google\u2019s words and this rule becomes one of ours without being rewritten.`}
+            </Said>
+          )}
           {/* In our labels, or not at all. A rule may still be stored against a
               provider's word — 383 of them are — and printing "Google ·
               water_park" one line under "No provider word appears here" is a
@@ -2149,6 +2175,7 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                           </View>
                         ))}
                       </View>
+                      <Text style={styles.bandKicker}>What travels with {r.label ?? r.key.replace(/_/g, ' ')}, and how often</Text>
                       {/* The words that sit on everything. They are on all twelve
                           and say nothing, which is exactly why the count matters
                           more than the list -- and the handoff asks for them to
@@ -2201,8 +2228,19 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                               ))}
                               {canManage && r.landing ? (
                                 <View style={{ paddingTop: 6, gap: 4 }}>
+                                  {/* In our labels, and with the half that says
+                                      what it grants: "a place with Gym +
+                                      Fitness centre gets Gyms & leisure
+                                      centres". It was the provider's display
+                                      names and no `gets` at all (the audit). */}
                                   <Text style={type.tiny}>
-                                    The rule worth writing: a place with {[r.label ?? r.key, ...eg.shapes[0].words.map((w) => eg.travels.find((t) => t.key === w)?.label ?? w)].join(' and ')}.
+                                    <Text style={styles.bandKicker}>The rule · in our labels{'  '}</Text>
+                                    a place with{' '}
+                                    <Text style={{ fontWeight: '700', color: colors.ink }}>
+                                      {ourLabels.length ? ourLabels.map((k) => subLabel(k) ?? k).join(' + ') : 'nothing of ours yet'}
+                                    </Text>
+                                    {' gets '}
+                                    <Text style={{ fontWeight: '700', color: colors.ink }}>{subLabel(r.landing.subcategory) ?? '—'}</Text>
                                   </Text>
                                   {/* Counted against the sample, and said so.
                                       Epic stores no places, and a screen
@@ -2915,13 +2953,19 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
     finally { setBusyKey(null); }
   };
 
+  // Where the phone frame is, for the docked tray. Fixed positioning is
+  // relative to the window, so without this the tray spans the whole browser
+  // when the shell is in Mobile view (the audit, 15 Sep 2026).
+  const { width: frameW, height: frameH, framed, origin } = useViewport();
+  const frame = framed && origin
+    ? { left: origin.x, right: 'auto' as never, width: frameW, bottom: 'auto' as never, top: origin.y + frameH - 60 }
+    : null;
   if (!rows) return <Text style={type.small}>Reading Google's list…</Text>;
 
   // Four number columns, the last column and the padding have to leave the
   // name room from the 900px breakpoint up, not only on a big screen (Codex, 12 Sep 2026).
   const COL = roomy ? 132 : wide ? 88 : 58;
   const LAST = roomy ? 320 : 200;
-  const MAP = roomy ? 380 : 300;
   const COLS = wide ? ['Subcategories', 'Places', 'Mapped', 'Unmapped'] : ['Subs', 'Mapped', 'Unmapped'];
   const cells = (g: { types: TaxonomyLabel[]; places: number; mapped: number; unmapped: number }) => (wide ? [g.types.length, g.places, g.mapped, g.unmapped] : [g.types.length, g.mapped, g.unmapped]);
   const cellsTotal = wide ? [total.types, total.places, total.mapped, total.unmapped] : [total.types, total.mapped, total.unmapped];
@@ -3075,6 +3119,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                 styles.groupBar,
                 openKey === `bulk:${g.key}` && { zIndex: 60 },
                 !wide && tickedHere.length ? styles.trayDocked : null,
+                !wide && tickedHere.length && frame ? frame : null,
               ]}>
                 {subsHere.length ? (
                   <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
@@ -3585,9 +3630,9 @@ const styles = StyleSheet.create({
   /** 31px is the wide title; the handoff draws 390 as its own artboard at 24 (BO1m). */
   bandTitlePhone: { fontSize: 24, letterSpacing: -0.8, lineHeight: 27 },
   bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
-  said: { borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 2 },
+  said: { borderLeftWidth: BORDER, borderLeftColor: colors.lime, paddingLeft: 13, paddingVertical: 2 },
   bandKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
-  halves: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted, overflow: 'hidden' },
+  halves: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted, alignSelf: 'flex-start' },
   halfItem: { minHeight: 34, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   halfDivider: { borderLeftWidth: 1, borderLeftColor: colors.ruleMuted },
   halfOn: { backgroundColor: colors.selected },
@@ -3604,9 +3649,13 @@ const styles = StyleSheet.create({
   // matters more than which words are in it (the handoff, BO9).
   barTrack: { height: 4, backgroundColor: colors.lineSoft, maxWidth: 420 },
   barFill: { height: 4, backgroundColor: colors.lime },
-  approve: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderBottomWidth: 2, borderBottomColor: colors.lime },
+  approve: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderBottomWidth: 1.5, borderBottomColor: colors.lime },
   approveOn: { backgroundColor: colors.lime },
-  tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, overflow: 'hidden', backgroundColor: colors.panelWarm },
+  // A 1px ruled segmented control, which is what the canvas draws — but with no
+  // ground of its own: a fill behind an outline is the "filled outlined box"
+  // the handoff refuses (the audit, 15 Sep 2026). The selected segment is lime,
+  // which is the colour role for "the moment something is selected".
+  tabs: { flexDirection: 'row', borderWidth: 1, borderColor: colors.decor, alignSelf: 'flex-start' },
   tabItem: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   tabDivider: { borderLeftWidth: 1, borderLeftColor: colors.decor },
   tabOn: { backgroundColor: colors.selected },

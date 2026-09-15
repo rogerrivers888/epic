@@ -668,9 +668,14 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
    */
   stacked?: boolean;
 }) {
-  const { width: screen } = useViewport();
+  const { width: screen, height: screenH, framed, origin } = useViewport();
   /** A phone gets a sheet; anything wider gets the panel (the handoff, BO1m). */
   const sheet = screen < 560;
+  // And the sheet is pinned to the frame, not the window: anything fixed
+  // escapes the phone frame unless told where it is (CLAUDE.md; the audit).
+  const inFrame = framed && origin
+    ? { left: origin.x, top: origin.y, width: screen, height: screenH, right: 'auto' as never, bottom: 'auto' as never }
+    : null;
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
@@ -719,7 +724,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
       </Press>
       {open ? (
         <>
-          <Press style={dd.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
+          <Press style={[dd.scrim, sheet && inFrame ? inFrame : null]} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
           {/* At 390 the answer menu is a full-height sheet, not a 300px panel
               hanging off a control -- "same order, same five answers, same
               adopt row at the foot" (the handoff, BO1m). A panel that width on
@@ -728,6 +733,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
             style={[
               dd.panel,
               sheet ? dd.sheet : align === 'right' && dd.panelRight,
+              sheet && inFrame ? inFrame : null,
               !sheet && align === 'right' && nudge ? { right: nudge } : null,
               sheet ? null : { width },
             ]}
