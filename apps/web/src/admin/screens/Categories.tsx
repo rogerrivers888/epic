@@ -1041,8 +1041,15 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.taxonomyPlaceLabels>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  /**
+   * A draft per label, not one shared between them: typing 3 to 14 into Suits
+   * ages put the same 3 and 14 into every other range on the place (Codex,
+   * 15 Sep 2026).
+   */
+  const [draft, setDraft] = useState<Record<string, { from: string; to: string }>>({});
+  const drafted = (k: string) => draft[k] ?? { from: '', to: '' };
+  const putDraft = (k: string, part: Partial<{ from: string; to: string }>) =>
+    setDraft((d) => ({ ...d, [k]: { ...drafted(k), ...part } }));
   const load = useCallback(async () => {
     try { setData(await api.taxonomyPlaceLabels({ ref: ref_, subcategory, words })); } catch { setData(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1088,12 +1095,22 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
                   {/* A range takes two numbers. Offering yes/no here wrote a
                       value whose shape disagreed with its own kind, so ages
                       could not be set at all (Codex, 15 Sep 2026). */}
-                  <TextInput value={from} onChangeText={setFrom} placeholder={String(a.range_min ?? 0)} placeholderTextColor={colors.ghost}
+                  <TextInput value={drafted(a.key).from} onChangeText={(t) => putDraft(a.key, { from: t })}
+                             placeholder={String(v?.from ?? a.range_min ?? 0)} placeholderTextColor={colors.ghost}
                              inputMode="numeric" style={[styles.field, { width: 54 }]} />
                   <Text style={type.tiny}>to</Text>
-                  <TextInput value={to} onChangeText={setTo} placeholder={String(a.range_max ?? 18)} placeholderTextColor={colors.ghost}
+                  <TextInput value={drafted(a.key).to} onChangeText={(t) => putDraft(a.key, { to: t })}
+                             placeholder={String(v?.to ?? a.range_max ?? 18)} placeholderTextColor={colors.ghost}
                              inputMode="numeric" style={[styles.field, { width: 54 }]} />
-                  <TextAction label="Set" disabled={busy} onPress={() => void set(a, { from: Number(from) || 0, to: Number(to) || (a.range_max ?? 18) })} />
+                  <TextAction label="Set" disabled={busy} onPress={() => {
+                    // A blank end keeps what is there, and 0 is a number: `||`
+                    // threw both away (Codex, 15 Sep 2026). Suits ages 0 to 7 is
+                    // the example the whole feature was built on.
+                    const d = drafted(a.key);
+                    const num = (t: string, fallback: number | null | undefined) =>
+                      (t.trim() === '' ? fallback ?? null : Number.isFinite(Number(t)) ? Number(t) : fallback ?? null);
+                    void set(a, { from: num(d.from, v?.from ?? a.range_min), to: num(d.to, v?.to ?? a.range_max) });
+                  }} />
                   {mine ? <TextAction label="Clear" tone="muted" disabled={busy} onPress={() => void set(a, null)} /> : null}
                 </View>
               ) : (
