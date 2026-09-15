@@ -672,8 +672,9 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
     if (!needle) return null;
     return groups.flatMap((g) => g.items
       .filter((o) => o.label.toLowerCase().includes(needle))
-      .map((o) => ({ ...o, group: g.key, groupLabel: g.label })))
-      .slice(0, 40);
+      .map((o) => ({ ...o, group: g.key, groupLabel: g.label })));
+    // Not truncated: a slice would silently hide a real answer from a broad
+    // query, and the panel already scrolls (Codex, 15 Sep 2026).
   }, [q, groups]);
   const group = groups.find((g) => g.key === into) ?? null;
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
