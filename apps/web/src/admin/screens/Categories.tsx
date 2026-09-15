@@ -2284,12 +2284,11 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
   const wouldCatch = useCallback(
     (pl: { ours?: string[] }) => {
       if (!ourLabels.length) return false;
-      // The queried word's own mapping is read live, not from the snapshot.
-      // Answering a word while its examples are open leaves `ours` as it was
-      // fetched, so the rule you just made possible would have counted zero and
-      // marked every place "not caught" — and refetching costs a Google call
-      // for something already on screen (Codex, 15 Sep 2026). Every place in
-      // this sample carries the queried word by construction.
+      // `ours` is what the place's *other* words mean — the server leaves the
+      // queried word out on purpose — and the queried word's own mapping is
+      // read live. So answering it, or changing the answer, moves the count
+      // straight away, and no stale mapping of its own can linger (Codex,
+      // 15 Sep 2026, twice). Every place here carries that word by construction.
       const mine = r.points_at ? [...(pl.ours ?? []), r.points_at] : (pl.ours ?? []);
       return ourLabels.every((k) => mine.includes(k));
     },

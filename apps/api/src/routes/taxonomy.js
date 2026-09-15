@@ -731,13 +731,21 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       return shelvesForVenue(venue, rules, tax.vocab).subcategory ?? null;
     };
     for (const p of out.places) p.landsIn = filedAs(p.types, p.primaryType ?? null);
-    // And which of *our* labels each place carries, from the whole vocabulary.
-    // The screen was deriving this from `travels`, which is capped at twelve, so
+    // And which of *our* labels each place carries, from the whole vocabulary —
+    // the screen was deriving this from `travels`, which is capped at twelve, so
     // a place reaching a label through a less common word was left out of the
-    // count while the rule would have caught it — and the row and the total
-    // disagreed (Codex, 15 Sep 2026).
+    // count while the rule would have caught it (Codex, 15 Sep 2026).
+    //
+    // The queried word's own contribution is deliberately left out. Every place
+    // here carries that word by construction, and the screen reads its mapping
+    // live: answering or re-answering the word while its examples are open must
+    // change the count, and a snapshot taken before the answer cannot (Codex,
+    // twice). Anything derived from the *other* words is stable.
     for (const p of out.places) {
-      p.ours = [...new Set((p.types ?? []).map((t) => byKey.get(t)?.points_at).filter(Boolean))];
+      p.ours = [...new Set((p.types ?? [])
+        .filter((t) => t !== parsed.key)
+        .map((t) => byKey.get(t)?.points_at)
+        .filter(Boolean))];
     }
     // And whether we already know it sits inside somewhere bigger, which is why
     // a place like Amity Beach never settles on its own (the handoff, BO8).
