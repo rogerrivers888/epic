@@ -3396,12 +3396,16 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                   166 food words still says what its columns are 900px down
                   (owner, 14 Sep 2026: "the column header should be sticky so
                   that when I scroll, I can still see the stuff at the top"). */}
+              {/* The same widths the rows use, including the word's own floor:
+                  with one fixed and the other able to shrink, the headings drift
+                  off their columns between about 1000 and 1300px (Codex,
+                  15 Sep 2026). */}
               <View style={[styles.tRow, styles.tHeadSoft, { paddingVertical: 6 }]}>
-                <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.colHead} numberOfLines={1}>Word</Text></View>
+                <View style={{ flex: 1, minWidth: wide ? 240 : 0 }}><Text style={styles.colHead} numberOfLines={1}>Word</Text></View>
                 {wide ? <View style={{ width: COL }} /> : null}
                 {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Sightings</Text></View> : null}
                 {canManage ? (
-                  <View style={{ width: wide ? COL * 2 + LAST : undefined, alignItems: 'flex-end' }}>
+                  <View style={{ width: wide ? COL * 2 + LAST : undefined, flexShrink: 1, flexGrow: 0, alignItems: 'flex-end' }}>
                     <Text style={styles.colHead} numberOfLines={1}>What it means, and what else it says</Text>
                   </View>
                 ) : null}
