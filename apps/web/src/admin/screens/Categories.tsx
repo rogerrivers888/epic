@@ -1576,6 +1576,8 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
   const [editing, setEditing] = useState(false);
   /** Which of the twelve has its own secondary labels open. */
   const [onPlace, setOnPlace] = useState('');
+  /** Which secondary label is being added to this drawer, if any. */
+  const [adding, setAdding] = useState('');
 
   const load = useCallback(async () => {
     try { setRules((await api.taxonomyRules(sc.key)).rules); } catch { setRules([]); }
@@ -1638,109 +1640,81 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
         <Text style={styles.backText}>{backLabel}</Text>
       </Press>
       <Band
-        kicker="A primary label · the name that prints"
+        kicker={`A subcategory of ${cat?.label ?? sc.category_key}`}
         title={sc.label}
         stats={[
           { label: 'Category', value: cat?.label ?? sc.category_key },
           { label: 'Places', value: String(landing?.places.length ?? '\u2014') },
-          { label: 'Rule fires on', value: fires },
+          { label: 'Of twelve real ones', value: fires },
         ]}
       />
       <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
         {/* ---- the rule that fills it ---------------------------------- */}
         <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
-          <Text style={styles.bandKicker}>The rule that fills it · written in our labels</Text>
-          {/* The claim is made only where it is true. A rule can still be stored
-              against a provider's word — 383 are — and asserting "no provider
-              word appears here" above one is a contradiction whether or not the
-              source prefix is shown (the audit, twice). Where every word means
-              something of ours, the sentence stands; where one does not, the
-              screen says that instead. */}
-          {allOurs ? (
-            <Said lead="No provider word appears here.">
-              {`Google\u2019s word, OpenStreetMap\u2019s tag and Wikidata\u2019s type all point at our label first, so one rule serves every provider \u2014 including ones we have not signed up.`}
-            </Said>
-          ) : (
-            <Said lead="One of these is still a provider’s own word.">
-              {`A rule is meant to be written in our labels, so that it serves every provider at once. Map the word marked below on Google\u2019s words and this rule becomes one of ours without being rewritten.`}
-            </Said>
-          )}
-          {/* In our labels, or not at all. A rule may still be stored against a
-              provider's word — 383 of them are — and printing "Google ·
-              water_park" one line under "No provider word appears here" is a
-              contradiction on the screen (the audit, 15 Sep 2026). So each word
-              is shown as the label of ours it means, and a rule holding a word
-              that means nothing of ours yet says so instead of pretending. */}
+          {/* Plain words, and the word itself.
+              The owner, 15 Sep 2026: "You might as well be speaking Chinese.
+              Zero idea what you're trying to say here." He was right. This
+              column explained an internal decision — that rules are written in
+              our labels so one serves every provider — on a page whose job is
+              to tell him what fills a drawer. Worse, it translated every rule to
+              the label it resolves to, so `google:museum`, `google:history_museum`
+              and `google:planetarium` all printed as "Museums": four identical
+              lines, and the one useful fact on each — that a *planetarium* lands
+              in Museums — thrown away. */}
+          <Text style={styles.bandKicker}>What puts a place in here</Text>
+          {(rules ?? []).length === 0 ? (
+            <Text style={type.small}>Nothing yet — only places moved here one at a time.</Text>
+          ) : null}
           {(rules ?? []).filter((r) => r.scope === 'ours' || r.scope === 'labels').map((r) => {
-            const ours = (r.labelList ?? []).map((l) => ({ ...l, mine: l.pointsAt }));
-            const strays = ours.filter((l) => !l.mine);
+            const words = r.labelList ?? [];
+            const where = (l: { label: string }) => (nsOf(l.label) === 'epic' ? 'our own word' : `${sourceWord(nsOf(l.label))}’s word`);
             return (
-              <View key={r.id} style={{ gap: 3 }}>
-                <View style={styles.ruleLine}>
-                  {/* Which vocabulary it is written in. Two rules can resolve to
-                      the same words of ours — one stored against Google's word,
-                      one against ours — and drawing both as "a place with Water
-                      park" with no way to tell them apart is what the screen
-                      looked like on the deployed site (15 Sep 2026). */}
-                  <Text style={[type.tiny, { width: 96 }]}>
-                    a place with{r.scope === 'ours' ? '' : '\u2009*'}
-                  </Text>
-                  <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    {ours.map((l, i) => (
-                      <Text key={l.label} style={type.small}>
-                        {i ? <Text style={{ color: colors.inkMuted }}>+ </Text> : null}
-                        <Text style={{ fontWeight: '600', color: l.mine ? colors.ink : colors.inkMuted }}>
-                          {l.mine ? subLabelOf(l.mine) : (l.name ?? keyOf(l.label))}
-                        </Text>
+              <View key={r.id} style={styles.wordRow}>
+                <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+                  <Text style={type.small} numberOfLines={2}>
+                    {words.map((l, i) => (
+                      <Text key={l.label}>
+                        {i ? <Text style={{ color: colors.inkMuted }}> and </Text> : null}
+                        <Text style={{ fontWeight: '700' }}>{l.name ?? keyOf(l.label).replace(/_/g, ' ')}</Text>
                       </Text>
                     ))}
-                  </View>
-                  {/* A rule can be dropped from here. The canvas draws a × on
-                      each label; a rule of ours is one statement, so the honest
-                      control is on the rule, not on a word inside it. */}
-                  {canManage ? (
-                    <TextAction label="Forget this rule" tone="muted" disabled={busy}
-                                onPress={() => void run(
-                                  () => api.shelfForget(r.id),
-                                  `Forgotten: ${ours.map((l) => (l.mine ? subLabelOf(l.mine) : l.name ?? keyOf(l.label))).join(' + ')} no longer fills ${sc.label}.`,
-                                )} />
-                  ) : null}
-                </View>
-                {strays.length ? (
-                  <Text style={[type.tiny, { color: colors.overrun }]}>
-                    {strays.length === 1 ? 'One word in this rule' : `${strays.length} words in this rule`} still
-                    {strays.length === 1 ? ' means' : ' mean'} nothing of ours — {strays.map((l) => keyOf(l.label)).join(', ')}.
-                    Map {strays.length === 1 ? 'it' : 'them'} on Google’s words and this rule becomes one of ours.
                   </Text>
+                  <Text style={type.tiny} numberOfLines={1}>
+                    {[...new Set(words.map(where))].join(' and ')}
+                    {/* A word that means nothing of ours yet is worth saying,
+                        without a paragraph about why. */}
+                    {words.some((l) => nsOf(l.label) !== 'epic' && !l.pointsAt)
+                      ? <Text style={{ color: colors.overrun }}>{' · not yet one of ours'}</Text> : null}
+                  </Text>
+                </View>
+                {canManage ? (
+                  <TextAction label="Remove" tone="muted" disabled={busy}
+                              onPress={() => void run(
+                                () => api.shelfForget(r.id),
+                                `${words.map((l) => l.name ?? keyOf(l.label)).join(' and ')} no longer puts a place in ${sc.label}.`,
+                              )} />
                 ) : null}
               </View>
             );
           })}
-          {(rules ?? []).some((r) => r.scope === 'labels') ? (
-            <Text style={type.tiny}>
-              * still stored against a provider’s own word. It fires the same way; rewriting it in ours is what makes it
-              serve every provider at once.
-            </Text>
-          ) : null}
-          {(rules ?? []).length === 0 ? (
-            <Text style={type.small}>No rule fills this drawer yet — only places moved here by hand.</Text>
-          ) : null}
-          <View style={styles.ruleLine}>
-            <Text style={[type.tiny, { width: 96 }]}>gets</Text>
-            <Text style={styles.gets}>{sc.label}</Text>
-            <Text style={type.tiny}>its own name, as the primary</Text>
-          </View>
-          {canManage ? (
-            <TextAction label="Add one of our labels" disabled={busy} onPress={() => setEditing(true)} />
-          ) : null}
+          {canManage ? <TextAction label="Add a word" disabled={busy} onPress={() => setEditing(true)} /> : null}
 
-          {/* ---- the secondary labels every place in here inherits ------- */}
-          <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>Secondary labels every place in here inherits</Text>
-          {secondary.map((a) => {
+          {/* Only what is actually said about this drawer, plus a way to add
+              one. Listing all seven meant Museums was offered a Cuisine and a
+              Dining style (owner, 15 Sep 2026: "Why would a museum inherit
+              cuisine?"). It never was inheriting one — the row read "not set" —
+              but a list of things that make no sense for this drawer is noise
+              whatever the values say. */}
+          <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>What is true of every {sc.label.toLowerCase().replace(/s$/, '')}</Text>
+          {secondary.filter((a) => defaults[a.key] || adding === a.key).map((a) => {
             const v = defaults[a.key];
-            const reads = !v ? 'Not set \u2014 each place answers'
-              : v.from != null || v.to != null ? `${v.from ?? 0} to ${v.to ?? 99}`
-                : v.choice ? v.choice : v.yesno === false ? 'No' : 'Yes';
+            // An open end reads as open. 0 and 99 were being shown as though
+            // somebody had chosen them.
+            const reads = !v ? 'not set'
+              : v.from != null && v.to != null ? `${v.from} to ${v.to}`
+                : v.from != null ? `${v.from} and up`
+                  : v.to != null ? `up to ${v.to}`
+                    : v.choice ? v.choice : v.yesno === false ? 'No' : 'Yes';
             const brings = (a.brings ?? []).map(broughtAs).join(', ');
             return (
               <View key={a.key} style={styles.wordRow}>
@@ -1808,6 +1782,21 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
             );
           })}
 
+          {!secondary.some((a) => defaults[a.key]) && !adding ? (
+            <Text style={type.small}>Nothing yet — every place in here answers for itself.</Text>
+          ) : null}
+          {canManage ? (
+            <DrillDropdown
+              label="Add" value="+ Say something about every one" width={280}
+              groups={[{
+                key: 'add', label: 'Our secondary labels',
+                items: secondary.filter((a) => !defaults[a.key]).map((a) => ({ key: a.key, label: a.label, on: false })),
+              }]}
+              startIn="add"
+              onPick={(k) => setAdding(k)}
+            />
+          ) : null}
+
           {/* ---- name, category, also show it in, switched on ------------ */}
           <View style={styles.wordRow}>
             <Text style={[type.tiny, { width: 96 }]}>Name</Text>
@@ -1834,7 +1823,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                 onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
               />
             ) : <Text style={type.small}>{cat?.label ?? sc.category_key}</Text>}
-            <Text style={type.tiny}>where every place in it lives</Text>
+            <Text style={type.tiny}>the menu it appears under</Text>
           </View>
           <View style={styles.wordRow}>
             <Text style={[type.tiny, { width: 96 }]}>Also show it in</Text>
@@ -1867,7 +1856,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                 />
               ) : null}
             </View>
-            <Text style={type.tiny}>which menus list it — not what a place is</Text>
+            <Text style={type.tiny}>other menus it also appears under</Text>
           </View>
           <View style={styles.wordRow}>
             <Text style={[type.tiny, { width: 96 }]}>Switched on</Text>
