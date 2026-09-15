@@ -52,6 +52,17 @@ const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 
 /**
+ * The research run's ceiling (the handoff, BO10).
+ *
+ * 250 places per run, raisable on the run that asks for it and never by itself.
+ * The handoff's reasoning, kept because it is the whole argument: "A cap you
+ * can raise beats a budget you discover afterwards." The maximum is what one
+ * request may ask for at all, so a typo of 25000 stops at something survivable.
+ */
+export const RUN_CEILING = 250;
+export const RUN_CEILING_MAX = 1000;
+
+/**
  * The code's vocabulary is in the table before anything reads it, and the
  * decisions Epic is sure of are made — once per process, only where nobody
  * has decided, and never for anything that would land in one of our
@@ -241,8 +252,12 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
  * The owner, 14 Sep 2026: "we'll be able to bulk say, 'Anthropic, go look and
  * find this, and get the answers'", and "no ceiling on the automated Claude
  * runs. I just want to concentrate on two specific areas: the area around
- * Sunningdale and the area around Bristol." The geography is the bound, so a
- * run reports what it read and what it cost rather than stopping at a number.
+ * Sunningdale and the area around Bristol." The geography is the bound.
+ *
+ * The handoff settles what that means in practice: **250 places per run, a hard
+ * ceiling you raise per run and which never raises itself**, with a receipt of
+ * what it read and what it cost. "A cap you can raise beats a budget you
+ * discover afterwards." No ceiling on the *runs*; a ceiling on each one.
  */
 taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next) => {
   try {
@@ -258,20 +273,30 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
 
 taxonomyRoutes.post('/not-sure/run', requires('manage_library'), async (req, res, next) => {
   try {
-    const refs = Array.isArray(req.body?.refs) ? req.body.refs.map(String).slice(0, 500) : [];
-    if (!refs.length) throw bad('Which places?');
+    // The ceiling is named on every run and defaults to 250. It is never read
+    // from anywhere that could have raised itself between runs (the handoff,
+    // BO10): a request that says nothing gets 250, not last time's number.
+    const cap = Math.min(RUN_CEILING_MAX, Math.max(1, Number(req.body?.cap) || RUN_CEILING));
+    const asked = Array.isArray(req.body?.refs) ? req.body.refs.map(String) : [];
+    if (!asked.length) throw bad('Which places?');
+    const refs = asked.slice(0, cap);
     const [tax, household] = await Promise.all([taxonomy.taxonomy(), currentHousehold()]);
     const allowed = tax.active.subcategories.map((sc) => ({ key: sc.key, label: sc.label }));
     // Only what is still waiting. A settled place dragged back through a run
     // would undo his decision (Codex, 14 Sep 2026).
-    const waiting = (await notSure.list({ state: 'waiting', limit: 500 })).filter((p) => refs.includes(p.venue_ref));
+    const waiting = (await notSure.list({ state: 'waiting', limit: RUN_CEILING_MAX })).filter((p) => refs.includes(p.venue_ref));
     const run = await notSure.startRun({ askedFor: waiting.length, by: actorOf(req) });
     // The answer goes back now and the reading happens after it. Six places
     // take minutes of web search and the gateway gives a request twenty-eight
     // seconds, so waiting for the run meant the run always failed (14 Sep 2026,
     // the same ceiling the area sweep hit). The screen watches the run and the
     // places fill in as they are answered.
-    res.json({ run, started: waiting.length });
+    // Said out loud when it stopped short, because a run that quietly did 250
+    // of 400 and reported success is the thing a ceiling is meant to prevent.
+    res.json({
+      run, started: waiting.length, cap,
+      stoppedAt: asked.length > refs.length ? { asked: asked.length, doing: refs.length } : null,
+    });
 
     void (async () => {
     let looked = 0; let got = 0; let pence = 0;

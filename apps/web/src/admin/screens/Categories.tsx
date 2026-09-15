@@ -946,6 +946,266 @@ function Said({ lead, children }: { lead: string; children: string }) {
 
 
 /**
+ * BO8 — a subcategory, on its own page: the rule, then real places.
+ *
+ * The owner, 15 Sep 2026: "B08 clearly shows that you should be able to click
+ * through on a subcategory and see all of the associated examples and labels.
+ * Please confirm how I actually get to this." He could not: this was an inline
+ * strip inside another screen, and a primary label was inert text. It is a page
+ * now, reached from Our labels › Primary, with its own address.
+ *
+ * Left: the rule that fills it, written in our labels, and the note that no
+ * provider word appears there. Then the secondary labels every place in here
+ * inherits, then name, category, also-show-it-in, switched on.
+ *
+ * Right: what would land here, before you save. Twelve real places, each with
+ * its address and our labels on it, marked settled or not sure — and the four
+ * that were not go to a list rather than being quietly filed wrong.
+ */
+function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, broughtAs, back, backLabel, onChanged }: {
+  sc: ShelfSubcategory; tax: Taxonomy; wide: boolean; canManage: boolean;
+  secondary: PlaceAttribute[]; defaults: Record<string, AttributeValue>;
+  nameOf: (k: string) => string;
+  broughtAs: (b: { key: string; value: AttributeValue }) => string;
+  back: () => void; backLabel: string;
+  onChanged: (said: string) => Promise<void>;
+}) {
+  const [rules, setRules] = useState<TaxonomyRule[] | null>(null);
+  const [landing, setLanding] = useState<TaxonomyExamples | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(sc.label);
+  const [editing, setEditing] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setRules((await api.taxonomyRules(sc.key)).rules); } catch { setRules([]); }
+  }, [sc.key]);
+  useEffect(() => { void load(); setLanding(null); setName(sc.label); }, [load, sc.label]);
+
+  const run = async (what: () => Promise<unknown>, said: string) => {
+    setBusy(true);
+    try { await what(); await onChanged(said); } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  /**
+   * The busiest word that fills this drawer, which is what twelve real places
+   * are fetched against. A rule in our own labels names our key, so the word is
+   * found through what points at it.
+   */
+  const busiest = useMemo(() => {
+    const words = (rules ?? [])
+      .filter((r) => r.scope === 'labels' || r.scope === 'ours')
+      .flatMap((r) => (r.labelList ?? []).map((l) => l.label))
+      .filter((l) => l.startsWith('google:'));
+    return words[0] ?? null;
+  }, [rules]);
+
+  const look = async () => {
+    if (!busiest) return;
+    setLooking(true);
+    try { setLanding(await api.taxonomyExamples(busiest, false)); }
+    catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setLooking(false); }
+  };
+
+  const settled = (landing?.places ?? []).filter((pl) => pl.landsIn);
+  const notSure = (landing?.places ?? []).filter((pl) => !pl.landsIn);
+  const ourWords = (pl: { types: string[] }) => (pl.types ?? [])
+    .map((t) => (rules ?? []).flatMap((r) => r.labelList ?? []).find((l) => l.label === `google:${t}`)?.name
+      ?? tax.subcategories.find((x) => x.key === t)?.label ?? null)
+    .filter(Boolean).slice(0, 4).join(' \u00b7 ');
+
+  const cat = tax.categories.find((c) => c.key === sc.category_key);
+  const fires = landing ? `${settled.length} of ${landing.places.length}` : '\u2014';
+
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Press effect="none" onPress={back} accessibilityRole="button" style={styles.backLine}>
+        <Icon name="back" size={14} color={colors.accent} strokeWidth={2.6} />
+        <Text style={styles.backText}>{backLabel}</Text>
+      </Press>
+      <Band
+        kicker="A primary label \u00b7 the name that prints"
+        title={sc.label}
+        stats={[
+          { label: 'Category', value: cat?.label ?? sc.category_key },
+          { label: 'Places', value: String(landing?.places.length ?? '\u2014') },
+          { label: 'Rule fires on', value: fires },
+        ]}
+      />
+      <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
+        {/* ---- the rule that fills it ---------------------------------- */}
+        <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
+          <Text style={styles.bandKicker}>The rule that fills it \u00b7 written in our labels</Text>
+          <Said lead="No provider word appears here.">
+            {`Google\u2019s word, OpenStreetMap\u2019s tag and Wikidata\u2019s type all point at our label first, so one rule serves every provider \u2014 including ones we have not signed up.`}
+          </Said>
+          {(rules ?? []).filter((r) => r.scope === 'ours' || r.scope === 'labels').map((r) => (
+            <View key={r.id} style={styles.ruleLine}>
+              <Text style={[type.tiny, { width: 96 }]}>a place with</Text>
+              <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                {(r.labelList ?? []).map((l) => <Word key={l.label} label={l.label} name={l.name} />)}
+              </View>
+            </View>
+          ))}
+          {(rules ?? []).length === 0 ? (
+            <Text style={type.small}>No rule fills this drawer yet \u2014 only places moved here by hand.</Text>
+          ) : null}
+          <View style={styles.ruleLine}>
+            <Text style={[type.tiny, { width: 96 }]}>gets</Text>
+            <Text style={styles.gets}>{sc.label}</Text>
+            <Text style={type.tiny}>its own name, as the primary</Text>
+          </View>
+          {canManage ? (
+            <TextAction label="Add one of our labels" disabled={busy} onPress={() => setEditing(true)} />
+          ) : null}
+
+          {/* ---- the secondary labels every place in here inherits ------- */}
+          <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>Secondary labels every place in here inherits</Text>
+          {secondary.map((a) => {
+            const v = defaults[a.key];
+            const reads = !v ? 'Not set \u2014 each place answers'
+              : v.from != null || v.to != null ? `${v.from ?? 0} to ${v.to ?? 99}`
+                : v.choice ? v.choice : v.yesno === false ? 'No' : 'Yes';
+            const brings = (a.brings ?? []).map(broughtAs).join(', ');
+            return (
+              <View key={a.key} style={styles.wordRow}>
+                <Text style={[type.small, { fontWeight: '600', flex: 1, minWidth: 0 }]}>{a.label}</Text>
+                {canManage ? (
+                  <DrillDropdown
+                    label={a.label} value={reads} set={Boolean(v)} align="right" width={260}
+                    groups={a.kind === 'oneof'
+                      ? [{ key: a.key, label: a.label, items: a.options.map((o) => ({ key: o, label: o, on: v?.choice === o })) }]
+                      : [{ key: a.key, label: a.label, items: [
+                        { key: 'yes', label: 'Yes', on: v?.yesno === true },
+                        { key: 'no', label: 'No', on: v?.yesno === false },
+                      ] }]}
+                    startIn={a.key}
+                    extra={v ? [{ key: '\u2717', label: 'Not set \u2014 each place answers', on: false }] : []}
+                    onPick={(k) => void run(
+                      () => api.taxonomySetDefault({
+                        subcategory: sc.key, attribute: a.key,
+                        value: k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' },
+                      }),
+                      k === '\u2717' ? `${a.label} is each place\u2019s own answer now.` : `Every ${sc.label.toLowerCase()} is ${a.label.toLowerCase()} \u00b7 ${k}.`,
+                    )}
+                  />
+                ) : <Text style={type.small}>{reads}</Text>}
+                {/* Lime, because nobody typed it: it arrived with another label. */}
+                {brings ? <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>brings {brings}</Text> : null}
+              </View>
+            );
+          })}
+
+          {/* ---- name, category, also show it in, switched on ------------ */}
+          <View style={styles.wordRow}>
+            <Text style={[type.tiny, { width: 96 }]}>Name</Text>
+            {renaming ? (
+              <>
+                <Field value={name} onChangeText={setName} autoFocus style={{ flex: 1, minWidth: 140 }}
+                       onSubmitEditing={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
+                <TextAction label="Save" onPress={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
+              </>
+            ) : (
+              <>
+                <Text style={[type.small, { fontWeight: '600', flex: 1 }]}>{sc.label}</Text>
+                {canManage ? <TextAction label="Rename" onPress={() => { setName(sc.label); setRenaming(true); }} /> : null}
+              </>
+            )}
+          </View>
+          <View style={styles.wordRow}>
+            <Text style={[type.tiny, { width: 96 }]}>Category</Text>
+            {canManage ? (
+              <DrillDropdown
+                label="Category" value={cat?.label ?? sc.category_key} align="right" width={240}
+                groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active).map((c) => ({ key: c.key, label: c.label, on: c.key === sc.category_key })) }]}
+                startIn="c"
+                onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
+              />
+            ) : <Text style={type.small}>{cat?.label ?? sc.category_key}</Text>}
+            <Text style={type.tiny}>where every place in it lives</Text>
+          </View>
+          <View style={styles.wordRow}>
+            <Text style={[type.tiny, { width: 96 }]}>Also show it in</Text>
+            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              {(sc.also_in ?? []).map((k) => (
+                <Token key={k} label={tax.categories.find((c) => c.key === k)?.label ?? k}
+                       onRemove={canManage ? () => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: (sc.also_in ?? []).filter((x) => x !== k) }), `${sc.label} no longer shows in ${tax.categories.find((c) => c.key === k)?.label ?? k}.`) : undefined} />
+              ))}
+              {canManage ? (
+                <DrillDropdown
+                  label="Add" value="+ Add" align="left" width={240}
+                  groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active && c.key !== sc.category_key && !(sc.also_in ?? []).includes(c.key)).map((c) => ({ key: c.key, label: c.label, on: false })) }]}
+                  startIn="c"
+                  onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: [...(sc.also_in ?? []), k as MoodKey] }), `${sc.label} also shows in ${tax.categories.find((c) => c.key === k)?.label ?? k}.`)}
+                />
+              ) : null}
+            </View>
+            <Text style={type.tiny}>which menus list it \u2014 not what a place is</Text>
+          </View>
+          <View style={styles.wordRow}>
+            <Text style={[type.tiny, { width: 96 }]}>Switched on</Text>
+            {canManage ? (
+              <TextAction label={sc.active ? 'On' : 'Off'} onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)} />
+            ) : <Text style={type.small}>{sc.active ? 'On' : 'Off'}</Text>}
+          </View>
+        </View>
+
+        {/* ---- what would land here, before you save -------------------- */}
+        <View style={[{ gap: spacing.sm, minWidth: 0 }, wide && { flex: 1 }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.md, flexWrap: 'wrap' }}>
+            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>What would land here \u00b7 before you save</Text>
+            <Text style={type.tiny}>{landing ? `${landing.places.length} real places, fetched once` : 'one provider call, nothing stored'}</Text>
+          </View>
+          {!landing ? (
+            <TextAction label={looking ? 'Looking\u2026' : busiest ? 'Look at twelve real ones' : 'No provider word fills this drawer yet'}
+                        disabled={looking || !busiest || !canManage} onPress={() => void look()} />
+          ) : landing.problem ? (
+            <Text style={type.tiny}>Could not look: {landing.problem}</Text>
+          ) : (
+            <>
+              {landing.places.map((pl) => (
+                <View key={pl.id} style={[styles.egRow, { alignItems: 'flex-start' }]}>
+                  <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                    <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name ?? pl.id}</Text>
+                    <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
+                    <Text style={type.tiny} numberOfLines={1}>our labels: {ourWords(pl) || '\u2014'}</Text>
+                  </View>
+                  <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>{pl.landsIn ? 'settled' : 'not sure'}</Text>
+                </View>
+              ))}
+              {canManage ? (
+                <View style={{ flexDirection: 'row', gap: spacing.lg, alignItems: 'center', flexWrap: 'wrap', paddingTop: spacing.sm }}>
+                  <Press effect="none" disabled={busy} accessibilityRole="button" style={styles.save}
+                         onPress={() => void onChanged(`Nothing to save \u2014 ${settled.length} of ${landing.places.length} were already settled by the labels.`)}>
+                    <Icon name="check" size={14} color={colors.selectedFg} strokeWidth={2.8} />
+                    <Text style={[type.small, { fontWeight: '700', color: colors.selectedFg }]}>Save \u00b7 {settled.length} settled</Text>
+                  </Press>
+                  {notSure.length ? (
+                    <TextAction label={`Send ${notSure.length} to the not-sure list`} disabled={busy}
+                                onPress={() => busiest && void run(() => api.taxonomyExamples(busiest, true), `${notSure.length} went to the not-sure list.`)} />
+                  ) : null}
+                </View>
+              ) : null}
+              <Said lead={`${settled.length} of ${landing.places.length} were settled by the labels; ${notSure.length} were not.`}>
+                {`The ${notSure.length} are named and go to a list, never quietly filed wrong.`}
+              </Said>
+            </>
+          )}
+        </View>
+      </View>
+      {editing ? (
+        <RuleEditor tax={tax} start={[]} startSubcategory={sc.key} fixedSubcategory={sc.key} canManage={canManage}
+                    onClose={() => setEditing(false)}
+                    onSaved={async (saidWhat) => { setEditing(false); await load(); await onChanged(saidWhat); }} />
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * BO7a — our labels.
  *
  * A primary label is a subcategory's own name; a place gets exactly one,
@@ -960,6 +1220,8 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
 }) {
   const [data, setData] = useState<TaxonomyAttributes | null>(null);
   const [half, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'secondary', asOneOf(['secondary', 'primary'] as const, 'secondary'));
+  /** Which primary label is open, in the address like every other layer. */
+  const [openLabel, setOpenLabel] = useQueryState<string>('label', '', asText);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1036,6 +1298,20 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   };
   const primary = tax.subcategories.filter((sc) => sc.active);
   const total = tax.rules.filter((r) => r.subcategory).length;
+
+  // BO8 — one primary label, on its own page.
+  const open = openLabel ? primary.find((sc) => sc.key === openLabel) ?? null : null;
+  if (open) {
+    return (
+      <PrimaryLabel
+        sc={open} tax={tax} wide={wide} canManage={canManage}
+        secondary={secondary} defaults={data?.defaults?.[open.key] ?? {}}
+        nameOf={nameOf} broughtAs={broughtAs}
+        back={() => setOpenLabel('')} backLabel={`Primary labels · ${primary.length}`}
+        onChanged={async (said) => { await load(); await onChanged(said); }}
+      />
+    );
+  }
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -1129,7 +1405,13 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
             <View style={[styles.tCell, styles.headCell, { width: wide ? 160 : 90 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Rules</Text></View>
           </View>
           {primary.map((sc) => (
-            <View key={sc.key} style={styles.wordRow}>
+            // Every primary label is a door. The handoff draws BO8 as the page
+            // behind it — the rule that fills it on the left, twelve real
+            // places on the right — and it was reachable from nowhere (owner,
+            // 15 Sep 2026: "B08 clearly shows that you should be able to click
+            // through on a subcategory and see all of the associated examples").
+            <Press key={sc.key} effect="none" onPress={() => setOpenLabel(sc.key)} accessibilityRole="button"
+                   style={({ hovered }: any) => [styles.wordRow, hovered && { backgroundColor: colors.well }]}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={type.small}><Text style={{ fontWeight: '600' }}>{sc.label}</Text> <Text style={{ color: colors.inkMuted }}>{sc.key}</Text></Text>
               </View>
@@ -1146,7 +1428,8 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
               <View style={[styles.tCell, { width: wide ? 160 : 90 }]}>
                 <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'] }]}>{pointing.get(sc.key) ?? 0}</Text>
               </View>
-            </View>
+              <Icon name="more" size={14} color={colors.inkMuted} />
+            </Press>
           ))}
         </View>
       )}
@@ -1416,6 +1699,9 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word }: {
  * carries the sentence it relied on and where that came from, and nothing is
  * applied until you say so.
  */
+/** 250 places per run — "a cap you can raise beats a budget you discover afterwards". */
+const CEILING = 250;
+
 function NotSure({ tax, wide, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string) => Promise<void>;
 }) {
@@ -1423,6 +1709,13 @@ function NotSure({ tax, wide, canManage, onChanged }: {
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  /**
+   * The ceiling for the next run (the handoff, BO10): 250 places, raised by
+   * hand on the run that needs it and never by itself. Deliberately not in the
+   * address and deliberately not remembered — a raised ceiling that survived
+   * into the next run would be a ceiling that raised itself.
+   */
+  const [cap, setCap] = useState(CEILING);
 
   const load = useCallback(async () => {
     try { const d = await api.taxonomyNotSure(); setData(d); } catch { setData(null); }
@@ -1444,10 +1737,13 @@ function NotSure({ tax, wide, canManage, onChanged }: {
       // of web search is minutes and a request gets twenty-eight seconds
       // (14 Sep 2026). So the list is reloaded as the answers land rather than
       // once at the end, and the run's own receipt fills in when it finishes.
-      const { started } = await api.taxonomyResearch(refs);
+      const { started, stoppedAt } = await api.taxonomyResearch(refs, cap === CEILING ? undefined : cap);
       setTicked(new Set());
+      setCap(CEILING);
       await load();
-      await onChanged(`Looking at ${started} place${started === 1 ? '' : 's'}. The answers fill in as they come back.`);
+      await onChanged(stoppedAt
+        ? `Looking at ${started} of the ${stoppedAt.asked} you ticked \u2014 the ceiling is ${cap}. Raise it and run the rest.`
+        : `Looking at ${started} place${started === 1 ? '' : 's'}. The answers fill in as they come back.`);
       for (const wait of [15000, 30000, 45000, 60000]) setTimeout(() => void load(), wait);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusy(false); }
@@ -1517,13 +1813,27 @@ function NotSure({ tax, wide, canManage, onChanged }: {
         relied on and where that came from. Nothing is applied until you say so.
       </Said>
       {canManage && ticked.size ? (
-        <View style={[styles.line, { gap: spacing.md, justifyContent: 'flex-end' }]}>
+        <View style={[styles.line, { gap: spacing.md, justifyContent: 'flex-end', flexWrap: 'wrap' }]}>
+          {/* The ceiling, named on the run rather than kept anywhere (the
+              handoff, BO10): "a cap you can raise beats a budget you discover
+              afterwards". It goes back to 250 the moment the run is sent, so
+              nothing it did can raise it for next time. */}
+          <Text style={[type.tiny, { flex: 1, minWidth: 0 }]}>
+            The ceiling is {cap} places for this run. It never raises itself.
+            {ticked.size > cap ? ` You have ticked ${ticked.size} — raise it or the rest wait.` : ''}
+          </Text>
+          <DrillDropdown
+            label="Ceiling" value={String(cap)} set={cap !== CEILING} align="right" width={220}
+            groups={[{ key: 'c', label: 'Places in this one run', items: [250, 400, 600, 1000].map((n) => ({ key: String(n), label: String(n), on: n === cap })) }]}
+            startIn="c"
+            onPick={(k) => setCap(Number(k) || CEILING)}
+          />
           <TextAction label="Clear" onPress={() => setTicked(new Set())} />
           <Press effect="none" onPress={() => void run()} disabled={busy} accessibilityRole="button"
                  style={({ hovered }: any) => [styles.approve, hovered && styles.approveOn, busy && { opacity: 0.5 }]}>
             {({ hovered }: any) => (
               <Text style={[type.small, { fontWeight: '700', color: hovered ? colors.selectedFg : colors.accent }]}>
-                {busy ? 'Looking…' : `Go and find out · ${ticked.size}`}
+                {busy ? 'Looking…' : `Go and find out · ${Math.min(ticked.size, cap)}`}
               </Text>
             )}
           </Press>
@@ -2414,6 +2724,12 @@ const styles = StyleSheet.create({
   ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   foundRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   wordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  /** BO8's own furniture: the way back, the rule lines, and the one lime action. */
+  backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
+  backText: { ...type.small, fontWeight: '700', color: colors.accent },
+  ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  gets: { ...type.small, fontWeight: '700', color: colors.ink, borderBottomWidth: 2, borderBottomColor: colors.lime, paddingBottom: 3, paddingRight: 40 },
+  save: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 36, paddingHorizontal: 14, backgroundColor: colors.selected },
   // A word a generic one was seen with: inside the row above it, so it reads as
   // "what this catches" rather than as another subcategory of Google's.
   pairRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.lineSoft },
