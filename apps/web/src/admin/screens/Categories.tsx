@@ -2282,8 +2282,18 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
    * the twelve commonest companions (Codex, 15 Sep 2026, twice).
    */
   const wouldCatch = useCallback(
-    (pl: { ours?: string[] }) => ourLabels.length > 0 && ourLabels.every((k) => (pl.ours ?? []).includes(k)),
-    [ourLabels],
+    (pl: { ours?: string[] }) => {
+      if (!ourLabels.length) return false;
+      // The queried word's own mapping is read live, not from the snapshot.
+      // Answering a word while its examples are open leaves `ours` as it was
+      // fetched, so the rule you just made possible would have counted zero and
+      // marked every place "not caught" — and refetching costs a Google call
+      // for something already on screen (Codex, 15 Sep 2026). Every place in
+      // this sample carries the queried word by construction.
+      const mine = r.points_at ? [...(pl.ours ?? []), r.points_at] : (pl.ours ?? []);
+      return ourLabels.every((k) => mine.includes(k));
+    },
+    [ourLabels, r.points_at],
   );
   const caught = useMemo(
     () => (eg ? eg.places.filter(wouldCatch).length : 0),
