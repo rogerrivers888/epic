@@ -47,7 +47,7 @@ import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, FoldLine } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, DrillDropdown, Dropdown, ago, count } from '../kit';
+import { AdminPage, DrillDropdown, Dropdown, Note, ago, count } from '../kit';
 import { Shelves } from './Shelves';
 import { asOneOf, asText, useQueryState } from '../../router';
 
@@ -462,59 +462,6 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
         </>
       ) : null}
 
-      <View style={{ marginTop: spacing.md }}>
-        <FoldLine label="How this works" value="labels, rules, and what wins">
-          <View style={{ gap: spacing.xs, paddingVertical: spacing.xs }}>
-            <Text style={type.small}>
-              A place carries labels: what each source called it, in that source's own words (Google's type, the map's tag, the
-              Wikidata type), plus what Epic read those into (an experience, a venue kind). Those are a provider's words, and
-              each one is mapped to a label of ours — which is a different thing from a secondary label.
-            </Text>
-            <Text style={type.small}>
-              A rule says: places carrying all of these labels go in this subcategory. Narrowest wins — a rule about one place,
-              then a combination of labels, then a Wikidata type, then the atlas word, then the experience. Naming a subcategory
-              settles the category, because a subcategory has exactly one home.
-            </Text>
-            <Text style={type.small}>
-              One place, one subcategory, one home category. That never changes, and it is what stops the same place being
-              counted twice. A subcategory may still be shown in more than one category: Skateboard park lives in Sport and is
-              listed under Fun and Outdoors, so somebody who opens Fun hoping for a skate park finds one. Set that on the
-              subcategory itself, under “Also show it in”.
-            </Text>
-            <Text style={type.small}>
-              Where several categories are drawn at once — Inspire's carousels, a trip's Activities lanes — each place is given
-              to one of them, its home if that lane is on screen, so nothing is ever drawn twice. Where one category is open on
-              its own, everything listed under it shows, including the drawers whose home is elsewhere. The count on a category
-              is what is behind it, which is why it can be larger than the row of cards above it.
-            </Text>
-            <Text style={type.small}>
-              Rename freely: keys never change. Move a subcategory and every place in it moves. Teach the type, not the place —
-              one rule against “castle” answers for every castle. Switch off rather than delete.
-            </Text>
-            <Text style={type.small}>
-              Google's categories: Google has 20 categories and 478 subcategories of its own (its "types"). A Google subcategory
-              is mapped once it has one of our subcategories, or is excluded from Epic, or is travel (stations, airports,
-              parking), or useful nearby (a loo, a visitor centre). Whole categories that are plainly not for Epic — car dealers,
-              banks, plumbers, petrol stations — and the travel and nearby kinds are decided by Epic without asking; the rest
-              Epic maps where it is sure, and only the judgement calls wait for you.
-            </Text>
-            <Text style={type.small}>
-              The fifth answer is “a secondary label, not a category”. Some of Google's words describe a place without saying what
-              kind of place it is: tourist attraction, adventure sports centre, establishment. They cannot decide which
-              subcategory a place goes in, so marking one takes it out of the mapping queue and stops any rule filing by it.
-              What it still does is describe: the word stays on the place and hands out whatever it tells us. Open one and
-              “the words it catches” lists the specific words seen on the same places, each mappable from there. Use Showing to
-              find every word with the same answer.
-            </Text>
-            <Text style={type.small}>
-              Examples is one live Google search near your home, fenced to that word. It shows real places, what else Google
-              calls them, and where each of those words lands. Nothing is stored and it costs one provider call, so it only ever
-              happens on a press. It is the honest way to settle what one of Google's words actually holds: it is how event
-              venue turned out to be a room you hire, and dance hall a dance class.
-            </Text>
-          </View>
-        </FoldLine>
-      </View>
     </AdminPage>
   );
 }
@@ -868,7 +815,6 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
   return (
     <View style={{ gap: spacing.md }}>
       <Section title={`Each source's words that land in ${cat.label}`}>
-        <Text style={[type.tiny, { paddingVertical: 6 }]}>A number is how many of that source's words land in the row; tap it to read them, and tap a word to write a rule about it. The last rows are the work: words read into {cat.label} with no subcategory, and words nothing read at all.</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableWrap}>
           <View>
             <View style={[styles.tRow, styles.tHead]}>
@@ -1045,17 +991,6 @@ function Band({ kicker, title, stats }: { kicker: string; title: string; stats: 
           </View>
         ))}
       </View>
-    </View>
-  );
-}
-
-/** A sentence that changes what you do next: a 2px rule beside it, never a box. */
-function Said({ lead, children }: { lead: string; children: string }) {
-  return (
-    <View style={styles.said}>
-      <Text style={[type.small, { color: colors.inkMuted, lineHeight: 19 }]}>
-        <Text style={{ color: colors.ink, fontWeight: '700' }}>{lead}</Text> {children}
-      </Text>
     </View>
   );
 }
@@ -1250,6 +1185,7 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
         <Icon name="back" size={14} color={colors.accent} strokeWidth={2.6} />
         <Text style={styles.backText}>Google’s words</Text>
       </Press>
+      <View style={[styles.line, { gap: spacing.sm, alignItems: 'flex-start' }]}>
       <Band
         kicker={`Google’s word · ${r.key}`}
         title={r.label ?? r.key.replace(/_/g, ' ')}
@@ -1258,7 +1194,8 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
           { label: 'Answer', value: answer },
         ]}
       />
-      {r.why ? <Said lead="Why this one is a judgement call.">{r.why}</Said> : null}
+      {r.why ? <Note>{r.why}</Note> : null}
+      </View>
       <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
         {/* ---- what it means ------------------------------------------- */}
         <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
@@ -1286,12 +1223,6 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
           <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>And what else it says · secondary labels</Text>
           {/* No asterisks: there is no markdown here, so they printed as
               asterisks (seen on the deployed site, 15 Sep 2026). */}
-          <Text style={type.tiny}>
-            A word can name the one thing a place <Text style={{ fontWeight: '700', color: colors.ink }}>is</Text>, and say
-            several things that are <Text style={{ fontWeight: '700', color: colors.ink }}>true of it</Text>. Italian
-            restaurant sends a place to Restaurants and also says Italian; dog park says nothing of the kind, which is why
-            this list is here and not on every row.
-          </Text>
           {secondary.map((a) => {
             const on = (r.carries ?? []).find((c) => c.key === a.key);
             return (
@@ -1367,7 +1298,6 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
                       {asking ? 'Reading their websites\u2026' : 'Ask Claude to read these websites'}
                     </Text>
                   </Press>
-                  <Text style={type.tiny}>It reads the sites above and says what the word means in practice. It recommends; you decide.</Text>
                 </View>
               ) : null}
               {said ? (
@@ -1953,9 +1883,6 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                   ) : null}
                 </View>
               ) : null}
-              <Said lead={`${settled.length} of ${landing.places.length} were settled by the labels; ${notSure.length} were not.`}>
-                {`The ${notSure.length} are named and go to a list, never quietly filed wrong.`}
-              </Said>
             </>
           )}
         </View>
@@ -2125,9 +2052,6 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
           { label: 'Rules that file a place', value: count(total) },
         ]}
       />
-      <Said lead="A primary label is a subcategory’s own name.">
-        {`There are ${primary.length} and a place gets exactly one, because it is what prints under the name. Everything else true about a place is a secondary label, and a place can carry any number.`}
-      </Said>
 
       <View style={[styles.line, { justifyContent: 'space-between', flexWrap: 'wrap' }]}>
         <View style={styles.halves}>
@@ -2464,7 +2388,6 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
       {nothingKnows.length ? (
         <View style={{ gap: 4, paddingTop: spacing.md }}>
           <Text style={styles.bandKicker}>Nothing knows these · {nothingKnows.length} words, {count(nothingKnows.reduce((n, r) => n + (r.seen_count ?? 0), 0))} places between them</Text>
-          <Text style={type.tiny}>Surfaced here so it is not a separate errand. Answering one costs nothing and gains nothing, so they go last.</Text>
           {nothingKnows.map(rowFor)}
         </View>
       ) : null}
@@ -2889,10 +2812,6 @@ function NotSure({ tax, wide, canManage, onChanged }: {
           { label: 'Last run', value: last ? `${last.looked_at} looked at${last.cost_pence != null ? ` · £${(last.cost_pence / 100).toFixed(2)}` : ''}` : 'none yet' },
         ]}
       />
-      <Said lead="The labels could not settle these.">
-        Each one is named with the reason. Tick some and send them to be looked up: what comes back carries the sentence it
-        relied on and where that came from. Nothing is applied until you say so.
-      </Said>
       {canManage && ticked.size ? (
         <View style={[styles.line, { gap: spacing.md, justifyContent: 'flex-end', flexWrap: 'wrap' }]}>
           {/* The ceiling, named on the run rather than kept anywhere (the
@@ -3065,10 +2984,6 @@ function PartsOfPlaces({ canManage, tax, onChanged }: {
       <Text style={styles.bandKicker}>
         Inside somewhere else · {rows?.length ?? 0} to confirm{settled.length ? ` · ${settled.length} settled` : ''}
       </Text>
-      <Said lead="No rule can tell these apart.">
-        Amity Beach and a standalone water park carry the same words, so what separates them is that one is inside the other.
-        Confirm and the child is never listed on its own; what it knows goes up to its parent instead.
-      </Said>
       {rows?.length ? rows.map((p) => one(p, false)) : (
         <Text style={[type.small, styles.emptyRow]}>
           Nothing waiting. Every place the research run found inside another one has been answered.
@@ -4021,7 +3936,7 @@ function FindWord({ tax, catLabel, subLabel, canManage, onPick }: {
       {source ? <Text style={type.tiny}>{source.what}. {count(source.total)} known, {count(source.seen)} seen on a real place, {count(source.taught)} in a rule.</Text> : null}
 
       {rows === null ? (
-        <Text style={[type.small, { color: colors.inkMuted }]}>Type a word, or pick a source, and the words that match are listed with where each one lands today.</Text>
+        <Text style={[type.small, { color: colors.inkMuted }]}>Nothing yet.</Text>
       ) : rows.length === 0 ? (
         <Text style={[type.small, { color: colors.inkMuted }]}>No word like that.</Text>
       ) : (
@@ -4174,7 +4089,6 @@ const styles = StyleSheet.create({
   /** 31px is the wide title; the handoff draws 390 as its own artboard at 24 (BO1m). */
   bandTitlePhone: { fontSize: 24, letterSpacing: -0.8, lineHeight: 27 },
   bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
-  said: { borderLeftWidth: BORDER, borderLeftColor: colors.lime, paddingLeft: 13, paddingVertical: 2 },
   bandKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
   halves: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted, alignSelf: 'flex-start' },
   halfItem: { minHeight: 34, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },

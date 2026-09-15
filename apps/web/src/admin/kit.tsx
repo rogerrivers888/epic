@@ -672,6 +672,39 @@ function useAnchor(open: boolean, ref: React.RefObject<any>) {
   return at;
 }
 
+/**
+ * A note behind an icon, for the one fact a control cannot carry itself.
+ *
+ * Roger, 15 Sep 2026: "I don't want any written explanations on a UI. If you
+ * need to put information, you put an information icon, which can have some
+ * detail, and it needs to be very clear and concise. No dribbling along."
+ *
+ * The test before adding one: **why does he need to read this?** If the answer
+ * is "to understand what the screen is doing", the screen is wrong and no
+ * amount of note fixes it. One or two sentences, or leave it out.
+ */
+export function Note({ children }: { children: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<any>(null);
+  const at = useAnchor(open, ref);
+  return (
+    <View ref={ref} style={{ position: 'relative' }}>
+      <Press onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityLabel={open ? 'Hide the note' : 'What is this?'}
+             hitSlop={8} style={{ padding: 2 }}>
+        <Icon name="info" size={14} color={open ? colors.ink : colors.inkMuted} strokeWidth={2} />
+      </Press>
+      {open ? (
+        <Overlay onClose={() => setOpen(false)}>
+          <Press style={dd.scrim} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={[dd.panel, dd.floating, at ? { top: at.y + at.h + 4, left: Math.max(8, at.x - 130), width: 280 } : { opacity: 0 }]}>
+            <Text style={[type.small, { padding: 12, lineHeight: 18 }]}>{children}</Text>
+          </View>
+        </Overlay>
+      ) : null}
+    </View>
+  );
+}
+
 export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0, stacked = false, showLabel = true }: {
   label: string;
   value: string;
