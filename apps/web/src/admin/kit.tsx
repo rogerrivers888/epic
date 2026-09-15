@@ -24,7 +24,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { colors, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
@@ -665,11 +665,21 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
+  /** What has been typed into the search over every group's items at once. */
+  const [q, setQ] = useState('');
+  const found = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return null;
+    return groups.flatMap((g) => g.items
+      .filter((o) => o.label.toLowerCase().includes(needle))
+      .map((o) => ({ ...o, group: g.key, groupLabel: g.label })))
+      .slice(0, 40);
+  }, [q, groups]);
   const group = groups.find((g) => g.key === into) ?? null;
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
-  const close = () => { setOpen(false); setInto(null); setAdopting(false); };
+  const close = () => { setOpen(false); setInto(null); setAdopting(false); setQ(''); };
   const wrapRef = React.useRef<any>(null);
-  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); onOpenChange?.(false); }, [onOpenChange]));
+  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); setQ(''); onOpenChange?.(false); }, [onOpenChange]));
   const pick = (key: string) => { onPick(key); close(); };
   return (
     <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
@@ -701,6 +711,17 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
         <>
           <Press style={dd.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[dd.panel, align === 'right' && dd.panelRight, align === 'right' && nudge ? { right: nudge } : null, { width }]} accessibilityRole="menu">
+            {/* Only on the first level, and only where there is enough to make
+                drilling a chore. Inside one group the list is already short. */}
+            {!group && !adopting && groups.reduce((n, g) => n + g.items.length, 0) >= 12 ? (
+              <View style={dd.search}>
+                <Icon name="search" size={13} color={colors.inkMuted} strokeWidth={2.2} />
+                <TextInput
+                  value={q} onChangeText={setQ} placeholder="Search all of ours" placeholderTextColor={colors.ghost}
+                  style={dd.searchInput} autoCorrect={false}
+                />
+              </View>
+            ) : null}
             <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
               {adopting ? (
                 <>
@@ -753,6 +774,23 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                       </Press>
                     </>
                   ) : null}
+                </>
+              ) : found ? (
+                /* Ours first, searched across every one of them (the handoff,
+                   BO1d). Drilling category by category is fine when you know
+                   which of the eight it is in; typing is what you do when you
+                   know the drawer's name and not its cabinet. */
+                <>
+                  {found.length === 0 ? (
+                    <View style={dd.item}><Text style={type.small}>Nothing called that.</Text></View>
+                  ) : found.map((o) => (
+                    <Press key={`${o.group}:${o.key}`} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
+                      <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
+                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
+                      <Text style={type.tiny} numberOfLines={1}>{o.groupLabel}</Text>
+                    </Press>
+                  ))}
                 </>
               ) : (
                 <>
@@ -827,6 +865,8 @@ const dd = StyleSheet.create({
   group: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
   item: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },
   itemHover: { backgroundColor: colors.well },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, height: 36, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  searchInput: { flex: 1, ...type.small, color: colors.ink, paddingVertical: 0, outlineStyle: 'none' as any },
   itemOn: { backgroundColor: colors.well },
 });
 
