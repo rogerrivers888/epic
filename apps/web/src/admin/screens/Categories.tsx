@@ -1593,43 +1593,59 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
               and `google:planetarium` all printed as "Museums": four identical
               lines, and the one useful fact on each — that a *planetarium* lands
               in Museums — thrown away. */}
-          <Text style={styles.bandKicker}>What puts a place in here</Text>
-          {(rules ?? []).length === 0 ? (
-            <Text style={type.small}>Nothing yet — only places moved here one at a time.</Text>
-          ) : null}
-          {(rules ?? []).filter((r) => r.scope === 'ours' || r.scope === 'labels').map((r) => {
-            const words = r.labelList ?? [];
-            const where = (l: { label: string }) => (nsOf(l.label) === 'epic' ? 'our own word' : `${sourceWord(nsOf(l.label))}’s word`);
-            return (
-              <View key={r.id} style={styles.wordRow}>
-                <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-                  <Text style={type.small} numberOfLines={2}>
-                    {words.map((l, i) => (
-                      <Text key={l.label}>
-                        {i ? <Text style={{ color: colors.inkMuted }}> and </Text> : null}
-                        <Text style={{ fontWeight: '700' }}>{l.name ?? keyOf(l.label).replace(/_/g, ' ')}</Text>
+          <Text style={[styles.h2, { paddingTop: 0 }]}>What puts a place in here</Text>
+          {/* Grouped by the provider, not one row per rule.
+              The owner, 15 Sep 2026: "You're repeating the sentence 'Google's
+              word' 3 times. Surely you would just put... Google and then show
+              their words all 3 in a row."
+              And the drawer's own label is not one of them. A rule saying "a
+              place with Museums gets Museums" is this page, not an entry on it:
+              "If we remove the word 'museum', then we don't have any word in the
+              subcategory of 'museum'... We're deleting the whole subcategory." */}
+          {(() => {
+            const bySource = new Map<string, { rule: TaxonomyRule; l: { label: string; name: string | null; pointsAt: string | null } }[]>();
+            for (const r of (rules ?? []).filter((x) => x.scope === 'ours' || x.scope === 'labels')) {
+              for (const l of r.labelList ?? []) {
+                // The drawer's own name, said back to it, is not a word that
+                // fills it.
+                if (nsOf(l.label) === 'epic' && keyOf(l.label) === sc.key) continue;
+                const ns = nsOf(l.label);
+                bySource.set(ns, [...(bySource.get(ns) ?? []), { rule: r, l }]);
+              }
+            }
+            if (!bySource.size) {
+              return <Text style={type.small}>Nothing yet — only places moved here one at a time.</Text>;
+            }
+            return [...bySource.entries()].map(([ns, items]) => (
+              <View key={ns} style={styles.wordRow}>
+                <Text style={[type.small, { width: 130, color: colors.inkMuted }]} numberOfLines={1}>
+                  {ns === 'epic' ? 'Ours' : sourceWord(ns)}
+                </Text>
+                <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
+                  {items.map(({ rule, l }) => (
+                    <View key={l.label} style={[styles.line, { gap: 5 }]}>
+                      <Text style={[type.small, { fontWeight: '600' }, nsOf(l.label) !== 'epic' && !l.pointsAt && { color: colors.overrun }]}>
+                        {l.name ?? keyOf(l.label).replace(/_/g, ' ')}
                       </Text>
-                    ))}
-                  </Text>
-                  <Text style={type.tiny} numberOfLines={1}>
-                    {[...new Set(words.map(where))].join(' and ')}
-                    {/* A word that means nothing of ours yet is worth saying,
-                        without a paragraph about why. */}
-                    {words.some((l) => nsOf(l.label) !== 'epic' && !l.pointsAt)
-                      ? <Text style={{ color: colors.overrun }}>{' · not yet one of ours'}</Text> : null}
-                  </Text>
+                      {canManage ? (
+                        <Press onPress={() => void run(
+                          () => api.shelfForget(rule.id),
+                          `${l.name ?? keyOf(l.label)} no longer puts a place in ${sc.label}.`,
+                        )} hitSlop={8} accessibilityLabel={`Remove ${l.name ?? keyOf(l.label)}`}>
+                          <Icon name="close" size={13} color={colors.inkMuted} />
+                        </Press>
+                      ) : null}
+                    </View>
+                  ))}
                 </View>
-                {canManage ? (
-                  <TextAction label="Remove" tone="muted" disabled={busy}
-                              onPress={() => void run(
-                                () => api.shelfForget(r.id),
-                                `${words.map((l) => l.name ?? keyOf(l.label)).join(' and ')} no longer puts a place in ${sc.label}.`,
-                              )} />
-                ) : null}
               </View>
-            );
-          })}
-          {canManage ? <TextAction label="Add a word" disabled={busy} onPress={() => setEditing(true)} /> : null}
+            ));
+          })()}
+          {canManage ? (
+            <View style={{ paddingTop: 4 }}>
+              <TextAction label="Add a word" disabled={busy} onPress={() => setEditing(true)} />
+            </View>
+          ) : null}
 
           {/* Only what is actually said about this drawer, plus a way to add
               one. Listing all seven meant Museums was offered a Cuisine and a
@@ -1637,7 +1653,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
               cuisine?"). It never was inheriting one — the row read "not set" —
               but a list of things that make no sense for this drawer is noise
               whatever the values say. */}
-          <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>What is true of every {sc.label.toLowerCase().replace(/s$/, '')}</Text>
+          <Text style={styles.h2}>What is true of every {sc.label.toLowerCase().replace(/s$/, '')}</Text>
           {secondary.filter((a) => defaults[a.key] || adding === a.key).map((a) => {
             const v = defaults[a.key];
             // An open end reads as open. 0 and 99 were being shown as though
@@ -1719,9 +1735,9 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
           ) : null}
           {canManage ? (
             <DrillDropdown
-              label="Add" value="+ Say something about every one" width={280}
+              label="Add" showLabel={false} value="+ Add a label" width={280}
               groups={[{
-                key: 'add', label: 'Our secondary labels',
+                key: 'add', label: `True of every ${sc.label.toLowerCase().replace(/s$/, '')}`,
                 items: secondary.filter((a) => !defaults[a.key]).map((a) => ({ key: a.key, label: a.label, on: false })),
               }]}
               startIn="add"
@@ -1804,14 +1820,24 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
         </View>
 
         {/* ---- what would land here, before you save -------------------- */}
-        <View style={[{ gap: spacing.sm, minWidth: 0 }, wide && { flex: 1 }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.md, flexWrap: 'wrap' }}>
-            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>What would land here · before you save</Text>
-            <Text style={type.tiny}>{landing ? `${landing.places.length} real places, fetched once` : 'one provider call, nothing stored'}</Text>
+        <View style={[{ gap: spacing.sm, minWidth: 0 }, wide && { flex: 1, paddingLeft: spacing.xl }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' }}>
+            <Text style={[styles.h2, { flex: 1, minWidth: 0, paddingTop: 0 }]}>What would land here</Text>
+            {landing ? <Text style={type.tiny}>{landing.places.length} fetched once</Text> : null}
+            {/* The cost belongs behind the icon, not in a sentence beside the
+                heading (owner, 15 Sep 2026). */}
+            <Note>One search of the provider, charged to us. Nothing about the places is stored.</Note>
           </View>
           {!landing ? (
-            <TextAction label={looking ? 'Looking\u2026' : busiest ? 'Look at twelve real ones' : 'No provider word fills this drawer yet'}
-                        disabled={looking || !busiest || !canManage} onPress={() => void look()} />
+            busiest ? (
+              <Press effect="none" disabled={looking || !canManage} accessibilityRole="button" style={styles.save}
+                     onPress={() => void look()}>
+                <Icon name="search" size={14} color={colors.selectedFg} strokeWidth={2.6} />
+                <Text style={[type.small, { fontWeight: '700', color: colors.selectedFg }]}>
+                  {looking ? 'Loading\u2026' : 'Load examples'}
+                </Text>
+              </Press>
+            ) : <Text style={type.small}>No provider word fills this drawer yet.</Text>
           ) : landing.problem ? (
             <Text style={type.tiny}>Could not look: {landing.problem}</Text>
           ) : (
@@ -4004,6 +4030,15 @@ const styles = StyleSheet.create({
   /** BO8's own furniture: the way back, the rule lines, and the one lime action. */
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
+  /**
+   * A section heading that reads as one.
+   *
+   * The owner, 15 Sep 2026: "That's like a header, but it's the same size as the
+   * text below. Looks very unformatted. I don't like it in big capitals either.
+   * Just camel caps, brighter white, clearly a header. Space it out. Move it
+   * down from the bar above."
+   */
+  h2: { ...type.small, fontSize: 16, lineHeight: 21, fontWeight: '700', color: colors.ink, paddingTop: spacing.xl, paddingBottom: spacing.sm },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
   landedIn: { gap: 2, paddingLeft: spacing.md, paddingVertical: 8, borderLeftWidth: 2, borderLeftColor: colors.line, marginLeft: spacing.md, marginBottom: spacing.sm },
   /** A consequence — a lime left rule and no fill (the handoff's colour roles). */
