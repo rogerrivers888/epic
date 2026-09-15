@@ -1498,10 +1498,23 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
 
   /** The library by default; the raw harvest only if asked for. */
   const [state, setState] = useState<'published' | 'all'>('published');
+  // The answer is only drawn if it is still the list that was asked for: the
+  // whole harvest is slow and a fast reply for the library could land after it
+  // (Codex, 15 Sep 2026).
+  const wanted = React.useRef('');
   const load = useCallback(async () => {
-    try { setData(await api.taxonomyDrawer(sc.key, state)); } catch { setData(null); }
+    const key = `${sc.key}:${state}`;
+    wanted.current = key;
+    try { const d = await api.taxonomyDrawer(sc.key, state); if (wanted.current === key) setData(d); }
+    catch { if (wanted.current === key) setData(null); }
   }, [sc.key, state]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // Nothing stays ticked across a change of scope — the rows it referred to
+    // may not be on screen, and a bulk change would reach them unseen.
+    setTicked(new Set());
+    setRange(null);
+    void load();
+  }, [load]);
 
   if (!data) return null;
   // Ranges included. "Suits ages X to Y" is the example he gave for what this
