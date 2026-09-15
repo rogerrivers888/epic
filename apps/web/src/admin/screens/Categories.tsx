@@ -1611,12 +1611,17 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
               .filter((x) => x.scope === 'ours' || x.scope === 'labels')
               .map((rule) => ({
                 rule,
-                // The drawer's own name, said back to it, is not a word that fills it.
+                // How many conditions the rule really has decides how it is
+                // drawn. Hiding the drawer's own name first could turn a
+                // conjunction back into one chip whose x deleted both halves
+                // (Codex, 15 Sep 2026).
+                conditions: (rule.labelList ?? []).length,
+                // The drawer's own name, said back to it, is not worth printing.
                 words: (rule.labelList ?? []).filter((l) => !(nsOf(l.label) === 'epic' && keyOf(l.label) === sc.key)),
               }))
               .filter((x) => x.words.length);
-            const single = live.filter((x) => x.words.length === 1);
-            const compound = live.filter((x) => x.words.length > 1);
+            const single = live.filter((x) => x.conditions === 1);
+            const compound = live.filter((x) => x.conditions > 1);
             const bySource = new Map<string, typeof single>();
             for (const x of single) {
               const ns = nsOf(x.words[0].label);
@@ -1657,12 +1662,20 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                 {compound.map(({ rule, words }) => (
                   <View key={rule.id} style={styles.wordRow}>
                     <Text style={[type.small, { width: 130, color: colors.inkMuted }]} numberOfLines={1}>All together</Text>
-                    <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={2}>
+                    {/* Every condition, not a truncated line: the Remove beside
+                        it deletes all of them. And each with its source, because
+                        Google's museum and Tripadvisor's Museums are two
+                        different conditions that read the same (Codex, 15 Sep
+                        2026). */}
+                    <Text style={[type.small, { flex: 1, minWidth: 0 }]}>
                       {words.map((l, n) => (
                         <Text key={l.label}>
                           {n ? <Text style={{ color: colors.inkMuted }}> and </Text> : null}
                           <Text style={[{ fontWeight: '600' }, nsOf(l.label) !== 'epic' && !l.pointsAt && { color: colors.overrun }]}>
                             {l.name ?? keyOf(l.label).replace(/_/g, ' ')}
+                          </Text>
+                          <Text style={{ color: colors.inkMuted }}>
+                            {` (${nsOf(l.label) === 'epic' ? 'ours' : sourceWord(nsOf(l.label))})`}
                           </Text>
                         </Text>
                       ))}
