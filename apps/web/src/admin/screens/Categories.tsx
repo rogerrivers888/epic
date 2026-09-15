@@ -218,6 +218,10 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
   // door's own sub-line. Read once when the screen loads.
   const [googleCount, setGoogleCount] = useState('Google’s list');
   const [notSureCount, setNotSureCount] = useState('none waiting');
+  // Keyed on what actually changes the count, not on `note` — every toast on
+  // the screen set that, so a whole not-sure list was fetched each time
+  // anything at all was saved (the audit, 15 Sep 2026).
+  const [notSureAt, setNotSureAt] = useState(0);
   useEffect(() => {
     let live = true;
     void api.taxonomyNotSure()
@@ -228,7 +232,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       })
       .catch(() => null);
     return () => { live = false; };
-  }, [note]);
+  }, [notSureAt]);
   useEffect(() => {
     let live = true;
     void api.taxonomyLabels({ namespace: 'google', all: true, limit: 2000 })
@@ -979,7 +983,12 @@ function Toast({ at, onGone }: { at: { text: string; undo?: () => Promise<void> 
   // drawer already follows (CLAUDE.md; the audit, 15 Sep 2026).
   const { width, height, framed, origin } = useViewport();
   const inFrame = framed && origin
-    ? { left: origin.x, right: 'auto' as never, width, bottom: 'auto' as never, top: origin.y + height - 76 }
+    ? {
+      left: origin.x, right: 'auto' as never, width, bottom: 'auto' as never, top: origin.y + height - 76,
+      // And un-centred: the resting style pulls itself back by half its width,
+      // which inside the frame put it half off the left edge (the audit).
+      transform: [] as never,
+    }
     : null;
   useEffect(() => {
     if (!at) return undefined;
@@ -1288,10 +1297,9 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
  * its address and our labels on it, marked settled or not sure — and the four
  * that were not go to a list rather than being quietly filed wrong.
  */
-function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, broughtAs, back, backLabel, onChanged }: {
+function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs, back, backLabel, onChanged }: {
   sc: ShelfSubcategory; tax: Taxonomy; wide: boolean; canManage: boolean;
   secondary: PlaceAttribute[]; defaults: Record<string, AttributeValue>;
-  nameOf: (k: string) => string;
   broughtAs: (b: { key: string; value: AttributeValue }) => string;
   back: () => void; backLabel: string;
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
@@ -1847,7 +1855,7 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
       <PrimaryLabel
         sc={open} tax={tax} wide={wide} canManage={canManage}
         secondary={secondary} defaults={data?.defaults?.[open.key] ?? {}}
-        nameOf={nameOf} broughtAs={broughtAs}
+        broughtAs={broughtAs}
         back={() => setOpenLabel('')} backLabel={`Primary labels · ${primary.length}`}
         onChanged={async (said) => { await load(); await onChanged(said); }}
       />
@@ -2103,7 +2111,7 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; busyKey: string | null;
-  onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }, why?: string) => void;
+  onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => void;
   onExamples: (key: string) => void; egKey: string;
   children?: (r: TaxonomyLabel) => React.ReactNode;
 }) {
@@ -2154,7 +2162,7 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
                   key: c.key, label: c.label,
                   items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: false })),
                 }))}
-                onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+                onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
               />
             </View>
           ) : null}
@@ -3048,14 +3056,20 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
     await onChanged('Put back.');
   } : undefined);
 
-  const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }, why?: string) => {
+  const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => {
     setBusyKey(r.key);
     try {
-      const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), generic: Boolean(choice.generic), reason: why ?? null }]);
+      const out = await api.taxonomyBatch([{
+        labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null,
+        aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel),
+        generic: Boolean(choice.generic), unanswered: Boolean(choice.unanswered),
+        reason: choice.subcategory && r.suggestion?.why ? `Approved: ${r.suggestion.why}.` : null,
+      }]);
       if (out.failed.length) throw new Error(out.failed[0].error);
       await reload();
       if (withKey) void loadWith(withKey);
-      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`, putBack(out.undo));
+      await onChanged(choice.unanswered ? `${r.label ?? r.key} is back in the queue, with nothing said about it.`
+        : choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`, putBack(out.undo));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
@@ -3083,14 +3097,15 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
    * bulk action, so then you'd need to add a toolbar above where I can bulk
    * apply a particular category or subcategory (the same control)").
    */
-  const applyMany = async (rows: TaxonomyLabel[], choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }) => {
+  const applyMany = async (rows: TaxonomyLabel[], choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => {
     if (!rows.length) return;
-    const said = choice.aside ? 'excluded from Epic' : choice.travel ? 'travel' : choice.nearby ? 'useful nearby' : choice.generic ? 'a label, not a subcategory' : `${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}`;
+    const said = choice.unanswered ? 'back in the queue' : choice.aside ? 'excluded from Epic' : choice.travel ? 'travel' : choice.nearby ? 'useful nearby' : choice.generic ? 'a label, not a subcategory' : `${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}`;
     setBusyKey('*');
     try {
       const out = await api.taxonomyBatch(rows.map((r) => ({
         labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null,
-        aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), generic: Boolean(choice.generic),
+        aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel),
+        generic: Boolean(choice.generic), unanswered: Boolean(choice.unanswered),
         reason: `Set in bulk from the Categories screen: ${said}.`,
       })));
       setTicked(new Set());
@@ -3314,7 +3329,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                         key: c.key, label: c.label,
                         items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: false })),
                       }))}
-                      onPick={(k) => void applyMany(tickedHere, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+                      onPick={(k) => void applyMany(tickedHere, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
                       onOpenChange={(o) => setOpenKey(o ? `bulk:${g.key}` : null)}
                       nudge={10}
                     />
@@ -3450,7 +3465,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             key: c.key, label: c.label,
                             items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: st === 'mapped' && r.landing.subcategory === sc.key })),
                           }))}
-                          onPick={(k) => void decide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+                          onPick={(k) => void decide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
                           onOpenChange={(o) => setOpenKey(o ? r.key : null)}
                           adopt={{
                             label: `Adopt Google's “${r.label ?? r.key}” as a new subcategory`,
@@ -3464,7 +3479,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             column; twenty solid lime buttons do not." It was a
                             plain ink word (the audit, 15 Sep 2026). */}
                         {!decided(r) && sug ? (
-                          <Press effect="none" onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)}
+                          <Press effect="none" onPress={() => void decide(r, sug)}
                                  disabled={busyKey != null} accessibilityRole="button"
                                  style={({ hovered }: any) => [styles.approve, hovered && styles.approveOn, busyKey != null && { opacity: 0.5 }]}>
                             {({ hovered }: any) => (
@@ -3533,7 +3548,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                                         key: c.key, label: c.label,
                                         items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: wst === 'mapped' && w.landing.subcategory === sc.key })),
                                       }))}
-                                      onPick={(k) => void decide(w, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
+                                      onPick={(k) => void decide(w, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
                                       onOpenChange={(o) => setOpenKey(o ? w.key : null)}
                                       adopt={{ label: `Adopt Google\u2019s \u201C${w.label ?? w.key}\u201D as a new subcategory`, onPick: (cat, alsoIn) => void adoptWord(w, cat, alsoIn) }}
                                       startIn={wst === 'mapped' ? w.landing.category ?? null : null}
@@ -3809,7 +3824,6 @@ const styles = StyleSheet.create({
   // Open, a category is marked by a lime rule beside it, never a lime band
   // across it (owner, 14 Sep 2026: "there's not supposed to be any green bar at
   // the top or in the middle").
-  gRowOpen: { borderLeftWidth: 3, borderLeftColor: colors.lime, marginLeft: -3 },
   // Inside a category there is nothing to indent away from: it is the page.
   opened: { paddingBottom: spacing.sm },
   moveOn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
@@ -3832,7 +3846,6 @@ const styles = StyleSheet.create({
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
   tCellOn: { backgroundColor: colors.selected },
   tTotal: { borderTopWidth: BORDER, borderTopColor: colors.line, borderBottomWidth: 0 },
-  inset: { borderLeftWidth: 4, borderLeftColor: colors.selected, paddingLeft: spacing.sm - 4, paddingRight: spacing.sm, paddingBottom: spacing.sm, marginBottom: spacing.xs },
   /** The Google table's rows: padded from the edge, a little taller. */
   gRow: { paddingHorizontal: spacing.sm, minHeight: 44 },
   gLast: { paddingLeft: spacing.md },
@@ -3841,7 +3854,6 @@ const styles = StyleSheet.create({
   // A hairline, not a filled block — BO1g rejects the block by name.
   barControl: { height: 36, paddingHorizontal: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   barControlOn: { borderBottomWidth: 1.5, borderBottomColor: colors.lime },
-  barButton: { backgroundColor: colors.primary },
   tickCell: { width: 24, alignItems: 'center', justifyContent: 'center' },
   // Lime fill, ink tick, 20px (the handoff's geometry and BO1g; the audit found
   // ink fill and a cream tick at 16, which is the one thing lime is *for* —

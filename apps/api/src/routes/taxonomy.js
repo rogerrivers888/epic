@@ -1024,6 +1024,23 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         if (!labels.length) throw new Error('no label');
         const badAt = labels.findIndex((l) => !parseLabel(l));
         if (badAt >= 0) throw new Error(`not a label: ${labels[badAt] || '(empty)'}`);
+        // The sixth answer: back to nothing said. A word answered wrongly could
+        // only be put back inside Undo's four seconds, and "six answers, one
+        // column, one control" means all six (the audit, 15 Sep 2026).
+        if (it.unanswered) {
+          if (labels.length !== 1) throw new Error('decide one label at a time');
+          const { namespace, key } = parseLabel(labels[0]);
+          await remember(labels);
+          const { rows: going } = await query(
+            `select * from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
+          undo.deleted.push(...going);
+          await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
+          shelfRules.forget();
+          await labelRepo.save({ namespace, key, decision: 'none', active: true });
+          await labelRepo.pointAt(namespace, key, null);
+          done.push({ labels, unanswered: true });
+          continue;
+        }
         if (it.aside || it.nearby || it.travel || it.generic) {
           if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
