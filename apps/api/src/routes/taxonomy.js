@@ -286,7 +286,21 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
       notSure.runs(5),
     ]);
     const tax = await taxonomy.taxonomy();
-    res.json({ places: rows, counts, runs, subcategories: tax.subcategories, categories: tax.categories });
+    // "Our labels on it" (the handoff, BO10): each word said in ours, which is
+    // how you see at a glance why nothing settled the place. Resolved here,
+    // because the mapping lives here and a bare `water_park` means nothing on
+    // a screen (the audit, 15 Sep 2026).
+    const words = [...new Set(rows.flatMap((r) => r.words ?? []))];
+    const means = new Map();
+    if (words.length) {
+      const { rows: found } = await query(
+        `select key, points_at from taxonomy_labels where namespace = 'google' and key = any($1)`, [words]);
+      for (const f of found) if (f.points_at) means.set(f.key, tax.subByKey.get(f.points_at)?.label ?? f.points_at);
+    }
+    res.json({
+      places: rows.map((r) => ({ ...r, our_words: (r.words ?? []).map((w) => means.get(w) ?? null).filter(Boolean) })),
+      counts, runs, subcategories: tax.subcategories, categories: tax.categories,
+    });
   } catch (err) { next(err); }
 });
 

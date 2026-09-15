@@ -3084,6 +3084,8 @@ export type PlacePart = {
 /** A place the labels could not settle, and what a run came back with. */
 export type NotSurePlace = {
   venue_ref: string; name: string | null; address: string | null; words: string[]; would_be: string | null;
+  /** Its words said in ours, dropping the ones that mean nothing of ours. */
+  our_words?: string[];
   /** A larger place a run thought this sits inside, as a name. */
   part_of_name: string | null;
   reason: string; state: 'waiting' | 'answered' | 'settled' | 'dropped';

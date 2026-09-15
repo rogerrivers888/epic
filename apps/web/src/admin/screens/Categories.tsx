@@ -1164,6 +1164,9 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
   tax: Taxonomy; rows: TaxonomyLabel[]; wide: boolean;
   catLabel: (k: string | null | undefined) => string;
 }) {
+  /** Which drawer's words are open, and which category the list is narrowed to. */
+  const [open, setOpen] = useState('');
+  const [landedIn, setLandedIn] = useState('');
   const byDrawer = useMemo(() => {
     const m = new Map<string, TaxonomyLabel[]>();
     for (const r of rows) {
@@ -1173,9 +1176,19 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
     }
     return m;
   }, [rows]);
-  const subs = tax.subcategories.filter((sc) => sc.active);
+  const subs = tax.subcategories
+    .filter((sc) => sc.active)
+    .filter((sc) => !landedIn || sc.category_key === landedIn);
   return (
     <View>
+      {/* "Landed in" — the canvas's own filter over this table. */}
+      <View style={[styles.line, { gap: spacing.md, paddingBottom: spacing.sm, flexWrap: 'wrap' }]}>
+        <Text style={styles.bandKicker}>Landed in</Text>
+        <Choice label="Every category" on={!landedIn} onPress={() => setLandedIn('')} />
+        {tax.categories.filter((c) => c.active).map((c) => (
+          <Choice key={c.key} label={c.label} on={landedIn === c.key} onPress={() => setLandedIn(landedIn === c.key ? '' : c.key)} />
+        ))}
+      </View>
       <View style={[styles.tRow, styles.tHeadSoft, styles.stick]}>
         <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Our subcategory</Text></View>
         {wide ? <View style={[styles.tCell, styles.headCell, { width: 220 }]}><Text style={styles.colHead}>Home, and also in</Text></View> : null}
@@ -1186,7 +1199,10 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
         const words = byDrawer.get(sc.key) ?? [];
         const most = words.reduce((n, w) => Math.max(n, w.seen_count ?? 0), 0);
         return (
-          <View key={sc.key} style={styles.wordRow}>
+          <View key={sc.key}>
+          <Press effect="none" onPress={() => setOpen(open === sc.key ? '' : sc.key)} accessibilityRole="button"
+                 accessibilityState={{ expanded: open === sc.key }}
+                 style={({ hovered }: any) => [styles.wordRow, hovered && { backgroundColor: colors.well }]}>
             <View style={[styles.tFirst, { flex: 1, width: undefined, minWidth: 0 }]}>
               <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{sc.label}</Text>
               {!wide ? (
@@ -1206,9 +1222,12 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
               </View>
             ) : null}
             <View style={[styles.tCell, { flex: wide ? 1.4 : 1, minWidth: 0 }]}>
-              <Text style={type.small} numberOfLines={2}>
-                {words.length ? words.map((w) => w.label ?? w.key.replace(/_/g, ' ')).join(' · ')
-                  : <Text style={{ color: colors.inkMuted }}>nothing points here yet</Text>}
+              {/* A count, and the row opens on it. The canvas draws the words
+                  behind a drawer -- "the four Google words that landed in
+                  Active · Courses & pitches" -- not as a wall of prose on every
+                  one of 59 rows (the audit, 15 Sep 2026). */}
+              <Text style={[type.small, { color: words.length ? colors.ink : colors.inkMuted }]}>
+                {words.length ? `${words.length}` : 'none'}
               </Text>
             </View>
             <View style={[styles.tCell, { width: wide ? 130 : 84 }]}>
@@ -1216,6 +1235,24 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
                 {most ? count(most) : '—'}
               </Text>
             </View>
+          </Press>
+          {open === sc.key ? (
+            <View style={styles.landedIn}>
+              <Text style={styles.bandKicker}>
+                The {words.length} Google word{words.length === 1 ? '' : 's'} that landed in {catLabel(sc.category_key)} · {sc.label}
+              </Text>
+              {words.map((w) => (
+                <View key={w.key} style={[styles.line, { gap: spacing.md, paddingVertical: 3 }]}>
+                  <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={1}>
+                    <Text style={{ fontWeight: '600' }}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
+                    <Text style={{ color: colors.inkMuted }}> {w.key}</Text>
+                  </Text>
+                  <Text style={[type.tiny, { fontVariant: ['tabular-nums'] }]}>{count(w.seen_count ?? 0)}</Text>
+                </View>
+              ))}
+              {!words.length ? <Text style={type.tiny}>Nothing points here yet.</Text> : null}
+            </View>
+          ) : null}
           </View>
         );
       })}
@@ -2428,6 +2465,13 @@ function NotSure({ tax, wide, canManage, onChanged }: {
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <Text style={type.small}><Text style={{ fontWeight: '600' }}>{p.name ?? p.venue_ref}</Text></Text>
         <Text style={[type.tiny, { lineHeight: 16 }]}>{p.address ? `${p.address} · ` : ''}{p.reason}</Text>
+        {/* "Our labels on it" — the canvas's third column, which is how you tell
+            at a glance why nothing settled it (the audit, 15 Sep 2026). */}
+        {(p.words ?? []).length ? (
+          <Text style={type.tiny} numberOfLines={2}>
+            our labels: {(p.our_words ?? []).join(' · ') || 'none of its words mean anything of ours'}
+          </Text>
+        ) : null}
         {p.part_of_name ? <Text style={[type.tiny, { color: colors.accent }]}>It says this sits inside {p.part_of_name}.</Text> : null}
         {p.because ? (
           <Text style={[type.tiny, { color: colors.accent, lineHeight: 16 }]} numberOfLines={3}>
@@ -2516,7 +2560,20 @@ function NotSure({ tax, wide, canManage, onChanged }: {
       ) : null}
       {waiting.length ? (
         <View style={{ gap: 4, paddingTop: answered.length ? spacing.md : 0 }}>
-          <Text style={styles.bandKicker}>Waiting to be looked at</Text>
+          <View style={[styles.line, { gap: spacing.md }]}>
+            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>Waiting to be looked at</Text>
+            {canManage && waiting.length ? (
+              <TextAction
+                label={waiting.every((p) => ticked.has(p.venue_ref)) ? 'Untick all' : `Tick all ${waiting.length}`}
+                onPress={() => setTicked((prev) => {
+                  const all = waiting.every((p) => prev.has(p.venue_ref));
+                  const n = new Set(prev);
+                  for (const p of waiting) { if (all) n.delete(p.venue_ref); else n.add(p.venue_ref); }
+                  return n;
+                })}
+              />
+            ) : null}
+          </View>
           {waiting.map(row)}
         </View>
       ) : null}
@@ -2575,6 +2632,12 @@ function PartsOfPlaces({ canManage, tax, onChanged }: {
         </Text>
         <Text style={type.tiny}>
           <Text style={{ fontWeight: '700', color: colors.ink }}>On its own</Text> never listed, never searchable
+        </Text>
+        {/* The parent's own primary label first, and unchanged: what goes up
+            adds to it and never replaces it (the canvas, BO11). */}
+        <Text style={type.tiny}>
+          <Text style={{ fontWeight: '700', color: colors.ink }}>{nameOf(p.parent_ref, p.parent_name)} </Text>
+          keeps its own primary label, unchanged
         </Text>
         {/* Lime: it arrived, nobody typed it. Named rather than described —
             "what Thorpe Park knows because of it: Water park, Swimming, Suits
@@ -3547,6 +3610,7 @@ const styles = StyleSheet.create({
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  landedIn: { gap: 2, paddingLeft: spacing.md, paddingVertical: 8, borderLeftWidth: 2, borderLeftColor: colors.line, marginLeft: spacing.md, marginBottom: spacing.sm },
   // 34x19 with a 12px block, from the handoff's geometry table. There was no
   // toggle in the admin at all; on and off were two words (the audit).
   toggle: { width: 34, height: 19, borderWidth: 1, borderColor: colors.line, justifyContent: 'center', paddingHorizontal: 2 },
