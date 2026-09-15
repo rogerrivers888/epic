@@ -1591,12 +1591,46 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
  * is used from the words list and from what-is-left alike, so it lives here
  * rather than being written twice.
  */
-function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word }: {
+function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, onChanged }: {
   eg: TaxonomyExamples | null; egBusy: boolean; canManage: boolean; word: TaxonomyLabel;
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
+  tax: Taxonomy; onChanged: (said: string) => Promise<void>;
 }) {
   const r = word;
+  /**
+   * BO9 — the rule builder, on the row.
+   *
+   * The handoff's own reason for this screen: "Combination rules have existed
+   * since 12 September and have never once been used, because the builder is
+   * buried in a view nobody opens. BO9 exists to fix that." Stating the rule in
+   * prose and leaving him to go and find the builder was the same bug in a new
+   * place, so the rule is written from here.
+   */
+  const [writing, setWriting] = useState(false);
+  const shape = eg?.shapes?.[0];
+  /**
+   * Our labels for the shape, never the provider's words. A word that points at
+   * nothing of ours cannot go in a rule at all, and is dropped here rather than
+   * smuggled in as `google:whatever`.
+   */
+  const ourLabels = useMemo(() => {
+    if (!shape) return [];
+    const points = new Map((eg?.travels ?? []).map((t) => [t.key, t.points_at]));
+    const mine = r.points_at ?? null;
+    return [...new Set([mine, ...shape.words.map((w) => points.get(w) ?? null)].filter(Boolean))] as string[];
+  }, [shape, eg?.travels, r.points_at]);
+  /**
+   * What it would have caught, **counted against the twelve already fetched**.
+   * The handoff is exact about saying so: "8 of the 12 in this sample, not 8 of
+   * 32", because Epic stores no places and a screen implying a total it cannot
+   * know is worse than one admitting a sample.
+   */
+  const caught = useMemo(() => {
+    if (!eg || !shape) return 0;
+    const need = [r.key, ...shape.words];
+    return eg.places.filter((pl) => need.every((w) => (pl.types ?? []).includes(w))).length;
+  }, [eg, shape, r.key]);
   return (
                 <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
                   {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
@@ -1653,10 +1687,37 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word }: {
                                 </View>
                               ))}
                               {canManage && r.landing ? (
-                                <View style={{ paddingTop: 6 }}>
+                                <View style={{ paddingTop: 6, gap: 4 }}>
                                   <Text style={type.tiny}>
                                     The rule worth writing: a place with {[r.label ?? r.key, ...eg.shapes[0].words.map((w) => eg.travels.find((t) => t.key === w)?.label ?? w)].join(' and ')}.
                                   </Text>
+                                  {/* Counted against the sample, and said so.
+                                      Epic stores no places, and a screen
+                                      implying a total it cannot know is worse
+                                      than one admitting a sample (the handoff). */}
+                                  <Text style={type.tiny}>
+                                    It would catch {caught} of the {eg.places.length} in this sample
+                                    {r.seen_count ? `, not ${caught} of ${r.seen_count}` : ''}.
+                                  </Text>
+                                  {ourLabels.length > 1 ? (
+                                    <TextAction label={`Write it \u2014 ${ourLabels.map((k) => subLabel(k) ?? k).join(' + ')}`} onPress={() => setWriting(true)} />
+                                  ) : (
+                                    <Text style={type.tiny}>
+                                      There is no rule to write yet: {ourLabels.length ? 'only one of these words points at a label of ours' : 'none of these words points at a label of ours'}, and a rule is
+                                      written in our labels or not at all.
+                                    </Text>
+                                  )}
+                                  {writing ? (
+                                    <RuleEditor
+                                      tax={tax}
+                                      start={ourLabels.map((k) => `epic:${k}`)}
+                                      startSubcategory={r.landing.subcategory ?? null}
+                                      fixedSubcategory={null}
+                                      canManage={canManage}
+                                      onClose={() => setWriting(false)}
+                                      onSaved={async (saidWhat) => { setWriting(false); await onChanged(saidWhat); }}
+                                    />
+                                  ) : null}
                                 </View>
                               ) : null}
                             </>
@@ -2206,7 +2267,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           onDecide={(r, choice) => void decide(r, choice)}
           onExamples={(k) => { setEg(egKey === k ? '' : k); setWith(''); }}
           egKey={egKey}
-          children={(r) => (egKey === r.key ? <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} /> : null)}
+          children={(r) => (egKey === r.key ? <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} /> : null)}
         />
       ) : null}
       {view === 'left' ? null : (
@@ -2497,7 +2558,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                   {/* Real places carrying this word, so it can be looked at
                       rather than guessed at (owner, 13 Sep 2026). */}
                   {egKey === r.key ? (
-                    <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} />
+                    <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} />
                   ) : null}
                   {/* What a generic word actually catches: the source's own
                       specific words seen on the same places, each mappable
