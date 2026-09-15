@@ -794,23 +794,11 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                   ))}
                 </>
               ) : (
+                /* "One press opens one list: **ours first** … then the four
+                   answers … then adopt in lime at the foot." It was the other
+                   way round, with adopt in the middle and in ink (the audit,
+                   15 Sep 2026). */
                 <>
-                  {extra.map((o) => (
-                    <Press key={o.key} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
-                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
-                      <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
-                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
-                    </Press>
-                  ))}
-                  {adopt ? (
-                    <Press onPress={() => setAdopting(true)} accessibilityRole="menuitem"
-                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
-                      <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.ink} strokeWidth={2.6} /></View>
-                      <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={2}>{adopt.label}</Text>
-                      <Icon name="more" size={14} color={colors.inkMuted} />
-                    </Press>
-                  ) : null}
-                  {extra.length || adopt ? <View style={dd.rule} /> : null}
                   {groups.map((g) => {
                     const within = g.items.some((o) => o.on);
                     return (
@@ -823,6 +811,27 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                       </Press>
                     );
                   })}
+                  {extra.length ? <View style={dd.rule} /> : null}
+                  {extra.map((o) => (
+                    <Press key={o.key} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
+                      <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
+                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
+                    </Press>
+                  ))}
+                  {/* At the foot, and in lime: it is the one thing here that
+                      makes something new rather than choosing something. */}
+                  {adopt ? (
+                    <>
+                      <View style={dd.rule} />
+                      <Press onPress={() => setAdopting(true)} accessibilityRole="menuitem"
+                             style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                        <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.accent} strokeWidth={2.6} /></View>
+                        <Text style={[type.small, { color: colors.accent, flex: 1, fontWeight: '700' }]} numberOfLines={2}>{adopt.label}</Text>
+                        <Icon name="more" size={14} color={colors.accent} />
+                      </Press>
+                    </>
+                  ) : null}
                 </>
               )}
             </ScrollView>

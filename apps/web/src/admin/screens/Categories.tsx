@@ -1827,7 +1827,7 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
             {r.why ? <Text style={[type.tiny, { lineHeight: 16 }]}>{r.why}</Text> : null}
-            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples'} onPress={() => onExamples(r.key)} /> : null}
+            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples · one search, it costs'} onPress={() => onExamples(r.key)} /> : null}
           </View>
           <View style={[styles.tCell, { width: wide ? 90 : 60 }]}>
             <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: r.seen_count ? colors.ink : colors.inkMuted }]}>{count(r.seen_count)}</Text>
@@ -1899,11 +1899,12 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
  * is used from the words list and from what-is-left alike, so it lives here
  * rather than being written twice.
  */
-function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, onChanged }: {
+function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, onChanged, onRefetch }: {
   eg: TaxonomyExamples | null; egBusy: boolean; canManage: boolean; word: TaxonomyLabel;
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
   tax: Taxonomy; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
+  onRefetch: () => void;
 }) {
   const r = word;
   /**
@@ -1946,7 +1947,12 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                   {!egBusy && eg && !eg.problem && !eg.places.length ? <Text style={type.tiny}>Google knows no place of this type near {eg.near}.</Text> : null}
                   {!egBusy && eg && eg.places.length ? (
                     <>
-                      <Text style={type.tiny}>{eg.places.length} near {eg.near}. Read live, never stored.{eg.fenced ? '' : ' Google will not filter by this word, so these were found by words and then kept only where it really appears.'}</Text>
+                      <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+                        <Text style={[type.tiny, { flex: 1, minWidth: 0 }]}>{eg.places.length} near {eg.near}. Read live, never stored.{eg.fenced ? '' : ' Google will not filter by this word, so these were found by words and then kept only where it really appears.'}</Text>
+                        {/* "Fetch again" (BO1h). Another search, another charge,
+                            said as such rather than looking free. */}
+                        {canManage ? <TextAction label="Fetch again · costs another search" tone="muted" onPress={onRefetch} /> : null}
+                      </View>
                       {/* Whether the word is worth keeping as a label even if it is
                           not a category: if nothing else on the place is mapped,
                           throwing it away leaves us knowing nothing (owner, 14 Sep
@@ -2704,7 +2710,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           onDecide={(r, choice) => void decide(r, choice)}
           onExamples={(k) => { setEg(egKey === k ? '' : k); setWith(''); }}
           egKey={egKey}
-          children={(r) => (egKey === r.key ? <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} /> : null)}
+          children={(r) => (egKey === r.key ? <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} onRefetch={() => void loadEg(r.key)} /> : null)}
         />
       ) : null}
       {view === 'left' ? null : (
@@ -2940,7 +2946,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             {/* One live Google search, on a press — and the endpoint
                                 asks for manage_library, so a read-only admin is not
                                 offered a button that can only 403 (Codex, 13 Sep 2026). */}
-                            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples'} onPress={() => { setEg(egKey === r.key ? '' : r.key); setWith(''); }} /> : null}
+                            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples · one search, it costs'} onPress={() => { setEg(egKey === r.key ? '' : r.key); setWith(''); }} /> : null}
                           </View>
                         );
                       })()}
@@ -2987,8 +2993,19 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           }}
                           startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
+                        {/* "Approve is an outline that fills on hover — lime label
+                            on a 1.5px lime underline, going to solid lime
+                            ink-on-lime. Twenty of them read as a quiet right-hand
+                            column; twenty solid lime buttons do not." It was a
+                            plain ink word (the audit, 15 Sep 2026). */}
                         {!decided(r) && sug ? (
-                          <TextAction label="Approve" disabled={busyKey != null} onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)} />
+                          <Press effect="none" onPress={() => void decide(r, sug, `Approved: ${sug.why}.`)}
+                                 disabled={busyKey != null} accessibilityRole="button"
+                                 style={({ hovered }: any) => [styles.approve, hovered && styles.approveOn, busyKey != null && { opacity: 0.5 }]}>
+                            {({ hovered }: any) => (
+                              <Text style={[type.small, { fontWeight: '700', color: hovered ? colors.selectedFg : colors.accent }]}>Approve</Text>
+                            )}
+                          </Press>
                         ) : null}
                       </View>
                     ) : (
@@ -3000,7 +3017,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                   {/* Real places carrying this word, so it can be looked at
                       rather than guessed at (owner, 13 Sep 2026). */}
                   {egKey === r.key ? (
-                    <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} />
+                    <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} onRefetch={() => void loadEg(r.key)} />
                   ) : null}
                   {/* What a generic word actually catches: the source's own
                       specific words seen on the same places, each mappable
