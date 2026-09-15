@@ -243,7 +243,20 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
   const chosen = subs.find((s) => s.key === sub) ?? null;
   const rulesOf = (key: string) => (tax?.rules ?? []).filter((r) => r.subcategory === key);
 
-  const changed = async (said: string) => { setNote(said); await load(); };
+  /**
+   * What just happened, and the way back from it.
+   *
+   * The prototype specifies this and it was missing: a lime band at the foot
+   * with a tick, what changed, and **Undo**, gone after four seconds. The
+   * README says BO1's behaviour is "specified by the prototype, not by prose",
+   * and undo is one of the six things it lists.
+   */
+  const [toast, setToast] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
+  const changed = async (said: string, undo?: () => Promise<void>) => {
+    setNote(said);
+    setToast({ text: said, undo });
+    await load();
+  };
   const run = async (what: () => Promise<unknown>, said: string) => {
     setBusy(true);
     try { await what(); await changed(said); }
@@ -321,6 +334,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       ) : null}
 
       {note ? <Text style={[type.small, styles.note]}>{note}</Text> : null}
+      <Toast at={toast} onGone={() => setToast(null)} />
 
       {editing && tax ? (
         <RuleEditor key={editing.labels.join('+')} tax={tax} start={editing.labels} startSubcategory={editing.subcategory} fixedSubcategory={null}
@@ -480,7 +494,7 @@ function AddSubcategory({ category, label, busy, run }: { category: MoodKey; lab
 function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChanged, onClose }: {
   sc: ShelfSubcategory; tax: Taxonomy; rules: TaxonomyRule[]; canManage: boolean; busy: boolean;
   run: (what: () => Promise<unknown>, said: string) => Promise<void>; wide: boolean;
-  onChanged: (said: string) => Promise<void>; onClose: () => void;
+  onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>; onClose: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(sc.label);
@@ -914,6 +928,36 @@ function Doors({ at, on, counts }: {
 }
 
 /** The band under the doors: what this is, and the numbers that matter about it. */
+/**
+ * What just happened, with the way back — the prototype's toast.
+ *
+ * Lime ground, ink type, a tick, and Undo underlined beside it; gone in four
+ * seconds. Never cream or white type on lime, so ink on lime is the only
+ * pairing here (CLAUDE.md). It sits over everything because it is the one
+ * thing you may want before it goes.
+ */
+function Toast({ at, onGone }: { at: { text: string; undo?: () => Promise<void> } | null; onGone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!at) return undefined;
+    const t = setTimeout(onGone, 4000);
+    return () => clearTimeout(t);
+  }, [at, onGone]);
+  if (!at) return null;
+  return (
+    <View style={styles.toast} accessibilityRole="alert">
+      <Icon name="check" size={15} color={colors.selectedFg} strokeWidth={3.2} />
+      <Text style={styles.toastText} numberOfLines={2}>{at.text}</Text>
+      {at.undo ? (
+        <Press effect="none" disabled={busy} accessibilityRole="button"
+               onPress={async () => { setBusy(true); try { await at.undo?.(); } finally { setBusy(false); onGone(); } }}>
+          <Text style={styles.toastUndo}>{busy ? 'Undoing\u2026' : 'Undo'}</Text>
+        </Press>
+      ) : null}
+    </View>
+  );
+}
+
 function Band({ kicker, title, stats }: { kicker: string; title: string; stats: { label: string; value: string }[] }) {
   const { width } = useViewport();
   const phone = width < WIDE;
@@ -970,7 +1014,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
   nameOf: (k: string) => string;
   broughtAs: (b: { key: string; value: AttributeValue }) => string;
   back: () => void; backLabel: string;
-  onChanged: (said: string) => Promise<void>;
+  onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [rules, setRules] = useState<TaxonomyRule[] | null>(null);
   const [landing, setLanding] = useState<TaxonomyExamples | null>(null);
@@ -1218,7 +1262,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
  * what somebody chose. Nothing is in a box.
  */
 function OurLabels({ tax, wide, canManage, onChanged }: {
-  tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string) => Promise<void>;
+  tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [data, setData] = useState<TaxonomyAttributes | null>(null);
   const [half, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'secondary', asOneOf(['secondary', 'primary'] as const, 'secondary'));
@@ -1612,7 +1656,7 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
   eg: TaxonomyExamples | null; egBusy: boolean; canManage: boolean; word: TaxonomyLabel;
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
-  tax: Taxonomy; onChanged: (said: string) => Promise<void>;
+  tax: Taxonomy; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const r = word;
   /**
@@ -1781,7 +1825,7 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
 const CEILING = 250;
 
 function NotSure({ tax, wide, canManage, onChanged }: {
-  tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string) => Promise<void>;
+  tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [data, setData] = useState<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[] } | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
@@ -1943,7 +1987,7 @@ function NotSure({ tax, wide, canManage, onChanged }: {
  * Beach." A proposal from a research run waits here; confirming it takes the
  * child off every list and sends what it knows up to its parent.
  */
-function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged: (said: string) => Promise<void> }) {
+function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void> }) {
   const [rows, setRows] = useState<PlacePart[] | null>(null);
   const [settled, setSettled] = useState<PlacePart[]>([]);
   const [busy, setBusy] = useState(false);
@@ -2050,7 +2094,7 @@ function said(v: AttributeValue): string {
  * says Italian. Drawn in lime, because nobody typed it on the place.
  */
 function Carries({ r, secondary, onChanged }: {
-  r: TaxonomyLabel; secondary: SecondaryLabel[]; onChanged: (said: string) => Promise<void>;
+  r: TaxonomyLabel; secondary: SecondaryLabel[]; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const label = `${r.namespace}:${r.key}`;
@@ -2092,7 +2136,7 @@ function Carries({ r, secondary, onChanged }: {
 function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours'; view: View_;
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
-  canManage: boolean; onChanged: (said: string) => Promise<void>;
+  canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [rows, setRows] = useState<TaxonomyLabel[] | null>(null);
   const [group, setGroup] = useQueryState<string>('group', '', asText);
@@ -2234,14 +2278,34 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   const total = groups.reduce((t, g) => ({ types: t.types + g.types.length, places: t.places + g.places, mapped: t.mapped + g.mapped, unmapped: t.unmapped + g.unmapped }), { types: 0, places: 0, mapped: 0, unmapped: 0 });
 
   /** One Google subcategory decided, on the fly: one of ours, or not a day out. */
+  /**
+   * A word's answer as it stands, shaped as the batch item that would put it
+   * back. This is what Undo sends: not "the opposite of what I just did", which
+   * cannot be worked out from the new state, but the old answer itself, read
+   * before the change went out (the prototype, which keeps `prev` and restores
+   * it wholesale).
+   */
+  const answerNow = (r: TaxonomyLabel) => ({
+    labels: [`google:${r.key}`],
+    subcategory: r.decision ? null : r.landing.subcategory ?? null,
+    aside: r.decision === 'aside', nearby: r.decision === 'nearby',
+    travel: r.decision === 'travel', generic: r.decision === 'generic',
+    reason: 'Undone from the Categories screen.',
+  });
+  const putBack = (was: ReturnType<typeof answerNow>[]) => async () => {
+    await api.taxonomyBatch(was);
+    await reload();
+  };
+
   const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }, why?: string) => {
+    const was = [answerNow(r)];
     setBusyKey(r.key);
     try {
       const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), generic: Boolean(choice.generic), reason: why ?? null }]);
       if (out.failed.length) throw new Error(out.failed[0].error);
       await reload();
       if (withKey) void loadWith(withKey);
-      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`);
+      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`, putBack(was));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
@@ -2268,6 +2332,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
    */
   const applyMany = async (rows: TaxonomyLabel[], choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }) => {
     if (!rows.length) return;
+    const was = rows.map(answerNow);
     const said = choice.aside ? 'excluded from Epic' : choice.travel ? 'travel' : choice.nearby ? 'useful nearby' : choice.generic ? 'a label, not a subcategory' : `${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}`;
     setBusyKey('*');
     try {
@@ -2278,13 +2343,14 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
       })));
       setTicked(new Set());
       await reload();
-      await onChanged(`${out.done.length} of ${rows.length} → ${said}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`);
+      await onChanged(`${out.done.length} of ${rows.length} → ${said}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`, putBack(was));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
 
   /** Every unmapped subcategory in a group with a suggestion, approved in one press. */
   const approveAll = async (types: TaxonomyLabel[]) => {
+    const was = types.filter((r) => !decided(r) && r.suggestion).map(answerNow);
     const items = types.filter((r) => !decided(r) && r.suggestion).map((r) => ({
       labels: [`google:${r.key}`], subcategory: r.suggestion?.subcategory ?? null, aside: Boolean(r.suggestion?.aside), nearby: Boolean(r.suggestion?.nearby), travel: Boolean(r.suggestion?.travel), generic: Boolean(r.suggestion?.generic), reason: `Approved: ${r.suggestion?.why}.`,
     }));
@@ -2294,7 +2360,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
       const out = await api.taxonomyBatch(items);
       setTicked(new Set());
       await reload();
-      await onChanged(`Approved ${out.done.length} of ${items.length}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`);
+      await onChanged(`Approved ${out.done.length} of ${items.length}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`, putBack(was));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
@@ -2856,6 +2922,13 @@ const styles = StyleSheet.create({
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  toast: {
+    position: 'fixed' as any, left: '50%', bottom: 28, transform: [{ translateX: '-50%' as any }],
+    flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 200,
+    backgroundColor: colors.selected, paddingVertical: 12, paddingHorizontal: 18, maxWidth: 560,
+  },
+  toastText: { ...type.small, fontWeight: '700', color: colors.selectedFg, flexShrink: 1, minWidth: 0 },
+  toastUndo: { ...type.small, fontWeight: '700', color: colors.selectedFg, textDecorationLine: 'underline' },
   /** A consequence, not a fact: a lime left rule and no fill (the handoff's colour roles). */
   theTest: { borderLeftWidth: 2, borderLeftColor: colors.lime, paddingLeft: spacing.md, paddingVertical: 8, marginTop: spacing.sm },
   gets: { ...type.small, fontWeight: '700', color: colors.ink, borderBottomWidth: 2, borderBottomColor: colors.lime, paddingBottom: 3, paddingRight: 40 },
