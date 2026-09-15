@@ -1501,15 +1501,18 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   // The answer is only drawn if it is still the list that was asked for: the
   // whole harvest is slow and a fast reply for the library could land after it
   // (Codex, 15 Sep 2026).
-  // A monotonic token, not the scope: a save in flight holds an older `load`
-  // and calling it on completion re-claimed that old scope, leaving the wrong
-  // list on screen under the new label for good (Codex, 15 Sep 2026).
-  const run = React.useRef(0);
-  const load = useCallback(async () => {
-    const mine = ++run.current;
-    try { const d = await api.taxonomyDrawer(sc.key, state); if (run.current === mine) setData(d); }
-    catch { if (run.current === mine) setData(null); }
-  }, [sc.key, state]);
+  /**
+   * Nothing but the effect fetches this list.
+   *
+   * A save that held its own `load` was holding the scope it was created in, so
+   * finishing after a change of scope drew the old list under the new label —
+   * and a token could not tell the difference, because that stale call really
+   * was the newest one (Codex, 15 Sep 2026, three passes). A save asks for a
+   * reload by bumping a number; the effect is the only thing that fetches, and
+   * it always has the scope that is on screen.
+   */
+  const [reloads, setReloads] = useState(0);
+  const again = useCallback(() => setReloads((n) => n + 1), []);
   useEffect(() => {
     // Nothing stays ticked across a change of scope — the rows it referred to
     // may not be on screen, and a bulk change would reach them unseen. And the
@@ -1518,8 +1521,12 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
     setTicked(new Set());
     setRange(null);
     setData(null);
-    void load();
-  }, [load]);
+    let live = true;
+    void api.taxonomyDrawer(sc.key, state)
+      .then((d) => { if (live) setData(d); })
+      .catch(() => { if (live) setData(null); });
+    return () => { live = false; };
+  }, [sc.key, state, reloads]);
 
   if (!data) return null;
   // Ranges included. "Suits ages X to Y" is the example he gave for what this
@@ -1540,7 +1547,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
     try {
       await api.taxonomySetMany({ attribute: a.key, refs, value });
       setTicked(new Set());
-      await load();
+      again();
       await onChanged(value ? `${refs.length} set to ${a.label} \u00b7 ${reads(value)}.` : `${a.label} cleared on ${refs.length}.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusy(false); }
@@ -1623,7 +1630,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
                         setBusy(true);
                         try {
                           await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: a.key, value: k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' } });
-                          await load();
+                          again();
                           await onChanged(`${pl.name}: ${a.label} ${k === '\u2717' ? 'back to what it inherits' : reads(a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' })}.`);
                         } finally { setBusy(false); }
                       })();
@@ -1662,7 +1669,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
                 if (range.ref === '*') await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value });
                 else await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value });
                 setRange(null); if (range.ref === '*') setTicked(new Set());
-                await load();
+                again();
                 await onChanged('Set.');
               } catch (err) { await onChanged(String((err as Error).message)); }
               finally { setBusy(false); }
@@ -1674,7 +1681,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
               try {
                 if (range.ref === '*') await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value: null });
                 else await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value: null });
-                setRange(null); await load(); await onChanged('Back to what it inherits.');
+                setRange(null); again(); await onChanged('Back to what it inherits.');
               } finally { setBusy(false); }
             })();
           }} />
