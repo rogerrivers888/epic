@@ -1390,7 +1390,13 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
                             // One at a time, awaited, stopping at the first
                             // failure: launching the mapping and the labels
                             // together could leave half of it applied.
-                            if (said.primary && !(await onDecide(r, { subcategory: said.primary }))) return;
+                            // "Secondary label only" is itself one of the six
+                            // answers, so it has to be recorded as one. Writing
+                            // the labels and leaving the word undecided left it
+                            // in the unmapped queue while the screen said it had
+                            // been answered (Codex, 15 Sep 2026).
+                            const settle = said.primary ? { subcategory: said.primary } : { generic: true };
+                            if (!(await onDecide(r, settle))) return;
                             for (const x of said.secondary) {
                               await onCarry(r, x.key, x.choice ? { choice: x.choice } : { yesno: true });
                             }
