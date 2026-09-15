@@ -1527,9 +1527,19 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   }, [sc.key, state, reloads]);
 
   if (!data) return null;
-  // Ranges included. "Suits ages X to Y" is the example he gave for what this
-  // screen is for, and I had filtered its column out (Codex, 15 Sep 2026).
-  const cols = data.attributes;
+  /**
+   * A column for every label that says something here, and none that does not.
+   *
+   * Museums were being given a Cuisine column and a Dining style column, every
+   * cell an em dash, for the same reason the drawer's own list was: I showed all
+   * seven rather than the ones that mean anything for this drawer. A label
+   * counts if the drawer assumes it, if any place here says it, or if he adds
+   * the column himself.
+   */
+  const [extraCols, setExtraCols] = useState<string[]>([]);
+  const says = new Set(extraCols);
+  for (const pl of data.places) for (const [k, v] of Object.entries(pl.values)) if (v) says.add(k);
+  const cols = data.attributes.filter((a) => says.has(a.key));
   const needle = q.trim().toLowerCase();
   const rows = needle ? data.places.filter((p) => p.name.toLowerCase().includes(needle)) : data.places;
 
@@ -1554,9 +1564,17 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   return (
     <View style={{ gap: 0 }}>
       <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
-        <Text style={[styles.h2, { flex: 1, minWidth: 0 }]}>Every {sc.label.toLowerCase()} we hold · {data.places.length}</Text>
+        <Text style={[styles.h2, { flex: 1, minWidth: 0 }]}>{sc.label} we hold · {data.places.length}</Text>
         <Choice label={state === 'all' ? 'Everything harvested' : 'In the library'} on={state === 'all'}
                 onPress={() => setState(state === 'all' ? 'published' : 'all')} />
+        {canManage && data.attributes.some((a) => !says.has(a.key)) ? (
+          <DrillDropdown
+            label="Column" showLabel={false} value="+ Add a column" width={240}
+            groups={[{ key: 'c', label: 'Our secondary labels', items: data.attributes.filter((a) => !says.has(a.key)).map((a) => ({ key: a.key, label: a.label, on: false })) }]}
+            startIn="c"
+            onPick={(k) => setExtraCols((x) => [...x, k])}
+          />
+        ) : null}
         <Field value={q} onChangeText={setQ} placeholder="Find one" style={{ minWidth: 160 }} icon="search" />
       </View>
       {/* One label, changed on everything ticked. */}
