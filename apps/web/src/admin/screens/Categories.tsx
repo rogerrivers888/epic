@@ -1501,18 +1501,23 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   // The answer is only drawn if it is still the list that was asked for: the
   // whole harvest is slow and a fast reply for the library could land after it
   // (Codex, 15 Sep 2026).
-  const wanted = React.useRef('');
+  // A monotonic token, not the scope: a save in flight holds an older `load`
+  // and calling it on completion re-claimed that old scope, leaving the wrong
+  // list on screen under the new label for good (Codex, 15 Sep 2026).
+  const run = React.useRef(0);
   const load = useCallback(async () => {
-    const key = `${sc.key}:${state}`;
-    wanted.current = key;
-    try { const d = await api.taxonomyDrawer(sc.key, state); if (wanted.current === key) setData(d); }
-    catch { if (wanted.current === key) setData(null); }
+    const mine = ++run.current;
+    try { const d = await api.taxonomyDrawer(sc.key, state); if (run.current === mine) setData(d); }
+    catch { if (run.current === mine) setData(null); }
   }, [sc.key, state]);
   useEffect(() => {
     // Nothing stays ticked across a change of scope — the rows it referred to
-    // may not be on screen, and a bulk change would reach them unseen.
+    // may not be on screen, and a bulk change would reach them unseen. And the
+    // old list comes off screen while the new one is fetched, so a tick made in
+    // the meantime cannot be on a row that is about to vanish.
     setTicked(new Set());
     setRange(null);
+    setData(null);
     void load();
   }, [load]);
 
