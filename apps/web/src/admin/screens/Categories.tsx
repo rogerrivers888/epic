@@ -1394,7 +1394,14 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
             return (
               <View key={r.id} style={{ gap: 3 }}>
                 <View style={styles.ruleLine}>
-                  <Text style={[type.tiny, { width: 96 }]}>a place with</Text>
+                  {/* Which vocabulary it is written in. Two rules can resolve to
+                      the same words of ours — one stored against Google's word,
+                      one against ours — and drawing both as "a place with Water
+                      park" with no way to tell them apart is what the screen
+                      looked like on the deployed site (15 Sep 2026). */}
+                  <Text style={[type.tiny, { width: 96 }]}>
+                    a place with{r.scope === 'ours' ? '' : '\u2009*'}
+                  </Text>
                   <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                     {ours.map((l, i) => (
                       <Text key={l.label} style={type.small}>
@@ -1426,6 +1433,12 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
               </View>
             );
           })}
+          {(rules ?? []).some((r) => r.scope === 'labels') ? (
+            <Text style={type.tiny}>
+              * still stored against a provider’s own word. It fires the same way; rewriting it in ours is what makes it
+              serve every provider at once.
+            </Text>
+          ) : null}
           {(rules ?? []).length === 0 ? (
             <Text style={type.small}>No rule fills this drawer yet — only places moved here by hand.</Text>
           ) : null}
@@ -1495,7 +1508,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
             <Text style={[type.tiny, { width: 96 }]}>Category</Text>
             {canManage ? (
               <DrillDropdown
-                label="Category" value={cat?.label ?? sc.category_key} align="right" width={240}
+                label="Category" showLabel={false} value={cat?.label ?? sc.category_key} align="right" width={240}
                 groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active).map((c) => ({ key: c.key, label: c.label, on: c.key === sc.category_key })) }]}
                 startIn="c"
                 onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
