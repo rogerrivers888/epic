@@ -652,7 +652,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
    * group picked is where the new thing goes (owner, 13 Sep 2026: "I would
    * like a new one called water park").
    */
-  adopt?: { label: string; onPick: (groupKey: string) => void } | null;
+  adopt?: { label: string; onPick: (groupKey: string, alsoIn: string[]) => void } | null;
   /** Pixels to hold a right-aligned panel off whatever sits to its right. */
   nudge?: number;
   /**
@@ -679,6 +679,9 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
+  /** The home picked in step one, and the extra menus picked in step two. */
+  const [home, setHome] = useState<string | null>(null);
+  const [also, setAlso] = useState<string[]>([]);
   /** What has been typed into the search over every group's items at once. */
   const [q, setQ] = useState('');
   const found = useMemo(() => {
@@ -692,7 +695,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   }, [q, groups]);
   const group = groups.find((g) => g.key === into) ?? null;
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
-  const close = () => { setOpen(false); setInto(null); setAdopting(false); setQ(''); };
+  const close = () => { setOpen(false); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); };
   const wrapRef = React.useRef<any>(null);
   useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); setQ(''); onOpenChange?.(false); }, [onOpenChange]));
   const pick = (key: string) => { onPick(key); close(); };
@@ -758,14 +761,47 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
             ) : null}
             <ScrollView style={sheet ? { flex: 1 } : { maxHeight: 360 }} keyboardShouldPersistTaps="handled">
               {adopting ? (
+                /* BO1e is two steps, not one: its home category, then — optional
+                   — the other menus it should be listed in, with the rule stated
+                   at the point of the decision, then the adopt line naming the
+                   home it is about to take. It committed on the first tap (the
+                   audit, 15 Sep 2026). */
+                home ? (
+                  <>
+                    <Press onPress={() => { setHome(null); setAlso([]); }} accessibilityRole="button" accessibilityLabel="Back"
+                           style={({ hovered }: any) => [dd.item, dd.back, hovered && dd.itemHover]}>
+                      <Icon name="back" size={14} color={colors.ink} strokeWidth={2.4} />
+                      <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: '700' }]} numberOfLines={2}>
+                        Also list it in · optional
+                      </Text>
+                    </Press>
+                    <Text style={dd.note}>Changes which menus show the drawer. Never changes where the place lives.</Text>
+                    {groups.filter((g) => g.key !== home).map((g) => (
+                      <Press key={g.key} onPress={() => setAlso((a) => (a.includes(g.key) ? a.filter((x) => x !== g.key) : [...a, g.key]))}
+                             accessibilityRole="menuitem" accessibilityState={{ selected: also.includes(g.key) }}
+                             style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, also.includes(g.key) && dd.itemOn]}>
+                        <View style={{ width: 16, alignItems: 'center' }}>{also.includes(g.key) ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
+                        <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{g.label}</Text>
+                      </Press>
+                    ))}
+                    <View style={dd.rule} />
+                    <Press onPress={() => { adopt?.onPick(home, also); close(); }} accessibilityRole="menuitem"
+                           style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
+                      <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.accent} strokeWidth={2.6} /></View>
+                      <Text style={[type.small, { color: colors.accent, flex: 1, fontWeight: '700' }]} numberOfLines={2}>
+                        Adopt it, home in {groups.find((g) => g.key === home)?.label ?? home}
+                      </Text>
+                    </Press>
+                  </>
+                ) : (
                 <>
                   <Press onPress={() => setAdopting(false)} accessibilityRole="button" accessibilityLabel="Back"
                          style={({ hovered }: any) => [dd.item, dd.back, hovered && dd.itemHover]}>
                     <Icon name="back" size={14} color={colors.ink} strokeWidth={2.4} />
-                    <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: '700' }]} numberOfLines={2}>New subcategory — under which category?</Text>
+                    <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: '700' }]} numberOfLines={2}>Its home category · pick one</Text>
                   </Press>
                   {groups.map((g) => (
-                    <Press key={g.key} onPress={() => { adopt?.onPick(g.key); close(); }} accessibilityRole="menuitem"
+                    <Press key={g.key} onPress={() => { setHome(g.key); setAlso([]); }} accessibilityRole="menuitem"
                            style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
                       <View style={{ width: 16 }} />
                       <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={1}>{g.label}</Text>
@@ -773,6 +809,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                     </Press>
                   ))}
                 </>
+                )
               ) : group ? (
                 <>
                   <Press onPress={() => setInto(null)} accessibilityRole="button" accessibilityLabel="Back to the categories"
@@ -793,10 +830,10 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                   {adopt ? (
                     <>
                       <View style={dd.rule} />
-                      <Press onPress={() => { adopt.onPick(group.key); close(); }} accessibilityRole="menuitem"
+                      <Press onPress={() => { setHome(group.key); setAlso([]); setAdopting(true); }} accessibilityRole="menuitem"
                              style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
-                        <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.ink} strokeWidth={2.6} /></View>
-                        <Text style={[type.small, { color: colors.ink, flex: 1 }]} numberOfLines={2}>{adopt.label} under {group.label}</Text>
+                        <View style={{ width: 16, alignItems: 'center' }}><Icon name="add" size={13} color={colors.accent} strokeWidth={2.6} /></View>
+                        <Text style={[type.small, { color: colors.accent, flex: 1, fontWeight: '700' }]} numberOfLines={2}>{adopt.label} under {group.label}</Text>
                       </Press>
                       {/* …or somewhere else: the owner opened on the suggested category and
                           took the one row he saw for the only choice (13 Sep 2026). */}
@@ -916,6 +953,7 @@ const dd = StyleSheet.create({
   group: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
   item: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: 7 },
   itemHover: { backgroundColor: colors.well },
+  note: { ...type.tiny, paddingHorizontal: 12, paddingBottom: 6, lineHeight: 16 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, height: 36, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   searchInput: { flex: 1, ...type.small, color: colors.ink, paddingVertical: 0, outlineStyle: 'none' as any },
   itemOn: { backgroundColor: colors.well },

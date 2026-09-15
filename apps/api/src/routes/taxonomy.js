@@ -694,6 +694,18 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       return shelvesForVenue(venue, rules, tax.vocab).subcategory ?? null;
     };
     for (const p of out.places) p.landsIn = filedAs(p.types, p.primaryType ?? null);
+    // And whether we already know it sits inside somewhere bigger, which is why
+    // a place like Amity Beach never settles on its own (the handoff, BO8).
+    const parents = await placeParts.parts().catch(() => new Map());
+    if (parents.size) {
+      const names = await query(
+        `select venue_ref, name from place_records where venue_ref = any($1)`, [[...parents.values()]],
+      ).then((r) => new Map(r.rows.map((x) => [x.venue_ref, x.name]))).catch(() => new Map());
+      for (const p of out.places) {
+        const parent = parents.get(`google:${p.id}`);
+        p.partOf = parent ? names.get(parent) ?? parent : null;
+      }
+    }
     // And how many the queried word is carrying on its own — the same question,
     // with that word taken away. If it *was* the primary, what is left has no
     // primary; promoting the next one would invent a reading.

@@ -3054,6 +3054,8 @@ export type TaxonomyExamples = {
     types: string[]; mapsUrl: string | null; website: string | null;
     /** Where the whole set of its words lands it today, or null if nothing does. */
     landsIn: string | null;
+    /** The bigger place this is inside, by name — which is why it never settles alone. */
+    partOf?: string | null;
   }[];
   /** Every other Google word on those places, commonest first, with where each lands. */
   alsoCalled: { key: string; on: number; label: string | null; decision: string | null; landing: TaxonomyLanding }[];

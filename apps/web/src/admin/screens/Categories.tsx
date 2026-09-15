@@ -1555,7 +1555,13 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                       <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
                       <Text style={type.tiny} numberOfLines={1}>our labels: {ourWords(pl) || '\u2014'}</Text>
                     </View>
-                    <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>{pl.landsIn ? 'settled' : 'not sure'}</Text>
+                    <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>
+                      {pl.landsIn ? 'settled' : 'not sure'}
+                      {/* The canvas marks Amity Beach "· part of another place",
+                          because that is *why* it did not settle rather than a
+                          second fact about it (the audit, 15 Sep 2026). */}
+                      {!pl.landsIn && pl.partOf ? ` · part of ${pl.partOf}` : ''}
+                    </Text>
                     {/* "Override it on a single place, where you can see what was
                         inherited and say why you changed it." The endpoint had
                         existed since the start with no way to reach it from
@@ -2951,12 +2957,15 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
    * and the word is mapped to it (owner, 13 Sep 2026: "if they call it water
    * park… I would like a new one called water park, and likewise with marina").
    */
-  const adoptWord = async (r: TaxonomyLabel, categoryKey: string) => {
+  const adoptWord = async (r: TaxonomyLabel, categoryKey: string, alsoIn: string[] = []) => {
     setBusyKey(r.key);
     try {
       const { subcategory, created } = await api.taxonomyAdopt({ label: `google:${r.key}`, categoryKey, name: r.label ?? r.key });
+      // Which menus list it, chosen at the same moment and written straight
+      // after — it is a listing, never a second home (the handoff, BO1e).
+      if (alsoIn.length) await api.shelfSaveSubcategory({ id: subcategory.id, alsoIn: alsoIn as MoodKey[] });
       await reload();
-      await onChanged(`${created ? 'New subcategory' : 'Subcategory'} ${subcategory.label} under ${catLabel(categoryKey)}, with ${r.label ?? r.key} mapped to it.`);
+      await onChanged(`${created ? 'New subcategory' : 'Subcategory'} ${subcategory.label} under ${catLabel(categoryKey)}, with ${r.label ?? r.key} mapped to it${alsoIn.length ? `, also listed in ${alsoIn.map((k) => catLabel(k)).join(' and ')}` : ''}.`);
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
@@ -3336,7 +3345,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           onOpenChange={(o) => setOpenKey(o ? r.key : null)}
                           adopt={{
                             label: `Adopt Google's “${r.label ?? r.key}” as a new subcategory`,
-                            onPick: (cat) => void adoptWord(r, cat),
+                            onPick: (cat, alsoIn) => void adoptWord(r, cat, alsoIn),
                           }}
                           startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
@@ -3417,7 +3426,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                                       }))}
                                       onPick={(k) => void decide(w, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : { subcategory: k })}
                                       onOpenChange={(o) => setOpenKey(o ? w.key : null)}
-                                      adopt={{ label: `Adopt Google\u2019s \u201C${w.label ?? w.key}\u201D as a new subcategory`, onPick: (cat) => void adoptWord(w, cat) }}
+                                      adopt={{ label: `Adopt Google\u2019s \u201C${w.label ?? w.key}\u201D as a new subcategory`, onPick: (cat, alsoIn) => void adoptWord(w, cat, alsoIn) }}
                                       startIn={wst === 'mapped' ? w.landing.category ?? null : null}
                                     />
                                     </View>
