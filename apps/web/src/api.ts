@@ -3070,6 +3070,8 @@ export type PlacePart = {
   note: string | null; set_by: string | null;
   /** Names, because `google:ChIJ…` on screen is not a place anybody can read. */
   child_name?: string | null; parent_name?: string | null;
+  /** Exactly what the parent gains: the child's primary label and its secondary ones. */
+  goes_up?: { primary: string | null; secondary: string[] };
 };
 
 /** A place the labels could not settle, and what a run came back with. */

@@ -212,6 +212,13 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
     catch (err) { setNote(String((err as Error).message)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  /** Our secondary labels, so a screen can name one rather than print its key. */
+  const [ourSecondary, setOurSecondary] = useState<PlaceAttribute[]>([]);
+  useEffect(() => {
+    let live = true;
+    void api.taxonomyAttributes().then((d) => { if (live) setOurSecondary(d.attributes.filter((a) => a.active)); }).catch(() => null);
+    return () => { live = false; };
+  }, []);
 
   const categories = tax?.categories ?? [];
   // How many of a provider's words there are and how many are answered, for the
@@ -427,7 +434,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       {tax && door === 'notsure' ? (
         <>
           <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
-          <PartsOfPlaces canManage={canManage} onChanged={changed} />
+          <PartsOfPlaces canManage={canManage} tax={tax} secondary={ourSecondary} onChanged={changed} />
         </>
       ) : null}
 
@@ -446,8 +453,8 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
             <Text style={type.small}>
               One place, one subcategory, one home category. That never changes, and it is what stops the same place being
               counted twice. A subcategory may still be shown in more than one category: Skateboard park lives in Sport and is
-              listed under Fun and Outdoors, so somebody who opens Fun hoping for a skate park finds one. Set that on Shelves,
-              under “Also show it in”.
+              listed under Fun and Outdoors, so somebody who opens Fun hoping for a skate park finds one. Set that on the
+              subcategory itself, under “Also show it in”.
             </Text>
             <Text style={type.small}>
               Where several categories are drawn at once — Inspire's carousels, a trip's Activities lanes — each place is given
@@ -598,7 +605,7 @@ function SubcategoryDetail({ sc, tax, rules, canManage, busy, run, wide, onChang
       ) : null}
 
       {rules.length === 0 ? (
-        <Text style={[type.small, styles.emptyRow]}>Nothing yet. Only places moved here one at a time on the Shelves screen will show under it.</Text>
+        <Text style={[type.small, styles.emptyRow]}>Nothing yet. Only places moved here one at a time, behind the Shelves door, will show under it.</Text>
       ) : rules.map((r) => (
         <View key={r.id} style={styles.ruleRow}>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -759,7 +766,7 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
         </Press>
       ))}
       {q.trim().length >= 2 && !found.length ? <Text style={[type.tiny, { paddingVertical: 6 }]}>No source uses a word like that.</Text> : null}
-      <Text style={type.tiny}>This will be {level}. One Wikidata type, atlas word or experience is written at that level, as the Shelves screen writes it; a provider's own word, or several labels together, sits above the type rules and below a rule about one place.</Text>
+      <Text style={type.tiny}>This will be {level}. One Wikidata type, atlas word or experience is written at that level; a provider's own word, or several labels together, sits above the type rules and below a rule about one place.</Text>
 
       {fixedSubcategory ? (
         <Text style={[type.small, { marginTop: spacing.sm }]}>Into <Text style={{ fontWeight: '700' }}>{catLabel(catOf(fixedSubcategory))} · {subLabel(fixedSubcategory)}</Text></Text>
@@ -2276,7 +2283,12 @@ function NotSure({ tax, wide, canManage, onChanged }: {
  * Beach." A proposal from a research run waits here; confirming it takes the
  * child off every list and sends what it knows up to its parent.
  */
-function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void> }) {
+function PartsOfPlaces({ canManage, tax, secondary, onChanged }: {
+  canManage: boolean; tax: Taxonomy; secondary: PlaceAttribute[];
+  onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
+}) {
+  const subLabel = (k: string) => tax.subcategories.find((x) => x.key === k)?.label ?? k.replace(/-/g, ' ');
+  const labelName = (k: string) => secondary.find((a) => a.key === k)?.label ?? k.replace(/-/g, ' ');
   const [rows, setRows] = useState<PlacePart[] | null>(null);
   const [settled, setSettled] = useState<PlacePart[]>([]);
   const [busy, setBusy] = useState(false);
@@ -2315,10 +2327,21 @@ function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged
         <Text style={type.tiny}>
           <Text style={{ fontWeight: '700', color: colors.ink }}>On its own</Text> never listed, never searchable
         </Text>
-        {/* Lime: it arrived, nobody typed it. */}
-        <Text style={[type.tiny, { color: colors.accent }]}>
-          <Text style={{ fontWeight: '700' }}>What goes up</Text> its primary label and every secondary label it carries,
-          to {nameOf(p.parent_ref, p.parent_name)}
+        {/* Lime: it arrived, nobody typed it. Named rather than described —
+            "what Thorpe Park knows because of it: Water park, Swimming, Suits
+            ages 0 to 12" (the handoff, BO11; the audit found the whole section
+            missing). */}
+        <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={3}>
+          <Text style={{ fontWeight: '700' }}>What goes up </Text>
+          {(() => {
+            const up = [
+              p.goes_up?.primary ? subLabel(p.goes_up.primary) : null,
+              ...(p.goes_up?.secondary ?? []).map((k) => labelName(k)),
+            ].filter(Boolean);
+            return up.length
+              ? `${up.join(', ')} — so ${nameOf(p.parent_ref, p.parent_name)} knows it has one`
+              : `its primary label and every secondary label it carries, to ${nameOf(p.parent_ref, p.parent_name)}`;
+          })()}
         </Text>
         {p.note ? <Text style={[type.tiny, { lineHeight: 16 }]} numberOfLines={3}>{p.note}</Text> : null}
       </View>
