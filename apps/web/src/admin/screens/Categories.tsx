@@ -138,12 +138,20 @@ function Word({ label, name, muted }: { label: string; name?: string | null; mut
 }
 
 /** A label that has been chosen: a flat lime-tint token with an × — the only filled thing in a form. */
+/**
+ * One label, with a way to take it off. **Not a pill.**
+ *
+ * "Labels are not pills. The primary label carries weight and a lime underline;
+ * secondary labels are plain text... This was considered and settled — pills
+ * would be a deliberate reversal of the standing instruction." It was a solid
+ * lime pill until the audit found it (15 Sep 2026).
+ */
 function Token({ label, name, onRemove }: { label: string; name?: string | null; onRemove?: () => void }) {
   const key = keyOf(label);
   return (
     <View style={styles.token}>
       <Text style={type.small}>
-        <Text style={{ color: colors.inkMuted }}>{sourceWord(nsOf(label))} · </Text>
+        {nsOf(label) === 'epic' ? null : <Text style={{ color: colors.inkMuted }}>{sourceWord(nsOf(label))} · </Text>}
         <Text style={{ fontWeight: '700' }}>{name && name !== key ? name : key}</Text>
       </Text>
       {onRemove ? (
@@ -347,7 +355,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       {door === 'cats' && tax && category && shown === 'subcategories' ? (
         <View style={[styles.split, wide && styles.splitWide]}>
           {/* Every subcategory of this category with its secondary labels, in one table. */}
-          <Section title="Subcategories and their secondary labels" style={{ flex: 1, minWidth: 0 }}
+          <Section title="Subcategories and what fills them" style={{ flex: 1, minWidth: 0 }}
                    right={canManage ? <AddSubcategory category={category.key as MoodKey} label={category.label} busy={busy} run={run} /> : undefined}>
             {subs.length === 0 ? <Text style={[type.small, styles.emptyRow]}>No subcategories yet.</Text> : null}
             {subs.filter((s) => wide || !chosen || s.key === chosen.key).map((s) => {
@@ -364,9 +372,19 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
                     </Text>
                   </View>
                   <View style={[styles.attrs, wide ? { flex: 1, minWidth: 0 } : { width: '100%' }]}>
-                    {words.slice(0, wide ? 14 : 8).map((w, i) => <Text key={`${w}-${i}`} style={styles.attr}>{w}</Text>)}
-                    {words.length > (wide ? 14 : 8) ? <Text style={[styles.attr, { color: colors.inkMuted }]}>+{words.length - (wide ? 14 : 8)} more</Text> : null}
-                    {words.length === 0 ? <Text style={[type.small, { color: colors.inkMuted }]}>No secondary labels yet — only places moved here by hand.</Text> : null}
+                    {/* Plain text on one line separated by middots. These are the
+                        words the rules name, which are neither pills nor
+                        secondary labels; calling them either was the three-way
+                        confusion the vocabulary rule exists to stop (the audit,
+                        15 Sep 2026). */}
+                    {words.length ? (
+                      <Text style={type.small} numberOfLines={wide ? 3 : 4}>
+                        {words.slice(0, wide ? 14 : 8).join(' · ')}
+                        {words.length > (wide ? 14 : 8) ? <Text style={{ color: colors.inkMuted }}>{` · +${words.length - (wide ? 14 : 8)} more`}</Text> : null}
+                      </Text>
+                    ) : (
+                      <Text style={[type.small, { color: colors.inkMuted }]}>Nothing fills it yet — only places moved here by hand.</Text>
+                    )}
                   </View>
                   {wide ? <Text style={[type.tiny, styles.subCount]}>{rules.length}</Text> : null}
                   {wide ? <Icon name={on ? 'collapse' : 'more'} size={14} color={colors.inkMuted} /> : null}
@@ -884,9 +902,11 @@ function ProviderWords({ tax, category, wide, subLabel, onPick }: {
 const STANDINGS = [
   { key: '', label: 'Every answer' },
   { key: 'mapped', label: 'Mapped to one of ours' },
-  // A rule that names a category but no drawer is its own answer, and it is a
-  // work queue: those words need a subcategory (Codex, 14 Sep 2026).
-  { key: 'category', label: 'A category but no subcategory' },
+  // Not a seventh answer — the six are the six. This is *mapped*, incompletely:
+  // a rule naming a category and no drawer, which is a work queue (Codex,
+  // 14 Sep 2026) and is named as one so it cannot read as an answer of its own
+  // (the audit, 15 Sep 2026).
+  { key: 'category', label: 'Mapped, but no subcategory yet' },
   { key: 'generic', label: 'A secondary label, not a category' },
   { key: 'travel', label: 'Travel' },
   { key: 'nearby', label: 'Useful nearby' },
@@ -1065,6 +1085,9 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
 
   const cat = tax.categories.find((c) => c.key === sc.category_key);
   const fires = landing ? `${settled.length} of ${landing.places.length}` : '\u2014';
+  /** One of ours, by its own name — a primary label or a secondary one. */
+  const subLabelOf = (k: string) => tax.subcategories.find((x) => x.key === k)?.label
+    ?? secondary.find((a) => a.key === k)?.label ?? k.replace(/-/g, ' ');
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -1073,7 +1096,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
         <Text style={styles.backText}>{backLabel}</Text>
       </Press>
       <Band
-        kicker="A primary label \u00b7 the name that prints"
+        kicker="A primary label · the name that prints"
         title={sc.label}
         stats={[
           { label: 'Category', value: cat?.label ?? sc.category_key },
@@ -1084,20 +1107,46 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
       <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
         {/* ---- the rule that fills it ---------------------------------- */}
         <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
-          <Text style={styles.bandKicker}>The rule that fills it \u00b7 written in our labels</Text>
+          <Text style={styles.bandKicker}>The rule that fills it · written in our labels</Text>
           <Said lead="No provider word appears here.">
             {`Google\u2019s word, OpenStreetMap\u2019s tag and Wikidata\u2019s type all point at our label first, so one rule serves every provider \u2014 including ones we have not signed up.`}
           </Said>
-          {(rules ?? []).filter((r) => r.scope === 'ours' || r.scope === 'labels').map((r) => (
-            <View key={r.id} style={styles.ruleLine}>
-              <Text style={[type.tiny, { width: 96 }]}>a place with</Text>
-              <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                {(r.labelList ?? []).map((l) => <Word key={l.label} label={l.label} name={l.name} />)}
+          {/* In our labels, or not at all. A rule may still be stored against a
+              provider's word — 383 of them are — and printing "Google ·
+              water_park" one line under "No provider word appears here" is a
+              contradiction on the screen (the audit, 15 Sep 2026). So each word
+              is shown as the label of ours it means, and a rule holding a word
+              that means nothing of ours yet says so instead of pretending. */}
+          {(rules ?? []).filter((r) => r.scope === 'ours' || r.scope === 'labels').map((r) => {
+            const ours = (r.labelList ?? []).map((l) => ({ ...l, mine: l.pointsAt }));
+            const strays = ours.filter((l) => !l.mine);
+            return (
+              <View key={r.id} style={{ gap: 3 }}>
+                <View style={styles.ruleLine}>
+                  <Text style={[type.tiny, { width: 96 }]}>a place with</Text>
+                  <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                    {ours.map((l, i) => (
+                      <Text key={l.label} style={type.small}>
+                        {i ? <Text style={{ color: colors.inkMuted }}>+ </Text> : null}
+                        <Text style={{ fontWeight: '600', color: l.mine ? colors.ink : colors.inkMuted }}>
+                          {l.mine ? subLabelOf(l.mine) : (l.name ?? keyOf(l.label))}
+                        </Text>
+                      </Text>
+                    ))}
+                  </View>
+                </View>
+                {strays.length ? (
+                  <Text style={[type.tiny, { color: colors.overrun }]}>
+                    {strays.length === 1 ? 'One word in this rule' : `${strays.length} words in this rule`} still
+                    {strays.length === 1 ? ' means' : ' mean'} nothing of ours — {strays.map((l) => keyOf(l.label)).join(', ')}.
+                    Map {strays.length === 1 ? 'it' : 'them'} on Google’s words and this rule becomes one of ours.
+                  </Text>
+                ) : null}
               </View>
-            </View>
-          ))}
+            );
+          })}
           {(rules ?? []).length === 0 ? (
-            <Text style={type.small}>No rule fills this drawer yet \u2014 only places moved here by hand.</Text>
+            <Text style={type.small}>No rule fills this drawer yet — only places moved here by hand.</Text>
           ) : null}
           <View style={styles.ruleLine}>
             <Text style={[type.tiny, { width: 96 }]}>gets</Text>
@@ -1189,7 +1238,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                 />
               ) : null}
             </View>
-            <Text style={type.tiny}>which menus list it \u2014 not what a place is</Text>
+            <Text style={type.tiny}>which menus list it — not what a place is</Text>
           </View>
           <View style={styles.wordRow}>
             <Text style={[type.tiny, { width: 96 }]}>Switched on</Text>
@@ -1202,7 +1251,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
         {/* ---- what would land here, before you save -------------------- */}
         <View style={[{ gap: spacing.sm, minWidth: 0 }, wide && { flex: 1 }]}>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.md, flexWrap: 'wrap' }}>
-            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>What would land here \u00b7 before you save</Text>
+            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>What would land here · before you save</Text>
             <Text style={type.tiny}>{landing ? `${landing.places.length} real places, fetched once` : 'one provider call, nothing stored'}</Text>
           </View>
           {!landing ? (
@@ -1223,15 +1272,33 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                 </View>
               ))}
               {canManage ? (
-                <View style={{ flexDirection: 'row', gap: spacing.lg, alignItems: 'center', flexWrap: 'wrap', paddingTop: spacing.sm }}>
-                  <Press effect="none" disabled={busy} accessibilityRole="button" style={styles.save}
-                         onPress={() => void onChanged(`Nothing to save \u2014 ${settled.length} of ${landing.places.length} were already settled by the labels.`)}>
-                    <Icon name="check" size={14} color={colors.selectedFg} strokeWidth={2.8} />
-                    <Text style={[type.small, { fontWeight: '700', color: colors.selectedFg }]}>Save \u00b7 {settled.length} settled</Text>
-                  </Press>
+                <View style={{ gap: 6, paddingTop: spacing.sm }}>
+                  {/* There is no Save. Everything on the left is written the
+                      moment it is changed, and a button that writes nothing is
+                      worse than no button (the audit, 15 Sep 2026: "Save is a
+                      no-op"). What the screen owes is the count and the one
+                      thing still to decide. */}
+                  <Text style={type.tiny}>
+                    {settled.length} of {landing.places.length} settled by the labels. Everything on the left is saved as
+                    you change it.
+                  </Text>
                   {notSure.length ? (
-                    <TextAction label={`Send ${notSure.length} to the not-sure list`} disabled={busy}
-                                onPress={() => busiest && void run(() => api.taxonomyExamples(busiest, true), `${notSure.length} went to the not-sure list.`)} />
+                    <Press effect="none" disabled={busy} accessibilityRole="button" style={styles.save}
+                           onPress={() => void run(
+                             () => api.taxonomyQueueNotSure({
+                               subcategory: sc.key,
+                               places: notSure.map((pl) => ({
+                                 ref: `google:${pl.id}`, name: pl.name, address: pl.address, words: pl.types ?? [],
+                                 reason: `Nothing it carries settles it, and it turned up in ${sc.label}\u2019s own sample.`,
+                               })),
+                             }),
+                             `${notSure.length} went to the not-sure list.`,
+                           )}>
+                      <Icon name="check" size={14} color={colors.selectedFg} strokeWidth={2.8} />
+                      <Text style={[type.small, { fontWeight: '700', color: colors.selectedFg }]}>
+                        Send {notSure.length} to the not-sure list
+                      </Text>
+                    </Press>
                   ) : null}
                 </View>
               ) : null}
@@ -1887,7 +1954,7 @@ function NotSure({ tax, wide, canManage, onChanged }: {
         <Press effect="none" onPress={() => setTicked((prev) => { const n = new Set(prev); if (n.has(p.venue_ref)) n.delete(p.venue_ref); else n.add(p.venue_ref); return n; })}
                accessibilityRole="checkbox" accessibilityState={{ checked: ticked.has(p.venue_ref) }} style={styles.tickCell}>
           <View style={[styles.tick, ticked.has(p.venue_ref) && styles.tickOn]}>
-            {ticked.has(p.venue_ref) ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}
+            {ticked.has(p.venue_ref) ? <Icon name="check" size={13} color={colors.selectedFg} strokeWidth={3.2} /> : null}
           </View>
         </Press>
       ) : null}
@@ -2450,7 +2517,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         <View style={{ flex: 1 }} />
         <Press effect="none" onPress={() => setNoise(noise === '1' ? '' : '1')} accessibilityRole="switch" accessibilityState={{ checked: noise === '1' }}
                style={[styles.barControl, noise === '1' && styles.barControlOn]}>
-          <Text style={[type.small, { fontWeight: '700', color: noise === '1' ? colors.selectedFg : colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} excluded · {asideCount}</Text>
+          <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} excluded · {asideCount}</Text>
         </Press>
       </View>
       {chosen ? null : (
@@ -2609,7 +2676,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                     {canManage ? (
                       <Press effect="none" onPress={() => tick(r.key, !ticked.has(r.key))}
                              accessibilityRole="checkbox" accessibilityState={{ checked: ticked.has(r.key) }} accessibilityLabel={`Tick ${r.label ?? r.key}`} style={styles.tickCell}>
-                        <View style={[styles.tick, ticked.has(r.key) && styles.tickOn]}>{ticked.has(r.key) ? <Icon name="check" size={11} color={colors.primaryFg} strokeWidth={3} /> : null}</View>
+                        <View style={[styles.tick, ticked.has(r.key) && styles.tickOn]}>{ticked.has(r.key) ? <Icon name="check" size={13} color={colors.selectedFg} strokeWidth={3.2} /> : null}</View>
                       </Press>
                     ) : null}
                     <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
@@ -2909,12 +2976,12 @@ const styles = StyleSheet.create({
   subName: { flexGrow: 1, flexBasis: 140, minWidth: 0, gap: 1 },
   subCount: { width: 24, textAlign: 'right', fontVariant: ['tabular-nums'] },
   attrs: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' },
-  attr: { ...type.tiny, color: colors.ink, fontWeight: '600', backgroundColor: colors.panelWarm, paddingHorizontal: 7, paddingVertical: 3 },
   emptyRow: { color: colors.inkMuted, paddingVertical: spacing.sm },
 
   ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   foundRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
-  wordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  // 13px, from the handoff's geometry table (the audit found 8).
+  wordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   /** BO8's own furniture: the way back, the rule lines, and the one lime action. */
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
@@ -2935,9 +3002,11 @@ const styles = StyleSheet.create({
   pairRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.lineSoft },
   egRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 5, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.lineSoft },
 
-  editor: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, backgroundColor: colors.surfaceMuted, marginVertical: spacing.sm, gap: 4 },
+  // A 2px ink left rule, not a filled panel: "No tiles, panels, outlined chips
+  // or boxes of any kind. Hairlines." (the audit, 15 Sep 2026).
+  editor: { paddingVertical: spacing.sm, paddingLeft: spacing.md, borderLeftWidth: 2, borderLeftColor: colors.line, marginVertical: spacing.sm, gap: 4 },
   tokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingVertical: 6 },
-  token: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.selected, paddingHorizontal: 8, paddingVertical: 4 },
+  token: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 3, borderBottomWidth: 1.5, borderBottomColor: colors.lime },
   field: { flexDirection: 'row', alignItems: 'center', gap: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line, paddingVertical: 2 },
   fieldInput: { flex: 1, paddingVertical: 6, color: colors.ink, fontSize: 14, outlineStyle: 'none' as never, backgroundColor: 'transparent' },
   landing: { paddingVertical: spacing.sm },
@@ -3019,10 +3088,14 @@ const styles = StyleSheet.create({
   gLast: { paddingLeft: spacing.md },
   /** The opened group's controls: one height, room above and below. */
   groupBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm, flexWrap: 'wrap', paddingVertical: spacing.md },
-  barControl: { height: 36, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surfaceMuted },
-  barControlOn: { backgroundColor: colors.selected },
+  // A hairline, not a filled block — BO1g rejects the block by name.
+  barControl: { height: 36, paddingHorizontal: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  barControlOn: { borderBottomWidth: 1.5, borderBottomColor: colors.lime },
   barButton: { backgroundColor: colors.primary },
   tickCell: { width: 24, alignItems: 'center', justifyContent: 'center' },
-  tick: { width: 16, height: 16, borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  tickOn: { backgroundColor: colors.ink },
+  // Lime fill, ink tick, 20px (the handoff's geometry and BO1g; the audit found
+  // ink fill and a cream tick at 16, which is the one thing lime is *for* —
+  // "the moment something is selected").
+  tick: { width: 20, height: 20, borderWidth: 1, borderColor: colors.line, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  tickOn: { backgroundColor: colors.selected, borderColor: colors.selected },
 });

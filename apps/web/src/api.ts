@@ -2419,6 +2419,9 @@ export const api = {
     request<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[]; subcategories: ShelfSubcategory[]; categories: ShelfCategory[] }>(
       `/api/admin/taxonomy/not-sure${qs({ state })}`),
   /** Send a batch to be looked up. Nothing is applied by it. */
+  /** Put places already on screen on the not-sure list, with no provider call. */
+  taxonomyQueueNotSure: (body: { subcategory: string | null; places: { ref: string; name: string | null; address: string | null; words: string[]; reason?: string }[] }) =>
+    post<{ queued: number }>('/api/admin/taxonomy/not-sure/queue', body),
   /** `cap` is the ceiling for *this* run and nothing else; leave it out for 250. */
   taxonomyResearch: (refs: string[], cap?: number) =>
     post<{ run: NotSureRun; started: number; cap: number; stoppedAt: { asked: number; doing: number } | null }>(
@@ -3119,7 +3122,13 @@ export type TaxonomyPairs = {
 };
 
 /** A rule as the Categories screen draws it: every rule as the labels it is about. */
-export type TaxonomyRule = ShelfRule & { labelList: { label: string; name: string | null }[] };
+export type TaxonomyRule = ShelfRule & {
+  labelList: {
+    label: string; name: string | null;
+    /** Which of ours this means. Null where the provider's word means nothing of ours yet. */
+    pointsAt: string | null;
+  }[];
+};
 
 export type Taxonomy = {
   categories: (ShelfCategory & { subcategories: ShelfSubcategory[] })[];

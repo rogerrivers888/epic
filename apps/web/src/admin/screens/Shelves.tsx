@@ -440,7 +440,7 @@ export function Shelves({ canManage, embedded = false }: { canManage: boolean; e
       {section === 'taught' ? (
         <Panel
           title="Every rule"
-          sub="What has been taught, why, and by whom. Forgetting one drops the subject back to where it started."
+          sub="What has been taught, why, and by whom. Forgetting one drops the word back to where it started."
           padded={false}
         >
           {(vocab?.rules ?? []).length === 0 ? (

@@ -136,6 +136,19 @@ async function namesFor(labels) {
 async function withLabels(rules) {
   const all = rules.flatMap((r) => labelsOfRule(r));
   const names = await namesFor(all);
+  // Which of our labels each provider word means, so a screen can show a rule
+  // in our words rather than in Google's — and say plainly where a word means
+  // nothing of ours yet (the handoff: "Rules are written only in our labels").
+  const pointsAt = new Map();
+  const provider = [...new Set(all.filter((l) => !l.startsWith('epic:')))];
+  if (provider.length) {
+    const { rows } = await query(
+      `select namespace, key, points_at from taxonomy_labels
+        where namespace || ':' || key = any($1)`,
+      [provider],
+    ).catch(() => ({ rows: [] }));
+    for (const r of rows) pointsAt.set(`${r.namespace}:${r.key}`, r.points_at);
+  }
   const unnamed = [...new Set(all.filter((l) => l.startsWith('wikidata:') && !names.get(l)).map((l) => l.slice('wikidata:'.length)))];
   // Named in the background — Wikidata can take a minute to say no (Codex, 12
   // Sep 2026) — so this answer carries the rule's own label and the next one
@@ -143,7 +156,13 @@ async function withLabels(rules) {
   if (unnamed.length) nameLater(unnamed);
   return rules.map((r) => ({
     ...r,
-    labelList: labelsOfRule(r).map((l) => ({ label: l, name: names.get(l) ?? (r.scope === 'kind' ? r.subject_label ?? null : null) })),
+    labelList: labelsOfRule(r).map((l) => ({
+      label: l,
+      name: names.get(l) ?? (r.scope === 'kind' ? r.subject_label ?? null : null),
+      // `epic:` labels are already ours; a provider's word is ours only through
+      // what it points at, and null means it means nothing of ours yet.
+      pointsAt: l.startsWith('epic:') ? l.slice('epic:'.length) : pointsAt.get(l) ?? null,
+    })),
   }));
 }
 
@@ -268,6 +287,41 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
     ]);
     const tax = await taxonomy.taxonomy();
     res.json({ places: rows, counts, runs, subcategories: tax.subcategories, categories: tax.categories });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /not-sure/queue { subcategory, places } — put places already on screen
+ * on the not-sure list.
+ *
+ * BO8 has twelve real places in front of it and knows which four the labels did
+ * not settle. Sending those four used to re-run the examples search, which is a
+ * second live provider call to learn what the screen already knew (the audit,
+ * 15 Sep 2026). Nothing about a place is stored beyond what the list holds:
+ * the reference, the name, the address and the words, which is the not-sure
+ * list's own shape.
+ */
+taxonomyRoutes.post('/not-sure/queue', requires('manage_library'), async (req, res, next) => {
+  try {
+    const wouldBe = req.body?.subcategory ? String(req.body.subcategory) : null;
+    const places = Array.isArray(req.body?.places) ? req.body.places.slice(0, 200) : [];
+    if (!places.length) throw bad('Which places?');
+    let queued = 0;
+    for (const p of places) {
+      const ref = String(p?.ref || '').trim();
+      if (!ref) continue;
+      await notSure.notSettled({
+        ref,
+        name: p.name ? String(p.name) : null,
+        address: p.address ? String(p.address) : null,
+        words: Array.isArray(p.words) ? p.words.map(String) : [],
+        wouldBe,
+        reason: p.reason ? String(p.reason).slice(0, 300)
+          : 'Nothing it carries settles it, and it turned up in this drawer\u2019s own sample.',
+      });
+      queued += 1;
+    }
+    res.json({ queued });
   } catch (err) { next(err); }
 });
 
