@@ -1495,6 +1495,12 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   const [q, setQ] = useState('');
   /** Which range is being typed — one place's, or every ticked one ('*'). */
   const [range, setRange] = useState<{ ref: string; key: string; from: string; to: string } | null>(null);
+  /**
+   * Columns asked for that nothing here says yet. Declared with the others,
+   * above the early return: a hook after one is not run on every render and
+   * React loses track of which state is which (Codex, 16 Sep 2026).
+   */
+  const [extraCols, setExtraCols] = useState<string[]>([]);
 
   /** The library by default; the raw harvest only if asked for. */
   const [state, setState] = useState<'published' | 'all'>('published');
@@ -1536,7 +1542,6 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
    * counts if the drawer assumes it, if any place here says it, or if he adds
    * the column himself.
    */
-  const [extraCols, setExtraCols] = useState<string[]>([]);
   const says = new Set(extraCols);
   for (const pl of data.places) for (const [k, v] of Object.entries(pl.values)) if (v) says.add(k);
   const cols = data.attributes.filter((a) => says.has(a.key));
