@@ -1603,43 +1603,81 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
               "If we remove the word 'museum', then we don't have any word in the
               subcategory of 'museum'... We're deleting the whole subcategory." */}
           {(() => {
-            const bySource = new Map<string, { rule: TaxonomyRule; l: { label: string; name: string | null; pointsAt: string | null } }[]>();
-            for (const r of (rules ?? []).filter((x) => x.scope === 'ours' || x.scope === 'labels')) {
-              for (const l of r.labelList ?? []) {
-                // The drawer's own name, said back to it, is not a word that
-                // fills it.
-                if (nsOf(l.label) === 'epic' && keyOf(l.label) === sc.key) continue;
-                const ns = nsOf(l.label);
-                bySource.set(ns, [...(bySource.get(ns) ?? []), { rule: r, l }]);
-              }
+            // A rule naming one word is a word; a rule naming several is one
+            // statement and cannot be split into chips — removing a chip would
+            // delete the whole rule while looking like it removed a word
+            // (Codex, 15 Sep 2026).
+            const live = (rules ?? [])
+              .filter((x) => x.scope === 'ours' || x.scope === 'labels')
+              .map((rule) => ({
+                rule,
+                // The drawer's own name, said back to it, is not a word that fills it.
+                words: (rule.labelList ?? []).filter((l) => !(nsOf(l.label) === 'epic' && keyOf(l.label) === sc.key)),
+              }))
+              .filter((x) => x.words.length);
+            const single = live.filter((x) => x.words.length === 1);
+            const compound = live.filter((x) => x.words.length > 1);
+            const bySource = new Map<string, typeof single>();
+            for (const x of single) {
+              const ns = nsOf(x.words[0].label);
+              bySource.set(ns, [...(bySource.get(ns) ?? []), x]);
             }
-            if (!bySource.size) {
+            if (!live.length) {
               return <Text style={type.small}>Nothing yet — only places moved here one at a time.</Text>;
             }
-            return [...bySource.entries()].map(([ns, items]) => (
-              <View key={ns} style={styles.wordRow}>
-                <Text style={[type.small, { width: 130, color: colors.inkMuted }]} numberOfLines={1}>
-                  {ns === 'epic' ? 'Ours' : sourceWord(ns)}
-                </Text>
-                <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
-                  {items.map(({ rule, l }) => (
-                    <View key={l.label} style={[styles.line, { gap: 5 }]}>
-                      <Text style={[type.small, { fontWeight: '600' }, nsOf(l.label) !== 'epic' && !l.pointsAt && { color: colors.overrun }]}>
-                        {l.name ?? keyOf(l.label).replace(/_/g, ' ')}
-                      </Text>
-                      {canManage ? (
-                        <Press onPress={() => void run(
-                          () => api.shelfForget(rule.id),
-                          `${l.name ?? keyOf(l.label)} no longer puts a place in ${sc.label}.`,
-                        )} hitSlop={8} accessibilityLabel={`Remove ${l.name ?? keyOf(l.label)}`}>
-                          <Icon name="close" size={13} color={colors.inkMuted} />
-                        </Press>
-                      ) : null}
+            return (
+              <>
+                {[...bySource.entries()].map(([ns, items]) => (
+                  <View key={ns} style={styles.wordRow}>
+                    <Text style={[type.small, { width: 130, color: colors.inkMuted }]} numberOfLines={1}>
+                      {ns === 'epic' ? 'Ours' : sourceWord(ns)}
+                    </Text>
+                    <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
+                      {items.map(({ rule, words }) => {
+                        const l = words[0];
+                        return (
+                          <View key={`${rule.id}:${l.label}`} style={[styles.line, { gap: 5 }]}>
+                            <Text style={[type.small, { fontWeight: '600' }, nsOf(l.label) !== 'epic' && !l.pointsAt && { color: colors.overrun }]}>
+                              {l.name ?? keyOf(l.label).replace(/_/g, ' ')}
+                            </Text>
+                            {canManage ? (
+                              <Press onPress={() => void run(
+                                () => api.shelfForget(rule.id),
+                                `${l.name ?? keyOf(l.label)} no longer puts a place in ${sc.label}.`,
+                              )} hitSlop={8} accessibilityLabel={`Remove ${l.name ?? keyOf(l.label)}`}>
+                                <Icon name="close" size={13} color={colors.inkMuted} />
+                              </Press>
+                            ) : null}
+                          </View>
+                        );
+                      })}
                     </View>
-                  ))}
-                </View>
-              </View>
-            ));
+                  </View>
+                ))}
+                {compound.map(({ rule, words }) => (
+                  <View key={rule.id} style={styles.wordRow}>
+                    <Text style={[type.small, { width: 130, color: colors.inkMuted }]} numberOfLines={1}>All together</Text>
+                    <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={2}>
+                      {words.map((l, n) => (
+                        <Text key={l.label}>
+                          {n ? <Text style={{ color: colors.inkMuted }}> and </Text> : null}
+                          <Text style={[{ fontWeight: '600' }, nsOf(l.label) !== 'epic' && !l.pointsAt && { color: colors.overrun }]}>
+                            {l.name ?? keyOf(l.label).replace(/_/g, ' ')}
+                          </Text>
+                        </Text>
+                      ))}
+                    </Text>
+                    {canManage ? (
+                      <TextAction label="Remove" tone="muted" disabled={busy}
+                                  onPress={() => void run(
+                                    () => api.shelfForget(rule.id),
+                                    `${words.map((l) => l.name ?? keyOf(l.label)).join(' and ')} no longer puts a place in ${sc.label}.`,
+                                  )} />
+                    ) : null}
+                  </View>
+                ))}
+              </>
+            );
           })()}
           {canManage ? (
             <View style={{ paddingTop: 4 }}>
