@@ -2408,6 +2408,17 @@ export const api = {
   /** Name a secondary label, or change one. */
   taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
     put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
+  /**
+   * One place, secondary label by secondary label, with `setAt` saying whether
+   * the answer is the place's own, its drawer's, one its own words carried, or
+   * one another label brought.
+   */
+  taxonomyPlaceLabels: (p: { ref: string; subcategory?: string | null; words?: string[] }) =>
+    request<{ ref: string; subcategory: string | null; attributes: PlaceAttribute[]; values: Record<string, AttributeValue> }>(
+      `/api/admin/taxonomy/attributes/place${qs({ ref: p.ref, subcategory: p.subcategory ?? undefined, words: p.words?.length ? p.words.join(',') : undefined })}`),
+  /** Say something about one place, with the reason it differs from what it inherited. */
+  taxonomySetPlaceLabel: (body: { ref: string; attribute: string; value: AttributeValue | null; reason?: string | null }) =>
+    put<{ ref: string; attribute: string; value: AttributeValue | null }>('/api/admin/taxonomy/attributes/place', body),
   /** What is inside a place, or everything waiting to be confirmed. */
   taxonomyParts: (parent?: string) =>
     request<{ parent?: string; children?: PlacePart[]; proposed: PlacePart[]; told?: PlacePart[] }>(`/api/admin/taxonomy/parts${qs({ parent })}`),

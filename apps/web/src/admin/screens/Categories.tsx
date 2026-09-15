@@ -1012,6 +1012,80 @@ function Said({ lead, children }: { lead: string; children: string }) {
 
 
 /**
+ * One place's secondary labels, and where each answer came from.
+ *
+ * "Override it on a single place, where you can see what was inherited and say
+ * why you changed it." Four provenances, and only the first is somebody's
+ * typing: **place** is set here, **word** came from one of its own provider
+ * words, **came** was brought by another label, **subcategory** is its drawer's
+ * default. The three that nobody typed are lime, which is the standing rule for
+ * anything that arrived rather than being chosen.
+ */
+function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
+  ref_: string; name: string; subcategory: string; words: string[];
+  onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
+}) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.taxonomyPlaceLabels>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState('');
+  const load = useCallback(async () => {
+    try { setData(await api.taxonomyPlaceLabels({ ref: ref_, subcategory, words })); } catch { setData(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref_, subcategory, words.join(',')]);
+  useEffect(() => { void load(); }, [load]);
+  if (!data) return <Text style={[type.tiny, { paddingLeft: spacing.md }]}>Reading what it is…</Text>;
+
+  const set = async (a: PlaceAttribute, value: AttributeValue | null) => {
+    setBusy(true);
+    try {
+      await api.taxonomySetPlaceLabel({ ref: ref_, attribute: a.key, value, reason: why.trim() || null });
+      setWhy('');
+      await load();
+      await onChanged(value ? `${name}: ${a.label} set here.` : `${name}: ${a.label} back to what it inherits.`);
+    } finally { setBusy(false); }
+  };
+  const cameFrom = (v: AttributeValue) => (v.setAt === 'place' ? 'set here'
+    : v.setAt === 'word' ? 'from its own words'
+      : v.setAt === 'came' ? `came with ${v.came ?? 'another label'}`
+        : 'from its drawer');
+
+  return (
+    <View style={styles.placeLabels}>
+      {data.attributes.filter((a) => a.active).map((a) => {
+        const v = data.values[a.key];
+        const mine = v?.setAt === 'place';
+        const reads = !v ? 'nothing said'
+          : v.from != null || v.to != null ? `${v.from ?? 0} to ${v.to ?? 99}`
+            : v.choice ? v.choice : v.yesno === false ? 'no' : 'yes';
+        return (
+          <View key={a.key} style={[styles.line, { gap: spacing.md, paddingVertical: 4 }]}>
+            <Text style={[type.tiny, { width: 110 }]} numberOfLines={1}>{a.label}</Text>
+            <Text style={[type.small, { fontWeight: '600', color: v && !mine ? colors.accent : colors.ink, flex: 1, minWidth: 0 }]} numberOfLines={1}>
+              {reads}
+              {v ? <Text style={[type.tiny, { fontWeight: '400', color: colors.inkMuted }]}>{`  ${cameFrom(v)}`}</Text> : null}
+            </Text>
+            <DrillDropdown
+              label={a.label} value={mine ? 'change' : 'say otherwise'} width={240} align="right"
+              groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
+                ? a.options.map((o) => ({ key: o, label: o, on: v?.choice === o }))
+                : [{ key: 'yes', label: 'Yes', on: v?.yesno === true }, { key: 'no', label: 'No', on: v?.yesno === false }] }]}
+              startIn={a.key}
+              extra={mine ? [{ key: '\u2717', label: 'Back to what it inherits', on: false }] : []}
+              onPick={(k) => { if (!busy) void set(a, k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' }); }}
+            />
+          </View>
+        );
+      })}
+      <View style={[styles.line, { gap: spacing.sm, paddingTop: 4 }]}>
+        <Text style={type.tiny}>Why it differs</Text>
+        <TextInput value={why} onChangeText={setWhy} placeholder="the reason, for whoever reads this later"
+                   placeholderTextColor={colors.ghost} style={[styles.field, { flex: 1, minWidth: 140 }]} />
+      </View>
+    </View>
+  );
+}
+
+/**
  * BO8 — a subcategory, on its own page: the rule, then real places.
  *
  * The owner, 15 Sep 2026: "B08 clearly shows that you should be able to click
@@ -1043,6 +1117,8 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(sc.label);
   const [editing, setEditing] = useState(false);
+  /** Which of the twelve has its own secondary labels open. */
+  const [onPlace, setOnPlace] = useState('');
 
   const load = useCallback(async () => {
     try { setRules((await api.taxonomyRules(sc.key)).rules); } catch { setRules([]); }
@@ -1262,13 +1338,30 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
           ) : (
             <>
               {landing.places.map((pl) => (
-                <View key={pl.id} style={[styles.egRow, { alignItems: 'flex-start' }]}>
-                  <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                    <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name ?? pl.id}</Text>
-                    <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
-                    <Text style={type.tiny} numberOfLines={1}>our labels: {ourWords(pl) || '\u2014'}</Text>
+                <View key={pl.id}>
+                  <View style={[styles.egRow, { alignItems: 'flex-start' }]}>
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name ?? pl.id}</Text>
+                      <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
+                      <Text style={type.tiny} numberOfLines={1}>our labels: {ourWords(pl) || '\u2014'}</Text>
+                    </View>
+                    <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>{pl.landsIn ? 'settled' : 'not sure'}</Text>
+                    {/* "Override it on a single place, where you can see what was
+                        inherited and say why you changed it." The endpoint had
+                        existed since the start with no way to reach it from
+                        anywhere (the audit, 15 Sep 2026). */}
+                    {canManage ? (
+                      <TextAction label={onPlace === pl.id ? 'Close' : 'Its labels'}
+                                  onPress={() => setOnPlace(onPlace === pl.id ? '' : pl.id)} />
+                    ) : null}
                   </View>
-                  <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>{pl.landsIn ? 'settled' : 'not sure'}</Text>
+                  {onPlace === pl.id ? (
+                    <PlaceLabels
+                      ref_={`google:${pl.id}`} name={pl.name ?? pl.id} subcategory={sc.key}
+                      words={(pl.types ?? []).map((t) => `google:${t}`)}
+                      onChanged={onChanged}
+                    />
+                  ) : null}
                 </View>
               ))}
               {canManage ? (
@@ -1361,15 +1454,43 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   /** Places that say this on their own — a count, not the coverage beside it. */
   const places = (key: string) => data?.places?.[key] ?? 0;
 
+  /**
+   * "Create one, with a name **and a kind**: yes or no, a range such as ages 3
+   * to 14, or one of a list." The kind was hard-coded to yes/no, so the two
+   * kinds that carry a value could not be made at all (the audit, 15 Sep 2026).
+   */
+  const [newKind, setNewKind] = useState<'yesno' | 'range' | 'oneof'>('yesno');
   const add = async () => {
     const l = name.trim();
     setAdding(false); setName('');
     if (!l) return;
     setBusy(true);
-    try { await api.taxonomySaveAttribute({ label: l, kind: 'yesno' }); await load(); await onChanged(`${l} is one of our secondary labels now.`); }
+    try {
+      await api.taxonomySaveAttribute({
+        label: l, kind: newKind,
+        // A range needs bounds to draw a control at all; one-of starts empty and
+        // is filled in on the row.
+        ...(newKind === 'range' ? { rangeMin: 0, rangeMax: 18, unit: 'years' } : {}),
+        ...(newKind === 'oneof' ? { options: [] } : {}),
+      });
+      setNewKind('yesno');
+      await load();
+      await onChanged(`${l} is one of our secondary labels now.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  /** Renaming is safe: the key never changes, so nothing that points here moves. */
+  const rename = async (a: PlaceAttribute, to: string) => {
+    const l = to.trim();
+    if (!l || l === a.label) return;
+    setBusy(true);
+    try { await api.taxonomySaveAttribute({ key: a.key, label: l }); await load(); await onChanged(`${a.label} is called ${l} now.`); }
     catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusy(false); }
   };
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameTo, setRenameTo] = useState('');
 
   const secondary = (data?.attributes ?? []).filter((a) => a.active);
   const nameOf = (k: string) => (data?.attributes ?? []).find((o) => o.key === k)?.label ?? k;
@@ -1457,9 +1578,23 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
           <Text style={type.tiny}><Text style={{ color: colors.accent, fontWeight: '700' }}>lime</Text> comes automatically</Text>
           {canManage && half === 'secondary' ? (
             adding ? (
-              <TextInput value={name} onChangeText={setName} placeholder="Name it" placeholderTextColor={colors.inkFaint}
-                         autoFocus onSubmitEditing={() => void add()} style={[styles.field, { minWidth: 180 }]} />
-            ) : <TextAction label="New secondary label" disabled={busy} onPress={() => { setAdding(true); setName(''); }} />
+              <>
+                <TextInput value={name} onChangeText={setName} placeholder="Name it" placeholderTextColor={colors.inkFaint}
+                           autoFocus onSubmitEditing={() => void add()} style={[styles.field, { minWidth: 180 }]} />
+                <DrillDropdown
+                  label="Kind" value={newKind === 'yesno' ? 'Yes or no' : newKind === 'range' ? 'A range' : 'One of a list'}
+                  set width={240}
+                  groups={[{ key: 'k', label: 'What kind of answer', items: [
+                    { key: 'yesno', label: 'Yes or no', on: newKind === 'yesno' },
+                    { key: 'range', label: 'A range — ages 3 to 14', on: newKind === 'range' },
+                    { key: 'oneof', label: 'One of a list', on: newKind === 'oneof' },
+                  ] }]}
+                  startIn="k"
+                  onPick={(k) => setNewKind(k as 'yesno' | 'range' | 'oneof')}
+                />
+                <TextAction label="Make it" disabled={busy} onPress={() => void add()} />
+              </>
+            ) : <TextAction label="New secondary label" disabled={busy} onPress={() => { setAdding(true); setName(''); setNewKind('yesno'); }} />
           ) : null}
         </View>
       </View>
@@ -1480,10 +1615,48 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
           {secondary.map((a) => (
             <View key={a.key} style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, openKey === a.key && { zIndex: 40 }]}>
               <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-                <Text style={type.small}><Text style={{ fontWeight: '600' }}>{a.label}</Text></Text>
+                {renaming === a.key ? (
+                  <View style={[styles.line, { gap: spacing.sm }]}>
+                    <TextInput value={renameTo} onChangeText={setRenameTo} autoFocus
+                               onSubmitEditing={() => { setRenaming(null); void rename(a, renameTo); }}
+                               style={[styles.field, { minWidth: 160 }]} />
+                    <TextAction label="Save" onPress={() => { setRenaming(null); void rename(a, renameTo); }} />
+                  </View>
+                ) : (
+                  <View style={[styles.line, { gap: spacing.md }]}>
+                    <Text style={type.small}><Text style={{ fontWeight: '600' }}>{a.label}</Text></Text>
+                    {/* "Rename it" — there was no way to (the audit, 15 Sep 2026).
+                        Safe, because the key never changes and nothing that
+                        points here moves. */}
+                    {canManage ? <TextAction label="Rename" tone="muted" onPress={() => { setRenaming(a.key); setRenameTo(a.label); }} /> : null}
+                  </View>
+                )}
                 {a.blurb ? <Text style={type.tiny} numberOfLines={2}>{a.blurb}</Text> : null}
+                {/* At 390 the Kind and Comes-with columns come off, and they are
+                    the point of the screen, so they are said here instead of
+                    being lost (the audit). */}
+                {!wide ? (
+                  <Text style={type.tiny} numberOfLines={2}>
+                    {kindOf(a)}
+                    {(a.brings ?? []).length ? <Text style={{ color: colors.accent }}>{` · comes with ${(a.brings ?? []).map(broughtAs).join(', ')}`}</Text> : null}
+                  </Text>
+                ) : null}
               </View>
               {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={type.small}>{kindOf(a)}</Text></View> : null}
+              {!wide && canManage ? (
+                <DrillDropdown
+                  label={(a.brings ?? []).length ? 'Comes with' : 'Add one'}
+                  value={(a.brings ?? []).map(broughtAs).join(' · ') || 'nothing chosen'}
+                  set={(a.brings ?? []).length > 0} width={260}
+                  groups={[{
+                    key: 'secondary', label: 'Our secondary labels',
+                    items: secondary.filter((o) => o.key !== a.key)
+                      .map((o) => ({ key: o.key, label: o.label, on: (a.brings ?? []).some((b) => b.key === o.key) })),
+                  }]}
+                  onPick={(k) => void bring(a, k)}
+                  onOpenChange={(o) => setOpenKey(o ? a.key : null)}
+                />
+              ) : null}
               {wide ? (
                 <View style={[styles.tCell, { width: 210 }]}>
                   {/* What arrives automatically is lime, so it is never confused
@@ -3035,6 +3208,7 @@ const styles = StyleSheet.create({
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  placeLabels: { gap: 2, paddingLeft: spacing.md, paddingVertical: 6, borderLeftWidth: 2, borderLeftColor: colors.lime, marginLeft: spacing.md },
   shapeBand: { flexDirection: 'row', gap: 34, paddingTop: 8, paddingBottom: 4, flexWrap: 'wrap' },
   barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   bar: { height: 6, minWidth: 2 },
