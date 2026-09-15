@@ -342,6 +342,23 @@ export function resolveFor({ subcategory, words = [], alsoTrue = null }, own, vo
   return out;
 }
 
+/**
+ * How many places carry each secondary label, said on a place rather than
+ * inherited (the handoff, BO7a).
+ *
+ * Deliberately not merged with "set by default in". Two columns, two units:
+ * coverage is 45 of 59 subcategories, and this is a count of places. Where a
+ * label is only ever a drawer default, what we know about it is coverage and
+ * the place count is nothing — drawn as an em dash rather than a nought, which
+ * would claim we had looked and found none.
+ */
+export async function placeCounts() {
+  const { rows } = await query(
+    `select attribute_key, count(distinct venue_ref)::int as n
+       from place_attribute_values group by attribute_key`);
+  return Object.fromEntries(rows.map((r) => [r.attribute_key, r.n]));
+}
+
 /** The corrections he has made, newest first — the examples a model is shown. */
 export async function corrections(limit = 200) {
   const { rows } = await query(

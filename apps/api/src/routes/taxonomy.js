@@ -392,9 +392,14 @@ taxonomyRoutes.put('/not-sure', requires('manage_library'), async (req, res, nex
 taxonomyRoutes.get('/parts', requires('view_library'), async (req, res, next) => {
   try {
     const parent = req.query.parent ? String(req.query.parent) : null;
-    res.json(parent
-      ? { parent, children: await placeParts.childrenOf(parent) }
-      : { proposed: await placeParts.proposed(Number(req.query.limit) || 100) });
+    if (parent) { res.json({ parent, children: await placeParts.childrenOf(parent) }); return; }
+    // The settled ones too, so the screen says what it has done rather than
+    // disappearing the moment the queue is empty (the handoff, BO11).
+    const [proposed, told] = await Promise.all([
+      placeParts.proposed(Number(req.query.limit) || 100),
+      placeParts.told(Number(req.query.limit) || 100),
+    ]);
+    res.json({ proposed, told });
   } catch (err) { next(err); }
 });
 
@@ -422,10 +427,15 @@ taxonomyRoutes.post('/parts', requires('manage_library'), async (req, res, next)
  */
 taxonomyRoutes.get('/attributes', requires('view_library'), async (req, res, next) => {
   try {
-    const [vocab, tax] = await Promise.all([placeAttributes.attributes(), taxonomy.taxonomy()]);
+    const [vocab, tax, places] = await Promise.all([
+      placeAttributes.attributes(), taxonomy.taxonomy(), placeAttributes.placeCounts(),
+    ]);
     res.json({
       attributes: vocab.list,
       defaults: Object.fromEntries([...vocab.bySubcategory].map(([k, m]) => [k, Object.fromEntries(m)])),
+      // A count of places, which is not the same unit as the coverage beside it
+      // and must not be merged with it (the handoff, BO7a).
+      places,
       subcategories: tax.subcategories, categories: tax.categories,
     });
   } catch (err) { next(err); }

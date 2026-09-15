@@ -2402,7 +2402,7 @@ export const api = {
     put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
   /** What is inside a place, or everything waiting to be confirmed. */
   taxonomyParts: (parent?: string) =>
-    request<{ parent?: string; children?: PlacePart[]; proposed: PlacePart[] }>(`/api/admin/taxonomy/parts${qs({ parent })}`),
+    request<{ parent?: string; children?: PlacePart[]; proposed: PlacePart[]; told?: PlacePart[] }>(`/api/admin/taxonomy/parts${qs({ parent })}`),
   /** Say a place is inside another, or that it stands alone. */
   taxonomySetPart: (body: { child: string; parent: string | null; note?: string | null }) =>
     post<{ part: PlacePart | null }>('/api/admin/taxonomy/parts', body),
@@ -3046,6 +3046,8 @@ export type TaxonomyExamples = {
 export type PlacePart = {
   child_ref: string; parent_ref: string; how: 'told' | 'proposed';
   note: string | null; set_by: string | null;
+  /** Names, because `google:ChIJ…` on screen is not a place anybody can read. */
+  child_name?: string | null; parent_name?: string | null;
 };
 
 /** A place the labels could not settle, and what a run came back with. */
@@ -3091,6 +3093,11 @@ export type TaxonomyAttributes = {
   attributes: PlaceAttribute[];
   /** Drawer key → what every place in it is taken to be. */
   defaults: Record<string, Record<string, AttributeValue>>;
+  /**
+   * How many places say this on their own. A different unit from the coverage
+   * beside it, and absent where a label is only ever a drawer default.
+   */
+  places: Record<string, number>;
   subcategories: ShelfSubcategory[];
   categories: ShelfCategory[];
 };

@@ -85,7 +85,34 @@ export async function proposed(limit = 100) {
   const { rows } = await query(
     `select * from place_parts where how = 'proposed' order by created_at desc limit $1`,
     [Math.min(500, Math.max(1, limit))]);
-  return rows;
+  return withNames(rows);
+}
+
+/** Every part-of already told, so the screen is not empty when the work is done. */
+export async function told(limit = 100) {
+  const { rows } = await query(
+    `select * from place_parts where how = 'told' order by updated_at desc limit $1`,
+    [Math.min(500, Math.max(1, limit))]);
+  return withNames(rows);
+}
+
+/**
+ * A reference is not a name. `google:ChIJ…` on screen is the bug the owner
+ * called out on a rule (12 Sep 2026), and the same one here: the row has to
+ * read "Amity Beach is part of Thorpe Park". Names come from the owned records,
+ * which is where Epic is allowed to keep one.
+ */
+async function withNames(rows) {
+  const refs = [...new Set(rows.flatMap((r) => [r.child_ref, r.parent_ref]).filter(Boolean))];
+  if (!refs.length) return rows;
+  const { rows: named } = await query(
+    `select venue_ref, name from place_records where venue_ref = any($1)`, [refs]);
+  const by = new Map(named.map((n) => [n.venue_ref, n.name]));
+  return rows.map((r) => ({
+    ...r,
+    child_name: by.get(r.child_ref) ?? null,
+    parent_name: by.get(r.parent_ref) ?? null,
+  }));
 }
 
 /**

@@ -1245,6 +1245,8 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
     : a.kind === 'range' ? `A range · ${a.range_min ?? 0} to ${a.range_max ?? 99}`
       : `One of ${a.options.length}`);
   const setIn = (key: string) => Object.values(data?.defaults ?? {}).filter((m) => m[key]).length;
+  /** Places that say this on their own — a count, not the coverage beside it. */
+  const places = (key: string) => data?.places?.[key] ?? 0;
 
   const add = async () => {
     const l = name.trim();
@@ -1356,6 +1358,10 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
             {wide ? <View style={[styles.tCell, styles.headCell, { width: 150 }]}><Text style={styles.colHead}>Kind</Text></View> : null}
             {wide ? <View style={[styles.tCell, styles.headCell, { width: 210 }]}><Text style={styles.colHead}>Always comes with it</Text></View> : null}
             <View style={[styles.tCell, styles.headCell, { width: wide ? 190 : 120 }]}><Text style={styles.colHead}>Set by default in</Text></View>
+            {/* Two columns, two units, and they must not be merged (the handoff,
+                BO7a): set by default in is coverage across 59 drawers, and this
+                is a count of places. */}
+            <View style={[styles.tCell, styles.headCell, { width: wide ? 120 : 80 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Places</Text></View>
           </View>
           {secondary.length === 0 ? <Text style={[type.small, styles.emptyRow]}>None yet.</Text> : null}
           {secondary.map((a) => (
@@ -1392,6 +1398,15 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
               ) : null}
               <View style={[styles.tCell, { width: wide ? 190 : 120 }]}>
                 <Text style={type.small}>{setIn(a.key) ? `${setIn(a.key)} of ${primary.length} subcategories` : 'nowhere yet'}</Text>
+              </View>
+              {/* An em dash, not a nought: where a label is only ever a drawer
+                  default, what we know about it is the coverage to the left, and
+                  a nought would claim we had counted places and found none
+                  (the handoff, BO7a). */}
+              <View style={[styles.tCell, { width: wide ? 120 : 80 }]}>
+                <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'], color: places(a.key) ? colors.ink : colors.inkMuted }]}>
+                  {places(a.key) ? count(places(a.key)) : '\u2014'}
+                </Text>
               </View>
             </View>
           ))}
@@ -1928,9 +1943,11 @@ function NotSure({ tax, wide, canManage, onChanged }: {
  */
 function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged: (said: string) => Promise<void> }) {
   const [rows, setRows] = useState<PlacePart[] | null>(null);
+  const [settled, setSettled] = useState<PlacePart[]>([]);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    try { const d = await api.taxonomyParts(); setRows(d.proposed); } catch { setRows([]); }
+    try { const d = await api.taxonomyParts(); setRows(d.proposed); setSettled(d.told ?? []); }
+    catch { setRows([]); setSettled([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -1945,28 +1962,71 @@ function PartsOfPlaces({ canManage, onChanged }: { canManage: boolean; onChanged
     finally { setBusy(false); }
   };
 
-  if (!rows?.length) return null;
+  /** A name if we have one; a reference is not something anybody can read. */
+  const nameOf = (ref: string, given: string | null | undefined) => given ?? ref;
+
+  /**
+   * One part-of, said the way the handoff draws it: part of · on its own · what
+   * goes up. The third line is lime because nobody typed it — it arrived from
+   * the child, which is the same rule as a label that comes with another.
+   */
+  const one = (p: PlacePart, confirmed: boolean) => (
+    <View key={p.child_ref} style={[styles.wordRow, { alignItems: 'flex-start' }]}>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <Text style={[type.small, { fontWeight: '700' }]}>{nameOf(p.child_ref, p.child_name)}</Text>
+        <Text style={type.tiny}>
+          <Text style={{ fontWeight: '700', color: colors.ink }}>Part of</Text> {nameOf(p.parent_ref, p.parent_name)}
+        </Text>
+        <Text style={type.tiny}>
+          <Text style={{ fontWeight: '700', color: colors.ink }}>On its own</Text> never listed, never searchable
+        </Text>
+        {/* Lime: it arrived, nobody typed it. */}
+        <Text style={[type.tiny, { color: colors.accent }]}>
+          <Text style={{ fontWeight: '700' }}>What goes up</Text> its primary label and every secondary label it carries,
+          to {nameOf(p.parent_ref, p.parent_name)}
+        </Text>
+        {p.note ? <Text style={[type.tiny, { lineHeight: 16 }]} numberOfLines={3}>{p.note}</Text> : null}
+      </View>
+      {canManage && !confirmed ? (
+        <View style={[styles.line, { gap: spacing.md }]}>
+          <TextAction label="It is" disabled={busy} onPress={() => void say(p, true)} />
+          <TextAction label="It stands alone" disabled={busy} onPress={() => void say(p, false)} />
+        </View>
+      ) : canManage ? (
+        <TextAction label="It stands alone" tone="muted" disabled={busy} onPress={() => void say(p, false)} />
+      ) : null}
+    </View>
+  );
+
   return (
     <View style={{ gap: spacing.md, paddingTop: spacing.lg }}>
-      <Text style={styles.bandKicker}>Inside somewhere else · {rows.length} to confirm</Text>
+      <Text style={styles.bandKicker}>
+        Inside somewhere else · {rows?.length ?? 0} to confirm{settled.length ? ` · ${settled.length} settled` : ''}
+      </Text>
       <Said lead="No rule can tell these apart.">
         Amity Beach and a standalone water park carry the same words, so what separates them is that one is inside the other.
         Confirm and the child is never listed on its own; what it knows goes up to its parent instead.
       </Said>
-      {rows.map((p) => (
-        <View key={p.child_ref} style={styles.wordRow}>
-          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Text style={type.small}><Text style={{ fontWeight: '600' }}>{p.child_ref}</Text> is part of <Text style={{ fontWeight: '600' }}>{p.parent_ref}</Text></Text>
-            {p.note ? <Text style={[type.tiny, { lineHeight: 16 }]} numberOfLines={2}>{p.note}</Text> : null}
-          </View>
-          {canManage ? (
-            <View style={[styles.line, { gap: spacing.md }]}>
-              <TextAction label="It is" disabled={busy} onPress={() => void say(p, true)} />
-              <TextAction label="It stands alone" disabled={busy} onPress={() => void say(p, false)} />
-            </View>
-          ) : null}
+      {rows?.length ? rows.map((p) => one(p, false)) : (
+        <Text style={[type.small, styles.emptyRow]}>
+          Nothing waiting. Every place the research run found inside another one has been answered.
+        </Text>
+      )}
+      {settled.length ? (
+        <View style={{ gap: 4, paddingTop: spacing.md }}>
+          <Text style={styles.bandKicker}>Already inside something · {settled.length}</Text>
+          {settled.map((p) => one(p, true))}
         </View>
-      ))}
+      ) : null}
+      {/* The test, on the screen, because it is the whole point and it is the
+          kind of thing that gets forgotten and then re-argued (the handoff). */}
+      <View style={styles.theTest}>
+        <Text style={[type.tiny, { lineHeight: 17 }]}>
+          <Text style={{ fontWeight: '700', color: colors.ink }}>The test: </Text>
+          a family searching for a water park should find Thorpe Park, and never a listing called Amity Beach that they
+          cannot buy a ticket to.
+        </Text>
+      </View>
     </View>
   );
 }
@@ -2277,8 +2337,13 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           BO1a). Closed, the band is the whole of Google's list. */}
       {chosen ? (
         <View style={{ gap: spacing.md }}>
+          {/* The back link carries the **local** count, and the top-level view
+              carries the global one. The handoff is explicit that the two
+              scopes must not be mixed, and this said the global figure while
+              standing inside one category, which reads as though the whole job
+              were done from in here. Hence "answered here". */}
           <TextAction
-            label={`All ${groups.length} ${by === 'ours' ? 'of our categories' : "Google's categories"} · ${total.mapped} of ${total.types} answered`}
+            label={`All ${groups.length} ${by === 'ours' ? 'of our categories' : "Google's categories"} · ${chosen.mapped} of ${chosen.types.length} answered here`}
             onPress={() => { setGroup('-'); setOnly(''); setTicked(new Set()); setEg(''); }}
           />
           <Band
@@ -2789,6 +2854,8 @@ const styles = StyleSheet.create({
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  /** A consequence, not a fact: a lime left rule and no fill (the handoff's colour roles). */
+  theTest: { borderLeftWidth: 2, borderLeftColor: colors.lime, paddingLeft: spacing.md, paddingVertical: 8, marginTop: spacing.sm },
   gets: { ...type.small, fontWeight: '700', color: colors.ink, borderBottomWidth: 2, borderBottomColor: colors.lime, paddingBottom: 3, paddingRight: 40 },
   save: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 36, paddingHorizontal: 14, backgroundColor: colors.selected },
   // A word a generic one was seen with: inside the row above it, so it reads as
