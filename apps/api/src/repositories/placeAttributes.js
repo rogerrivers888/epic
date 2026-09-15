@@ -172,6 +172,7 @@ export async function setCarries(label, attributeKey, value) {
     forget();
     return null;
   }
+  await mustFit(attributeKey, value);
   const { rows } = await query(
     `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno, from_value, to_value, choice)
      values ($1, $2, $3, $4, $5, $6, $7)

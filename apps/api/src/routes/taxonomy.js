@@ -375,7 +375,13 @@ taxonomyRoutes.post('/word', requires('manage_library'), async (req, res, next) 
       word: parsed.key,
       places,
       primary: tax.active.subcategories.map((sc) => ({ key: sc.key, label: sc.label })),
-      secondary: attrs.list.filter((a) => a.active).map((a) => ({ key: a.key, label: a.label, options: a.options ?? [] })),
+      // Not the ranges. A range belongs to a drawer or to one place — "suits
+      // ages 0 to 7" is not something a provider's word can assert about every
+      // place that carries it — and offering one invited a yes/no answer in a
+      // row meant for two numbers (Codex, 15 Sep 2026).
+      secondary: attrs.list
+        .filter((a) => a.active && a.kind !== 'range')
+        .map((a) => ({ key: a.key, label: a.label, options: a.options ?? [] })),
       householdId: household?.id ?? null,
       sessionId: null,
     });

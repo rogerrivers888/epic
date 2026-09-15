@@ -1203,7 +1203,8 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
   subLabel: (k: string | null | undefined) => string | null;
   back: () => void;
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
-  onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => void;
+  /** Answers false where it failed, so a run of writes can stop where it stopped. */
+  onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => Promise<boolean>;
   onCarry: (r: TaxonomyLabel, attribute: string, value: AttributeValue | null) => Promise<void>;
 }) {
   const [eg, setEg] = useState<TaxonomyExamples | null>(null);
@@ -1375,15 +1376,28 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
                   <Press onPress={() => void Linking.openURL(said.source)} accessibilityRole="link">
                     <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>{said.source.replace(/^https?:\/\//, '')}</Text>
                   </Press>
-                  {canManage && said.primary ? (
+                  {/* A word that determines nothing and still says something is
+                      a real answer — "keep it as a secondary label" is one of
+                      the six — so it can be taken too (Codex, 15 Sep 2026). */}
+                  {canManage && (said.primary || said.secondary.length) ? (
                     <View style={[styles.line, { gap: spacing.md, paddingTop: 4 }]}>
-                      <TextAction label={`Take it \u2014 ${subLabel(said.primary)}`} disabled={busy} onPress={async () => {
-                        setBusy(true);
-                        try {
-                          onDecide(r, { subcategory: said.primary as string });
-                          for (const x of said.secondary) await onCarry(r, x.key, x.choice ? { choice: x.choice } : { yesno: true });
-                        } finally { setBusy(false); }
-                      }} />
+                      <TextAction
+                        label={said.primary ? `Take it \u2014 ${subLabel(said.primary)}` : `Take it \u2014 ${said.secondary.map((x) => x.label).join(', ')} only`}
+                        disabled={busy}
+                        onPress={async () => {
+                          setBusy(true);
+                          try {
+                            // One at a time, awaited, stopping at the first
+                            // failure: launching the mapping and the labels
+                            // together could leave half of it applied.
+                            if (said.primary && !(await onDecide(r, { subcategory: said.primary }))) return;
+                            for (const x of said.secondary) {
+                              await onCarry(r, x.key, x.choice ? { choice: x.choice } : { yesno: true });
+                            }
+                          } catch (err) { await onChanged(String((err as Error).message)); }
+                          finally { setBusy(false); }
+                        }}
+                      />
                       <TextAction label="No" tone="muted" onPress={() => setSaid(null)} />
                     </View>
                   ) : null}
@@ -3323,7 +3337,8 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
       if (withKey) void loadWith(withKey);
       await onChanged(choice.unanswered ? `${r.label ?? r.key} is back in the queue, with nothing said about it.`
         : choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`, putBack(out.undo));
-    } catch (err) { await onChanged(String((err as Error).message)); }
+      return true;
+    } catch (err) { await onChanged(String((err as Error).message)); return false; }
     finally { setBusyKey(null); }
   };
 
@@ -3402,7 +3417,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         catLabel={catLabel} subLabel={subLabel}
         back={() => setWord('')}
         onChanged={onChanged}
-        onDecide={(row, choice) => void decide(row, choice)}
+        onDecide={(row, choice) => decide(row, choice)}
         onCarry={async (row, attribute, value) => {
           await api.taxonomySetCarries({ label: `google:${row.key}`, attribute, value });
           await reload();
