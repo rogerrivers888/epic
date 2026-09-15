@@ -628,7 +628,7 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * panel hangs directly under the control; `align: 'right'` hangs it from the
  * control's right edge for a control at the end of a row.
  */
-export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0, stacked = false }: {
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0, stacked = false, showLabel = true }: {
   label: string;
   value: string;
   groups: { key: string; label: string; items: DropdownOption[] }[];
@@ -655,6 +655,12 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   adopt?: { label: string; onPick: (groupKey: string) => void } | null;
   /** Pixels to hold a right-aligned panel off whatever sits to its right. */
   nudge?: number;
+  /**
+   * False where the row beside it already names the thing. The label is still
+   * used for the accessible name, which is why it is not simply left blank:
+   * BO8 was printing "Indoors / Indoors / Not set" down the whole column.
+   */
+  showLabel?: boolean;
   /**
    * The label above the value as an uppercase kicker, rather than beside it.
    * The kicker names the *kind* of answer and the line beneath is the answer,
@@ -705,7 +711,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
           </View>
         ) : (
           <>
-            <Text style={dd.ctlLabel}>{label}</Text>
+            {showLabel ? <Text style={dd.ctlLabel}>{label}</Text> : null}
             <Text style={[dd.ctlValue, set && { color: colors.accent }]} numberOfLines={1}>{value}</Text>
             <Icon name={open ? 'collapse' : 'expand'} size={12} color={set ? colors.accent : colors.ink} strokeWidth={2.6} />
           </>

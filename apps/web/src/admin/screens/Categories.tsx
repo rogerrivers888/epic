@@ -1115,7 +1115,7 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
                 </View>
               ) : (
                 <DrillDropdown
-                  label={a.label} value={mine ? 'change' : 'say otherwise'} width={240} align="right"
+                  label={a.label} showLabel={false} value={mine ? 'change' : 'say otherwise'} width={240} align="right"
                   groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
                     ? a.options.map((o) => ({ key: o, label: o, on: v?.choice === o }))
                     : [{ key: 'yes', label: 'Yes', on: v?.yesno === true }, { key: 'no', label: 'No', on: v?.yesno === false }] }]}
@@ -1395,7 +1395,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                 <Text style={[type.small, { fontWeight: '600', flex: 1, minWidth: 0 }]}>{a.label}</Text>
                 {canManage ? (
                   <DrillDropdown
-                    label={a.label} value={reads} set={Boolean(v)} align="right" width={260}
+                    label={a.label} showLabel={false} value={reads} set={Boolean(v)} align="right" width={260}
                     groups={a.kind === 'oneof'
                       ? [{ key: a.key, label: a.label, items: a.options.map((o) => ({ key: o, label: o, on: v?.choice === o })) }]
                       : [{ key: a.key, label: a.label, items: [
