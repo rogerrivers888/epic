@@ -1571,15 +1571,58 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
         <Icon name="back" size={14} color={colors.accent} strokeWidth={2.6} />
         <Text style={styles.backText}>{backLabel}</Text>
       </Press>
-      <Band
-        kicker={`A subcategory of ${cat?.label ?? sc.category_key}`}
-        title={sc.label}
-        stats={[
-          { label: 'Category', value: cat?.label ?? sc.category_key },
-          { label: 'Places', value: String(landing?.places.length ?? '\u2014') },
-          { label: 'Of twelve real ones', value: fires },
-        ]}
-      />
+      {/* The title is the name, so it is edited here rather than repeated in a
+          row below; the category is the same (owner, 15 Sep 2026: "surely that
+          should just have a pencil next to it... that's also repeated up the
+          top, so why would that not also be editable up the top?"). The two
+          numbers that were here were about the twelve real places, and belong
+          beside them: "What are the Places and 12 real ones up the top? What's
+          that supposed to mean?" */}
+      <View style={styles.band}>
+        <View style={{ gap: 6, minWidth: 0, flexShrink: 1 }}>
+          <Text style={styles.bandKicker}>A subcategory</Text>
+          {renaming ? (
+            <View style={[styles.line, { gap: spacing.md }]}>
+              <Field value={name} onChangeText={setName} autoFocus style={{ minWidth: 220 }}
+                     onSubmitEditing={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
+              <TextAction label="Save" onPress={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
+            </View>
+          ) : (
+            <View style={[styles.line, { gap: spacing.md }]}>
+              <Text style={styles.bandTitle}>{sc.label}</Text>
+              {canManage ? (
+                <Press onPress={() => { setName(sc.label); setRenaming(true); }} hitSlop={8} accessibilityLabel={`Rename ${sc.label}`}>
+                  <Icon name="edit" size={16} color={colors.inkMuted} strokeWidth={2} />
+                </Press>
+              ) : null}
+            </View>
+          )}
+        </View>
+        <View style={styles.bandStats}>
+          <View style={styles.bandStat}>
+            <Text style={styles.bandKicker}>Category</Text>
+            {canManage ? (
+              <DrillDropdown
+                label="Category" showLabel={false} value={cat?.label ?? sc.category_key} align="right" width={240}
+                groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active).map((c) => ({ key: c.key, label: c.label, on: c.key === sc.category_key })) }]}
+                startIn="c"
+                onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
+              />
+            ) : <Text style={styles.bandValue}>{cat?.label ?? sc.category_key}</Text>}
+          </View>
+          <View style={styles.bandStat}>
+            <Text style={styles.bandKicker}>Switched on</Text>
+            {canManage ? (
+              <Press effect="none" accessibilityRole="switch" accessibilityState={{ checked: sc.active }}
+                     accessibilityLabel={`${sc.label} is ${sc.active ? 'on' : 'off'}`}
+                     onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)}
+                     style={[styles.toggle, sc.active && styles.toggleOn]}>
+                <View style={[styles.toggleBlock, sc.active && styles.toggleBlockOn]} />
+              </Press>
+            ) : <Text style={styles.bandValue}>{sc.active ? 'On' : 'Off'}</Text>}
+          </View>
+        </View>
+      </View>
       <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
         {/* ---- the rule that fills it ---------------------------------- */}
         <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
@@ -1804,42 +1847,14 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
             />
           ) : null}
 
-          {/* ---- name, category, also show it in, switched on ------------ */}
+          {/* Its own section, with a heading that says what it is. It read as
+              a footnote under Category and he asked what it was: "Is that
+              supposed to be secondary labels? If so, why does it not say that?
+              That should just be a separate section." It is not secondary
+              labels — it is which menus list the drawer. */}
+          <Text style={styles.h2}>Which other menus list it</Text>
           <View style={styles.wordRow}>
-            <Text style={[type.tiny, { width: 96 }]}>Name</Text>
-            {renaming ? (
-              <>
-                <Field value={name} onChangeText={setName} autoFocus style={{ flex: 1, minWidth: 140 }}
-                       onSubmitEditing={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
-                <TextAction label="Save" onPress={() => { setRenaming(false); void run(() => api.shelfSaveSubcategory({ id: sc.id, label: name.trim() || sc.label }), `Renamed to ${name.trim() || sc.label}.`); }} />
-              </>
-            ) : (
-              <>
-                <Text style={[type.small, { fontWeight: '600', flex: 1 }]}>{sc.label}</Text>
-                {canManage ? <TextAction label="Rename" onPress={() => { setName(sc.label); setRenaming(true); }} /> : null}
-              </>
-            )}
-          </View>
-          <View style={styles.wordRow}>
-            <Text style={[type.tiny, { width: 96 }]}>Category</Text>
-            {canManage ? (
-              <DrillDropdown
-                label="Category" showLabel={false} value={cat?.label ?? sc.category_key} align="right" width={240}
-                groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active).map((c) => ({ key: c.key, label: c.label, on: c.key === sc.category_key })) }]}
-                startIn="c"
-                onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
-              />
-            ) : <Text style={type.small}>{cat?.label ?? sc.category_key}</Text>}
-            <Text style={type.tiny}>the menu it appears under</Text>
-          </View>
-          <View style={styles.wordRow}>
-            <Text style={[type.tiny, { width: 96 }]}>Also show it in</Text>
-            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-              {/* Plain text with a way to take it off. It was a Token, which
-                  expects a `ns:key` and was handed a display name — so it drew
-                  "Families · " with the name greyed as though it were a source —
-                  and lime is the role for something that arrived by itself,
-                  which this did not (the audit, 15 Sep 2026). */}
+            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'center' }}>
               {(sc.also_in ?? []).map((k) => {
                 const name = tax.categories.find((c) => c.key === k)?.label ?? k;
                 return (
@@ -1854,27 +1869,16 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                   </View>
                 );
               })}
+              {!(sc.also_in ?? []).length ? <Text style={[type.small, { color: colors.inkMuted }]}>Only {cat?.label ?? sc.category_key}.</Text> : null}
               {canManage ? (
                 <DrillDropdown
-                  label="Add" value="+ Add" align="left" width={240}
+                  label="Add" showLabel={false} value="+ Add a menu" align="left" width={240}
                   groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active && c.key !== sc.category_key && !(sc.also_in ?? []).includes(c.key)).map((c) => ({ key: c.key, label: c.label, on: false })) }]}
                   startIn="c"
                   onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: [...(sc.also_in ?? []), k as MoodKey] }), `${sc.label} also shows in ${tax.categories.find((c) => c.key === k)?.label ?? k}.`)}
                 />
               ) : null}
             </View>
-            <Text style={type.tiny}>other menus it also appears under</Text>
-          </View>
-          <View style={styles.wordRow}>
-            <Text style={[type.tiny, { width: 96 }]}>Switched on</Text>
-            {canManage ? (
-              <Press effect="none" accessibilityRole="switch" accessibilityState={{ checked: sc.active }}
-                     accessibilityLabel={`${sc.label} is ${sc.active ? 'on' : 'off'}`}
-                     onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)}
-                     style={[styles.toggle, sc.active && styles.toggleOn]}>
-                <View style={[styles.toggleBlock, sc.active && styles.toggleBlockOn]} />
-              </Press>
-            ) : <Text style={type.small}>{sc.active ? 'On' : 'Off'}</Text>}
           </View>
         </View>
 
@@ -1889,12 +1893,17 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
           </View>
           {!landing ? (
             busiest ? (
-              <Press effect="none" disabled={looking || !canManage} accessibilityRole="button" style={styles.save}
-                     onPress={() => void look()}>
-                <Icon name="search" size={14} color={colors.selectedFg} strokeWidth={2.6} />
-                <Text style={[type.small, { fontWeight: '700', color: colors.selectedFg }]}>
-                  {looking ? 'Loading\u2026' : 'Load examples'}
-                </Text>
+              /* An outline that fills on hover, sized to its words — it was a
+                 solid lime bar across the whole column (owner, 15 Sep 2026:
+                 "why is the button half the page long?"). */
+              <Press effect="none" disabled={looking || !canManage} accessibilityRole="button"
+                     onPress={() => void look()}
+                     style={({ hovered }: any) => [styles.approve, { alignSelf: 'flex-start' }, hovered && styles.approveOn, looking && { opacity: 0.5 }]}>
+                {({ hovered }: any) => (
+                  <Text style={[type.small, { fontWeight: '700', color: hovered ? colors.selectedFg : colors.accent }]}>
+                    {looking ? 'Loading\u2026' : 'Load examples'}
+                  </Text>
+                )}
               </Press>
             ) : <Text style={type.small}>No provider word fills this drawer yet.</Text>
           ) : landing.problem ? (
@@ -1907,21 +1916,30 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                       <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name ?? pl.id}</Text>
                       <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
-                      <Text style={type.tiny} numberOfLines={1}>our labels: {ourWords(pl) || '\u2014'}</Text>
+                      {/* The website, so it can be looked at (owner, 15 Sep
+                          2026: "there needs to be a website address for each of
+                          these locations so I can have a look at it"). */}
+                      {pl.website ? (
+                        <Press onPress={() => void Linking.openURL(pl.website as string)} accessibilityRole="link">
+                          <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>{pl.website.replace(/^https?:\/\//, '')}</Text>
+                        </Press>
+                      ) : <Text style={type.tiny}>no website</Text>}
+                      <Text style={type.tiny} numberOfLines={1}>its words mean: {ourWords(pl) || 'nothing of ours'}</Text>
                     </View>
+                    {/* "Settled" said nothing to him. This column answers the
+                        question the heading asks: would it land here? */}
                     <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>
-                      {pl.landsIn ? 'settled' : 'not sure'}
-                      {/* The canvas marks Amity Beach "· part of another place",
-                          because that is *why* it did not settle rather than a
-                          second fact about it (the audit, 15 Sep 2026). */}
-                      {!pl.landsIn && pl.partOf ? ` · part of ${pl.partOf}` : ''}
+                      {pl.landsIn === sc.key ? 'lands here'
+                        : pl.landsIn ? `lands in ${subLabelOf(pl.landsIn)}`
+                          : 'nothing files it'}
+                      {!pl.landsIn && pl.partOf ? ` \u00b7 inside ${pl.partOf}` : ''}
                     </Text>
                     {/* "Override it on a single place, where you can see what was
                         inherited and say why you changed it." The endpoint had
                         existed since the start with no way to reach it from
                         anywhere (the audit, 15 Sep 2026). */}
                     {canManage ? (
-                      <TextAction label={onPlace === pl.id ? 'Close' : 'Its labels'}
+                      <TextAction label={onPlace === pl.id ? 'Close' : 'Labels'}
                                   onPress={() => setOnPlace(onPlace === pl.id ? '' : pl.id)} />
                     ) : null}
                   </View>
@@ -1946,10 +1964,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                       worse than no button (the audit, 15 Sep 2026: "Save is a
                       no-op"). What the screen owes is the count and the one
                       thing still to decide. */}
-                  <Text style={type.tiny}>
-                    {settled.length} of {landing.places.length} settled by the labels. Everything on the left is saved as
-                    you change it.
-                  </Text>
+                  <Text style={type.tiny}>{settled.length} of {landing.places.length} would land here.</Text>
                   {notSure.length ? (
                     <Press effect="none" disabled={busy} accessibilityRole="button" style={styles.save}
                            onPress={() => void run(
