@@ -1197,7 +1197,7 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
  * their websites on the right, and one button that reads those sites and comes
  * back with a recommendation — which is offered, never applied.
  */
-function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back, onChanged, onDecide, onCarry }: {
+function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back, onChanged, onDecide, onCarry, onTake }: {
   r: TaxonomyLabel; tax: Taxonomy; secondary: SecondaryLabel[]; wide: boolean; canManage: boolean;
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
@@ -1206,6 +1206,8 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
   /** Answers false where it failed, so a run of writes can stop where it stopped. */
   onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => Promise<boolean>;
   onCarry: (r: TaxonomyLabel, attribute: string, value: AttributeValue | null) => Promise<void>;
+  /** The answer and what the word also says, in one act that can be undone as one. */
+  onTake: (r: TaxonomyLabel, choice: { subcategory?: string | null; generic?: boolean }, carries: { attribute: string; value: AttributeValue | null }[]) => Promise<void>;
 }) {
   const [eg, setEg] = useState<TaxonomyExamples | null>(null);
   const [looking, setLooking] = useState(false);
@@ -1395,11 +1397,16 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
                             // the labels and leaving the word undecided left it
                             // in the unmapped queue while the screen said it had
                             // been answered (Codex, 15 Sep 2026).
-                            const settle = said.primary ? { subcategory: said.primary } : { generic: true };
-                            if (!(await onDecide(r, settle))) return;
-                            for (const x of said.secondary) {
-                              await onCarry(r, x.key, x.choice ? { choice: x.choice } : { yesno: true });
-                            }
+                            // One act, one request: the answer and the labels
+                            // go together in one transaction, or neither does. A
+                            // run of separate writes could leave the word decided
+                            // with none of them, which is worse than not having
+                            // taken it at all (Codex, 15 Sep 2026).
+                            await onTake(
+                              r,
+                              said.primary ? { subcategory: said.primary } : { generic: true },
+                              said.secondary.map((x) => ({ attribute: x.key, value: x.choice ? { choice: x.choice } : { yesno: true } })),
+                            );
                           } catch (err) { await onChanged(String((err as Error).message)); }
                           finally { setBusy(false); }
                         }}
@@ -3424,6 +3431,21 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         back={() => setWord('')}
         onChanged={onChanged}
         onDecide={(row, choice) => decide(row, choice)}
+        onTake={async (row, choice, carries) => {
+          const out = await api.taxonomyBatch([{
+            labels: [`google:${row.key}`],
+            subcategory: choice.subcategory ?? null, generic: Boolean(choice.generic),
+            carries, reason: 'Taken from what Claude read on their websites.',
+          }]);
+          if (out.failed.length) throw new Error(out.failed[0].error);
+          await reload();
+          await onChanged(
+            choice.subcategory
+              ? `${row.label ?? row.key} → ${subLabel(choice.subcategory)}${carries.length ? `, and ${carries.length} more label${carries.length === 1 ? '' : 's'}` : ''}.`
+              : `${row.label ?? row.key}: a secondary label only${carries.length ? `, saying ${carries.length} thing${carries.length === 1 ? '' : 's'}` : ''}.`,
+            putBack(out.undo),
+          );
+        }}
         onCarry={async (row, attribute, value) => {
           await api.taxonomySetCarries({ label: `google:${row.key}`, attribute, value });
           await reload();

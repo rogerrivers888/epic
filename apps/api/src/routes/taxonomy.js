@@ -1045,7 +1045,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
     // they stand, every rule it deletes, and every rule it makes. Taken here
     // rather than in the browser, because the browser has no way of knowing
     // what a generic decision is about to delete (Codex, 15 Sep 2026).
-    const undo = { labels: [], deleted: [], made: [] };
+    const undo = { labels: [], carries: [], deleted: [], made: [] };
     const remember = async (labelList) => {
       for (const l of labelList) {
         const parsed = parseLabel(l);
@@ -1070,6 +1070,11 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         // `active` goes with the decision: deciding a word aside switches it
         // off, and putting the decision back without it leaves it hidden.
         undo.labels.push(rows[0] ?? { namespace: parsed.namespace, key: parsed.key, decision: null, active: true, points_at: null });
+        // And what it carries, because an item may set that too and Undo has to
+        // put all of one act back, not most of it (Codex, 15 Sep 2026).
+        const { rows: had } = await query(
+          'select * from taxonomy_label_carries where namespace = $1 and key = $2', [parsed.namespace, parsed.key]);
+        undo.carries.push({ namespace: parsed.namespace, key: parsed.key, rows: had });
       }
     };
     for (const it of items) {
@@ -1097,6 +1102,10 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           done.push({ labels, unanswered: true });
           continue;
         }
+        // An item may say what the word *also* means. Applied with the answer,
+        // so taking a recommendation is one act: the answer and the labels go
+        // together or neither does (Codex, 15 Sep 2026).
+        const carries = Array.isArray(it.carries) ? it.carries : [];
         if (it.aside || it.nearby || it.travel || it.generic) {
           if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
@@ -1127,7 +1136,8 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           // The word no longer means one of our labels, so nothing written in
           // our words may keep firing for it (Codex, 14 Sep 2026).
           await labelRepo.pointAt(namespace, key, null);
-          done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel', generic: decision === 'generic' });
+          for (const c of carries) await placeAttributes.setCarries(labels[0], String(c?.attribute ?? ''), c?.value ?? null);
+          done.push({ labels, aside: decision === 'aside', nearby: decision === 'nearby', travel: decision === 'travel', generic: decision === 'generic', carries: carries.length });
           continue;
         }
         const subcategory = it.subcategory ? String(it.subcategory) : null;
@@ -1155,7 +1165,8 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
            JSON.stringify({ labels, subcategory, reason: rule.reason, batch: true })]);
         if (before.length) undo.deleted.push(before[0]); else undo.made.push(rule.id);
-        done.push({ labels, subcategory, ruleId: rule.id });
+        for (const c of carries) await placeAttributes.setCarries(labels[0], String(c?.attribute ?? ''), c?.value ?? null);
+        done.push({ labels, subcategory, ruleId: rule.id, carries: carries.length });
       } catch (err) { failed.push({ labels, error: String(err.message ?? err) }); }
     }
     // Only where something actually changed: a batch that failed wholesale has
@@ -1209,6 +1220,17 @@ taxonomyRoutes.post('/rules/undo', requires('manage_library'), async (req, res, 
              updated_at = now()`,
           [r.id, r.scope, r.subject, r.subject_label, r.weights, r.reason, r.taught_by, r.seeded, r.subcategory, r.labels]);
       }
+      // What each word carried, put back exactly: cleared first, because a
+      // label added by the act has to go as well as one it changed.
+      for (const c of snap.carries ?? []) {
+        await client.query('delete from taxonomy_label_carries where namespace = $1 and key = $2', [c.namespace, c.key]);
+        for (const row of c.rows ?? []) {
+          await client.query(
+            `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno, from_value, to_value, choice, seeded)
+             values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [row.namespace, row.key, row.attribute_key, row.yesno, row.from_value, row.to_value, row.choice, row.seeded]);
+        }
+      }
       // And each word's own answer as it stood.
       for (const l of snap.labels ?? []) {
         if (l.namespace === 'wikidata') {
@@ -1222,9 +1244,15 @@ taxonomyRoutes.post('/rules/undo', requires('manage_library'), async (req, res, 
             where namespace = $1 and key = $2`,
           [l.namespace, l.key, l.decision ?? null, l.active ?? true, l.points_at ?? null]);
       }
-      return { rules: (snap.made ?? []).length, back: (snap.deleted ?? []).length, words: (snap.labels ?? []).length };
+      return {
+        rules: (snap.made ?? []).length, back: (snap.deleted ?? []).length,
+        words: (snap.labels ?? []).length, carries: (snap.carries ?? []).length,
+      };
     });
     shelfRules.forget();
+    // The carried labels are cached too, and they were just written to directly
+    // rather than through the repository that clears it.
+    placeAttributes.forget();
     // The resolver reads points_at out of the taxonomy's own five-second cache,
     // so without this a word just put back keeps landing where the undone
     // change sent it (Codex, 15 Sep 2026).

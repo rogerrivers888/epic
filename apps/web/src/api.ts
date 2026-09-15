@@ -2391,7 +2391,13 @@ export const api = {
   taxonomySaveRule: (body: { labels: string[]; subcategory?: string | null; weights?: ShelfWeights; reason?: string | null }) =>
     put<{ rule: TaxonomyRule }>('/api/admin/taxonomy/rules', body),
   /** A group's suggestions approved in one press: rules and set-asides together. */
-  taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean; reason?: string | null }[]) =>
+  taxonomyBatch: (items: {
+    labels: string[]; subcategory?: string | null;
+    aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean;
+    /** What the word also says, applied with the answer so the two cannot part company. */
+    carries?: { attribute: string; value: AttributeValue | null }[];
+    reason?: string | null;
+  }[]) =>
     post<{
       done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }[];
       failed: { labels: string[]; error: string }[];
