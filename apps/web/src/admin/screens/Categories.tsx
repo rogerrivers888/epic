@@ -915,17 +915,19 @@ function Doors({ at, on, counts }: {
 
 /** The band under the doors: what this is, and the numbers that matter about it. */
 function Band({ kicker, title, stats }: { kicker: string; title: string; stats: { label: string; value: string }[] }) {
+  const { width } = useViewport();
+  const phone = width < WIDE;
   return (
     <View style={styles.band}>
       <View style={{ gap: 6, minWidth: 0, flexShrink: 1 }}>
         <Text style={styles.bandKicker}>{kicker}</Text>
-        <Text style={styles.bandTitle}>{title}</Text>
+        <Text style={[styles.bandTitle, phone && styles.bandTitlePhone]}>{title}</Text>
       </View>
       <View style={styles.bandStats}>
         {stats.map((st) => (
-          <View key={st.label} style={{ gap: 2 }}>
-            <Text style={styles.bandKicker}>{st.label}</Text>
-            <Text style={styles.bandValue}>{st.value}</Text>
+          <View key={st.label} style={styles.bandStat}>
+            <Text style={styles.bandKicker} numberOfLines={1}>{st.label}</Text>
+            <Text style={styles.bandValue} numberOfLines={2}>{st.value}</Text>
           </View>
         ))}
       </View>
@@ -2903,7 +2905,13 @@ const styles = StyleSheet.create({
   band: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.xl,
     borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 18, flexWrap: 'wrap' },
   bandTitle: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
-  bandStats: { flexDirection: 'row', alignItems: 'flex-end', gap: 34, flexWrap: 'wrap' },
+  // Shrinkable, or a long value — "Food & drink · Restaurants" — pushes the last
+  // stat off the right edge at 390 instead of wrapping (15 Sep 2026, on the
+  // deployed site at 390, which the handoff says is reviewed like the wide one).
+  bandStats: { flexDirection: 'row', alignItems: 'flex-end', gap: 34, flexWrap: 'wrap', flexShrink: 1, minWidth: 0 },
+  bandStat: { gap: 2, flexShrink: 1, minWidth: 0 },
+  /** 31px is the wide title; the handoff draws 390 as its own artboard at 24 (BO1m). */
+  bandTitlePhone: { fontSize: 24, letterSpacing: -0.8, lineHeight: 27 },
   bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
   said: { borderLeftWidth: BORDER, borderLeftColor: colors.ruleMuted, paddingLeft: 13, paddingVertical: 2 },
   bandKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
