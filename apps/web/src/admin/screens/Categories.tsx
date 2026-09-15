@@ -2976,7 +2976,14 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                   menu opened in the bar has to lift the bar itself or the rows
                   under it paint straight over the panel (13 Sep 2026). */}
               <View style={[styles.stickGroup, openKey === `bulk:${g.key}` && { zIndex: 60 }]}>
-              <View style={[styles.groupBar, openKey === `bulk:${g.key}` && { zIndex: 60 }]}>
+              {/* At 390 the tray docks to the bottom with the count reduced to a
+                  number (the handoff, BO1m). Above that it is the hairline band
+                  at the top of the list. */}
+              <View style={[
+                styles.groupBar,
+                openKey === `bulk:${g.key}` && { zIndex: 60 },
+                !wide && tickedHere.length ? styles.trayDocked : null,
+              ]}>
                 {subsHere.length ? (
                   <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
                     <Choice label={`All · ${g.types.length}`} on={!only} onPress={() => setOnly('')} />
@@ -2986,7 +2993,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                 {/* Ticked rows get one answer between them, from the same control
                     the single rows use. */}
                 {canManage && tickable.length ? (
-                  <TextAction label={allTicked ? 'Untick all' : `Tick all ${tickable.length}`}
+                  <TextAction label={!wide && tickedHere.length ? String(tickedHere.length) : allTicked ? 'Untick all' : `Tick all ${tickable.length}`}
                               onPress={() => setTicked((prev) => { const n = new Set(prev); for (const r of tickable) { if (allTicked) n.delete(r.key); else n.add(r.key); } return n; })} />
                 ) : null}
                 {canManage && tickedHere.length ? (
@@ -3450,6 +3457,13 @@ const styles = StyleSheet.create({
    * `position` is typed loosely enough in React Native Web to say so here.
    */
   /** The bar and the column heads together, so both stay put while the list runs under them. */
+  trayDocked: Platform.OS === 'web'
+    ? ({
+      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 120,
+      backgroundColor: colors.bg, borderTopWidth: 2, borderTopColor: colors.line,
+      paddingHorizontal: spacing.md, paddingVertical: 10,
+    } as any)
+    : {},
   stickGroup: Platform.OS === 'web'
     ? ({ position: 'sticky', top: 0, zIndex: 4, backgroundColor: colors.bg } as any)
     : {},

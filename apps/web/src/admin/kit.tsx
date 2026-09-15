@@ -662,6 +662,9 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
    */
   stacked?: boolean;
 }) {
+  const { width: screen } = useViewport();
+  /** A phone gets a sheet; anything wider gets the panel (the handoff, BO1m). */
+  const sheet = screen < 560;
   const [open, setOpenState] = useState(false);
   const [into, setInto] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
@@ -711,7 +714,25 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
       {open ? (
         <>
           <Press style={dd.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={[dd.panel, align === 'right' && dd.panelRight, align === 'right' && nudge ? { right: nudge } : null, { width }]} accessibilityRole="menu">
+          {/* At 390 the answer menu is a full-height sheet, not a 300px panel
+              hanging off a control -- "same order, same five answers, same
+              adopt row at the foot" (the handoff, BO1m). A panel that width on
+              a phone is most of the screen anyway, and half of it hangs off. */}
+          <View
+            style={[
+              dd.panel,
+              sheet ? dd.sheet : align === 'right' && dd.panelRight,
+              !sheet && align === 'right' && nudge ? { right: nudge } : null,
+              sheet ? null : { width },
+            ]}
+            accessibilityRole="menu"
+          >
+            {sheet ? (
+              <Press onPress={close} accessibilityRole="button" style={dd.sheetHead}>
+                <Text style={[type.small, { fontWeight: '700', color: colors.ink, flex: 1 }]} numberOfLines={1}>{label}</Text>
+                <Icon name="close" size={16} color={colors.ink} strokeWidth={2.4} />
+              </Press>
+            ) : null}
             {/* Only on the first level, and only where there is enough to make
                 drilling a chore. Inside one group the list is already short. */}
             {!group && !adopting && groups.reduce((n, g) => n + g.items.length, 0) >= 12 ? (
@@ -723,7 +744,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                 />
               </View>
             ) : null}
-            <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+            <ScrollView style={sheet ? { flex: 1 } : { maxHeight: 360 }} keyboardShouldPersistTaps="handled">
               {adopting ? (
                 <>
                   <Press onPress={() => setAdopting(false)} accessibilityRole="button" accessibilityLabel="Back"
@@ -863,6 +884,14 @@ const dd = StyleSheet.create({
     position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
     paddingVertical: 4,
+  },
+  sheet: {
+    position: 'fixed' as never, top: 0, left: 0, right: 0, bottom: 0, marginTop: 0,
+    width: 'auto' as never, zIndex: 300, borderWidth: 0,
+  },
+  sheetHead: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, height: 52,
+    borderBottomWidth: 2, borderBottomColor: colors.line,
   },
   panelSoft: { borderColor: colors.lineSoft },
   /** Hung from the control's right edge, for a control at the end of a row. */
