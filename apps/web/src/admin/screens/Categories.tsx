@@ -203,7 +203,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** The Google view, read by Google's categories or by ours. */
-  const [by, setBy] = useQueryState<'google' | 'ours'>('by', 'google', asOneOf(['google', 'ours'] as const, 'google'));
+  const [by, setBy] = useQueryState<'google' | 'ours' | 'subs'>('by', 'google', asOneOf(['google', 'ours', 'subs'] as const, 'google'));
   /** A rule being written from a word, outside the subcategory column. */
   const [editing, setEditing] = useState<{ labels: string[]; subcategory: string | null } | null>(null);
 
@@ -321,9 +321,15 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
                     onPick={(k) => setSub(k)} />
         ) : null}
         {shown === 'google' ? (
-          <Dropdown label="By" value={by === 'ours' ? 'our categories' : "Google's categories"} width={220}
-                    options={[{ key: 'google', label: "Google's categories", on: by === 'google' }, { key: 'ours', label: 'Our categories', on: by === 'ours' }]}
-                    onPick={(k) => setBy(k as 'google' | 'ours')} />
+          <Dropdown label="By" value={by === 'ours' ? 'our categories' : by === 'subs' ? 'our subcategories' : "Google's categories"} width={240}
+                    options={[
+                      { key: 'google', label: "Google's categories", on: by === 'google' },
+                      { key: 'ours', label: 'Our categories', on: by === 'ours' },
+                      // BO1i draws our 59 as the rows, not the eight cabinets
+                      // above them (the audit, 15 Sep 2026).
+                      { key: 'subs', label: 'Our subcategories', on: by === 'subs' },
+                    ]}
+                    onPick={(k) => setBy(k as 'google' | 'ours' | 'subs')} />
         ) : null}
       </View>
 
@@ -1093,6 +1099,85 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
 }
 
 /**
+ * BO1i — our 59, as the rows.
+ *
+ * "Our subcategory | Home, and also in | Google words | Places." Grouping by
+ * the eight categories is a different question and has its own option; this is
+ * the one that answers "what fills Water park, and where is it listed".
+ *
+ * There is no place total, and saying so is the honest thing: one place carries
+ * several of a provider's words, so adding the words' counts would count the
+ * same place more than once. The biggest single word is a true lower bound and
+ * is given as one.
+ */
+function OurSubcategories({ tax, rows, wide, catLabel }: {
+  tax: Taxonomy; rows: TaxonomyLabel[]; wide: boolean;
+  catLabel: (k: string | null | undefined) => string;
+}) {
+  const byDrawer = useMemo(() => {
+    const m = new Map<string, TaxonomyLabel[]>();
+    for (const r of rows) {
+      const k = r.landing?.subcategory;
+      if (!k) continue;
+      m.set(k, [...(m.get(k) ?? []), r]);
+    }
+    return m;
+  }, [rows]);
+  const subs = tax.subcategories.filter((sc) => sc.active);
+  return (
+    <View>
+      <View style={[styles.tRow, styles.tHeadSoft, styles.stick]}>
+        <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Our subcategory</Text></View>
+        {wide ? <View style={[styles.tCell, styles.headCell, { width: 220 }]}><Text style={styles.colHead}>Home, and also in</Text></View> : null}
+        <View style={[styles.tCell, styles.headCell, { flex: wide ? 1.4 : 1 }]}><Text style={styles.colHead}>Google words</Text></View>
+        <View style={[styles.tCell, styles.headCell, { width: wide ? 130 : 84 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Places</Text></View>
+      </View>
+      {subs.map((sc) => {
+        const words = byDrawer.get(sc.key) ?? [];
+        const most = words.reduce((n, w) => Math.max(n, w.seen_count ?? 0), 0);
+        return (
+          <View key={sc.key} style={styles.wordRow}>
+            <View style={[styles.tFirst, { flex: 1, width: undefined, minWidth: 0 }]}>
+              <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{sc.label}</Text>
+              {!wide ? (
+                <Text style={type.tiny} numberOfLines={1}>
+                  {catLabel(sc.category_key)}
+                  {(sc.also_in ?? []).length ? <Text style={{ color: colors.accent }}>{` · also in ${(sc.also_in ?? []).map((k) => catLabel(k)).join(', ')}`}</Text> : null}
+                </Text>
+              ) : null}
+            </View>
+            {wide ? (
+              <View style={[styles.tCell, { width: 220 }]}>
+                <Text style={type.small} numberOfLines={2}>
+                  {catLabel(sc.category_key)}
+                  {/* Lime: also-in is a listing, not a home. */}
+                  {(sc.also_in ?? []).length ? <Text style={{ color: colors.accent }}>{` · ${(sc.also_in ?? []).map((k) => catLabel(k)).join(' · ')}`}</Text> : null}
+                </Text>
+              </View>
+            ) : null}
+            <View style={[styles.tCell, { flex: wide ? 1.4 : 1, minWidth: 0 }]}>
+              <Text style={type.small} numberOfLines={2}>
+                {words.length ? words.map((w) => w.label ?? w.key.replace(/_/g, ' ')).join(' · ')
+                  : <Text style={{ color: colors.inkMuted }}>nothing points here yet</Text>}
+              </Text>
+            </View>
+            <View style={[styles.tCell, { width: wide ? 130 : 84 }]}>
+              <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'], color: most ? colors.ink : colors.inkMuted }]}>
+                {most ? `at least ${count(most)}` : '—'}
+              </Text>
+            </View>
+          </View>
+        );
+      })}
+      <Text style={[type.tiny, styles.emptyRow]}>
+        “At least”, because one place carries several of a provider’s words and adding the counts would count the same
+        place more than once. The biggest single word is a true floor.
+      </Text>
+    </View>
+  );
+}
+
+/**
  * BO8 — a subcategory, on its own page: the rule, then real places.
  *
  * The owner, 15 Sep 2026: "B08 clearly shows that you should be able to click
@@ -1326,7 +1411,12 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
           <View style={styles.wordRow}>
             <Text style={[type.tiny, { width: 96 }]}>Switched on</Text>
             {canManage ? (
-              <TextAction label={sc.active ? 'On' : 'Off'} onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)} />
+              <Press effect="none" accessibilityRole="switch" accessibilityState={{ checked: sc.active }}
+                     accessibilityLabel={`${sc.label} is ${sc.active ? 'on' : 'off'}`}
+                     onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)}
+                     style={[styles.toggle, sc.active && styles.toggleOn]}>
+                <View style={[styles.toggleBlock, sc.active && styles.toggleBlockOn]} />
+              </Press>
             ) : <Text style={type.small}>{sc.active ? 'On' : 'Off'}</Text>}
           </View>
         </View>
@@ -1805,12 +1895,17 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
   onExamples: (key: string) => void; egKey: string;
   children?: (r: TaxonomyLabel) => React.ReactNode;
 }) {
-  const [order, setOrder] = useQueryState<'places' | 'az'>('order', 'places', asOneOf(['places', 'az'] as const, 'places'));
+  const [order, setOrder] = useQueryState<'places' | 'az' | 'oldest'>('order', 'places', asOneOf(['places', 'az', 'oldest'] as const, 'places'));
   const left = useMemo(() => {
     const list = [...rows];
-    return order === 'az'
-      ? list.sort((a, b) => (a.label ?? a.key).localeCompare(b.label ?? b.key))
-      : list.sort((a, b) => (b.seen_count ?? 0) - (a.seen_count ?? 0) || (a.label ?? a.key).localeCompare(b.label ?? b.key));
+    if (order === 'az') return list.sort((a, b) => (a.label ?? a.key).localeCompare(b.label ?? b.key));
+    // Longest unanswered first — the ones that have been sitting there since the
+    // first sweep read them, rather than the ones Google added last week.
+    if (order === 'oldest') {
+      return list.sort((a, b) => String(a.first_seen ?? '').localeCompare(String(b.first_seen ?? ''))
+        || (a.label ?? a.key).localeCompare(b.label ?? b.key));
+    }
+    return list.sort((a, b) => (b.seen_count ?? 0) - (a.seen_count ?? 0) || (a.label ?? a.key).localeCompare(b.label ?? b.key));
   }, [rows, order]);
   const nothingKnows = left.filter((r) => !r.seen_count);
   const known = left.filter((r) => r.seen_count);
@@ -1870,8 +1965,11 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
       />
       <View style={[styles.line, { gap: spacing.md }]}>
         <Text style={styles.bandKicker}>Order by</Text>
-        <TextAction label="Places it decides" onPress={() => setOrder('places')} />
-        <TextAction label="A to Z" onPress={() => setOrder('az')} />
+        {/* The chosen one reads as chosen; it was three plain words with no
+            state at all (the audit). "Oldest" is the canvas's third. */}
+        {([['places', 'Places it decides'], ['az', 'A to Z'], ['oldest', 'Oldest']] as const).map(([k, l]) => (
+          <Choice key={k} label={l} on={order === k} onPress={() => setOrder(k)} />
+        ))}
         <Text style={type.tiny}>{order === 'places' ? 'Consequence first, and it stays that way' : 'Alphabetical, which puts the pointless one first'}</Text>
       </View>
       <View style={[styles.tRow, styles.tHeadSoft]}>
@@ -2452,7 +2550,7 @@ function Carries({ r, secondary, onChanged }: {
 }
 
 function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage, onChanged }: {
-  tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours'; view: View_;
+  tax: Taxonomy; wide: boolean; roomy: boolean; by: 'google' | 'ours' | 'subs'; view: View_;
   catLabel: (k: string | null | undefined) => string; subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
@@ -2702,6 +2800,12 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           underneath the table and reads as see-through (owner, 14 Sep 2026). */}
       {/* BO5 — what is left, hardest first. Same rows, same actions, ordered by
           what answering one actually moves. */}
+      {/* BO1i — our 59, as rows. "Our subcategory | Home, and also in | Google
+          words | Places". The eight categories above them are a different
+          question and stay behind their own option (the audit, 15 Sep 2026). */}
+      {by === 'subs' && view !== 'left' ? (
+        <OurSubcategories tax={tax} rows={rows ?? []} wide={wide} catLabel={catLabel} />
+      ) : null}
       {view === 'left' ? (
         <WhatIsLeft
           rows={(rows ?? []).filter((r) => !decided(r))}
@@ -2771,14 +2875,14 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} excluded · {asideCount}</Text>
         </Press>
       </View>
-      {chosen ? null : (
+      {chosen || by === 'subs' ? null : (
         <View style={[styles.tRow, styles.tHeadSoft, styles.gRow, styles.stick]}>
           <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={2}>{first}</Text></View>
           {COLS.map((h) => <View key={h} style={[styles.tCell, styles.headCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]} numberOfLines={1}>{h}</Text></View>)}
           {wide ? <View style={[styles.tCell, styles.headCell, styles.gLast, { width: LAST }]}><Text style={styles.colHead} numberOfLines={1}>{last}</Text></View> : null}
         </View>
       )}
-      {(chosen ? [chosen] : groups).map((g) => {
+      {(by === 'subs' ? [] : chosen ? [chosen] : groups).map((g) => {
         const on = chosen?.key === g.key;
         // Inside one of our categories, one subcategory at a time if asked.
         const subsHere = by === 'ours' && !g.key.startsWith('_')
@@ -3248,6 +3352,12 @@ const styles = StyleSheet.create({
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  // 34x19 with a 12px block, from the handoff's geometry table. There was no
+  // toggle in the admin at all; on and off were two words (the audit).
+  toggle: { width: 34, height: 19, borderWidth: 1, borderColor: colors.line, justifyContent: 'center', paddingHorizontal: 2 },
+  toggleOn: { backgroundColor: colors.selected, borderColor: colors.selected },
+  toggleBlock: { width: 12, height: 12, backgroundColor: colors.inkMuted, alignSelf: 'flex-start' },
+  toggleBlockOn: { backgroundColor: colors.selectedFg, alignSelf: 'flex-end' },
   placeLabels: { gap: 2, paddingLeft: spacing.md, paddingVertical: 6, borderLeftWidth: 2, borderLeftColor: colors.lime, marginLeft: spacing.md },
   shapeBand: { flexDirection: 'row', gap: 34, paddingTop: 8, paddingBottom: 4, flexWrap: 'wrap' },
   barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

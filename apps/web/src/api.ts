@@ -3009,6 +3009,8 @@ export type TaxonomyLanding = {
 export type TaxonomyLabel = {
   namespace: string; key: string; label: string | null; note: string | null;
   seen_count: number; active: boolean; seeded: boolean;
+  /** When a sweep first saw this word, so a queue can be read oldest first. */
+  first_seen?: string | null;
   /** Which of our labels this provider's word means, or null while it means nothing. */
   points_at?: string | null;
   /**
