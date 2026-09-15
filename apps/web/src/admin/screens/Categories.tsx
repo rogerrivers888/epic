@@ -1332,6 +1332,16 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                       </Text>
                     ))}
                   </View>
+                  {/* A rule can be dropped from here. The canvas draws a × on
+                      each label; a rule of ours is one statement, so the honest
+                      control is on the rule, not on a word inside it. */}
+                  {canManage ? (
+                    <TextAction label="Forget this rule" tone="muted" disabled={busy}
+                                onPress={() => void run(
+                                  () => api.shelfForget(r.id),
+                                  `Forgotten: ${ours.map((l) => (l.mine ? subLabelOf(l.mine) : l.name ?? keyOf(l.label))).join(' + ')} no longer fills ${sc.label}.`,
+                                )} />
+                  ) : null}
                 </View>
                 {strays.length ? (
                   <Text style={[type.tiny, { color: colors.overrun }]}>
@@ -2329,6 +2339,25 @@ function NotSure({ tax, wide, canManage, onChanged }: {
     finally { setBusy(false); }
   };
 
+  /**
+   * Everything the run answered, taken in one press.
+   *
+   * "The last run's output is shown for approval... Nothing is applied without
+   * approval" — and approving four answers was four presses (the audit, 15 Sep
+   * 2026). Only the ones with an answer, and only where it names one of ours.
+   */
+  const takeAll = async () => {
+    const ready = answered.filter((p) => p.said && tax.subcategories.some((s) => s.key === p.said));
+    if (!ready.length) return;
+    setBusy(true);
+    try {
+      for (const p of ready) await api.taxonomySettle(p.venue_ref, p.said as string);
+      await load();
+      await onChanged(`${ready.length} filed where the run said.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
   const row = (p: NotSurePlace) => (
     <View key={p.venue_ref} style={[styles.wordRow, openKey === p.venue_ref && { zIndex: 40 }, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
       {canManage && p.state === 'waiting' ? (
@@ -2412,7 +2441,19 @@ function NotSure({ tax, wide, canManage, onChanged }: {
       {places.length === 0 ? <Text style={[type.small, styles.emptyRow]}>Nothing on the list. Every place the labels met was settled by them.</Text> : null}
       {answered.length ? (
         <View style={{ gap: 4 }}>
-          <Text style={styles.bandKicker}>Answered, waiting on you</Text>
+          <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>Answered, waiting on you</Text>
+            {canManage && answered.some((p) => p.said && tax.subcategories.some((s) => s.key === p.said)) ? (
+              <Press effect="none" onPress={() => void takeAll()} disabled={busy} accessibilityRole="button"
+                     style={({ hovered }: any) => [styles.approve, hovered && styles.approveOn, busy && { opacity: 0.5 }]}>
+                {({ hovered }: any) => (
+                  <Text style={[type.small, { fontWeight: '700', color: hovered ? colors.selectedFg : colors.accent }]}>
+                    Take all {answered.filter((p) => p.said && tax.subcategories.some((s) => s.key === p.said)).length}
+                  </Text>
+                )}
+              </Press>
+            ) : null}
+          </View>
           {answered.map(row)}
         </View>
       ) : null}
@@ -2621,6 +2662,13 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   /** The row whose dropdown is open, lifted over the rows after it. */
   const [openKey, setOpenKey] = useState<string | null>(null);
   /**
+   * How many specific words a generic one is seen beside — what "the words it
+   * catches" would open on. Read from the pairs the API already computes, and
+   * only for the words that are answers of that kind, so it costs one call.
+   */
+  const [catchesBy, setCatchesBy] = useState<Record<string, number>>({});
+  const catches = (r: TaxonomyLabel) => catchesBy[r.key] ?? 0;
+  /**
    * The generic word whose company is open (owner, 13 Sep 2026: "instead
    * surface all the subcategories and map those accordingly"). A word like
    * `tourist_attraction` says nothing on its own, so what is worth seeing is
@@ -2663,6 +2711,18 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
     catch { if (wantedWith.current === key) setWithWords([]); }
   }, []);
   useEffect(() => { if (!withKey) { setWithWords(null); return; } setWithWords(null); void loadWith(withKey); }, [withKey, loadWith]);
+  // The counts for every word kept as a secondary label, asked once when the
+  // list lands rather than per row.
+  useEffect(() => {
+    const generic = (rows ?? []).filter((r) => r.decision === 'generic').map((r) => r.key);
+    if (!generic.length) return;
+    let live = true;
+    void Promise.all(generic.map((k) => api.taxonomyPairs(`google:${k}`)
+      .then((d) => [k, d.words.length] as const).catch(() => [k, 0] as const)))
+      .then((pairs) => { if (live) setCatchesBy(Object.fromEntries(pairs)); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows?.length]);
 
   /** The secondary labels a word can be given, for the control on its row. */
   const [secondary, setSecondary] = useState<SecondaryLabel[]>([]);
@@ -3074,7 +3134,10 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           : sugText ? 'Suggested' : 'Nothing said yet';
                 const ctlValue = busyKey === r.key ? 'Saving…'
                   : st === 'aside' ? 'from Epic'
-                    : st === 'generic' ? 'it describes, it does not name'
+                    // "Catches N words" — what a word kept as a secondary label
+                    // is actually worth is the specific words seen beside it,
+                    // and the count belongs on the row (the audit, 15 Sep 2026).
+                    : st === 'generic' ? `it describes, it does not name${catches(r) ? ` · catches ${catches(r)} words` : ''}`
                     : st === 'travel' ? 'getting there, parking'
                     : st === 'nearby' ? 'a loo, a visitor centre'
                     : st === 'mapped' ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
