@@ -1834,6 +1834,10 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
     return v.yesno === false ? `not ${nameOf(b.key)}` : nameOf(b.key);
   };
   const primary = tax.subcategories.filter((sc) => sc.active);
+  // Rules that file a place somewhere — which is not the same as provider words
+  // pointing at one of ours, and was labelled as though it were. It counts
+  // rules written in `epic:` labels and rules about a single place too (the
+  // audit, 15 Sep 2026).
   const total = tax.rules.filter((r) => r.subcategory).length;
 
   // BO8 — one primary label, on its own page.
@@ -1858,7 +1862,7 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
         stats={[
           { label: 'Primary', value: String(primary.length) },
           { label: 'Secondary', value: String(secondary.length) },
-          { label: 'Provider words pointing at them', value: count(total) },
+          { label: 'Rules that file a place', value: count(total) },
         ]}
       />
       <Said lead="A primary label is a subcategory’s own name.">
@@ -2167,7 +2171,11 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
         title="What is left"
         stats={[
           { label: 'Left', value: String(rows.length) },
-          { label: 'Places they decide', value: count(places) },
+          // Sightings, not places: the same place is seen once per word it
+          // carries, so this sum counts many of them more than once. It was
+          // labelled "Places they decide", which is exactly the sum the
+          // footnote elsewhere says must never be taken (the audit).
+          { label: 'Sightings between them', value: count(places) },
           { label: 'Nothing knows these', value: String(nothingKnows.length) },
         ]}
       />
@@ -2188,7 +2196,7 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
       </View>
       <View style={[styles.tRow, styles.tHeadSoft]}>
         <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Google's word, and why it is a judgement call</Text></View>
-        <View style={[styles.tCell, styles.headCell, { width: wide ? 90 : 60 }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View>
+        <View style={[styles.tCell, styles.headCell, { width: wide ? 90 : 60 }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Sightings</Text></View>
         {canManage ? <View style={[styles.tCell, styles.headCell, { width: wide ? 300 : 0 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Suggestion</Text></View> : null}
       </View>
       {known.map(rowFor)}
@@ -2248,10 +2256,19 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
    * know is worse than one admitting a sample.
    */
   const caught = useMemo(() => {
-    if (!eg || !shape) return 0;
-    const need = [r.key, ...shape.words];
-    return eg.places.filter((pl) => need.every((w) => (pl.types ?? []).includes(w))).length;
-  }, [eg, shape, r.key]);
+    if (!eg || !ourLabels.length) return 0;
+    // Counted against the rule that is about to be written, which is in *our*
+    // labels — not against the Google shape it came from. The two differ
+    // whenever two of Google's words point at one of ours, or a shape word
+    // points at nothing (the audit, 15 Sep 2026). A place counts where every
+    // label the rule names is one its own words mean.
+    const points = new Map((eg.travels ?? []).map((t) => [t.key, t.points_at]));
+    if (r.points_at) points.set(r.key, r.points_at);
+    return eg.places.filter((pl) => {
+      const mine = new Set((pl.types ?? []).map((t) => points.get(t)).filter(Boolean));
+      return ourLabels.every((k) => mine.has(k));
+    }).length;
+  }, [eg, ourLabels, r.key, r.points_at]);
   return (
                 <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
                   {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
@@ -3112,10 +3129,13 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   // name room from the 900px breakpoint up, not only on a big screen (Codex, 12 Sep 2026).
   const COL = roomy ? 132 : wide ? 88 : 58;
   const LAST = roomy ? 320 : 200;
-  const COLS = wide ? ['Subcategories', 'Places', 'Mapped', 'Unmapped'] : ['Subs', 'Mapped', 'Unmapped'];
-  const cells = (g: { types: TaxonomyLabel[]; places: number; mapped: number; unmapped: number }) => (wide ? [g.types.length, g.places, g.mapped, g.unmapped] : [g.types.length, g.mapped, g.unmapped]);
-  const cellsTotal = wide ? [total.types, total.places, total.mapped, total.unmapped] : [total.types, total.mapped, total.unmapped];
-  const placesAt = wide ? 1 : -1; const unmappedAt = wide ? 3 : 2;
+  // No Places column. One place carries several of a provider's words, so a sum
+  // over a category counts it many times — which is why every cell in it was an
+  // em dash. A column that can never carry a value is not a column (the audit).
+  const COLS = wide ? ['Subcategories', 'Mapped', 'Unmapped'] : ['Subs', 'Mapped', 'Unmapped'];
+  const cells = (g: { types: TaxonomyLabel[]; mapped: number; unmapped: number }) => [g.types.length, g.mapped, g.unmapped];
+  const cellsTotal = [total.types, total.mapped, total.unmapped];
+  const placesAt = -1; const unmappedAt = 2;
   const first = by === 'google' ? "Google's category / subcategory" : 'Our category / subcategory';
   const last = by === 'google' ? 'Lands in' : 'Our subcategories';
 
@@ -3327,7 +3347,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
               <View style={[styles.tRow, styles.tHeadSoft, { paddingVertical: 6 }]}>
                 <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.colHead} numberOfLines={1}>Word</Text></View>
                 {wide ? <View style={{ width: COL }} /> : null}
-                {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Places</Text></View> : null}
+                {wide ? <View style={[styles.tCell, { width: COL }]}><Text style={[styles.colHead, { textAlign: 'center' }]}>Sightings</Text></View> : null}
                 {canManage ? (
                   <View style={{ width: wide ? COL * 2 + LAST : undefined, alignItems: 'flex-end' }}>
                     <Text style={styles.colHead} numberOfLines={1}>What it means, and what else it says</Text>
@@ -3381,7 +3401,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           Google category that makes it not a day out. */}
                       {(() => {
                         const bits = [
-                          !wide ? `${count(r.seen_count)} ${r.seen_count === 1 ? 'place' : 'places'}` : null,
+                          !wide ? `seen ${count(r.seen_count)}` : null,
                           !decided(r) && sug && !/^the obvious/.test(sug.why) ? sug.why : null,
                           st === 'mapped' && r.landing.how === 'taught' ? (r.landing.via?.by === 'Epic' ? 'mapped by Epic' : 'mapped by you') : st === 'mapped' ? 'mapped by the code' : null,
                         ].filter(Boolean);
