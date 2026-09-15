@@ -3056,6 +3056,8 @@ export type TaxonomyExamples = {
     landsIn: string | null;
     /** The bigger place this is inside, by name — which is why it never settles alone. */
     partOf?: string | null;
+    /** Which of our labels its words mean, from the whole vocabulary rather than a sample. */
+    ours?: string[];
   }[];
   /** Every other Google word on those places, commonest first, with where each lands. */
   alsoCalled: { key: string; on: number; label: string | null; decision: string | null; landing: TaxonomyLanding }[];

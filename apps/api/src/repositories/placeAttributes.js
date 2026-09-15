@@ -201,6 +201,34 @@ export async function carriedByWord() {
  * The default for a whole drawer. A value of null clears it back to "nothing
  * said", which is not the same as "no": a castle is neither indoors nor out.
  */
+/**
+ * A value has to be the shape its label is.
+ *
+ * Nothing checked this, so a control offering Yes and No against a range wrote
+ * `{yesno:true}` into a row meant to hold two numbers, and everything
+ * downstream read a range with no bounds (the audit, 15 Sep 2026). The database
+ * triggers do this for a brought value; a drawer's default and a place's own
+ * answer had no equivalent.
+ */
+async function mustFit(attributeKey, value) {
+  const { byKey } = await attributes();
+  const a = byKey.get(attributeKey);
+  if (!a) throw bad(`${attributeKey} is not one of our secondary labels.`);
+  const has = (k) => value?.[k] != null;
+  if (a.kind === 'yesno' && !has('yesno')) throw bad(`${a.label} is a yes or no.`);
+  if (a.kind === 'range' && !has('from') && !has('to')) throw bad(`${a.label} is a range \u2014 it needs a number at one end at least.`);
+  if (a.kind === 'oneof') {
+    if (!has('choice')) throw bad(`${a.label} is one of a list.`);
+    if (!(a.options ?? []).includes(value.choice)) throw bad(`${value.choice} is not one of ${a.label}'s choices.`);
+  }
+  if (a.kind !== 'yesno' && has('yesno')) throw bad(`${a.label} is not a yes or no.`);
+  if (a.kind !== 'range' && (has('from') || has('to'))) throw bad(`${a.label} is not a range.`);
+  if (a.kind !== 'oneof' && has('choice')) throw bad(`${a.label} is not one of a list.`);
+  if (a.kind === 'range' && has('from') && has('to') && Number(value.from) > Number(value.to)) {
+    throw bad(`${a.label} runs from the smaller number to the larger one.`);
+  }
+}
+
 export async function setDefault(subcategoryKey, attributeKey, value) {
   if (!subcategoryKey || !attributeKey) throw bad('Which drawer, and which attribute?');
   if (value == null) {
@@ -209,6 +237,7 @@ export async function setDefault(subcategoryKey, attributeKey, value) {
     forget();
     return null;
   }
+  await mustFit(attributeKey, value);
   const { rows } = await query(
     `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice)
      values ($1, $2, $3, $4, $5, $6)

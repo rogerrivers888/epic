@@ -269,6 +269,15 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
     setToast({ text: said, undo });
     await load();
   };
+  /**
+   * The not-sure door's own count, refreshed when that list changes and not
+   * every time anything on the screen is saved. Keyed on a number the not-sure
+   * panel bumps, rather than on the toast, which everything sets.
+   */
+  const notSureChanged = async (said: string, undo?: () => Promise<void>) => {
+    setNotSureAt((n) => n + 1);
+    await changed(said, undo);
+  };
   const run = async (what: () => Promise<unknown>, said: string) => {
     setBusy(true);
     try { await what(); await changed(said); }
@@ -439,8 +448,8 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
 
       {tax && door === 'notsure' ? (
         <>
-          <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
-          <PartsOfPlaces canManage={canManage} tax={tax} onChanged={changed} />
+          <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={notSureChanged} />
+          <PartsOfPlaces canManage={canManage} tax={tax} onChanged={notSureChanged} />
         </>
       ) : null}
 
@@ -2157,6 +2166,7 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
                   { key: '-', label: 'Excluded from Epic', on: false },
                   { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
                   { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
+                  { key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false },
                 ]}
                 groups={tax.categories.filter((c) => c.active).map((c) => ({
                   key: c.key, label: c.label,
@@ -2263,20 +2273,22 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
    * 32", because Epic stores no places and a screen implying a total it cannot
    * know is worse than one admitting a sample.
    */
-  const caught = useMemo(() => {
-    if (!eg || !ourLabels.length) return 0;
-    // Counted against the rule that is about to be written, which is in *our*
-    // labels — not against the Google shape it came from. The two differ
-    // whenever two of Google's words point at one of ours, or a shape word
-    // points at nothing (the audit, 15 Sep 2026). A place counts where every
-    // label the rule names is one its own words mean.
-    const points = new Map((eg.travels ?? []).map((t) => [t.key, t.points_at]));
-    if (r.points_at) points.set(r.key, r.points_at);
-    return eg.places.filter((pl) => {
-      const mine = new Set((pl.types ?? []).map((t) => points.get(t)).filter(Boolean));
-      return ourLabels.every((k) => mine.has(k));
-    }).length;
-  }, [eg, ourLabels, r.key, r.points_at]);
+  /**
+   * Would the rule about to be written catch this place?
+   *
+   * One predicate, used for the total and for each row's own marker — they were
+   * two, and disagreed. In *our* labels, because that is what the rule is
+   * written in, and from the whole vocabulary the server resolved rather than
+   * the twelve commonest companions (Codex, 15 Sep 2026, twice).
+   */
+  const wouldCatch = useCallback(
+    (pl: { ours?: string[] }) => ourLabels.length > 0 && ourLabels.every((k) => (pl.ours ?? []).includes(k)),
+    [ourLabels],
+  );
+  const caught = useMemo(
+    () => (eg ? eg.places.filter(wouldCatch).length : 0),
+    [eg, wouldCatch],
+  );
   return (
                 <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
                   {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
@@ -2437,7 +2449,7 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                           for (BO1h). */}
                       {eg.places.map((pl) => {
                         const others = (pl.types ?? []).filter((t) => t !== r.key && !(eg.everywhere ?? []).some((e) => e.key === t));
-                        const caughtHere = shape ? [r.key, ...shape.words].every((w) => (pl.types ?? []).includes(w)) : false;
+                        const caughtHere = wouldCatch(pl);
                         return (
                           <View key={pl.id} style={[styles.egRow, { alignItems: 'flex-start' }]}>
                             <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -2449,7 +2461,7 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                                 </Text>
                               ) : null}
                             </View>
-                            {shape && shape.on > 1 ? (
+                            {shape && shape.on > 1 && ourLabels.length ? (
                               <Text style={[type.tiny, caughtHere ? null : { color: colors.inkMuted }]}>{caughtHere ? 'caught' : '— not caught'}</Text>
                             ) : null}
                             {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
@@ -3063,7 +3075,11 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null,
         aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel),
         generic: Boolean(choice.generic), unanswered: Boolean(choice.unanswered),
-        reason: choice.subcategory && r.suggestion?.why ? `Approved: ${r.suggestion.why}.` : null,
+        // Only where the choice *is* the suggestion. Attaching "Approved: …" to
+        // a subcategory somebody picked instead is a false audit line (Codex,
+        // 15 Sep 2026).
+        reason: choice.subcategory && choice.subcategory === r.suggestion?.subcategory && r.suggestion?.why
+          ? `Approved: ${r.suggestion.why}.` : null,
       }]);
       if (out.failed.length) throw new Error(out.failed[0].error);
       await reload();
@@ -3324,6 +3340,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                         { key: '-', label: 'Excluded from Epic', on: false },
                         { key: '>', label: 'Travel \u2014 getting there, parking', on: false },
                         { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: false },
+                        { key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false },
                       ]}
                       groups={tax.categories.filter((c) => c.active).map((c) => ({
                         key: c.key, label: c.label,
@@ -3460,6 +3477,9 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
                             { key: '>', label: 'Travel — getting there, parking', on: st === 'travel' },
                             { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: st === 'nearby' },
+                            // The sixth answer: back to the queue. A word answered wrongly could
+                            // only be put back inside Undo's four seconds (the audit, 15 Sep 2026).
+                            ...(decided(r) ? [{ key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false },] : []),
                           ]}
                           groups={tax.categories.filter((c) => c.active).map((c) => ({
                             key: c.key, label: c.label,
@@ -3543,6 +3563,9 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                                         { key: '-', label: 'Excluded from Epic', on: wst === 'aside' },
                                         { key: '>', label: 'Travel — getting there, parking', on: wst === 'travel' },
                                         { key: '~', label: 'Useful nearby — a loo, a visitor centre', on: wst === 'nearby' },
+                                        // The sixth answer: back to the queue. A word answered wrongly could
+                                        // only be put back inside Undo's four seconds (the audit, 15 Sep 2026).
+                                        ...(wst !== 'undecided' ? [{ key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false },] : []),
                                       ]}
                                       groups={tax.categories.filter((c) => c.active).map((c) => ({
                                         key: c.key, label: c.label,

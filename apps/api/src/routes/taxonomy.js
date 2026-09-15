@@ -731,6 +731,14 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
       return shelvesForVenue(venue, rules, tax.vocab).subcategory ?? null;
     };
     for (const p of out.places) p.landsIn = filedAs(p.types, p.primaryType ?? null);
+    // And which of *our* labels each place carries, from the whole vocabulary.
+    // The screen was deriving this from `travels`, which is capped at twelve, so
+    // a place reaching a label through a less common word was left out of the
+    // count while the rule would have caught it — and the row and the total
+    // disagreed (Codex, 15 Sep 2026).
+    for (const p of out.places) {
+      p.ours = [...new Set((p.types ?? []).map((t) => byKey.get(t)?.points_at).filter(Boolean))];
+    }
     // And whether we already know it sits inside somewhere bigger, which is why
     // a place like Amity Beach never settles on its own (the handoff, BO8).
     // `parts()` answers with { childToParent }, not a Map — reading `.size` off
