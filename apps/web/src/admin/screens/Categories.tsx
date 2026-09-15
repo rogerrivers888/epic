@@ -2510,7 +2510,10 @@ function NotSure({ tax, wide, canManage, onChanged }: {
             onPick={(k) => void settle(p, k)}
             onOpenChange={(o) => setOpenKey(o ? p.venue_ref : null)}
           />
-          <TextAction label="Not one of ours" disabled={busy} onPress={() => void settle(p, null)} />
+          {/* An action, not a verdict. Sitting under "It says · High ropes & zip
+              lines" it read as a judgement on the answer rather than a way to
+              drop the place (seen on the deployed site, 15 Sep 2026). */}
+          <TextAction label="Drop it — not a day out" tone="muted" disabled={busy} onPress={() => void settle(p, null)} />
         </View>
       ) : null}
     </View>
