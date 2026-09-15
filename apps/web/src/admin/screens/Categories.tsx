@@ -1543,7 +1543,9 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
     finally { setLooking(false); }
   };
 
-  const settled = (landing?.places ?? []).filter((pl) => pl.landsIn);
+  // "Would land here" means *here*, not somewhere. A place the labels file into
+  // Cafés & bakeries is settled, and it is not one of these (Codex, 15 Sep 2026).
+  const settled = (landing?.places ?? []).filter((pl) => pl.landsIn === sc.key);
   const notSure = (landing?.places ?? []).filter((pl) => !pl.landsIn);
   const ourWords = (pl: { types: string[] }) => (pl.types ?? [])
     .map((t) => (rules ?? []).flatMap((r) => r.labelList ?? []).find((l) => l.label === `google:${t}`)?.name
@@ -1551,7 +1553,6 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
     .filter(Boolean).slice(0, 4).join(' \u00b7 ');
 
   const cat = tax.categories.find((c) => c.key === sc.category_key);
-  const fires = landing ? `${settled.length} of ${landing.places.length}` : '\u2014';
   /** One of ours, by its own name — a primary label or a secondary one. */
   const subLabelOf = (k: string) => tax.subcategories.find((x) => x.key === k)?.label
     ?? secondary.find((a) => a.key === k)?.label ?? k.replace(/-/g, ' ');
