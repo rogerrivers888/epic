@@ -451,7 +451,10 @@ export async function listAttractions({ region, state, q, category, kind, limit 
               where l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero' limit 1) as hero_lqip
        from attractions a join regions r on r.slug = a.region_slug
       ${where.length ? `where ${where.join(' and ')}` : ''}
-      order by ${rank}
+      -- a.id last, always: without a unique tie-breaker a page taken by offset
+      -- can repeat a row or skip one, because most swept candidates share a
+      -- region, a null rank and the same score (Codex, 15 Sep 2026).
+      order by ${rank}, a.id
       limit $${args.length - 1} offset $${args.length}`, args);
   return rows;
 }

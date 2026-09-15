@@ -1621,8 +1621,18 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
           <Field value={range.from} onChangeText={(t) => setRange({ ...range, from: t })} autoFocus style={{ width: 62 }} />
           <Text style={type.tiny}>to</Text>
           <Field value={range.to} onChangeText={(t) => setRange({ ...range, to: t })} style={{ width: 62 }} />
-          <TextAction label="Set" disabled={busy} onPress={() => {
-            const num = (t: string) => (t.trim() === '' ? null : Number.isFinite(Number(t)) ? Number(t) : null);
+          {/* Blank is an open end; nonsense is not. "1O to 12" quietly became
+              "up to 12" and could be written across two thousand places
+              (Codex, 15 Sep 2026). */}
+          {[range.from, range.to].some((t) => t.trim() !== '' && !Number.isFinite(Number(t))) ? (
+            <Text style={[type.tiny, { color: colors.overrun }]}>Numbers, or leave an end blank.</Text>
+          ) : null}
+          <TextAction
+            label="Set"
+            disabled={busy || [range.from, range.to].some((t) => t.trim() !== '' && !Number.isFinite(Number(t)))
+              || (range.from.trim() === '' && range.to.trim() === '')}
+            onPress={() => {
+            const num = (t: string) => (t.trim() === '' ? null : Number(t));
             const value = { from: num(range.from), to: num(range.to) };
             void (async () => {
               setBusy(true);
