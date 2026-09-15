@@ -3542,8 +3542,15 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                         ) : null}
                       </View>
                     ) : (
-                      <View style={{ width: wide ? COL * 2 + LAST : undefined, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end' }}>
+                      <View style={{ width: wide ? COL * 2 + LAST : undefined, maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', alignItems: 'flex-end', gap: 3 }}>
                         <Text style={[type.small, { fontWeight: '600', textAlign: 'right' }]} numberOfLines={2}>{ctlValue}</Text>
+                        {/* Going to look at a drawer is not managing anything, so
+                            it is offered to a read-only admin too (Codex,
+                            15 Sep 2026). */}
+                        {st === 'mapped' && r.landing.subcategory ? (
+                          <TextAction label={`Open ${subLabel(r.landing.subcategory)}`}
+                                      onPress={() => onOpenDrawer(r.landing.subcategory as string)} />
+                        ) : null}
                       </View>
                     )}
                   </View>
