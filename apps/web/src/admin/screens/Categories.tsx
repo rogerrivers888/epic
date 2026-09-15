@@ -1513,14 +1513,12 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
    */
   const [reloads, setReloads] = useState(0);
   const again = useCallback(() => setReloads((n) => n + 1), []);
+  // A change of *scope* empties the selection: the rows it referred to may not
+  // be on screen, and a bulk change would reach them unseen. A reload after a
+  // save is not a change of scope, and losing the selection to one is its own
+  // annoyance (Codex, 15 Sep 2026).
+  useEffect(() => { setTicked(new Set()); setRange(null); setData(null); }, [sc.key, state]);
   useEffect(() => {
-    // Nothing stays ticked across a change of scope — the rows it referred to
-    // may not be on screen, and a bulk change would reach them unseen. And the
-    // old list comes off screen while the new one is fetched, so a tick made in
-    // the meantime cannot be on a row that is about to vanish.
-    setTicked(new Set());
-    setRange(null);
-    setData(null);
     let live = true;
     void api.taxonomyDrawer(sc.key, state)
       .then((d) => { if (live) setData(d); })
