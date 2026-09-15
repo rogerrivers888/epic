@@ -2392,7 +2392,15 @@ export const api = {
     put<{ rule: TaxonomyRule }>('/api/admin/taxonomy/rules', body),
   /** A group's suggestions approved in one press: rules and set-asides together. */
   taxonomyBatch: (items: { labels: string[]; subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; reason?: string | null }[]) =>
-    post<{ done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }[]; failed: { labels: string[]; error: string }[] }>('/api/admin/taxonomy/rules/batch', { items }),
+    post<{
+      done: { labels: string[]; subcategory?: string; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }[];
+      failed: { labels: string[]; error: string }[];
+      /** Hand this back to `taxonomyUndo` to put everything this call changed back. */
+      undo: string | null;
+    }>('/api/admin/taxonomy/rules/batch', { items }),
+  /** Put back exactly what one batch changed — once. */
+  taxonomyUndo: (id: string) =>
+    post<{ undone: true; rules: number; back: number; words: number }>('/api/admin/taxonomy/rules/undo', { id }),
   /** The specific words seen on the same places as a generic one, commonest first. */
   taxonomyPairs: (label: string) => request<TaxonomyPairs>(`/api/admin/taxonomy/pairs${qs({ label })}`),
   /** Our own secondary labels, with what every drawer is taken to be. */

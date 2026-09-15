@@ -2279,33 +2279,32 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
 
   /** One Google subcategory decided, on the fly: one of ours, or not a day out. */
   /**
-   * A word's answer as it stands, shaped as the batch item that would put it
-   * back. This is what Undo sends: not "the opposite of what I just did", which
-   * cannot be worked out from the new state, but the old answer itself, read
-   * before the change went out (the prototype, which keeps `prev` and restores
-   * it wholesale).
+   * Undo is the server's, not the browser's.
+   *
+   * The first version of this snapshotted each word's answer here and sent it
+   * back as another batch, and Codex took it apart three times over: the old
+   * answer is often *no answer*, which the batch endpoint refuses, so Undo
+   * failed silently for every word Approve-all had touched; and deciding a word
+   * generic deletes every combination rule naming it, which the browser has no
+   * way of giving back. The write now records what it is about to destroy and
+   * hands back a token, and this sends the token.
    */
-  const answerNow = (r: TaxonomyLabel) => ({
-    labels: [`google:${r.key}`],
-    subcategory: r.decision ? null : r.landing.subcategory ?? null,
-    aside: r.decision === 'aside', nearby: r.decision === 'nearby',
-    travel: r.decision === 'travel', generic: r.decision === 'generic',
-    reason: 'Undone from the Categories screen.',
-  });
-  const putBack = (was: ReturnType<typeof answerNow>[]) => async () => {
-    await api.taxonomyBatch(was);
+  const putBack = (id: string | null) => (id ? async () => {
+    await api.taxonomyUndo(id);
     await reload();
-  };
+    // The parent's copy of the rules was refreshed after the change and would
+    // otherwise still hold it (Codex, 15 Sep 2026).
+    await onChanged('Put back.');
+  } : undefined);
 
   const decide = async (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }, why?: string) => {
-    const was = [answerNow(r)];
     setBusyKey(r.key);
     try {
       const out = await api.taxonomyBatch([{ labels: [`google:${r.key}`], subcategory: choice.subcategory ?? null, aside: Boolean(choice.aside), nearby: Boolean(choice.nearby), travel: Boolean(choice.travel), generic: Boolean(choice.generic), reason: why ?? null }]);
       if (out.failed.length) throw new Error(out.failed[0].error);
       await reload();
       if (withKey) void loadWith(withKey);
-      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`, putBack(was));
+      await onChanged(choice.aside ? `${r.label ?? r.key}: excluded from Epic.` : choice.travel ? `${r.label ?? r.key}: travel.` : choice.nearby ? `${r.label ?? r.key}: useful nearby.` : choice.generic ? `${r.label ?? r.key}: a label, not a subcategory.` : `${r.label ?? r.key} → ${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}.`, putBack(out.undo));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
@@ -2332,7 +2331,6 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
    */
   const applyMany = async (rows: TaxonomyLabel[], choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean }) => {
     if (!rows.length) return;
-    const was = rows.map(answerNow);
     const said = choice.aside ? 'excluded from Epic' : choice.travel ? 'travel' : choice.nearby ? 'useful nearby' : choice.generic ? 'a label, not a subcategory' : `${catLabel(tax.subcategories.find((s) => s.key === choice.subcategory)?.category_key)} · ${subLabel(choice.subcategory)}`;
     setBusyKey('*');
     try {
@@ -2343,14 +2341,13 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
       })));
       setTicked(new Set());
       await reload();
-      await onChanged(`${out.done.length} of ${rows.length} → ${said}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`, putBack(was));
+      await onChanged(`${out.done.length} of ${rows.length} → ${said}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`, putBack(out.undo));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };
 
   /** Every unmapped subcategory in a group with a suggestion, approved in one press. */
   const approveAll = async (types: TaxonomyLabel[]) => {
-    const was = types.filter((r) => !decided(r) && r.suggestion).map(answerNow);
     const items = types.filter((r) => !decided(r) && r.suggestion).map((r) => ({
       labels: [`google:${r.key}`], subcategory: r.suggestion?.subcategory ?? null, aside: Boolean(r.suggestion?.aside), nearby: Boolean(r.suggestion?.nearby), travel: Boolean(r.suggestion?.travel), generic: Boolean(r.suggestion?.generic), reason: `Approved: ${r.suggestion?.why}.`,
     }));
@@ -2360,7 +2357,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
       const out = await api.taxonomyBatch(items);
       setTicked(new Set());
       await reload();
-      await onChanged(`Approved ${out.done.length} of ${items.length}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`, putBack(was));
+      await onChanged(`Approved ${out.done.length} of ${items.length}${out.failed.length ? ` — ${out.failed.length} failed: ${out.failed[0].error}` : ''}.`, putBack(out.undo));
     } catch (err) { await onChanged(String((err as Error).message)); }
     finally { setBusyKey(null); }
   };

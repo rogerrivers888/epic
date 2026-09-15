@@ -849,6 +849,22 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
     const tax = await taxonomy.taxonomy();
     const known = tax.categories.map((c) => c.key);
     const done = []; const failed = [];
+    // What this batch is about to undo (migration 130). The labels' own rows as
+    // they stand, every rule it deletes, and every rule it makes. Taken here
+    // rather than in the browser, because the browser has no way of knowing
+    // what a generic decision is about to delete (Codex, 15 Sep 2026).
+    const undo = { labels: [], deleted: [], made: [] };
+    const remember = async (labelList) => {
+      for (const l of labelList) {
+        const parsed = parseLabel(l);
+        if (!parsed || parsed.namespace === 'epic') continue;
+        if (undo.labels.some((x) => x.namespace === parsed.namespace && x.key === parsed.key)) continue;
+        const { rows } = await query(
+          'select namespace, key, decision, points_at from taxonomy_labels where namespace = $1 and key = $2',
+          [parsed.namespace, parsed.key]);
+        undo.labels.push(rows[0] ?? { namespace: parsed.namespace, key: parsed.key, decision: null, points_at: null });
+      }
+    };
     for (const it of items) {
       const labels = Array.isArray(it?.labels) ? it.labels.map(String) : [];
       try {
@@ -861,6 +877,15 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           if (labels.length !== 1) throw new Error('decide one label at a time');
           const { namespace, key } = parseLabel(labels[0]);
           const decision = it.aside ? 'aside' : it.travel ? 'travel' : it.generic ? 'generic' : 'nearby';
+          await remember(labels);
+          // Kept whole, because putting a rule back means putting all of it
+          // back: its labels, its reason and who taught it.
+          const { rows: going } = await query(
+            decision === 'generic'
+              ? `select * from shelf_rules where scope = 'labels' and (subject = $1 or $1 = any(labels))`
+              : `select * from shelf_rules where scope = 'labels' and subject = $1`,
+            [labels[0]]);
+          undo.deleted.push(...going);
           await labelRepo.save({ namespace, key, decision });
           // A decision replaces a mapping: a rule about this one word, if there
           // is one, goes, or the resolver would keep filing by it (Codex, 13 Sep 2026).
@@ -883,6 +908,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         }
         const subcategory = it.subcategory ? String(it.subcategory) : null;
         if (!subcategory || !tax.subByKey.has(subcategory)) throw new Error(`${subcategory} is not a subcategory`);
+        await remember(labels);
         const { scope, subject, labels: stored } = scopeFor(labels);
         const names = await namesFor(labels);
         const rule = await shelfRules.teach({
@@ -899,10 +925,66 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
           [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
            JSON.stringify({ labels, subcategory, reason: rule.reason, batch: true })]);
+        undo.made.push(rule.id);
         done.push({ labels, subcategory, ruleId: rule.id });
       } catch (err) { failed.push({ labels, error: String(err.message ?? err) }); }
     }
-    res.json({ done, failed });
+    // Only where something actually changed: a batch that failed wholesale has
+    // nothing to take back and an Undo that does nothing is worse than none.
+    let undoId = null;
+    if (done.length) {
+      const { rows } = await query(
+        'insert into taxonomy_undo (by, snapshot) values ($1, $2) returning id',
+        [actorOf(req), JSON.stringify(undo)]);
+      undoId = rows[0].id;
+    }
+    res.json({ done, failed, undo: undoId });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /rules/undo { id } — put back exactly what that batch changed.
+ *
+ * The labels' own rows, the rules it deleted and the rules it made, all three,
+ * in one transaction. Restoring a rule means restoring all of it — its labels,
+ * its reason, and who taught it — so the row goes back whole rather than being
+ * re-taught, which would put Epic's name on something the owner wrote.
+ *
+ * It can only be done once. A second press would "restore" a state that has
+ * since been changed again by somebody else.
+ */
+taxonomyRoutes.post('/rules/undo', requires('manage_library'), async (req, res, next) => {
+  try {
+    const id = String(req.body?.id || '').trim();
+    if (!id) throw bad('Undo what?');
+    const out = await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        'update taxonomy_undo set undone_at = now() where id = $1 and undone_at is null returning snapshot', [id]);
+      if (!rows.length) throw bad('That change has already been taken back.');
+      const snap = rows[0].snapshot ?? {};
+      // The rules this batch made, gone.
+      for (const ruleId of snap.made ?? []) {
+        await client.query('delete from shelf_rules where id = $1', [ruleId]);
+      }
+      // The rules it deleted, back whole.
+      for (const r of snap.deleted ?? []) {
+        await client.query(
+          `insert into shelf_rules (id, scope, subject, subject_label, weights, reason, taught_by, seeded, subcategory, labels)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           on conflict (id) do nothing`,
+          [r.id, r.scope, r.subject, r.subject_label, r.weights, r.reason, r.taught_by, r.seeded, r.subcategory, r.labels]);
+      }
+      // And each word's own answer as it stood.
+      for (const l of snap.labels ?? []) {
+        await client.query(
+          `update taxonomy_labels set decision = $3, points_at = $4, updated_at = now()
+            where namespace = $1 and key = $2`,
+          [l.namespace, l.key, l.decision ?? null, l.points_at ?? null]);
+      }
+      return { rules: (snap.made ?? []).length, back: (snap.deleted ?? []).length, words: (snap.labels ?? []).length };
+    });
+    shelfRules.forget();
+    res.json({ undone: true, ...out });
   } catch (err) { next(err); }
 });
 
