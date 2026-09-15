@@ -636,9 +636,11 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * painted over by one. `transparent` keeps the page visible behind it; the
  * panel supplies its own scrim.
  */
-function Overlay({ children }: { children: React.ReactNode }) {
+function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  // Escape, and Android's Back, both come through `onRequestClose`. Swallowing
+  // it left the only ways out a click on the scrim (Codex, 15 Sep 2026).
   return (
-    <Modal transparent visible animationType="none" onRequestClose={() => {}}>
+    <Modal transparent visible animationType="none" onRequestClose={onClose}>
       {children}
     </Modal>
   );
@@ -772,7 +774,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
         )}
       </Press>
       {open ? (
-        <Overlay>
+        <Overlay onClose={close}>
           <Press style={[dd.scrim, sheet && inFrame ? inFrame : null]} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
           {/* At 390 the answer menu is a full-height sheet, not a 300px panel
               hanging off a control -- "same order, same five answers, same
@@ -788,13 +790,19 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
               // it. Above the control where there is not room below, which a
               // row near the foot of a long list never has.
               !sheet && at ? (() => {
-                const tall = Math.min(360 + 8, screenH - 24);
+                // One number decides both where it starts and how tall it is.
+                // They were two and disagreed, so a long list opened upwards
+                // from a point that assumed a cap it was not held to, and grew
+                // back down across the control (Codex, 15 Sep 2026).
+                const gap = 4;
                 const below = screenH - (at.y + at.h) - 12;
-                const up = below < Math.min(tall, 180) && at.y > below;
+                const above = at.y - 12;
+                const up = below < 180 && above > below;
+                const room = Math.max(120, Math.min(360, up ? above : below));
                 return {
-                  top: up ? Math.max(12, at.y - Math.min(tall, at.y - 12) - 4) : at.y + at.h + 4,
-                  maxHeight: Math.max(120, up ? at.y - 16 : below),
-                  left: align === 'right' ? Math.max(8, at.x + at.w - width - nudge) : Math.min(at.x, screen - width - 8),
+                  top: up ? at.y - room - gap : at.y + at.h + gap,
+                  maxHeight: room,
+                  left: align === 'right' ? Math.max(8, at.x + at.w - width - nudge) : Math.min(at.x, Math.max(8, screen - width - 8)),
                   width,
                 };
               })() : null,
