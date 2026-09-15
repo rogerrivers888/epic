@@ -24,7 +24,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { colors, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
@@ -628,6 +628,48 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
  * panel hangs directly under the control; `align: 'right'` hangs it from the
  * control's right edge for a control at the end of a row.
  */
+/**
+ * A layer above everything on the page.
+ *
+ * `Modal` on React Native Web renders through a portal at the document root,
+ * so what it draws is outside every row's stacking context and cannot be
+ * painted over by one. `transparent` keeps the page visible behind it; the
+ * panel supplies its own scrim.
+ */
+function Overlay({ children }: { children: React.ReactNode }) {
+  return (
+    <Modal transparent visible animationType="none" onRequestClose={() => {}}>
+      {children}
+    </Modal>
+  );
+}
+
+/**
+ * Where a control actually sits, in window coordinates.
+ *
+ * A panel drawn as a *sibling* of the rows after it is painted over by them:
+ * every React Native Web view is its own stacking context at z-index 0, so a
+ * zIndex inside one row cannot lift it above the next. Lifting each row by hand
+ * worked, and had to be remembered at every call site — nine of fifteen did
+ * not, which is why the owner could see straight through a panel three times
+ * (15 Sep 2026). The panel stops being a sibling: measured here, drawn above.
+ */
+function useAnchor(open: boolean, ref: React.RefObject<any>) {
+  const [at, setAt] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!open) { setAt(null); return undefined; }
+    const measure = () => ref.current?.measureInWindow?.(
+      (x: number, y: number, w: number, h: number) => setAt({ x, y, w, h }));
+    measure();
+    if (typeof window === 'undefined') return undefined;
+    // A scroll or a resize moves the control out from under its own panel.
+    window.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
+    return () => { window.removeEventListener('scroll', measure, true); window.removeEventListener('resize', measure); };
+  }, [open, ref]);
+  return at;
+}
+
 export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0, stacked = false, showLabel = true }: {
   label: string;
   value: string;
@@ -697,7 +739,11 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
   const close = () => { setOpen(false); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); };
   const wrapRef = React.useRef<any>(null);
-  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); onOpenChange?.(false); }, [onOpenChange]));
+  const at = useAnchor(open, wrapRef);
+  // Not `useCloseOutside`: the panel is drawn in a layer of its own now, so
+  // every one of its own menu items is "outside" this control and a press on
+  // one would close the menu before it fired. The scrim below covers the page
+  // and is what closes it (15 Sep 2026).
   const pick = (key: string) => { onPick(key); close(); };
   return (
     <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
@@ -726,7 +772,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
         )}
       </Press>
       {open ? (
-        <>
+        <Overlay>
           <Press style={[dd.scrim, sheet && inFrame ? inFrame : null]} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
           {/* At 390 the answer menu is a full-height sheet, not a 300px panel
               hanging off a control -- "same order, same five answers, same
@@ -735,10 +781,17 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
           <View
             style={[
               dd.panel,
-              sheet ? dd.sheet : align === 'right' && dd.panelRight,
+              sheet ? dd.sheet : dd.floating,
               sheet && inFrame ? inFrame : null,
-              !sheet && align === 'right' && nudge ? { right: nudge } : null,
-              sheet ? null : { width },
+              // Placed where the control is, measured in the window — it is no
+              // longer beneath the control in the tree, so it cannot hang off it.
+              !sheet && at ? {
+                top: at.y + at.h + 4,
+                left: align === 'right' ? Math.max(8, at.x + at.w - width - nudge) : at.x,
+                width,
+              } : null,
+              // Not drawn at 0,0 for the frame between opening and measuring.
+              !sheet && !at ? { opacity: 0 } : null,
             ]}
             accessibilityRole="menu"
           >
@@ -906,7 +959,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
               )}
             </ScrollView>
           </View>
-        </>
+        </Overlay>
       ) : null}
     </View>
   );
@@ -942,6 +995,8 @@ const dd = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, height: 52,
     borderBottomWidth: 2, borderBottomColor: colors.line,
   },
+  /** Placed at the control's measured position, in the layer above everything. */
+  floating: { position: 'absolute', top: 0, left: 0, marginTop: 0 },
   panelSoft: { borderColor: colors.lineSoft },
   /** Hung from the control's right edge, for a control at the end of a row. */
   // `left: 'auto'`, not undefined: StyleSheet.create drops an undefined value, so
