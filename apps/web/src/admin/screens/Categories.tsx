@@ -212,13 +212,6 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
     catch (err) { setNote(String((err as Error).message)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  /** Our secondary labels, so a screen can name one rather than print its key. */
-  const [ourSecondary, setOurSecondary] = useState<PlaceAttribute[]>([]);
-  useEffect(() => {
-    let live = true;
-    void api.taxonomyAttributes().then((d) => { if (live) setOurSecondary(d.attributes.filter((a) => a.active)); }).catch(() => null);
-    return () => { live = false; };
-  }, []);
 
   const categories = tax?.categories ?? [];
   // How many of a provider's words there are and how many are answered, for the
@@ -440,7 +433,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       {tax && door === 'notsure' ? (
         <>
           <NotSure tax={tax} wide={wide} canManage={canManage} onChanged={changed} />
-          <PartsOfPlaces canManage={canManage} tax={tax} secondary={ourSecondary} onChanged={changed} />
+          <PartsOfPlaces canManage={canManage} tax={tax} onChanged={changed} />
         </>
       ) : null}
 
@@ -1177,7 +1170,7 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
         <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Our subcategory</Text></View>
         {wide ? <View style={[styles.tCell, styles.headCell, { width: 220 }]}><Text style={styles.colHead}>Home, and also in</Text></View> : null}
         <View style={[styles.tCell, styles.headCell, { flex: wide ? 1.4 : 1 }]}><Text style={styles.colHead}>Google words</Text></View>
-        <View style={[styles.tCell, styles.headCell, { width: wide ? 130 : 84 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Places</Text></View>
+        <View style={[styles.tCell, styles.headCell, { width: wide ? 130 : 84 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Sightings</Text></View>
       </View>
       {subs.map((sc) => {
         const words = byDrawer.get(sc.key) ?? [];
@@ -1210,15 +1203,15 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
             </View>
             <View style={[styles.tCell, { width: wide ? 130 : 84 }]}>
               <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'], color: most ? colors.ink : colors.inkMuted }]}>
-                {most ? `at least ${count(most)}` : '—'}
+                {most ? count(most) : '—'}
               </Text>
             </View>
           </View>
         );
       })}
-      <Text style={[type.tiny, styles.emptyRow]}>
-        “At least”, because one place carries several of a provider’s words and adding the counts would count the same
-        place more than once. The biggest single word is a true floor.
+        <Text style={[type.tiny, styles.emptyRow]}>
+        Sightings of the busiest word that fills it, not a count of places: a place carries several of a provider’s
+        words and can be seen more than once, so adding them up would be a bigger number than there are places.
       </Text>
     </View>
   );
@@ -2110,8 +2103,17 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
   return (
                 <View style={{ paddingLeft: canManage ? 34 : 6, paddingBottom: spacing.sm, gap: 4 }}>
                   {egBusy ? <Text style={type.tiny}>Asking Google for a few real ones…</Text> : null}
-                  {!egBusy && eg?.problem ? <Text style={type.tiny}>Could not look: {eg.problem}</Text> : null}
-                  {!egBusy && eg && !eg.problem && !eg.places.length ? <Text style={type.tiny}>Google knows no place of this type near {eg.near}.</Text> : null}
+                  {/* Offered on every finished state, because a search that
+                      failed or came back empty is exactly when you want to try
+                      again (Codex, 15 Sep 2026). */}
+                  {!egBusy && eg && (eg.problem || !eg.places.length) ? (
+                    <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+                      <Text style={[type.tiny, { flex: 1, minWidth: 0 }]}>
+                        {eg.problem ? `Could not look: ${eg.problem}` : `Google knows no place of this type near ${eg.near}.`}
+                      </Text>
+                      {canManage ? <TextAction label="Fetch again · costs another search" tone="muted" onPress={onRefetch} /> : null}
+                    </View>
+                  ) : null}
                   {!egBusy && eg && eg.places.length ? (
                     <>
                       <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
@@ -2493,12 +2495,11 @@ function NotSure({ tax, wide, canManage, onChanged }: {
  * Beach." A proposal from a research run waits here; confirming it takes the
  * child off every list and sends what it knows up to its parent.
  */
-function PartsOfPlaces({ canManage, tax, secondary, onChanged }: {
-  canManage: boolean; tax: Taxonomy; secondary: PlaceAttribute[];
+function PartsOfPlaces({ canManage, tax, onChanged }: {
+  canManage: boolean; tax: Taxonomy;
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const subLabel = (k: string) => tax.subcategories.find((x) => x.key === k)?.label ?? k.replace(/-/g, ' ');
-  const labelName = (k: string) => secondary.find((a) => a.key === k)?.label ?? k.replace(/-/g, ' ');
   const [rows, setRows] = useState<PlacePart[] | null>(null);
   const [settled, setSettled] = useState<PlacePart[]>([]);
   const [busy, setBusy] = useState(false);
@@ -2544,9 +2545,13 @@ function PartsOfPlaces({ canManage, tax, secondary, onChanged }: {
         <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={3}>
           <Text style={{ fontWeight: '700' }}>What goes up </Text>
           {(() => {
+            // With its value: "Suits ages 0 to 12", not "Suits ages" (Codex,
+            // 15 Sep 2026 — the example the handoff itself gives).
+            const reads = (v: AttributeValue) => (v.from != null || v.to != null ? ` ${v.from ?? 0} to ${v.to ?? 99}`
+              : v.choice ? ` · ${v.choice}` : v.yesno === false ? ' — no' : '');
             const up = [
               p.goes_up?.primary ? subLabel(p.goes_up.primary) : null,
-              ...(p.goes_up?.secondary ?? []).map((k) => labelName(k)),
+              ...(p.goes_up?.secondary ?? []).map((x) => `${x.label}${reads(x.value)}`),
             ].filter(Boolean);
             return up.length
               ? `${up.join(', ')} — so ${nameOf(p.parent_ref, p.parent_name)} knows it has one`
@@ -2929,7 +2934,10 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           words | Places". The eight categories above them are a different
           question and stay behind their own option (the audit, 15 Sep 2026). */}
       {by === 'subs' && view !== 'left' ? (
-        <OurSubcategories tax={tax} rows={rows ?? []} wide={wide} catLabel={catLabel} />
+        // The same rows every other view is showing. Handing it the unfiltered
+        // list left the Mapped/Unmapped tabs and the answer filter changing the
+        // totals while the table under them never moved (Codex, 15 Sep 2026).
+        <OurSubcategories tax={tax} rows={(rows ?? []).filter(inView)} wide={wide} catLabel={catLabel} />
       ) : null}
       {view === 'left' ? (
         <WhatIsLeft

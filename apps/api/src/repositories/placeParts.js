@@ -15,6 +15,7 @@
  */
 
 import { query } from '../db.js';
+import * as placeAttributes from './placeAttributes.js';
 
 const TTL_MS = 10_000;
 let cache = null;
@@ -106,30 +107,45 @@ async function withNames(rows) {
   const refs = [...new Set(rows.flatMap((r) => [r.child_ref, r.parent_ref]).filter(Boolean))];
   if (!refs.length) return rows;
   const children = [...new Set(rows.map((r) => r.child_ref).filter(Boolean))];
-  const [named, primary, own, swept] = await Promise.all([
+  const [named, primary, swept, vocab] = await Promise.all([
     query(`select venue_ref, name from place_records where venue_ref = any($1)`, [refs]),
     // What the child would have been filed as, which is what goes up as the
     // parent's `contains` — the thing that lets a family searching for a water
     // park find the theme park around it.
-    query(`select venue_ref, would_be from not_sure where venue_ref = any($1) and would_be is not null`, [children]),
-    query(`select venue_ref, attribute_key from place_attribute_values where venue_ref = any($1)`, [children]),
+    query(`select venue_ref, would_be, words from not_sure where venue_ref = any($1)`, [children]),
     query(`select venue_ref, secondary from scout_places where venue_ref = any($1) and secondary is not null`, [children]),
+    placeAttributes.attributes(),
   ]);
   const by = new Map(named.rows.map((n) => [n.venue_ref, n.name]));
-  const wouldBe = new Map(primary.rows.map((n) => [n.venue_ref, n.would_be]));
-  const labels = new Map();
-  for (const r of own.rows) labels.set(r.venue_ref, [...new Set([...(labels.get(r.venue_ref) ?? []), r.attribute_key])]);
-  for (const r of swept.rows) {
-    labels.set(r.venue_ref, [...new Set([...(labels.get(r.venue_ref) ?? []), ...Object.keys(r.secondary ?? {})])]);
-  }
-  return rows.map((r) => ({
-    ...r,
-    child_name: by.get(r.child_ref) ?? null,
-    parent_name: by.get(r.parent_ref) ?? null,
-    // Exactly what the parent gains, named rather than described (the handoff,
-    // BO11: "what Thorpe Park knows because of it").
-    goes_up: { primary: wouldBe.get(r.child_ref) ?? null, secondary: labels.get(r.child_ref) ?? [] },
-  }));
+  const filed = new Map(primary.rows.map((n) => [n.venue_ref, n.would_be]));
+  const wordsOf = new Map(primary.rows.map((n) => [n.venue_ref, (n.words ?? []).map((w) => `google:${w}`)]));
+  const sweptSays = new Map(swept.rows.map((n) => [n.venue_ref, n.secondary ?? {}]));
+  // Resolved the way rollUp() resolves, not read off the raw tables: a label a
+  // child *inherits* from its drawer, or one another label brought it, travels
+  // up too, and an inactive one does not (Codex, 15 Sep 2026).
+  const own = new Map();
+  for (const ref of children) own.set(ref, await placeAttributes.valuesFor(ref));
+  return rows.map((r) => {
+    const resolved = placeAttributes.resolveFor(
+      { subcategory: filed.get(r.child_ref) ?? null, words: wordsOf.get(r.child_ref) ?? [], alsoTrue: sweptSays.get(r.child_ref) ?? null },
+      own.get(r.child_ref) ?? new Map(), vocab,
+    );
+    return {
+      ...r,
+      child_name: by.get(r.child_ref) ?? null,
+      parent_name: by.get(r.parent_ref) ?? null,
+      // Exactly what the parent gains, named *with its value* rather than
+      // described: "Suits ages 0 to 12", not "Suits ages" (the handoff, BO11).
+      goes_up: {
+        primary: filed.get(r.child_ref) ?? null,
+        secondary: Object.entries(resolved).map(([key, v]) => ({
+          key,
+          label: vocab.byKey.get(key)?.label ?? key,
+          value: v,
+        })),
+      },
+    };
+  });
 }
 
 /**
