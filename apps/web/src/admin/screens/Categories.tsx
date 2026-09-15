@@ -1778,15 +1778,39 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                             : `${eg.alone} of ${eg.places.length} carry nothing else we have mapped — for those, this word is all we would know.`}
                         </Text>
                       ) : null}
-                      {eg.places.map((pl) => (
-                        <View key={pl.id} style={styles.egRow}>
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={type.small} numberOfLines={1}><Text style={{ fontWeight: '600' }}>{pl.name ?? pl.id}</Text></Text>
-                            <Text style={type.tiny} numberOfLines={1}>{[pl.address, pl.primaryType ? `Google leads with ${pl.primaryType.replace(/_/g, ' ')}` : null].filter(Boolean).join(' · ')}</Text>
+                      {/* BO9 leads with the shape, not a list (the handoff). The
+                          band first, then the words that point at nothing of
+                          ours, then the ones that do -- and the places after
+                          all of it. */}
+                      <View style={styles.shapeBand}>
+                        {[
+                          { label: 'Places looked at', value: String(eg.places.length) },
+                          { label: 'Shapes found', value: String(eg.shapes?.length ?? 0) },
+                          { label: 'Biggest shape', value: shape ? `${shape.on} of ${eg.places.length}` : '—' },
+                        ].map((st) => (
+                          <View key={st.label} style={{ gap: 2 }}>
+                            <Text style={styles.bandKicker}>{st.label}</Text>
+                            <Text style={styles.bandValue}>{st.value}</Text>
                           </View>
-                          {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
+                        ))}
+                      </View>
+                      {/* The words that sit on everything. They are on all twelve
+                          and say nothing, which is exactly why the count matters
+                          more than the list -- and the handoff asks for them to
+                          be marked as pointing at no label of ours. */}
+                      {(eg.everywhere ?? []).length ? (
+                        <View style={{ gap: 3, paddingTop: 6 }}>
+                          {(eg.everywhere ?? []).map((w) => (
+                            <View key={w.key} style={styles.barRow}>
+                              <Text style={[type.tiny, { flex: 1, minWidth: 0, color: colors.inkMuted }]} numberOfLines={1}>
+                                {w.key.replace(/_/g, ' ')} — points at no label of ours
+                              </Text>
+                              <View style={[styles.bar, { width: `${Math.round((w.on / Math.max(1, eg.places.length)) * 100)}%`, backgroundColor: colors.lineSoft }]} />
+                              <Text style={[type.tiny, { width: 62, textAlign: 'right' }]}>{w.on} of {eg.places.length}</Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
+                      ) : null}
                       {/* BO9 — the shape is the rule worth writing. The words
                           that travel with this one, how often, and the
                           combination worth naming. Opened from the row it
@@ -1857,6 +1881,31 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                           )}
                         </View>
                       ) : null}
+                      {/* The places, after the shape. "It leads with the shape,
+                          not a list" (the handoff, BO9) -- and each one says
+                          every other word on it, which is what the drawer is
+                          for (BO1h). */}
+                      {eg.places.map((pl) => {
+                        const others = (pl.types ?? []).filter((t) => t !== r.key && !(eg.everywhere ?? []).some((e) => e.key === t));
+                        const caughtHere = shape ? [r.key, ...shape.words].every((w) => (pl.types ?? []).includes(w)) : false;
+                        return (
+                          <View key={pl.id} style={[styles.egRow, { alignItems: 'flex-start' }]}>
+                            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                              <Text style={type.small} numberOfLines={1}><Text style={{ fontWeight: '600' }}>{pl.name ?? pl.id}</Text></Text>
+                              <Text style={type.tiny} numberOfLines={1}>{[pl.address, pl.primaryType ? `Google leads with ${pl.primaryType.replace(/_/g, ' ')}` : null].filter(Boolean).join(' · ')}</Text>
+                              {others.length ? (
+                                <Text style={type.tiny} numberOfLines={2}>
+                                  Google also calls it {others.map((t) => eg.travels.find((x) => x.key === t)?.label ?? t.replace(/_/g, ' ')).join(' · ')}
+                                </Text>
+                              ) : null}
+                            </View>
+                            {shape && shape.on > 1 ? (
+                              <Text style={[type.tiny, caughtHere ? null : { color: colors.inkMuted }]}>{caughtHere ? 'caught' : '— not caught'}</Text>
+                            ) : null}
+                            {pl.mapsUrl ? <TextAction label="Map" onPress={() => void Linking.openURL(pl.mapsUrl as string)} /> : null}
+                          </View>
+                        );
+                      })}
                       {eg.alsoCalled.length ? (
                         <View style={{ paddingTop: 6, gap: 2 }}>
                           <Text style={styles.colHead}>Also called, on those places</Text>
@@ -2986,6 +3035,9 @@ const styles = StyleSheet.create({
   backLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, alignSelf: 'flex-start' },
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
+  shapeBand: { flexDirection: 'row', gap: 34, paddingTop: 8, paddingBottom: 4, flexWrap: 'wrap' },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  bar: { height: 6, minWidth: 2 },
   toast: {
     position: 'fixed' as any, left: '50%', bottom: 28, transform: [{ translateX: '-50%' as any }],
     flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 200,
