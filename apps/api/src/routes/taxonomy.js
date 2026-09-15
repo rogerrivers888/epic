@@ -1107,9 +1107,9 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
             `select * from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
           undo.deleted.push(...going);
           await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
+          wrote = true;
           shelfRules.forget();
           await labelRepo.save({ namespace, key, decision: 'none', active: true });
-          wrote = true;
           await labelRepo.pointAt(namespace, key, null);
           done.push({ labels, unanswered: true });
           continue;
@@ -1138,6 +1138,9 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           undo.deleted.push(...going);
           await labelRepo.save({ namespace, key, decision });
           wrote = true;
+          // Set here and not lower down: a failure between this and the end of
+          // the branch still leaves a change somebody has to be able to take
+          // back (Codex, 15 Sep 2026).
           // A decision replaces a mapping: a rule about this one word, if there
           // is one, goes, or the resolver would keep filing by it (Codex, 13 Sep 2026).
           // For 'generic' that is the whole point, and it goes further: a word
@@ -1168,6 +1171,9 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         const { rows: before } = await query(
           'select * from shelf_rules where scope = $1 and subject = $2', [scope, String(subject)]);
         const names = await namesFor(labels);
+        // From here on the item writes, so anything that throws below has left
+        // something behind.
+        wrote = true;
         const rule = await shelfRules.teach({
           scope, subject, labels: stored, subjectLabel: labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + '),
           weights: {}, subcategory, reason: it.reason ?? 'Approved from the suggested mapping.', by: actorOf(req), known,
@@ -1182,7 +1188,6 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
           [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
            JSON.stringify({ labels, subcategory, reason: rule.reason, batch: true })]);
-        wrote = true;
         if (before.length) undo.deleted.push(before[0]); else undo.made.push(rule.id);
         for (const c of carries) await placeAttributes.setCarries(labels[0], String(c?.attribute ?? ''), c?.value ?? null);
         done.push({ labels, subcategory, ruleId: rule.id, carries: carries.length });
