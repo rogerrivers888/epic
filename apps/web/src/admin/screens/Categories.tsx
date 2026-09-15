@@ -1284,10 +1284,13 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
 
           {/* ---- and what else it says ---------------------------------- */}
           <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>And what else it says · secondary labels</Text>
+          {/* No asterisks: there is no markdown here, so they printed as
+              asterisks (seen on the deployed site, 15 Sep 2026). */}
           <Text style={type.tiny}>
-            A word can mean one thing a place *is* and say several things that are *true of it*. Italian restaurant sends a
-            place to Restaurants and also says Italian; dog park says nothing of the kind, which is why this list is here and
-            not on every row.
+            A word can name the one thing a place <Text style={{ fontWeight: '700', color: colors.ink }}>is</Text>, and say
+            several things that are <Text style={{ fontWeight: '700', color: colors.ink }}>true of it</Text>. Italian
+            restaurant sends a place to Restaurants and also says Italian; dog park says nothing of the kind, which is why
+            this list is here and not on every row.
           </Text>
           {secondary.map((a) => {
             const on = (r.carries ?? []).find((c) => c.key === a.key);
