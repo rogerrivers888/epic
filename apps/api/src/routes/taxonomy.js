@@ -30,6 +30,7 @@ import { Router } from 'express';
 import { requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
+import * as library from '../repositories/library.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
@@ -44,7 +45,7 @@ import { suggestFor, sureDecisionFor, sureMappingFor, WHY_UNSURE } from '../doma
 import { examplesOfType } from '../sources/google.js';
 import { currentHousehold } from './household.js';
 import * as visitsRepo from '../repositories/visits.js';
-import { SHELF_FLOOR, shelvesForVenue } from '../domain/moods.js';
+import { SHELF_FLOOR, shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
 
@@ -346,6 +347,68 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
       places: rows.map((r) => ({ ...r, our_words: (r.words ?? []).map((w) => means.get(w) ?? null).filter(Boolean) })),
       counts, runs, subcategories: tax.subcategories, categories: tax.categories,
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /drawer?subcategory= — every place the labels file into one drawer.
+ *
+ * The owner, 15 Sep 2026: "I thought I would be editing a subcategory to be
+ * kid-friendly or suit ages X to Y, rather than an individual location. If I was
+ * editing an individual location, I wouldn't want to do it this way: by just
+ * finding 12 random examples, picking 1, and starting to engage with
+ * drop-downs. I want to get a big, massive list in a row view with columns
+ * where I can change stuff on the fly or bulk it."
+ *
+ * So: the whole drawer, not a sample, with each place's secondary labels
+ * resolved — what it says for itself, what its drawer assumes, and what its own
+ * words carried — so a column can be read and changed.
+ */
+taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) => {
+  try {
+    const subcategory = String(req.query.subcategory || '').trim();
+    if (!subcategory) throw bad('Which drawer?');
+    const [tax, rules, vocab] = await Promise.all([
+      taxonomy.taxonomy(), shelfRules.rules(), placeAttributes.attributes(),
+    ]);
+    if (!tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
+    const all = await library.listAttractions({ limit: 4000 });
+    // Where each one lands is the resolver's answer, not a stored column: a
+    // place's drawer is worked out from its labels every time.
+    const mine = all.filter((a) => shelvesForAtlas({
+      ref: a.venue_ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
+    }, rules, tax.vocab).subcategory === subcategory);
+    const own = await placeAttributes.valuesForMany(mine.map((a) => a.venue_ref).filter(Boolean));
+    res.json({
+      subcategory,
+      attributes: vocab.list.filter((a) => a.active),
+      places: mine.map((a) => ({
+        ref: a.venue_ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
+        website: a.website ?? null,
+        values: placeAttributes.resolveFor({ subcategory }, own.get(a.venue_ref) ?? new Map(), vocab),
+      })).sort((x, y) => String(x.name).localeCompare(String(y.name))),
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /drawer — one secondary label, set on many places at once.
+ *
+ * "…where I can change stuff on the fly or bulk it."
+ */
+taxonomyRoutes.put('/drawer', requires('manage_library'), async (req, res, next) => {
+  try {
+    const attribute = String(req.body?.attribute || '').trim();
+    const refs = Array.isArray(req.body?.refs) ? req.body.refs.map(String).slice(0, 2000) : [];
+    if (!attribute || !refs.length) throw bad('Which label, and on which places?');
+    const value = req.body?.value ?? null;
+    // Checked once, before anything is written: every place gets the same value,
+    // so a bad one should fail before the first of two thousand writes.
+    if (value != null) await placeAttributes.mustFit(attribute, value);
+    for (const ref of refs) {
+      await placeAttributes.setValue(ref, attribute, value, { reason: req.body?.reason ?? null, by: actorOf(req) });
+    }
+    res.json({ changed: refs.length, attribute });
   } catch (err) { next(err); }
 });
 

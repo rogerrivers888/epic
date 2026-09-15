@@ -2450,6 +2450,16 @@ export const api = {
       label: string;
       said: { primary: string | null; secondary: { key: string; label: string; choice: string | null }[]; because: string; source: string } | null;
     }>('/api/admin/taxonomy/word', body),
+  /** Every place the labels file into one drawer, with its secondary labels. */
+  taxonomyDrawer: (subcategory: string) =>
+    request<{
+      subcategory: string;
+      attributes: PlaceAttribute[];
+      places: { ref: string; name: string; region: string | null; website: string | null; values: Record<string, AttributeValue> }[];
+    }>(`/api/admin/taxonomy/drawer${qs({ subcategory })}`),
+  /** One secondary label, set on many places at once. */
+  taxonomySetMany: (body: { attribute: string; refs: string[]; value: AttributeValue | null; reason?: string | null }) =>
+    put<{ changed: number; attribute: string }>('/api/admin/taxonomy/drawer', body),
   /** Put places already on screen on the not-sure list, with no provider call. */
   taxonomyQueueNotSure: (body: { subcategory: string | null; places: { ref: string; name: string | null; address: string | null; words: string[]; reason?: string }[] }) =>
     post<{ queued: number }>('/api/admin/taxonomy/not-sure/queue', body),

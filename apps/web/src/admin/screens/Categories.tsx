@@ -1476,6 +1476,136 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
 }
 
 /**
+ * Every place in one drawer, as rows and columns.
+ *
+ * The owner, 15 Sep 2026: "I want to get a big, massive list in a row view with
+ * columns where I can change stuff on the fly or bulk it."
+ *
+ * A column per secondary label, a value in every cell, and a tick to change a
+ * lot of them at once. A cell drawn in lime is inherited — from the drawer, or
+ * from the place's own words — and one in ink was set on the place itself.
+ */
+function DrawerPlaces({ sc, canManage, wide, onChanged }: {
+  sc: ShelfSubcategory; canManage: boolean; wide: boolean;
+  onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
+}) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.taxonomyDrawer>> | null>(null);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState('');
+
+  const load = useCallback(async () => {
+    try { setData(await api.taxonomyDrawer(sc.key)); } catch { setData(null); }
+  }, [sc.key]);
+  useEffect(() => { void load(); }, [load]);
+
+  if (!data) return null;
+  const cols = data.attributes.filter((a) => a.kind !== 'range');
+  const needle = q.trim().toLowerCase();
+  const rows = needle ? data.places.filter((p) => p.name.toLowerCase().includes(needle)) : data.places;
+
+  const reads = (v?: AttributeValue) => (!v ? '\u2014'
+    : v.choice ? v.choice
+      : v.from != null || v.to != null ? `${v.from ?? ''}\u2013${v.to ?? ''}`
+        : v.yesno === false ? 'No' : 'Yes');
+
+  const setMany = async (a: PlaceAttribute, value: AttributeValue | null) => {
+    const refs = [...ticked];
+    if (!refs.length) return;
+    setBusy(true);
+    try {
+      await api.taxonomySetMany({ attribute: a.key, refs, value });
+      setTicked(new Set());
+      await load();
+      await onChanged(value ? `${refs.length} set to ${a.label} \u00b7 ${reads(value)}.` : `${a.label} cleared on ${refs.length}.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <View style={{ gap: 0 }}>
+      <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+        <Text style={[styles.h2, { flex: 1, minWidth: 0 }]}>Every {sc.label.toLowerCase()} we hold · {data.places.length}</Text>
+        <Field value={q} onChangeText={setQ} placeholder="Find one" style={{ minWidth: 160 }} icon="search" />
+      </View>
+      {/* One label, changed on everything ticked. */}
+      {canManage && ticked.size ? (
+        <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
+          <Text style={[type.small, { fontWeight: '700' }]}>{ticked.size} ticked</Text>
+          {cols.map((a) => (
+            <DrillDropdown
+              key={a.key} label={a.label} value={a.label} width={240}
+              groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
+                ? a.options.map((o) => ({ key: o, label: o, on: false }))
+                : [{ key: 'yes', label: 'Yes', on: false }, { key: 'no', label: 'No', on: false }] }]}
+              startIn={a.key}
+              extra={[{ key: '\u2717', label: `Back to what they inherit`, on: false }]}
+              onPick={(k) => { if (!busy) void setMany(a, k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' }); }}
+            />
+          ))}
+          <TextAction label="Clear" onPress={() => setTicked(new Set())} />
+        </View>
+      ) : null}
+      <View style={[styles.tRow, styles.tHeadSoft, styles.stick]}>
+        {canManage ? <View style={styles.tickCell} /> : null}
+        <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.colHead}>Place</Text></View>
+        {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={styles.colHead}>Where</Text></View> : null}
+        {cols.map((a) => (
+          <View key={a.key} style={[styles.tCell, { width: 116 }]}><Text style={[styles.colHead, { textAlign: 'right' }]} numberOfLines={2}>{a.label}</Text></View>
+        ))}
+      </View>
+      {rows.map((pl) => (
+        <View key={pl.ref} style={styles.wordRow}>
+          {canManage ? (
+            <Press effect="none" onPress={() => setTicked((prev) => { const n = new Set(prev); if (n.has(pl.ref)) n.delete(pl.ref); else n.add(pl.ref); return n; })}
+                   accessibilityRole="checkbox" accessibilityState={{ checked: ticked.has(pl.ref) }} style={styles.tickCell}>
+              <View style={[styles.tick, ticked.has(pl.ref) && styles.tickOn]}>
+                {ticked.has(pl.ref) ? <Icon name="check" size={13} color={colors.selectedFg} strokeWidth={3.2} /> : null}
+              </View>
+            </Press>
+          ) : null}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name}</Text>
+            {!wide && pl.region ? <Text style={type.tiny} numberOfLines={1}>{pl.region}</Text> : null}
+          </View>
+          {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={type.tiny} numberOfLines={1}>{pl.region}</Text></View> : null}
+          {cols.map((a) => {
+            const v = pl.values[a.key];
+            const mine = v?.setAt === 'place';
+            return (
+              <View key={a.key} style={[styles.tCell, { width: 116, alignItems: 'flex-end' }]}>
+                {canManage ? (
+                  <DrillDropdown
+                    label={a.label} showLabel={false} value={reads(v)} set={Boolean(v) && !mine} align="right" width={220}
+                    groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
+                      ? a.options.map((o) => ({ key: o, label: o, on: v?.choice === o }))
+                      : [{ key: 'yes', label: 'Yes', on: v?.yesno === true }, { key: 'no', label: 'No', on: v?.yesno === false }] }]}
+                    startIn={a.key}
+                    extra={mine ? [{ key: '\u2717', label: 'Back to what it inherits', on: false }] : []}
+                    onPick={(k) => {
+                      if (busy) return;
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: a.key, value: k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' } });
+                          await load();
+                          await onChanged(`${pl.name}: ${a.label} ${k === '\u2717' ? 'back to what it inherits' : reads(a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' })}.`);
+                        } finally { setBusy(false); }
+                      })();
+                    }}
+                  />
+                ) : <Text style={[type.small, v && !mine ? { color: colors.accent } : null]}>{reads(v)}</Text>}
+              </View>
+            );
+          })}
+        </View>
+      ))}
+      {!rows.length ? <Text style={[type.small, styles.emptyRow]}>Nothing matches.</Text> : null}
+    </View>
+  );
+}
+
+/**
  * BO8 — a subcategory, on its own page: the rule, then real places.
  *
  * The owner, 15 Sep 2026: "B08 clearly shows that you should be able to click
@@ -1925,7 +2055,6 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                           <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>{pl.website.replace(/^https?:\/\//, '')}</Text>
                         </Press>
                       ) : <Text style={type.tiny}>no website</Text>}
-                      <Text style={type.tiny} numberOfLines={1}>its words mean: {ourWords(pl) || 'nothing of ours'}</Text>
                     </View>
                     {/* "Settled" said nothing to him. This column answers the
                         question the heading asks: would it land here? */}
@@ -1935,14 +2064,13 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                           : 'nothing files it'}
                       {!pl.landsIn && pl.partOf ? ` \u00b7 inside ${pl.partOf}` : ''}
                     </Text>
-                    {/* "Override it on a single place, where you can see what was
-                        inherited and say why you changed it." The endpoint had
-                        existed since the start with no way to reach it from
-                        anywhere (the audit, 15 Sep 2026). */}
-                    {canManage ? (
-                      <TextAction label={onPlace === pl.id ? 'Close' : 'Labels'}
-                                  onPress={() => setOnPlace(onPlace === pl.id ? '' : pl.id)} />
-                    ) : null}
+                    {/* No per-place editing here. This sample exists to answer
+                        one question — would my rule catch these? — and editing
+                        one of twelve arbitrary places from it is the wrong place
+                        for it (owner, 15 Sep 2026: "What's the purpose of me
+                        doing it here when this is just 12 random examples?...
+                        I want to get a big, massive list in a row view with
+                        columns"). That list is below. */}
                   </View>
                   {onPlace === pl.id ? (
                     <PlaceLabels
@@ -1990,6 +2118,8 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
           )}
         </View>
       </View>
+      {/* The whole drawer, as rows and columns — not a sample. */}
+      <DrawerPlaces sc={sc} canManage={canManage} wide={wide} onChanged={onChanged} />
       {editing ? (
         <RuleEditor tax={tax} start={[]} startSubcategory={sc.key} fixedSubcategory={sc.key} canManage={canManage}
                     onClose={() => setEditing(false)}
@@ -4196,12 +4326,14 @@ const styles = StyleSheet.create({
   // Shrinkable, or a long value — "Food & drink · Restaurants" — pushes the last
   // stat off the right edge at 390 instead of wrapping (15 Sep 2026, on the
   // deployed site at 390, which the handoff says is reviewed like the wide one).
-  bandStats: { flexDirection: 'row', alignItems: 'flex-end', gap: 34, flexWrap: 'wrap', flexShrink: 1, minWidth: 0 },
-  bandStat: { gap: 2, flexShrink: 1, minWidth: 0 },
+  bandStats: { flexDirection: 'row', alignItems: 'flex-start', gap: 44, flexWrap: 'wrap', flexShrink: 1, minWidth: 0 },
+  bandStat: { gap: 6, flexShrink: 1, minWidth: 0, alignItems: 'flex-start' },
   /** 31px is the wide title; the handoff draws 390 as its own artboard at 24 (BO1m). */
   bandTitlePhone: { fontSize: 24, letterSpacing: -0.8, lineHeight: 27 },
   bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
-  bandKicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
+  // Sentence case, not capitals (owner, 15 Sep 2026: "I don't like these
+  // capital letters either. Just normal camel caps, please").
+  bandKicker: { ...type.tiny, fontWeight: '700', color: colors.inkMuted },
   halves: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted, alignSelf: 'flex-start' },
   halfItem: { minHeight: 34, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   halfDivider: { borderLeftWidth: 1, borderLeftColor: colors.ruleMuted },
