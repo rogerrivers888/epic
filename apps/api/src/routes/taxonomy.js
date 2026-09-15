@@ -913,10 +913,25 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         const parsed = parseLabel(l);
         if (!parsed || parsed.namespace === 'epic') continue;
         if (undo.labels.some((x) => x.namespace === parsed.namespace && x.key === parsed.key)) continue;
+        // A Wikidata type is not a row in `taxonomy_labels` — it is a
+        // `place_kinds` row whose one switch is `admit`, and a decision sets it
+        // (Codex, 15 Sep 2026). Read it from where it actually lives, or Undo
+        // silently restores nothing for every Wikidata word.
+        if (parsed.namespace === 'wikidata') {
+          const { rows } = await query(
+            'select qid as key, admit as active, points_at from place_kinds where qid = $1', [parsed.key]);
+          undo.labels.push({
+            namespace: 'wikidata', key: parsed.key, decision: null,
+            active: rows[0]?.active ?? null, points_at: rows[0]?.points_at ?? null,
+          });
+          continue;
+        }
         const { rows } = await query(
-          'select namespace, key, decision, points_at from taxonomy_labels where namespace = $1 and key = $2',
+          'select namespace, key, decision, active, points_at from taxonomy_labels where namespace = $1 and key = $2',
           [parsed.namespace, parsed.key]);
-        undo.labels.push(rows[0] ?? { namespace: parsed.namespace, key: parsed.key, decision: null, points_at: null });
+        // `active` goes with the decision: deciding a word aside switches it
+        // off, and putting the decision back without it leaves it hidden.
+        undo.labels.push(rows[0] ?? { namespace: parsed.namespace, key: parsed.key, decision: null, active: true, points_at: null });
       }
     };
     for (const it of items) {
@@ -964,6 +979,11 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
         if (!subcategory || !tax.subByKey.has(subcategory)) throw new Error(`${subcategory} is not a subcategory`);
         await remember(labels);
         const { scope, subject, labels: stored } = scopeFor(labels);
+        // teach() upserts on (scope, subject). A rule that was already there is
+        // *changed*, not made, and recording its id as made would have Undo
+        // delete a rule that existed before the batch (Codex, 15 Sep 2026).
+        const { rows: before } = await query(
+          'select * from shelf_rules where scope = $1 and subject = $2', [scope, String(subject)]);
         const names = await namesFor(labels);
         const rule = await shelfRules.teach({
           scope, subject, labels: stored, subjectLabel: labels.map((l) => names.get(l) ?? l.split(':').slice(1).join(':')).join(' + '),
@@ -979,7 +999,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
           [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
            JSON.stringify({ labels, subcategory, reason: rule.reason, batch: true })]);
-        undo.made.push(rule.id);
+        if (before.length) undo.deleted.push(before[0]); else undo.made.push(rule.id);
         done.push({ labels, subcategory, ruleId: rule.id });
       } catch (err) { failed.push({ labels, error: String(err.message ?? err) }); }
     }
@@ -1022,22 +1042,38 @@ taxonomyRoutes.post('/rules/undo', requires('manage_library'), async (req, res, 
       }
       // The rules it deleted, back whole.
       for (const r of snap.deleted ?? []) {
+        // Overwritten, not skipped: a rule that was *changed* still has its id,
+        // so "do nothing" would leave the change in place (Codex, 15 Sep 2026).
         await client.query(
           `insert into shelf_rules (id, scope, subject, subject_label, weights, reason, taught_by, seeded, subcategory, labels)
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-           on conflict (id) do nothing`,
+           on conflict (id) do update set
+             scope = excluded.scope, subject = excluded.subject, subject_label = excluded.subject_label,
+             weights = excluded.weights, reason = excluded.reason, taught_by = excluded.taught_by,
+             seeded = excluded.seeded, subcategory = excluded.subcategory, labels = excluded.labels,
+             updated_at = now()`,
           [r.id, r.scope, r.subject, r.subject_label, r.weights, r.reason, r.taught_by, r.seeded, r.subcategory, r.labels]);
       }
       // And each word's own answer as it stood.
       for (const l of snap.labels ?? []) {
+        if (l.namespace === 'wikidata') {
+          await client.query(
+            'update place_kinds set admit = $2, points_at = $3, updated_at = now() where qid = $1',
+            [l.key, l.active ?? true, l.points_at ?? null]);
+          continue;
+        }
         await client.query(
-          `update taxonomy_labels set decision = $3, points_at = $4, updated_at = now()
+          `update taxonomy_labels set decision = $3, active = $4, points_at = $5, updated_at = now()
             where namespace = $1 and key = $2`,
-          [l.namespace, l.key, l.decision ?? null, l.points_at ?? null]);
+          [l.namespace, l.key, l.decision ?? null, l.active ?? true, l.points_at ?? null]);
       }
       return { rules: (snap.made ?? []).length, back: (snap.deleted ?? []).length, words: (snap.labels ?? []).length };
     });
     shelfRules.forget();
+    // The resolver reads points_at out of the taxonomy's own five-second cache,
+    // so without this a word just put back keeps landing where the undone
+    // change sent it (Codex, 15 Sep 2026).
+    taxonomy.forget();
     res.json({ undone: true, ...out });
   } catch (err) { next(err); }
 });
