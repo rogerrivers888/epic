@@ -684,6 +684,7 @@ function useAnchor(open: boolean, ref: React.RefObject<any>) {
  * amount of note fixes it. One or two sentences, or leave it out.
  */
 export function Note({ children }: { children: string }) {
+  const { width: screen, height: screenH } = useViewport();
   const [open, setOpen] = useState(false);
   const ref = React.useRef<any>(null);
   const at = useAnchor(open, ref);
@@ -696,7 +697,14 @@ export function Note({ children }: { children: string }) {
       {open ? (
         <Overlay onClose={() => setOpen(false)}>
           <Press style={dd.scrim} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={[dd.panel, dd.floating, at ? { top: at.y + at.h + 4, left: Math.max(8, at.x - 130), width: 280 } : { opacity: 0 }]}>
+          <View style={[dd.panel, dd.floating, at ? {
+            // Held inside the screen on every side, and above the icon where
+            // there is no room below it (Codex, 15 Sep 2026).
+            top: screenH - (at.y + at.h) < 140 ? Math.max(12, at.y - 140) : at.y + at.h + 4,
+            left: Math.min(Math.max(8, at.x - 130), Math.max(8, screen - 288)),
+            maxHeight: Math.max(120, screenH - (at.y + at.h) < 140 ? at.y - 20 : screenH - (at.y + at.h) - 20),
+            width: 280,
+          } : { opacity: 0 }]}>
             <Text style={[type.small, { padding: 12, lineHeight: 18 }]}>{children}</Text>
           </View>
         </Overlay>

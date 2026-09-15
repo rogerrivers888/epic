@@ -1186,6 +1186,7 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
         <Text style={styles.backText}>Google’s words</Text>
       </Press>
       <View style={[styles.line, { gap: spacing.sm, alignItems: 'flex-start' }]}>
+      <View style={{ flex: 1, minWidth: 0 }}>
       <Band
         kicker={`Google’s word · ${r.key}`}
         title={r.label ?? r.key.replace(/_/g, ' ')}
@@ -1194,6 +1195,7 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
           { label: 'Answer', value: answer },
         ]}
       />
+      </View>
       {r.why ? <Note>{r.why}</Note> : null}
       </View>
       <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
