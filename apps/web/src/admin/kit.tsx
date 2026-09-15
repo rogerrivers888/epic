@@ -784,12 +784,20 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
               sheet ? dd.sheet : dd.floating,
               sheet && inFrame ? inFrame : null,
               // Placed where the control is, measured in the window — it is no
-              // longer beneath the control in the tree, so it cannot hang off it.
-              !sheet && at ? {
-                top: at.y + at.h + 4,
-                left: align === 'right' ? Math.max(8, at.x + at.w - width - nudge) : at.x,
-                width,
-              } : null,
+              // longer beneath the control in the tree, so it cannot hang off
+              // it. Above the control where there is not room below, which a
+              // row near the foot of a long list never has.
+              !sheet && at ? (() => {
+                const tall = Math.min(360 + 8, screenH - 24);
+                const below = screenH - (at.y + at.h) - 12;
+                const up = below < Math.min(tall, 180) && at.y > below;
+                return {
+                  top: up ? Math.max(12, at.y - Math.min(tall, at.y - 12) - 4) : at.y + at.h + 4,
+                  maxHeight: Math.max(120, up ? at.y - 16 : below),
+                  left: align === 'right' ? Math.max(8, at.x + at.w - width - nudge) : Math.min(at.x, screen - width - 8),
+                  width,
+                };
+              })() : null,
               // Not drawn at 0,0 for the frame between opening and measuring.
               !sheet && !at ? { opacity: 0 } : null,
             ]}
@@ -812,7 +820,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                 />
               </View>
             ) : null}
-            <ScrollView style={sheet ? { flex: 1 } : { maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+            <ScrollView style={sheet ? { flex: 1 } : null} keyboardShouldPersistTaps="handled">
               {adopting ? (
                 /* BO1e is two steps, not one: its home category, then — optional
                    — the other menus it should be listed in, with the rule stated
