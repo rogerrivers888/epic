@@ -1046,6 +1046,11 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
     // rather than in the browser, because the browser has no way of knowing
     // what a generic decision is about to delete (Codex, 15 Sep 2026).
     const undo = { labels: [], carries: [], deleted: [], made: [] };
+    // Whether anything was actually written. A snapshot taken is not a write
+    // made: an item rejected after `remember` had run would otherwise leave a
+    // token whose use would overwrite somebody else's later change with a
+    // state that never changed (Codex, 15 Sep 2026).
+    let wrote = false;
     const remember = async (labelList) => {
       for (const l of labelList) {
         const parsed = parseLabel(l);
@@ -1104,6 +1109,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
           await query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [labels[0]]);
           shelfRules.forget();
           await labelRepo.save({ namespace, key, decision: 'none', active: true });
+          wrote = true;
           await labelRepo.pointAt(namespace, key, null);
           done.push({ labels, unanswered: true });
           continue;
@@ -1131,6 +1137,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
             [labels[0]]);
           undo.deleted.push(...going);
           await labelRepo.save({ namespace, key, decision });
+          wrote = true;
           // A decision replaces a mapping: a rule about this one word, if there
           // is one, goes, or the resolver would keep filing by it (Codex, 13 Sep 2026).
           // For 'generic' that is the whole point, and it goes further: a word
@@ -1175,6 +1182,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
            values ($1,$2,'taxonomy.rule','shelf_rule',$3,$4,$5)`,
           [req.account?.id ?? null, actorOf(req), rule.id, `${rule.scope}: ${rule.subject_label ?? rule.subject}`,
            JSON.stringify({ labels, subcategory, reason: rule.reason, batch: true })]);
+        wrote = true;
         if (before.length) undo.deleted.push(before[0]); else undo.made.push(rule.id);
         for (const c of carries) await placeAttributes.setCarries(labels[0], String(c?.attribute ?? ''), c?.value ?? null);
         done.push({ labels, subcategory, ruleId: rule.id, carries: carries.length });
@@ -1185,7 +1193,7 @@ taxonomyRoutes.post('/rules/batch', requires('manage_library'), async (req, res,
     let undoId = null;
     // Anything that changed, not only what succeeded: an item that wrote and
     // then threw is exactly the one somebody needs to take back.
-    if (done.length || undo.labels.length || undo.deleted.length || undo.made.length) {
+    if (wrote) {
       const { rows } = await query(
         'insert into taxonomy_undo (by, snapshot) values ($1, $2) returning id',
         [actorOf(req), JSON.stringify(undo)]);
