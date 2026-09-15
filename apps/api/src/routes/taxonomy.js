@@ -328,8 +328,15 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
       const nameOf = (k) => tax.subByKey.get(k)?.label ?? attrs.byKey.get(k)?.label ?? k.replace(/-/g, ' ');
       for (const f of found) if (f.points_at) means.set(f.key, nameOf(f.points_at));
       for (const w of words) {
+        // With the value it carries, or "Cuisine" alone says nothing about the
+        // place: italian_restaurant means Cuisine · Italian (Codex, 15 Sep 2026).
+        const reads = (v) => (v?.choice ? ` · ${v.choice}`
+          : v?.from != null && v?.to != null ? ` ${v.from} to ${v.to}`
+            : v?.from != null ? ` ${v.from} and up`
+              : v?.to != null ? ` up to ${v.to}`
+                : v?.yesno === false ? ' — no' : '');
         const also = (carried.get(`google:${w}`) ?? [])
-          .map((c) => attrs.byKey.get(c.key)?.label ?? c.key)
+          .map((c) => `${attrs.byKey.get(c.key)?.label ?? c.key}${reads(c.value)}`)
           .filter(Boolean);
         if (!also.length) continue;
         means.set(w, [means.get(w), ...also].filter(Boolean).join(' · '));
@@ -840,7 +847,10 @@ taxonomyRoutes.get('/pairs', requires('view_library'), async (req, res, next) =>
     const parsed = parseLabel(label);
     if (!parsed) throw bad(`${label || '(nothing)'} is not a label`);
     const [pairs, rules, tax] = await Promise.all([
-      labelRepo.pairsFor(label, Math.min(200, Number(req.query.limit) || PAIRS_SHOWN)),
+      // Always the same number the count is capped at. A caller-set limit made
+      // the two disagree in both directions — "catches 60" opening on thirty,
+      // or on two hundred (Codex, 15 Sep 2026).
+      labelRepo.pairsFor(label, PAIRS_SHOWN),
       shelfRules.rules(), taxonomy.taxonomy(),
     ]);
     const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
@@ -1200,10 +1210,13 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
         : [];
       if (alsoIn.length) {
         await c.query('delete from shelf_subcategory_categories where subcategory_key = $1', [sc.key]);
-        for (const k of alsoIn) {
+        // With their ordinality, as the other path stores it: the taxonomy reads
+        // these in `position` order and shelvesOf keeps that order, so leaving
+        // them all at 0 reorders the lanes by category key (Codex, 15 Sep 2026).
+        for (const [i, k] of alsoIn.entries()) {
           await c.query(
-            `insert into shelf_subcategory_categories (subcategory_key, category_key) values ($1, $2)
-             on conflict do nothing`, [sc.key, k]);
+            `insert into shelf_subcategory_categories (subcategory_key, category_key, position) values ($1, $2, $3)
+             on conflict do nothing`, [sc.key, k, i]);
         }
       }
       const rule = await c.query(
