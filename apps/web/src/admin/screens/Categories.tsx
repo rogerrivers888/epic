@@ -2960,10 +2960,10 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   const adoptWord = async (r: TaxonomyLabel, categoryKey: string, alsoIn: string[] = []) => {
     setBusyKey(r.key);
     try {
-      const { subcategory, created } = await api.taxonomyAdopt({ label: `google:${r.key}`, categoryKey, name: r.label ?? r.key });
-      // Which menus list it, chosen at the same moment and written straight
-      // after — it is a listing, never a second home (the handoff, BO1e).
-      if (alsoIn.length) await api.shelfSaveSubcategory({ id: subcategory.id, alsoIn: alsoIn as MoodKey[] });
+      // One request, one transaction: adopting and listing it elsewhere are a
+      // single act, and splitting them left the drawer made without its
+      // listings when the second call failed (Codex, 15 Sep 2026).
+      const { subcategory, created } = await api.taxonomyAdopt({ label: `google:${r.key}`, categoryKey, name: r.label ?? r.key, alsoIn });
       await reload();
       await onChanged(`${created ? 'New subcategory' : 'Subcategory'} ${subcategory.label} under ${catLabel(categoryKey)}, with ${r.label ?? r.key} mapped to it${alsoIn.length ? `, also listed in ${alsoIn.map((k) => catLabel(k)).join(' and ')}` : ''}.`);
     } catch (err) { await onChanged(String((err as Error).message)); }

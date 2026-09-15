@@ -697,7 +697,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
   const close = () => { setOpen(false); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); };
   const wrapRef = React.useRef<any>(null);
-  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); setQ(''); onOpenChange?.(false); }, [onOpenChange]));
+  useCloseOutside(open, wrapRef, useCallback(() => { setOpenState(false); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); onOpenChange?.(false); }, [onOpenChange]));
   const pick = (key: string) => { onPick(key); close(); };
   return (
     <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>

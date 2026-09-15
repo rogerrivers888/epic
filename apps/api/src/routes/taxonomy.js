@@ -59,6 +59,8 @@ const bad = (message) => Object.assign(new Error(message), { status: 400, code: 
  * can raise beats a budget you discover afterwards." The maximum is what one
  * request may ask for at all, so a typo of 25000 stops at something survivable.
  */
+/** What `/pairs` shows, so a count and the list it opens can never disagree. */
+export const PAIRS_SHOWN = 60;
 export const RUN_CEILING = 250;
 export const RUN_CEILING_MAX = 1000;
 
@@ -219,20 +221,33 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
     if (namespace && !NAMESPACES.some((n) => n.key === namespace)) throw bad(`${namespace} is not a source of labels`);
     const q = String(req.query.q || '').trim() || null;
     const all = req.query.all === '1' || req.query.all === 'true';
-    const [rows, rules, tax, attrs, carried, catches] = await Promise.all([
+    const [rows, rules, tax, attrs, carried] = await Promise.all([
       labelRepo.list({
         namespace, q, seenOnly: !all && (namespace === 'wikidata' || !namespace),
         limit: Math.min(2000, Number(req.query.limit) || 400), offset: Number(req.query.offset) || 0,
       }),
       shelfRules.rules(), taxonomy.taxonomy(),
       placeAttributes.attributes(), placeAttributes.carriedByWord(),
-      // How many specific words each word is seen beside — what "Catches N
-      // words" says on a word kept as a secondary label. One query, because the
-      // screen was asking once per such word (the audit, 15 Sep 2026).
-      query(`select label, count(*)::int as n from taxonomy_label_pairs group by label`)
-        .then((r) => new Map(r.rows.map((x) => [x.label, x.n])))
-        .catch(() => new Map()),
     ]);
+    /**
+     * How many specific words each word is seen beside — "Catches N words".
+     *
+     * One query rather than one per word (the audit), but only over the rows
+     * being returned and only for the list that draws it: this endpoint also
+     * backs the typeahead, and a whole-table aggregation on every keystroke is
+     * a real cost. Capped at what `/pairs` will actually return, or a row would
+     * say "catches 100" and open on sixty (Codex, 15 Sep 2026).
+     */
+    const catchable = namespace === 'google'
+      ? rows.filter((r) => r.decision === 'generic').map((r) => `${r.namespace}:${r.key}`)
+      : [];
+    const catches = catchable.length
+      ? await query(
+        `select label, least(count(*), $2)::int as n from taxonomy_label_pairs
+          where label = any($1) group by label`,
+        [catchable, PAIRS_SHOWN],
+      ).then((r) => new Map(r.rows.map((x) => [x.label, x.n]))).catch(() => new Map())
+      : new Map();
     const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
     const labels = rows.map((r) => ({
       ...r,
@@ -711,7 +726,10 @@ taxonomyRoutes.get('/examples', requires('manage_library'), async (req, res, nex
     for (const p of out.places) p.landsIn = filedAs(p.types, p.primaryType ?? null);
     // And whether we already know it sits inside somewhere bigger, which is why
     // a place like Amity Beach never settles on its own (the handoff, BO8).
-    const parents = await placeParts.parts().catch(() => new Map());
+    // `parts()` answers with { childToParent }, not a Map — reading `.size` off
+    // the wrapper was always undefined, so this never ran at all (Codex,
+    // 15 Sep 2026).
+    const { childToParent: parents } = await placeParts.parts().catch(() => ({ childToParent: new Map() }));
     if (parents.size) {
       const names = await query(
         `select venue_ref, name from place_records where venue_ref = any($1)`, [[...parents.values()]],
@@ -822,7 +840,7 @@ taxonomyRoutes.get('/pairs', requires('view_library'), async (req, res, next) =>
     const parsed = parseLabel(label);
     if (!parsed) throw bad(`${label || '(nothing)'} is not a label`);
     const [pairs, rules, tax] = await Promise.all([
-      labelRepo.pairsFor(label, Math.min(200, Number(req.query.limit) || 60)),
+      labelRepo.pairsFor(label, Math.min(200, Number(req.query.limit) || PAIRS_SHOWN)),
       shelfRules.rules(), taxonomy.taxonomy(),
     ]);
     const subKeys = tax.subcategories.filter((s) => s.active).map((s) => s.key);
@@ -1172,6 +1190,21 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
           `insert into shelf_subcategories (category_key, key, label, position, seeded) values ($1, $2, $3, 100, false) returning *`,
           [categoryKey, key, name]);
         sc = ins.rows[0];
+      }
+      // Which menus also list it, inside the same transaction: split across two
+      // requests, a failure after the adopt left the drawer created without its
+      // listings while the screen reported the whole thing as failed (Codex,
+      // 15 Sep 2026). It is a listing, never a second home.
+      const alsoIn = Array.isArray(req.body?.alsoIn)
+        ? req.body.alsoIn.map(String).filter((k) => tax.byKey.has(k) && k !== categoryKey)
+        : [];
+      if (alsoIn.length) {
+        await c.query('delete from shelf_subcategory_categories where subcategory_key = $1', [sc.key]);
+        for (const k of alsoIn) {
+          await c.query(
+            `insert into shelf_subcategory_categories (subcategory_key, category_key) values ($1, $2)
+             on conflict do nothing`, [sc.key, k]);
+        }
       }
       const rule = await c.query(
         `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded, labels)
