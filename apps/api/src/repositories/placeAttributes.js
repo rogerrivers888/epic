@@ -236,6 +236,7 @@ export async function setValue(venueRef, attributeKey, value, { reason = null, b
     await query('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
     return null;
   }
+  await mustFit(attributeKey, value);
   const { rows } = await query(
     `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, reason, set_by)
      values ($1, $2, $3, $4, $5, $6, $7, $8)

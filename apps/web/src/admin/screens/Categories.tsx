@@ -288,7 +288,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
           ours: `${(tax?.subcategories ?? []).filter((x) => x.active).length} primary`,
           cats: String((tax?.categories ?? []).filter((c) => c.active).length),
           notsure: notSureCount,
-          shelves: 'what the rules actually did',
+          shelves: 'places, not words',
         }}
       />
 
@@ -374,7 +374,10 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
                   <View style={[styles.subName, wide && { width: 200, flexGrow: 0 }]}>
                     <Text style={[type.small, { fontWeight: '700' }]}>{s.label}</Text>
                     <Text style={type.tiny}>
-                      {[wide ? null : `${rules.length} rule${rules.length === 1 ? '' : 's'}`, s.indoor === true ? 'indoors' : s.indoor === false ? 'outdoors' : null, s.for_kids === true ? 'for kids' : null, !s.active ? 'off' : null].filter(Boolean).join(' · ')}
+                      {/* "not indoors", never "outdoors": there is no secondary label called
+                          outdoors, and the refusal saying so is on this very screen
+                          (the audit, 15 Sep 2026). */}
+                      {[wide ? null : `${rules.length} rule${rules.length === 1 ? '' : 's'}`, s.indoor === true ? 'indoors' : s.indoor === false ? 'not indoors' : null, s.for_kids === true ? 'for kids' : null, !s.active ? 'off' : null].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
                   <View style={[styles.attrs, wide ? { flex: 1, minWidth: 0 } : { width: '100%' }]}>
@@ -940,7 +943,11 @@ function Doors({ at, on, counts }: {
     { key: 'ours', label: 'Our labels', sub: counts.ours },
     { key: 'cats', label: 'Categories', sub: counts.cats },
     { key: 'notsure', label: 'Not sure', sub: counts.notsure },
-    { key: 'shelves', label: 'Shelves', sub: counts.shelves },
+    // Not "Shelves". The canvas is explicit: "Shelves is gone. It was a second
+    // list of the same 59 with a different name on the tab." The second list is
+    // gone; what is left behind this door is the other half — what the rules
+    // actually did to real places — so it is named that (the audit, 15 Sep 2026).
+    { key: 'shelves', label: 'What the rules did', sub: counts.shelves },
   ];
   return (
     <View style={styles.doors}>
@@ -1343,6 +1350,11 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
   /** One of ours, by its own name — a primary label or a secondary one. */
   const subLabelOf = (k: string) => tax.subcategories.find((x) => x.key === k)?.label
     ?? secondary.find((a) => a.key === k)?.label ?? k.replace(/-/g, ' ');
+  /** A range draft per label, so one row's numbers are not another's. */
+  const [draft, setDraft] = useState<Record<string, { from: string; to: string }>>({});
+  const drafted = (k: string) => draft[k] ?? { from: '', to: '' };
+  const putDraft = (k: string, part: Partial<{ from: string; to: string }>) =>
+    setDraft((d) => ({ ...d, [k]: { ...drafted(k), ...part } }));
   /** Whether every word in every rule here means one of ours. */
   const allOurs = (rules ?? [])
     .filter((r) => r.scope === 'ours' || r.scope === 'labels')
@@ -1463,6 +1475,42 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
               <View key={a.key} style={styles.wordRow}>
                 <Text style={[type.small, { fontWeight: '600', flex: 1, minWidth: 0 }]}>{a.label}</Text>
                 {canManage ? (
+                  a.kind === 'range' ? (
+                    /* A range takes two numbers. This offered Yes and No and
+                       wrote {yesno:true} against a range attribute, so BO8's
+                       own worked example -- "Suits ages · 0 to 12" -- could not
+                       be set and the row it wrote was the wrong shape. I fixed
+                       exactly this in PlaceLabels last round and left it
+                       standing here, which is the one BO8 actually draws (the
+                       audit, 15 Sep 2026). */
+                    <View style={[styles.line, { gap: 6 }]}>
+                      <TextInput value={drafted(a.key).from} onChangeText={(t) => putDraft(a.key, { from: t })}
+                                 placeholder={String(v?.from ?? a.range_min ?? 0)} placeholderTextColor={colors.ghost}
+                                 inputMode="numeric" style={[styles.field, { width: 54 }]} />
+                      <Text style={type.tiny}>to</Text>
+                      <TextInput value={drafted(a.key).to} onChangeText={(t) => putDraft(a.key, { to: t })}
+                                 placeholder={String(v?.to ?? a.range_max ?? 18)} placeholderTextColor={colors.ghost}
+                                 inputMode="numeric" style={[styles.field, { width: 54 }]} />
+                      <TextAction label="Set" disabled={busy} onPress={() => {
+                        const d = drafted(a.key);
+                        const num = (t: string, fallback: number | null | undefined) =>
+                          (t.trim() === '' ? fallback ?? null : Number.isFinite(Number(t)) ? Number(t) : fallback ?? null);
+                        const from = num(d.from, v?.from ?? a.range_min);
+                        const to = num(d.to, v?.to ?? a.range_max);
+                        void run(
+                          () => api.taxonomySetDefault({ subcategory: sc.key, attribute: a.key, value: { from, to } }),
+                          `Every ${sc.label.toLowerCase()} suits ${from ?? ''} to ${to ?? ''}.`,
+                        );
+                      }} />
+                      {v ? (
+                        <TextAction label="Clear" tone="muted" disabled={busy}
+                                    onPress={() => void run(
+                                      () => api.taxonomySetDefault({ subcategory: sc.key, attribute: a.key, value: null }),
+                                      `${a.label} is each place\u2019s own answer now.`,
+                                    )} />
+                      ) : null}
+                    </View>
+                  ) : (
                   <DrillDropdown
                     label={a.label} showLabel={false} value={reads} set={Boolean(v)} align="right" width={260}
                     groups={a.kind === 'oneof'
@@ -1481,6 +1529,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                       k === '\u2717' ? `${a.label} is each place\u2019s own answer now.` : `Every ${sc.label.toLowerCase()} is ${a.label.toLowerCase()} \u00b7 ${k}.`,
                     )}
                   />
+                  )
                 ) : <Text style={type.small}>{reads}</Text>}
                 {/* Lime, because nobody typed it: it arrived with another label. */}
                 {brings ? <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>brings {brings}</Text> : null}
@@ -1519,10 +1568,25 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
           <View style={styles.wordRow}>
             <Text style={[type.tiny, { width: 96 }]}>Also show it in</Text>
             <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-              {(sc.also_in ?? []).map((k) => (
-                <Token key={k} label={tax.categories.find((c) => c.key === k)?.label ?? k}
-                       onRemove={canManage ? () => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: (sc.also_in ?? []).filter((x) => x !== k) }), `${sc.label} no longer shows in ${tax.categories.find((c) => c.key === k)?.label ?? k}.`) : undefined} />
-              ))}
+              {/* Plain text with a way to take it off. It was a Token, which
+                  expects a `ns:key` and was handed a display name — so it drew
+                  "Families · " with the name greyed as though it were a source —
+                  and lime is the role for something that arrived by itself,
+                  which this did not (the audit, 15 Sep 2026). */}
+              {(sc.also_in ?? []).map((k) => {
+                const name = tax.categories.find((c) => c.key === k)?.label ?? k;
+                return (
+                  <View key={k} style={[styles.line, { gap: 5 }]}>
+                    <Text style={[type.small, { fontWeight: '600' }]}>{name}</Text>
+                    {canManage ? (
+                      <Press onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: (sc.also_in ?? []).filter((x) => x !== k) }), `${sc.label} no longer shows in ${name}.`)}
+                             hitSlop={8} accessibilityLabel={`Stop showing it in ${name}`}>
+                        <Icon name="close" size={13} color={colors.inkMuted} />
+                      </Press>
+                    ) : null}
+                  </View>
+                );
+              })}
               {canManage ? (
                 <DrillDropdown
                   label="Add" value="+ Add" align="left" width={240}
@@ -2114,7 +2178,13 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
         {([['places', 'Places it decides'], ['az', 'A to Z'], ['oldest', 'Oldest']] as const).map(([k, l]) => (
           <Choice key={k} label={l} on={order === k} onPress={() => setOrder(k)} />
         ))}
-        <Text style={type.tiny}>{order === 'places' ? 'Consequence first, and it stays that way' : 'Alphabetical, which puts the pointless one first'}</Text>
+        {/* A three-way control had a two-way caption, so choosing Oldest said
+            "Alphabetical, which puts the pointless one first" (the audit). */}
+        <Text style={type.tiny}>
+          {order === 'places' ? 'Consequence first, and it stays that way'
+            : order === 'az' ? 'Alphabetical, which puts the pointless one first'
+              : 'Longest unanswered first, whatever it would move'}
+        </Text>
       </View>
       <View style={[styles.tRow, styles.tHeadSoft]}>
         <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Google's word, and why it is a judgement call</Text></View>
@@ -2840,7 +2910,12 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
     wantedEg.current = key; setEgBusy(true);
     // `queue`: the ones the labels could not settle go on the not-sure list
     // rather than being quietly filed wrong (the handoff, BO8).
-    try { const d = await api.taxonomyExamples(`google:${key}`, true); if (wantedEg.current === key) setEgData(d); }
+    // Never `queue=1`. Looking is not deciding — the same fix as BO8's own look,
+    // which I made and then left this one standing (the audit, twice). With it
+    // on, pressing Examples wrote a not-sure row for every place the labels did
+    // not settle: a licensed provider's name and address stored on a read path,
+    // under a caption that says "read live, never stored".
+    try { const d = await api.taxonomyExamples(`google:${key}`, false); if (wantedEg.current === key) setEgData(d); }
     catch { if (wantedEg.current === key) setEgData(null); }
     finally { if (wantedEg.current === key) setEgBusy(false); }
   }, []);
@@ -3052,15 +3127,6 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           underneath the table and reads as see-through (owner, 14 Sep 2026). */}
       {/* BO5 — what is left, hardest first. Same rows, same actions, ordered by
           what answering one actually moves. */}
-      {/* BO1i — our 59, as rows. "Our subcategory | Home, and also in | Google
-          words | Places". The eight categories above them are a different
-          question and stay behind their own option (the audit, 15 Sep 2026). */}
-      {by === 'subs' && view !== 'left' ? (
-        // The same rows every other view is showing. Handing it the unfiltered
-        // list left the Mapped/Unmapped tabs and the answer filter changing the
-        // totals while the table under them never moved (Codex, 15 Sep 2026).
-        <OurSubcategories tax={tax} rows={(rows ?? []).filter(inView)} wide={wide} catLabel={catLabel} />
-      ) : null}
       {view === 'left' ? (
         <WhatIsLeft
           rows={(rows ?? []).filter((r) => !decided(r))}
@@ -3130,6 +3196,13 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>{noise === '1' ? 'Showing' : 'Show'} excluded · {asideCount}</Text>
         </Press>
       </View>
+      {/* BO1i — our 59, as rows: "Our subcategory | Home, and also in | Google
+          words | Places". Drawn *here*, under the band and the filters that act
+          on it, rather than above them (the audit, 15 Sep 2026). The eight
+          categories are a different question and keep their own option. */}
+      {by === 'subs' ? (
+        <OurSubcategories tax={tax} rows={(rows ?? []).filter(inView)} wide={wide} catLabel={catLabel} />
+      ) : null}
       {chosen || by === 'subs' ? null : (
         <View style={[styles.tRow, styles.tHeadSoft, styles.gRow, styles.stick]}>
           <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead} numberOfLines={2}>{first}</Text></View>
@@ -3462,7 +3535,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         );
       })}
       {/* The total, at the bottom of the list, over one ink rule. */}
-      {chosen ? null : (
+      {chosen || by === 'subs' ? null : (
         <View style={[styles.tRow, styles.tTotal, styles.gRow]}>
           <View style={[styles.tFirst, { flex: 1, width: undefined }]}><Text style={[type.small, { fontWeight: '700' }]}>Total</Text></View>
           {cellsTotal.map((n, i) => (
