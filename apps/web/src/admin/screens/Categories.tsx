@@ -3440,7 +3440,12 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                 return (
                   <View key={r.key} style={openKey === r.key ? { zIndex: 40 } : undefined}>
                   <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }, st === 'aside' && { opacity: 0.55 }]}>
-                    <View style={[{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, wide ? { flex: 1, minWidth: 0 } : null]}>
+                    {/* A floor under the word's own column. Adding "Open
+                        Restaurants" to the answer gave the right-hand side more
+                        to carry, and with nothing but `minWidth: 0` here the
+                        word was crushed to two letters a line (seen on the
+                        deployed site, 15 Sep 2026). */}
+                    <View style={[{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, wide ? { flex: 1, minWidth: 240 } : null]}>
                     {canManage ? (
                       <Press effect="none" onPress={() => tick(r.key, !ticked.has(r.key))}
                              accessibilityRole="checkbox" accessibilityState={{ checked: ticked.has(r.key) }} accessibilityLabel={`Tick ${r.label ?? r.key}`} style={styles.tickCell}>
@@ -3489,7 +3494,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                       </View>
                     ) : null}
                     {canManage ? (
-                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? COL * 2 + LAST : undefined }}>
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%', alignSelf: wide ? 'center' : 'flex-end', width: wide ? COL * 2 + LAST : undefined, flexGrow: 0 }}>
                         <DrillDropdown
                           label={ctlLabel} value={ctlValue} stacked set={!decided(r) && Boolean(sugText)} align="right" width={300}
                           extra={[
