@@ -301,9 +301,24 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
     const words = [...new Set(rows.flatMap((r) => r.words ?? []))];
     const means = new Map();
     if (words.length) {
-      const { rows: found } = await query(
-        `select key, points_at from taxonomy_labels where namespace = 'google' and key = any($1)`, [words]);
-      for (const f of found) if (f.points_at) means.set(f.key, tax.subByKey.get(f.points_at)?.label ?? f.points_at);
+      const [{ rows: found }, attrs, carried] = await Promise.all([
+        query(`select key, points_at from taxonomy_labels where namespace = 'google' and key = any($1)`, [words]),
+        placeAttributes.attributes(),
+        placeAttributes.carriedByWord(),
+      ]);
+      // A word can point at a *secondary* label as well as a primary one, and
+      // it can carry one besides — a cuisine, an age. Reading only points_at
+      // against the subcategories told him none of a place's words meant
+      // anything of ours when several did (Codex, 15 Sep 2026).
+      const nameOf = (k) => tax.subByKey.get(k)?.label ?? attrs.byKey.get(k)?.label ?? k.replace(/-/g, ' ');
+      for (const f of found) if (f.points_at) means.set(f.key, nameOf(f.points_at));
+      for (const w of words) {
+        const also = (carried.get(`google:${w}`) ?? [])
+          .map((c) => attrs.byKey.get(c.key)?.label ?? c.key)
+          .filter(Boolean);
+        if (!also.length) continue;
+        means.set(w, [means.get(w), ...also].filter(Boolean).join(' · '));
+      }
     }
     res.json({
       places: rows.map((r) => ({ ...r, our_words: (r.words ?? []).map((w) => means.get(w) ?? null).filter(Boolean) })),
