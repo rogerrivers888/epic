@@ -572,6 +572,11 @@ taxonomyRoutes.get('/attributes/place', requires('view_library'), async (req, re
     res.json({
       ref, subcategory, attributes: vocab.list,
       values: placeAttributes.resolveFor({ subcategory, words }, own, vocab),
+      // The same question with nothing set on the place: what it *would* be, so
+      // a screen can show the answer "Back to what it inherits" restores before
+      // anybody presses it (Codex, 15 Sep 2026 — and it is what BO7a asks for:
+      // "where you can see what was inherited").
+      inherited: placeAttributes.resolveFor({ subcategory, words }, new Map(), vocab),
     });
   } catch (err) { next(err); }
 });

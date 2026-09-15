@@ -1041,6 +1041,8 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.taxonomyPlaceLabels>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const load = useCallback(async () => {
     try { setData(await api.taxonomyPlaceLabels({ ref: ref_, subcategory, words })); } catch { setData(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1067,25 +1069,53 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
       {data.attributes.filter((a) => a.active).map((a) => {
         const v = data.values[a.key];
         const mine = v?.setAt === 'place';
-        const reads = !v ? 'nothing said'
-          : v.from != null || v.to != null ? `${v.from ?? 0} to ${v.to ?? 99}`
-            : v.choice ? v.choice : v.yesno === false ? 'no' : 'yes';
+        const says = (x?: AttributeValue) => (!x ? 'nothing said'
+          : x.from != null || x.to != null ? `${x.from ?? 0} to ${x.to ?? 99}`
+            : x.choice ? x.choice : x.yesno === false ? 'no' : 'yes');
+        // What clearing would restore. The whole point of the screen is seeing
+        // it *before* you change anything (Codex, 15 Sep 2026).
+        const under = mine ? data.inherited?.[a.key] : undefined;
         return (
-          <View key={a.key} style={[styles.line, { gap: spacing.md, paddingVertical: 4 }]}>
-            <Text style={[type.tiny, { width: 110 }]} numberOfLines={1}>{a.label}</Text>
-            <Text style={[type.small, { fontWeight: '600', color: v && !mine ? colors.accent : colors.ink, flex: 1, minWidth: 0 }]} numberOfLines={1}>
-              {reads}
-              {v ? <Text style={[type.tiny, { fontWeight: '400', color: colors.inkMuted }]}>{`  ${cameFrom(v)}`}</Text> : null}
-            </Text>
-            <DrillDropdown
-              label={a.label} value={mine ? 'change' : 'say otherwise'} width={240} align="right"
-              groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
-                ? a.options.map((o) => ({ key: o, label: o, on: v?.choice === o }))
-                : [{ key: 'yes', label: 'Yes', on: v?.yesno === true }, { key: 'no', label: 'No', on: v?.yesno === false }] }]}
-              startIn={a.key}
-              extra={mine ? [{ key: '\u2717', label: 'Back to what it inherits', on: false }] : []}
-              onPick={(k) => { if (!busy) void set(a, k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' }); }}
-            />
+          <View key={a.key} style={{ paddingVertical: 4, gap: 2 }}>
+            <View style={[styles.line, { gap: spacing.md }]}>
+              <Text style={[type.tiny, { width: 110 }]} numberOfLines={1}>{a.label}</Text>
+              <Text style={[type.small, { fontWeight: '600', color: v && !mine ? colors.accent : colors.ink, flex: 1, minWidth: 0 }]} numberOfLines={1}>
+                {says(v)}
+                {v ? <Text style={[type.tiny, { fontWeight: '400', color: colors.inkMuted }]}>{`  ${cameFrom(v)}`}</Text> : null}
+              </Text>
+              {a.kind === 'range' ? (
+                <View style={[styles.line, { gap: 6 }]}>
+                  {/* A range takes two numbers. Offering yes/no here wrote a
+                      value whose shape disagreed with its own kind, so ages
+                      could not be set at all (Codex, 15 Sep 2026). */}
+                  <TextInput value={from} onChangeText={setFrom} placeholder={String(a.range_min ?? 0)} placeholderTextColor={colors.ghost}
+                             inputMode="numeric" style={[styles.field, { width: 54 }]} />
+                  <Text style={type.tiny}>to</Text>
+                  <TextInput value={to} onChangeText={setTo} placeholder={String(a.range_max ?? 18)} placeholderTextColor={colors.ghost}
+                             inputMode="numeric" style={[styles.field, { width: 54 }]} />
+                  <TextAction label="Set" disabled={busy} onPress={() => void set(a, { from: Number(from) || 0, to: Number(to) || (a.range_max ?? 18) })} />
+                  {mine ? <TextAction label="Clear" tone="muted" disabled={busy} onPress={() => void set(a, null)} /> : null}
+                </View>
+              ) : (
+                <DrillDropdown
+                  label={a.label} value={mine ? 'change' : 'say otherwise'} width={240} align="right"
+                  groups={[{ key: a.key, label: a.label, items: a.kind === 'oneof'
+                    ? a.options.map((o) => ({ key: o, label: o, on: v?.choice === o }))
+                    : [{ key: 'yes', label: 'Yes', on: v?.yesno === true }, { key: 'no', label: 'No', on: v?.yesno === false }] }]}
+                  startIn={a.key}
+                  extra={mine ? [{ key: '\u2717', label: 'Back to what it inherits', on: false }] : []}
+                  onPick={(k) => { if (!busy) void set(a, k === '\u2717' ? null : a.kind === 'oneof' ? { choice: k } : { yesno: k === 'yes' }); }}
+                />
+              )}
+            </View>
+            {mine ? (
+              <Text style={[type.tiny, { paddingLeft: 110 + spacing.md }]} numberOfLines={2}>
+                <Text style={{ color: colors.inkMuted }}>{`inherits ${says(under)}`}</Text>
+                {/* The reason, for whoever reads this later — which was the
+                    point of asking for it (Codex, 15 Sep 2026). */}
+                {v?.reason ? <Text style={{ color: colors.inkMuted }}>{` · “${v.reason}”`}</Text> : null}
+              </Text>
+            ) : null}
           </View>
         );
       })}
@@ -1454,7 +1484,12 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, nameOf, b
                   </View>
                   {onPlace === pl.id ? (
                     <PlaceLabels
-                      ref_={`google:${pl.id}`} name={pl.name ?? pl.id} subcategory={sc.key}
+                      ref_={`google:${pl.id}`} name={pl.name ?? pl.id}
+                      // Where it actually lands, not the page we are on: a place
+                      // in this sample may settle into another drawer, and using
+                      // this page's would report the wrong defaults as inherited
+                      // (Codex, 15 Sep 2026).
+                      subcategory={pl.landsIn ?? sc.key}
                       words={(pl.types ?? []).map((t) => `google:${t}`)}
                       onChanged={onChanged}
                     />
@@ -1557,9 +1592,10 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
    * kinds that carry a value could not be made at all (the audit, 15 Sep 2026).
    */
   const [newKind, setNewKind] = useState<'yesno' | 'range' | 'oneof'>('yesno');
+  const [choices, setChoices] = useState('');
   const add = async () => {
     const l = name.trim();
-    setAdding(false); setName('');
+    setAdding(false); setName(''); setChoices('');
     if (!l) return;
     setBusy(true);
     try {
@@ -1568,7 +1604,9 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
         // A range needs bounds to draw a control at all; one-of starts empty and
         // is filled in on the row.
         ...(newKind === 'range' ? { rangeMin: 0, rangeMax: 18, unit: 'years' } : {}),
-        ...(newKind === 'oneof' ? { options: [] } : {}),
+        // A one-of with no choices is unusable: every control that assigns it
+        // is built from this list (Codex, 15 Sep 2026).
+        ...(newKind === 'oneof' ? { options: choices.split(',').map((c) => c.trim()).filter(Boolean) } : {}),
       });
       setNewKind('yesno');
       await load();
@@ -1689,7 +1727,11 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
                   startIn="k"
                   onPick={(k) => setNewKind(k as 'yesno' | 'range' | 'oneof')}
                 />
-                <TextAction label="Make it" disabled={busy} onPress={() => void add()} />
+                {newKind === 'oneof' ? (
+                  <TextInput value={choices} onChangeText={setChoices} placeholder="its choices, separated by commas"
+                             placeholderTextColor={colors.ghost} style={[styles.field, { minWidth: 220 }]} />
+                ) : null}
+                <TextAction label="Make it" disabled={busy || (newKind === 'oneof' && !choices.trim())} onPress={() => void add()} />
               </>
             ) : <TextAction label="New secondary label" disabled={busy} onPress={() => { setAdding(true); setName(''); setNewKind('yesno'); }} />
           ) : null}
@@ -2086,10 +2128,16 @@ function ExamplesPanel({ eg, egBusy, canManage, catLabel, subLabel, word, tax, o
                         <View style={{ gap: 3, paddingTop: 6 }}>
                           {(eg.everywhere ?? []).map((w) => (
                             <View key={w.key} style={styles.barRow}>
-                              <Text style={[type.tiny, { flex: 1, minWidth: 0, color: colors.inkMuted }]} numberOfLines={1}>
+                              <Text style={[type.tiny, { width: 200, color: colors.inkMuted }]} numberOfLines={1}>
                                 {w.key.replace(/_/g, ' ')} — points at no label of ours
                               </Text>
-                              <View style={[styles.bar, { width: `${Math.round((w.on / Math.max(1, eg.places.length)) * 100)}%`, backgroundColor: colors.lineSoft }]} />
+                              {/* The same flexing track the shape bars below use.
+                                  The percentage belongs to the track, not the
+                                  row: at 100% it took the whole row and
+                                  collapsed the label (Codex, 15 Sep 2026). */}
+                              <View style={[styles.barTrack, { flex: 1 }]}>
+                                <View style={[styles.barFill, { width: `${Math.round((w.on / Math.max(1, eg.places.length)) * 100)}%`, backgroundColor: colors.line }]} />
+                              </View>
                               <Text style={[type.tiny, { width: 62, textAlign: 'right' }]}>{w.on} of {eg.places.length}</Text>
                             </View>
                           ))}
@@ -3361,7 +3409,7 @@ const styles = StyleSheet.create({
   placeLabels: { gap: 2, paddingLeft: spacing.md, paddingVertical: 6, borderLeftWidth: 2, borderLeftColor: colors.lime, marginLeft: spacing.md },
   shapeBand: { flexDirection: 'row', gap: 34, paddingTop: 8, paddingBottom: 4, flexWrap: 'wrap' },
   barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  bar: { height: 6, minWidth: 2 },
+
   toast: {
     position: 'fixed' as any, left: '50%', bottom: 28, transform: [{ translateX: '-50%' as any }],
     flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 200,

@@ -2414,7 +2414,12 @@ export const api = {
    * one another label brought.
    */
   taxonomyPlaceLabels: (p: { ref: string; subcategory?: string | null; words?: string[] }) =>
-    request<{ ref: string; subcategory: string | null; attributes: PlaceAttribute[]; values: Record<string, AttributeValue> }>(
+    request<{
+      ref: string; subcategory: string | null; attributes: PlaceAttribute[];
+      values: Record<string, AttributeValue>;
+      /** What it would be with nothing set on the place — what clearing restores. */
+      inherited: Record<string, AttributeValue>;
+    }>(
       `/api/admin/taxonomy/attributes/place${qs({ ref: p.ref, subcategory: p.subcategory ?? undefined, words: p.words?.length ? p.words.join(',') : undefined })}`),
   /** Say something about one place, with the reason it differs from what it inherited. */
   taxonomySetPlaceLabel: (body: { ref: string; attribute: string; value: AttributeValue | null; reason?: string | null }) =>
