@@ -2435,6 +2435,15 @@ export const api = {
     request<{ places: NotSurePlace[]; counts: Record<string, number>; runs: NotSureRun[]; subcategories: ShelfSubcategory[]; categories: ShelfCategory[] }>(
       `/api/admin/taxonomy/not-sure${qs({ state })}`),
   /** Send a batch to be looked up. Nothing is applied by it. */
+  /**
+   * What one of a provider's words means, read off the real places that carry
+   * it. Costs no provider call — the sample is the one already on screen.
+   */
+  taxonomyWordMeans: (body: { label: string; places: { id: string; name: string | null; address: string | null; website: string | null; types: string[] }[] }) =>
+    post<{
+      label: string;
+      said: { primary: string | null; secondary: { key: string; label: string; choice: string | null }[]; because: string; source: string } | null;
+    }>('/api/admin/taxonomy/word', body),
   /** Put places already on screen on the not-sure list, with no provider call. */
   taxonomyQueueNotSure: (body: { subcategory: string | null; places: { ref: string; name: string | null; address: string | null; words: string[]; reason?: string }[] }) =>
     post<{ queued: number }>('/api/admin/taxonomy/not-sure/queue', body),

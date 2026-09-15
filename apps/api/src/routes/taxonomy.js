@@ -35,7 +35,7 @@ import * as labelRepo from '../repositories/taxonomyLabels.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import * as placeParts from '../repositories/placeParts.js';
 import * as notSure from '../repositories/notSure.js';
-import { research } from '../domain/research.js';
+import { recommendForWord, research } from '../domain/research.js';
 import { kindsByQid, nameKinds } from '../repositories/library.js';
 import { kindLabels } from '../sources/wikimedia.js';
 import { NAMESPACES, labelsOfRule, parseLabel, scopeFor } from '../domain/labels.js';
@@ -346,6 +346,40 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
       places: rows.map((r) => ({ ...r, our_words: (r.words ?? []).map((w) => means.get(w) ?? null).filter(Boolean) })),
       counts, runs, subcategories: tax.subcategories, categories: tax.categories,
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /word { label, places } — what one of a provider's words means, read off
+ * the real places that carry it.
+ *
+ * The owner, 15 Sep 2026: "I want to have the option to ask the AI to look at
+ * them and to actually check the website addresses and come up with a
+ * recommendation." The sample comes from the screen, so this spends no provider
+ * call of its own — only Claude, reading the websites already fetched.
+ *
+ * It recommends and never applies. A word files hundreds of places, so a
+ * confident wrong answer here is the most expensive mistake on the screen.
+ */
+taxonomyRoutes.post('/word', requires('manage_library'), async (req, res, next) => {
+  try {
+    const label = String(req.body?.label || '').trim();
+    const parsed = parseLabel(label);
+    if (!parsed) throw bad('Which word?');
+    const places = Array.isArray(req.body?.places) ? req.body.places.slice(0, 12) : [];
+    if (!places.length) throw bad('Look at some real ones first — there is nothing to read.');
+    const [tax, attrs, household] = await Promise.all([
+      taxonomy.taxonomy(), placeAttributes.attributes(), currentHousehold(),
+    ]);
+    const said = await recommendForWord({
+      word: parsed.key,
+      places,
+      primary: tax.active.subcategories.map((sc) => ({ key: sc.key, label: sc.label })),
+      secondary: attrs.list.filter((a) => a.active).map((a) => ({ key: a.key, label: a.label, options: a.options ?? [] })),
+      householdId: household?.id ?? null,
+      sessionId: null,
+    });
+    res.json({ label, said });
   } catch (err) { next(err); }
 });
 

@@ -1183,6 +1183,221 @@ function PlaceLabels({ ref_, name, subcategory, words, onChanged }: {
 }
 
 /**
+ * A provider's word, on its own page.
+ *
+ * The owner, 15 Sep 2026: "I should be able to click on Dog Park, and I should
+ * be able to then see B08 or something like B08, where I can see the examples.
+ * I don't want them appearing in a dropdown. I want those examples to have
+ * website addresses. I want to have the option to ask the AI to look at them
+ * and to actually check the website addresses and come up with a
+ * recommendation. I want to be able to add the labels and set 1 to primary and
+ * 1 to secondary. I can't do all of that in line on the row."
+ *
+ * So: the answer and every secondary label on the left, the real places with
+ * their websites on the right, and one button that reads those sites and comes
+ * back with a recommendation — which is offered, never applied.
+ */
+function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back, onChanged, onDecide, onCarry }: {
+  r: TaxonomyLabel; tax: Taxonomy; secondary: SecondaryLabel[]; wide: boolean; canManage: boolean;
+  catLabel: (k: string | null | undefined) => string;
+  subLabel: (k: string | null | undefined) => string | null;
+  back: () => void;
+  onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
+  onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => void;
+  onCarry: (r: TaxonomyLabel, attribute: string, value: AttributeValue | null) => Promise<void>;
+}) {
+  const [eg, setEg] = useState<TaxonomyExamples | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [said, setSaid] = useState<Awaited<ReturnType<typeof api.taxonomyWordMeans>>['said']>(null);
+  const [busy, setBusy] = useState(false);
+  const label = `google:${r.key}`;
+
+  const look = async () => {
+    setLooking(true);
+    try { setEg(await api.taxonomyExamples(label, false)); }
+    catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setLooking(false); }
+  };
+  const ask = async () => {
+    if (!eg?.places.length) return;
+    setAsking(true);
+    try {
+      const out = await api.taxonomyWordMeans({
+        label,
+        places: eg.places.map((p) => ({ id: p.id, name: p.name, address: p.address, website: p.website, types: p.types })),
+      });
+      setSaid(out.said);
+      if (!out.said) await onChanged('It read them and would not say — no answer it could stand behind.');
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setAsking(false); }
+  };
+
+  const st = r.decision ?? (r.landing?.subcategory ? 'mapped' : 'none');
+  const answer = r.decision === 'aside' ? 'Excluded from Epic'
+    : r.decision === 'travel' ? 'Travel'
+      : r.decision === 'nearby' ? 'Useful nearby'
+        : r.decision === 'generic' ? 'A secondary label only'
+          : r.landing?.subcategory ? `${catLabel(r.landing.category)} · ${subLabel(r.landing.subcategory)}`
+            : 'Nothing said yet';
+
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Press effect="none" onPress={back} accessibilityRole="button" style={styles.backLine}>
+        <Icon name="back" size={14} color={colors.accent} strokeWidth={2.6} />
+        <Text style={styles.backText}>Google’s words</Text>
+      </Press>
+      <Band
+        kicker={`Google’s word · ${r.key}`}
+        title={r.label ?? r.key.replace(/_/g, ' ')}
+        stats={[
+          { label: 'Sightings', value: count(r.seen_count ?? 0) },
+          { label: 'Answer', value: answer },
+        ]}
+      />
+      {r.why ? <Said lead="Why this one is a judgement call.">{r.why}</Said> : null}
+      <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
+        {/* ---- what it means ------------------------------------------- */}
+        <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
+          <Text style={styles.bandKicker}>What it means · one of ours</Text>
+          {canManage ? (
+            <DrillDropdown
+              label="Mapped to" value={answer} stacked set={st !== 'none'} width={320}
+              extra={[
+                { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
+                { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
+                { key: '>', label: 'Travel \u2014 getting there, parking', on: st === 'travel' },
+                { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: st === 'nearby' },
+                ...(st !== 'none' ? [{ key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false }] : []),
+              ]}
+              groups={tax.categories.filter((c) => c.active).map((c) => ({
+                key: c.key, label: c.label,
+                items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: r.landing?.subcategory === sc.key })),
+              }))}
+              startIn={r.landing?.category ?? null}
+              onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
+            />
+          ) : <Text style={[type.small, { fontWeight: '700' }]}>{answer}</Text>}
+
+          {/* ---- and what else it says ---------------------------------- */}
+          <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>And what else it says · secondary labels</Text>
+          <Text style={type.tiny}>
+            A word can mean one thing a place *is* and say several things that are *true of it*. Italian restaurant sends a
+            place to Restaurants and also says Italian; dog park says nothing of the kind, which is why this list is here and
+            not on every row.
+          </Text>
+          {secondary.map((a) => {
+            const on = (r.carries ?? []).find((c) => c.key === a.key);
+            return (
+              <View key={a.key} style={styles.wordRow}>
+                <Text style={[type.small, { fontWeight: '600', flex: 1, minWidth: 0 }]} numberOfLines={1}>{a.label}</Text>
+                {canManage && a.kind === 'oneof' ? (
+                  <DrillDropdown
+                    label={a.label} showLabel={false} value={on ? said_(on.value) : '\u2014'} set={Boolean(on)} align="right" width={260}
+                    groups={[{ key: a.key, label: a.label, items: a.options.map((o) => ({ key: o, label: o, on: on?.value.choice === o })) }]}
+                    startIn={a.key}
+                    extra={on ? [{ key: '\u2717', label: `Not ${a.label.toLowerCase()}`, on: false }] : []}
+                    onPick={(k) => { if (!busy) void onCarry(r, a.key, k === '\u2717' ? null : { choice: k }); }}
+                  />
+                ) : canManage && a.kind === 'yesno' ? (
+                  <DrillDropdown
+                    label={a.label} showLabel={false} value={on ? said_(on.value) : '\u2014'} set={Boolean(on)} align="right" width={220}
+                    groups={[{ key: a.key, label: a.label, items: [
+                      { key: 'yes', label: 'Yes', on: on?.value.yesno === true },
+                      { key: 'no', label: 'No', on: on?.value.yesno === false },
+                    ] }]}
+                    startIn={a.key}
+                    extra={on ? [{ key: '\u2717', label: 'It says nothing about this', on: false }] : []}
+                    onPick={(k) => { if (!busy) void onCarry(r, a.key, k === '\u2717' ? null : { yesno: k === 'yes' }); }}
+                  />
+                ) : (
+                  <Text style={[type.small, on ? { color: colors.accent, fontWeight: '600' } : { color: colors.inkMuted }]}>
+                    {on ? said_(on.value) : a.kind === 'range' ? 'a range — set on a drawer or a place' : '\u2014'}
+                  </Text>
+                )}
+              </View>
+            );
+          })}
+        </View>
+
+        {/* ---- the real places, and what Claude makes of them ----------- */}
+        <View style={[{ gap: spacing.sm, minWidth: 0 }, wide && { flex: 1 }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.md, flexWrap: 'wrap' }}>
+            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>Real places carrying it</Text>
+            {eg ? <Text style={type.tiny}>{eg.places.length} near {eg.near}, read live, never stored</Text> : null}
+          </View>
+          {!eg ? (
+            <TextAction label={looking ? 'Looking\u2026' : 'Look at twelve real ones \u00b7 one search, it costs'}
+                        disabled={looking || !canManage} onPress={() => void look()} />
+          ) : eg.problem ? (
+            <View style={[styles.line, { gap: spacing.md }]}>
+              <Text style={[type.tiny, { flex: 1, minWidth: 0 }]}>Could not look: {eg.problem}</Text>
+              <TextAction label="Try again" onPress={() => void look()} />
+            </View>
+          ) : (
+            <>
+              {eg.places.map((pl) => (
+                <View key={pl.id} style={[styles.egRow, { alignItems: 'flex-start' }]}>
+                  <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                    <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name ?? pl.id}</Text>
+                    <Text style={type.tiny} numberOfLines={1}>{pl.address}</Text>
+                    {/* The website, on the page rather than behind a dropdown. */}
+                    {pl.website ? (
+                      <Press onPress={() => void Linking.openURL(pl.website as string)} accessibilityRole="link">
+                        <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>{pl.website.replace(/^https?:\/\//, '')}</Text>
+                      </Press>
+                    ) : <Text style={type.tiny}>no website</Text>}
+                  </View>
+                  <Text style={[type.tiny, pl.landsIn ? null : { color: colors.overrun }]}>
+                    {pl.landsIn ? subLabel(pl.landsIn) : 'nothing settles it'}
+                  </Text>
+                </View>
+              ))}
+              {canManage ? (
+                <View style={{ gap: 6, paddingTop: spacing.sm }}>
+                  <Press effect="none" disabled={asking} accessibilityRole="button" style={styles.save} onPress={() => void ask()}>
+                    <Icon name="search" size={14} color={colors.selectedFg} strokeWidth={2.6} />
+                    <Text style={[type.small, { fontWeight: '700', color: colors.selectedFg }]}>
+                      {asking ? 'Reading their websites\u2026' : 'Ask Claude to read these websites'}
+                    </Text>
+                  </Press>
+                  <Text style={type.tiny}>It reads the sites above and says what the word means in practice. It recommends; you decide.</Text>
+                </View>
+              ) : null}
+              {said ? (
+                <View style={styles.recommends}>
+                  <Text style={styles.bandKicker}>What it makes of them</Text>
+                  <Text style={type.small}>
+                    <Text style={{ fontWeight: '700' }}>{said.primary ? subLabel(said.primary) : 'No one answer fits'}</Text>
+                    {said.secondary.length ? <Text style={{ color: colors.accent }}>{` · and it says ${said.secondary.map((x) => `${x.label}${x.choice ? ` ${x.choice}` : ''}`).join(', ')}`}</Text> : null}
+                  </Text>
+                  <Text style={[type.tiny, { lineHeight: 16 }]}>{said.because}</Text>
+                  <Press onPress={() => void Linking.openURL(said.source)} accessibilityRole="link">
+                    <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>{said.source.replace(/^https?:\/\//, '')}</Text>
+                  </Press>
+                  {canManage && said.primary ? (
+                    <View style={[styles.line, { gap: spacing.md, paddingTop: 4 }]}>
+                      <TextAction label={`Take it \u2014 ${subLabel(said.primary)}`} disabled={busy} onPress={async () => {
+                        setBusy(true);
+                        try {
+                          onDecide(r, { subcategory: said.primary as string });
+                          for (const x of said.secondary) await onCarry(r, x.key, x.choice ? { choice: x.choice } : { yesno: true });
+                        } finally { setBusy(false); }
+                      }} />
+                      <TextAction label="No" tone="muted" onPress={() => setSaid(null)} />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+            </>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
  * BO1i — our 59, as the rows.
  *
  * "Our subcategory | Home, and also in | Google words | Places." Grouping by
@@ -2860,7 +3075,7 @@ function PartsOfPlaces({ canManage, tax, onChanged }: {
 }
 
 /** A secondary label's value, in one short phrase. */
-function said(v: AttributeValue): string {
+function said_(v: AttributeValue): string {
   if (v.choice) return v.choice;
   if (v.from != null || v.to != null) return `${v.from ?? ''}\u2013${v.to ?? ''}`;
   return v.yesno === false ? 'no' : 'yes';
@@ -2886,7 +3101,7 @@ function Carries({ r, secondary, onChanged }: {
     try {
       await api.taxonomySetCarries({ label, attribute, value });
       const name = secondary.find((x) => x.key === attribute)?.label ?? attribute;
-      await onChanged(value ? `${r.key.replace(/_/g, ' ')} also says ${name} \u00b7 ${said(value)}.` : `${r.key.replace(/_/g, ' ')} no longer says ${name}.`);
+      await onChanged(value ? `${r.key.replace(/_/g, ' ')} also says ${name} \u00b7 ${said_(value)}.` : `${r.key.replace(/_/g, ' ')} no longer says ${name}.`);
     } finally { setBusy(false); }
   };
   // Only the one-of labels are offered here: a yes/no or a range belongs to a
@@ -2901,7 +3116,7 @@ function Carries({ r, secondary, onChanged }: {
           <DrillDropdown
             key={a.key}
             label={a.label}
-            value={on ? said(on.value) : '\u2014'}
+            value={on ? said_(on.value) : '\u2014'}
             set={Boolean(on)}
             width={260}
             groups={[{ key: a.key, label: a.label, items: a.options.map((o) => ({ key: o, label: o, on: on?.value.choice === o })) }]}
@@ -2959,6 +3174,8 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
   // refreshed tab, a shared link or a Back would spend another without anybody
   // pressing anything (Codex, 13 Sep 2026). Nothing here is stored, so there is
   // nothing at that address to share either.
+  /** Which word has its own page open, in the address like every other layer. */
+  const [word, setWord] = useQueryState<string>('word', '', asText);
   const [egKey, setEg] = useState('');
   const [eg, setEgData] = useState<TaxonomyExamples | null>(null);
   const [egBusy, setEgBusy] = useState(false);
@@ -3175,6 +3392,26 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
     ? { left: origin.x, right: 'auto' as never, width: frameW, bottom: 'auto' as never, top: origin.y + frameH - 60 }
     : null;
   if (!rows) return <Text style={type.small}>Reading Google's list…</Text>;
+
+  // One word, on its own page — everything the row cannot hold.
+  const open = word ? (rows ?? []).find((x) => x.key === word) ?? null : null;
+  if (open) {
+    return (
+      <WordPage
+        r={open} tax={tax} secondary={secondary} wide={wide} canManage={canManage}
+        catLabel={catLabel} subLabel={subLabel}
+        back={() => setWord('')}
+        onChanged={onChanged}
+        onDecide={(row, choice) => void decide(row, choice)}
+        onCarry={async (row, attribute, value) => {
+          await api.taxonomySetCarries({ label: `google:${row.key}`, attribute, value });
+          await reload();
+          const name = secondary.find((x) => x.key === attribute)?.label ?? attribute;
+          await onChanged(value ? `${row.label ?? row.key} also says ${name}.` : `${row.label ?? row.key} no longer says ${name}.`);
+        }}
+      />
+    );
+  }
 
   // Four number columns, the last column and the padding have to leave the
   // name room from the 900px breakpoint up, not only on a big screen (Codex, 12 Sep 2026).
@@ -3457,7 +3694,17 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                       </Press>
                     ) : null}
                     <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-                      <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
+                      {/* The word's name is the way into its own page, where
+                          the examples, their websites and both kinds of label
+                          live (owner, 15 Sep 2026: "I should be able to click on
+                          Dog Park"). */}
+                      <Press effect="none" onPress={() => setWord(r.key)} accessibilityRole="button"
+                             accessibilityLabel={`Open ${r.label ?? r.key}`}>
+                        <Text style={type.small}>
+                          <Text style={{ fontWeight: '600', textDecorationLine: 'underline' }}>{r.label ?? r.key}</Text>
+                          <Text style={{ color: colors.inkMuted }}> {r.key}</Text>
+                        </Text>
+                      </Press>
                       {/* A reason only where it says something: the cuisine kept, or the
                           Google category that makes it not a day out. */}
                       {(() => {
@@ -3482,11 +3729,16 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           sends a place is one answer; this is the other, and the
                           two never compete — italian_restaurant still lands in
                           Restaurants and also says Italian. */}
-                      {canManage ? (
-                        <Carries r={r} secondary={secondary} onChanged={onChanged} />
-                      ) : (r.carries ?? []).length ? (
+                      {/* Not a control on every row. Offering Cuisine and Dining
+                          style under Dog park is nonsense, and it was there
+                          because I put the control on every word rather than on
+                          the words it could mean anything for (owner, 15 Sep
+                          2026: "it's got cuisine and dining style underneath it.
+                          What on earth is that about?"). Setting them is on the
+                          word's own page; the row only says what is set. */}
+                      {(r.carries ?? []).length ? (
                         <Text style={[type.tiny, { color: colors.accent }]} numberOfLines={1}>
-                          Also says {(r.carries ?? []).map((c) => `${c.label} · ${said(c.value)}`).join(' · ')}
+                          Also says {(r.carries ?? []).map((c) => `${c.label} · ${said_(c.value)}`).join(' · ')}
                         </Text>
                       ) : null}
                     </View>
@@ -3802,6 +4054,8 @@ const styles = StyleSheet.create({
   backText: { ...type.small, fontWeight: '700', color: colors.accent },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
   landedIn: { gap: 2, paddingLeft: spacing.md, paddingVertical: 8, borderLeftWidth: 2, borderLeftColor: colors.line, marginLeft: spacing.md, marginBottom: spacing.sm },
+  /** A consequence — a lime left rule and no fill (the handoff's colour roles). */
+  recommends: { gap: 5, paddingLeft: spacing.md, paddingVertical: 8, borderLeftWidth: 2, borderLeftColor: colors.lime, marginTop: spacing.sm },
   // 34x19 with a 12px block, from the handoff's geometry table. There was no
   // toggle in the admin at all; on and off were two words (the audit).
   toggle: { width: 34, height: 19, borderWidth: 1, borderColor: colors.line, justifyContent: 'center', paddingHorizontal: 2 },
@@ -3903,7 +4157,11 @@ const styles = StyleSheet.create({
   // matters more than which words are in it (the handoff, BO9).
   barTrack: { height: 4, backgroundColor: colors.lineSoft, maxWidth: 420 },
   barFill: { height: 4, backgroundColor: colors.lime },
-  approve: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderBottomWidth: 1.5, borderBottomColor: colors.lime },
+  // A full 1px lime outline, which is what BO1b draws — the approved artboard
+  // for this list. I had followed the README's word "outline" as an underline;
+  // the underline is what BO1c/f/m use for a different control (owner, 15 Sep
+  // 2026: "Approve is supposed to be a button… You haven't followed that").
+  approve: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 13, borderWidth: 1, borderColor: colors.lime },
   approveOn: { backgroundColor: colors.lime },
   // A 1px ruled segmented control, which is what the canvas draws — but with no
   // ground of its own: a fill behind an outline is the "filled outlined box"
