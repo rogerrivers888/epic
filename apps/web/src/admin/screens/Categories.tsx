@@ -131,8 +131,7 @@ function Word({ label, name, muted }: { label: string; name?: string | null; mut
   return (
     <Text style={[type.small, muted && { color: colors.inkMuted }]} numberOfLines={1}>
       <Text style={{ color: colors.inkMuted }}>{sourceWord(nsOf(label))} · </Text>
-      <Text style={{ fontWeight: '600', color: muted ? colors.inkMuted : colors.ink }}>{name && name !== key ? name : key}</Text>
-      {name && name !== key ? <Text style={{ color: colors.inkMuted }}> {key}</Text> : null}
+      <Text style={{ fontWeight: '600', color: muted ? colors.inkMuted : colors.ink }}>{name && name !== key ? name : key.replace(/_/g, ' ')}</Text>
     </Text>
   );
 }
@@ -191,7 +190,7 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
    * drawer it lands in (owner, 15 Sep 2026: "when I click on any of these rows
    * it does not open into a new screen? That was my expectation").
    */
-  const [, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'secondary', asOneOf(['secondary', 'primary'] as const, 'secondary'));
+  const [, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'primary', asOneOf(['secondary', 'primary'] as const, 'primary'));
   const [, setOpenLabel] = useQueryState<string>('label', '', asText);
   const [door, setDoor] = useQueryState<Door>('door', 'words', asOneOf(['words', 'ours', 'cats', 'notsure', 'shelves'] as const, 'words'));
 
@@ -377,7 +376,22 @@ export function Categories({ canManage, startAt }: { canManage: boolean; startAt
       ) : null}
 
       {!tax ? <Text style={type.small}>Loading…</Text> : null}
-      {needsCategory && tax && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
+      {/* A door named Categories opens on the categories. It opened on a
+          dropdown and the words "Select a category above", and once you chose
+          one you were looking at subcategories, which is what the owner was
+          reading as the category list (16 Sep 2026: "when I click on category,
+          why do I not see outdoors, food and drink? I actually see zoos and
+          farms and play and soft play, which are not the categories"). */}
+      {door === 'cats' && tax && !category ? (
+        <CategoryList tax={tax} wide={wide} onOpen={(k) => { setCat(k); setSub(''); setEditing(null); }} />
+      ) : null}
+      {door === 'cats' && tax && category ? (
+        <Crumbs trail={[
+          { label: 'Categories', go: () => { setCat(''); setSub(''); setEditing(null); } },
+          { label: category.label },
+        ]} />
+      ) : null}
+      {needsCategory && door !== 'cats' && tax && !category ? <Text style={[type.small, { color: colors.inkMuted }]}>Select a category above.</Text> : null}
 
       {door === 'cats' && tax && category && shown === 'subcategories' ? (
         <View style={[styles.split, wide && styles.splitWide]}>
@@ -902,6 +916,71 @@ const STANDINGS = [
  * and the eight categories. A 2px rule underneath with a lime one under the
  * door you are in — the only lime on the screen bar an action.
  */
+/**
+ * The eight categories, as a list you can open.
+ *
+ * A category is the kind of day out — Culture, Outdoors, Food & drink. The
+ * sixty primary labels sit inside them. Opening one shows its own.
+ */
+function CategoryList({ tax, wide, onOpen }: { tax: Taxonomy; wide: boolean; onOpen: (key: string) => void }) {
+  const subsOf = (key: string) => tax.subcategories.filter((s) => s.category_key === key);
+  const rulesOf = (key: string) => {
+    const keys = new Set(subsOf(key).map((s) => s.key));
+    return tax.rules.filter((r) => r.subcategory && keys.has(r.subcategory)).length;
+  };
+  const cats = [...tax.categories].sort((a, b) => a.label.localeCompare(b.label));
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Band
+        kicker={`${cats.filter((c) => c.active).length} kinds of day out`}
+        title="Categories"
+        stats={[
+          { label: 'Categories', value: String(cats.filter((c) => c.active).length) },
+          { label: 'Primary labels in them', value: String(tax.subcategories.filter((s) => s.active).length) },
+          { label: 'Doors into Places', value: String(cats.filter((c) => c.is_door).length) },
+        ]}
+      />
+      <View>
+        <View style={[styles.tRow, styles.tHeadSoft, { gap: spacing.sm }]}>
+          <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}><Text style={styles.colHead}>Category</Text></View>
+          {wide ? <View style={[styles.tCell, { width: 300 }]}><Text style={styles.colHead}>Primary labels in it</Text></View> : null}
+          <View style={[styles.tCell, { width: 116 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Labels</Text></View>
+          <View style={[styles.tCell, { width: 116 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Rules</Text></View>
+          <View style={[styles.tCell, { width: 116 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Switched on</Text></View>
+        </View>
+        {cats.map((c) => {
+          const subs = subsOf(c.key);
+          return (
+            <Press key={c.key} effect="none" onPress={() => onOpen(c.key)} accessibilityRole="button"
+                   accessibilityLabel={`Open ${c.label}`}
+                   style={({ hovered }: any) => [styles.wordRow, hovered && { backgroundColor: colors.well }]}>
+              <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}>
+                <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{c.label}</Text>
+                {!wide ? <Text style={type.tiny} numberOfLines={1}>{subs.map((s) => s.label).join(' · ')}</Text> : null}
+              </View>
+              {wide ? (
+                <View style={[styles.tCell, { width: 300 }]}>
+                  <Text style={type.tiny} numberOfLines={2}>{subs.map((s) => s.label).join(' · ')}</Text>
+                </View>
+              ) : null}
+              <View style={[styles.tCell, { width: 116 }]}>
+                <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'] }]}>{subs.length}</Text>
+              </View>
+              <View style={[styles.tCell, { width: 116 }]}>
+                <Text style={[type.small, { textAlign: 'right', fontVariant: ['tabular-nums'] }]}>{rulesOf(c.key)}</Text>
+              </View>
+              <View style={[styles.tCell, { width: 116, alignItems: 'flex-end' }]}>
+                <Text style={[type.small, !c.active && { color: colors.inkMuted }]}>{c.active ? 'On' : 'Off'}</Text>
+              </View>
+              <Icon name="more" size={14} color={colors.inkMuted} />
+            </Press>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function Doors({ at, on, counts }: {
   at: Door; on: (d: Door) => void;
   counts: { words: string; ours: string; cats: string; notsure: string; shelves: string };
@@ -970,6 +1049,36 @@ function Toast({ at, onGone }: { at: { text: string; undo?: () => Promise<void> 
           <Text style={styles.toastUndo}>{busy ? 'Undoing\u2026' : 'Undo'}</Text>
         </Press>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * Where you are, and every step back — not one step back.
+ *
+ * The owner, 16 Sep 2026: "it's got a back arrow with primary label 60 when it
+ * should really have a breadcrumb trail. It shouldn't take me back to primary
+ * label. It takes me back to the R labels page, so it should be a normal
+ * breadcrumb trail." A back arrow names one destination and hides the rest;
+ * a trail names them all and lets you pick.
+ */
+function Crumbs({ trail }: { trail: { label: string; go?: () => void }[] }) {
+  return (
+    <View style={[styles.line, { gap: 0, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
+      {trail.map((c, i) => (
+        <View key={`${c.label}-${i}`} style={[styles.line, { gap: 0, paddingVertical: 0 }]}>
+          {i > 0 ? <Text style={[type.small, { color: colors.inkMuted, paddingHorizontal: 8 }]}>/</Text> : null}
+          {c.go ? (
+            <Press effect="none" onPress={c.go} accessibilityRole="link">
+              {({ hovered }: any) => (
+                <Text style={[type.small, { color: colors.accent, fontWeight: '600' }, hovered && { textDecorationLine: 'underline' }]}>
+                  {c.label}
+                </Text>
+              )}
+            </Press>
+          ) : <Text style={[type.small, { color: colors.inkMuted }]} numberOfLines={1}>{c.label}</Text>}
+        </View>
+      ))}
     </View>
   );
 }
@@ -1172,6 +1281,9 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
   };
 
   const st = r.decision ?? (r.landing?.subcategory ? 'mapped' : 'none');
+  /** A secondary label is offered only where it means something. */
+  const here = r.landing?.category ?? null;
+  const asksHere = (a: SecondaryLabel) => !(a.only_in ?? []).length || (here ? (a.only_in ?? []).includes(here) : false);
   const answer = r.decision === 'aside' ? 'Excluded from Epic'
     : r.decision === 'travel' ? 'Travel'
       : r.decision === 'nearby' ? 'Useful nearby'
@@ -1181,51 +1293,65 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
 
   return (
     <View style={{ gap: spacing.lg }}>
-      <Press effect="none" onPress={back} accessibilityRole="button" style={styles.backLine}>
-        <Icon name="back" size={14} color={colors.accent} strokeWidth={2.6} />
-        <Text style={styles.backText}>Google’s words</Text>
-      </Press>
-      <View style={[styles.line, { gap: spacing.sm, alignItems: 'flex-start' }]}>
-      <View style={{ flex: 1, minWidth: 0 }}>
-      <Band
-        kicker={`Google’s word · ${r.key}`}
-        title={r.label ?? r.key.replace(/_/g, ' ')}
-        stats={[
-          { label: 'Sightings', value: count(r.seen_count ?? 0) },
-          { label: 'Answer', value: answer },
-        ]}
-      />
-      </View>
-      {r.why ? <Note>{r.why}</Note> : null}
+      <Crumbs trail={[{ label: "Google's words", go: back }, { label: r.label && r.label !== r.key ? r.label : r.key }]} />
+      {/* The same band a primary label has: the name on the left, and on the
+          right the things you change about it (owner, 16 Sep 2026: "I can have
+          the mapping in the top right"). */}
+      <View style={styles.band}>
+        <View style={{ gap: 6, minWidth: 0, flexShrink: 1 }}>
+          <Text style={styles.bandKicker}>Google’s word · {r.key}</Text>
+          <Text style={styles.bandTitle} numberOfLines={2}>{r.label ?? r.key.replace(/_/g, ' ')}</Text>
+        </View>
+        <View style={styles.bandStats}>
+          <View style={styles.bandStat}>
+            <Text style={styles.bandKicker}>Sightings</Text>
+            <View style={styles.bandControl}><Text style={styles.bandValue}>{count(r.seen_count ?? 0)}</Text></View>
+          </View>
+          <View style={styles.bandStat}>
+            <Text style={styles.bandKicker}>Mapped to</Text>
+            <View style={styles.bandControl}>
+              {canManage ? (
+                <DrillDropdown
+                  label="Mapped to" showLabel={false} value={answer} set={st !== 'none'} align="right" width={320}
+                  extra={[
+                    { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
+                    { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
+                    { key: '>', label: 'Travel \u2014 getting there, parking', on: st === 'travel' },
+                    { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: st === 'nearby' },
+                    ...(st !== 'none' ? [{ key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false }] : []),
+                  ]}
+                  groups={tax.categories.filter((c) => c.active).map((c) => ({
+                    key: c.key, label: c.label,
+                    items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: r.landing?.subcategory === sc.key })),
+                  }))}
+                  startIn={r.landing?.category ?? null}
+                  onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
+                />
+              ) : <Text style={styles.bandValue}>{answer}</Text>}
+            </View>
+          </View>
+          {r.why ? (
+            <View style={styles.bandStat}>
+              <Text style={styles.bandKicker}>Why</Text>
+              <View style={styles.bandControl}><Note>{r.why}</Note></View>
+            </View>
+          ) : null}
+        </View>
       </View>
       <View style={[{ gap: spacing.lg }, wide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
         {/* ---- what it means ------------------------------------------- */}
         <View style={[{ gap: spacing.md, minWidth: 0 }, wide && { flex: 1 }]}>
-          <Text style={styles.bandKicker}>What it means · one of ours</Text>
-          {canManage ? (
-            <DrillDropdown
-              label="Mapped to" value={answer} stacked set={st !== 'none'} width={320}
-              extra={[
-                { key: '=', label: 'Keep as a secondary label \u2014 it describes the place, it does not say what it is', on: st === 'generic' },
-                { key: '-', label: 'Excluded from Epic', on: st === 'aside' },
-                { key: '>', label: 'Travel \u2014 getting there, parking', on: st === 'travel' },
-                { key: '~', label: 'Useful nearby \u2014 a loo, a visitor centre', on: st === 'nearby' },
-                ...(st !== 'none' ? [{ key: '?', label: 'Nothing said yet \u2014 put it back in the queue', on: false }] : []),
-              ]}
-              groups={tax.categories.filter((c) => c.active).map((c) => ({
-                key: c.key, label: c.label,
-                items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: r.landing?.subcategory === sc.key })),
-              }))}
-              startIn={r.landing?.category ?? null}
-              onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
-            />
-          ) : <Text style={[type.small, { fontWeight: '700' }]}>{answer}</Text>}
-
           {/* ---- and what else it says ---------------------------------- */}
-          <Text style={[styles.bandKicker, { paddingTop: spacing.sm }]}>And what else it says · secondary labels</Text>
+          <Text style={[styles.h2, { paddingTop: 0 }]}>What else it says</Text>
           {/* No asterisks: there is no markdown here, so they printed as
               asterisks (seen on the deployed site, 15 Sep 2026). */}
-          {secondary.map((a) => {
+          {/* Cuisine and dining style are a question about food, not about a
+              dog park. The drawer already refuses to offer a label outside the
+              category it belongs to; the word page was offering all seven
+              (owner, 15 Sep 2026: "it's got cuisine and dining style underneath
+              it. What on earth is that about?"). Where a word lands decides it;
+              a word that lands nowhere yet is asked nothing it could not mean. */}
+          {secondary.filter(asksHere).map((a) => {
             const on = (r.carries ?? []).find((c) => c.key === a.key);
             return (
               <View key={a.key} style={styles.wordRow}>
@@ -1355,6 +1481,15 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
           )}
         </View>
       </View>
+      {/* What we already hold carrying this word — the same list, the same
+          columns and the same panel a primary label has (owner, 16 Sep 2026:
+          "the attributes and what we hold in our database... you should apply
+          to all the other options on this page"). */}
+      <DrawerPlaces
+        sc={null} word={`google:${r.key}`}
+        title={`${r.label ?? r.key.replace(/_/g, ' ')} \u2014 what we hold`}
+        canManage={canManage} wide={wide} onChanged={onChanged}
+      />
     </View>
   );
 }
@@ -1593,10 +1728,16 @@ const sourceName = (pl: DrawerPlace) => {
   return SOURCES[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : '\u2014');
 };
 
-function DrawerPlaces({ sc, canManage, wide, onChanged }: {
-  sc: ShelfSubcategory; canManage: boolean; wide: boolean;
+function DrawerPlaces({ sc, word, title, canManage, wide, onChanged }: {
+  /** The drawer whose places these are, or null when this is a word's list. */
+  sc: ShelfSubcategory | null;
+  /** A provider word, when the list is "places carrying this word". */
+  word?: string;
+  title: string;
+  canManage: boolean; wide: boolean;
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
+  const scope = word ?? sc?.key ?? '';
   const [data, setData] = useState<Awaited<ReturnType<typeof api.taxonomyDrawer>> | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -1632,23 +1773,23 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   // be on screen, and a bulk change would reach them unseen. A reload after a
   // save is not a change of scope, and losing the selection to one is its own
   // annoyance (Codex, 15 Sep 2026).
-  useEffect(() => { setTicked(new Set()); setRange(null); setPage(0); }, [sc.key, state]);
+  useEffect(() => { setTicked(new Set()); setRange(null); setPage(0); }, [scope, state]);
   // A different subcategory is a different list and the old one must go. A
   // different *state* of the same subcategory is not: blanking the table for
   // the seven seconds the whole harvest takes read as the screen losing the
   // 256 it had (owner, 16 Sep 2026: "it just removes 266 museums and then
   // refreshes a few minutes later"). The rows stay, the control says it is
   // working, and `data.state` is what the table is actually showing.
-  useEffect(() => { setData(null); }, [sc.key]);
+  useEffect(() => { setData(null); }, [scope]);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     let live = true;
     setLoading(true);
-    void api.taxonomyDrawer(sc.key, state)
+    void api.taxonomyDrawer(sc?.key ?? '', state, word)
       .then((d) => { if (live) { setData(d); setLoading(false); } })
       .catch(() => { if (live) { setData(null); setLoading(false); } });
     return () => { live = false; };
-  }, [sc.key, state, reloads]);
+  }, [scope, state, word, sc, reloads]);
   /** Which place's panel is open. */
   const [openRef, setOpenRef] = useState<string | null>(null);
 
@@ -1714,7 +1855,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
           search should probably be a first-class citizen. Museums we hold
           should be a bit bigger"). No Add-a-column: there are seven labels and
           the ones that matter here are already shown. */}
-      <Text style={[styles.h1, { paddingTop: spacing.xl }]}>{sc.label} we hold</Text>
+      <Text style={[styles.h1, { paddingTop: spacing.xl }]}>{title}</Text>
       <View style={[styles.line, { gap: spacing.lg, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
         <Field value={q} onChangeText={(t) => { setQ(t); setPage(0); }} placeholder={`Find one of ${data.places.length}`} style={{ flex: 1, minWidth: 220 }} icon="search" />
         {/* Two choices, each naming itself. One control captioned with the
@@ -2000,11 +2141,11 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
  * its address and our labels on it, marked settled or not sure — and the four
  * that were not go to a list rather than being quietly filed wrong.
  */
-function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs, back, backLabel, onChanged }: {
+function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs, crumbs, onChanged }: {
   sc: ShelfSubcategory; tax: Taxonomy; wide: boolean; canManage: boolean;
   secondary: PlaceAttribute[]; defaults: Record<string, AttributeValue>;
   broughtAs: (b: { key: string; value: AttributeValue }) => string;
-  back: () => void; backLabel: string;
+  crumbs: { label: string; go?: () => void }[];
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [rules, setRules] = useState<TaxonomyRule[] | null>(null);
@@ -2076,10 +2217,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
 
   return (
     <View style={{ gap: spacing.lg }}>
-      <Press effect="none" onPress={back} accessibilityRole="button" style={styles.backLine}>
-        <Icon name="back" size={14} color={colors.accent} strokeWidth={2.6} />
-        <Text style={styles.backText}>{backLabel}</Text>
-      </Press>
+      <Crumbs trail={crumbs} />
       {/* The title is the name, so it is edited here rather than repeated in a
           row below; the category is the same (owner, 15 Sep 2026: "surely that
           should just have a pencil next to it... that's also repeated up the
@@ -2501,7 +2639,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
         </View>
       </View>
       {/* The whole drawer, as rows and columns — not a sample. */}
-      <DrawerPlaces sc={sc} canManage={canManage} wide={wide} onChanged={onChanged} />
+      <DrawerPlaces sc={sc} title={`${sc.label} we hold`} canManage={canManage} wide={wide} onChanged={onChanged} />
       {editing ? (
         <RuleEditor tax={tax} start={[]} startSubcategory={sc.key} fixedSubcategory={sc.key} canManage={canManage}
                     onClose={() => setEditing(false)}
@@ -2525,12 +2663,23 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   tax: Taxonomy; wide: boolean; canManage: boolean; onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
   const [data, setData] = useState<TaxonomyAttributes | null>(null);
-  const [half, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'secondary', asOneOf(['secondary', 'primary'] as const, 'secondary'));
+  const [half, setHalf] = useQueryState<'secondary' | 'primary'>('half', 'primary', asOneOf(['secondary', 'primary'] as const, 'primary'));
   /** Which primary label is open, in the address like every other layer. */
   const [openLabel, setOpenLabel] = useQueryState<string>('label', '', asText);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * How the sixty are ordered and which category they are cut to.
+   *
+   * The owner, 16 Sep 2026: "I also can't sort them by the primary label in
+   * alphabetical order. I can't sort the category. I can't filter by category."
+   * Both live in the address, because a sorted, filtered list is a page
+   * somebody shares (CLAUDE.md).
+   */
+  const [sort, setSort] = useQueryState<'name' | 'category' | 'rules'>('sort', 'name', asOneOf(['name', 'category', 'rules'] as const, 'name'));
+  const [desc, setDesc] = useQueryState<'1' | ''>('desc', '', asOneOf(['1', ''] as const, ''));
+  const [only, setOnly] = useQueryState<string>('in', '', asText);
 
   const load = useCallback(async () => {
     try { setData(await api.taxonomyAttributes()); } catch { setData(null); }
@@ -2636,6 +2785,32 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
     return v.yesno === false ? `not ${nameOf(b.key)}` : nameOf(b.key);
   };
   const primary = tax.subcategories.filter((sc) => sc.active);
+  const catOf = (k: string | null | undefined) => tax.categories.find((c) => c.key === k)?.label ?? k ?? '';
+  /** The sixty, cut to one category if asked, in the order asked for. */
+  const primaryShown = useMemo(() => {
+    const list = only ? primary.filter((sc) => sc.category_key === only || (sc.also_in ?? []).includes(only as MoodKey)) : [...primary];
+    const by = sort === 'rules'
+      ? (a: ShelfSubcategory, b: ShelfSubcategory) => (pointing.get(a.key) ?? 0) - (pointing.get(b.key) ?? 0)
+      : sort === 'category'
+        // Inside a category, still alphabetical: a category column sorted on its
+        // own leaves sixty rows in no order at all within each block.
+        ? (a: ShelfSubcategory, b: ShelfSubcategory) =>
+          catOf(a.category_key).localeCompare(catOf(b.category_key)) || a.label.localeCompare(b.label)
+        : (a: ShelfSubcategory, b: ShelfSubcategory) => a.label.localeCompare(b.label);
+    list.sort((a, b) => (desc ? -by(a, b) : by(a, b)));
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primary, only, sort, desc, pointing, tax.categories]);
+  /** A heading that sorts: press for that order, press again to turn it over. */
+  const SortHead = ({ by, label, right }: { by: 'name' | 'category' | 'rules'; label: string; right?: boolean }) => (
+    <Press effect="none" accessibilityRole="button"
+           accessibilityLabel={`Sort by ${label}${sort === by && !desc ? ', reversed' : ''}`}
+           onPress={() => { if (sort === by) setDesc(desc ? '' : '1'); else { setSort(by); setDesc(''); } }}
+           style={[styles.line, { gap: 4, paddingVertical: 0, justifyContent: right ? 'flex-end' : 'flex-start' }]}>
+      <Text style={[styles.colHead, sort === by && { color: colors.ink, fontWeight: '700' }]}>{label}</Text>
+      {sort === by ? <Icon name={desc ? 'collapse' : 'expand'} size={11} color={colors.ink} strokeWidth={2.6} /> : null}
+    </Press>
+  );
   // Rules that file a place somewhere — which is not the same as provider words
   // pointing at one of ours, and was labelled as though it were. It counts
   // rules written in `epic:` labels and rules about a single place too (the
@@ -2650,7 +2825,11 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
         sc={open} tax={tax} wide={wide} canManage={canManage}
         secondary={secondary} defaults={data?.defaults?.[open.key] ?? {}}
         broughtAs={broughtAs}
-        back={() => setOpenLabel('')} backLabel={`Primary labels · ${primary.length}`}
+        crumbs={[
+          { label: 'Our labels', go: () => { setOpenLabel(''); setHalf('primary'); setOnly(''); } },
+          { label: only ? `Primary in ${catOf(only)}` : 'Primary', go: () => { setOpenLabel(''); setHalf('primary'); } },
+          { label: open.label },
+        ]}
         onChanged={async (said) => { await load(); await onChanged(said); }}
       />
     );
@@ -2670,7 +2849,12 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
 
       <View style={[styles.line, { justifyContent: 'space-between', flexWrap: 'wrap' }]}>
         <View style={styles.halves}>
-          {([['secondary', 'Secondary'], ['primary', `Primary · ${primary.length}`]] as const).map(([k, l], i) => (
+          {/* Primary first, and first by default. The sixty primary labels are
+              what a place is filed under; the seven secondary ones describe it
+              once it is filed. The list of sixty was behind the list of seven
+              (owner, 16 Sep 2026: "the primary labels come after the secondary
+              labels, which doesn't make much sense"). */}
+          {([['primary', `Primary · ${primary.length}`], ['secondary', `Secondary · ${secondary.length}`]] as const).map(([k, l], i) => (
             <Press key={k} effect="none" onPress={() => setHalf(k)} accessibilityRole="button"
                    accessibilityState={{ selected: half === k }}
                    style={[styles.halfItem, i > 0 && styles.halfDivider, half === k && styles.halfOn]}>
@@ -2680,6 +2864,20 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
         </View>
         <View style={[styles.line, { gap: spacing.md }]}>
           <Text style={type.tiny}><Text style={{ color: colors.accent, fontWeight: '700' }}>lime</Text> comes automatically</Text>
+          {half === 'primary' ? (
+            <DrillDropdown
+              label="In category" value={only ? catOf(only) : 'All eight'} set={Boolean(only)} width={240}
+              groups={[{ key: 'c', label: 'Categories', items: [
+                { key: '', label: 'All eight', on: !only },
+                ...tax.categories.filter((c) => c.active).map((c) => ({ key: c.key, label: c.label, on: c.key === only })),
+              ] }]}
+              startIn="c"
+              onPick={(k) => setOnly(k)}
+            />
+          ) : null}
+          {half === 'secondary' ? (
+            <Note>There is no secondary label called “outdoors”. Indoors is a yes or no, and outdoors is Indoors set to no. Outdoors the category is a kind of day out; indoors is a property of a place.</Note>
+          ) : null}
           {canManage && half === 'secondary' ? (
             adding ? (
               <>
@@ -2808,12 +3006,12 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
       ) : (
         <View>
           <View style={[styles.tRow, styles.tHeadSoft]}>
-            <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><Text style={styles.colHead}>Primary label</Text></View>
-            <View style={[styles.tCell, styles.headCell, { width: wide ? 200 : 120 }]}><Text style={styles.colHead}>Its category</Text></View>
+            <View style={[styles.tFirst, styles.headCell, { flex: 1, width: undefined }]}><SortHead by="name" label="Primary label" /></View>
+            <View style={[styles.tCell, styles.headCell, { width: wide ? 200 : 120 }]}><SortHead by="category" label="Its category" /></View>
             {wide ? <View style={[styles.tCell, styles.headCell, { width: 210 }]}><Text style={styles.colHead}>Also shown in</Text></View> : null}
-            <View style={[styles.tCell, styles.headCell, { width: wide ? 160 : 90 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Rules</Text></View>
+            <View style={[styles.tCell, styles.headCell, { width: wide ? 160 : 90 }]}><SortHead by="rules" label="Rules" right /></View>
           </View>
-          {primary.map((sc) => (
+          {primaryShown.map((sc) => (
             // Every primary label is a door. The handoff draws BO8 as the page
             // behind it — the rule that fills it on the left, twelve real
             // places on the right — and it was reachable from nowhere (owner,
@@ -2822,10 +3020,10 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
             <Press key={sc.key} effect="none" onPress={() => setOpenLabel(sc.key)} accessibilityRole="button"
                    style={({ hovered }: any) => [styles.wordRow, hovered && { backgroundColor: colors.well }]}>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={type.small}><Text style={{ fontWeight: '600' }}>{sc.label}</Text> <Text style={{ color: colors.inkMuted }}>{sc.key}</Text></Text>
+                <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{sc.label}</Text>
               </View>
               <View style={[styles.tCell, { width: wide ? 200 : 120 }]}>
-                <Text style={type.small}>{tax.categories.find((c) => c.key === sc.category_key)?.label ?? sc.category_key}</Text>
+                <Text style={type.small}>{catOf(sc.category_key)}</Text>
               </View>
               {wide ? (
                 <View style={[styles.tCell, { width: 210 }]}>
@@ -2874,16 +3072,7 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
         </View>
       ) : null}
 
-      {/* The refusal, on the screen because the argument for it is the kind that
-          gets forgotten and then made again. */}
-      <View style={styles.refusal}>
-        <Text style={[styles.bandKicker, { color: colors.overrun }]}>One label that will not be made</Text>
-        <Text style={[type.small, { color: colors.inkMuted, lineHeight: 19 }]}>
-          <Text style={{ color: colors.ink, fontWeight: '700' }}>There is no secondary label called “outdoors”. </Text>
-          Indoors already exists as a yes or no, and outdoors is simply Indoors set to no. The Outdoors category is a kind of
-          day out; Indoors is a property of a place. Two different things that were about to share a word.
-        </Text>
-      </View>
+
     </View>
   );
 }
@@ -2897,13 +3086,13 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
  * adventure sports centre on none, so alphabetical order puts the pointless one
  * first. The default is by consequence and it stays that way.
  */
-function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, onDecide, onExamples, egKey, children }: {
+function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, onDecide, onExamples, onOpen, egKey, children }: {
   rows: TaxonomyLabel[]; tax: Taxonomy; wide: boolean;
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; busyKey: string | null;
   onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => void;
-  onExamples: (key: string) => void; egKey: string;
+  onExamples: (key: string) => void; onOpen: (key: string) => void; egKey: string;
   children?: (r: TaxonomyLabel) => React.ReactNode;
 }) {
   const [order, setOrder] = useQueryState<'places' | 'az' | 'oldest'>('order', 'places', asOneOf(['places', 'az', 'oldest'] as const, 'places'));
@@ -2931,9 +3120,12 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
       <View key={r.key}>
         <View style={[styles.wordRow, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Text style={type.small}><Text style={{ fontWeight: '600' }}>{r.label ?? r.key}</Text> <Text style={{ color: colors.inkMuted }}>{r.key}</Text></Text>
+            {/* The word opens; it does not unfold in place. Same as the other
+                lists on this screen (owner, 16 Sep 2026). */}
+            <Press effect="none" onPress={() => onOpen(r.key)} accessibilityRole="button" accessibilityLabel={`Open ${r.label ?? r.key}`}>
+              <Text style={[type.small, { fontWeight: '600', textDecorationLine: 'underline' }]} numberOfLines={1}>{r.label ?? r.key.replace(/_/g, ' ')}</Text>
+            </Press>
             {r.why ? <Text style={[type.tiny, { lineHeight: 16 }]}>{r.why}</Text> : null}
-            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples · one search, it costs'} onPress={() => onExamples(r.key)} /> : null}
           </View>
           <View style={[styles.tCell, { width: wide ? 90 : 60 }]}>
             <Text style={[type.small, { textAlign: 'center', fontVariant: ['tabular-nums'], color: r.seen_count ? colors.ink : colors.inkMuted }]}>{count(r.seen_count)}</Text>
@@ -4007,6 +4199,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           busyKey={busyKey}
           onDecide={(r, choice) => void decide(r, choice)}
           onExamples={(k) => { setEg(egKey === k ? '' : k); setWith(''); }}
+          onOpen={(k) => setWord(k)}
           egKey={egKey}
           children={(r) => (egKey === r.key ? <ExamplesPanel eg={eg} egBusy={egBusy} canManage={canManage} word={r} catLabel={catLabel} subLabel={subLabel} tax={tax} onChanged={onChanged} onRefetch={() => void loadEg(r.key)} /> : null)}
         />
@@ -4265,9 +4458,12 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                           Dog Park"). */}
                       <Press effect="none" onPress={() => setWord(r.key)} accessibilityRole="button"
                              accessibilityLabel={`Open ${r.label ?? r.key}`}>
-                        <Text style={type.small}>
-                          <Text style={{ fontWeight: '600', textDecorationLine: 'underline' }}>{r.label ?? r.key}</Text>
-                          <Text style={{ color: colors.inkMuted }}> {r.key}</Text>
+                        {/* The name, once. "Dog park dog_park" is the same word
+                            twice (owner, 16 Sep 2026: "I see dog park, and I see
+                            dog_park right next to it. That's duplication"). The
+                            raw key is on the word's own page. */}
+                        <Text style={[type.small, { fontWeight: '600', textDecorationLine: 'underline' }]} numberOfLines={1}>
+                          {r.label ?? r.key.replace(/_/g, ' ')}
                         </Text>
                       </Press>
                       {/* A reason only where it says something: the cuisine kept, or the
@@ -4284,7 +4480,10 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             {/* One live Google search, on a press — and the endpoint
                                 asks for manage_library, so a read-only admin is not
                                 offered a button that can only 403 (Codex, 13 Sep 2026). */}
-                            {canManage ? <TextAction label={egKey === r.key ? 'Hide examples' : 'Examples · one search, it costs'} onPress={() => { setEg(egKey === r.key ? '' : r.key); setWith(''); }} /> : null}
+                            {/* No examples on the row. The owner, 16 Sep 2026:
+                                "I see 'hide examples' or 'show examples.' I don't
+                                want any of that. I just want to be able to click
+                                through." Examples are on the word's own page. */}
                           </View>
                         );
                       })()}

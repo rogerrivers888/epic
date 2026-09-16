@@ -2451,9 +2451,10 @@ export const api = {
       said: { primary: string | null; secondary: { key: string; label: string; choice: string | null }[]; because: string; source: string } | null;
     }>('/api/admin/taxonomy/word', body),
   /** Every place the labels file into one drawer, with its secondary labels. */
-  taxonomyDrawer: (subcategory: string, state?: 'published' | 'candidate' | 'all') =>
+  /** A drawer's places, or the places carrying one provider word. */
+  taxonomyDrawer: (subcategory: string, state?: 'published' | 'candidate' | 'all', word?: string) =>
     request<{
-      subcategory: string; state: string;
+      subcategory: string; state: string; word?: string | null;
       attributes: PlaceAttribute[];
       places: {
         ref: string; name: string; region: string | null; website: string | null;
@@ -2467,7 +2468,7 @@ export const api = {
         /** The provider words it was filed by. */
         words: string[];
       }[];
-    }>(`/api/admin/taxonomy/drawer${qs({ subcategory, state })}`),
+    }>(`/api/admin/taxonomy/drawer${qs({ subcategory, state, word })}`),
   /** One secondary label, set on many places at once. */
   /** One label on many places, or several labels together in one act. */
   taxonomySetMany: (body: {
@@ -3082,6 +3083,8 @@ export type TaxonomyLabel = {
 export type SecondaryLabel = {
   key: string; label: string; kind: 'yesno' | 'range' | 'oneof';
   options: string[]; range_min: number | null; range_max: number | null; unit: string | null;
+  /** The categories this label is a question about; empty means all of them. */
+  only_in?: string[];
 };
 
 /** A handful of real places carrying one Google word, read live and never stored. */

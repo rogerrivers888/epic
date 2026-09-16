@@ -282,6 +282,9 @@ taxonomyRoutes.get('/labels', requires('view_library'), async (req, res, next) =
       secondary: attrs.list.filter((a) => a.active).map((a) => ({
         key: a.key, label: a.label, kind: a.kind, options: a.options ?? [],
         range_min: a.range_min, range_max: a.range_max, unit: a.unit,
+        // Which kinds of day out this label is a question about, so a word page
+        // can stop offering Cuisine under a dog park (owner, 15 Sep 2026).
+        only_in: a.only_in ?? [],
       })),
     });
   } catch (err) { next(err); }
@@ -375,11 +378,16 @@ const RENTED = new Set(['google', 'yelp', 'tripadvisor', 'foursquare']);
 taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) => {
   try {
     const subcategory = String(req.query.subcategory || '').trim();
-    if (!subcategory) throw bad('Which drawer?');
+    // Either a drawer's places, or the places carrying one provider word. The
+    // owner, 16 Sep 2026: "the attributes and what we hold in our database, or
+    // whatever logic you're applying to our labels, you should apply to all the
+    // other options on this page." A word page needs the same list.
+    const carrying = String(req.query.word || '').trim();
+    if (!subcategory && !carrying) throw bad('Which drawer?');
     const [tax, rules, vocab] = await Promise.all([
       taxonomy.taxonomy(), shelfRules.rules(), placeAttributes.attributes(),
     ]);
-    if (!tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
+    if (subcategory && !tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
     // Every page, not the first four thousand: the atlas is bigger than one
     // page and a drawer's list has to be the drawer (Codex, 15 Sep 2026).
     // The library, not the harvest. `candidate` rows are raw finds — many with
@@ -403,18 +411,27 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
     // place's drawer is worked out from its labels every time.
     const mine = all
       .map((a) => ({ a, ref: refOf(a), words: labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] }) }))
-      .filter(({ a, ref }) => ref && shelvesForAtlas({
-        ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
-      }, rules, tax.vocab).subcategory === subcategory);
+      .filter(({ a, ref, words }) => {
+        if (!ref) return false;
+        // A word's list is every place carrying that word, wherever it lands.
+        if (carrying) return words.includes(carrying);
+        return shelvesForAtlas({
+          ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
+        }, rules, tax.vocab).subcategory === subcategory;
+      });
     const own = await placeAttributes.valuesForMany(mine.map((x) => x.ref));
     // A label that is not a question for this kind of day out is not offered
     // here at all (owner, 16 Sep 2026: "Cuisine and dining relates to
     // restaurants. It should only appear if it's food and drink").
-    const here = tax.subByKey.get(subcategory)?.category_key ?? null;
+    const lands = carrying
+      ? (rules.find((r) => (r.labelList ?? []).some((l) => l.label === carrying))?.subcategory ?? null)
+      : subcategory;
+    const here = tax.subByKey.get(lands)?.category_key ?? null;
     const asks = (a) => !(a.only_in ?? []).length || (here && a.only_in.includes(here));
     res.json({
-      subcategory, state: state ?? 'all',
+      subcategory: subcategory || lands, state: state ?? 'all',
       attributes: vocab.list.filter((a) => a.active && asks(a)),
+      word: carrying || null,
       places: mine.map(({ a, ref, words }) => ({
         ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
         website: a.website ?? null,
@@ -438,7 +455,7 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
         words,
         // The same words it was filed by, so a label its own words carry shows
         // as carried rather than as unset (Codex, 15 Sep 2026).
-        values: placeAttributes.resolveFor({ subcategory, words }, own.get(ref) ?? new Map(), vocab),
+        values: placeAttributes.resolveFor({ subcategory: lands, words }, own.get(ref) ?? new Map(), vocab),
       })).sort((x, y) => String(x.name).localeCompare(String(y.name))),
     });
   } catch (err) { next(err); }
