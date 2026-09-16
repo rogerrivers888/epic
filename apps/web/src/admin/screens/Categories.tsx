@@ -1654,7 +1654,12 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
           <TextAction label="Clear" onPress={() => setTicked(new Set())} />
         </View>
       ) : null}
-      <View style={[styles.tRow, styles.tHeadSoft, styles.stick]}>
+      {/* The same gap between headings as between the cells under them. The
+          rows space their columns by 8 and the heading row spaced them by
+          nothing, so every column but the last drifted left of its own heading
+          (owner, 16 Sep 2026: "Place where indoors is not lined up with the
+          text below"). Measured on epic.day, not guessed. */}
+      <View style={[styles.tRow, styles.tHeadSoft, styles.stick, { gap: spacing.sm }]}>
         {canManage ? <View style={styles.tickCell} /> : null}
         <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}><Text style={styles.colHead}>Place</Text></View>
         {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={styles.colHead}>Where</Text></View> : null}
