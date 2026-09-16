@@ -1494,7 +1494,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState('');
   /** Which range is being typed — one place's, or every ticked one ('*'). */
-  const [range, setRange] = useState<{ ref: string; key: string; from: string; to: string } | null>(null);
+  const [range, setRange] = useState<{ ref: string; key: string; from: string; to: string; alsoClear?: string } | null>(null);
   /**
    * Columns asked for that nothing here says yet. Declared with the others,
    * above the early return: a hook after one is not run on every render and
@@ -1550,12 +1550,17 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   const ages = data.attributes.some((a) => a.key === 'kid-friendly' || a.key === 'suits-ages');
   const agesOf = (v: Record<string, AttributeValue>) => {
     const kid = v['kid-friendly']; const span = v['suits-ages'];
-    if (span && (span.from != null || span.to != null)) {
-      return { text: span.from != null && span.to != null ? `${span.from} to ${span.to}` : span.from != null ? `${span.from} and up` : `up to ${span.to}`, own: span.setAt === 'place' };
-    }
-    if (kid?.yesno === false) return { text: 'Not for children', own: kid.setAt === 'place' };
-    if (kid?.yesno === true) return { text: 'All ages', own: kid.setAt === 'place' };
-    return { text: '\u2014', own: false };
+    const spanText = span && (span.from != null || span.to != null)
+      ? (span.from != null && span.to != null ? `${span.from} to ${span.to}`
+        : span.from != null ? `${span.from} and up` : `up to ${span.to}`)
+      : null;
+    const kidText = kid?.yesno === false ? 'Not for children' : kid?.yesno === true ? 'All ages' : null;
+    // What the place itself says beats anything it inherits, which is the rule
+    // everywhere else: a place explicitly not for children was reading as its
+    // drawer's age range (Codex, 16 Sep 2026).
+    const mine = [span?.setAt === 'place' ? spanText : null, kid?.setAt === 'place' ? kidText : null].filter(Boolean);
+    if (mine.length) return { text: mine[0] as string, own: true };
+    return { text: spanText ?? kidText ?? '\u2014', own: false };
   };
   const needle = q.trim().toLowerCase();
   const rows = needle ? data.places.filter((p) => p.name.toLowerCase().includes(needle)) : data.places;
@@ -1592,7 +1597,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
           the ones that matter here are already shown. */}
       <Text style={[styles.h1, { paddingTop: spacing.xl }]}>{sc.label} we hold</Text>
       <View style={[styles.line, { gap: spacing.lg, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
-        <Field value={q} onChangeText={setQ} placeholder={`Find one of ${data.places.length}`} style={{ flex: 1, minWidth: 220 }} icon="search" />
+        <Field value={q} onChangeText={(t) => { setQ(t); setPage(0); }} placeholder={`Find one of ${data.places.length}`} style={{ flex: 1, minWidth: 220 }} icon="search" />
         <Choice label={state === 'all' ? 'Everything harvested' : 'In the library'} on={state === 'all'}
                 onPress={() => setState(state === 'all' ? 'published' : 'all')} />
       </View>
@@ -1616,7 +1621,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
               extra={[{ key: '\u2717', label: 'Back to what they inherit', on: false }]}
               onPick={(k) => {
                 if (busy) return;
-                if (k === 'span') { setRange({ ref: '*', key: 'suits-ages', from: '', to: '' }); return; }
+                if (k === 'span') { setRange({ ref: '*', key: 'suits-ages', from: '', to: '', alsoClear: 'kid-friendly' }); return; }
                 const refs = [...ticked];
                 void (async () => {
                   setBusy(true);
@@ -1724,7 +1729,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
                     extra={a.own ? [{ key: '\u2717', label: 'Back to what it inherits', on: false }] : []}
                     onPick={(k) => {
                       if (busy) return;
-                      if (k === 'span') { setRange({ ref: pl.ref, key: 'suits-ages', from: '', to: '' }); return; }
+                      if (k === 'span') { setRange({ ref: pl.ref, key: 'suits-ages', from: '', to: '', alsoClear: 'kid-friendly' }); return; }
                       void (async () => {
                         setBusy(true);
                         try {
@@ -1781,8 +1786,16 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
             void (async () => {
               setBusy(true);
               try {
-                if (range.ref === '*') await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value });
-                else await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value });
+                // An age range is the answer, so the yes/no behind it goes: a
+                // place left "Not for children" *and* 3 to 14 says two things
+                // (Codex, 16 Sep 2026).
+                if (range.ref === '*') {
+                  if (range.alsoClear) await api.taxonomySetMany({ attribute: range.alsoClear, refs: [...ticked], value: null });
+                  await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value });
+                } else {
+                  if (range.alsoClear) await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.alsoClear, value: null });
+                  await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value });
+                }
                 setRange(null); if (range.ref === '*') setTicked(new Set());
                 again();
                 await onChanged('Set.');
