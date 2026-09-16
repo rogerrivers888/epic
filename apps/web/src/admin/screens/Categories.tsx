@@ -1500,7 +1500,8 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
    * above the early return: a hook after one is not run on every render and
    * React loses track of which state is which (Codex, 16 Sep 2026).
    */
-  const [extraCols, setExtraCols] = useState<string[]>([]);
+  /** How far down the list we are. 256 rows is a scroll, not a page. */
+  const [page, setPage] = useState(0);
 
   /** The library by default; the raw harvest only if asked for. */
   const [state, setState] = useState<'published' | 'all'>('published');
@@ -1535,18 +1536,34 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   if (!data) return null;
   /**
    * A column for every label that says something here, and none that does not.
+   * The server has already dropped the ones that are not a question for this
+   * kind of day out; this drops the ones nothing here has an answer for.
    *
-   * Museums were being given a Cuisine column and a Dining style column, every
-   * cell an em dash, for the same reason the drawer's own list was: I showed all
-   * seven rather than the ones that mean anything for this drawer. A label
-   * counts if the drawer assumes it, if any place here says it, or if he adds
-   * the column himself.
+   * Children are one column, not two. The owner, 16 Sep 2026: "Suits ages is
+   * conditional. If I select kid-friendly yes, then suits ages should always
+   * appear, or maybe it's just one column: kid-friendly all, or then an age
+   * range." So the cell reads All ages, or the range, or Not for children.
    */
-  const says = new Set(extraCols);
+  const says = new Set<string>();
   for (const pl of data.places) for (const [k, v] of Object.entries(pl.values)) if (v) says.add(k);
-  const cols = data.attributes.filter((a) => says.has(a.key));
+  const cols = data.attributes.filter((a) => says.has(a.key) && a.key !== 'kid-friendly' && a.key !== 'suits-ages');
+  const ages = data.attributes.some((a) => a.key === 'kid-friendly' || a.key === 'suits-ages');
+  const agesOf = (v: Record<string, AttributeValue>) => {
+    const kid = v['kid-friendly']; const span = v['suits-ages'];
+    if (span && (span.from != null || span.to != null)) {
+      return { text: span.from != null && span.to != null ? `${span.from} to ${span.to}` : span.from != null ? `${span.from} and up` : `up to ${span.to}`, own: span.setAt === 'place' };
+    }
+    if (kid?.yesno === false) return { text: 'Not for children', own: kid.setAt === 'place' };
+    if (kid?.yesno === true) return { text: 'All ages', own: kid.setAt === 'place' };
+    return { text: '\u2014', own: false };
+  };
   const needle = q.trim().toLowerCase();
   const rows = needle ? data.places.filter((p) => p.name.toLowerCase().includes(needle)) : data.places;
+  // 256 rows is a scroll, not a page.
+  const PER = 50;
+  const pages = Math.max(1, Math.ceil(rows.length / PER));
+  const at = Math.min(page, pages - 1);
+  const shown = rows.slice(at * PER, at * PER + PER);
 
   const reads = (v?: AttributeValue) => (!v ? '\u2014'
     : v.choice ? v.choice
@@ -1568,19 +1585,16 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
 
   return (
     <View style={{ gap: 0 }}>
-      <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
-        <Text style={[styles.h2, { flex: 1, minWidth: 0 }]}>{sc.label} we hold · {data.places.length}</Text>
+      {/* The list is the point of this section, so its heading is a heading and
+          its controls are a row of their own (owner, 16 Sep 2026: "List and
+          search should probably be a first-class citizen. Museums we hold
+          should be a bit bigger"). No Add-a-column: there are seven labels and
+          the ones that matter here are already shown. */}
+      <Text style={[styles.h1, { paddingTop: spacing.xl }]}>{sc.label} we hold</Text>
+      <View style={[styles.line, { gap: spacing.lg, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
+        <Field value={q} onChangeText={setQ} placeholder={`Find one of ${data.places.length}`} style={{ flex: 1, minWidth: 220 }} icon="search" />
         <Choice label={state === 'all' ? 'Everything harvested' : 'In the library'} on={state === 'all'}
                 onPress={() => setState(state === 'all' ? 'published' : 'all')} />
-        {canManage && data.attributes.some((a) => !says.has(a.key)) ? (
-          <DrillDropdown
-            label="Column" showLabel={false} value="+ Add a column" width={240}
-            groups={[{ key: 'c', label: 'Our secondary labels', items: data.attributes.filter((a) => !says.has(a.key)).map((a) => ({ key: a.key, label: a.label, on: false })) }]}
-            startIn="c"
-            onPick={(k) => setExtraCols((x) => [...x, k])}
-          />
-        ) : null}
-        <Field value={q} onChangeText={setQ} placeholder="Find one" style={{ minWidth: 160 }} icon="search" />
       </View>
       {/* One label, changed on everything ticked. */}
       {canManage && ticked.size ? (
@@ -1590,6 +1604,38 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
             <TextAction key={a.key} label={a.label} disabled={busy}
                         onPress={() => setRange({ ref: '*', key: a.key, from: '', to: '' })} />
           ))}
+          {ages ? (
+            <DrillDropdown
+              label="Ages" value="Ages" width={240}
+              groups={[{ key: 'ages', label: 'Who it suits', items: [
+                { key: 'all', label: 'All ages', on: false },
+                { key: 'none', label: 'Not for children', on: false },
+                { key: 'span', label: 'An age range\u2026', on: false },
+              ] }]}
+              startIn="ages"
+              extra={[{ key: '\u2717', label: 'Back to what they inherit', on: false }]}
+              onPick={(k) => {
+                if (busy) return;
+                if (k === 'span') { setRange({ ref: '*', key: 'suits-ages', from: '', to: '' }); return; }
+                const refs = [...ticked];
+                void (async () => {
+                  setBusy(true);
+                  try {
+                    if (k === '\u2717') {
+                      await api.taxonomySetMany({ attribute: 'kid-friendly', refs, value: null });
+                      await api.taxonomySetMany({ attribute: 'suits-ages', refs, value: null });
+                    } else {
+                      await api.taxonomySetMany({ attribute: 'suits-ages', refs, value: null });
+                      await api.taxonomySetMany({ attribute: 'kid-friendly', refs, value: { yesno: k === 'all' } });
+                    }
+                    setTicked(new Set()); again();
+                    await onChanged(`${refs.length} set.`);
+                  } catch (err) { await onChanged(String((err as Error).message)); }
+                  finally { setBusy(false); }
+                })();
+              }}
+            />
+          ) : null}
           {cols.filter((a) => a.kind !== 'range').map((a) => (
             <DrillDropdown
               key={a.key} label={a.label} value={a.label} width={240}
@@ -1611,8 +1657,9 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
         {cols.map((a) => (
           <View key={a.key} style={[styles.tCell, { width: 116 }]}><Text style={[styles.colHead, { textAlign: 'right' }]} numberOfLines={2}>{a.label}</Text></View>
         ))}
+        {ages ? <View style={[styles.tCell, { width: 140 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Ages</Text></View> : null}
       </View>
-      {rows.map((pl) => (
+      {shown.map((pl) => (
         <View key={pl.ref} style={styles.wordRow}>
           {canManage ? (
             <Press effect="none" onPress={() => setTicked((prev) => { const n = new Set(prev); if (n.has(pl.ref)) n.delete(pl.ref); else n.add(pl.ref); return n; })}
@@ -1661,9 +1708,56 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
               </View>
             );
           })}
+          {ages ? (() => {
+            const a = agesOf(pl.values);
+            return (
+              <View style={[styles.tCell, { width: 140, alignItems: 'flex-end' }]}>
+                {canManage ? (
+                  <DrillDropdown
+                    label="Ages" showLabel={false} value={a.text} set={a.text !== '\u2014' && !a.own} align="right" width={240}
+                    groups={[{ key: 'ages', label: 'Who it suits', items: [
+                      { key: 'all', label: 'All ages', on: a.text === 'All ages' },
+                      { key: 'none', label: 'Not for children', on: a.text === 'Not for children' },
+                      { key: 'span', label: 'An age range\u2026', on: false },
+                    ] }]}
+                    startIn="ages"
+                    extra={a.own ? [{ key: '\u2717', label: 'Back to what it inherits', on: false }] : []}
+                    onPick={(k) => {
+                      if (busy) return;
+                      if (k === 'span') { setRange({ ref: pl.ref, key: 'suits-ages', from: '', to: '' }); return; }
+                      void (async () => {
+                        setBusy(true);
+                        try {
+                          // One answer, written as the two labels behind it: an
+                          // age range replaces "all ages", and clearing clears
+                          // both (owner, 16 Sep 2026: "maybe it's just 1 column").
+                          if (k === '\u2717') {
+                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'kid-friendly', value: null });
+                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'suits-ages', value: null });
+                          } else {
+                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'suits-ages', value: null });
+                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'kid-friendly', value: { yesno: k === 'all' } });
+                          }
+                          again();
+                          await onChanged(`${pl.name}: ${k === '\u2717' ? 'ages back to what it inherits' : k === 'all' ? 'all ages' : 'not for children'}.`);
+                        } finally { setBusy(false); }
+                      })();
+                    }}
+                  />
+                ) : <Text style={[type.small, a.text !== '\u2014' && !a.own ? { color: colors.accent } : null]}>{a.text}</Text>}
+              </View>
+            );
+          })() : null}
         </View>
       ))}
       {!rows.length ? <Text style={[type.small, styles.emptyRow]}>Nothing matches.</Text> : null}
+      {pages > 1 ? (
+        <View style={[styles.line, { gap: spacing.lg, paddingTop: spacing.md }]}>
+          <TextAction label="Back" tone="muted" disabled={at === 0} onPress={() => setPage(at - 1)} />
+          <Text style={type.small}>{at * PER + 1}–{Math.min(rows.length, (at + 1) * PER)} of {rows.length}</Text>
+          <TextAction label="Next" disabled={at >= pages - 1} onPress={() => setPage(at + 1)} />
+        </View>
+      ) : null}
       {/* Two numbers, for the one kind of label that takes them. */}
       {range ? (
         <View style={[styles.line, { gap: spacing.sm, paddingTop: spacing.sm }]}>
@@ -1848,6 +1942,36 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                 onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
               />
             ) : <Text style={styles.bandValue}>{cat?.label ?? sc.category_key}</Text>}
+          </View>
+          {/* Where else it is listed, beside where it lives (owner, 16 Sep 2026:
+              "In the top right-hand corner, we got category. You should add
+              subcategory there"). It grows as menus are added. */}
+          <View style={styles.bandStat}>
+            <Text style={styles.bandKicker}>Also listed in</Text>
+            <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+              {(sc.also_in ?? []).map((k) => {
+                const nm = tax.categories.find((c) => c.key === k)?.label ?? k;
+                return (
+                  <View key={k} style={[styles.line, { gap: 5 }]}>
+                    <Text style={styles.bandValue}>{nm}</Text>
+                    {canManage ? (
+                      <Press onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: (sc.also_in ?? []).filter((x) => x !== k) }), `${sc.label} no longer shows in ${nm}.`)}
+                             hitSlop={8} accessibilityLabel={`Stop showing it in ${nm}`}>
+                        <Icon name="close" size={13} color={colors.inkMuted} />
+                      </Press>
+                    ) : null}
+                  </View>
+                );
+              })}
+              {canManage ? (
+                <DrillDropdown
+                  label="Add" showLabel={false} value={(sc.also_in ?? []).length ? '+' : '+ Add'} width={240}
+                  groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active && c.key !== sc.category_key && !(sc.also_in ?? []).includes(c.key)).map((c) => ({ key: c.key, label: c.label, on: false })) }]}
+                  startIn="c"
+                  onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: [...(sc.also_in ?? []), k as MoodKey] }), `${sc.label} also shows in ${tax.categories.find((c) => c.key === k)?.label ?? k}.`)}
+                />
+              ) : (sc.also_in ?? []).length ? null : <Text style={styles.bandValue}>—</Text>}
+            </View>
           </View>
           <View style={styles.bandStat}>
             <Text style={styles.bandKicker}>Switched on</Text>
@@ -2086,39 +2210,6 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
             />
           ) : null}
 
-          {/* Its own section, with a heading that says what it is. It read as
-              a footnote under Category and he asked what it was: "Is that
-              supposed to be secondary labels? If so, why does it not say that?
-              That should just be a separate section." It is not secondary
-              labels — it is which menus list the drawer. */}
-          <Text style={styles.h2}>Which other menus list it</Text>
-          <View style={styles.wordRow}>
-            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'center' }}>
-              {(sc.also_in ?? []).map((k) => {
-                const name = tax.categories.find((c) => c.key === k)?.label ?? k;
-                return (
-                  <View key={k} style={[styles.line, { gap: 5 }]}>
-                    <Text style={[type.small, { fontWeight: '600' }]}>{name}</Text>
-                    {canManage ? (
-                      <Press onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: (sc.also_in ?? []).filter((x) => x !== k) }), `${sc.label} no longer shows in ${name}.`)}
-                             hitSlop={8} accessibilityLabel={`Stop showing it in ${name}`}>
-                        <Icon name="close" size={13} color={colors.inkMuted} />
-                      </Press>
-                    ) : null}
-                  </View>
-                );
-              })}
-              {!(sc.also_in ?? []).length ? <Text style={[type.small, { color: colors.inkMuted }]}>Only {cat?.label ?? sc.category_key}.</Text> : null}
-              {canManage ? (
-                <DrillDropdown
-                  label="Add" showLabel={false} value="+ Add a menu" align="left" width={240}
-                  groups={[{ key: 'c', label: 'Categories', items: tax.categories.filter((c) => c.active && c.key !== sc.category_key && !(sc.also_in ?? []).includes(c.key)).map((c) => ({ key: c.key, label: c.label, on: false })) }]}
-                  startIn="c"
-                  onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, alsoIn: [...(sc.also_in ?? []), k as MoodKey] }), `${sc.label} also shows in ${tax.categories.find((c) => c.key === k)?.label ?? k}.`)}
-                />
-              ) : null}
-            </View>
-          </View>
         </View>
 
         {/* ---- what would land here, before you save -------------------- */}
@@ -4352,6 +4443,8 @@ const styles = StyleSheet.create({
    * down from the bar above."
    */
   h2: { ...type.small, fontSize: 16, lineHeight: 21, fontWeight: '700', color: colors.ink, paddingTop: spacing.xl, paddingBottom: spacing.sm },
+  /** The heading over a whole section of its own, like the list of places. */
+  h1: { ...type.small, fontSize: 21, lineHeight: 27, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, paddingBottom: spacing.md },
   ruleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, flexWrap: 'wrap' },
   landedIn: { gap: 2, paddingLeft: spacing.md, paddingVertical: 8, borderLeftWidth: 2, borderLeftColor: colors.line, marginLeft: spacing.md, marginBottom: spacing.sm },
   /** A consequence — a lime left rule and no fill (the handoff's colour roles). */

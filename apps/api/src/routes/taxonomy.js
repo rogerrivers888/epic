@@ -399,9 +399,14 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
         ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
       }, rules, tax.vocab).subcategory === subcategory);
     const own = await placeAttributes.valuesForMany(mine.map((x) => x.ref));
+    // A label that is not a question for this kind of day out is not offered
+    // here at all (owner, 16 Sep 2026: "Cuisine and dining relates to
+    // restaurants. It should only appear if it's food and drink").
+    const here = tax.subByKey.get(subcategory)?.category_key ?? null;
+    const asks = (a) => !(a.only_in ?? []).length || (here && a.only_in.includes(here));
     res.json({
       subcategory, state: state ?? 'all',
-      attributes: vocab.list.filter((a) => a.active),
+      attributes: vocab.list.filter((a) => a.active && asks(a)),
       places: mine.map(({ a, ref, words }) => ({
         ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
         website: a.website ?? null,
