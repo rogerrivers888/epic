@@ -1752,8 +1752,15 @@ function DrawerPlaces({ sc, word, title, canManage, wide, onChanged }: {
   /** How far down the list we are. 256 rows is a scroll, not a page. */
   const [page, setPage] = useState(0);
 
-  /** The library by default; the raw harvest only if asked for. */
-  const [state, setState] = useState<'published' | 'all'>('published');
+  /**
+   * The library by default; the raw harvest only if asked for.
+   *
+   * Except for a word's list. Our library is built from Wikidata and OSM, so a
+   * published place carries `wikidata:` and `atlas:` words and never a
+   * `google:` one — the places Google gave this word to are all in the harvest,
+   * and opening on the library would always show an empty table.
+   */
+  const [state, setState] = useState<'published' | 'all'>(word ? 'all' : 'published');
   // The answer is only drawn if it is still the list that was asked for: the
   // whole harvest is slow and a fast reply for the library could land after it
   // (Codex, 15 Sep 2026).
@@ -1856,6 +1863,9 @@ function DrawerPlaces({ sc, word, title, canManage, wide, onChanged }: {
           should be a bit bigger"). No Add-a-column: there are seven labels and
           the ones that matter here are already shown. */}
       <Text style={[styles.h1, { paddingTop: spacing.xl }]}>{title}</Text>
+      {word && !data.places.length && !loading ? (
+        <Text style={[type.small, { color: colors.inkMuted }]}>No place we hold carries this word yet.</Text>
+      ) : null}
       <View style={[styles.line, { gap: spacing.lg, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
         <Field value={q} onChangeText={(t) => { setQ(t); setPage(0); }} placeholder={`Find one of ${data.places.length}`} style={{ flex: 1, minWidth: 220 }} icon="search" />
         {/* Two choices, each naming itself. One control captioned with the

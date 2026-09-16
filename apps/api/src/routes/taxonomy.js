@@ -423,8 +423,11 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
     // A label that is not a question for this kind of day out is not offered
     // here at all (owner, 16 Sep 2026: "Cuisine and dining relates to
     // restaurants. It should only appear if it's food and drink").
+    // Where one word lands is the resolver's answer, asked of a place carrying
+    // only that word — not a scan of the rule rows, which are keyed by scope
+    // and subject rather than being a list.
     const lands = carrying
-      ? (rules.find((r) => (r.labelList ?? []).some((l) => l.label === carrying))?.subcategory ?? null)
+      ? (shelvesForAtlas({ ref: `word:${carrying}`, category: null, kinds: [], labels: [carrying] }, rules, tax.vocab).subcategory ?? null)
       : subcategory;
     const here = tax.subByKey.get(lands)?.category_key ?? null;
     const asks = (a) => !(a.only_in ?? []).length || (here && a.only_in.includes(here));
