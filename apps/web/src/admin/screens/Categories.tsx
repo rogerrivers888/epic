@@ -1965,6 +1965,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
         <View style={styles.bandStats}>
           <View style={styles.bandStat}>
             <Text style={styles.bandKicker}>Category</Text>
+            <View style={styles.bandControl}>
             {canManage ? (
               <DrillDropdown
                 label="Category" showLabel={false} value={cat?.label ?? sc.category_key} align="right" width={240}
@@ -1973,13 +1974,14 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
                 onPick={(k) => void run(() => api.shelfSaveSubcategory({ id: sc.id, categoryKey: k }), `${sc.label} sits in ${tax.categories.find((c) => c.key === k)?.label ?? k} now \u2014 and every place in it with it.`)}
               />
             ) : <Text style={styles.bandValue}>{cat?.label ?? sc.category_key}</Text>}
+            </View>
           </View>
           {/* Where else it is listed, beside where it lives (owner, 16 Sep 2026:
               "In the top right-hand corner, we got category. You should add
               subcategory there"). It grows as menus are added. */}
           <View style={styles.bandStat}>
             <Text style={styles.bandKicker}>Also listed in</Text>
-            <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+            <View style={[styles.line, styles.bandControl, { gap: spacing.md, flexWrap: 'wrap' }]}>
               {(sc.also_in ?? []).map((k) => {
                 const nm = tax.categories.find((c) => c.key === k)?.label ?? k;
                 return (
@@ -4568,7 +4570,9 @@ const styles = StyleSheet.create({
   /** 31px is the wide title; the handoff draws 390 as its own artboard at 24 (BO1m). */
   bandTitlePhone: { fontSize: 24, letterSpacing: -0.8, lineHeight: 27 },
   bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
-  // The height every control in the band shares, so they read as one line.
+  // The height every control in the band shares, so they read as one line --
+  // whether the value is a dropdown, a switch or, for a reader who cannot
+  // change it, plain text (Codex, 16 Sep 2026).
   bandControl: { minHeight: 32, justifyContent: 'center' },
   // Sentence case, not capitals (owner, 15 Sep 2026: "I don't like these
   // capital letters either. Just normal camel caps, please").
