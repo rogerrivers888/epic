@@ -1981,7 +1981,7 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
               subcategory there"). It grows as menus are added. */}
           <View style={styles.bandStat}>
             <Text style={styles.bandKicker}>Also listed in</Text>
-            <View style={[styles.line, styles.bandControl, { gap: spacing.md, flexWrap: 'wrap' }]}>
+            <View style={[styles.line, styles.bandRow, { gap: spacing.md, flexWrap: 'wrap' }]}>
               {(sc.also_in ?? []).map((k) => {
                 const nm = tax.categories.find((c) => c.key === k)?.label ?? k;
                 return (
@@ -4574,6 +4574,10 @@ const styles = StyleSheet.create({
   // whether the value is a dropdown, a switch or, for a reader who cannot
   // change it, plain text (Codex, 16 Sep 2026).
   bandControl: { minHeight: 32, justifyContent: 'center' },
+  // The same height for a slot that lays its contents out in a row, where
+  // justifyContent would centre them across the band instead (Codex,
+  // 16 Sep 2026). `line` already centres them the way that matters.
+  bandRow: { minHeight: 32 },
   // Sentence case, not capitals (owner, 15 Sep 2026: "I don't like these
   // capital letters either. Just normal camel caps, please").
   bandKicker: { ...type.tiny, fontWeight: '700', color: colors.inkMuted },
