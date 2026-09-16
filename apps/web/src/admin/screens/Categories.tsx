@@ -1656,7 +1656,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
       ) : null}
       <View style={[styles.tRow, styles.tHeadSoft, styles.stick]}>
         {canManage ? <View style={styles.tickCell} /> : null}
-        <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.colHead}>Place</Text></View>
+        <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}><Text style={styles.colHead}>Place</Text></View>
         {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={styles.colHead}>Where</Text></View> : null}
         {/* A heading sits over its own answers. Under a heading is either a
             dropdown -- value, then a 5px gap, then a 12px chevron -- or plain
@@ -1685,7 +1685,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
               </View>
             </Press>
           ) : null}
-          <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}>
             <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name}</Text>
             {!wide && pl.region ? <Text style={type.tiny} numberOfLines={1}>{pl.region}</Text> : null}
           </View>
@@ -4577,7 +4577,7 @@ const styles = StyleSheet.create({
   // The same height for a slot that lays its contents out in a row, where
   // justifyContent would centre them across the band instead (Codex,
   // 16 Sep 2026). `line` already centres them the way that matters.
-  bandRow: { minHeight: 32 },
+  bandRow: { minHeight: 32, paddingVertical: 0 },
   // Sentence case, not capitals (owner, 15 Sep 2026: "I don't like these
   // capital letters either. Just normal camel caps, please").
   bandKicker: { ...type.tiny, fontWeight: '700', color: colors.inkMuted },
