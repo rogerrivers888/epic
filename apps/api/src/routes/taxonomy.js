@@ -425,17 +425,23 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
  */
 taxonomyRoutes.put('/drawer', requires('manage_library'), async (req, res, next) => {
   try {
-    const attribute = String(req.body?.attribute || '').trim();
     const refs = Array.isArray(req.body?.refs) ? req.body.refs.map(String).slice(0, 2000) : [];
-    if (!attribute || !refs.length) throw bad('Which label, and on which places?');
-    const value = req.body?.value ?? null;
-    // Checked once, before anything is written: every place gets the same value,
-    // so a bad one should fail before the first of two thousand writes.
-    if (value != null) await placeAttributes.mustFit(attribute, value);
+    // One label, or several set together. "All ages" and "3 to 14" are two
+    // labels behind one answer, and writing them one request at a time left a
+    // place with neither when the second failed (Codex, 16 Sep 2026).
+    const set = Array.isArray(req.body?.set)
+      ? req.body.set.map((x) => ({ attribute: String(x?.attribute ?? '').trim(), value: x?.value ?? null }))
+      : [{ attribute: String(req.body?.attribute || '').trim(), value: req.body?.value ?? null }];
+    if (!refs.length || set.some((x) => !x.attribute)) throw bad('Which label, and on which places?');
+    // Checked before anything is written: every place gets the same values, so a
+    // bad one should fail before the first of two thousand writes.
+    for (const x of set) if (x.value != null) await placeAttributes.mustFit(x.attribute, x.value);
     for (const ref of refs) {
-      await placeAttributes.setValue(ref, attribute, value, { reason: req.body?.reason ?? null, by: actorOf(req) });
+      for (const x of set) {
+        await placeAttributes.setValue(ref, x.attribute, x.value, { reason: req.body?.reason ?? null, by: actorOf(req) });
+      }
     }
-    res.json({ changed: refs.length, attribute });
+    res.json({ changed: refs.length, set: set.map((x) => x.attribute) });
   } catch (err) { next(err); }
 });
 

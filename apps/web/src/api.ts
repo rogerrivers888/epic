@@ -2458,8 +2458,12 @@ export const api = {
       places: { ref: string; name: string; region: string | null; website: string | null; values: Record<string, AttributeValue> }[];
     }>(`/api/admin/taxonomy/drawer${qs({ subcategory, state })}`),
   /** One secondary label, set on many places at once. */
-  taxonomySetMany: (body: { attribute: string; refs: string[]; value: AttributeValue | null; reason?: string | null }) =>
-    put<{ changed: number; attribute: string }>('/api/admin/taxonomy/drawer', body),
+  /** One label on many places, or several labels together in one act. */
+  taxonomySetMany: (body: {
+    refs: string[]; reason?: string | null;
+    attribute?: string; value?: AttributeValue | null;
+    set?: { attribute: string; value: AttributeValue | null }[];
+  }) => put<{ changed: number; set: string[] }>('/api/admin/taxonomy/drawer', body),
   /** Put places already on screen on the not-sure list, with no provider call. */
   taxonomyQueueNotSure: (body: { subcategory: string | null; places: { ref: string; name: string | null; address: string | null; words: string[]; reason?: string }[] }) =>
     post<{ queued: number }>('/api/admin/taxonomy/not-sure/queue', body),

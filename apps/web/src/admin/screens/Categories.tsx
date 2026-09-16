@@ -1580,7 +1580,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
     if (!refs.length) return;
     setBusy(true);
     try {
-      await api.taxonomySetMany({ attribute: a.key, refs, value });
+      await api.taxonomySetMany({ refs, set: [{ attribute: a.key, value }] });
       setTicked(new Set());
       again();
       await onChanged(value ? `${refs.length} set to ${a.label} \u00b7 ${reads(value)}.` : `${a.label} cleared on ${refs.length}.`);
@@ -1626,13 +1626,12 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
                 void (async () => {
                   setBusy(true);
                   try {
-                    if (k === '\u2717') {
-                      await api.taxonomySetMany({ attribute: 'kid-friendly', refs, value: null });
-                      await api.taxonomySetMany({ attribute: 'suits-ages', refs, value: null });
-                    } else {
-                      await api.taxonomySetMany({ attribute: 'suits-ages', refs, value: null });
-                      await api.taxonomySetMany({ attribute: 'kid-friendly', refs, value: { yesno: k === 'all' } });
-                    }
+                    await api.taxonomySetMany({
+                      refs,
+                      set: k === '\u2717'
+                        ? [{ attribute: 'kid-friendly', value: null }, { attribute: 'suits-ages', value: null }]
+                        : [{ attribute: 'suits-ages', value: null }, { attribute: 'kid-friendly', value: { yesno: k === 'all' } }],
+                    });
                     setTicked(new Set()); again();
                     await onChanged(`${refs.length} set.`);
                   } catch (err) { await onChanged(String((err as Error).message)); }
@@ -1736,13 +1735,15 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
                           // One answer, written as the two labels behind it: an
                           // age range replaces "all ages", and clearing clears
                           // both (owner, 16 Sep 2026: "maybe it's just 1 column").
-                          if (k === '\u2717') {
-                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'kid-friendly', value: null });
-                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'suits-ages', value: null });
-                          } else {
-                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'suits-ages', value: null });
-                            await api.taxonomySetPlaceLabel({ ref: pl.ref, attribute: 'kid-friendly', value: { yesno: k === 'all' } });
-                          }
+                          // Both labels in one request, because they are one
+                          // answer: writing them separately left a place with
+                          // neither when the second failed (Codex, 16 Sep 2026).
+                          await api.taxonomySetMany({
+                            refs: [pl.ref],
+                            set: k === '\u2717'
+                              ? [{ attribute: 'kid-friendly', value: null }, { attribute: 'suits-ages', value: null }]
+                              : [{ attribute: 'suits-ages', value: null }, { attribute: 'kid-friendly', value: { yesno: k === 'all' } }],
+                          });
                           again();
                           await onChanged(`${pl.name}: ${k === '\u2717' ? 'ages back to what it inherits' : k === 'all' ? 'all ages' : 'not for children'}.`);
                         } finally { setBusy(false); }
@@ -1789,13 +1790,13 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
                 // An age range is the answer, so the yes/no behind it goes: a
                 // place left "Not for children" *and* 3 to 14 says two things
                 // (Codex, 16 Sep 2026).
-                if (range.ref === '*') {
-                  if (range.alsoClear) await api.taxonomySetMany({ attribute: range.alsoClear, refs: [...ticked], value: null });
-                  await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value });
-                } else {
-                  if (range.alsoClear) await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.alsoClear, value: null });
-                  await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value });
-                }
+                await api.taxonomySetMany({
+                  refs: range.ref === '*' ? [...ticked] : [range.ref],
+                  set: [
+                    ...(range.alsoClear ? [{ attribute: range.alsoClear, value: null }] : []),
+                    { attribute: range.key, value },
+                  ],
+                });
                 setRange(null); if (range.ref === '*') setTicked(new Set());
                 again();
                 await onChanged('Set.');
@@ -1807,8 +1808,13 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
             void (async () => {
               setBusy(true);
               try {
-                if (range.ref === '*') await api.taxonomySetMany({ attribute: range.key, refs: [...ticked], value: null });
-                else await api.taxonomySetPlaceLabel({ ref: range.ref, attribute: range.key, value: null });
+                await api.taxonomySetMany({
+                  refs: range.ref === '*' ? [...ticked] : [range.ref],
+                  set: [
+                    ...(range.alsoClear ? [{ attribute: range.alsoClear, value: null }] : []),
+                    { attribute: range.key, value: null },
+                  ],
+                });
                 setRange(null); again(); await onChanged('Back to what it inherits.');
               } finally { setBusy(false); }
             })();
