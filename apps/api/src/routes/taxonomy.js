@@ -408,27 +408,29 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
       ?? (a.external_ref ? String(a.external_ref) : null)
       ?? (a.slug ? `atlas:${a.slug}` : null);
     // Where each one lands is the resolver's answer, not a stored column: a
-    // place's drawer is worked out from its labels every time.
-    const mine = all
+    // place's drawer is worked out from its labels every time. Where one *word*
+    // lands is the same question, asked of a place carrying only that word --
+    // not a scan of the rule rows, which are keyed by scope and subject rather
+    // than being a list.
+    //
+    // And a word's places *are* that drawer's places. No attraction keeps the
+    // provider's own word: a swept Google row is stored as `atlas:museum`, so
+    // "every place carrying google:museum" would be empty for all 485 words.
+    // What a word honestly has behind it is the drawer it feeds (16 Sep 2026,
+    // proved against production before this was written).
+    const lands = carrying
+      ? (shelvesForAtlas({ ref: `word:${carrying}`, category: null, kinds: [], labels: [carrying] }, rules, tax.vocab).subcategory ?? null)
+      : subcategory;
+
+    const mine = lands ? all
       .map((a) => ({ a, ref: refOf(a), words: labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] }) }))
-      .filter(({ a, ref, words }) => {
-        if (!ref) return false;
-        // A word's list is every place carrying that word, wherever it lands.
-        if (carrying) return words.includes(carrying);
-        return shelvesForAtlas({
-          ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
-        }, rules, tax.vocab).subcategory === subcategory;
-      });
+      .filter(({ a, ref }) => ref && shelvesForAtlas({
+        ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
+      }, rules, tax.vocab).subcategory === lands) : [];
     const own = await placeAttributes.valuesForMany(mine.map((x) => x.ref));
     // A label that is not a question for this kind of day out is not offered
     // here at all (owner, 16 Sep 2026: "Cuisine and dining relates to
     // restaurants. It should only appear if it's food and drink").
-    // Where one word lands is the resolver's answer, asked of a place carrying
-    // only that word — not a scan of the rule rows, which are keyed by scope
-    // and subject rather than being a list.
-    const lands = carrying
-      ? (shelvesForAtlas({ ref: `word:${carrying}`, category: null, kinds: [], labels: [carrying] }, rules, tax.vocab).subcategory ?? null)
-      : subcategory;
     const here = tax.subByKey.get(lands)?.category_key ?? null;
     const asks = (a) => !(a.only_in ?? []).length || (here && a.only_in.includes(here));
     res.json({
