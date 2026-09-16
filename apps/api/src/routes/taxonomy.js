@@ -436,11 +436,16 @@ taxonomyRoutes.put('/drawer', requires('manage_library'), async (req, res, next)
     // Checked before anything is written: every place gets the same values, so a
     // bad one should fail before the first of two thousand writes.
     for (const x of set) if (x.value != null) await placeAttributes.mustFit(x.attribute, x.value);
-    for (const ref of refs) {
-      for (const x of set) {
-        await placeAttributes.setValue(ref, x.attribute, x.value, { reason: req.body?.reason ?? null, by: actorOf(req) });
+    // One transaction, so a pair of labels that are one answer land together or
+    // not at all (Codex, 16 Sep 2026: one request is not one transaction).
+    await withTransaction(async (client) => {
+      for (const ref of refs) {
+        for (const x of set) {
+          await placeAttributes.setValue(ref, x.attribute, x.value, { reason: req.body?.reason ?? null, by: actorOf(req), client });
+        }
       }
-    }
+    });
+    placeAttributes.forget();
     res.json({ changed: refs.length, set: set.map((x) => x.attribute) });
   } catch (err) { next(err); }
 });

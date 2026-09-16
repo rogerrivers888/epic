@@ -258,16 +258,21 @@ export async function setDefault(subcategoryKey, attributeKey, value) {
  * so it can make suggestions in future or do it to other similar activities",
  * and these are the examples that get shown back to it.
  */
-export async function setValue(venueRef, attributeKey, value, { reason = null, by = null } = {}) {
+/**
+ * @param client  A transaction to write inside, where several labels are one
+ *   answer and have to land together or not at all (Codex, 16 Sep 2026).
+ */
+export async function setValue(venueRef, attributeKey, value, { reason = null, by = null, client = null } = {}) {
+  const run = client ? (t, a) => client.query(t, a) : query;
   if (!venueRef || !attributeKey) throw bad('Which place, and which attribute?');
   // An empty object says nothing, and saying nothing is clearing it.
   const empty = value != null && value.yesno == null && value.from == null && value.to == null && value.choice == null;
   if (value == null || empty) {
-    await query('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
+    await run('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
     return null;
   }
   await mustFit(attributeKey, value);
-  const { rows } = await query(
+  const { rows } = await run(
     `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, reason, set_by)
      values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (venue_ref, attribute_key) do update
