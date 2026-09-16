@@ -1658,10 +1658,22 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
         {canManage ? <View style={styles.tickCell} /> : null}
         <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.colHead}>Place</Text></View>
         {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={styles.colHead}>Where</Text></View> : null}
+        {/* A heading sits over its own answers. Under a heading is either a
+            dropdown -- value, then a 5px gap, then a 12px chevron -- or plain
+            text flush to the edge, and a header right-aligned to the cell hung
+            17px past the first (owner, 16 Sep 2026: "Place where indoors is not
+            lined up with the text below"). The header keeps the chevron's room
+            when the column has one. */}
         {cols.map((a) => (
-          <View key={a.key} style={[styles.tCell, { width: 116 }]}><Text style={[styles.colHead, { textAlign: 'right' }]} numberOfLines={2}>{a.label}</Text></View>
+          <View key={a.key} style={[styles.tCell, { width: 116 }, canManage && a.kind !== 'range' && styles.overDrill]}>
+            <Text style={[styles.colHead, { textAlign: 'right' }]} numberOfLines={2}>{a.label}</Text>
+          </View>
         ))}
-        {ages ? <View style={[styles.tCell, { width: 140 }]}><Text style={[styles.colHead, { textAlign: 'right' }]}>Ages</Text></View> : null}
+        {ages ? (
+          <View style={[styles.tCell, { width: 140 }, canManage && styles.overDrill]}>
+            <Text style={[styles.colHead, { textAlign: 'right' }]}>Ages</Text>
+          </View>
+        ) : null}
       </View>
       {shown.map((pl) => (
         <View key={pl.ref} style={styles.wordRow}>
@@ -1994,14 +2006,19 @@ function PrimaryLabel({ sc, tax, wide, canManage, secondary, defaults, broughtAs
           </View>
           <View style={styles.bandStat}>
             <Text style={styles.bandKicker}>Switched on</Text>
-            {canManage ? (
-              <Press effect="none" accessibilityRole="switch" accessibilityState={{ checked: sc.active }}
-                     accessibilityLabel={`${sc.label} is ${sc.active ? 'on' : 'off'}`}
-                     onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)}
-                     style={[styles.toggle, sc.active && styles.toggleOn]}>
-                <View style={[styles.toggleBlock, sc.active && styles.toggleBlockOn]} />
-              </Press>
-            ) : <Text style={styles.bandValue}>{sc.active ? 'On' : 'Off'}</Text>}
+            {/* The values beside it are controls 32px tall; a 21px switch left
+                to find its own top sat above their line (owner, 16 Sep 2026:
+                "The switched-on toggle is not aligned with the text"). */}
+            <View style={styles.bandControl}>
+              {canManage ? (
+                <Press effect="none" accessibilityRole="switch" accessibilityState={{ checked: sc.active }}
+                       accessibilityLabel={`${sc.label} is ${sc.active ? 'on' : 'off'}`}
+                       onPress={() => void run(() => api.shelfSaveSubcategory({ id: sc.id, active: !sc.active }), sc.active ? `${sc.label} is switched off.` : `${sc.label} is switched on.`)}
+                       style={[styles.toggle, sc.active && styles.toggleOn]}>
+                  <View style={[styles.toggleBlock, sc.active && styles.toggleBlockOn]} />
+                </Press>
+              ) : <Text style={styles.bandValue}>{sc.active ? 'On' : 'Off'}</Text>}
+            </View>
           </View>
         </View>
       </View>
@@ -4551,6 +4568,8 @@ const styles = StyleSheet.create({
   /** 31px is the wide title; the handoff draws 390 as its own artboard at 24 (BO1m). */
   bandTitlePhone: { fontSize: 24, letterSpacing: -0.8, lineHeight: 27 },
   bandValue: { ...type.small, fontSize: 15, fontWeight: '600' },
+  // The height every control in the band shares, so they read as one line.
+  bandControl: { minHeight: 32, justifyContent: 'center' },
   // Sentence case, not capitals (owner, 15 Sep 2026: "I don't like these
   // capital letters either. Just normal camel caps, please").
   bandKicker: { ...type.tiny, fontWeight: '700', color: colors.inkMuted },
@@ -4587,6 +4606,9 @@ const styles = StyleSheet.create({
   tWork: { backgroundColor: colors.surfaceMuted },
   tFirst: { width: 150, paddingVertical: 8, paddingRight: spacing.sm, justifyContent: 'center' },
   tCell: { paddingVertical: 8, paddingHorizontal: 6, gap: 1, justifyContent: 'center' },
+  // A heading over a column of dropdowns: the cell's own 6, then the
+  // chevron's 12 and the 5 between it and the value.
+  overDrill: { paddingRight: 23 },
   tCellOn: { backgroundColor: colors.selected },
   tTotal: { borderTopWidth: BORDER, borderTopColor: colors.line, borderBottomWidth: 0 },
   /** The Google table's rows: padded from the edge, a little taller. */
