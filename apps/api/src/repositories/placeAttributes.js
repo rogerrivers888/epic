@@ -261,6 +261,12 @@ export async function setDefault(subcategoryKey, attributeKey, value) {
 /**
  * @param client  A transaction to write inside, where several labels are one
  *   answer and have to land together or not at all (Codex, 16 Sep 2026).
+ *
+ *   **A caller passing one has already called `mustFit`.** Validating in here
+ *   would read the vocabulary through the pool while holding a transaction's
+ *   connection, and enough concurrent bulk writes would then wait on a pool
+ *   they are themselves holding (Codex, 16 Sep 2026). The only caller that
+ *   passes a client is `PUT /drawer`, which checks every value up front.
  */
 export async function setValue(venueRef, attributeKey, value, { reason = null, by = null, client = null } = {}) {
   const run = client ? (t, a) => client.query(t, a) : query;
@@ -271,7 +277,7 @@ export async function setValue(venueRef, attributeKey, value, { reason = null, b
     await run('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
     return null;
   }
-  await mustFit(attributeKey, value);
+  if (!client) await mustFit(attributeKey, value);
   const { rows } = await run(
     `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, reason, set_by)
      values ($1, $2, $3, $4, $5, $6, $7, $8)
