@@ -2455,7 +2455,18 @@ export const api = {
     request<{
       subcategory: string; state: string;
       attributes: PlaceAttribute[];
-      places: { ref: string; name: string; region: string | null; website: string | null; values: Record<string, AttributeValue> }[];
+      places: {
+        ref: string; name: string; region: string | null; website: string | null;
+        values: Record<string, AttributeValue>;
+        /** Where the row came from, and what we may keep of it. */
+        source: string | null; rented: boolean; named: boolean;
+        state: string | null; outcode: string | null;
+        attribution: { source?: string; licence?: string; url?: string }[];
+        wikipedia: string | null; osm: string | null; wikidata: string | null;
+        seen: string | null;
+        /** The provider words it was filed by. */
+        words: string[];
+      }[];
     }>(`/api/admin/taxonomy/drawer${qs({ subcategory, state })}`),
   /** One secondary label, set on many places at once. */
   /** One label on many places, or several labels together in one act. */

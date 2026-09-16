@@ -47,7 +47,7 @@ import { colors, spacing, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Button, FoldLine } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, DrillDropdown, Dropdown, Note, ago, count } from '../kit';
+import { AdminPage, DrillDropdown, Dropdown, Fact, Note, SidePanel, ago, count, day } from '../kit';
 import { Shelves } from './Shelves';
 import { asOneOf, asText, useQueryState } from '../../router';
 
@@ -1485,6 +1485,114 @@ function OurSubcategories({ tax, rows, wide, catLabel }: {
  * lot of them at once. A cell drawn in lime is inherited — from the drawer, or
  * from the place's own words — and one in ink was set on the place itself.
  */
+/**
+ * One place, opened from its row.
+ *
+ * The owner, 16 Sep 2026: "for the examples we have, like Aberdeen Art Gallery,
+ * there's no information about them. There's no side drawer that I can open to
+ * view them. You don't say where the source of the information has come from,
+ * whether we own the data."
+ *
+ * So: who told us, under what licence, what we are allowed to keep, the words
+ * it was filed by, and every secondary label with where its answer came from.
+ * Facts, not sentences.
+ */
+function PlacePanel({ pl, attributes, onClose }: {
+  pl: DrawerPlace; attributes: PlaceAttribute[]; onClose: () => void;
+}) {
+  const link = (url: string, said?: string) => (
+    <Press key={url} onPress={() => void Linking.openURL(url)} accessibilityRole="link">
+      <Text style={[type.small, { color: colors.accent }]} numberOfLines={1}>
+        {said ?? url.replace(/^https?:\/\//, '')}
+      </Text>
+    </Press>
+  );
+  const said = (v?: AttributeValue) => (!v ? '\u2014'
+    : v.choice ? v.choice
+      : v.from != null || v.to != null ? `${v.from ?? ''}\u2013${v.to ?? ''}`
+        : v.yesno === false ? 'No' : 'Yes');
+  const from = (v?: AttributeValue) => (!v ? null
+    : v.setAt === 'place' ? 'set here'
+      : v.setAt === 'word' ? 'its own word'
+        : v.setAt === 'came' ? 'brought by another label'
+          : 'every ' + (pl.words[0] ?? 'place').split(':').pop()?.replace(/_/g, ' '));
+  return (
+    <SidePanel title={placeName(pl)} kicker={pl.named ? 'A place' : 'A sighting'} onClose={onClose}>
+      <Fact label="Where"><Text style={type.small}>{[pl.region, pl.outcode].filter(Boolean).join(' \u00b7 ') || '\u2014'}</Text></Fact>
+      <Fact label="Source"><Text style={type.small}>{sourceName(pl)}</Text></Fact>
+      {/* The one line that answers "whether we own the data". */}
+      <Fact label="What we keep">
+        <Text style={type.small}>{pl.rented ? 'The identifier only' : 'The record'}</Text>
+        <Text style={type.tiny}>{pl.rented ? 'Its name and details are read live' : 'Ours to hold'}</Text>
+      </Fact>
+      {pl.attribution.length ? (
+        <Fact label="Licence">
+          {pl.attribution.map((a, i) => (
+            <View key={i} style={{ alignItems: 'flex-end', gap: 2 }}>
+              <Text style={type.small}>{[a.source, a.licence].filter(Boolean).join(' \u00b7 ')}</Text>
+              {a.url ? link(a.url) : null}
+            </View>
+          ))}
+        </Fact>
+      ) : null}
+      <Fact label="In the list"><Text style={type.small}>{pl.state === 'published' ? 'In the library' : 'Harvested, not published'}</Text></Fact>
+      <Fact label="Reference"><Text style={[type.tiny, { textAlign: 'right' }]}>{pl.ref}</Text></Fact>
+      {pl.website || pl.wikipedia || pl.osm || pl.wikidata ? (
+        <Fact label="Links">
+          {pl.website ? link(pl.website) : null}
+          {pl.wikipedia ? link(pl.wikipedia, 'Wikipedia') : null}
+          {pl.wikidata ? link(`https://www.wikidata.org/wiki/${pl.wikidata}`, pl.wikidata) : null}
+          {pl.osm ? <Text style={type.tiny}>{pl.osm}</Text> : null}
+        </Fact>
+      ) : null}
+      <Fact label="Filed by">
+        {pl.words.length
+          ? pl.words.map((w) => <Text key={w} style={type.small}>{w.replace(/_/g, ' ')}</Text>)
+          : <Text style={type.small}>\u2014</Text>}
+      </Fact>
+      {attributes.map((a) => {
+        const v = pl.values[a.key];
+        return (
+          <Fact key={a.key} label={a.label}>
+            <Text style={[type.small, v && v.setAt !== 'place' ? { color: colors.accent } : null]}>{said(v)}</Text>
+            {v ? <Text style={type.tiny}>{from(v)}</Text> : null}
+          </Fact>
+        );
+      })}
+      {pl.seen ? <Fact label="Last seen"><Text style={type.small}>{day(pl.seen)}</Text></Fact> : null}
+    </SidePanel>
+  );
+}
+
+/** A place in the drawer list, as the API sends it. */
+type DrawerPlace = Awaited<ReturnType<typeof api.taxonomyDrawer>>['places'][number];
+
+/**
+ * What to call a place we may not name.
+ *
+ * A licensed provider's row is an identifier and our own annotations; its name
+ * is the provider's and is never stored (Technical Constraints §13.10). The
+ * harvest held 233 of those in one drawer, every one of them printing
+ * "(art gallery)" (owner, 16 Sep 2026). The word it was filed by is what we
+ * actually know, so that is what the row says.
+ */
+const placeName = (pl: DrawerPlace) => {
+  if (pl.named) return pl.name;
+  const word = (pl.words[0] ?? '').split(':').pop() ?? '';
+  const said = word.replace(/_/g, ' ').trim();
+  return said ? said.charAt(0).toUpperCase() + said.slice(1) : 'Unnamed';
+};
+
+/** Who told us about it: the stored source, or failing that the ref's namespace. */
+const SOURCES: Record<string, string> = {
+  wikidata: 'Wikidata', wikipedia: 'Wikipedia', osm: 'OpenStreetMap', openstreetmap: 'OpenStreetMap',
+  google: 'Google', atlas: 'Ours', own: 'Ours', overture: 'Overture',
+};
+const sourceName = (pl: DrawerPlace) => {
+  const key = String(pl.source ?? pl.ref.split(':', 1)[0] ?? '').toLowerCase();
+  return SOURCES[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : '\u2014');
+};
+
 function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   sc: ShelfSubcategory; canManage: boolean; wide: boolean;
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
@@ -1524,14 +1632,25 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
   // be on screen, and a bulk change would reach them unseen. A reload after a
   // save is not a change of scope, and losing the selection to one is its own
   // annoyance (Codex, 15 Sep 2026).
-  useEffect(() => { setTicked(new Set()); setRange(null); setData(null); }, [sc.key, state]);
+  useEffect(() => { setTicked(new Set()); setRange(null); setPage(0); }, [sc.key, state]);
+  // A different subcategory is a different list and the old one must go. A
+  // different *state* of the same subcategory is not: blanking the table for
+  // the seven seconds the whole harvest takes read as the screen losing the
+  // 256 it had (owner, 16 Sep 2026: "it just removes 266 museums and then
+  // refreshes a few minutes later"). The rows stay, the control says it is
+  // working, and `data.state` is what the table is actually showing.
+  useEffect(() => { setData(null); }, [sc.key]);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
     let live = true;
+    setLoading(true);
     void api.taxonomyDrawer(sc.key, state)
-      .then((d) => { if (live) setData(d); })
-      .catch(() => { if (live) setData(null); });
+      .then((d) => { if (live) { setData(d); setLoading(false); } })
+      .catch(() => { if (live) { setData(null); setLoading(false); } });
     return () => { live = false; };
   }, [sc.key, state, reloads]);
+  /** Which place's panel is open. */
+  const [openRef, setOpenRef] = useState<string | null>(null);
 
   if (!data) return null;
   /**
@@ -1598,8 +1717,13 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
       <Text style={[styles.h1, { paddingTop: spacing.xl }]}>{sc.label} we hold</Text>
       <View style={[styles.line, { gap: spacing.lg, flexWrap: 'wrap', paddingBottom: spacing.sm }]}>
         <Field value={q} onChangeText={(t) => { setQ(t); setPage(0); }} placeholder={`Find one of ${data.places.length}`} style={{ flex: 1, minWidth: 220 }} icon="search" />
-        <Choice label={state === 'all' ? 'Everything harvested' : 'In the library'} on={state === 'all'}
-                onPress={() => setState(state === 'all' ? 'published' : 'all')} />
+        {/* Two choices, each naming itself. One control captioned with the
+            state it was already in read as a button to the library and went
+            to the harvest instead (owner, 16 Sep 2026: "If I click on library,
+            it just takes me back to museums"). */}
+        <Choice label="In the library" on={state === 'published'} onPress={() => setState('published')} />
+        <Choice label="Everything harvested" on={state === 'all'} onPress={() => setState('all')} />
+        {loading ? <Text style={type.tiny}>Loading…</Text> : null}
       </View>
       {/* One label, changed on everything ticked. */}
       {canManage && ticked.size ? (
@@ -1663,6 +1787,7 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
         {canManage ? <View style={styles.tickCell} /> : null}
         <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}><Text style={styles.colHead}>Place</Text></View>
         {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={styles.colHead}>Where</Text></View> : null}
+        {wide ? <View style={[styles.tCell, { width: 116 }]}><Text style={styles.colHead}>Source</Text></View> : null}
         {/* A heading sits over its own answers. Under a heading is either a
             dropdown -- value, then a 5px gap, then a 12px chevron -- or plain
             text flush to the edge, and a header right-aligned to the cell hung
@@ -1691,10 +1816,20 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
             </Press>
           ) : null}
           <View style={[styles.tCell, { flex: 1, minWidth: 0 }]}>
-            <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{pl.name}</Text>
+            {/* The name opens the place. A row we may not name shows the word
+                it was filed by and the outcode it sits in, because 233 lines
+                reading "(art gallery)" are not 233 things you can tell apart
+                (owner, 16 Sep 2026). */}
+            <Press effect="none" onPress={() => setOpenRef(pl.ref)} accessibilityRole="button"
+                   accessibilityLabel={`Open ${placeName(pl)}`}>
+              <Text style={[type.small, { fontWeight: '600' }, !pl.named && { color: colors.inkMuted }]} numberOfLines={1}>
+                {placeName(pl)}
+              </Text>
+            </Press>
             {!wide && pl.region ? <Text style={type.tiny} numberOfLines={1}>{pl.region}</Text> : null}
           </View>
-          {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={type.tiny} numberOfLines={1}>{pl.region}</Text></View> : null}
+          {wide ? <View style={[styles.tCell, { width: 150 }]}><Text style={type.tiny} numberOfLines={1}>{[pl.region, pl.outcode].filter(Boolean).join(' \u00b7 ')}</Text></View> : null}
+          {wide ? <View style={[styles.tCell, { width: 116 }]}><Text style={type.tiny} numberOfLines={1}>{sourceName(pl)}</Text></View> : null}
           {cols.map((a) => {
             const v = pl.values[a.key];
             const mine = v?.setAt === 'place';
@@ -1774,6 +1909,11 @@ function DrawerPlaces({ sc, canManage, wide, onChanged }: {
         </View>
       ))}
       {!rows.length ? <Text style={[type.small, styles.emptyRow]}>Nothing matches.</Text> : null}
+      {openRef ? (() => {
+        const pl = data.places.find((x) => x.ref === openRef);
+        if (!pl) return null;
+        return <PlacePanel pl={pl} attributes={data.attributes} onClose={() => setOpenRef(null)} />;
+      })() : null}
       {pages > 1 ? (
         <View style={[styles.line, { gap: spacing.lg, paddingTop: spacing.md }]}>
           <TextAction label="Back" tone="muted" disabled={at === 0} onPress={() => setPage(at - 1)} />

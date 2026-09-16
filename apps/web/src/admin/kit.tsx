@@ -1233,3 +1233,69 @@ const card = StyleSheet.create({
   chip: { paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
   chipOn: { backgroundColor: colors.selected },
 });
+
+/**
+ * A panel down the right-hand edge, for one thing in a list.
+ *
+ * The owner, 16 Sep 2026: "for the examples we have, like Aberdeen Art Gallery,
+ * there's no information about them. There's no side drawer that I can open to
+ * view them." A row in a table is a line; what is behind the line needs
+ * somewhere to go that is not another page.
+ *
+ * It portals through `Modal` for the same reason every other panel here does:
+ * a sibling of the rows after it is painted over by them. In Mobile view it
+ * pins to the frame's own corner rather than the window's (CLAUDE.md), and
+ * below 560px it is the whole frame, because 420px down the side of a 390px
+ * phone is the phone.
+ */
+export function SidePanel({ title, kicker, onClose, children }: {
+  title: string; kicker?: string; onClose: () => void; children: React.ReactNode;
+}) {
+  const { width: screen, height: screenH, framed, origin } = useViewport();
+  const left0 = framed && origin ? origin.x : 0;
+  const top0 = framed && origin ? origin.y : 0;
+  const full = screen < 560;
+  const w = full ? screen : Math.min(420, screen - 40);
+  return (
+    <Modal transparent visible animationType="none" onRequestClose={onClose}>
+      <Press style={[side.scrim, { left: left0, top: top0, width: screen, height: screenH }]}
+             onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
+      <View style={[side.panel, { left: left0 + screen - w, top: top0, width: w, height: screenH }]}>
+        <View style={side.head}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            {kicker ? <Text style={side.kicker}>{kicker}</Text> : null}
+            <Text style={side.title} numberOfLines={2}>{title}</Text>
+          </View>
+          <Press onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+            <Icon name="close" size={18} color={colors.ink} strokeWidth={2} />
+          </Press>
+        </View>
+        <ScrollView contentContainerStyle={side.body}>{children}</ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/** One fact in a SidePanel: what it is on the left, what it says on the right. */
+export function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <View style={side.fact}>
+      <Text style={side.factLabel}>{label}</Text>
+      <View style={{ flex: 1, minWidth: 0, alignItems: 'flex-end', gap: 3 }}>{children}</View>
+    </View>
+  );
+}
+
+const side = StyleSheet.create({
+  scrim: { position: 'absolute', backgroundColor: 'rgba(32,30,29,0.28)' },
+  panel: { position: 'absolute', backgroundColor: colors.bg, borderLeftWidth: BORDER, borderLeftColor: colors.ink },
+  head: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,
+          paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.md,
+          borderBottomWidth: 1, borderBottomColor: colors.line },
+  kicker: { ...type.tiny, fontWeight: '700', color: colors.inkMuted },
+  title: { ...type.title, fontSize: 22, lineHeight: 26, letterSpacing: -0.6 },
+  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
+  fact: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,
+          paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  factLabel: { ...type.small, color: colors.inkMuted, width: 118 },
+});

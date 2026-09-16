@@ -364,6 +364,14 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
  * resolved — what it says for itself, what its drawer assumes, and what its own
  * words carried — so a column can be read and changed.
  */
+/**
+ * The ref namespaces whose content is rented rather than owned. A row from one
+ * of these is an identifier and the annotations we made ourselves; its name,
+ * hours, rating and photos are the provider's and are never stored
+ * (Technical Constraints §13.10).
+ */
+const RENTED = new Set(['google', 'yelp', 'tripadvisor', 'foursquare']);
+
 taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) => {
   try {
     const subcategory = String(req.query.subcategory || '').trim();
@@ -410,6 +418,24 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
       places: mine.map(({ a, ref, words }) => ({
         ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
         website: a.website ?? null,
+        // Where this row came from, and whether the words on it are ours to
+        // keep (owner, 16 Sep 2026: "You don't say where the source of the
+        // information has come from, whether we own the data"). `rented` is
+        // the rule in Technical Constraints §13.10, read off the ref: a
+        // licensed provider's row is an identifier and nothing else, which is
+        // why 381 of these have no name.
+        source: a.source ?? null,
+        rented: RENTED.has(String(ref).split(':', 1)[0]),
+        named: Boolean(a.name) && !/^\(.*\)$/.test(String(a.name)),
+        state: a.state ?? null,
+        outcode: a.outcode ?? null,
+        attribution: Array.isArray(a.attribution) ? a.attribution : [],
+        wikipedia: a.wikipedia_url ?? null,
+        osm: a.osm_ref ?? null,
+        wikidata: a.wikidata_id ?? null,
+        seen: a.last_seen ?? a.first_seen ?? null,
+        // The provider words it was filed by: the answer to "why is this here".
+        words,
         // The same words it was filed by, so a label its own words carry shows
         // as carried rather than as unset (Codex, 15 Sep 2026).
         values: placeAttributes.resolveFor({ subcategory, words }, own.get(ref) ?? new Map(), vocab),
