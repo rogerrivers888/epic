@@ -431,7 +431,19 @@ export async function state({ scheme = 'sector', country = 'GB' } = {}) {
       interrupted: Boolean(run && run.state !== 'done'),
       lastBuild: run ? { state: run.state, at: run.finished_at ?? run.started_at, why: run.why } : null,
     };
-  }).concat(unrecorded
+  })
+  // A mode whose very first build died before it wrote a row has no marker and
+  // no pair, so it would be absent from a report assembled only from what the
+  // table holds — the one case where "nothing here" and "never built" look the
+  // same (Codex, 17 Sep 2026).
+  .concat(lastRuns
+    .filter((r) => r.state !== 'done' && !built.some((b) => b.mode === r.mode) && !unrecorded.some((u) => u.mode === r.mode))
+    .map((r) => ({
+      mode: r.mode, cap: null, partWayThrough: false, pairs: 0, fromCells: 0,
+      shortOfHorizon: true, missingCells: cellCount.n, interrupted: true,
+      lastBuild: { state: r.state, at: r.finished_at ?? r.started_at, why: r.why },
+      note: 'the first build of this mode never wrote a row',
+    }))).concat(unrecorded
     .filter((u) => !built.some((b) => b.mode === u.mode))
     .map((u) => ({
       mode: u.mode, cap: null, partWayThrough: false,

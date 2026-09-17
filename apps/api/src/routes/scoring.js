@@ -63,9 +63,11 @@ router.get('/', requires('view_library'), async (req, res, next) => {
       accolades: row.accolades ?? [],
       menuItems: row.menu_state === 'read' ? (row.item_count ?? 0) : 0,
       cuisines: row.record_cuisines?.length ? row.record_cuisines : (row.sweep_cuisines ?? []),
-      // Either source of a website counts, because either one is what the sweep
-      // counted when it scored the place.
-      website: row.record_website ?? row.sweep_website ?? null,
+      // The sweep's own website first, because `rescore()` reads
+      // `scout_places.website` and this page has to explain the score that was
+      // actually calculated — not a better one it could have had. An owned
+      // record's website is the answer only for a place the sweep never saw.
+      website: row.sweep_website ?? row.record_website ?? null,
       summary: row.summary, openingHours: row.opening_hours,
       chainScale: scale,
     };
