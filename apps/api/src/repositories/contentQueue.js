@@ -18,7 +18,7 @@
  *   · the reviewer's trail goes to `admin_audit`, not to a table of its own.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { mailConfigured, sendMail } from '../sources/mail.js';
 
 /** The kinds, in the order the filter prints them. */
@@ -389,39 +389,49 @@ export async function one(id) {
 
 /** Approve — one, or forty photographs together. */
 export async function approve(ids, who) {
-  const { rows } = await query(
-    `update content_queue set state = 'approved', reason = null, decided_by = $2, decided_at = now()
-      where id = any($1::uuid[]) and state <> 'approved' returning id, kind, subject_type, subject_id`,
-    [ids, who ?? null]);
-  // Approving is the undo of rejecting, so it has to reach as far: a thing
-  // suppressed by mistake comes back, rather than staying invisible for ever
-  // because the queue row now says "approved".
-  for (const r of rows) {
-    if (r.subject_type === 'image') {
-      await decideImage(r.subject_id, 'approved', { who });
-      const { rows: [q] } = await query('select venue_ref from content_queue where id = $1', [r.id]);
-      if (q?.venue_ref) await rescorePlace(q.venue_ref);
-      continue;
+  // The decision and its effect commit together.
+  //
+  // Marking the queue row approved and then restoring the thing were two
+  // writes, so a failure in between left the queue saying "approved" over
+  // something still hidden — and nobody would look at it again, because it is
+  // no longer waiting (Codex, 17 Sep 2026).
+  return withTransaction(async (client) => {
+    const run = (text, params) => client.query(text, params);
+
+    const { rows } = await run(
+      `update content_queue set state = 'approved', reason = null, decided_by = $2, decided_at = now()
+        where id = any($1::uuid[]) and state <> 'approved' returning id, kind, subject_type, subject_id`,
+      [ids, who ?? null]);
+    // Approving is the undo of rejecting, so it has to reach as far: a thing
+    // suppressed by mistake comes back, rather than staying invisible for ever
+    // because the queue row now says "approved".
+    for (const r of rows) {
+      if (r.subject_type === 'image') {
+        await decideImage(r.subject_id, 'approved', { who, run });
+        const { rows: [q] } = await run('select venue_ref from content_queue where id = $1', [r.id]);
+        if (q?.venue_ref) await rescorePlace(q.venue_ref);
+        continue;
+      }
+      if (r.subject_type === 'open_entry') {
+        // Live again — unless the household has already written the replacement
+        // this rejection made room for, in which case bringing this one back
+        // would break the unique index. Then it stays ended, which is the truth.
+        await run(`
+          update open_entries e set state = 'active', updated_at = now()
+           where e.id = $1::uuid and e.hidden and e.state = 'ended'
+             and not exists (
+               select 1 from open_entries o
+                where o.id <> e.id and o.state = 'active' and not o.hidden
+                  and ((e.scope = 'standing' and o.scope = 'standing' and o.household_id = e.household_id)
+                    or (e.trip_id is not null and o.trip_id = e.trip_id)))`, [r.subject_id]);
+        await run(`update open_entries set hidden = false where id = $1::uuid`, [r.subject_id]);
+        continue;
+      }
+      const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', chat_reply: 'chat_replies' }[r.subject_type];
+      if (table) await run(`update ${table} set hidden = false where id = $1::uuid`, [r.subject_id]);
     }
-    if (r.subject_type === 'open_entry') {
-      // Live again — unless the household has already written the replacement
-      // this rejection made room for, in which case bringing this one back
-      // would break the unique index. Then it stays ended, which is the truth.
-      await query(`
-        update open_entries e set state = 'active', updated_at = now()
-         where e.id = $1::uuid and e.hidden and e.state = 'ended'
-           and not exists (
-             select 1 from open_entries o
-              where o.id <> e.id and o.state = 'active' and not o.hidden
-                and ((e.scope = 'standing' and o.scope = 'standing' and o.household_id = e.household_id)
-                  or (e.trip_id is not null and o.trip_id = e.trip_id)))`, [r.subject_id]);
-      await query(`update open_entries set hidden = false where id = $1::uuid`, [r.subject_id]);
-      continue;
-    }
-    const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', chat_reply: 'chat_replies' }[r.subject_type];
-    if (table) await query(`update ${table} set hidden = false where id = $1::uuid`, [r.subject_id]);
-  }
-  return rows;
+    return rows;
+  });
 }
 
 /**
@@ -437,32 +447,45 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   if (!r) return null;
   const body = tell ? (message ?? r.message) : null;
 
-  // Written down first, then acted on, then told.
-  //
-  // The message used to go out before the queue row was updated, so a failure
-  // in between left a household thanked for a decision that had not been
-  // recorded — and the next person to look would decide it again (Codex,
-  // 17 Sep 2026). `told` therefore starts false and is set in a second write,
-  // once something has actually gone out.
-  const { rows: [out] } = await query(
-    `update content_queue
-        set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now()
-      where id = $1 returning *`,
-    [id, reason, body, who ?? null]);
+  /**
+   * The decision, the suppression and the count, in one transaction.
+   *
+   * Three things have to be true together. The queue row says rejected; the
+   * review or the conversation or the offer stops being anybody's; the reason
+   * is counted so the common one can be designed out. Written separately, a
+   * failure between them left the queue saying "rejected" over a review that
+   * was still public — and nobody would ever look at it again, because it is no
+   * longer waiting. Worst of all on reported content, which is the case that
+   * lane exists for (Codex, 17 Sep 2026).
+   *
+   * The message is sent afterwards, outside this, because an e-mail cannot be
+   * rolled back — so it is the last thing, and `told` is a second write once
+   * something has actually gone out.
+   */
+  const out = await withTransaction(async (client) => {
+    const run = (text, params) => client.query(text, params);
+    const { rows: [row] } = await run(
+      `update content_queue
+          set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now()
+        where id = $1 returning *`,
+      [id, reason, body, who ?? null]);
+    // Marking the queue row and stopping there left an abusive review public
+    // the moment its hold expired, because nothing that reads it knows the
+    // queue exists. Each kind is suppressed where it lives, in the way that
+    // table already understands.
+    if (row) await suppress(row.subject_type, row.subject_id, { reason, who, run });
+    await run(
+      `insert into rejection_counts (kind, reason, used, last_at) values ($1,$2,1, now())
+       on conflict (kind, reason) do update set used = rejection_counts.used + 1, last_at = now()`,
+      [q.kind, reason]);
+    return row ?? null;
+  });
+  if (!out) return null;
 
-  // A rejection has to reach the thing itself.
-  //
-  // Marking the queue row and stopping there left an abusive review public the
-  // moment its hold expired, because nothing that reads it knows the queue
-  // exists (Codex, 17 Sep 2026). Each kind is suppressed where it lives, in the
-  // way that table already understands.
-  if (out) {
-    await suppress(out.subject_type, out.subject_id, { reason, who });
-    // A picture is one of the six facts the ready bar is judged on, and only an
-    // approved one counts — so a decision about a photograph changes the
-    // place's score (Codex, 17 Sep 2026).
-    if (out.subject_type === 'image' && out.venue_ref) await rescorePlace(out.venue_ref);
-  }
+  // A picture is one of the six facts the ready bar is judged on, and only an
+  // approved one counts — so a decision about a photograph changes the place's
+  // score. Derived, so outside the transaction that made the decision.
+  if (out.subject_type === 'image' && out.venue_ref) await rescorePlace(out.venue_ref);
 
   // "Reject and send this" has to send it.
   //
@@ -495,11 +518,8 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
     if (told) await query('update content_queue set told = true where id = $1', [id]);
   }
 
-  await query(
-    `insert into rejection_counts (kind, reason, used, last_at) values ($1,$2,1, now())
-     on conflict (kind, reason) do update set used = rejection_counts.used + 1, last_at = now()`,
-    [q.kind, reason]);
-  if (out) { out.told = told; out.why = why; }
+  out.told = told;
+  out.why = why;
   return out;
 }
 
@@ -513,24 +533,24 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
  * the thank-you e-mail and none of the points they were promised (Codex,
  * 17 Sep 2026). Same rules, same figures, one path.
  */
-async function decideImage(imageId, moderation, { note = null, who = null } = {}) {
-  const { rows: [before] } = await query(
+async function decideImage(imageId, moderation, { note = null, who = null, run = query } = {}) {
+  const { rows: [before] } = await run(
     `select id, moderation, reward_points, contributor_account_id, contributor_household_id
        from image_assets where id = $1::uuid`, [imageId]);
   if (!before) return null;
-  await query(
+  await run(
     `update image_assets set moderation = $2, moderation_note = coalesce($3, moderation_note),
             moderated_by = $4, moderated_at = now(), updated_at = now()
       where id = $1::uuid`, [imageId, moderation, note, who ?? null]);
   if (!before.contributor_account_id || moderation === before.moderation) return before;
   // The same ten points, and the same reversal, as the Library path.
   if (moderation === 'approved') {
-    await query(
+    await run(
       `insert into image_rewards (account_id, household_id, image_id, points, reason, awarded_by)
        values ($1,$2,$3,$4,'accepted',$5)`,
       [before.contributor_account_id, before.contributor_household_id, imageId, before.reward_points || 10, who ?? null]);
   } else if (before.moderation === 'approved') {
-    await query(
+    await run(
       `insert into image_rewards (account_id, household_id, image_id, points, reason, note, awarded_by)
        values ($1,$2,$3,$4,'reversed',$5,$6)`,
       [before.contributor_account_id, before.contributor_household_id, imageId,
@@ -557,9 +577,9 @@ async function rescorePlace(venueRef) {
  * erasure, and the words stay where they are so the decision can be looked at
  * again. What changes is whether anybody else is shown them.
  */
-async function suppress(subjectType, subjectId, { reason, who }) {
+async function suppress(subjectType, subjectId, { reason, who, run = query }) {
   if (subjectType === 'image') {
-    await decideImage(subjectId, 'rejected', { note: reason, who });
+    await decideImage(subjectId, 'rejected', { note: reason, who, run });
     // The link is left alone on purpose. Every read that puts a picture in
     // front of anybody already joins `moderation = 'approved'`, so the flag is
     // what suppresses it — and deleting the links as well would make the
@@ -574,13 +594,13 @@ async function suppress(subjectType, subjectId, { reason, who }) {
   if (table) {
     // Not swallowed. A rejection that failed to reach the content but told the
     // screen it had is the exact shape of the bug this fixes.
-    await query(`update ${table} set hidden = true where id = $1::uuid`, [subjectId]);
+    await run(`update ${table} set hidden = true where id = $1::uuid`, [subjectId]);
     // An open entry is ended as well as hidden. There is a unique index over
     // *active* standing and per-trip entries, so a hidden-but-active row would
     // block the household from ever submitting a corrected one (Codex, 17 Sep
     // 2026). Ending it is what makes "write it again" possible.
     if (subjectType === 'open_entry') {
-      await query(`update open_entries set state = 'ended', updated_at = now() where id = $1::uuid`, [subjectId]);
+      await run(`update open_entries set state = 'ended', updated_at = now() where id = $1::uuid`, [subjectId]);
       // And the introductions it is already part of.
       //
       // Hiding the entry took it out of the pool and left the matches alone, so
@@ -588,7 +608,7 @@ async function suppress(subjectType, subjectId, { reason, who }) {
       // people already introduced to it went on seeing it, swapping videos and
       // talking (Codex, 17 Sep 2026). The match ends; nothing is deleted, so
       // the counterpart's own entry and words are untouched.
-      await query(
+      await run(
         `update open_matches set stage = 'ended', updated_at = now()
           where (host_entry_id = $1::uuid or guest_entry_id = $1::uuid)
             and stage not in ('ended', 'lapsed')`, [subjectId]);

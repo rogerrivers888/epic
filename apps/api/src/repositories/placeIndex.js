@@ -777,7 +777,22 @@ export async function shelveAll({ refs = null } = {}) {
  * could not be *counted*.
  */
 export async function noteMany(places = [], { source = null, countryCode = null, ownership = null, client = null } = {}) {
-  const rows = places.map((p) => (typeof p === 'string' ? { ref: p } : p)).filter((p) => p?.ref);
+  // One entry per place, whatever the caller handed over.
+  //
+  // A batch with the same reference twice — a harvest where two rows resolve to
+  // one place — made two tuples for one primary key, and a statement cannot
+  // touch the same row twice: the whole insert aborted, and on the pool path
+  // the swallow hid it, so the batch was silently not written (Codex, 17 Sep
+  // 2026, and found by trying it). Later entries win, because a caller that
+  // says a thing twice means the second one.
+  const byRef = new Map();
+  for (const p of places) {
+    const row = typeof p === 'string' ? { ref: p } : p;
+    if (!row?.ref) continue;
+    const had = byRef.get(row.ref);
+    byRef.set(row.ref, had ? { ...had, ...row, sources: [...(had.sources ?? []), ...(row.sources ?? [])] } : row);
+  }
+  const rows = [...byRef.values()];
   if (!rows.length) return { noted: 0 };
   const write = async (exec) => {
     // `now()` is in the tuple, not implied by the column list. Without it the
@@ -823,15 +838,24 @@ export async function noteMany(places = [], { source = null, countryCode = null,
     // that in `scout_places.from_sources` — but only the synthetic `sweep` was
     // handed to the index, so the sources lens undercounted both and read
     // combined places as single-source (Codex, 17 Sep 2026).
+    //
+    // Deduplicated by the pair, across the whole batch. A statement cannot
+    // touch the same row twice, and there are two ways to end up with one
+    // tuple twice: a place naming the same source twice, and the same place
+    // twice in one batch — a harvest where two rows resolve to one reference.
+    // Per place it was already right; the pair covers both (Codex, 17 Sep 2026).
+    const seenPair = new Set();
     const triples = rows.flatMap((p) => {
       const said = Array.isArray(p.sources) && p.sources.length ? p.sources : [p.source ?? source];
       return said
         .filter(Boolean)
-        .map((s) => [p.ref, String(s), p.sourceId ?? null])
-        // Two names for the same source in one list would be two identical
-        // tuples, and `on conflict` cannot see a duplicate inside its own
-        // statement.
-        .filter((t, i, all) => all.findIndex((o) => o[1] === t[1]) === i);
+        .map((sc) => [p.ref, String(sc), p.sourceId ?? null])
+        .filter(([ref, sc]) => {
+          const pair = `${ref}\u0000${sc}`;
+          if (seenPair.has(pair)) return false;
+          seenPair.add(pair);
+          return true;
+        });
     });
     if (triples.length) {
       const src = triples.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
