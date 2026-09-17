@@ -29,6 +29,16 @@ export type { Tip, TipKey };
 
 /** The width the design sets, and the width the clamp is measured against. */
 const TIP_W = 330;
+/**
+ * The tallest a tip is assumed to be, for clamping.
+ *
+ * The panel sizes itself to its words, and measuring it before it is drawn
+ * would mean drawing it twice. The longest body in `tips.ts` is a little over
+ * three hundred characters, which wraps to about seven lines at this width —
+ * so this is generous rather than exact, and being generous is the safe
+ * direction: a tip nudged up too far is readable, one nudged too little is not.
+ */
+const TIP_H_MAX = 150;
 
 type Shown = { tip: Tip; x: number; y: number } | null;
 
@@ -57,12 +67,22 @@ export function Explains({ children }: { children: React.ReactNode }) {
     }
     const rr = (root as any).getBoundingClientRect();
     let x = box.left - rr.left;
-    const y = box.bottom - rr.top + 8;
+    let y = box.bottom - rr.top + 8;
     // Kept inside the page, so a tip on the last column is readable rather than
     // half off the edge.
     const maxX = Math.max(0, rr.width - TIP_W - 12);
     if (x > maxX) x = maxX;
     if (x < 0) x = 0;
+    // And inside it downwards. The design says the panel is "clamped inside its
+    // artboard"; only the sides were clamped, so a tip on the last row of a
+    // long board hung below the page (17 Sep 2026, the verification audit).
+    // Above the thing it explains rather than below it, which is what there is
+    // room for.
+    const bottom = y + TIP_H_MAX;
+    if (bottom > rr.height - 8) {
+      const above = box.top - rr.top - TIP_H_MAX - 8;
+      y = above > 8 ? above : Math.max(8, rr.height - TIP_H_MAX - 8);
+    }
     setShown({ tip, x, y });
   }, []);
   const hide = useCallback(() => setShown(null), []);

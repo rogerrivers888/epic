@@ -44,6 +44,32 @@ const SAID: Record<string, string> = {
 };
 const said = (kind: string) => SAID[kind] ?? kind;
 
+/**
+ * A value, said rather than serialised.
+ *
+ * An empty object is a blank, not `{}`; an object of facts is its facts in
+ * words; a list is its items. Nothing is ever printed as JSON. The place
+ * drawer's Compare tab has the same helper for the same reason, and the two
+ * read the same way on purpose.
+ */
+function say(v: unknown): string {
+  if (v == null || v === '') return '—';
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => (x && typeof x === 'object'
+      ? String((x as any).label ?? (x as any).key ?? (x as any).name ?? '')
+      : String(x))).filter(Boolean);
+    return parts.length ? parts.join(', ') : '—';
+  }
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (typeof v === 'object') {
+    const held = Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x != null && x !== '' && x !== false)
+      .map(([k, x]) => (x === true ? k.replace(/([A-Z])/g, ' $1').toLowerCase() : `${k.replace(/([A-Z])/g, ' $1').toLowerCase()} ${say(x)}`));
+    return held.length ? held.join(', ') : '—';
+  }
+  return String(v);
+}
+
 /** The fact three sources disagree about, in our own words. */
 const FIELD_WORD: Record<string, string> = {
   opening_hours: 'hours', website: 'website', phone: 'telephone number', address: 'address',
@@ -89,6 +115,13 @@ export function Queue({ canManage }: { canManage: boolean }) {
     () => (data?.rows ?? []).filter((r) => picked.has(r.id) && !r.batchable).length,
     [data, picked],
   );
+
+  /** Somebody has flagged it. It jumps the queue and lands in its own lane. */
+  const report = useCallback(async (id: string) => {
+    setBusy(true);
+    try { await api.adminQueueReport(id, 'flagged in the back office'); load(); }
+    finally { setBusy(false); }
+  }, [load]);
 
   const approve = useCallback(async (ids: string[]) => {
     setBusy(true);
@@ -205,6 +238,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
             <ItemPane item={item} canManage={canManage} busy={busy}
                       onApprove={() => approve([item.item.id])}
                       onReject={(tell) => setRejecting(tell ? 'tell' : 'quiet')}
+                      onReport={() => report(item.item.id)}
                       next={data.rows[data.rows.findIndex((r) => r.id === open) + 1] ?? null}
                       onApproveNext={(id) => approve([id])}
                       onOpenNext={(id) => { setOpen(id); setRejecting('tell'); }} />
@@ -220,8 +254,10 @@ export function Queue({ canManage }: { canManage: boolean }) {
   );
 }
 
-function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveNext, onOpenNext }: {
+function ItemPane({ item, canManage, busy, onApprove, onReject, onReport, next, onApproveNext, onOpenNext }: {
   item: QueueItem; canManage: boolean; busy: boolean; onApprove: () => void; onReject: (tell: boolean) => void;
+  /** Reported content jumps the queue. `view_library` is enough — reporting is not deciding. */
+  onReport: () => void;
   next: QueueList['rows'][number] | null;
   onApproveNext: (id: string) => void; onOpenNext: (id: string) => void;
 }) {
@@ -261,7 +297,10 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
                 {item.detail.disagree.map((d: any) => (
                   <View key={d.source} style={styles.disagree}>
                     <Text style={styles.disagreeSource}>{d.source}</Text>
-                    <Text style={styles.disagreeValue} numberOfLines={1}>{typeof d.value === 'object' ? JSON.stringify(d.value) : String(d.value)}</Text>
+                    {/* Said, not serialised. Nothing is ever printed as JSON —
+                        that is a database's own output and not a thing anybody
+                        reads (17 Sep 2026, the verification audit). */}
+                    <Text style={styles.disagreeValue} numberOfLines={1}>{say(d.value)}</Text>
                   </View>
                 ))}
               </View>
@@ -291,6 +330,13 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
           {/* Two different acts: the silent one still needs a reason from the
               closed list, so the common one can be counted — it simply does not
               send a message (Codex, 17 Sep 2026). */}
+          {/* Reported jumps the queue and has a lane of its own, and nothing
+              in the app could put anything in it — the route was written and
+              unreachable, so the lane was permanently empty (17 Sep 2026, the
+              verification audit). */}
+          {!it.reported ? (
+            <Act label="Report it" tone="secondary" disabled={busy} onPress={onReport} />
+          ) : null}
           <Act label="Reject" tone="secondary" disabled={!canManage || busy} onPress={() => onReject(false)} />
           <Act label="Reject, and tell them why" tone="secondary" disabled={!canManage || busy} onPress={() => onReject(true)} />
           <Act label="Approve" icon="check" tone="solid" disabled={!canManage || busy} onPress={onApprove} />

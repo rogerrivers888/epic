@@ -2592,6 +2592,13 @@ export const api = {
   /** BO5b — the rejection, beside the message it sends. */
   adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean }) =>
     post<{ ok: true; id: string; reason: string; told: boolean; message: string | null; why: string | null }>(`/api/admin/queue/${id}/reject`, body),
+  /**
+   * Somebody has flagged this. Reported content jumps the queue and has a lane
+   * of its own; nothing in the app could put anything in it, so the lane was
+   * permanently empty (17 Sep 2026, the verification audit).
+   */
+  adminQueueReport: (id: string, reason?: string) =>
+    post<{ ok: true; id: string }>(`/api/admin/queue/${id}/report`, { reason: reason ?? null }),
   adminQueueReasons: () => request<{ reasons: Record<string, RejectReason[]>; used: { kind: string; reason: string; used: number; last_at: string }[] }>('/api/admin/queue/report/reasons'),
 
   /** What the household did to one of the results — the click stream Demand counts. */

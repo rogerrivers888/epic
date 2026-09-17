@@ -1101,7 +1101,13 @@ export async function categories(areaSlug, { refs = null, category = null, since
            count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where pi.ownership = 'identified')::int  as identified,
            count(*) filter (where pi.ready)::int as ready_count,
-           avg(pi.data_score)::real as avg_score
+           avg(pi.data_score)::real as avg_score,
+           -- How many of them actually have a score. A category's average is
+           -- the mean over *scored* places, so a subcategory with two scored
+           -- places out of two hundred must not weigh two hundred — the band
+           -- and the row read differently for the same category, which the
+           -- design's fourth law forbids (17 Sep 2026, the verification audit).
+           count(pi.data_score)::int as scored
       from place_index pi where ${scope.sql}
      group by pi.category, pi.subcategory`, scope.args);
   const bySub = new Map(held.filter((h) => h.subcategory).map((h) => [h.subcategory, h]));
@@ -1110,7 +1116,7 @@ export async function categories(areaSlug, { refs = null, category = null, since
     if (!h.category) continue;
     const c = byCat.get(h.category) ?? { known: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, sum: 0, n: 0 };
     c.known += h.known; c.owned += h.owned; c.claimed += h.claimed; c.identified += h.identified; c.ready_count += h.ready_count;
-    if (h.avg_score != null) { c.sum += h.avg_score * h.known; c.n += h.known; }
+    if (h.avg_score != null && h.scored) { c.sum += h.avg_score * h.scored; c.n += h.scored; }
     byCat.set(h.category, c);
   }
 

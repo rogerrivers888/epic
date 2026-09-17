@@ -494,7 +494,12 @@ router.get('/ring', requires('view_library'), async (req, res, next) => {
           searches: searches.get(s.key) ?? 0,
           nearest: best.has(s.key) ? best.get(s.key) : null,
         };
-      }).filter((r) => r.known > 0 || r.searches > 0),
+      // Every one of them, as the comment eleven lines up promises. The filter
+      // that used to sit here dropped exactly the rows the board exists to
+      // show: a ring with none of something, that nobody has searched for
+      // either, is the emptiest gap there is (17 Sep 2026, the verification
+      // audit).
+      }),
       // What answering this cost, said plainly, because it is the argument.
       ring: {
         cell: scope.cell, cellLabel: labelOf(scope.cell),
@@ -816,7 +821,13 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
     // "identified" any more. Left alone, the rollups still counted it as one
     // and paid collection went on thinking it was worth a call (Codex, 17 Sep
     // 2026).
-    if (key !== 'subcategory' && key !== 'outcode') {
+    //
+    // Not the busy band, though: that is a judgement made *about* a provider's
+    // rating at the moment of the call, not a fact of our own — and the rule
+    // the rebuild asks does not count it, so marking the place owned here would
+    // be undone by the next rebuild (17 Sep 2026, the verification audit). One
+    // definition, asked the same way in every place that asks it.
+    if (!['subcategory', 'outcode', 'busy'].includes(key)) {
       await query(
         `update place_index set ownership = 'owned' where venue_ref = $1 and ownership <> 'owned'`, [ref]);
     }

@@ -56,6 +56,15 @@ export type Col<T> = {
    * deliver the inner press reliably. Only ever the first columns or the last.
    */
   stops?: boolean;
+  /**
+   * A header that does something when it is pressed — the per-fact columns on
+   * BO2q filter the list to the places missing that fact. Separate from `sort`,
+   * because sorting and filtering are two different acts and a column can offer
+   * either.
+   */
+  onHeader?: () => void;
+  /** Whether that filter is the one in force, so the header says so. */
+  headerOn?: boolean;
 };
 
 const alignOf = (a: Align | undefined) =>
@@ -95,7 +104,14 @@ export function Ladder<T>({
         {columns.map((c) => (
           <Explain key={c.key} tip={c.tip}
                    style={[cellStyle(c), { alignItems: alignOf(c.align), justifyContent: 'center' }]}>
-            {c.sort && onSort ? (
+            {c.onHeader ? (
+              <Press effect="none" onPress={c.onHeader} accessibilityRole="button"
+                     accessibilityState={{ selected: Boolean(c.headerOn) }}
+                     accessibilityLabel={`Show only the places missing ${c.label}`}
+                     style={[styles.headSort, { justifyContent: alignOf(c.align) }]}>
+                <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, c.headerOn && styles.headLabelOn, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
+              </Press>
+            ) : c.sort && onSort ? (
               <Press effect="none" onPress={() => onSort(c.sort!)} accessibilityRole="button"
                      accessibilityLabel={`Sort by ${c.label}`}
                      style={[styles.headSort, { justifyContent: alignOf(c.align) }]}>

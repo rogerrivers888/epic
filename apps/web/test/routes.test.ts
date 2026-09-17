@@ -240,6 +240,8 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.equal(splitHref('/admin/places?pictures=all&pic=castle+winter').query.get('pic'), 'castle winter');
   assert.equal(splitHref('/admin/places?pictures=all&pic=x&facet=household').query.get('facet'), 'household');
   assert.equal(splitHref('/admin/places?ready=restaurants').query.get('ready'), 'restaurants');
+  // "The places here missing a menu" is a piece of work, so it is a link.
+  assert.equal(splitHref('/admin/places?where=gb&sub=restaurants&missing=menu').query.get('missing'), 'menu');
   // A layer inside the place drawer is its own address, so a licence argument
   // or a score can be sent to somebody (BO2h, BO2i, BO2j, BO2r).
   assert.equal(splitHref('/admin/places?where=gb&place=atlas%3A9f7&tab=score').query.get('tab'), 'score');

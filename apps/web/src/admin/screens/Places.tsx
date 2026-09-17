@@ -238,7 +238,10 @@ function Level(props: {
 }) {
   const { where, within, mode, ring, lens, cat, sub, phone } = props;
   const [level, setLevel] = useState<PlaceLevel | null>(null);
-  const [missing, setMissing] = useState<string | null>(null);
+  // In the address: "the places here missing a menu" is a piece of work, and a
+  // piece of work is a link you can send somebody (17 Sep 2026, the
+  // verification audit — it was component state and nothing could set it).
+  const [missing, setMissing] = useQueryState<string>('missing', '', asText);
   const [names, setNames] = useState<{ cat?: string; sub?: string; subs?: number; needs?: string[] }>({});
 
   const q = useMemo(() => ({ where, within: within ?? undefined, by: ring ? mode : undefined }), [where, within, ring, mode]);
@@ -260,7 +263,7 @@ function Level(props: {
   }
 
   const body = (() => {
-    if (lens === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing} onMissing={setMissing} onNames={setNames} onWiden={props.onWithin} within={within} />;
+    if (lens === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
     if (lens === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} />;
     if (lens === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lens === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
@@ -1113,10 +1116,18 @@ function DemandLens({ q, canManage, onCollect }: { q: any; canManage: boolean; o
     { key: 'noTrip', label: 'Never tripped', tip: 'neverTripped', width: 130, align: 'right',
       cell: (r) => <Num n={r.noTrip || null} strong={r.fault === 'thin-places'} accent={r.fault === 'thin-places'} /> },
     { key: 'known', label: 'We know of', tip: 'weKnowOf', width: 100, align: 'right', cell: (r) => <Num n={r.known || null} /> },
-    { key: 'fault', label: 'Fault', tip: 'fault', width: 190, align: 'left', stops: true,
+    { key: 'fault', label: 'Fault', tip: 'fault', width: 220, align: 'left', stops: true,
+      // The word *and* the way out of it. Drawing only the button meant "No
+      // places" — one of the three faults the whole screen is built around —
+      // was never printed anywhere (17 Sep 2026, the verification audit).
       cell: (r) => (r.act === 'collect'
-        ? <Act label="Collect here" icon="download" small tone={r.fault === 'empty-always' ? 'primary' : 'secondary'}
-               disabled={!canManage} onPress={onCollect} />
+        ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Word>{r.shortFault}</Word>
+            <Act label="Collect here" icon="download" small tone={r.fault === 'empty-always' ? 'primary' : 'secondary'}
+                 disabled={!canManage} onPress={onCollect} />
+          </View>
+        )
         : <Word>{r.shortFault}</Word>) },
   ];
 
@@ -1276,8 +1287,15 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
       const notCounted = ['Not counted', `${kindWord(bar?.label ?? sub)} is not judged on this, so it never counts against the score. The bar is set per kind of place.`] as const;
       return {
         key: f.key, label: f.short, muted: Boolean(data) && !counted,
-        tip: counted ? ([f.label, f.explain] as const) : notCounted,
+        tip: counted
+          ? ([f.label, `${f.explain} Tap the heading to list only the places missing it.`] as const)
+          : notCounted,
         width: 76, align: 'centre',
+        // Tapping the heading lists only the places missing that fact. The API
+        // has always supported it and nothing called it, so a filter the board
+        // offered was unreachable (17 Sep 2026, the verification audit).
+        onHeader: counted ? () => onMissing(missing === f.key ? null : f.key) : undefined,
+        headerOn: missing === f.key,
         cell: (r) => (r.facts[f.key] === 'n/a' ? <Na tip={notCounted} /> : <Tick on={r.facts[f.key] !== 'no'} />),
         cellTip: (r) => (r.facts[f.key] === 'n/a' ? notCounted : ([f.label, f.explain] as const)),
       };

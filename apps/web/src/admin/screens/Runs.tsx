@@ -16,7 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
@@ -55,9 +55,19 @@ export function Runs({ canManage }: { canManage: boolean }) {
 function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: (key: string) => void }) {
   const [data, setData] = useState<RunsList | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** The ceiling, being typed. A number goes in a small box — never a stepper. */
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const { navigate } = useRouter();
   const load = useCallback(() => { api.adminRuns().then(setData).catch(() => setData(null)); }, []);
   useEffect(load, [load]);
+
+  const saveCeiling = useCallback(async () => {
+    const pounds_ = Number(String(draft).replace(/[^0-9.]/g, ''));
+    setEditing(false);
+    if (!Number.isFinite(pounds_) || pounds_ < 0) return;
+    try { await api.adminSetCollectCeiling(Math.round(pounds_ * 100)); } finally { load(); }
+  }, [draft, load]);
 
   /**
    * What a row's button does.
@@ -125,7 +135,29 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
         <View style={styles.five}>
           <Stat label="Running" value={data.running} tip="running" />
           <Stat label="Spent this month" value={pounds(data.spentPence)} tip="spentThisMonth" />
-          <Stat label="Of a ceiling of" value={pounds(data.ceilingPence)} tip="ceiling" />
+          {/* The ceiling is set here, which is what the route's own comment
+              says it is for — "so the number on the screen is the number in
+              force". It was printed and unchangeable, and the call to change
+              it was written and unreachable (17 Sep 2026, the verification
+              audit). Epic's own bound on its own spending; a provider-side cap
+              is a different thing and is the owner's to set in their console. */}
+          <Stat label="Of a ceiling of" value={
+            editing
+              ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.poundSign}>£</Text>
+                  <TextInput value={draft} onChangeText={setDraft} keyboardType="numeric"
+                             style={styles.ceilingInput} accessibilityLabel="The monthly ceiling, in pounds"
+                             autoFocus onSubmitEditing={saveCeiling} />
+                </View>
+              )
+              : (
+                <Press effect="none" onPress={() => { if (canManage) { setDraft(String(Math.round(data.ceilingPence / 100))); setEditing(true); } }}
+                       accessibilityRole="button" accessibilityLabel="Change the monthly ceiling">
+                  <Text style={styles.ceilingWord}>{pounds(data.ceilingPence)}</Text>
+                </Press>
+              )
+          } tip="ceiling" />
           <Stat label="Needs looking at" value={data.needsLooking} tip="needsLookingAt" accent />
         </View>
       </View>
@@ -414,6 +446,12 @@ const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityIndicator color={colors.accent} /></View>;
 
 const styles = StyleSheet.create({
+  ceilingWord: { ...type.title, fontSize: 22, fontWeight: '800', color: colors.ink },
+  poundSign: { ...type.title, fontSize: 22, fontWeight: '800', color: colors.inkMuted },
+  ceilingInput: {
+    ...type.title, fontSize: 22, fontWeight: '800', color: colors.ink,
+    borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, minWidth: 74, paddingVertical: 0,
+  },
   band: {
     flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
     gap: spacing.xl, flexWrap: 'wrap',
