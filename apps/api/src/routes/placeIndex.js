@@ -24,7 +24,7 @@ import * as index from '../repositories/placeIndex.js';
 import * as reach from '../repositories/reach.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
-import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT } from '../domain/placeIndex.js';
+import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
 import { writeAudit } from '../repositories/roles.js';
 import { OUR_LABEL, detailFor, blank, lineUp } from '../sources/compare.js';
 import { googleSource } from '../sources/google.js';
@@ -1042,16 +1042,10 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     // labelled the database's own bookkeeping "Owned record" while suppressing
     // an atlas or sweep record that actually held the facts (Codex, 17 Sep
     // 2026). The same question the index asks.
-    // The same fields the index counts, which deliberately do not include the
-    // name: a record holding only a name is a place we have noticed, and
-    // treating it as ours suppressed a richer atlas or sweep record (Codex,
-    // 17 Sep 2026).
-    const ours = rec && (
-      [rec.summary, rec.website, rec.opening_hours, rec.price_range, rec.address, rec.phone]
-        .some((v) => v != null)
-      || (rec.accessibility && Object.keys(rec.accessibility).length > 0)
-      || rec.curated_at != null
-    ) ? rec : null;
+    // The same question the index asks, from the same list: a record holding
+    // only a name is a place we have noticed, and treating it as ours
+    // suppressed a richer atlas or sweep record (Codex, 17 Sep 2026).
+    const ours = holdsAnOwnedFact(rec) ? rec : null;
     const mine = ours
       ? { source: 'own', fields: Object.fromEntries(Object.entries(ours).filter(([, v]) => v != null)) }
       : att ? { source: 'atlas', fields: { name: att.name, summary: att.summary, website: att.website, lat: att.lat, lng: att.lng, wikidata_id: att.wikidata_id, wikipedia_url: att.wikipedia_url, crowd_band: att.crowd_band, count_band: att.count_band, epic_score: att.epic_score } }

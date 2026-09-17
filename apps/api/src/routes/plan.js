@@ -1516,7 +1516,12 @@ async function runInspire({ household, accountId = null, attending, session, sta
       sourcesQueried: ['claude'], degraded: [],
     });
     // The ideas as they were given, in order, so a replay prints what was shown.
-    await searchLog.noteShown(searchId, ideas.map((idea, i) => ({ ref: idea.place?.ref ?? null, position: i + 1 })));
+    // The same fallback the screen reports against. An idea geocoding could not
+    // place went in with no reference at all, so the replay could not match an
+    // open or a trip to the row it was shown as — and several unplaced ideas
+    // were indistinguishable, on a board that promises the exact list (Codex,
+    // 17 Sep 2026).
+    await searchLog.noteShown(searchId, ideas.map((idea, i) => ({ ref: idea.place?.ref ?? idea.id, position: i + 1 })));
     // Published *with* the finish, not after it: a client that polls in between
     // sees `running: false`, stops polling and never learns the id — so every
     // open and every trip made from these ideas would be dropped and the ask

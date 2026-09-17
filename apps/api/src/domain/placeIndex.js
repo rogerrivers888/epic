@@ -151,3 +151,40 @@ export const SHORT_FAULT = {
   'wrong-places': 'Wrong places', 'thin-places': 'Thin places',
   'all-three': 'All three', working: 'Working', none: '—',
 };
+
+/**
+ * What makes a `place_records` row an *owned* place: one fact of our own.
+ *
+ * Any one of these is enough — a sentence we wrote, the address of their own
+ * page, the hours they publish, a price band, a street, a postcode we
+ * corrected, a telephone number, whether you can get in without steps, or the
+ * fact that somebody curated it. An empty row is a place we have noticed and
+ * not researched, and calling that owned is how 1,357 of 1,361 places came to
+ * look researched on a board whose average score was ten (17 Sep 2026).
+ *
+ * The list lives here because five different places ask the question and they
+ * have to ask it the same way: the incremental promotion, the full rebuild, the
+ * migration that corrected the history, the comparison's "ours" column, and the
+ * write that earns the ownership. They had already drifted once — a corrected
+ * postcode counted for the rebuild and not for the promotion (Codex, 17 Sep
+ * 2026).
+ *
+ * `name` is deliberately not on it. A name alone is a place we have heard of.
+ */
+export const OWNED_FACTS = [
+  'summary', 'website', 'opening_hours', 'price_range', 'address', 'postcode', 'phone',
+];
+
+/** The same question in SQL, against a `place_records` row aliased as `r`. */
+export const ownedRecordSql = (alias = 'r') => `(
+  coalesce(${OWNED_FACTS.map((f) => `${alias}.${f}`).join(', ')}) is not null
+  or ${alias}.accessibility <> '{}'::jsonb
+  or ${alias}.curated_at is not null
+)`;
+
+/** And in JavaScript, against a row already read. */
+export const holdsAnOwnedFact = (r) => Boolean(r) && (
+  OWNED_FACTS.some((f) => r[f] != null)
+  || (r.accessibility && Object.keys(r.accessibility).length > 0)
+  || r.curated_at != null
+);

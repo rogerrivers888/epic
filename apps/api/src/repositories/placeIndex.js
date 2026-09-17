@@ -22,7 +22,7 @@ import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
 import { rules as shelfRules } from './shelfRules.js';
 import { taxonomy } from './shelfTaxonomy.js';
-import { FACT_KEYS, FACT_WEIGHTS, defaultBars, scorePlace, readyShare } from '../domain/placeIndex.js';
+import { FACT_KEYS, FACT_WEIGHTS, defaultBars, scorePlace, readyShare, ownedRecordSql } from '../domain/placeIndex.js';
 
 /** Sources we can be asked about, in the order the boards print them. */
 export const SOURCES = [
@@ -39,17 +39,11 @@ const lower = (s) => String(s ?? '').trim().toLowerCase();
 /**
  * What makes a `place_records` row an *owned* place.
  *
- * Any one fact of our own is enough — a sentence we wrote, the address of their
- * own page, the hours they publish, a price band, a street, a telephone number,
- * whether you can get in without steps. An empty row is a place we have noticed
- * and not researched, and calling that owned is how 1,357 of 1,361 places came
- * to look researched on a board whose average score was ten (17 Sep 2026).
+ * One definition, in `domain/placeIndex.js`, because five things ask it and
+ * they have to agree (Codex, 17 Sep 2026: a corrected postcode counted for the
+ * rebuild and not for the promotion).
  */
-const OWNED_RECORD = `(
-  coalesce(r.summary, r.website, r.opening_hours, r.price_range, r.address, r.phone) is not null
-  or r.accessibility <> '{}'::jsonb
-  or r.curated_at is not null
-)`;
+const OWNED_RECORD = ownedRecordSql('r');
 
 // ---------------------------------------------------------------------------
 // the bar

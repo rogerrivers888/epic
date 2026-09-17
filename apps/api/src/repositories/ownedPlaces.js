@@ -21,6 +21,7 @@
 
 import { query } from '../db.js';
 import { noteMany } from './placeIndex.js';
+import { ownedRecordSql, holdsAnOwnedFact } from '../domain/placeIndex.js';
 
 // ---------------------------------------------------------------------------
 // facts, with their terms
@@ -100,15 +101,19 @@ export async function noteOwned(venueRef) {
  * ask — and is the only thing that can take an ownership down again.
  */
 export async function settleOwnership(venueRef) {
+  // Does the *record* hold a fact of ours? That is the question the `own`
+  // source row answers, and it is not the same as "is this place owned": an
+  // attraction with a summary of its own makes the place owned without our
+  // having researched anything, and a fabricated `own` row there both
+  // overstated the sources lens and started the twelve-month free-collection
+  // window (Codex, 17 Sep 2026).
+  const { rows: [rec] } = await query(
+    `select ${ownedRecordSql('r')} as ours from place_records r where r.venue_ref = $1`, [venueRef]);
+  const oursToo = Boolean(rec?.ours);
+
   const { rows } = await query(
     `update place_index pi set ownership = case
-         when exists (
-           select 1 from place_records r
-            where r.venue_ref = pi.venue_ref
-              and (coalesce(r.summary, r.website, r.opening_hours, r.price_range, r.address, r.phone) is not null
-                   or r.accessibility <> '{}'::jsonb
-                   or r.curated_at is not null))
-           then 'owned'
+         when $2 then 'owned'
          when exists (
            select 1 from attractions a
             where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
@@ -119,15 +124,13 @@ export async function settleOwnership(venueRef) {
            then 'claimed'
          else 'identified' end
       where pi.venue_ref = $1
-      returning ownership`, [venueRef]);
-  // The source row follows the answer: `own` means we hold something, so it
-  // goes when we no longer do — and its timestamp is what the free-collection
-  // window reads.
-  if (rows[0]?.ownership !== 'owned') {
-    await query(`delete from place_index_sources where venue_ref = $1 and source = 'own'`, [venueRef]);
-  } else {
-    await noteMany([{ ref: venueRef, ownership: 'owned' }], { source: 'own' });
-  }
+      returning ownership`, [venueRef, oursToo]);
+
+  // The source row follows the *record*, not the ownership: its timestamp is
+  // what the free-collection window reads, and the rebuild only writes one for
+  // a record that holds something.
+  if (oursToo) await noteMany([{ ref: venueRef, ownership: 'owned' }], { source: 'own' });
+  else await query(`delete from place_index_sources where venue_ref = $1 and source = 'own'`, [venueRef]);
   return rows[0]?.ownership ?? null;
 }
 
@@ -167,9 +170,7 @@ export async function writeRecord(venueRef, columns, values, attribution, proven
     `update place_records set ${sets},
        attribution = $${columns.length + 2}, provenance = $${columns.length + 3}, updated_at = now()
      where venue_ref = $1
-     returning (coalesce(summary, website, opening_hours, price_range, address, phone) is not null
-                or accessibility <> '{}'::jsonb
-                or curated_at is not null) as holds_something`,
+     returning ${ownedRecordSql('place_records')} as holds_something`,
     [venueRef, ...values, JSON.stringify(attribution), JSON.stringify(provenance)],
   );
   // This is the moment a place becomes ours: a fact of our own has landed on
