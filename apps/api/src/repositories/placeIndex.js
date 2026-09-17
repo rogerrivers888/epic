@@ -145,7 +145,12 @@ const HELD_SQL = `
              (select min(pf.fetched_at) from place_facts pf where pf.venue_ref = pi.venue_ref)     as oldest_fact
         from place_index pi
         left join place_records r on r.venue_ref = pi.venue_ref
-        left join attractions  a on a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref
+        -- Not a rejected one. Every other query about an attraction excludes
+        -- them, and this one did not — so a place could be scored ready on a
+        -- summary, a website, opening hours and pictures belonging to an
+        -- attraction somebody had thrown out (Codex, 17 Sep 2026).
+        left join attractions  a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
+                                and a.state <> 'rejected'
         left join attraction_details d on d.attraction_id = a.id
         left join lateral (select sp.website from scout_places sp where sp.venue_ref = pi.venue_ref limit 1) s on true
     ) x`;

@@ -23,7 +23,7 @@ import { detailFor } from '../sources/compare.js';
 import { roomToSpend, releaseSpend } from './placeIndex.js';
 import { googleSource } from '../sources/google.js';
 import { currentHousehold } from './household.js';
-import { USD_TO_GBP } from '../domain/providerPrices.js';
+import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -142,7 +142,12 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // so its place id goes straight to Place Details — there is no search to
       // pay for (Codex, 17 Sep 2026). Reserving twice the cost could refuse a
       // replay there was budget for.
-      const want = Math.round(nameless.length * 1.4);
+      //
+      // Priced from the one table there is, like the collection paths: a
+      // hard-coded 1.4p was the old figure and the ledger records about 2.5p,
+      // so the reservation was a little over half the cost and the replay could
+      // pass a ceiling it then went past (Codex, 17 Sep 2026).
+      const want = Math.round(nameless.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP);
       const room = await roomToSpend(want, { holder: 'replay' });
       if (!room.ok) {
         why = `that would spend about £${(want / 100).toFixed(2)} and there is £${(room.leftPence / 100).toFixed(2)} left of this month`;
