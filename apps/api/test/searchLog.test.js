@@ -220,3 +220,48 @@ test('every subcategory the taxonomy ships with has a bar to be judged on', asyn
   const missing = rows.map((r) => r.key).filter((k) => !seed[k]);
   assert.deepEqual(missing, [], `these have no bar and would read "not set" for ever: ${missing.join(', ')}`);
 });
+
+test('a place kept between rebuilds is placed, and turns up on the board', async () => {
+  // `noteMany` writes the index row and nothing else — no area, no shelf, no
+  // score. Every board in Places reads through `place_areas`, so until this
+  // runs a newly swept or claimed place is in the index and on no screen, and
+  // it stayed that way until somebody pressed Rebuild (Codex, 17 Sep 2026).
+  await index.noteMany([{ ref: 'osm:node/settle-me', lat: 51.48, lng: -0.61 }], { source: 'osm', countryCode: 'GB' });
+  const before = await index.breakdown('gb', { by: 'county' });
+  const inGb = async () => (await query(
+    `select count(*)::int as n from place_areas where venue_ref = $1 and area_slug = 'gb'`,
+    ['osm:node/settle-me'])).rows[0].n;
+  assert.equal(await inGb(), 0, 'nothing has placed it yet');
+
+  const out = await index.settleNew();
+  assert.ok(out.settled >= 1);
+  assert.equal(await inGb(), 1, 'the country it is in is an area it is in');
+  const { rows: [row] } = await query('select placed_at, indexed_at from place_index where venue_ref = $1', ['osm:node/settle-me']);
+  assert.ok(row.placed_at, 'placed, which is what takes it out of the waiting set');
+
+  // And it is safe to run again when there is nothing left to do.
+  assert.equal((await index.settleNew()).settled, 0);
+  assert.ok(before !== null);
+});
+
+test('a breakdown that is a slice ranks the right slice', async () => {
+  // Sorting a page that was chosen arbitrarily ranks the wrong areas. Two
+  // counties, and a limit of one: the one that comes back must be the bigger.
+  for (const [slug, name] of [['aaa-shire', 'Aaa'], ['zzz-shire', 'Zzz']]) {
+    await query(`insert into localities (slug, name, kind, parent_slug) values ($1,$2,'county','gb')
+                 on conflict (slug) do nothing`, [slug, name]);
+  }
+  await index.noteMany([{ ref: 'osm:node/one' }, { ref: 'osm:node/two' }, { ref: 'osm:node/three' }], { countryCode: 'GB' });
+  // Both the county and the country: `inside` finds the areas that overlap the
+  // one being stood in, so a place has to be in Great Britain to count there.
+  await query(`insert into place_areas (venue_ref, area_slug) values
+                 ('osm:node/one','zzz-shire'), ('osm:node/two','zzz-shire'), ('osm:node/three','aaa-shire'),
+                 ('osm:node/one','gb'), ('osm:node/two','gb'), ('osm:node/three','gb')
+               on conflict do nothing`);
+  await index.refreshStats();
+  const one = await index.breakdown('gb', { by: 'county', sort: 'known', desc: true, limit: 1 });
+  assert.equal(one.rows.length, 1);
+  assert.equal(one.rows[0].slug, 'zzz-shire', 'the top of a slice is the actual top');
+  const other = await index.breakdown('gb', { by: 'county', sort: 'known', desc: false, limit: 1 });
+  assert.equal(other.rows[0].slug, 'aaa-shire');
+});

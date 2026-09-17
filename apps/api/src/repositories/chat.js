@@ -25,9 +25,9 @@ const TOPIC_SELECT = `
          mem.name as member_name, mem.avatar_url as member_avatar,
          g.name as guest_name,
          (select count(*)::int from chat_reads r where r.target_type = 'topic' and r.target_id = t.id) as seen_by,
-         (select count(*)::int from chat_replies x where x.topic_id = t.id) as reply_count,
-         (select max(x.created_at) from chat_replies x where x.topic_id = t.id) as last_reply_at,
-         greatest(t.created_at, coalesce((select max(x.created_at) from chat_replies x where x.topic_id = t.id), t.created_at)) as last_at
+         (select count(*)::int from chat_replies x where x.topic_id = t.id and not x.hidden) as reply_count,
+         (select max(x.created_at) from chat_replies x where x.topic_id = t.id and not x.hidden) as last_reply_at,
+         greatest(t.created_at, coalesce((select max(x.created_at) from chat_replies x where x.topic_id = t.id and not x.hidden), t.created_at)) as last_at
     from chat_topics t
     left join members mem on mem.id = t.author_member_id
     left join trip_guests g on g.id = t.author_guest_id`;
@@ -118,14 +118,15 @@ const REPLY_SELECT = `
     left join trip_guests g on g.id = r.author_guest_id`;
 
 export async function repliesOf(topicId) {
-  const { rows } = await query(`${REPLY_SELECT} where r.topic_id = $1 order by r.created_at`, [topicId]);
+  // `hidden` is a moderator's rejection (contentQueue.js, migration 148).
+  const { rows } = await query(`${REPLY_SELECT} where r.topic_id = $1 and not r.hidden order by r.created_at`, [topicId]);
   return rows;
 }
 
 /** The replies of every topic in a context, in one read, for the filters that look inside them. */
 export async function repliesAcross(topicIds) {
   if (!topicIds.length) return [];
-  const { rows } = await query(`${REPLY_SELECT} where r.topic_id = any($1::uuid[]) order by r.created_at`, [topicIds]);
+  const { rows } = await query(`${REPLY_SELECT} where r.topic_id = any($1::uuid[]) and not r.hidden order by r.created_at`, [topicIds]);
   return rows;
 }
 
@@ -205,10 +206,10 @@ export async function unreadOf(contextType, contextId, me) {
     `select t.id,
             exists (select 1 from chat_reads r where r.target_type = 'topic' and r.target_id = t.id
                       and (($3::uuid is not null and r.member_id = $3) or ($4::uuid is not null and r.guest_id = $4))) as opened,
-            (select count(*)::int from chat_replies x where x.topic_id = t.id and not exists (
+            (select count(*)::int from chat_replies x where x.topic_id = t.id and not x.hidden and not exists (
                select 1 from chat_reads r where r.target_type = 'reply' and r.target_id = x.id
                   and (($3::uuid is not null and r.member_id = $3) or ($4::uuid is not null and r.guest_id = $4)))) as unread_replies
-       from chat_topics t where t.context_type = $1 and t.context_id = $2`,
+       from chat_topics t where t.context_type = $1 and t.context_id = $2 and not t.hidden`,
     [contextType, contextId, memberId, guestId],
   );
   const opened = new Set(rows.filter((r) => r.opened).map((r) => r.id));

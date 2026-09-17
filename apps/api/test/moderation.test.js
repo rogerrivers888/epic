@@ -88,3 +88,49 @@ test('the reject reason is still from a closed list, and an unknown one changes 
   assert.equal((await hosting.publishedReviews(host.id)).length, 1,
     'a reason nobody offered must not hide anything');
 });
+
+
+test('a reply is moderated like anything else somebody wrote in public', async () => {
+  const { household, member } = await aHousehold(query);
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Windsor', 51.48, -0.61, now(), now() + interval '2 days') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, tag_kind, author_member_id, title, body, state)
+     values ('trip', $1, 'general', $2, 'A title', 'A body', 'open') returning *`, [trip.id, member.id]);
+  const { rows: [reply] } = await query(
+    `insert into chat_replies (topic_id, author_member_id, body) values ($1,$2,'Something abusive') returning *`,
+    [topic.id, member.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'chat_reply' and subject_id = $1`, [reply.id]);
+  // Abuse is more often in a reply than in the question it hangs off, so a
+  // reply that never reaches the queue can never be acted on at all.
+  assert.ok(q, 'the reply reached the queue');
+  assert.equal((await chat.repliesOf(topic.id)).length, 1);
+  assert.ok((await queue.one(q.id)).detail?.text, 'the reviewer can read what they are deciding about');
+
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+  assert.equal((await chat.repliesOf(topic.id)).length, 0);
+  await queue.approve([q.id], null);
+  assert.equal((await chat.repliesOf(topic.id)).length, 1);
+});
+
+test('a household whose open entry is rejected can write another one', async () => {
+  const { household } = await aHousehold(query);
+  const make = () => query(
+    `insert into open_entries (household_id, scope, kind, state) values ($1, 'standing', 'adult', 'active') returning *`,
+    [household.id]);
+  const { rows: [entry] } = await make();
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'open_entry' and subject_id = $1`, [entry.id]);
+  assert.ok((await queue.one(q.id)).detail, 'the reviewer sees the offer, not just that one exists');
+
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+  // There is a unique index over *active* standing entries. A hidden row left
+  // active would lock the household out of ever replacing it.
+  const { rows: [again] } = await make();
+  assert.ok(again.id, 'the replacement goes in');
+  assert.equal((await queue.one(q.id)).state, 'rejected');
+});

@@ -66,6 +66,7 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
+import { settleNew } from './repositories/placeIndex.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
 const app = express();
@@ -516,7 +517,7 @@ if (authConfigured()) {
 // predicate over a small table, so the cost of running it twenty-four times as
 // often is not worth measuring.
 //
-// The matrix's refresh rides along with it. The sweep calls `refresh()` itself
+// The matrix's refresh, and the placing of newly kept places, ride along with it. The sweep calls `refresh()` itself
 // when an area finishes, but that is the only thing that calls it, so a run
 // where ONS timed out left those places unstamped until the area's next sweep
 // six months later (Codex, 17 Sep 2026). On the hour it costs two queries when
@@ -529,6 +530,12 @@ const sweep = async () => {
   const reach = await refreshReach({ mode: 'driving' }).catch(() => null);
   if (reach?.cells) console.log(`epic-api: reach — ${reach.cells} cell(s) worked out, ${reach.pairs} pair(s)`);
   if (reach?.stamped?.failed) console.log(`epic-api: reach — ${reach.stamped.failed} point(s) ONS could not answer for; will try again on the hour`);
+  // Places noted since the last pass — by the sweep, the harvest, our own
+  // research or a household claiming one — get their area, cell, shelf and
+  // score. Without it a new place sat in the index and appeared on no board
+  // until somebody pressed Rebuild (Codex, 17 Sep 2026).
+  const placed = await settleNew().catch(() => null);
+  if (placed?.settled) console.log(`epic-api: places — ${placed.settled} newly kept place(s) placed and scored`);
 };
 void sweep();
 setInterval(() => { void sweep(); }, 3600_000).unref?.();

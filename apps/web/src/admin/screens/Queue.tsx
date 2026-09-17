@@ -206,7 +206,15 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
                 {`Photograph by ${it.maker ?? 'a household'}${item.picture.fetched_at ? `, ${day(item.picture.fetched_at)}` : ''}`}
               </Text>
             ) : null}
+            {item.detail?.title ? <Text style={styles.previewCredit}>{item.detail.title}</Text> : null}
             {item.detail?.text ? <Text style={styles.previewText}>{`“${item.detail.text}”`}</Text> : null}
+            {/* An open entry is often chips rather than a sentence, and a
+                reviewer cannot decide about a thing they cannot see. */}
+            {item.detail?.interests?.length || item.detail?.level || item.detail?.where ? (
+              <Text style={styles.previewNote}>
+                {[...(item.detail.interests ?? []), item.detail.level, item.detail.where].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
             {item.detail?.disagree ? (
               <View style={{ gap: 4, marginTop: 6 }}>
                 {item.detail.disagree.map((d: any) => (

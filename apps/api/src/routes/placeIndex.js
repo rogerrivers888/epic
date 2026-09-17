@@ -1415,7 +1415,13 @@ router.post('/reindex', requires('manage_library'), async (req, res, next) => {
 
 /** Rebuild just the counts — what "Refresh the counts · 4 min ago" does. */
 router.post('/refresh', requires('manage_library'), async (_req, res, next) => {
-  try { res.json(await index.refreshStats()); } catch (err) { next(err); }
+  try {
+    // Anything kept since the last pass is placed first — otherwise Refresh
+    // recounts the places the boards already knew about and the new ones stay
+    // invisible, which is the opposite of what the button says.
+    const placed = await index.settleNew();
+    res.json({ ...await index.refreshStats(), ...placed });
+  } catch (err) { next(err); }
 });
 
 /** Work every score out again. Free, and the thing to run after a bar changes. */

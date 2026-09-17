@@ -298,9 +298,90 @@ export async function reindex({ onProgress = null } = {}) {
   const scored = await rescore();
   onProgress?.({ stage: 'scored', ...scored });
 
+  // A rebuild places everything it touched, so the incremental pass afterwards
+  // has nothing left to do.
+  await query('update place_index set placed_at = now()');
   const total = (await query('select count(*)::int as n from place_index')).rows[0].n;
   await refreshStats();
   return { places: total, ...scored, ms: Date.now() - t0 };
+}
+
+/**
+ * Place the ones nobody has placed yet.
+ *
+ * `noteMany` writes the row the moment a place is kept, and that is all it
+ * writes: no area, no cell, no shelf, no score. But every board in Places reads
+ * through `place_areas`, so until something derives those a newly swept or
+ * claimed place is in the index and invisible on the screen — and it stayed
+ * that way until an administrator thought to press Rebuild (Codex, 17 Sep
+ * 2026).
+ *
+ * This is the same derivation the full rebuild does, scoped to the places that
+ * have never had it. `placed_at` is the marker (migration 149) rather than
+ * `indexed_at`, which defaults to now() and so is already set on a brand new
+ * row. It runs on the hour and whenever somebody presses Refresh, and it is
+ * safe to run when there is nothing to do: one indexed read that finds nothing.
+ */
+export async function settleNew({ limit = 5000 } = {}) {
+  const { rows: waiting } = await query(
+    'select venue_ref from place_index where placed_at is null limit $1', [limit]);
+  if (!waiting.length) return { settled: 0 };
+  const refs = waiting.map((r) => r.venue_ref);
+
+  // 1 — where they are. The same four sources the rebuild reads, and the same
+  //     rule that a town carries its county. Nothing is deleted first: these
+  //     places have no area rows yet, by definition.
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select pi.venue_ref, lower(pi.country_code) from place_index pi
+     where pi.venue_ref = any($1) and pi.country_code is not null
+    on conflict do nothing`, [refs]);
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select coalesce(a.venue_ref, 'atlas:' || a.id::text), x.slug
+      from attractions a
+      cross join lateral (values (a.region_slug), (a.locality_slug), (lower(a.outcode))) as x(slug)
+     where a.state <> 'rejected' and x.slug is not null
+       and coalesce(a.venue_ref, 'atlas:' || a.id::text) = any($1)
+    on conflict do nothing`, [refs]);
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select sp.venue_ref, x.slug
+      from scout_places sp
+      cross join lateral (values (sp.locality_slug), (lower(sp.outcode))) as x(slug)
+     where x.slug is not null and sp.venue_ref = any($1)
+    on conflict do nothing`, [refs]);
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select r.venue_ref, lower(substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?'))
+      from place_records r
+     where r.venue_ref = any($1) and r.postcode is not null
+       and substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?') is not null
+    on conflict do nothing`, [refs]);
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select pa.venue_ref, l.parent_slug
+      from place_areas pa join localities l on l.slug = pa.area_slug
+     where pa.venue_ref = any($1) and l.kind = 'town' and l.parent_slug is not null
+    on conflict do nothing`, [refs]);
+
+  // 2 — the cell the reach build stamped, so a ring finds them.
+  await query(`
+    update place_index pi set cell = pc.cell
+      from place_cells pc
+     where pc.venue_ref = pi.venue_ref and pi.venue_ref = any($1) and pi.cell is distinct from pc.cell`, [refs]);
+
+  // 3 — our shelf, and 4 — the score, which is what clears `indexed_at`.
+  await shelveAll({ refs });
+  const scored = await rescore({ refs });
+  // Placed. Whether or not any of it found anything — an outcode nobody has
+  // swept yet has no area to be in, and retrying it every hour for ever would
+  // starve the ones that do. The next full rebuild picks it up.
+  await query('update place_index set placed_at = now() where venue_ref = any($1)', [refs]);
+  // The boards read `area_stats`, so a place placed but not counted is still
+  // missing from every headline.
+  await refreshStats();
+  return { settled: refs.length, ...scored };
 }
 
 /**
@@ -310,12 +391,19 @@ export async function reindex({ onProgress = null } = {}) {
  * adjusted: the score is a pure function of the facts held and the bar in force,
  * so a rebuild cannot drift from what the screen says the weights are.
  */
-export async function rescore({ subcategory = null } = {}) {
+export async function rescore({ subcategory = null, refs = null } = {}) {
   const bar = await bars();
+  const args = [];
+  const where = [];
+  if (subcategory) { args.push(subcategory); where.push(`p.subcategory = $${args.length}`); }
+  if (refs) { args.push(refs); where.push(`p.venue_ref = any($${args.length})`); }
   const { rows } = await query(
     `${HELD_SQL} join place_index p on p.venue_ref = x.venue_ref
-      ${subcategory ? 'where p.subcategory = $1' : ''}`, subcategory ? [subcategory] : []);
-  const subs = new Map((await query('select venue_ref, subcategory from place_index')).rows.map((r) => [r.venue_ref, r.subcategory]));
+      ${where.length ? `where ${where.join(' and ')}` : ''}`, args);
+  const { rows: subRows } = refs
+    ? await query('select venue_ref, subcategory from place_index where venue_ref = any($1)', [refs])
+    : await query('select venue_ref, subcategory from place_index');
+  const subs = new Map(subRows.map((r) => [r.venue_ref, r.subcategory]));
   let changed = 0;
   const chunk = [];
   for (const r of rows) {
@@ -379,9 +467,13 @@ export async function note({ ref, lat = null, lng = null, source = null, sourceI
  * place nothing fires for keeps a null subcategory, which is a finding rather
  * than a gap: it is invisible on Inspire however good it is.
  */
-export async function shelveAll() {
+export async function shelveAll({ refs = null } = {}) {
   const [taught, tax] = await Promise.all([shelfRules(), taxonomy()]);
-  await query('delete from place_index_labels');
+  // Only the shelves being rebuilt are cleared. A full pass wipes the lot and
+  // fills it again; an incremental one must not throw away every other place's
+  // words to file a hundred new ones.
+  if (refs) await query('delete from place_index_labels where venue_ref = any($1)', [refs]);
+  else await query('delete from place_index_labels');
   const live = new Set(tax.subcategories?.map?.((s) => s.key) ?? []);
   const { rows } = await query(`
     select pi.venue_ref, pi.derived_by,
@@ -392,7 +484,8 @@ export async function shelveAll() {
       left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
       left join lateral (select category, cuisine_group from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
       left join place_records r on r.venue_ref = pi.venue_ref
-     where pi.derived_by is distinct from 'hand'`);
+     where pi.derived_by is distinct from 'hand'
+       ${refs ? 'and pi.venue_ref = any($1)' : ''}`, refs ? [refs] : []);
 
   const chunk = [];
   // The words each place was filed by, so the labels lens can be driven by the
@@ -575,6 +668,26 @@ export const statsAge = async () =>
 // reading it
 // ---------------------------------------------------------------------------
 
+/**
+ * How each column of the breakdown ladder is ordered, in the database.
+ *
+ * It has to be the database, because the list is a slice: sorting a page that
+ * was chosen arbitrarily ranks the wrong two hundred areas. `ready` is the
+ * share rather than the count, which is what the column prints, and a place
+ * with nothing known has no share — `nulls last` keeps those at the bottom
+ * whichever way round it is read.
+ */
+const ORDER_BY = {
+  known: 'coalesce(st.places, 0)',
+  owned: 'coalesce(st.owned, 0)',
+  identified: 'coalesce(st.identified, 0)',
+  ready: 'case when coalesce(st.places, 0) > 0 then coalesce(st.ready, 0)::real / st.places else null end',
+  score: 'st.avg_score',
+  searches: 'coalesce(d.searches, 0)',
+  empty: 'coalesce(d.empty, 0)',
+  name: 'l.name',
+};
+
 const FIVE = `
   coalesce(st.places, 0)     as known,
   coalesce(st.owned, 0)      as owned,
@@ -709,6 +822,12 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
         select count(*)::int as searches, count(*) filter (where s.empty)::int as empty
           from searches s where s.area_slug = l.slug and s.at > now() - ($3 || ' days')::interval
       ) d on true
+     -- Ordered before it is cut, not after. Great Britain broken down by
+     -- postcode is 2,900 outcodes; taking an arbitrary 200 and *then* sorting
+     -- them in JavaScript printed a top ten that was nothing of the sort
+     -- (Codex, 17 Sep 2026). The same expressions the ladder sorts by, said
+     -- once, in SQL.
+     order by ${ORDER_BY[sort] ?? ORDER_BY.searches} ${desc ? 'desc' : 'asc'} nulls last, l.name asc
      limit $4`, [slug, kind, String(since), limit]);
   // How many there are at all, so a list that is a slice can say so rather than
   // reading as the whole (the boards print "8 of 1,204").
@@ -720,12 +839,6 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
      select count(*)::int as n from inside i join localities l on l.slug = i.area_slug and l.kind = $2`,
     [slug, kind]);
 
-  const key = {
-    known: (r) => r.known, owned: (r) => r.owned, identified: (r) => r.identified,
-    ready: (r) => readyShare(r.ready_count, r.known) ?? -1,
-    score: (r) => r.avg_score ?? -1, searches: (r) => r.searches, empty: (r) => r.empty,
-    name: (r) => r.name,
-  }[sort] ?? ((r) => r.searches);
   const out = rows.map((r) => ({
     slug: r.slug, name: r.name, kind: r.kind, parent: r.parent_name ?? null,
     known: r.known, owned: r.owned, identified: r.identified,
@@ -733,11 +846,6 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
     avgScore: r.avg_score == null ? null : Math.round(r.avg_score),
     searches: r.searches, empty: r.empty,
   }));
-  out.sort((a, b) => {
-    const av = key(a), bv = key(b);
-    if (typeof av === 'string') return desc ? String(bv).localeCompare(av) : av.localeCompare(String(bv));
-    return desc ? bv - av : av - bv;
-  });
   return { rows: out, all: all.n };
 }
 

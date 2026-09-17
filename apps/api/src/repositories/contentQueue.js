@@ -139,6 +139,18 @@ export async function sync() {
      where not t.hidden
     on conflict (subject_type, subject_id) do nothing`);
 
+  // A reply is somebody's words in public exactly as a topic is, and abuse is
+  // more often in a reply than in the opening question. Leaving them out meant a
+  // reported reply could never be acted on (Codex, 17 Sep 2026).
+  await query(`
+    insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, made_at)
+    select 'message', 'chat_reply', rp.id::text, m.household_id, coalesce(m.name, 'Somebody'), rp.created_at
+      from chat_replies rp
+      join chat_topics t on t.id = rp.topic_id
+      left join members m on m.id = rp.author_member_id
+     where not rp.hidden and coalesce(rp.body, '') <> ''
+    on conflict (subject_type, subject_id) do nothing`);
+
   await query(`
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, made_at)
     select 'offer', 'open_entry', e.id::text, e.household_id, coalesce(h.name, 'A household'), e.created_at
@@ -235,6 +247,27 @@ export async function one(id) {
     const { rows: [t] } = await query('select title, body from chat_topics where id = $1::uuid', [q.subject_id]);
     out.detail = t ? { text: t.body, title: t.title } : null;
   }
+  if (q.subject_type === 'chat_reply') {
+    const { rows: [r] } = await query(
+      `select rp.body, t.title from chat_replies rp join chat_topics t on t.id = rp.topic_id
+        where rp.id = $1::uuid`, [q.subject_id]);
+    out.detail = r ? { text: r.body, title: r.title } : null;
+  }
+  if (q.subject_type === 'open_entry') {
+    // What was actually submitted, so the decision is made on the offer rather
+    // than on its existence (Codex, 17 Sep 2026).
+    const { rows: [e] } = await query(
+      `select kind, scope, interests, level, when_chips, where_label, languages, transcript, state
+         from open_entries where id = $1::uuid`, [q.subject_id]);
+    out.detail = e
+      ? {
+        // The transcript is the household's own words, which is the part a
+        // moderator is actually deciding about.
+        text: e.transcript, kind: e.kind, scope: e.scope, interests: e.interests,
+        level: e.level, when: e.when_chips, where: e.where_label, languages: e.languages,
+      }
+      : null;
+  }
   if (q.kind === 'data') {
     const [ref, field] = String(q.subject_id).split('#');
     const { rows } = await query('select source, value, fetched_at from place_facts where venue_ref = $1 and field = $2', [ref, field]);
@@ -265,7 +298,22 @@ export async function approve(ids, who) {
       await query(`update image_assets set moderation = 'approved', moderated_by = $2, moderated_at = now() where id = $1::uuid`, [r.subject_id, who ?? null]);
       continue;
     }
-    const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', open_entry: 'open_entries' }[r.subject_type];
+    if (r.subject_type === 'open_entry') {
+      // Live again — unless the household has already written the replacement
+      // this rejection made room for, in which case bringing this one back
+      // would break the unique index. Then it stays ended, which is the truth.
+      await query(`
+        update open_entries e set state = 'active', updated_at = now()
+         where e.id = $1::uuid and e.hidden and e.state = 'ended'
+           and not exists (
+             select 1 from open_entries o
+              where o.id <> e.id and o.state = 'active' and not o.hidden
+                and ((e.scope = 'standing' and o.scope = 'standing' and o.household_id = e.household_id)
+                  or (e.trip_id is not null and o.trip_id = e.trip_id)))`, [r.subject_id]);
+      await query(`update open_entries set hidden = false where id = $1::uuid`, [r.subject_id]);
+      continue;
+    }
+    const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', chat_reply: 'chat_replies' }[r.subject_type];
     if (table) await query(`update ${table} set hidden = false where id = $1::uuid`, [r.subject_id]);
   }
   return rows;
@@ -346,18 +394,28 @@ async function suppress(subjectType, subjectId, { reason, who }) {
     await query(
       `update image_assets set moderation = 'rejected', moderation_note = $2, moderated_by = $3, moderated_at = now()
         where id = $1::uuid`, [subjectId, reason, who ?? null]);
-    // And it stops being anybody's picture of anywhere.
-    await query(`delete from image_links where image_id = $1::uuid`, [subjectId]).catch(() => null);
+    // The link is left alone on purpose. Every read that puts a picture in
+    // front of anybody already joins `moderation = 'approved'`, so the flag is
+    // what suppresses it — and deleting the links as well would make the
+    // approval path a lie, because nothing restores which place it was of
+    // (Codex, 17 Sep 2026).
     return;
   }
   // One flag, one meaning, three tables: `hidden` (migration 147). Not a state
   // flip and not a date pushed out of reach, because both of those lose what
   // the row used to say and cannot be undone honestly.
-  const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', open_entry: 'open_entries' }[subjectType];
+  const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', chat_reply: 'chat_replies', open_entry: 'open_entries' }[subjectType];
   if (table) {
     // Not swallowed. A rejection that failed to reach the content but told the
     // screen it had is the exact shape of the bug this fixes.
     await query(`update ${table} set hidden = true where id = $1::uuid`, [subjectId]);
+    // An open entry is ended as well as hidden. There is a unique index over
+    // *active* standing and per-trip entries, so a hidden-but-active row would
+    // block the household from ever submitting a corrected one (Codex, 17 Sep
+    // 2026). Ending it is what makes "write it again" possible.
+    if (subjectType === 'open_entry') {
+      await query(`update open_entries set state = 'ended', updated_at = now() where id = $1::uuid`, [subjectId]);
+    }
     return;
   }
   // A visit's note, a rating's comment and a flagged fact are not published to
