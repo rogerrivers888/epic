@@ -307,6 +307,30 @@ export async function reindex({ onProgress = null } = {}) {
 }
 
 /**
+ * Build the index the first time, if nothing ever has.
+ *
+ * The index is derived: on an installation that predates it, migration 142
+ * creates the tables empty and every board in Places reads as though Epic had
+ * never seen a place. Nothing put that right except an administrator noticing
+ * and pressing Rebuild (Codex, 17 Sep 2026).
+ *
+ * Run at boot. It is a full rebuild, so it is only ever done when the index is
+ * empty *and* there is something to put in it — not on a fresh database, and
+ * never a second time.
+ */
+export async function buildIfEmpty() {
+  const { rows: [have] } = await query('select count(*)::int as n from place_index');
+  if (have.n > 0) return { built: false, places: have.n };
+  const { rows: [any] } = await query(`
+    select (select count(*) from attractions)     +
+           (select count(*) from scout_places)    +
+           (select count(*) from place_records)   +
+           (select count(*) from household_places) as n`);
+  if (!Number(any.n)) return { built: false, places: 0 };
+  return { built: true, ...await reindex() };
+}
+
+/**
  * Place the ones nobody has placed yet.
  *
  * `noteMany` writes the row the moment a place is kept, and that is all it

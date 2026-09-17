@@ -1396,7 +1396,10 @@ router.post('/inspire', async (req, res, next) => {
     const state = { transcript: [], kind: 'inspire', input, running: true, runStartedAt: new Date().toISOString(), ideas: null, reply: null, error: null };
     const session = await planSessions.insertPlanSession(household.id, state);
     res.json({ sessionId: session.id, ref: runRef(session.id), running: true, stage: 'thinking' });
-    runInspire({ household, attending, session, state }).catch(() => { /* recorded on the session */ });
+    // The account comes with it: the run is detached from the request, so if it
+    // is not carried here it is gone by the time the search is written down.
+    runInspire({ household, accountId: req.account?.id ?? null, attending, session, state })
+      .catch(() => { /* recorded on the session */ });
   } catch (err) {
     next(err);
   }
@@ -1416,7 +1419,7 @@ const deadline = (promise, ms, message) => Promise.race([
   new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
 ]);
 
-async function runInspire({ household, attending, session, state, append = false }) {
+async function runInspire({ household, accountId = null, attending, session, state, append = false }) {
   // Each stage is written to the session as it starts, so the screen can say
   // what is happening instead of spinning, and the ideas themselves are saved
   // before they are pinned to the map — titles first, pins as they land.
@@ -1499,7 +1502,10 @@ async function runInspire({ household, attending, session, state, append = false
     // a fault it had not committed (Codex, 17 Sep 2026). The screen reports an
     // idea opened and a trip made from one against this id.
     const searchId = await searchLog.noteSearch({
-      householdId: household.id, surface: 'plan',
+      // The account too, like every other surface (Codex, 17 Sep 2026). Without
+      // it every planner ask was stored unattributed and Demand counted the
+      // planner as a place nobody signed in had ever used.
+      householdId: household.id, accountId, surface: 'plan',
       ...(await searchLog.whereOf({ lat: home?.lat ?? null, lng: home?.lng ?? null })),
       lat: home?.lat ?? null, lng: home?.lng ?? null,
       minutes: state.input?.maxTravelMinutes ?? null,
@@ -1548,7 +1554,8 @@ router.post('/inspire/more', async (req, res, next) => {
     Object.assign(state, { running: true, stage: 'thinking', error: null, runStartedAt: new Date().toISOString() });
     await saveSession(session.id, state, null);
     res.json({ sessionId: session.id, ref: runRef(session.id), running: true, stage: 'thinking' });
-    runInspire({ household, attending, session, state, append: true }).catch(() => { /* recorded on the session */ });
+    runInspire({ household, accountId: req.account?.id ?? null, attending, session, state, append: true })
+      .catch(() => { /* recorded on the session */ });
   } catch (err) {
     next(err);
   }

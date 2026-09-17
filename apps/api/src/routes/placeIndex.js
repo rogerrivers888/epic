@@ -30,6 +30,7 @@ import { OUR_LABEL, detailFor, blank, lineUp } from '../sources/compare.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { TRIPADVISOR_CAP } from '../repositories/runs.js';
+import * as collectRuns from '../repositories/collectRuns.js';
 import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
@@ -1202,25 +1203,89 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     if (!room.ok) return overTheCeiling(res, want, room);
 
     const household = await currentHousehold();
+    // Written down before a word of it is done, so an answer of "started" is a
+    // claim something can check afterwards (Codex, 17 Sep 2026).
+    const run = await collectRuns.start({
+      whereLabel: scope.kind === 'ring' ? `${rows.length} places in a ring` : (scope.area?.name ?? scope.area?.slug ?? null),
+      scope: { kind: scope.kind, slug: scope.area?.slug ?? null, cat: req.body?.cat ?? null, sub: req.body?.sub ?? null },
+      sources: [...chosen],
+      todo: { free, google, tripadvisor },
+      startedBy: req.account?.email ?? null,
+    });
     res.json({
-      started: true, places: rows.length, sources: [...chosen],
+      started: true, runId: run.id, places: rows.length, sources: [...chosen],
       free: free.length, paid: google.length + tripadvisor.length,
       google: google.length, tripadvisor: tripadvisor.length,
       // Said out loud rather than swallowed: the ones the monthly ceiling left out.
       tripadvisorCapped: taCapped, tripadvisorLeft: taLeft,
       spendPence: want, leftPence: room.leftPence,
     });
-    void (async () => {
-      try {
-        if (free.length) await curateThese(free, household.id);
-        if (google.length) await askThese(google, household.id);
-        if (tripadvisor.length) await askTripadvisor(tripadvisor, household.id);
-        await index.rescore();
-        await index.refreshStats();
-      } catch (err) { console.warn(`collect: ${err.message}`); }
-    })();
+    void work(run.id, household.id);
   } catch (err) { next(err); }
 });
+
+/**
+ * Work through one collection run, a chunk at a time.
+ *
+ * After every chunk the row is written: those places come off the list, the
+ * count goes up, and `touched_at` moves. So a process that dies mid-run loses
+ * at most one chunk, and what is left is still on the row for the next process
+ * to pick up. It is deliberately not clever about concurrency — a run is
+ * resumed only once it has gone untouched for ten minutes, which is longer than
+ * any chunk takes.
+ */
+async function work(runId, householdId) {
+  try {
+    for (;;) {
+      const run = await collectRuns.one(runId);
+      if (!run || run.state !== 'running') return;
+      const todo = run.todo ?? {};
+      const source = ['google', 'tripadvisor', 'free'].find((k) => (todo[k] ?? []).length);
+      if (!source) break;
+      const batch = todo[source].slice(0, collectRuns.CHUNK);
+      if (source === 'free') {
+        const out = await curateThese(batch, householdId);
+        await collectRuns.advance(runId, 'free', batch, { done: out.started, refused: out.refused });
+      } else if (source === 'google') {
+        // The ceiling is asked again per chunk, not once at the start: a run
+        // that outlives a deploy must not outlive the month's budget either.
+        const room = await roomToSpend(Math.round(batch.length * 1.4));
+        if (!room.ok) { await collectRuns.advance(runId, 'google', batch, { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
+        const out = await askThese(batch, householdId);
+        await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: Math.round(out.asked * 1.4) });
+      } else {
+        const left = await tripadvisorRoom();
+        const may = batch.slice(0, left);
+        const out = may.length ? await askTripadvisor(may, householdId) : { asked: 0, refused: [] };
+        await collectRuns.advance(runId, 'tripadvisor', batch, {
+          done: out.asked,
+          refused: [...out.refused, ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly ceiling' }))],
+        });
+      }
+    }
+    await index.settleNew();
+    await index.rescore();
+    await index.refreshStats();
+    await collectRuns.finish(runId);
+  } catch (err) {
+    console.warn(`collect: ${err.message}`);
+    await collectRuns.fail(runId, err.message).catch(() => null);
+  }
+}
+
+/**
+ * Pick up whatever a deploy interrupted.
+ *
+ * Called on the hour. A run is only resumed once it has gone untouched for ten
+ * minutes, so this cannot start a second worker on a run that is simply slow.
+ */
+export async function resumeCollections() {
+  const waiting = await collectRuns.stranded();
+  if (!waiting.length) return { resumed: 0 };
+  const household = await currentHousehold();
+  for (const run of waiting) void work(run.id, household.id);
+  return { resumed: waiting.length };
+}
 
 
 // ---------------------------------------------------------------------------

@@ -237,19 +237,16 @@ export async function upsertAttractions(regionSlug, rows) {
   if (!rows.length) return 0;
   let written = 0;
   await withTransaction(async (client) => {
-    // Everything the harvest keeps is a place Epic has seen, and the index
-    // learns it inside the same transaction — so a run that fails halfway does
-    // not leave index rows for attractions that were never written (Codex,
-    // 17 Sep 2026).
-    await noteMany(
-      rows.filter((a) => a.venueRef).map((a) => ({
-        ref: a.venueRef, lat: a.lat ?? null, lng: a.lng ?? null,
-        // Owned only where the harvest actually kept something of ours to read.
-        ownership: (a.summary ?? a.website ?? a.wikipediaUrl) ? 'owned' : 'identified',
-      })),
-      { source: 'atlas', client });
+    // What the index is told about, collected as the rows go in.
+    //
+    // It cannot be worked out beforehand: a Wikidata harvest row carries no
+    // venue reference of its own, and the synthetic `atlas:<id>` only exists
+    // once the row has an id. Filtering on `a.venueRef` up front therefore
+    // threw away essentially the whole harvest, and those attractions stayed
+    // out of Places until somebody ran a full rebuild (Codex, 17 Sep 2026).
+    const kept = [];
     for (const a of rows) {
-      await client.query(
+      const got = await client.query(
         `insert into attractions
            (region_slug, wikidata_id, name, slug, summary, summary_source, category, kinds, lat, lng,
             wikipedia_title, wikipedia_url, commons_category, website, osm_ref, heritage,
@@ -276,15 +273,27 @@ export async function upsertAttractions(regionSlug, rows) {
            sitelinks = excluded.sitelinks,
            pageviews_year = coalesce(excluded.pageviews_year, attractions.pageviews_year),
            score = excluded.score, score_parts = excluded.score_parts,
-           attribution = excluded.attribution, last_seen = now(), updated_at = now()`,
+           attribution = excluded.attribution, last_seen = now(), updated_at = now()
+         returning id, venue_ref`,
         [regionSlug, a.wikidataId, a.name, a.slug, a.summary ?? null, a.summarySource ?? null,
          a.category ?? null, a.kinds ?? [], a.lat ?? null, a.lng ?? null,
          a.wikipediaTitle ?? null, a.wikipediaUrl ?? null, a.commonsCategory ?? null,
          a.website ?? null, a.osmRef ?? null, a.heritage ?? null,
          a.sitelinks ?? 0, a.pageviewsYear ?? null, a.score ?? 0,
          JSON.stringify(a.scoreParts ?? {}), JSON.stringify(a.attribution ?? [])]);
+      const put = got.rows[0];
+      if (put) {
+        kept.push({
+          ref: put.venue_ref ?? `atlas:${put.id}`, lat: a.lat ?? null, lng: a.lng ?? null,
+          // Owned only where the harvest actually kept something of ours to read.
+          ownership: (a.summary ?? a.website ?? a.wikipediaUrl) ? 'owned' : 'identified',
+        });
+      }
       written += 1;
     }
+    // Inside the same transaction, so a run that fails halfway does not leave
+    // index rows for attractions that were never written.
+    await noteMany(kept, { source: 'atlas', client });
   });
   return written;
 }

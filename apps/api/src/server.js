@@ -66,7 +66,8 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
-import { settleNew } from './repositories/placeIndex.js';
+import { buildIfEmpty, settleNew } from './repositories/placeIndex.js';
+import { resumeCollections } from './routes/placeIndex.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
 const app = express();
@@ -536,7 +537,18 @@ const sweep = async () => {
   // until somebody pressed Rebuild (Codex, 17 Sep 2026).
   const placed = await settleNew().catch(() => null);
   if (placed?.settled) console.log(`epic-api: places — ${placed.settled} newly kept place(s) placed and scored`);
+  // And any collection a deploy interrupted. Only runs untouched for ten
+  // minutes are picked up, so a slow one is never started twice.
+  const back = await resumeCollections().catch(() => null);
+  if (back?.resumed) console.log(`epic-api: collect — picked up ${back.resumed} interrupted run(s)`);
 };
+
+// The index is derived, so on an installation that predates it there is nothing
+// in it and every board in Places reads empty until somebody presses Rebuild.
+// Once, at boot, and only when there is something to put in it.
+void buildIfEmpty()
+  .then((r) => { if (r?.built) console.log(`epic-api: places — built the index for the first time, ${r.places} place(s)`); })
+  .catch((err) => console.warn(`epic-api: places — could not build the index: ${err.message}`));
 void sweep();
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 

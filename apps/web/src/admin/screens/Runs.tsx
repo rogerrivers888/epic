@@ -63,7 +63,7 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
     if (r.key === 'menus') { onFailures('menus'); return; }
     if (r.key === 'bench') { navigate('/admin/sources'); return; }
     // These three are asked of a selection of places, not of Britain.
-    if (r.key === 'rate' || r.key === 'tripadvisor' || r.key === 'curate') { navigate('/admin/places?where=gb&lens=collect'); return; }
+    if (r.key === 'rate' || r.key === 'tripadvisor' || r.key === 'curate' || r.key === 'collect') { navigate('/admin/places?where=gb&lens=collect'); return; }
     if (r.key === 'sweep') { navigate('/admin/places?where=gb&by=postcode&lens=collect'); return; }
     setBusy(r.key);
     try {

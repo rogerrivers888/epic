@@ -265,3 +265,22 @@ test('a breakdown that is a slice ranks the right slice', async () => {
   const other = await index.breakdown('gb', { by: 'county', sort: 'known', desc: false, limit: 1 });
   assert.equal(other.rows[0].slug, 'aaa-shire');
 });
+
+test('the harvest reaches the index, including the rows that have no reference of their own', async () => {
+  // A Wikidata harvest row carries no venue reference: the synthetic
+  // `atlas:<id>` only exists once the row has an id. Filtering on it beforehand
+  // threw away essentially the whole harvest (Codex, 17 Sep 2026).
+  const library = await import('../src/repositories/library.js');
+  await query(`insert into regions (slug, name, nation, kind) values ('testshire', 'Testshire', 'England', 'county')
+               on conflict (slug) do nothing`);
+  const written = await library.upsertAttractions('testshire', [
+    { wikidataId: 'Q-test-1', name: 'A castle', slug: 'a-castle', lat: 51.48, lng: -0.61, summary: 'Ours.' },
+    { wikidataId: null, name: 'A garden', slug: 'a-garden', lat: 51.49, lng: -0.62 },
+  ]);
+  assert.equal(written, 2);
+  const { rows } = await query(
+    `select pi.venue_ref from place_index pi
+      where pi.venue_ref in (select coalesce(a.venue_ref, 'atlas:' || a.id::text)
+                               from attractions a where a.region_slug = 'testshire')`);
+  assert.equal(rows.length, 2, 'both of them, whether or not they came with a reference');
+});

@@ -12,6 +12,7 @@
 import { query } from '../db.js';
 import { menuCauses } from './scout.js';
 import { OURS_KINDS, oursKindOf } from '../domain/menuCauses.js';
+import * as collectRuns from './collectRuns.js';
 
 /**
  * The eight ways of getting more data.
@@ -47,6 +48,13 @@ export const RUNS = [
   { key: 'rescore', label: 'Work out the scores again',
     explain: 'No network and nothing spent. Run it after any change to the ready bar.',
     costs: 'free', free: true, action: 'Run it' },
+  // Collect is the umbrella the other three are asked under, started from
+  // Places. It is on this board because it is long-running and a deploy can
+  // interrupt it — which is precisely what this page is for (Codex, 17 Sep
+  // 2026).
+  { key: 'collect', label: 'Collect, from Places',
+    explain: 'Works through a list of places asking each source in turn. Picks itself up after a deploy.',
+    costs: 'what the sources cost', free: false, action: 'Choose where' },
 ];
 
 const one = async (sql, args = []) => (await query(sql, args)).rows[0] ?? null;
@@ -80,6 +88,7 @@ export async function list() {
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);
   const bench = await one('select count(*)::int as n, max(ran_at) as last from source_bench_runs').catch(() => null);
   const rescore = await one('select max(indexed_at) as last, count(*)::int as n from place_index');
+  const collect = await collectRuns.latest();
 
   const rows = [
     {
@@ -122,6 +131,23 @@ export async function list() {
     { ...RUNS[5], state: 'idle', where: 'Idle', cap: 'none', lastAt: curate?.last ?? null, done: curate?.n ?? 0 },
     { ...RUNS[6], state: 'idle', where: 'Idle', cap: '30 places', lastAt: bench?.last ?? null },
     { ...RUNS[7], state: 'idle', where: 'Idle', cap: 'none', lastAt: rescore?.last ?? null, places: rescore?.n ?? 0 },
+    {
+      ...RUNS[8],
+      state: collect?.state === 'running' ? 'running' : collect?.state === 'failed' ? 'failed' : 'idle',
+      where: !collect ? 'Idle'
+        : collect.state === 'running' ? `Running · ${collect.asked} asked, ${collect.left} to go`
+        : collect.state === 'failed' ? `Stopped · ${collect.problem ?? 'it fell over'}`
+        : `Done · ${collect.asked} place${collect.asked === 1 ? '' : 's'}${collect.where ? ` in ${collect.where}` : ''}`,
+      progress: collect && collect.asked + collect.left ? collect.asked / (collect.asked + collect.left) : null,
+      cap: 'the ceiling, asked again every chunk',
+      lastAt: collect?.finishedAt ?? collect?.startedAt ?? null,
+      startedAt: collect?.state === 'running' ? collect.startedAt : null,
+      spentPence: collect?.spentPence ?? 0,
+      error: collect?.problem ?? null,
+      // Untouched for ten minutes while claiming to be going: a deploy took it,
+      // and it is picked up on the hour.
+      stranded: collect?.stranded ? { since: collect.touchedAt, why: 'a deploy' } : null,
+    },
   ];
 
   const spend = await one(
