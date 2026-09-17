@@ -22,11 +22,20 @@ update place_index pi
         and coalesce(r.summary, r.website, r.opening_hours, r.price_range,
                      r.address, r.postcode, r.phone) is not null);
 
+-- Only for a place the index already holds.
+--
+-- `place_index_sources.venue_ref` points at `place_index`, and on an upgrade
+-- the index is created empty by migration 142 — the rebuild that fills it runs
+-- after every migration has passed. Without this the insert broke the foreign
+-- key and aborted the deployment (Codex, 17 Sep 2026). The places not yet in
+-- the index do not need it: the rebuild writes their `own` rows itself, from
+-- the same predicate.
 insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
 select r.venue_ref, 'own', r.venue_ref, r.first_owned, r.updated_at
   from place_records r
- where coalesce(r.summary, r.website, r.opening_hours, r.price_range,
-                r.address, r.postcode, r.phone) is not null
-    or r.accessibility <> '{}'::jsonb
-    or r.curated_at is not null
+ where exists (select 1 from place_index pi where pi.venue_ref = r.venue_ref)
+   and (coalesce(r.summary, r.website, r.opening_hours, r.price_range,
+                 r.address, r.postcode, r.phone) is not null
+        or r.accessibility <> '{}'::jsonb
+        or r.curated_at is not null)
 on conflict (venue_ref, source) do nothing;
