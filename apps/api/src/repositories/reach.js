@@ -214,6 +214,17 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
            rows.map((r) => r.minutes), rows.map((r) => r.km), rows.map(() => 'estimate')],
         );
       }
+      // What this origin was built to, written as it finishes. The matrix's
+      // completeness is a fact about each origin, not something that can be
+      // read back out of the times it happens to hold.
+      await query(
+        `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, at)
+         values ($1, $2, $3, $4, 'estimate', now())
+         on conflict (from_cell, mode) do update
+           set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs,
+               method = excluded.method, at = excluded.at`,
+        [cells[i].code, canonical, capMinutes, rows.length],
+      );
       pairs += rows.length;
       if (onProgress && i % 100 === 0) { try { onProgress({ done: i + 1, of: cells.length, pairs }); } catch { /* not the build */ } }
     }
@@ -274,7 +285,7 @@ export async function placesWithin(cell, { minutes = 30, mode = 'driving', edge 
 }
 
 /** What has been built, for the back office and for the tests. */
-export async function state() {
+export async function state({ scheme = 'sector', country = 'GB' } = {}) {
   const { rows: [cells] } = await query(
     `select count(*)::int as cells,
             count(*) filter (where places > 0)::int as with_places,
@@ -286,24 +297,56 @@ export async function state() {
             count(distinct from_cell)::int as from_cells
        from reach`,
   );
-  // What each mode was actually built to, and whether it still reaches the
-  // horizon. A matrix built before the edge allowance existed answers every
-  // read happily and is quietly short at the far end, so it has to say so
-  // rather than be silently trusted or silently rebuilt — a rebuild is minutes
-  // of work and must never happen inside somebody's read (Codex, 17 Sep 2026).
+  // What each mode was actually built to, per origin, and scoped to the cells
+  // it was built over: another scheme or another country sharing the table
+  // would otherwise mask newly added sectors or invent missing ones.
   const { rows: built } = await query(
-    `select mode, max(minutes)::int as cap, count(*)::bigint as pairs,
-            count(distinct from_cell)::int as from_cells
-       from reach group by mode order by mode`,
+    `select b.mode,
+            min(b.cap_minutes)::int      as lowest_cap,
+            max(b.cap_minutes)::int      as highest_cap,
+            count(*)::int                as built_cells,
+            coalesce(sum(b.pairs), 0)::bigint as pairs
+       from cell_builds b
+       join geo_cells g on g.code = b.from_cell
+      where g.scheme = $1 and g.country_code = $2
+      group by b.mode order by b.mode`,
+    [scheme, country],
   );
-  const { rows: [cellCount] } = await query("select count(*)::int as n from geo_cells where scheme = 'sector'");
+  const { rows: [cellCount] } = await query(
+    'select count(*)::int as n from geo_cells where scheme = $1 and country_code = $2',
+    [scheme, country],
+  );
+  // A mode with rows in the matrix and no build record at all: written before
+  // this table existed, or by a run that died before its first origin landed.
+  // Reported as short rather than left off, because a mode that vanishes from
+  // the report is a mode nobody rebuilds.
+  const { rows: unrecorded } = await query(
+    `select r.mode, count(distinct r.from_cell)::int as from_cells, count(*)::bigint as pairs
+       from reach r
+       join geo_cells g on g.code = r.from_cell
+      where g.scheme = $1 and g.country_code = $2
+        and not exists (select 1 from cell_builds b where b.from_cell = r.from_cell and b.mode = r.mode)
+      group by r.mode order by r.mode`,
+    [scheme, country],
+  );
   const modes = built.map((m) => ({
-    mode: m.mode, cap: m.cap, pairs: Number(m.pairs), fromCells: m.from_cells,
-    // Short if it does not reach the horizon, or if cells have been added since
-    // it was built and some of them have no neighbours of their own.
-    shortOfHorizon: m.cap < HORIZON_MINUTES,
-    missingCells: Math.max(0, cellCount.n - m.from_cells),
-  }));
+    mode: m.mode,
+    cap: m.lowest_cap,
+    // A rebuild part-way through has origins at two different caps. Saying both
+    // is the only honest answer, and the low one is the one that matters.
+    partWayThrough: m.lowest_cap !== m.highest_cap,
+    pairs: Number(m.pairs),
+    fromCells: m.built_cells,
+    shortOfHorizon: m.lowest_cap < HORIZON_MINUTES,
+    missingCells: Math.max(0, cellCount.n - m.built_cells),
+  })).concat(unrecorded
+    .filter((u) => !built.some((b) => b.mode === u.mode))
+    .map((u) => ({
+      mode: u.mode, cap: null, partWayThrough: false,
+      pairs: Number(u.pairs), fromCells: u.from_cells,
+      shortOfHorizon: true, missingCells: Math.max(0, cellCount.n - u.from_cells),
+      note: 'built before the build record existed',
+    })));
   const { rows: [stamped] } = await query(
     `select count(*) filter (where cell is not null)::int as n,
             count(*) filter (where cell is null)::int as unplaced
