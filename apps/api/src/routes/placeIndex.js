@@ -799,7 +799,22 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       have: scored.parts.held.length, missingCount: scored.parts.missing.length,
       areas: areas.map((a) => ({ slug: a.slug, name: a.name, kind: a.kind })),
       sources: seen.map((s) => ({ source: s.source, id: s.source_place_id, firstSeen: s.first_seen, lastSeen: s.last_seen })),
-      unseen: unseen.map((s) => ({ ...s, pence: s.key === 'google' ? 1.4 : null })),
+      // What one of these would cost, from the one price table. The hard-coded
+      // 1.4p was the old figure and the ledger records about 2.5p a Google
+      // request (Codex, 17 Sep 2026).
+      unseen: unseen.map((s) => ({
+        ...s,
+        pence: s.key === 'google' ? DETAIL_PENCE
+          : s.key === 'tripadvisor' ? taCost(1)
+          : null,
+      })),
+      // What opening "Ours beside theirs" would spend: a Google detail, a match
+      // where we hold no identifier, and a Tripadvisor view where it is
+      // switched on and joined. Said on the button rather than guessed at.
+      comparePence: (googleSource.enabled()
+        ? DETAIL_PENCE + (ref.startsWith('google:') || asked.has('google') ? 0 : MATCH_PENCE)
+        : 0)
+        + (tripadvisorSource.enabled() ? taCost(1) : 0),
       unseenFree: unseen.filter((s) => !s.paid).length,
       unseenPaid: unseen.filter((s) => s.paid).length,
       record,

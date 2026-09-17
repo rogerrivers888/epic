@@ -186,6 +186,12 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict (venue_ref) do update
        set lat = coalesce(excluded.lat, place_index.lat),
            lng = coalesce(excluded.lng, place_index.lng),
+           -- The country a source knows, where the row does not. A place noted
+           -- by the write path before anything knew its country kept a null
+           -- through every rebuild, so it had no country area row and was
+           -- missing from the country boards for good (Codex, 17 Sep 2026).
+           -- First one wins, as everywhere else.
+           country_code = coalesce(place_index.country_code, excluded.country_code),
            last_seen = greatest(place_index.last_seen, excluded.last_seen),
            -- identified < claimed < owned, said out loud rather than left to
            -- the alphabet, which puts claimed below identified.
@@ -216,6 +222,8 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict (venue_ref) do update
        set lat = coalesce(place_index.lat, excluded.lat),
            lng = coalesce(place_index.lng, excluded.lng),
+           -- The same: the sweep's area knows the country when the row does not.
+           country_code = coalesce(place_index.country_code, excluded.country_code),
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
 
   // An owned record is one that holds something of ours to read.

@@ -1495,6 +1495,14 @@ export type PlaceDetail = {
   sources: { source: string; id: string | null; firstSeen: string; lastSeen: string }[];
   unseen: (PlaceSourceDef & { pence: number | null })[];
   unseenFree: number; unseenPaid: number;
+  /**
+   * What opening "Ours beside theirs" would actually spend, in pence.
+   *
+   * From the one price table, and counting the calls this place needs — a
+   * match only where we hold no identifier. The button used to say £0.014,
+   * which was the old figure and roughly a fifth of the real one.
+   */
+  comparePence: number;
   record: PlaceField[];
   facts: { field: string; source: string; value: unknown; licence: string; retention: string; fetchedAt: string; expiresAt: string | null }[];
   pictures: {

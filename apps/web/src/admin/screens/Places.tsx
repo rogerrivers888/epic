@@ -1692,7 +1692,10 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Act label={curating ? 'Curating…' : 'Curate it · free'} tone="secondary" disabled={!canManage || curating}
                onPress={() => { setCurating(true); api.adminCuratePlaces([refId]).finally(() => { setCurating(false); load(); }); }} />
-          <Act label="Compare all three · £0.014" disabled={!canManage} onPress={() => setTab('compare')} />
+          {/* What it would actually spend, from the API rather than a figure
+              typed on the screen (Codex, 17 Sep 2026). */}
+          <Act label={`Compare all three · ${place.comparePence ? pounds(Math.round(place.comparePence)) : 'free'}`}
+               disabled={!canManage} onPress={() => setTab('compare')} />
         </View>
       </View>
 
