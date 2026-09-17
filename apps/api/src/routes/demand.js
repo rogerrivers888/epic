@@ -23,6 +23,9 @@ import { faultOf, SHORT_FAULT } from '../domain/placeIndex.js';
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
 
+/** A source, said the way a person would say it rather than the way it is keyed. */
+const SOURCE_WORD = { google: 'Google', osm: 'OSM', atlas: 'the atlas', sweep: 'the sweep', own: 'ours', tripadvisor: 'Tripadvisor', claude: 'the planner', live: 'a live look' };
+
 /** BO4a — three numbers, what was asked for, and the log itself. */
 router.get('/', requires('view_reporting'), async (req, res, next) => {
   try {
@@ -54,7 +57,11 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
           label: s.subject ? (labels.get(s.subject) ?? catLabels.get(s.subject) ?? s.subject) : 'Anything',
           noSubject: !s.subject,
           searches: s.searches, empty: s.empty, noClick: s.noClick, noTrip: s.noTrip, known: k,
-          fault: f.key, faultLabel: f.label, shortFault: SHORT_FAULT[f.key], owner: f.owner, act: f.act,
+          fault: f.key, faultLabel: f.label,
+          // "No places" only where we really hold none; otherwise the figures
+          // say what they say and the row reads "Came back empty".
+          shortFault: f.key === 'no-places' && k ? 'Came back empty' : SHORT_FAULT[f.key],
+          owner: f.owner, act: f.act,
         };
       }),
       log: log.map((r) => ({
@@ -105,19 +112,29 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       prev.push(e);
       did.set(e.venue_ref, prev);
     }
-    const word = (list) => {
-      if (!list?.length) return { label: 'Never reached', strong: false };
-      const kinds = new Set(list.map((e) => e.kind));
+    /**
+     * What they did to one row, in the words the board uses.
+     *
+     * Three inactions, and they are different facts: a row they saw and moved
+     * past, a row they said no to, and a row they never got down to. The third
+     * is decided by the deepest thing they *did* touch — anything below the
+     * furthest they reached was never reached (Codex, 17 Sep 2026).
+     */
+    const deepest = Math.max(0, ...events.filter((e) => e.kind !== 'shown').map((e) => e.position ?? 0));
+    const word = (list, position) => {
+      const kinds = new Set((list ?? []).map((e) => e.kind));
       if (kinds.has('add_to_trip')) return { label: 'Opened, then tripped', strong: true };
       if (kinds.has('save') || kinds.has('shortlist')) return { label: 'Opened, then saved', strong: true };
       if (kinds.has('dismiss')) return { label: 'Dismissed', strong: false };
       if (kinds.has('open')) return { label: 'Opened, then closed', strong: true };
-      return { label: 'Scrolled past', strong: false };
+      // Nothing was done to it. Whether they ever got to it is the question, and
+      // the deepest row they touched is the only honest answer we hold.
+      return { label: position <= deepest ? 'Scrolled past' : 'Never reached', strong: false };
     };
 
     const rows = shown.map((e, i) => {
       const acts = did.get(e.venue_ref) ?? [];
-      const w = word(acts.length ? acts : (e.meta?.reached === false ? null : []));
+      const w = word(acts, e.position ?? i + 1);
       const px = byRef.get(e.venue_ref);
       return {
         position: e.position ?? i + 1,
@@ -133,16 +150,22 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       };
     });
 
+    const areaName = search.area_slug
+      ? (await query('select name from localities where slug = $1', [search.area_slug])).rows[0]?.name ?? search.area_slug
+      : null;
     res.json({
       id: search.id, at: search.at, surface: search.surface,
-      subject: search.subject, asked: search.asked,
-      where: search.area_slug ?? search.cell, minutes: search.minutes, mode: search.mode,
+      subject: search.subject,
+      // The subject in our own words, not the key it is stored under.
+      subjectLabel: search.subject ? labels.get(search.subject) ?? search.subject : null,
+      asked: search.asked,
+      where: areaName ?? search.cell, minutes: search.minutes, mode: search.mode,
       identified: Boolean(search.account_id), heldAgainst: search.account_id ? 'an account' : 'a household',
       shown: search.shown_total,
       opened: events.filter((e) => e.kind === 'open').length,
       saved: events.filter((e) => e.kind === 'save' || e.kind === 'shortlist').length,
       tripped: events.some((e) => e.kind === 'add_to_trip'),
-      sourcesQueried: search.sources_queried ?? [],
+      sourcesQueried: (search.sources_queried ?? []).map((k) => SOURCE_WORD[k] ?? k),
       degraded: search.degraded ?? [],
       rows,
       // What this replay cost: a name we do not hold has to be fetched.

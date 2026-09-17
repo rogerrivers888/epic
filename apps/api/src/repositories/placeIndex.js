@@ -19,6 +19,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
+import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
 import { rules as shelfRules } from './shelfRules.js';
 import { taxonomy } from './shelfTaxonomy.js';
 import { FACT_KEYS, FACT_WEIGHTS, defaultBars, scorePlace, readyShare } from '../domain/placeIndex.js';
@@ -342,8 +343,14 @@ async function flushScores(chunk) {
 /**
  * Note a place the moment something resolves it, rather than waiting for a job.
  *
- * Called from the sources layer, the sweep, the harvest and a household claiming
- * a place. Cheap, idempotent, and it never writes a name.
+ * Called from the sweep, the harvest, our own records and a household claiming a
+ * place — the four paths that actually *persist* a place. Cheap, idempotent, and
+ * it never writes a name.
+ *
+ * Not from the sources layer on every search: a browse resolves forty venues and
+ * most of them are gone a second later, so writing an index row for each one
+ * would put an insert storm behind somebody's spinner to record places nothing
+ * ever asked about again. A place that is kept is a place worth indexing.
  */
 export async function note({ ref, lat = null, lng = null, source = null, sourceId = null, countryCode = 'GB' }) {
   if (!ref) return;
@@ -374,6 +381,7 @@ export async function note({ ref, lat = null, lng = null, source = null, sourceI
  */
 export async function shelveAll() {
   const [taught, tax] = await Promise.all([shelfRules(), taxonomy()]);
+  await query('delete from place_index_labels');
   const live = new Set(tax.subcategories?.map?.((s) => s.key) ?? []);
   const { rows } = await query(`
     select pi.venue_ref, pi.derived_by,
@@ -387,30 +395,45 @@ export async function shelveAll() {
      where pi.derived_by is distinct from 'hand'`);
 
   const chunk = [];
+  // The words each place was filed by, so the labels lens can be driven by the
+  // taxonomy the way the subcategory lens is — every label listed whether or not
+  // anything carries it, because an empty one is the finding.
+  const words = [];
   const flush = async () => {
-    if (!chunk.length) return;
-    const values = chunk.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4})`).join(',');
-    await query(
-      `update place_index pi set category = v.cat, subcategory = v.sub, derived_by = v.by
-         from (values ${values}) as v(ref, cat, sub, by)
-        where pi.venue_ref = v.ref`, chunk.flat());
-    chunk.length = 0;
+    if (chunk.length) {
+      const values = chunk.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4})`).join(',');
+      await query(
+        `update place_index pi set category = v.cat, subcategory = v.sub, derived_by = v.by
+           from (values ${values}) as v(ref, cat, sub, by)
+          where pi.venue_ref = v.ref`, chunk.flat());
+      chunk.length = 0;
+    }
+    if (words.length) {
+      const values = words.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(',');
+      await query(
+        `insert into place_index_labels (venue_ref, label) values ${values} on conflict do nothing`,
+        words.flat());
+      words.length = 0;
+    }
   };
 
   for (const r of rows) {
     const [source, ...rest] = String(r.venue_ref).split(':');
     let filed = null;
+    let said = [];
     let by = r.derived_by ?? null;
     if (r.atlas_category != null || r.atlas_id) {
       filed = shelvesForAtlas({ ref: r.venue_ref, category: r.atlas_category, kinds: r.atlas_kinds ?? [] }, taught, tax.vocab);
+      said = labelsOfAtlas({ category: r.atlas_category, kinds: r.atlas_kinds ?? [] });
       by = 'harvest';
     } else if (r.own_category || r.sweep_category) {
-      filed = shelvesForVenue(
-        { source, sourcePlaceId: rest.join(':'), category: r.own_category ?? r.sweep_category, experiences: r.experiences ?? [], styles: [] },
-        taught, tax.vocab);
+      const venue = { source, sourcePlaceId: rest.join(':'), category: r.own_category ?? r.sweep_category, experiences: r.experiences ?? [], styles: [] };
+      filed = shelvesForVenue(venue, taught, tax.vocab);
+      said = labelsOf(venue);
       by = r.own_category ? 'own' : 'sweep';
     }
     if (!filed) continue;
+    for (const w of said) words.push([r.venue_ref, w]);
     const sub = filed.subcategory && (!live.size || live.has(filed.subcategory)) ? filed.subcategory : null;
     const cat = filed.category ?? filed.shelves?.[0] ?? null;
     // Which rule put it there, so "changes every amusement park" can say how far
@@ -422,6 +445,40 @@ export async function shelveAll() {
   }
   await flush();
   return { shelved: rows.length };
+}
+
+/**
+ * The same, for a run that has just written a batch of them.
+ *
+ * One statement rather than one per place: the sweep keeps a hundred at a time
+ * and the harvest twenty, and a round trip each would make a write path that is
+ * already the slow part slower still. Failures are swallowed on purpose — the
+ * index is a derived thing, and a place must never fail to be *kept* because it
+ * could not be *counted*.
+ */
+export async function noteMany(places = [], { source = null, countryCode = 'GB' } = {}) {
+  const rows = places.map((p) => (typeof p === 'string' ? { ref: p } : p)).filter((p) => p?.ref);
+  if (!rows.length) return { noted: 0 };
+  try {
+    const values = rows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2}::double precision,$${i * 4 + 3}::double precision,$${i * 4 + 4})`).join(',');
+    await query(
+      `insert into place_index (venue_ref, lat, lng, country_code, last_seen)
+       values ${values}
+       on conflict (venue_ref) do update
+          set lat = coalesce(place_index.lat, excluded.lat),
+              lng = coalesce(place_index.lng, excluded.lng),
+              last_seen = now()`,
+      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode]));
+    if (source) {
+      const src = rows.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
+      await query(
+        `insert into place_index_sources (venue_ref, source, source_place_id)
+         values ${src}
+         on conflict (venue_ref, source) do update set last_seen = now()`,
+        rows.flatMap((p) => [p.ref, p.source ?? source, p.sourceId ?? null]));
+    }
+    return { noted: rows.length };
+  } catch { return { noted: 0 }; }
 }
 
 // ---------------------------------------------------------------------------
@@ -502,7 +559,7 @@ export async function statsFor(areaSlug, { category = '', subcategory = '' } = {
 }
 
 /** The same five, for a set of refs (a ring, or a selection). */
-export async function statsForRefs(refs) {
+export async function statsForRefs(refs, { category = '', subcategory = '' } = {}) {
   if (!refs?.length) return { known: 0, owned: 0, identified: 0, readyCount: 0, ready: null, avgScore: null };
   const { rows } = await query(
     `select count(*)::int as known,
@@ -510,7 +567,12 @@ export async function statsForRefs(refs) {
             count(*) filter (where ownership = 'identified')::int  as identified,
             count(*) filter (where ready)::int as ready_count,
             avg(data_score)::real as avg_score
-       from place_index where venue_ref = any($1)`, [refs]);
+       from place_index
+      where venue_ref = any($1)
+        -- A category or a subcategory narrows the same set, so BO2p and BO2q
+        -- print their own five numbers rather than the ring's (Codex, 17 Sep).
+        and ($2::text = '' or category = $2)
+        and ($3::text = '' or subcategory = $3)`, [refs, category ?? '', subcategory ?? '']);
   const r = rows[0];
   return {
     known: r.known, owned: r.owned, identified: r.identified, readyCount: r.ready_count,
@@ -528,8 +590,20 @@ export async function countries() {
   const { rows } = await query(`
     select l.slug, l.name, l.country_code, ${FIVE},
            (select count(*)::int from geo_cells g where g.country_code = l.country_code) as cells,
-           (select count(distinct from_cell)::int from cell_builds cb
-             join geo_cells g on g.code = cb.from_cell where g.country_code = l.country_code) as built
+           -- Per mode, not per cell. A cell built for driving says nothing about
+           -- whether a walking ring can answer, and counting distinct origins
+           -- across every mode reported a country as ready when only one of the
+           -- three was (Codex, 17 Sep 2026).
+           (select count(distinct cb.from_cell)::int from cell_builds cb
+             join geo_cells g on g.code = cb.from_cell
+            where g.country_code = l.country_code and cb.mode = 'driving') as built,
+           (select string_agg(distinct cb.mode, ',' order by cb.mode) from cell_builds cb
+             join geo_cells g on g.code = cb.from_cell where g.country_code = l.country_code) as modes,
+           -- What was asked for here in the last thirty days. A country nobody
+           -- searches is a country not to spend the collection budget on.
+           (select count(*)::int from searches sq
+             join localities sl on sl.slug = sq.area_slug
+            where sl.country_code = l.country_code and sq.at > now() - interval '30 days') as searches
       from localities l
       left join area_stats st on st.area_slug = l.slug and st.category = '' and st.subcategory = '' and st.source = '' and st.ownership = ''
      where l.kind = 'country'
@@ -539,14 +613,26 @@ export async function countries() {
     known: r.known, owned: r.owned, identified: r.identified,
     readyCount: r.ready_count, ready: readyShare(r.ready_count, r.known),
     avgScore: r.avg_score == null ? null : Math.round(r.avg_score),
-    cells: r.cells, built: r.built,
+    cells: r.cells, built: r.built, searches: r.searches,
+    // Which ways of getting there this country can actually answer. Walking is
+    // computed live and transit is estimated, so driving is the one the matrix
+    // has to hold — but the list is said out loud rather than implied.
+    modes: (r.modes ?? '').split(',').filter(Boolean),
     // `ready` here is the matrix, not the places: either it can answer a ring or
     // it cannot, and a half-built one says so rather than pretending.
     travel: r.cells === 0 ? 'none' : r.built >= r.cells ? 'ready' : r.built > 0 ? 'part' : 'none',
   }));
 }
 
-const KIND_OF = { country: 'country', county: 'county', town: 'town', postcode: 'postcode' };
+/**
+ * How a level is cut, said in the screen's words.
+ *
+ * The boards say "City or town" and the table says `town`. The alias is here
+ * rather than in the screen because the address is the screen's word and the
+ * column is the table's, and letting them drift made `?by=city` fall through to
+ * counties under a header that said towns (Codex, 17 Sep 2026).
+ */
+const KIND_OF = { country: 'country', county: 'county', city: 'town', town: 'town', postcode: 'postcode' };
 
 /** One area, by slug, whatever kind it is. */
 export const areaBySlug = async (slug) => (await query(
@@ -586,6 +672,15 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
           from searches s where s.area_slug = l.slug and s.at > now() - ($3 || ' days')::interval
       ) d on true
      limit $4`, [slug, kind, String(since), limit]);
+  // How many there are at all, so a list that is a slice can say so rather than
+  // reading as the whole (the boards print "8 of 1,204").
+  const { rows: [all] } = await query(
+    `with inside as (
+       select pa2.area_slug from place_areas pa1
+         join place_areas pa2 on pa2.venue_ref = pa1.venue_ref
+        where pa1.area_slug = $1 group by pa2.area_slug)
+     select count(*)::int as n from inside i join localities l on l.slug = i.area_slug and l.kind = $2`,
+    [slug, kind]);
 
   const key = {
     known: (r) => r.known, owned: (r) => r.owned, identified: (r) => r.identified,
@@ -605,7 +700,7 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
     if (typeof av === 'string') return desc ? String(bv).localeCompare(av) : av.localeCompare(String(bv));
     return desc ? bv - av : av - bv;
   });
-  return out;
+  return { rows: out, all: all.n };
 }
 
 /**
@@ -614,6 +709,10 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
  */
 export async function coverage(areaSlug, { limit = 60 } = {}) {
   const slug = lower(areaSlug);
+  // Half the room each. An outcode does not nest under a county, so the two are
+  // listed together — and ordering the lot by size buried every town under sixty
+  // outcodes, which is the one thing this board must not do (Codex, 17 Sep).
+  const share = Math.max(10, Math.floor(limit / 2));
   const { rows } = await query(`
     with mine as (select venue_ref from place_areas where area_slug = $1),
          rows_ as (
@@ -624,7 +723,14 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
             where pa.area_slug <> $1
          )
     select l.slug, l.name, l.kind,
-           string_agg(distinct par.name, ', ') as towns,
+           -- The towns this outcode's own places actually sit in — the way back
+           -- across the two ladders, and the only honest thing to print beside
+           -- an outcode. Read through the places, not through a parent an
+           -- outcode does not have.
+           (select string_agg(distinct t.name, ', ')
+              from place_areas pa3
+              join localities t on t.slug = pa3.area_slug and t.kind = 'town'
+             where pa3.venue_ref in (select venue_ref from place_areas where area_slug = l.slug)) as towns,
            count(*)::int as known,
            count(*) filter (where pi.ownership <> 'identified')::int as owned,
            count(*) filter (where r.ready)::int as ready_count,
@@ -640,13 +746,13 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
       from rows_ r
       join localities l on l.slug = r.area_slug
       join place_index pi on pi.venue_ref = r.venue_ref
-      left join localities par on par.slug = l.parent_slug
-     where l.kind in ('town', 'postcode')
+       where l.kind in ('town', 'postcode')
      group by l.slug, l.name, l.kind
-     order by count(*) desc
-     limit $2`, [slug, limit]);
+     order by count(*) desc`, [slug]);
   const pct = (n, d) => (d > 0 ? Math.round((n / d) * 100) : null);
-  return rows.map((r) => ({
+  const towns = rows.filter((r) => r.kind === 'town').slice(0, share);
+  const codes = rows.filter((r) => r.kind === 'postcode').slice(0, limit - towns.length);
+  return [...towns, ...codes].map((r) => ({
     slug: r.slug, name: r.name, kind: r.kind,
     // An outcode says which towns its own places sit in — the way back across
     // the two ladders, and the only honest thing to print beside it.
@@ -756,6 +862,43 @@ export async function categories(areaSlug, { refs = null, category = null, since
 }
 
 /**
+ * BO2c's other half — the labels lens, driven by the vocabulary rather than by
+ * the data.
+ *
+ * Every word every provider uses, listed whether or not anything here carries
+ * it, because a word we have taught a rule for and nothing lands on is exactly
+ * as much of a finding as an empty subcategory.
+ */
+export async function labels(areaSlug, { refs = null, limit = 400 } = {}) {
+  const scope = refs
+    ? { sql: 'pil.venue_ref = any($1)', args: [refs] }
+    : { sql: 'exists (select 1 from place_areas pa where pa.venue_ref = pil.venue_ref and pa.area_slug = $1)', args: [lower(areaSlug)] };
+  const { rows: held } = await query(`
+    select pil.label,
+           count(*)::int as known,
+           count(*) filter (where pi.ownership <> 'identified')::int as owned,
+           count(*) filter (where pi.ready)::int as ready_count,
+           avg(pi.data_score)::real as avg_score
+      from place_index_labels pil
+      join place_index pi on pi.venue_ref = pil.venue_ref
+     where ${scope.sql}
+     group by pil.label`, scope.args);
+  const by = new Map(held.map((h) => [h.label, h]));
+  const { rows: vocab } = await query(
+    `select namespace || ':' || key as word, coalesce(label, key) as label, points_at
+       from taxonomy_labels order by namespace, key limit $1`, [limit]);
+  return vocab.map((v) => {
+    const h = by.get(v.word);
+    return {
+      key: v.word, label: v.label, pointsAt: v.points_at,
+      known: h?.known ?? 0, owned: h?.owned ?? 0,
+      readyCount: h?.ready_count ?? 0, ready: h ? readyShare(h.ready_count, h.known) : null,
+      avgScore: h?.avg_score == null ? null : Math.round(h.avg_score),
+    };
+  }).sort((a, b) => b.known - a.known || a.key.localeCompare(b.key));
+}
+
+/**
  * BO2d — the source lens.
  *
  * `oneSourceOnly` is the column that matters: places a single source has ever
@@ -771,7 +914,12 @@ export async function sources(areaSlug, { refs = null, limit = 60 } = {}) {
          n as (select s.venue_ref, count(*)::int as sources from scoped s join place_index_sources src on src.venue_ref = s.venue_ref group by s.venue_ref)
     select s.subcategory,
            count(*)::int as known,
-           ${SOURCES.map((x, i) => `count(*) filter (where exists (select 1 from place_index_sources q where q.venue_ref = s.venue_ref and q.source = '${x.key}'))::int as src_${i}`).join(',\n           ')},
+           ${SOURCES.map((x, i) => (x.key === 'own'
+             // "Ours" is the same fact the OWNED figure above it is, so it is
+             // counted the same way. Counting the `own` *source* instead made
+             // one screen say 58 owned over a column of dashes (Codex, 17 Sep).
+             ? `count(*) filter (where s.ownership <> 'identified')::int as src_${i}`
+             : `count(*) filter (where exists (select 1 from place_index_sources q where q.venue_ref = s.venue_ref and q.source = '${x.key}'))::int as src_${i}`)).join(',\n           ')},
            count(*) filter (where coalesce(n.sources, 0) = 1)::int as one_only,
            count(*) filter (where coalesce(n.sources, 0) = 1 and s.venue_ref like 'google:%')::int as google_only
       from scoped s left join n on n.venue_ref = s.venue_ref
@@ -783,8 +931,12 @@ export async function sources(areaSlug, { refs = null, limit = 60 } = {}) {
   // Which sources we have ever asked anywhere. A source never asked reads
   // "not asked" on every row, never as nothing.
   const asked = new Set((await query('select distinct source from place_index_sources')).rows.map((r) => r.source));
+  // How many subcategories there are at all, because "5 of 59" is the finding:
+  // the ones that are not listed are the ones nothing landed in.
+  const all = (await query('select count(*)::int as n from shelf_subcategories where active')).rows[0].n;
   return {
     sources: SOURCES.map((s) => ({ ...s, asked: asked.has(s.key) })),
+    subcategories: all,
     rows: rows.map((r) => ({
       key: r.subcategory, label: labels.get(r.subcategory) ?? r.subcategory, known: r.known,
       counts: Object.fromEntries(SOURCES.map((s, i) => [s.key, asked.has(s.key) ? r[`src_${i}`] : null])),
@@ -914,7 +1066,7 @@ export async function places(areaSlug, {
     if (typeof av === 'string') return desc ? String(bv).localeCompare(av) : av.localeCompare(String(bv));
     return desc ? bv - av : av - bv;
   });
-  return out;
+  return { rows: out, all: all.n };
 }
 
 /**
@@ -947,7 +1099,7 @@ export async function namesFor(refs) {
 }
 
 export default {
-  SOURCES, bars, seedBars, setBar, reindex, rescore, note, refreshStats, statsAge,
+  SOURCES, bars, seedBars, setBar, reindex, rescore, note, noteMany, refreshStats, statsAge,
   statsFor, statsForRefs, countries, areaBySlug, breakdown, coverage, categories, shelveAll,
-  sources, quality, places, namesFor,
+  sources, quality, places, namesFor, labels,
 };

@@ -246,6 +246,14 @@ test('Household, Settings, Prototypes and the back office', () => {
   // The content queue: one queue with a filter, not a queue per kind.
   assert.deepEqual(roundTrip('/admin/queue'), { name: 'admin', screen: 'queue' });
   assert.equal(splitHref('/admin/queue?state=waiting&where=berkshire').query.get('state'), 'waiting');
+  // The two layers over these screens carry their own addresses: the places
+  // behind one failure cause, and the rejection sheet over one queued thing.
+  assert.equal(splitHref('/admin/runs?run=menus&view=failures&cause=ours:timeout').query.get('cause'), 'ours:timeout');
+  assert.equal(splitHref('/admin/queue?item=abc&reject=tell').query.get('reject'), 'tell');
+  // The two deepest Places boards address themselves without naming the lens,
+  // because naming a category is choosing the category lens.
+  assert.equal(splitHref('/admin/places?where=sl4-1qn&within=30&by=drive&cat=family').query.get('cat'), 'family');
+  assert.equal(splitHref('/admin/places?where=berkshire&lens=category&words=labels').query.get('words'), 'labels');
   // The four that dissolved into Places still resolve, so no address anybody
   // kept lands on a 404 — they are simply no longer in the rail.
   assert.deepEqual(roundTrip('/admin/coverage'), { name: 'admin', screen: 'coverage' });

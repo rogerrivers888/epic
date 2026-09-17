@@ -1364,7 +1364,9 @@ export type PlaceLevel = {
 
 export type PlaceCountry = PlaceStats & {
   slug: string; name: string; countryCode: string;
-  cells: number; built: number;
+  cells: number; built: number; searches: number;
+  /** Which ways of getting there the matrix can answer here. */
+  modes: string[];
   /** Whether this country can answer "within 30 minutes" yet. */
   travel: 'ready' | 'part' | 'none';
 };
@@ -1396,6 +1398,9 @@ export type PlaceCategory = PlaceStats & {
   key: string; label: string; searches: number; empty: number;
   subcategories: PlaceSubcategory[];
 };
+
+/** BO2c's other half: a provider's own word, and what it points at in ours. */
+export type PlaceLabel = PlaceStats & { key: string; label: string; pointsAt: string | null };
 
 export type PlaceSourceDef = { key: string; label: string; explain: string; optIn: boolean; paid: boolean; asked: boolean };
 export type PlaceSourceRow = {
@@ -1447,6 +1452,8 @@ export type PlaceField = {
   key: string; label: string; value: string | null; source: string | null; checked: string | null;
   /** What the column has no room for: it belongs in the row when it is opened. */
   note: string | null;
+  /** The exact record and key this came from, printed when the row is opened. */
+  reference: string | null;
   counted: boolean | null; notCounted: boolean; editable: boolean; action: string | null;
 };
 
@@ -1471,8 +1478,18 @@ export type PlaceDetail = {
   atlas: { id: string; state: string; pinned: boolean; note: string | null; rank: number | null; scoreParts: Record<string, unknown> } | null;
 };
 
-export type CompareColumn = { key: string; label: string; note: string | null; id?: string | null; of?: number; filled?: number };
-export type CompareRow = { key: string; keys: Record<string, string | null>; cells: Record<string, unknown> };
+export type CompareColumn = {
+  key: string; label: string; note: string | null; id?: string | null; of?: number; filled?: number;
+  /** held · not-asked · no-match · off — four different facts, never one dash. */
+  state?: 'held' | 'not-asked' | 'no-match' | 'off';
+};
+export type CompareRow = {
+  key: string; label?: string; keys: Record<string, string | null>; cells: Record<string, unknown>;
+  /** Where our version came from, and when it was last checked. Per row. */
+  from?: string | null;
+  /** Ours, so editable — a provider's column never is. */
+  editable?: boolean;
+};
 export type RawSource = {
   key: string; label: string; explain: string;
   state: 'held' | 'not-asked' | 'no-match'; id: string | null; lastSeen: string | null;
@@ -1481,6 +1498,8 @@ export type RawSource = {
 export type PlaceHistoryRow = { at: string; what: string; who: string | null; kind: 'edit' | 'call'; usd?: number };
 
 export type PictureIndex = {
+  /** How many match, as against how many were sent. */
+  matching: number;
   pictures: {
     id: string; source: string; licence: string | null; licenceUrl: string | null;
     creator: string | null; creatorUrl: string | null; credit: string | null;
@@ -1540,7 +1559,7 @@ export type DemandReport = {
   replayPence: number;
 };
 export type SearchReplay = {
-  id: string; at: string; surface: string; subject: string | null; asked: Record<string, unknown>;
+  id: string; at: string; surface: string; subject: string | null; subjectLabel: string | null; asked: Record<string, unknown>;
   where: string | null; minutes: number | null; mode: string | null;
   identified: boolean; heldAgainst: string;
   shown: number; opened: number; saved: number; tripped: boolean;
@@ -1555,7 +1574,15 @@ export type SearchReplay = {
 
 export type ScoreWorkings = {
   ref: string; name: string | null;
-  inputs: { key: string; label: string; value: unknown; kind: string; held: boolean }[];
+  inputs: {
+    key: string; label: string; value: unknown; kind: string; held: boolean;
+    /** What this input contributed, in the same units the score is printed in. */
+    worth: number;
+    /** Whether we may keep it for good, or read it and drop it. */
+    owned: boolean;
+    how: string | null;
+  }[];
+  chainWeight: number;
   parts: {
     key: string; label: string; points: number | null;
     weightEpic: number | null; weightOwned: number | null;
@@ -1579,6 +1606,7 @@ export type QueueList = {
     id: string; kind: string; subjectType: string; subjectId: string;
     maker: string | null; place: string | null; ref: string | null; area: string | null;
     state: string; reported: boolean; madeAt: string; reason: string | null; told: boolean; batchable: boolean;
+    imageId: string | null;
   }[];
 };
 export type QueueItem = {
@@ -1589,8 +1617,10 @@ export type QueueItem = {
     reason: string | null; message: string | null; told: boolean;
   };
   detail: Record<string, any> | null;
-  picture: { id: string; title: string | null; caption: string | null; licence: string | null; credit_line: string | null; width: number | null; height: number | null; bytes: number | null; fetched_at: string; moderation: string; reward_points: number; creator: string | null } | null;
+  picture: { id: string; imageId: string; title: string | null; caption: string | null; licence: string | null; credit_line: string | null; width: number | null; height: number | null; bytes: number | null; fetched_at: string; moderation: string; reward_points: number; creator: string | null } | null;
   made: { name: string; kept: number; points: number } | null;
+  /** Whether anything has looked for a face in it. "not looked for" is an answer. */
+  faces: string;
   reasons: RejectReason[];
   batchable: boolean;
 };
@@ -2064,7 +2094,7 @@ export const api = {
   planPreview: (utterance: string, sessionId?: string | null) => post<{ sessionId: string; rows: PlanRow[] }>('/api/plan/preview', { utterance, sessionId: sessionId ?? undefined }),
   /** Inspire me runs in the background: the answer is the session; poll inspireStatus until running is false. */
   inspire: (body: { query: string; moods: string[]; maxTravelMinutes: number | null; budget?: IdeaBudget; attendingMemberIds?: string[] | null }) => post<{ sessionId: string; ref: string; running: boolean; stage: InspireStage }>('/api/plan/inspire', body),
-  inspireStatus: (sessionId: string) => request<{ sessionId: string; ref: string; running: boolean; ideas: Idea[] | null; reply: string | null; budget: IdeaBudget; stage: InspireStage | null; placed: number; startedAt: string | null; error: string | null }>(`/api/plan/inspire/${sessionId}`),
+  inspireStatus: (sessionId: string) => request<{ sessionId: string; ref: string; running: boolean; ideas: Idea[] | null; reply: string | null; budget: IdeaBudget; stage: InspireStage | null; placed: number; startedAt: string | null; error: string | null; searchId: string | null }>(`/api/plan/inspire/${sessionId}`),
   /** Five more days out on the same list, without losing the ones already there. */
   inspireMore: (body: { sessionId: string; attendingMemberIds?: string[] | null }) => post<{ sessionId: string; ref: string; running: boolean; stage: InspireStage }>('/api/plan/inspire/more', body),
   /** What is inside a place with grounds: the rides in a theme park, researched once and ours to keep. */
@@ -2340,16 +2370,16 @@ export const api = {
   adminPlaceArea: (p: PlaceWhere) => request<PlaceLevel>(`/api/admin/place-index/area${qs(p)}`),
   /** BO2a / BO2n — the level cut by county, by city or by postcode district. */
   adminPlaceBreakdown: (p: PlaceWhere & { by?: string; sort?: string; desc?: string; since?: number }) =>
-    request<{ rows: PlaceAreaRow[]; totals: PlaceStats }>(`/api/admin/place-index/breakdown${qs(p)}`),
+    request<{ rows: PlaceAreaRow[]; all: number; totals: PlaceStats }>(`/api/admin/place-index/breakdown${qs(p)}`),
   /** BO2b — the coverage grid, towns and outcodes together. */
   adminPlaceCoverage: (p: PlaceWhere) =>
     request<{ rows: PlaceCoverageRow[]; towns: number; outcodes: number; allTowns: number; refreshedAt: string | null }>(`/api/admin/place-index/coverage${qs(p)}`),
   /** BO2c / BO2o / BO2p — the taxonomy with the counts left-joined onto it. */
-  adminPlaceCategories: (p: PlaceWhere & { cat?: string | null; since?: number }) =>
-    request<PlaceLevel & { categories: PlaceCategory[]; facts: FactDef[] }>(`/api/admin/place-index/categories${qs(p)}`),
+  adminPlaceCategories: (p: PlaceWhere & { cat?: string | null; since?: number; by?: string }) =>
+      request<PlaceLevel & { categories: PlaceCategory[]; facts: FactDef[]; subcategories: number; labels: PlaceLabel[] | null }>(`/api/admin/place-index/categories${qs(p)}`),
   /** BO2d — which providers have ever seen these places. */
   adminPlaceSources: (p: PlaceWhere) =>
-    request<PlaceLevel & { sources: PlaceSourceDef[]; rows: PlaceSourceRow[] }>(`/api/admin/place-index/sources${qs(p)}`),
+    request<PlaceLevel & { sources: PlaceSourceDef[]; rows: PlaceSourceRow[]; subcategories: number }>(`/api/admin/place-index/sources${qs(p)}`),
   /** BO2e — the score distribution, staleness, and what is worth owning next. */
   adminPlaceQuality: (p: PlaceWhere) => request<PlaceLevel & PlaceQuality>(`/api/admin/place-index/quality${qs(p)}`),
   /** BO2f — the gaps ranked by what was actually searched for. */
@@ -2359,7 +2389,7 @@ export const api = {
   adminPlaceRing: (p: PlaceWhere) => request<PlaceLevel & PlaceRing>(`/api/admin/place-index/ring${qs(p)}`),
   /** BO2q — the places themselves. */
   adminPlaceList: (p: PlaceWhere & { cat?: string | null; sub?: string | null; show?: string; q?: string; missing?: string; sort?: string; desc?: string }) =>
-    request<PlaceLevel & { rows: PlaceRow[]; facts: FactDef[]; bar: BarFact[]; counted: string[] }>(`/api/admin/place-index/places${qs(p)}`),
+    request<PlaceLevel & { rows: PlaceRow[]; facts: FactDef[]; bar: BarFact[]; counted: string[]; notReady: number }>(`/api/admin/place-index/places${qs(p)}`),
   /** BO2h / BO2r — one place, every field, and what nobody has asked yet. */
   adminPlace: (ref: string) => request<PlaceDetail>(`/api/admin/place-index/place${qs({ ref })}`),
   /** BO2h — ours beside each provider's. Spends: one detail call per place. */
@@ -2383,6 +2413,15 @@ export const api = {
   /** What saving this bar would do, stated before it saves. */
   adminReadyBarEffect: (sub: string, facts: BarFact[]) => post<BarEffect>(`/api/admin/place-index/bars/${encodeURIComponent(sub)}/effect`, { facts }),
   adminSaveReadyBar: (sub: string, facts: BarFact[]) => put<{ ok: true; rescored: number }>(`/api/admin/place-index/bars/${encodeURIComponent(sub)}`, { facts }),
+  /**
+   * Work one place's score out again and write it down. Free — `score()` is pure
+   * and recomputes from what we already hold; asking a provider for a fresh
+   * rating is a collection run and happens on Places, where the spend is said.
+   */
+  adminRescoreOne: (ref: string) => post<{ ref: string; epicScore: number; ownedScore: number; spentPence: number; at: string }>('/api/admin/score', { ref }),
+  /** The travel-time matrix: stamp the places with a cell, then work the times out. */
+  adminReachState: () => request<{ cells: number; withPlaces: number; places: number; needsRebuild?: string[] }>('/api/admin/reach'),
+  adminBuildReach: (mode = 'driving') => post<{ started?: boolean; cells?: number; pairs?: number }>('/api/admin/reach/refresh', { mode }),
   /** Keeping it current. All three are free and spend nothing. */
   adminReindexPlaces: (wait = false) => post<{ started?: boolean; places?: number; rescored?: number; ms?: number }>('/api/admin/place-index/reindex', { wait }),
   adminRefreshPlaceCounts: () => post<{ n: number; at: string }>('/api/admin/place-index/refresh', {}),

@@ -116,7 +116,7 @@ async function trail(scope) {
 }
 
 const statsOf = (scope, extra = {}) =>
-  (scope.kind === 'ring' ? index.statsForRefs(scope.refs) : index.statsFor(scope.area.slug, extra));
+  (scope.kind === 'ring' ? index.statsForRefs(scope.refs, extra) : index.statsFor(scope.area.slug, extra));
 
 const head = async (scope) => ({
   kind: scope.kind,
@@ -161,15 +161,14 @@ router.get('/area', requires('view_library'), async (req, res, next) => {
 router.get('/breakdown', requires('view_library'), async (req, res, next) => {
   try {
     const where = lower(req.query.where) || 'gb';
-    res.json({
-      rows: await index.breakdown(where, {
-        by: req.query.by ?? 'county',
-        sort: req.query.sort ?? 'searches',
-        desc: req.query.desc !== '0',
-        since: Number(req.query.since) || 30,
-      }),
-      totals: await index.statsFor(where),
+    const out = await index.breakdown(where, {
+      by: req.query.by ?? 'county',
+      sort: req.query.sort ?? 'searches',
+      desc: req.query.desc !== '0',
+      since: Number(req.query.since) || 30,
     });
+    // `all` is how many there are at all, so a list that is a slice says so.
+    res.json({ rows: out.rows, all: out.all, totals: await index.statsFor(where) });
   } catch (err) { next(err); }
 });
 
@@ -198,7 +197,18 @@ router.get('/categories', requires('view_library'), async (req, res, next) => {
       category: req.query.cat ? String(req.query.cat) : null,
       since: Number(req.query.since) || 30,
     });
-    res.json({ ...(await head(scope)), stats: await statsOf(scope), categories: rows, facts: FACTS });
+    // A category opened is its own level, so it prints the category's five
+    // numbers rather than the area's (Codex, 17 Sep 2026).
+    const scoped = { category: req.query.cat ? String(req.query.cat) : '', subcategory: '' };
+    res.json({
+      ...(await head(scope)), stats: await statsOf(scope, scoped),
+      // The subcategories there are at all, so "9 of 9" can be printed.
+      subcategories: (await query('select count(*)::int as n from shelf_subcategories where active')).rows[0].n,
+      categories: rows, facts: FACTS,
+      labels: req.query.by === 'labels'
+        ? await index.labels(scope.kind === 'area' ? scope.area.slug : null, { refs: scope.kind === 'ring' ? scope.refs : null })
+        : null,
+    });
   } catch (err) { next(err); }
 });
 
@@ -266,7 +276,9 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
           label: r.subject ? (labels.get(r.subject) ?? catLabels.get(r.subject) ?? r.subject) : 'Anything',
           searches: r.searches, empty: r.empty, noClick: r.no_click, noTrip: r.no_trip,
           known: r.subject ? k : null,
-          fault: fault.key, faultLabel: fault.label, shortFault: SHORT_FAULT[fault.key], owner: fault.owner, act: fault.act,
+          fault: fault.key, faultLabel: fault.label,
+          shortFault: fault.key === 'no-places' && k ? 'Came back empty' : SHORT_FAULT[fault.key],
+          owner: fault.owner, act: fault.act,
         };
       }),
     });
@@ -310,7 +322,17 @@ router.get('/ring', requires('view_library'), async (req, res, next) => {
         where at > now() - interval '30 days' and cell = any($1) group by subject`,
       [(await reach.reachableCells(scope.cell, { minutes: scope.minutes, mode: travelMode(scope.mode) })).map((c) => c.to_cell)]
     )).rows.map((r) => [r.subject, r.n]));
-    const built = (await query('select max(at) as at from cell_builds where from_cell = $1', [scope.cell])).rows[0]?.at ?? null;
+    // Per mode: a driving ring must not print the walking build's timestamp.
+    const built = (await query(
+      'select max(at) as at, max(method) as method from cell_builds where from_cell = $1 and mode = $2',
+      [scope.cell, travelMode(scope.mode)])).rows[0] ?? { at: null, method: null };
+    // What answering this actually cost. The claim on this board is the whole
+    // argument for the matrix, so it is measured rather than asserted: a ring
+    // that started from a postcode reads the matrix and computes nothing; one
+    // that started from a town name snaps to the nearest cell first, and that
+    // snap is distances (Codex, 17 Sep 2026).
+    const snapped = scope.area != null && !sectorOf(String(req.query.where ?? '').replace(/-/g, ' '));
+    const matrixRows = (await reach.reachableCells(scope.cell, { minutes: scope.minutes, mode: travelMode(scope.mode) })).length;
     res.json({
       ...(await head(scope)),
       stats: await index.statsForRefs(scope.refs),
@@ -330,8 +352,21 @@ router.get('/ring', requires('view_library'), async (req, res, next) => {
         cell: scope.cell, cellLabel: labelOf(scope.cell),
         cellsInReach: scope.cells,
         cellsTotal: (await query('select count(*)::int as n from geo_cells')).rows[0].n,
-        rowsRead: 1, distancesComputed: 0, spendPence: 0,
-        builtAt: built, estimated: true, edgeMinutes: EDGE_MINUTES,
+        // One index range over `reach`, and that is the answer. The figure is
+        // the rows that range returned, not a constant.
+        rowsRead: matrixRows,
+        // Nothing, from a postcode. From a town name, the one snap to the
+        // nearest cell we hold — said rather than rounded away.
+        distancesComputed: snapped ? 1 : 0,
+        spendPence: 0,
+        builtAt: built.at, builtMethod: built.method,
+        // Estimated from distance, not routed (routes/reach.js). The screen says
+        // so, because a date under "travel times worked out" reads as a road
+        // network build otherwise.
+        estimated: built.method !== 'osrm',
+        // The ring is deliberately a few minutes generous, so a place at the
+        // edge of its sector is offered rather than lost. Said out loud.
+        edgeMinutes: EDGE_MINUTES,
       },
     });
   } catch (err) { next(err); }
@@ -354,10 +389,14 @@ router.get('/places', requires('view_library'), async (req, res, next) => {
       desc: req.query.desc !== '0',
     });
     const bar = sub ? (await index.bars()).get(sub) ?? [] : [];
-    const total = await index.statsFor(scope.kind === 'area' ? scope.area.slug : 'gb', { category: req.query.cat ?? '', subcategory: sub ?? '' });
+    const scoped = { category: req.query.cat ? String(req.query.cat) : '', subcategory: sub ?? '' };
+    const stats = await statsOf(scope, scoped);
     res.json({
       ...(await head(scope)),
-      stats: scope.kind === 'ring' ? await index.statsForRefs(scope.refs) : total,
+      stats,
+      // How many of this subcategory are not ready, so the count above the list
+      // is "N of the M not ready" rather than "N of everything here".
+      notReady: Math.max(0, stats.known - stats.readyCount),
       rows, facts: FACTS,
       // What this kind of place is judged on, so the column headers can explain
       // themselves rather than being six flat ticks.
@@ -403,8 +442,11 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
        where (li.subject_type = 'place' and li.subject_id = $1)
           or (li.subject_type = 'attraction' and li.subject_id = $2)
        order by li.position`, [ref, att?.id ?? '00000000-0000-0000-0000-000000000000']);
-    const { rows: menus } = await query('select state, item_count, url, read_at from place_menus where venue_ref = $1 order by read_at desc nulls last limit 1', [ref])
+    const { rows: menus } = await query('select state, item_count, menu_url as url, read_at from place_menus where venue_ref = $1 order by read_at desc nulls last limit 1', [ref])
       .catch(() => ({ rows: [] }));
+    const { rows: labelRows } = await query('select label from place_index_labels where venue_ref = $1 order by label', [ref]);
+    const catLabel = new Map((await query('select key, label from shelf_categories')).rows.map((r) => [r.key, r.label]));
+    const subLabel = new Map((await query('select key, label from shelf_subcategories')).rows.map((r) => [r.key, r.label]));
 
     const factOf = (field) => facts.find((f) => f.field === field) ?? null;
     const hoursVal = rec?.opening_hours ?? null;
@@ -430,32 +472,59 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
     // Every field a place can carry, whether or not we hold it. A dash is a hole
     // to fill; `n/a` is a fact this kind of place is not judged on.
     const judged = new Set(scored.parts.judged.map((j) => j.fact));
-    const field = (key, label, value, source, checked, fact = null, editable = false, action = null, note = null) => ({
-      key, label, value: value ?? null,
-      // Nothing held, nothing to say about where it came from: a source beside a
-      // dash reads as though we hold something we do not.
-      source: value == null ? null : asWord(source),
-      checked: value == null ? null : checked ?? null,
-      note,
-      counted: fact ? judged.has(fact) : null,
-      notCounted: fact ? !judged.has(fact) : false,
-      editable, action,
-    });
+    const OURS = new Set(['ours', 'own', 'curate', 'hand', 'claim']);
+    const field = (key, label, value, source, checked, fact = null, editable = false, action = null, note = null, reference = null) => {
+      const from = value == null ? null : asWord(source);
+      const held = value != null;
+      const counted = fact ? judged.has(fact) : null;
+      return {
+        key, label, value: value ?? null,
+        // Nothing held, nothing to say about where it came from: a source beside
+        // a dash reads as though we hold something we do not.
+        source: from,
+        // A fact this kind of place is not judged on has not been "never
+        // checked" — there was never anything to check (Codex, 17 Sep 2026).
+        checked: held ? checked ?? null : counted === false ? null : 'never',
+        note, reference,
+        counted,
+        notCounted: fact ? !judged.has(fact) : false,
+        // **Ours, so editable.** The Source column's own tooltip says it: a
+        // provider's value changes when they change it, and a copy of it we
+        // could overwrite would be a copy we are not allowed to keep. So the
+        // flag follows where the value came from, not a list (Codex, 17 Sep).
+        editable: editable && held && OURS.has(String(from ?? '').toLowerCase()),
+        // A hole offers the thing that would fill it. It used to be shadowed by
+        // Edit, so Write, Find and Ask were unreachable.
+        action: held ? null : action,
+      };
+    };
     const record = [
-      field('name', 'Name', name.name, name.from, rec?.updated_at ?? att?.updated_at ?? sweep?.last_seen ?? null, null, false),
-      field('aka', 'Also known as', rec?.curation?.aka ?? null, rec?.curation?.aka ? 'ours' : null, rec?.curated_at ?? null, null, true),
-      field('address', 'Address', rec?.address ?? factOf('address')?.value ?? null, rec?.address ? 'ours' : factOf('address')?.source ?? null, factOf('address')?.fetched_at ?? null, null, true),
+      field('name', 'Name', name.name, name.from, rec?.updated_at ?? att?.updated_at ?? sweep?.last_seen ?? null, null, false,
+            null, null, name.from === 'atlas' && att ? `attractions ${att.id}` : name.from === 'osm' && sweep ? `scout_places ${sweep.venue_ref}` : rec ? `place_records ${ref}` : null),
+      field('aka', 'Also known as', rec?.curation?.aka ?? null, rec?.curation?.aka ? 'ours' : null, rec?.curated_at ?? null, null, true,
+            null, rec?.curated_model ? `Curate · ${rec.curated_model}` : null, rec?.curated_at ? `curate run ${new Date(rec.curated_at).toISOString().slice(0, 10)} · field aka` : null),
+      field('address', 'Address', rec?.address ?? factOf('address')?.value ?? null, rec?.address ? 'ours' : factOf('address')?.source ?? null, factOf('address')?.fetched_at ?? null, null, true,
+            null, null, factOf('address') ? `place_facts ${ref} · address · ${factOf('address').source}` : rec ? `place_records ${ref} · address` : null),
       field('position', 'Position', pi.lat != null ? `${Number(pi.lat).toFixed(4)}, ${Number(pi.lng).toFixed(4)}` : null, 'ours', pi.indexed_at, null, false),
       field('outcode', 'Postcode area', areas.find((a) => a.kind === 'postcode')?.slug?.toUpperCase() ?? null, 'ours', pi.indexed_at, null, true),
-      field('subcategory', 'Subcategory', pi.subcategory, 'ours', null, null, true),
-      field('what_it_is', 'What it is', rec?.summary ?? att?.summary ?? null, rec?.summary_source ?? att?.summary_source ?? null, rec?.curated_at ?? null, 'what_it_is', true, held.what_it_is ? null : 'write'),
-      field('hours', 'Opening hours', hoursVal, factOf('opening_hours')?.source ?? (hoursVal ? 'ours' : null), factOf('opening_hours')?.fetched_at ?? null, 'hours', true, held.hours ? null : 'ask'),
-      field('prices', 'Prices', rec?.price_range ?? null, factOf('price_range')?.source ?? null, factOf('price_range')?.fetched_at ?? null, 'prices', true),
+      field('subcategory', 'Subcategory',
+            pi.subcategory ? `${catLabel.get(pi.category) ?? pi.category} › ${subLabel.get(pi.subcategory) ?? pi.subcategory}` : null,
+            'ours', null, null, true, null, null, pi.derived_by),
+      // Our own words for this place, which is what every rule is written
+      // against. Ours, and therefore ours to change.
+      field('labels', 'Labels', (labelRows.map((l) => l.label).join(' · ') || null), 'ours', pi.indexed_at, null, true),
+      field('what_it_is', 'What it is', rec?.summary ?? att?.summary ?? null, rec?.summary_source ?? att?.summary_source ?? null, rec?.curated_at ?? null, 'what_it_is', true, 'write',
+            null, rec?.curated_from?.length ? `read from ${rec.curated_from.join(', ')}` : null),
+      field('hours', 'Opening hours', hoursVal, factOf('opening_hours')?.source ?? (hoursVal ? 'ours' : null), factOf('opening_hours')?.fetched_at ?? null, 'hours', true, 'ask',
+            null, factOf('opening_hours') ? `place_facts ${ref} · opening_hours · ${factOf('opening_hours').source}` : null),
+      field('prices', 'Prices', rec?.price_range ?? null, rec?.price_range ? 'ours' : factOf('price_range')?.source ?? null, factOf('price_range')?.fetched_at ?? null, 'prices', true),
       field('step_free', 'Step-free', rec?.accessibility?.stepFree == null ? null : (rec.accessibility.stepFree ? 'yes' : 'no'), 'ours', rec?.updated_at ?? null, 'step_free', true),
-      field('phone', 'Telephone', rec?.phone ?? null, factOf('phone')?.source ?? null, factOf('phone')?.fetched_at ?? null, null, true),
-      field('website', 'Website', rec?.website ?? att?.website ?? sweep?.website ?? null, factOf('website')?.source ?? null, factOf('website')?.fetched_at ?? null, null, true, (rec?.website ?? att?.website ?? sweep?.website) ? null : 'find'),
-      field('menu', 'Menu', menus[0]?.state === 'read' ? `${menus[0].item_count} dishes` : null, menus[0]?.url ? 'their site' : null, menus[0]?.read_at ?? null, 'menu', false, menus[0]?.state === 'read' ? null : 'read'),
-      field('busy', 'How busy', sweep?.count_band ?? rec?.count_band ?? null, 'ours', sweep?.scored_at ?? rec?.banded_at ?? null, null, true, (sweep?.count_band ?? rec?.count_band) ? null : 'ask',
+      field('phone', 'Telephone', rec?.phone ?? null, rec?.phone ? 'ours' : factOf('phone')?.source ?? null, factOf('phone')?.fetched_at ?? null, null, true,
+            null, null, factOf('phone') ? `place_facts ${ref} · phone · ${factOf('phone').source}` : null),
+      field('website', 'Website', rec?.website ?? att?.website ?? sweep?.website ?? null, rec?.website ? 'ours' : factOf('website')?.source ?? (att?.website ? 'atlas' : sweep?.website ? 'osm' : null), factOf('website')?.fetched_at ?? null, null, true, 'find'),
+      field('menu', 'Menu', menus[0]?.state === 'read' ? `${menus[0].item_count} dishes` : null, menus[0]?.url ? 'their site' : null, menus[0]?.read_at ?? null, 'menu', false, 'read',
+            null, null, menus[0]?.url ?? null),
+      field('busy', 'How busy', sweep?.count_band ?? rec?.count_band ?? null, 'ours', sweep?.scored_at ?? rec?.banded_at ?? null, null, true, 'ask',
             'Banded at the moment of the call. The figure it came from was never written down.'),
       field('accolades', 'Accolades', (att?.accolades ?? sweep?.accolades ?? []).map((a) => a.label ?? a.key ?? a).join(', ') || null, 'ours', att?.updated_at ?? null, null, false,
             null, 'A fact about who said what, published to be quoted — ours for good once found.'),
@@ -579,9 +648,12 @@ router.get('/place/reach', requires('view_library'), async (req, res, next) => {
     const { rows: [pi] } = await query('select derived_by, subcategory from place_index where venue_ref = $1', [ref]);
     const rule = pi?.derived_by ?? null;
     if (!rule || !rule.startsWith('rule:')) return res.json({ rule: null, places: 1, counties: 1, onlyThis: true });
+    // Distinct places and distinct counties. Counting the join rows made a
+    // place in three areas three places, and the county filter sat in the join
+    // condition where it filtered nothing (Codex, 17 Sep 2026).
     const { rows: [n] } = await query(`
-      select count(*)::int as places,
-             count(distinct pa.area_slug)::int as counties
+      select count(distinct pi.venue_ref)::int as places,
+             count(distinct l.slug)::int as counties
         from place_index pi
         left join place_areas pa on pa.venue_ref = pi.venue_ref
         left join localities l on l.slug = pa.area_slug and l.kind = 'county'
@@ -662,13 +734,66 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     for (const c of columns) {
       c.of = rows.filter((r) => r.keys[c.key]).length;
       c.filled = rows.filter((r) => r.keys[c.key] && !blank(r.cells[c.key])).length;
+      // Four different facts, and the board insists they stay visibly apart: we
+      // hold it, we never asked, we asked and there is no such place, or the
+      // source is not switched on here (Codex, 17 Sep 2026).
+      c.state = c.fields ? 'held'
+        : c.note === 'not switched on' ? 'off'
+        : c.note === 'no match' ? 'no-match'
+        : c.key === 'ours' ? 'no-match' : 'not-asked';
     }
-    res.json({ ref, name: named.name, columns, rows, ours: OURS_FIELDS });
+    // Where *our* version of each field came from, and when it was last checked.
+    // A column-wide note printed on every row said "ours" against values that
+    // were OpenStreetMap's (Codex, 17 Sep 2026).
+    const prov = rec?.provenance ?? {};
+    const factOf = (field) => facts.find((f) => f.field === field) ?? null;
+    res.json({
+      ref, name: named.name, columns,
+      rows: rows.map((r) => {
+        const key = r.keys.ours;
+        const f = key ? factOf(key) : null;
+        const from = key
+          ? (prov[key]?.source ?? f?.source ?? (mine ? OUR_SOURCE[mine.source] : null))
+          : null;
+        return {
+          ...r,
+          label: FACT_WORD[r.key] ?? null,
+          from: key && !blank(r.cells.ours)
+            ? [from, f?.fetched_at ? `${Math.max(1, Math.round((Date.now() - new Date(f.fetched_at).getTime()) / 2_592_000_000))} mo ago` : null].filter(Boolean).join(' · ') || 'ours'
+            : key ? 'we hold none' : null,
+          editable: Boolean(key && OURS_FIELDS.includes(key)),
+        };
+      }),
+      ours: OURS_FIELDS,
+      // How far a change to the shelf would travel, said on this board too.
+      shelf: { subcategory: pi.subcategory, category: pi.category, derivedBy: pi.derived_by },
+    });
   } catch (err) { next(err); }
 });
 
 /** Which of the compared rows are ours, and therefore the only editable ones. */
 const OURS_FIELDS = ['address', 'website', 'summary', 'opening_hours', 'price_range', 'phone', 'curation', 'crowd_band', 'count_band'];
+const OUR_SOURCE = { own: 'ours', atlas: 'the atlas', sweep: 'the sweep' };
+
+/**
+ * A field said the way a household would say it.
+ *
+ * The board's Fact column is "one field a household would expect to see on the
+ * place" — Name, Address, Opening hours, How busy — not the column names the
+ * tables happen to use (Codex, 17 Sep 2026).
+ */
+const FACT_WORD = {
+  name: 'Name', address: 'Address', lat: 'Position', lng: 'Position', postcode: 'Postcode',
+  opening_hours: 'Opening hours', website: 'Website', phone: 'Telephone', email: 'E-mail',
+  summary: 'What it is', image_url: 'Picture we own', photos: 'Pictures they hold',
+  crowd_band: 'How well thought of', count_band: 'How busy', rating: 'How well thought of', ratingCount: 'How busy',
+  price_range: 'Prices', priceLevel: 'Prices', cuisines: 'What it serves', experiences: 'What it is for',
+  dietary_options: 'Diets', good_for_children: 'Good for children', accessibility: 'Getting in',
+  menu_url: 'Menu', menu_label: 'Menu', booking_url: 'Booking', socials: 'Where else they are',
+  osm_ref: 'OpenStreetMap', wikidata_id: 'Wikidata', wikipedia_url: 'Wikipedia',
+  curation: 'What we wrote', epic_score: 'Our score', category: 'Shelf', reviews: 'Reviews',
+  openNow: 'Open now', mapsUrl: 'On their map', aiSummary: 'Their summary', reviewSummary: 'Their summary of reviews',
+};
 
 /**
  * BO2r's "What each source returned" — literally the fields we get.
@@ -722,7 +847,10 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
     const where = ['ia.may_store'];
     if (q) { args.push(q); where.push(`ia.search @@ plainto_tsquery('english', $${args.length})`); }
     if (facet === 'household') where.push('ia.contributor_household_id is not null');
-    else if (facet === 'needs-attribution') where.push("ia.attribution_required and coalesce(ia.credit_line, '') = ''");
+    // The same test the tile dims on: a picture we may keep but cannot credit is
+    // not publishable, whatever its licence says about whether credit is
+    // required (Codex, 17 Sep 2026).
+    else if (facet === 'needs-attribution') where.push("coalesce(ia.credit_line, '') = ''");
     else if (facet) { args.push(facet); where.push(`ia.source = $${args.length}`); }
     args.push(Math.min(240, Number(req.query.limit) || 60));
     const { rows } = await query(`
@@ -738,7 +866,7 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
     const { rows: [counts] } = await query(`
       select count(*) filter (where may_store)::int as owned,
              count(*) filter (where contributor_household_id is not null)::int as household,
-             count(*) filter (where attribution_required and coalesce(credit_line,'') = '')::int as needs_attribution
+             count(*) filter (where may_store and coalesce(credit_line,'') = '')::int as needs_attribution
         from image_assets`);
     const { rows: facets } = await query(
       `select source, count(*)::int as n from image_assets where may_store group by source order by count(*) desc`);
@@ -749,7 +877,12 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
     // wrote. `household` is the same set as the "A household" facet, so it is
     // named once and not listed twice.
     const SOURCE_WORD = { wikimedia: 'Commons', commons: 'Commons', geograph: 'Geograph', site: 'The venue’s own', logo: 'The venue’s own logo', street: 'Street level', household: 'A household' };
+    // How many match, not how many were sent: the heading reads as the size of
+    // the answer.
+    const { rows: [matching] } = await query(
+      `select count(*)::int as n from image_assets ia where ${where.join(' and ')}`, args.slice(0, -1));
     res.json({
+      matching: matching.n,
       pictures: rows.map((p) => ({
         id: p.id, source: p.source, licence: p.licence, licenceUrl: p.licence_url,
         creator: p.creator, creatorUrl: p.creator_url, credit: p.credit_line,

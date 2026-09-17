@@ -10,6 +10,7 @@
  */
 
 import { query } from '../db.js';
+import { noteMany } from './placeIndex.js';
 
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
@@ -38,6 +39,10 @@ const MILES_FROM = (latParam, lngParam) => `(3958.7613 * acos(least(1, greatest(
  *    "other" stops being "other" the moment a visit says it is a restaurant.
  */
 export async function upsertHouseholdPlace(client, householdId, p) {
+  // A household act claims a place, and a claimed place is one the back office
+  // counts (Codex, 17 Sep 2026). The index holds the ref and the position; the
+  // name and everything else stay where they already legitimately live.
+  void noteMany([{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null }]);
   await on(client)(
     `insert into household_places (household_id, venue_ref, label, kind, category, lat, lng, country, country_code, locality, venue, note)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

@@ -169,6 +169,71 @@ export function workings(input = {}) {
   // the total looks like a mistake.
   const eachAccolade = (accolades || []).map((key) => ({ key, points: ACCOLADE_POINTS[key] ?? 0 }));
 
+  // What each input was actually worth, so the column adds to the number above
+  // it (BO2i: "Worth · adds to 72"). Two rules decide these:
+  //   · a part's weight is shared out between the inputs that made it, in
+  //     proportion to what each contributed, so nothing is invented and nothing
+  //     is lost;
+  //   · **owned** says whether we may keep the input for good. The crowd and the
+  //     count are licensed — read at the moment of the call, banded, and thrown
+  //     away — and everything else is our own research or a public register.
+  const w = licensed ? { crowd: 0.5, accolade: 0.3, substance: 0.2 } : { crowd: 0, accolade: 0.6, substance: 0.4 };
+  const chainW = out.chainWeight;
+  // In the same units the score is printed in (0–100), because the column has to
+  // add to the figure above it and a reader cannot be asked to scale it.
+  const worthOf = (part, weight) => part * weight * 100 * chainW;
+  // The crowd part is 80% the band and 20% how many said it (`crowdSplit`).
+  const crowdShare = licensed ? (CROWD_POINTS[crowd] ?? 0) * 0.8 : 0;
+  const countShare = licensed ? (COUNT_POINTS[count] ?? 0) * 0.2 : 0;
+  const accoladeTotal = eachAccolade.reduce((n, a) => n + a.points, 0);
+  const substanceParts = [
+    ['menuItems', menuItems >= 40 ? 0.45 : menuItems >= 15 ? 0.35 : menuItems > 0 ? 0.2 : 0],
+    ['cuisines', (cuisines ?? []).length ? 0.2 : 0],
+    ['website', website ? 0.15 : 0],
+    ['summary', summary ? 0.1 : 0],
+    ['openingHours', openingHours ? 0.1 : 0],
+  ];
+  // `substanceOf` caps at 1, so the shares are scaled by the same cap the score
+  // used rather than adding past the part they belong to.
+  const substanceRaw = substanceParts.reduce((n, [, v]) => n + v, 0);
+  const substanceScale = substanceRaw > 0 ? Math.min(1, substanceRaw) / substanceRaw : 0;
+  const accoladeScale = accoladeTotal > 0 ? out.raw.accolade / accoladeTotal : 0;
+  const raw = {
+    crowd: worthOf(crowdShare, w.crowd),
+    count: worthOf(countShare, w.crowd),
+    accolades: worthOf(out.raw.accolade, w.accolade),
+    menuItems: worthOf(substanceParts[0][1] * substanceScale, w.substance),
+    cuisines: worthOf(substanceParts[1][1] * substanceScale, w.substance),
+    website: worthOf(substanceParts[2][1] * substanceScale, w.substance),
+    summary: worthOf(substanceParts[3][1] * substanceScale, w.substance),
+    openingHours: worthOf(substanceParts[4][1] * substanceScale, w.substance),
+    chainScale: 0,
+  };
+  // Rounded so they add up. Law 4 on the board: "every figure must be derivable
+  // from the columns beside it", so the pennies of rounding go on the largest
+  // row rather than leaving the column a point short of its own total.
+  const target = Math.round(out.epicScore * 10);
+  const share = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Math.round(v)]));
+  const biggest = Object.entries(share).sort((a, b) => b[1] - a[1])[0];
+  if (biggest) share[biggest[0]] += target - Object.values(share).reduce((n, v) => n + v, 0);
+  // Kept for good, or read and dropped. This is the column BO2i prints beside
+  // every input, and it is the exposure the whole board exists to show.
+  const OWNED = {
+    crowd: false, count: false,
+    accolades: true, menuItems: true, cuisines: true, website: true, summary: true, openingHours: true, chainScale: true,
+  };
+  const HOW = {
+    crowd: 'A rating read at the moment of the call, pulled towards the average the more thinly it is reviewed, then banded. Only the word is kept.',
+    count: 'How many people have left a review, added across every provider that returned this place and banded at the call. The figure is never written down.',
+    accolades: 'Who else has judged it — Michelin, the AA, the Good Food Guide, a rosette. A fact about who said what, published to be quoted, and ours for good.',
+    menuItems: 'Dishes we read off the venue\'s own menu. Ours, because we read it from their page.',
+    cuisines: 'What it says it is, in its own words. "Restaurant" is not one.',
+    website: 'The venue\'s own site, which is where we are allowed to read from.',
+    summary: 'A sentence of our own saying what the place is.',
+    openingHours: 'When it is open, and how long ago we last checked.',
+    chainScale: 'How many of it there are. A weight on the end rather than a filter at the start, so a chain people genuinely rate keeps most of what it earned.',
+  };
+
   return {
     // What went in. `band` is our word; the figure it came from is never here,
     // because it was never kept.
@@ -182,7 +247,17 @@ export function workings(input = {}) {
       { key: 'summary', label: 'Something to read', value: Boolean(summary), kind: 'yes-no', held: Boolean(summary) },
       { key: 'openingHours', label: 'When it is open', value: Boolean(openingHours), kind: 'yes-no', held: Boolean(openingHours) },
       { key: 'chainScale', label: 'How many of it there are', value: chainScale, kind: 'word', held: true },
-    ],
+    ].map((i) => ({
+      ...i,
+      // What this input contributed to the score above it, and whether we may
+      // keep it for good.
+      worth: share[i.key] ?? 0,
+      owned: OWNED[i.key] ?? true,
+      how: HOW[i.key] ?? null,
+    })),
+    // The weight the whole total is multiplied by at the end, so the column can
+    // be made to add up on a place that is one of several.
+    chainWeight: chainW,
     // What each part was worth, and what it contributed to each of the two
     // numbers. `owned` is the column that proves the ranking survives a provider
     // going dark, so both are shown side by side rather than one after the other.

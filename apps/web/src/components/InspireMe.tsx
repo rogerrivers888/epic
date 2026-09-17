@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from './press';
 import { api, BrowseItem, IdeaBudget, SketchEvent, Idea, IdeaHeadline, IdeaThing, InspireStage, Taste, TasteTable } from '../api';
+import { heldSearch, noteSearchEvent } from '../search';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap, minutes } from './ui';
 import { Icon, CategoryIcon, Rating } from './Icon';
@@ -246,6 +247,10 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       // Whatever it has so far goes on screen now: the titles arrive before
       // the pins do, and the pins arrive one at a time.
       if (s.ideas) { setIdeas(s.ideas); setReply(s.reply); setFoundAt(new Date().toISOString()); }
+      // What the household does with these ideas is counted against the ask
+      // that produced them; without the id every planner ask stayed at "clicked
+      // nothing" for ever (Codex, 17 Sep 2026).
+      heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id));
       setStage(s.stage); setPlaced(s.placed ?? 0);
       if (s.error) throw new Error(`${s.error}${ref ? ` (run ${ref})` : ''}`);
       if (!s.running) break;
@@ -316,6 +321,9 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
     // 2026: "I can't click on Thorpe Park… I can't see any information").
     const ref = head?.venueRef ?? idea.place?.ref ?? '';
     if (!idea.place) return;
+    // Opening an idea is the first of Demand's three things, counted against the
+    // ask that produced it.
+    noteSearchEvent('plan', 'open', ref || idea.id);
     setDrawer({
       id: idea.id, venueRef: ref, name: head?.name ?? idea.place.label, category: head?.category ?? 'attraction',
       lat: idea.place.lat, lng: idea.place.lng, dwellMinutes: 120, reasons: [], justification: idea.why,
@@ -494,6 +502,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
     if (!sessionId || opening) return;
     const head = things[idea.id]?.headline ?? null;
     const already = opened[idea.id];
+    noteSearchEvent('plan', 'add_to_trip', idea.place?.ref ?? idea.id);
     if (already) { onOpenTrip?.(already.tripId, openOpts(head)); return; }
     setOpening(idea.id); setError(null);
     try {

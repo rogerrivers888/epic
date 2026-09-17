@@ -131,7 +131,10 @@ export function faultOf({ searches = 0, empty = 0, noClick = 0, noTrip = 0, know
   const bad = [share(empty), share(noClick), share(noTrip)].filter((s) => s >= 0.2).length;
   if (worst < 0.2) return { key: 'working', label: 'Working', owner: null };
   if (bad >= 3) return { key: 'all-three', label: 'All three', owner: 'Start with Collect', act: 'collect' };
-  if (worst === share(empty)) return { key: 'no-places', label: known ? 'Came back empty' : 'No places', owner: 'Collect', act: 'collect' };
+  // The long label is BO4a's column ("Which fault"); the short one is BO2f's.
+  // They were sharing a word for two different columns, so a row whose bar shows
+  // four of five searches answered read "No places" (Codex, 17 Sep 2026).
+  if (worst === share(empty)) return { key: 'no-places', label: 'Came back empty', owner: 'Collect', act: 'collect' };
   if (worst === share(noClick)) return { key: 'wrong-places', label: 'Clicked nothing', owner: 'Categories', act: 'categories' };
   return { key: 'thin-places', label: 'Never tripped', owner: 'The data score', act: 'score' };
 }
@@ -141,6 +144,9 @@ export function faultOf({ searches = 0, empty = 0, noClick = 0, noTrip = 0, know
  * shorter name (BO2f): No places · Wrong places · Thin places.
  */
 export const SHORT_FAULT = {
+  // "No places" is the plain name for the fault; the long label above says what
+  // the figures did. A subject we hold nothing at all for is the first; a
+  // subject we hold something for that still came back empty is the second.
   'no-places': 'No places', 'empty-always': 'No places',
   'wrong-places': 'Wrong places', 'thin-places': 'Thin places',
   'all-three': 'All three', working: 'Working', none: '—',

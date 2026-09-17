@@ -13,6 +13,7 @@
 // wrong is a takedown rather than a bug.
 
 import { query, withTransaction } from '../db.js';
+import { noteMany } from './placeIndex.js';
 import { judgeVisiting } from '../domain/visiting.js';
 import { osmForWikidata, wikipediaCategories, titleFromUrl } from '../sources/visitingEvidence.js';
 
@@ -234,6 +235,9 @@ export async function bumpKindsSeen(qids) {
  */
 export async function upsertAttractions(regionSlug, rows) {
   if (!rows.length) return 0;
+  // Everything the harvest keeps is a place Epic has seen, so the index learns
+  // it now rather than at the next rebuild (Codex, 17 Sep 2026).
+  void noteMany(rows.filter((a) => a.venueRef).map((a) => ({ ref: a.venueRef, lat: a.lat ?? null, lng: a.lng ?? null })), { source: 'atlas' });
   let written = 0;
   await withTransaction(async (client) => {
     for (const a of rows) {

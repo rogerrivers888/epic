@@ -23,7 +23,7 @@
 import express from 'express';
 import { requires } from '../access.js';
 import { workings } from '../domain/scoring.js';
-import { scoringInputsFor } from '../repositories/scout.js';
+import { scoringInputsFor, rescoreOne } from '../repositories/scout.js';
 import { chainScale } from '../domain/chains.js';
 
 const router = express.Router();
@@ -82,6 +82,36 @@ router.get('/', requires('view_library'), async (req, res, next) => {
       drifted: row.epic_score != null && Math.abs(row.epic_score - out.epicScore) >= 0.1,
       area: row.area_code ?? null,
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST / — work it out again, and write the answer down.
+ *
+ * `score()` is pure and recomputes from scratch, so this asks it of whatever we
+ * hold now and stores the two numbers it returns. Free: nothing here goes out to
+ * a provider. Asking a provider for a fresh rating is a *collection* run and
+ * lives on Places, where the spending is said out loud before it happens.
+ */
+router.post('/', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.body?.ref ?? '').trim();
+    if (!ref) throw Object.assign(new Error('Which place? Pass its ref.'), { status: 400, code: 'ref_required' });
+    const row = await scoringInputsFor(ref);
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'Nothing held for that ref — it has not been swept or claimed.' });
+    const name = row.record_name ?? row.sweep_name ?? null;
+    const scale = row.chain_scale ?? chainScale({ name, sites: row.sites ?? (row.chain ? 2 : 1) }).scale;
+    const out = workings({
+      crowd: row.crowd_band, count: row.count_band,
+      accolades: row.accolades ?? [],
+      menuItems: row.menu_state === 'read' ? (row.item_count ?? 0) : 0,
+      cuisines: row.record_cuisines?.length ? row.record_cuisines : (row.sweep_cuisines ?? []),
+      website: row.sweep_website ?? row.record_website ?? null,
+      summary: row.summary, openingHours: row.opening_hours,
+      chainScale: scale,
+    });
+    await rescoreOne(ref, out.epicScore, out.ownedScore);
+    res.json({ ref, epicScore: out.epicScore, ownedScore: out.ownedScore, spentPence: 0, at: new Date().toISOString() });
   } catch (err) { next(err); }
 });
 

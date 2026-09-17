@@ -1495,7 +1495,12 @@ async function runInspire({ household, attending, session, state, append = false
     // The planner's ask, written down. An ask that produced nothing is a demand
     // signal exactly as a browse that showed nothing is, and neither can be
     // backfilled (17 Sep 2026).
-    await searchLog.noteSearch({
+    //
+    // The id is published onto the session, because without it every planner ask
+    // stayed at outcome `none` for ever and was counted as "clicked nothing" —
+    // a fault it had not committed (Codex, 17 Sep 2026). The screen reports an
+    // idea opened and a trip made from one against this id.
+    const searchId = await searchLog.noteSearch({
       householdId: household.id, surface: 'plan',
       ...(await searchLog.whereOf({ lat: home?.lat ?? null, lng: home?.lng ?? null })),
       lat: home?.lat ?? null, lng: home?.lng ?? null,
@@ -1506,6 +1511,9 @@ async function runInspire({ household, attending, session, state, append = false
       shown: [{ kind: 'idea', n: ideas.length }],
       sourcesQueried: ['claude'], degraded: [],
     });
+    // The ideas as they were given, in order, so a replay prints what was shown.
+    await searchLog.noteShown(searchId, ideas.map((idea, i) => ({ ref: idea.place?.ref ?? null, position: i + 1 })));
+    await publish({ searchId });
 
     // What there is at each idea is gathered now, in the background and in
     // order, so opening one is a read rather than a search (owner, 3 Sep 2026).
@@ -1717,6 +1725,9 @@ router.get('/inspire/:sessionId', async (req, res, next) => {
       sessionId: session.id, ref: runRef(session.id),
       running: Boolean(s.running) && !stale,
       ideas: s.ideas ?? null, reply: s.reply ?? null, budget: s.input?.budget ?? 'any',
+      // What the household does with these ideas is counted against the ask that
+      // produced them (routes/demand.js).
+      searchId: s.searchId ?? null,
       stage: stale ? 'error' : s.stage ?? null, placed: s.placed ?? 0,
       startedAt: s.runStartedAt ?? null,
       error: stale || interrupted ? 'That run was interrupted before it finished — tap Inspire me again.' : s.error ?? null,

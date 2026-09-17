@@ -61,6 +61,25 @@ export function duration(seconds: number | null | undefined): string {
   return `${hours}h ${mins % 60 ? `${mins % 60}m` : ''}`.trim();
 }
 
+/**
+ * "4 min ago", "2 hrs ago", "3 days ago".
+ *
+ * `ago()` starts at day granularity, which is right for an account that last
+ * signed in on Tuesday and wrong for a set of counts refreshed two minutes ago:
+ * the one thing "Refresh the counts · N ago" exists to say is how stale they
+ * are, and "today" cannot say it (Codex, 17 Sep 2026).
+ */
+export function since(iso?: string | null): string {
+  if (!iso) return 'never';
+  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr${hours === 1 ? '' : 's'} ago`;
+  return ago(iso);
+}
+
 /** "3 days ago", "today" — the same words the Accounts screen uses. */
 export function ago(iso?: string | null): string {
   if (!iso) return 'never';

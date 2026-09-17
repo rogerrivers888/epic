@@ -36,6 +36,9 @@ router.get('/', requires('view_library'), async (req, res, next) => {
         maker: r.maker_label, place: r.place_label, ref: r.venue_ref, area: r.area_slug,
         state: r.state, reported: r.reported, madeAt: r.made_at,
         reason: r.reason, told: r.told,
+        // A photograph's own id, so a row can draw a thumbnail of the thing it
+        // is asking about.
+        imageId: r.kind === 'photo' && r.subject_type === 'image' ? r.subject_id : null,
         batchable: queue.KINDS.find((k) => k.key === r.kind)?.batch ?? false,
       })),
     });
@@ -54,10 +57,17 @@ router.get('/:id', requires('view_library'), async (req, res, next) => {
         state: item.state, reported: item.reported, reportReason: item.report_reason, madeAt: item.made_at,
         reason: item.reason, message: item.message, told: item.told,
       },
-      detail: item.detail, picture: item.picture,
+      detail: item.detail,
+      // The photograph itself, not a description of it: a photo queue whose
+      // photo cannot be seen cannot be worked (Codex, 17 Sep 2026).
+      picture: item.picture ? { ...item.picture, imageId: item.picture.id } : null,
       // What this household has sent before and what it has earned, because a
       // decision about one photograph is a decision about a person.
       made: item.maker ? { name: item.maker.name, kept: item.maker.kept, points: item.maker.points } : null,
+      // The reviewer is asked to apply the "somebody's face is in it" test, so
+      // the screen has to say whether anything looked. Nothing does yet, and
+      // saying "not looked for" is the honest answer rather than "none found".
+      faces: 'not looked for',
       // The closed list, with the message each one sends.
       reasons: queue.REASONS[item.kind] ?? queue.REASONS.review,
       batchable: queue.KINDS.find((k) => k.key === item.kind)?.batch ?? false,

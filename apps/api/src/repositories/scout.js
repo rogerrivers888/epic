@@ -6,6 +6,7 @@
 // before anything reaches this file.
 
 import { query, withTransaction } from '../db.js';
+import { noteMany } from './placeIndex.js';
 import { causeOf, CAUSES } from '../domain/menuCauses.js';
 
 export async function upsertArea(a) {
@@ -137,6 +138,10 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
  * changed?" is answered without ever having held the thing that changed.
  */
 export async function putPlace(areaCode, p, run = query) {
+  // The index is written to by the paths that keep a place, so Places is
+  // current between rebuilds rather than as stale as the last one (Codex,
+  // 17 Sep 2026). Identifiers and a position only; never a name.
+  void noteMany([{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null }], { source: 'sweep' });
   await run(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
                                accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, from_sources, secondary, last_seen, scored_at)
@@ -695,4 +700,26 @@ export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
     .filter((r) => r.km <= km)
     .sort((a, b) => (a.chain === b.chain ? (b.epic_score ?? 0) - (a.epic_score ?? 0) : a.chain ? 1 : -1))
     .slice(0, limit);
+}
+
+/**
+ * One place's score, worked out again and written down.
+ *
+ * Nothing goes out to a provider: `score()` is pure and recomputes from what we
+ * already hold, which is the whole point of it (`domain/scoring.js`). Both
+ * places a score is kept are updated, because a screen reading one and a list
+ * ordering by the other is the drift this exists to stop.
+ */
+export async function rescoreOne(venueRef, epicScore, ownedScore) {
+  await query(
+    'update scout_places set epic_score = $2, owned_score = $3, scored_at = now() where venue_ref = $1',
+    [venueRef, epicScore, ownedScore]);
+  await query(
+    'update place_records set epic_score = $2, banded_at = now() where venue_ref = $1',
+    [venueRef, epicScore]);
+  await query(
+    `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score)
+     select area_code, venue_ref, $2, $3 from scout_places where venue_ref = $1`,
+    [venueRef, epicScore, ownedScore]).catch(() => null);
+  return { venueRef, epicScore, ownedScore };
 }

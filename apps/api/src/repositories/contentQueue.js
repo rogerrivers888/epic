@@ -142,7 +142,7 @@ export async function sync() {
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, made_at)
     select 'offer', 'open_entry', e.id::text, e.household_id, coalesce(h.name, 'A household'), e.created_at
       from open_entries e left join households h on h.id = e.household_id
-     where e.state = 'live'
+     where e.state = 'active'
     on conflict (subject_type, subject_id) do nothing`);
 
   // Where a picture or a review is about a place, say which area it is in, so

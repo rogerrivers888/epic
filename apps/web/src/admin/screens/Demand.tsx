@@ -23,7 +23,7 @@ import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { asNumber, asText, useQueryState, useRouter } from '../../router';
 import { api, type DemandReport, type DemandRow, type SearchReplay } from '../../api';
-import { AdminPage, ago, duration, pounds } from '../kit';
+import { AdminPage, ago, duration, pounds, since as howLongAgo } from '../kit';
 import { Explain } from '../explain';
 import { Ladder, Num, Word, Blank, Bar, Act, Footer, Kicker, Stat, type Col } from '../table';
 
@@ -90,9 +90,9 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
           <Text style={styles.alt}>Asked for</Text>
         </View>
         <View style={styles.five}>
-          <Stat label="Came back empty" value={data.totals.empty.toLocaleString()} tip="emptyTotal" big />
-          <Stat label="Clicked nothing" value={data.totals.noClick.toLocaleString()} tip="noClick" big />
-          <Stat label="Never tripped" value={data.totals.noTrip.toLocaleString()} tip="neverTripped" big />
+          <Stat label="Came back empty" value={data.totals.empty.toLocaleString()} tip="emptyTotal" big mark />
+          <Stat label="Clicked nothing" value={data.totals.noClick.toLocaleString()} tip="noClick" big mark />
+          <Stat label="Never tripped" value={data.totals.noTrip.toLocaleString()} tip="neverTripped" big mark />
         </View>
       </View>
 
@@ -108,24 +108,30 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
           ))}
         </View>
         {where ? (
-          <Press effect="none" onPress={() => onWhere('')} accessibilityRole="button" accessibilityLabel="Everywhere">
-            <Text style={styles.chipOff}>{`${data.area?.name ?? where} ✕`}</Text>
+          <Press effect="none" onPress={() => onWhere('')} accessibilityRole="button" accessibilityLabel="Everywhere"
+                 style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Text style={styles.chipOff}>{data.area?.name ?? where}</Text>
+            <Icon name="close" size={12} strokeWidth={2.4} color={colors.accent} />
           </Press>
         ) : null}
       </View>
 
       <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.subject ?? 'anything'}
               highlight={(r) => r.fault === 'empty-always'}
-              empty={<Word muted>Nothing has been searched for here yet. The log is written from the day it was built and cannot be backfilled.</Word>} />
+              empty={
+                <Explain tip={['Nothing yet', 'The search log is written from the day it was built and none of it can be backfilled, so a new area reads empty until somebody searches it.']}>
+                  <Word muted>Nothing searched for here yet</Word>
+                </Explain>
+              } />
 
       <View style={{ gap: 9 }}>
         <Kicker>Searches · most recent first</Kicker>
         <View>
           {data.log.map((s, i) => (
             <View key={s.id} style={[styles.logRow, i === data.log.length - 1 && { borderBottomWidth: 0 }]}>
-              <Text style={[styles.rowNote, { width: 130 }]}>{ago(s.at)}</Text>
+              <Text style={[styles.rowNote, { width: 130 }]}>{howLongAgo(s.at)}</Text>
               <Text style={[styles.logWhat, { flex: 1 }]} numberOfLines={1}>
-                {[s.label, s.where, s.minutes ? `within ${s.minutes} min` : null].filter(Boolean).join(' · ')}
+                {[s.label, s.where, s.minutes ? `within ${s.minutes} min` : null, askedWords(s.asked)].filter(Boolean).join(' · ')}
               </Text>
               <Text style={[styles.logOutcome, { width: 150 }]}>
                 {s.empty ? 'came back empty' : `${s.shown} shown, ${s.tripped ? `${s.tripped} tripped` : `${s.opened} clicked`}`}
@@ -168,7 +174,13 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
       cell: (r) => <Text style={[styles.rowName, r.strong && styles.strong, !r.name && styles.refName]} numberOfLines={1}>{r.name ?? r.ref}</Text> },
     { key: 'sub', label: 'Subcategory', tip: 'subcategory', width: 190, align: 'left',
       cell: (r) => (r.subcategory ? <Word>{r.subcategory}</Word> : <Blank />) },
-    { key: 'score', label: 'Its score', tip: 'itsScore', width: 120, align: 'right', cell: (r) => <Num n={r.score} /> },
+    { key: 'score', label: 'Its score', tip: 'itsScore', width: 120, align: 'right',
+      cell: (r) => <Num n={r.score} />,
+      // The board's column is "that place's data score **at the time they were
+      // shown it**"; where the log did not keep it, the row says so.
+      cellTip: (r) => (r.scoreThen
+        ? 'itsScore'
+        : ['Its score · now', 'The log did not keep this place\'s score at the time, so this is what it scores today.'] as const) },
     { key: 'did', label: 'What they did', tip: 'whatTheyDid', width: 160, align: 'left',
       cell: (r) => <Text style={[styles.did, r.strong && styles.strong, !r.strong && { color: colors.inkMuted }]}>{r.did}</Text> },
     { key: 'dwell', label: 'Dwell', tip: 'dwell', width: 130, align: 'right',
@@ -186,13 +198,16 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
       </View>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
+          {/* Who was going, as counts — never a name, and never anything a
+              provider owns. */}
           <Kicker>{[
             when.toLocaleDateString([], { day: 'numeric', month: 'short' }),
             when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             data.surface,
             data.identified ? 'signed in' : 'not signed in',
-          ].join(' · ')}</Kicker>
-          <Text style={styles.title}>{[data.subject ?? 'Anything', data.where, data.minutes ? `within ${data.minutes} min` : null].filter(Boolean).join(', ')}</Text>
+            askedWords(data.asked),
+          ].filter(Boolean).join(' · ')}</Kicker>
+          <Text style={styles.title}>{[data.subjectLabel ?? 'Anything', data.where, data.minutes ? `within ${data.minutes} min` : null].filter(Boolean).join(', ')}</Text>
         </View>
         <View style={styles.five}>
           <Stat label="Shown" value={data.shown} tip="shown" />
@@ -214,6 +229,25 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
       </View>
     </AdminPage>
   );
+}
+
+/**
+ * What was asked for beside the subject — counts and our own words only.
+ *
+ * The board's rows read "Soft play · within 30 min of RG1 · **under 5s**", and
+ * that last part is what makes a row legible. Never free text somebody typed,
+ * and never a provider's label.
+ */
+function askedWords(asked: Record<string, unknown> | null | undefined): string | null {
+  if (!asked) return null;
+  const out: string[] = [];
+  const party = Number(asked.party ?? 0);
+  if (party) out.push(`${party} ${party === 1 ? 'person' : 'people'}`);
+  if (Array.isArray(asked.moods) && asked.moods.length) out.push(asked.moods.join(', '));
+  if (asked.budget && asked.budget !== 'any') out.push(String(asked.budget));
+  if (asked.typed) out.push('they typed something');
+  if (asked.events) out.push('with events');
+  return out.length ? out.join(' · ') : null;
 }
 
 const Fact = ({ label, value }: { label: string; value: string }) => (

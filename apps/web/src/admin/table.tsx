@@ -41,6 +41,11 @@ export type Col<T> = {
   align?: Align;
   /** Sortable columns say so, and the sorted one says it is. */
   sort?: string;
+  /**
+   * A fact this kind of place is not judged on. The board greys the *header* as
+   * well as the cells, so you can tell at a glance which columns count.
+   */
+  muted?: boolean;
   cell: (row: T, i: number) => React.ReactNode;
   /** A cell that explains only itself — a source that says "not asked". */
   cellTip?: (row: T) => TipKey | Tip | null;
@@ -118,10 +123,15 @@ export function Ladder<T>({
             {c.cell(row, i)}
           </Explain>
         );
-        const style = [styles.row, dense && styles.rowDense, highlight?.(row) && styles.rowOn, i === rows.length - 1 && styles.rowLast];
+        const on = highlight?.(row);
+        const style = [styles.row, dense && styles.rowDense, i === rows.length - 1 && styles.rowLast];
+        // The tint is a wash behind the row rather than a fill on it, so it can
+        // be the 7% the design sets without needing a colour of its own.
+        const wash = on ? <View style={[StyleSheet.absoluteFill, styles.wash]} pointerEvents="none" /> : null;
         const body = onRow
           ? (
             <View style={style}>
+              {wash}
               {lead.map(draw)}
               <Press effect="none" onPress={() => onRow(row)} accessibilityRole="button"
                      accessibilityLabel={label?.(row)} style={styles.doorway}>
@@ -130,7 +140,7 @@ export function Ladder<T>({
               {tail.map(draw)}
             </View>
           )
-          : <View style={style}>{columns.map(draw)}</View>;
+          : <View style={style}>{wash}{columns.map(draw)}</View>;
         return (
           <React.Fragment key={keyOf(row, i)}>
             {group ? <View style={styles.group}>{group}</View> : null}
@@ -265,14 +275,21 @@ export const Kicker = ({ children, accent }: { children: React.ReactNode; accent
 );
 
 /** One of the five numbers at the top of every level. */
-export function Stat({ label, value, tip, accent, big }: {
+export function Stat({ label, value, tip, accent, big, mark = false }: {
   label: string; value: React.ReactNode; tip?: TipKey | Tip | null; accent?: boolean; big?: boolean;
+  /**
+   * The little info circle. The boards draw it on the figures whose definition
+   * is genuinely arguable — ready, the average score, the three faults — and
+   * leave it off the ones a word already explains. Every stat still explains
+   * itself on hover either way.
+   */
+  mark?: boolean;
 }) {
   return (
     <Explain tip={tip} style={{ gap: 2 }}>
       <View style={styles.statLabelRow}>
         <Text style={[styles.kicker, accent && { color: colors.accent }]}>{label}</Text>
-        {tip ? <Icon name="info" size={11} strokeWidth={2.2} color={colors.inkMuted} /> : null}
+        {tip && mark ? <Icon name="info" size={11} strokeWidth={2.2} color={colors.inkMuted} /> : null}
       </View>
       <Text style={[styles.statValue, big && { fontSize: 30 }, accent && { color: colors.accent }]}>{value}</Text>
     </Explain>
@@ -287,6 +304,7 @@ const styles = StyleSheet.create({
   headSort: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   headLabel: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
   headLabelOn: { color: colors.ink, fontWeight: '700' },
+  headLabelMuted: { color: colors.decor },
   headNote: { ...type.tiny, fontSize: 10.5, color: colors.inkMuted },
 
   row: {
@@ -297,7 +315,11 @@ const styles = StyleSheet.create({
   /** The pressable middle of a row: it grows, and it carries the row's own gap. */
   doorway: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   rowLast: { borderBottomWidth: 0 },
-  rowOn: { backgroundColor: colors.surfaceMuted },
+  // The design's token table: "Lime tints — / 0.07 row highlight". `surfaceMuted`
+  // is the *panel* tint and is four times that, which turned a board of empty
+  // subcategories into a green page (Codex, 17 Sep 2026).
+  rowOn: { backgroundColor: 'transparent' },
+  wash: { backgroundColor: colors.selected, opacity: 0.07 },
   group: { paddingTop: 6 },
   empty: { paddingVertical: spacing.lg },
 

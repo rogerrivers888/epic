@@ -21,9 +21,9 @@ import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
-import { asText, useQueryState } from '../../router';
+import { asText, useQueryState, useRouter } from '../../router';
 import { api, type RunsList, type Run, type RunFailures } from '../../api';
-import { AdminPage, ago, pounds } from '../kit';
+import { AdminPage, ago, day, pounds, since } from '../kit';
 import { Explain } from '../explain';
 import { Ladder, Num, Word, Blank, Progress, Act, Footer, Kicker, Stat, type Col } from '../table';
 
@@ -45,8 +45,33 @@ export function Runs({ canManage }: { canManage: boolean }) {
 
 function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: (key: string) => void }) {
   const [data, setData] = useState<RunsList | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const { navigate } = useRouter();
   const load = useCallback(() => { api.adminRuns().then(setData).catch(() => setData(null)); }, []);
   useEffect(load, [load]);
+
+  /**
+   * What a row's button does.
+   *
+   * A run that is national and scopeless starts here. A run that needs to be
+   * told *where* does not: Collect lives inside Places, where the gap is, and
+   * every *Collect here* button carries its own scope. So those send you there
+   * rather than starting something over the whole estate (Codex, 17 Sep 2026 —
+   * every one of these used to silently reload the page).
+   */
+  const run = useCallback(async (r: Run) => {
+    if (r.key === 'menus') { onFailures('menus'); return; }
+    if (r.key === 'bench') { navigate('/admin/sources'); return; }
+    // These three are asked of a selection of places, not of Britain.
+    if (r.key === 'rate' || r.key === 'tripadvisor' || r.key === 'curate') { navigate('/admin/places?where=gb&lens=collect'); return; }
+    if (r.key === 'sweep') { navigate('/admin/places?where=gb&by=postcode&lens=collect'); return; }
+    setBusy(r.key);
+    try {
+      if (r.key === 'harvest') await api.libraryHarvest({ scope: 'never' });
+      if (r.key === 'rescore') await api.adminRescorePlaces();
+    } finally { setBusy(null); load(); }
+  }, [load, navigate, onFailures]);
+
   if (!data) return <AdminPage><Waiting /></AdminPage>;
 
   const columns: Col<Run>[] = [
@@ -69,14 +94,14 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
     { key: 'cap', label: 'Cap', tip: 'cap', width: 150, align: 'right',
       cell: (r) => (r.cap === 'none' ? <Word muted>none</Word> : <Word strong={r.capLeft != null}>{r.cap}</Word>) },
     { key: 'last', label: 'Last run', tip: 'lastRun', width: 150, align: 'right',
-      cell: (r) => (r.state === 'running' && r.startedAt ? <Word muted>{`started ${ago(r.startedAt)}`}</Word>
-        : r.lastAt ? <Word muted>{ago(r.lastAt)}</Word> : <Blank />) },
-    { key: 'act', label: '', width: 130, align: 'right', stops: true,
+      cell: (r) => (r.state === 'running' && r.startedAt ? <Word muted>{`started ${since(r.startedAt)}`}</Word>
+        : r.lastAt ? <Word muted>{since(r.lastAt)}</Word> : <Blank />) },
+    { key: 'act', label: '', width: 150, align: 'right', stops: true,
       cell: (r) => (
-        <Act label={r.state === 'running' ? 'Watch it' : r.action} small
+        <Act label={busy === r.key ? 'Going…' : r.state === 'running' ? 'Watch it' : r.action} small
              tone={r.state === 'running' || r.action === 'See failures' || r.action === 'Open it' ? 'secondary' : 'primary'}
-             disabled={!canManage && r.action !== 'See failures' && r.state !== 'running'}
-             onPress={() => (r.key === 'menus' ? onFailures('menus') : r.key === 'rescore' ? api.adminRescorePlaces().then(load) : load())} />
+             disabled={busy != null || (!canManage && r.action !== 'See failures' && r.state !== 'running')}
+             onPress={() => run(r)} />
       ) },
   ];
 
@@ -101,8 +126,11 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
 
       <Footer>
         {stranded ? (
-          <Act label={`Pick up the ${new Date(stranded.started_at).toLocaleDateString([], { day: 'numeric', month: 'long' })} run`}
-               tone="solid" disabled={!canManage} onPress={load} />
+          // A deploy killed it mid-flight; the harvest is resumable, so picking
+          // it up is asking for the regions it never reached.
+          <Act label={busy === 'pickup' ? 'Picking it up…' : `Pick up the ${new Date(stranded.started_at).toLocaleDateString([], { day: 'numeric', month: 'long' })} run`}
+               tone="solid" disabled={!canManage || busy != null}
+               onPress={() => { setBusy('pickup'); api.libraryHarvest({ scope: 'failed' }).finally(() => { setBusy(null); load(); }); }} />
         ) : null}
       </Footer>
     </AdminPage>
@@ -115,13 +143,23 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
 
 function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canManage: boolean; onClose: () => void }) {
   const [data, setData] = useState<RunFailures | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  // In the address: the places behind one cause are a piece of work, and a piece
+  // of work is a link you can send somebody (Codex, 17 Sep 2026).
+  const [open, setOpen] = useQueryState<string>('cause', '', asText);
   const [rows, setRows] = useState<{ venue_ref: string; label: string; why: string }[] | null>(null);
+  const [retrying, setRetrying] = useState(false);
   useEffect(() => { api.adminRunFailures(runKey).then(setData).catch(() => setData(null)); }, [runKey]);
+  useEffect(() => {
+    if (!open) { setRows(null); return; }
+    const [cause, ours] = open.split(':');
+    setRows(null);
+    api.adminRunFailing(runKey, { cause, ours: ours || undefined }).then((r) => setRows(r.rows)).catch(() => setRows([]));
+  }, [open, runKey]);
 
+  // A second tap on the same row closes it.
   const see = (cause: string, ours?: string) => {
-    setOpen(`${cause}:${ours ?? ''}`); setRows(null);
-    api.adminRunFailing(runKey, { cause, ours }).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    const key = `${cause}:${ours ?? ''}`;
+    setOpen(open === key ? '' : key);
   };
 
   if (!data) return <AdminPage><Waiting /></AdminPage>;
@@ -137,7 +175,9 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
       </View>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
-          <Kicker>{`Read the menus${t.last ? ` · ${ago(t.last)}` : ''}`}</Kicker>
+          {/* A run's timestamp is the kind of thing you quote, so it is the date and
+              the time rather than "10 days ago". */}
+          <Kicker>{`Read the menus${t.last ? ` · ${day(t.last)}, ${new Date(t.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`}</Kicker>
           <Text style={styles.title}>{`${(t.failed ?? 0).toLocaleString()} could not be read`}</Text>
         </View>
         <View style={styles.five}>
@@ -159,7 +199,7 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
                 </Explain>
                 <Text style={[styles.causeN, styles.strong]}>{c.n.toLocaleString()}</Text>
                 <View style={{ width: 150, alignItems: 'flex-start' }}>
-                  <Act label={`See the ${c.n}`} small tone="secondary" onPress={() => see('ours', c.key)} />
+                  <Act label={open === `ours:${c.key}` ? 'Close' : `See the ${c.n}`} small tone="secondary" onPress={() => see('ours', c.key)} />
                 </View>
               </View>
               {open === `ours:${c.key}` ? <Behind rows={rows} /> : null}
@@ -179,7 +219,7 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
                 </Explain>
                 <Text style={styles.causeN}>{c.n.toLocaleString()}</Text>
                 <View style={{ width: 150, alignItems: 'flex-start' }}>
-                  <Act label="See them" small tone="secondary" onPress={() => see(c.key)} />
+                  <Act label={open === `${c.key}:` ? 'Close' : 'See them'} small tone="secondary" onPress={() => see(c.key)} />
                 </View>
               </View>
               {open === `${c.key}:` ? <Behind rows={rows} /> : null}
@@ -190,7 +230,9 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
       </View>
 
       <Footer>
-        <Act label="Retry just ours · free" tone="secondary" disabled={!canManage || !(t.ours ?? 0)} onPress={() => {}} />
+        <Act label={retrying ? 'Retrying…' : 'Retry just ours · free'} tone="secondary"
+             disabled={!canManage || !(t.ours ?? 0) || retrying}
+             onPress={() => { setRetrying(true); api.scoutRetryCause('ours').finally(() => { setRetrying(false); api.adminRunFailures(runKey).then(setData).catch(() => null); }); }} />
       </Footer>
     </AdminPage>
   );
@@ -201,7 +243,12 @@ const Behind = ({ rows }: { rows: { venue_ref: string; label: string; why: strin
     {!rows ? <Waiting /> : rows.length === 0 ? <Word muted>Nothing behind this one now.</Word> : rows.slice(0, 40).map((r) => (
       <View key={r.venue_ref} style={styles.behindRow}>
         <Text style={styles.behindName} numberOfLines={1}>{r.label}</Text>
-        <Text style={styles.behindWhy} numberOfLines={1}>{r.why}</Text>
+        {/* The provider's own sentence is what tells you what to do about this
+            one place, so it is kept — behind a hover, where the board puts an
+            explanation, rather than spilled across the row. */}
+        <Explain tip={['What went wrong', r.why || 'No reason was recorded.']} style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.behindWhy} numberOfLines={1}>{plainly(r.why)}</Text>
+        </Explain>
       </View>
     ))}
   </View>
@@ -218,7 +265,12 @@ const Behind = ({ rows }: { rows: { venue_ref: string; label: string; why: strin
  */
 function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: (key: string) => void }) {
   const [data, setData] = useState<RunsList | null>(null);
+  const [worst, setWorst] = useState<{ label: string; n: number } | null>(null);
   useEffect(() => { api.adminRuns().then(setData).catch(() => setData(null)); }, []);
+  // The one cause behind most of our own failures — the board names it on the
+  // row, because "132 were ours" is not something you can act on and "timed out
+  // before we sent anything · 71" is.
+  useEffect(() => { api.adminRunFailures('menus').then((f) => setWorst(f.ours[0] ?? null)).catch(() => setWorst(null)); }, []);
   if (!data) return <AdminPage><Waiting /></AdminPage>;
 
   const going = data.runs.find((r) => r.state === 'running') ?? null;
@@ -231,7 +283,8 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
       <View style={styles.bandPhone}>
         <Kicker>Today</Kicker>
         <Text style={styles.titlePhone}>
-          {going ? `One run going, ${needs} need${needs === 1 ? 's' : ''} you` : needs ? `${needs} need${needs === 1 ? 's' : ''} you` : 'Nothing needs you'}
+          {going ? `One run going, ${word(needs)} need${needs === 1 ? 's' : ''} you`
+            : needs ? `${cap(word(needs))} need${needs === 1 ? 's' : ''} you` : 'Nothing needs you'}
         </Text>
       </View>
 
@@ -243,7 +296,7 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
           </View>
           <Progress of={going.progress ?? 0} height={5} />
           <View style={styles.goingFoot}>
-            <Text style={styles.rowNote}>{going.startedAt ? `Started ${ago(going.startedAt)}` : ''}</Text>
+            <Text style={styles.rowNote}>{going.startedAt ? `Started ${since(going.startedAt)}` : ''}</Text>
             <Text style={styles.rowNote}>{going.free ? 'nothing spent' : going.costs}</Text>
           </View>
         </View>
@@ -266,11 +319,17 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
       {menus && (menus.ours ?? 0) > 0 ? (
         <View style={styles.phoneRow}>
           <View style={{ gap: 2 }}>
-            <Text style={styles.rowName}>{`${menus.ours} menu failures were ours`}</Text>
+            <Text style={styles.rowName}>{`${menus.ours} menu failure${menus.ours === 1 ? '' : 's'} ${menus.ours === 1 ? 'was' : 'were'} ours`}</Text>
             <Text style={styles.rowNote}>menus</Text>
           </View>
+          {worst ? (
+            <View style={styles.phoneFacts}>
+              <Text style={styles.rowNote} numberOfLines={1}>{worst.label}</Text>
+              <Text style={styles.phoneFact}>{worst.n}</Text>
+            </View>
+          ) : null}
           <View style={styles.phoneFacts}>
-            <Text style={styles.rowNote}>Of all the failures</Text>
+            <Text style={styles.rowNote}>{`Of ${(menus.failed ?? 0)} failures in all`}</Text>
             <Text style={styles.phoneFact}>{`${menus.ours} ours · ${(menus.failed ?? 0) - (menus.ours ?? 0)} theirs`}</Text>
           </View>
           <Act label="See them" tone="secondary" onPress={() => onFailures('menus')} />
@@ -292,6 +351,34 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
     </AdminPage>
   );
 }
+
+/**
+ * A failure, in words rather than in a stack trace.
+ *
+ * The raw sentence is kept — it is the thing that says what to do about this one
+ * place — but it belongs in the hover. A row of `Could not resolve
+ * authentication method. Expected one of apiKey, authToken…` is a provider's
+ * error printed on a screen, which is the one thing this repository does not do.
+ */
+function plainly(why: string | null | undefined): string {
+  const w = String(why ?? '');
+  if (!w) return 'no reason recorded';
+  if (/authentication|api[_ ]?key|unauthori[sz]ed/i.test(w)) return 'a key of ours was missing or refused';
+  if (/rate.?limit|quota|429|budget|credit balance/i.test(w)) return 'we ran into a limit of our own';
+  if (/timed out|ETIMEDOUT|socket hang up|ECONNRESET|abort/i.test(w)) return 'it timed out before we sent anything';
+  if (/\b404\b|not found|ENOTFOUND/i.test(w)) return 'the page we asked for is not on their site';
+  if (/is not defined|is not a function|cannot read propert|unexpected token/i.test(w)) return 'our own code threw';
+  if (w === 'menu_had_no_items') return 'the page opened and there were no dishes on it';
+  if (w === 'menu_unreadable') return 'we could not read the page we downloaded';
+  if (w === 'menu_url_required') return 'we have no address to read';
+  // Anything the crawler wrote as a sentence already is a sentence; anything
+  // that is still a code is said as one rather than printed as one.
+  return /^[a-z0-9_]+$/.test(w) ? w.replace(/_/g, ' ') : w.length > 90 ? `${w.slice(0, 88)}…` : w;
+}
+
+/** Small numbers are words on a headline: the board reads "two need you". */
+const word = (n: number) => (['nothing', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][n] ?? String(n));
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 
 const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityIndicator color={colors.accent} /></View>;
 
