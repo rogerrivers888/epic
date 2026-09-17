@@ -223,10 +223,15 @@ export async function pictureFor(place, { force = false } = {}) {
   // Rung 1. A photograph somebody in the house took outranks anything we could
   // go and find, and it is already in the library — there is nothing to fetch.
   const existing = await lib.heroForPlace(venueRef);
+  // A photograph somebody in the house took outranks anything we could go and
+  // find, and that holds **even when the looking was asked for deliberately**:
+  // `force` is "look again", not "replace what a household gave us". Without
+  // this a logo found on the venue's own site demoted their picture to the
+  // gallery (Codex, 17 Sep 2026).
+  if (existing && (existing.source === 'household' || existing.source === 'upload')) {
+    return { state: 'found', rung: 'household', tried: [{ rung: 'household', found: true }], imageId: existing.id };
+  }
   if (existing && !force) {
-    if (existing.source === 'household' || existing.source === 'upload') {
-      return { state: 'found', rung: 'household', tried: [{ rung: 'household', found: true }], imageId: existing.id };
-    }
     return { state: 'found', rung: existing.source, tried: [{ rung: existing.source, found: true }], imageId: existing.id };
   }
 

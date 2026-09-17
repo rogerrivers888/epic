@@ -861,7 +861,11 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     const { rows: known } = await query(`
       select pi.venue_ref, pi.lat, pi.lng, pi.subcategory,
              coalesce(r.website, a.website, sp.website) as website,
-             coalesce(r.address, a.name) as address,
+             -- The street, and only the street: an attraction's name is not an
+             -- address, and passing it as one gave the matchers the name twice
+             -- (Codex, 17 Sep 2026).
+             coalesce(r.address, (select pf.value #>> '{}' from place_facts pf
+                                   where pf.venue_ref = pi.venue_ref and pf.field = 'address' limit 1)) as address,
              (select l.name from place_areas pa join localities l on l.slug = pa.area_slug
                where pa.venue_ref = pi.venue_ref and l.kind = 'town' limit 1) as locality
         from place_index pi
@@ -1001,14 +1005,11 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
         left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
        where pi.venue_ref = any($1)`, [refs]);
     const out = [];
-    for (const place of rows) {
-      // Not forced. A photograph somebody in the house took outranks anything we
-      // could go and find, and `force` walks straight past that guard — so a
-      // logo would demote a household's own picture to the gallery (Codex,
-      // 17 Sep 2026). Looking again where there is already a hero is what the
-      // ladder's own first rung is for.
-      out.push({ ref: place.venue_ref, ...(await pictureFor(place)) });
-    }
+    // Deliberately asked, so it looks again — a logo we found once should be
+    // improvable. What it may not do is demote a photograph somebody in the
+    // house took, and that guard lives in `pictureFor` where every caller gets
+    // it (Codex, 17 Sep 2026).
+    for (const place of rows) out.push({ ref: place.venue_ref, ...(await pictureFor(place, { force: true })) });
     await index.rescore();
     await index.refreshStats();
     res.json({ found: out.filter((o) => o.state === 'found').length, results: out, spentPence: 0 });
