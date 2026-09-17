@@ -814,6 +814,38 @@ The word "strangers" is never used anywhere in this feature.
 
 ---
 
+### 13.21 The map is worked out once — **built** (owner, 17 Sep 2026; migrations 139, 140)
+
+> Owner, 17 Sep 2026: "We could calculate the distance to all the other postcodes within a 30-minute or 60-minute distance… instead of having to do map distance calculations every time someone does a search, we will already hold and know instantly which activities are within their particular area. Please let me know whether that's doable."
+
+**It is, and it is cheaper than a provider.** `domain/reach.js`, `repositories/reach.js`, `routes/reach.js`, migrations 139 and 140. Every place Epic holds is given a **postcode sector** — `SL4 1`, the district plus the first character of the incode — and the travel time between every pair of sectors within the horizon is worked out once and kept. A catchment stops being a distance computed for every row and becomes one indexed read. Measured on the first build: 1,296 places into 590 sectors, 244,798 pairs, six seconds, and 1.5–3ms to answer "everything within an hour of Windsor".
+
+**The sector is the unit, for a measured reason.** About eleven thousand of them in Britain, against 2,980 districts (a rural district is twenty kilometres across) and 1.8 million units (far too many to pair up). Sectors are drawn around people rather than land, so they are small where places are dense and large where there is nothing — exactly the behaviour a catchment wants.
+
+**The code carries its scheme** — `sector:SL4 1`. A postcode sector is a British idea; France has communes and the United States has ZIPs of a quite different size. `grid:` and `h3:` land in the same column and nothing downstream learns a second shape. Stamping `place_cells` is part of onboarding a country, not an afterthought.
+
+**The times are Epic's own estimate, deliberately.** `minutesBetween` is `estimateTravelMinutes` and must stay so: a matrix that disagreed with the fence every list is filtered by afterwards would offer a place the next pass then threw away, and nobody could see why. Every row carries `method`, so a real road-network build (OSRM over the OpenStreetMap extract — eleven thousand `table` calls, hours, no provider spend) can replace a region's rows and the screens can say which they are looking at. Through a routing provider the same matrix would cost tens of thousands of pounds.
+
+**The matrix is the filter, never the answer.** Centre-to-centre is an approximation: good in a city, loose in rural Wales. So the ring is built and read **five minutes wider than asked** (`EDGE_MINUTES`), because the exact pass can throw a place away and can never go and find one the matrix did not offer — and `HORIZON_MINUTES` is `CAP_MINUTES` plus that allowance, or the allowance would cancel itself at ninety minutes. Walking is not precomputed (a mile or two, computed live) and **transit cannot be one number** — 08:30 and 23:00 are different journeys, so it stays estimated and labelled until §6.2's provider exists.
+
+**Three things that only showed up by running it.** A place that cannot be given a postcode must be remembered as such or it is asked about for ever (905 requests to place 496 places, now 14); a failed request is **not** an unplaceable place, and writing the one down as the other would lose a whole batch to a five-second timeout for good; and the neighbour search needs a latitude gate before the haversine, because at eleven thousand cells the inner loop runs a hundred and twenty million times.
+
+**Completeness is recorded, never inferred.** `max(minutes)` is not a cap anybody built to. `cell_builds` holds what each origin was built to, so an interrupted rebuild is visible as two caps at once; and because a rebuild replaces markers as cells finish, the **run row** is what proves a build reached the end — a mode whose last run is anything but `done` is reported as needing one, however current its markers read. The report is scoped to one scheme and country, so a second country sharing the table cannot mask a new sector or invent a missing one.
+
+**It keeps up with the sweep on its own.** `refresh()` stamps what is unstamped and works out neighbours only for cells that have none, and **writes both directions at once** — a new cell needs its own neighbours *and* a row from each of them pointing back, or the places in a newly swept town are invisible to every search that does not start inside it. The estimate is a function of the distance between two points and nothing else, so the reverse row is the same row with its ends swapped; a test fails if that stops being true.
+
+### 13.22 The score shows its working — **built** (owner, 17 Sep 2026)
+
+> Owner, 17 Sep 2026: "I thought we were going to be taking all the providers' stars and come up with our own rating, which we can retain. I should be able to then run an order of how that's calculated, even if that means hitting the same APIs again to recalculate it. Show me the calculation logic."
+
+**This confirms §13.16 and closes the question left open by the rating bench.** A provider's figure is banded into one of four words at the moment of the call and discarded there; the composite is ours, retained, and **recomputed rather than adjusted**, which is the answer to "how do we change our score three months later if we never kept the original rating" — nothing is ever changed. `ownedScore` is kept beside it: the same ranking with the licensed input removed, which is the proof the ordering survives a provider going dark. No provider rating figure is written to any table anywhere; audited 17 Sep 2026, and the only ratings in the schema are the household's own.
+
+**`workings()` in `domain/scoring.js`** returns every input, what each part was worth, what it was weighted by, what it contributed and the two numbers out — by calling `score()` rather than repeating its arithmetic, because a screen explaining a calculation the code no longer does is worse than no screen. The weights are read out of the module rather than retyped into the UI. `GET /api/admin/score?ref=` answers for one place and says whether the stored number has **drifted** from what the evidence now gives, which is what `rescore` exists to close.
+
+**The working has to add up to the number it claims to explain**, and at first it did not: two accolades worth 0.98 printed as 1.0 and the total came out a tenth high. `score()` now returns its parts unrounded beside the rounded ones, and a test asserts the sum over five shapes of place. The inputs must be the ones the score was actually made from — the sweep's own `website`, `chain_scale` and `sites`, not an owned record's website and a scale re-derived from the name, or the page explains a score nobody ever calculated.
+
+**Whether a provider's figure may appear transiently on a back-office screen** — as it does on Lookup's not-owned list, which the owner asked for — is narrower and **still his**. Nothing in this section changes it.
+
 ## 14. Spend containment patterns
 
 Cost is the central commercial risk: provider content cannot be retained between sessions, so the same search for the same household next week bills again. Nothing amortises. A client retry loop is a direct billing event.
