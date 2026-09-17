@@ -206,6 +206,17 @@ const SECTIONS: Section[] = [
     icon: 'search',
     decisions: [
       {
+        title: 'The map is worked out once, not on every search',
+        rule: 'Every place Epic holds is given a postcode sector \u2014 SL4 1, the district plus one character \u2014 and the travel time between every pair of sectors within ninety minutes is worked out once and kept. A catchment is then a lookup rather than a calculation: everything within thirty minutes of Windsor comes back in about two milliseconds, with no arithmetic and no provider call. The matrix is the filter; a list is still ordered by the exact distance to each place, so being a little generous at the edge costs nothing.',
+        why: 'A distance worked out for every row cannot survive millions of rows in several countries. Measured on the first build: 1,296 places fell into 590 sectors, 244,798 pairs, six seconds to build, and 1.5\u20133ms to answer. Times are Epic\u2019s own estimate rather than a route over real roads \u2014 deliberately the same function every list is already fenced with, because a matrix that disagreed with the fence would offer a place the next pass then threw away. A road-network build can replace a region\u2019s rows without anything else changing; every row says which it is.',
+        state: 'live',
+        where: 'apps/api/src/domain/reach.js \u00b7 apps/api/src/repositories/reach.js \u00b7 migration 139',
+        said: {
+          who: 'Roger', on: '17 Sep 2026',
+          words: 'instead of having to do map distance calculations every time someone does a search, we will already hold and know instantly which activities are within their particular area.',
+        },
+      },
+      {
         title: 'A source too slow to wait for is not a source to drop',
         rule: 'Overpass is marked slow by nature. Once something useful has arrived and every other source has settled, the search answers without it \u2014 but its work carries on, and when it lands the fuller answer replaces what the cache holds. The first look is fast; the next look at the same place is fast and complete.',
         why: 'Measured on production, 6 Sep 2026: Overpass answered three tries in five, at 5.0s, 7.2s and 9.8s, and ran out its cap on the other two \u2014 while returning 120 restaurants in central Manchester where Google returns 7. Too slow to wait for, too good to drop. Before this, every search paid for it and then gave up: with the flag the fan-out answers in 21ms, without it 2,521ms, and not one of those 120 had ever reached a screen.',
@@ -270,6 +281,24 @@ const SECTIONS: Section[] = [
     blurb: 'The difference between the two layers is the thing most likely to be broken by accident, because both look like "a place" on screen.',
     icon: 'locked',
     decisions: [
+      {
+        title: 'Their stars become our word, and the word is what we keep',
+        rule: 'A provider\u2019s rating is turned into one of four words \u2014 top, high, good, mixed \u2014 at the moment of the call, and the figure is discarded there. What is kept is our own composite out of ten, built from that word, how many people spoke, the accolades anybody independent has given the place, and how much we actually own about it. A second number is kept beside it with the crowd taken out altogether. Nothing recalculates by adjusting: the score is a pure function of the evidence in front of it, so every sweep works it out from scratch.',
+        why: 'The owner asked how a score could be updated three months later if the original rating was never kept. The answer is that nothing is ever updated \u2014 it is recomputed. The word cannot be read backwards into the figure, which is what makes it ours; the second number is the proof that the ranking survives a provider going dark. Few voices are pulled towards the average, because a 5.0 from eleven diners is not better than a 4.6 from two thousand.',
+        state: 'live',
+        where: 'apps/api/src/domain/scoring.js \u00b7 crowdBand(), countBand(), score()',
+        said: {
+          who: 'Roger', on: '17 Sep 2026',
+          words: 'I thought we were going to be taking all the providers\u2019 stars and come up with our own rating, which we can retain. I should be able to then run an order of how that\u2019s calculated, even if that means hitting the same APIs again to recalculate it. Show me the calculation logic.',
+        },
+      },
+      {
+        title: 'The score shows its working',
+        rule: 'Any place\u2019s score can be opened: what went in, what each part was worth, what it was weighted by, what it contributed, and the two numbers out. The weights are read out of the scoring module rather than written into the screen. What is deliberately absent is a star rating \u2014 there is nothing behind the word to show, because the figure was never kept.',
+        why: 'A ranking nobody can argue with is a ranking nobody can correct. The working has to add up to the number it claims to explain, which it did not at first: two accolades worth 0.98 printed as 1.0 and the total came out a tenth high \u2014 exactly the sort of thing nobody notices until they are disagreeing with a score and cannot see why.',
+        state: 'partial',
+        where: 'apps/api/src/domain/scoring.js \u00b7 workings() \u00b7 GET /api/admin/score?ref= \u00b7 the screen is not drawn yet',
+      },
       {
         title: 'Rented and owned are two different layers',
         rule: 'A household act — shortlist, save, special, visited — claims a place. Epic then researches it from OpenStreetMap, the venue’s own published page and the open encyclopedias, and that research is kept for good. A provider’s name, hours, reviews, photos or rating is never written down.',
@@ -520,6 +549,82 @@ const SECTIONS: Section[] = [
         why: 'For every licence but CC0 and public domain, the picture without the line is the licence broken. Putting it in the component rather than in each caller is what stops one screen forgetting.',
         state: 'live',
         where: 'apps/web/src/components/VenueThumb.tsx',
+      },
+    ],
+  },
+  {
+    key: 'owed',
+    title: 'What we owe',
+    blurb: 'Obligations this platform has taken on and has not finished. A thing we have not done is said here plainly rather than left off \u2014 the same rule as everything above it.',
+    icon: 'alert',
+    decisions: [
+      {
+        title: 'The privacy notice has to say that searches are recorded',
+        rule: 'Every search a household makes is recorded against the account that made it: where, what was asked for, what came back, and what they did next. The notice must say so plainly, and say what it is used for.',
+        why: 'Recording it against an account is what makes it possible to understand one person\u2019s experience rather than an average, and to follow up with them. It is also personal data, and a notice that does not mention it is what would make the whole log unusable.',
+        state: 'planned',
+        where: 'the notice itself \u00b7 the log will be written in apps/api/src/routes/discover.js',
+        said: {
+          who: 'Roger', on: '17 Sep 2026',
+          words: 'Are we allowed to retain what account ID did what search? If so, I\u2019d like to do so\u2026 It would just be nice to understand specific user behaviours and then also to be able to target them with specific communication to help their user experience, or maybe follow up with surveys.',
+        },
+      },
+      {
+        title: 'Marketing off the back of behaviour needs its own permission',
+        rule: 'Analytics and marketing are two different permissions. Using what somebody searched for to send them a message or a survey is direct marketing, and needs consent or the soft opt-in \u2014 an existing customer, a similar product, and an unsubscribe in every message. The flag is built with the search log, not after it.',
+        why: 'The data and the permission have to arrive together. Building the log first and the consent afterwards means that on the day the first survey goes out, Epic holds the data and not the right to use it.',
+        state: 'planned',
+        where: 'accounts.marketing_opt_in \u00b7 not built',
+      },
+      {
+        title: 'A legitimate-interests assessment, written once',
+        rule: 'Recording identified searches for product analytics rests on legitimate interests. That has to be assessed and written down \u2014 about two pages \u2014 rather than assumed.',
+        why: 'It is the document that gets asked for if anybody ever asks, and it takes an afternoon before there is a log and a great deal longer after there is one.',
+        state: 'planned',
+      },
+      {
+        title: 'Erasure has to reach the search log',
+        rule: 'Deleting a household takes its searches with it; deleting an account leaves the counts and removes the person. Export has to include both.',
+        why: 'A right to be forgotten that stops at the tables somebody remembered to think about is not one.',
+        state: 'planned',
+        where: 'searches.household_id cascades \u00b7 searches.account_id sets null \u00b7 not built',
+      },
+      {
+        title: 'Every search is kept, until keeping them stops being sensible',
+        rule: 'All searches are retained for now, by the owner\u2019s decision. The path that rolls old ones up into counts and drops the detail is built at the same time and left switched off, with the row count that should trigger it named.',
+        why: 'Building the switch now means throwing the lever later is a setting rather than a migration written under pressure.',
+        state: 'planned',
+        said: {
+          who: 'Roger', on: '17 Sep 2026',
+          words: 'I think we should retain all searches for now, but once that starts to become too big, then we can certainly start to remove or aggregate the data.',
+        },
+      },
+      {
+        title: 'Household-made content is not reviewed by anybody yet',
+        rule: 'Photographs, reviews, ratings and notes that households make need one queue where they can be filtered, approved or rejected, with the reason from a closed list and a message the person actually receives. Reported content jumps it.',
+        why: 'Until it exists, anything a household submits either appears unreviewed or sits where nobody looks, and both are worse than a queue.',
+        state: 'planned',
+        where: 'not built \u00b7 the atlas\u2019s Uploads section is the only part of it that exists',
+      },
+      {
+        title: 'Which credentials gate which host categories is not set',
+        rule: 'Every credential type ships as a badge and nothing is blocked at Publish, because the gates are empty. Food registration is the law for cooking for paying guests and not for a wine-tasting walk, and a browse category is too coarse a net to say so.',
+        why: 'Parked by the owner on 17 Sep 2026 \u2014 but while it is empty Epic is not checking, and the terms have to put compliance on the host.',
+        state: 'planned',
+        where: 'Back office \u203a Skills \u203a Credentials \u00b7 gates_categories is empty on every type',
+      },
+      {
+        title: 'Four things outside the repo are still called Roam',
+        rule: 'The ROAM_* variables in Doppler, aliased for now by env.js; the Railpack commands on Railway; the Railway project and service names; and a local .env.',
+        why: 'The rebrand was September 2026, and these are the parts an agent cannot change: they hold secrets, or they are platform configuration.',
+        state: 'planned',
+        where: 'README \u203a The rebrand: what is still called Roam',
+      },
+      {
+        title: 'Heritage Crafts have not been asked about the Red List',
+        rule: 'The host skills vocabulary leans on the Heritage Crafts Red List. They should be e-mailed and asked how they would like it referenced.',
+        why: 'Using somebody else\u2019s research well means asking them how to credit it, before it is in front of the public rather than after.',
+        state: 'planned',
       },
     ],
   },

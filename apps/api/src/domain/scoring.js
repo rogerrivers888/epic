@@ -131,7 +131,99 @@ export function score({ crowd = null, count = null, accolades = [], menuItems = 
   const w = CHAIN_WEIGHT[chainScale] ?? 1;
 
   const round = (x) => Math.round(x * 10) / 10;
-  return { epicScore: round(composite * w), ownedScore: round(owned * w), substance: round(substance), accolade: round(accolade), chainWeight: w };
+  return {
+    epicScore: round(composite * w), ownedScore: round(owned * w),
+    substance: round(substance), accolade: round(accolade), chainWeight: w,
+    // The parts before they were rounded for display. `workings()` shows its
+    // arithmetic on screen, and a working shown in rounded figures does not add
+    // up to the total it claims to explain — two accolades worth 0.98 print as
+    // 1.0 and the sum comes out a tenth too high.
+    raw: { substance, accolade, crowd: crowdPoints, composite, owned },
+  };
+}
+
+/**
+ * The same score, with its working shown.
+ *
+ * Owner, 17 Sep 2026: "I should be able to then run an order of how that's
+ * calculated, even if that means hitting the same APIs again to recalculate it.
+ * Show me the calculation logic."
+ *
+ * So this returns every input, what each was worth, what it was weighted by and
+ * what it contributed, beside the two numbers `score()` returns — and it returns
+ * them by calling `score()` rather than by repeating its arithmetic, because a
+ * screen that explained a calculation the code no longer does would be worse
+ * than no screen at all.
+ *
+ * Structured, never sentences: the back office draws this, and a paragraph on a
+ * UI is the one thing the owner has asked for most often not to see.
+ */
+export function workings(input = {}) {
+  const out = score(input);
+  const { crowd = null, count = null, accolades = [], menuItems = 0, cuisines = [], website = null, summary = null, openingHours = null, chainScale = 'independent' } = input;
+  const crowdPoints = out.raw.crowd;
+  const licensed = crowdPoints != null;
+
+  // What each accolade was worth on its own, before the stack is capped. The
+  // cap is why four of them are not four times one, and it has to be visible or
+  // the total looks like a mistake.
+  const eachAccolade = (accolades || []).map((key) => ({ key, points: ACCOLADE_POINTS[key] ?? 0 }));
+
+  return {
+    // What went in. `band` is our word; the figure it came from is never here,
+    // because it was never kept.
+    inputs: [
+      { key: 'crowd', label: 'What the crowd said', value: crowd, kind: 'band', held: crowd != null },
+      { key: 'count', label: 'How many said it', value: count, kind: 'band', held: count != null },
+      { key: 'accolades', label: 'Who else has judged it', value: eachAccolade.map((a) => a.key), kind: 'list', held: eachAccolade.length > 0 },
+      { key: 'menuItems', label: 'Dishes we have read', value: menuItems, kind: 'count', held: menuItems > 0 },
+      { key: 'cuisines', label: 'What it says it is', value: cuisines, kind: 'list', held: (cuisines ?? []).length > 0 },
+      { key: 'website', label: 'Its own page', value: Boolean(website), kind: 'yes-no', held: Boolean(website) },
+      { key: 'summary', label: 'Something to read', value: Boolean(summary), kind: 'yes-no', held: Boolean(summary) },
+      { key: 'openingHours', label: 'When it is open', value: Boolean(openingHours), kind: 'yes-no', held: Boolean(openingHours) },
+      { key: 'chainScale', label: 'How many of it there are', value: chainScale, kind: 'word', held: true },
+    ],
+    // What each part was worth, and what it contributed to each of the two
+    // numbers. `owned` is the column that proves the ranking survives a provider
+    // going dark, so both are shown side by side rather than one after the other.
+    parts: [
+      {
+        key: 'crowd', label: 'The crowd', points: crowdPoints,
+        weightEpic: licensed ? 0.5 : null, weightOwned: null,
+        intoEpic: licensed ? crowdPoints * 0.5 * 10 : 0, intoOwned: 0,
+        note: licensed ? null : 'not held',
+      },
+      {
+        key: 'accolade', label: 'Accolades', points: out.raw.accolade,
+        weightEpic: licensed ? 0.3 : 0.6, weightOwned: 0.6,
+        intoEpic: out.raw.accolade * (licensed ? 0.3 : 0.6) * 10, intoOwned: out.raw.accolade * 0.6 * 10,
+        each: eachAccolade, capped: eachAccolade.reduce((n, a) => n + a.points, 0) * 0.7 > 1,
+      },
+      {
+        key: 'substance', label: 'What we own about it', points: out.raw.substance,
+        weightEpic: licensed ? 0.2 : 0.4, weightOwned: 0.4,
+        intoEpic: out.raw.substance * (licensed ? 0.2 : 0.4) * 10, intoOwned: out.raw.substance * 0.4 * 10,
+      },
+    ],
+    // Applied to the total rather than taken off an input, so a chain people
+    // genuinely rate keeps most of what it earned.
+    chain: { scale: chainScale, weight: out.chainWeight },
+    epicScore: out.epicScore,
+    ownedScore: out.ownedScore,
+    licensedInput: licensed,
+    // The weights themselves, read out of this module rather than retyped into a
+    // screen: a weight that can drift from the code is worse than no screen.
+    weights: {
+      crowd: CROWD_POINTS, count: COUNT_POINTS, accolade: ACCOLADE_POINTS,
+      composite: licensed ? { crowd: 0.5, accolade: 0.3, substance: 0.2 } : { accolade: 0.6, substance: 0.4 },
+      owned: { accolade: 0.6, substance: 0.4 },
+      crowdSplit: { band: 0.8, count: 0.2 },
+      accoladeStack: 0.7,
+      prior: PRIOR, priorWeight: PRIOR_WEIGHT,
+      substance: { menu40: 0.45, menu15: 0.35, menuAny: 0.2, cuisine: 0.2, website: 0.15, summary: 0.1, hours: 0.1 },
+      chain: CHAIN_WEIGHT,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

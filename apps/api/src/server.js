@@ -31,6 +31,8 @@ import postmarkRoutes from './routes/postmark.js';
 import openToRoutes, { adminRouter as openToAdminRoutes, startOpenToLoop } from './routes/openTo.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
 import lookupRoutes from './routes/lookup.js';
+import reachRoutes from './routes/reach.js';
+import scoringRoutes from './routes/scoring.js';
 import { router as localityRoutes } from './routes/localities.js';
 import { resumeInterrupted } from './sources/harvest.js';
 import activityRoutes from './routes/activity.js';
@@ -182,6 +184,12 @@ app.use('/api/admin/skills', requireDoor('admin'), skillsAdminRoutes);
 app.use('/api/admin/places', requireDoor('admin'), localityRoutes);
 // Lookup: what every source has for one place, and what each record holds (routes/lookup.js).
 app.use('/api/admin/lookup', requireDoor('admin'), lookupRoutes);
+// Reach: the postcode cells and the travel-time matrix between them, worked out
+// once so a catchment is a lookup rather than a calculation (routes/reach.js).
+app.use('/api/admin/reach', requireDoor('admin'), reachRoutes);
+// The score with its working shown: every constant, and one place's arithmetic
+// (routes/scoring.js). A provider's star rating is never in it.
+app.use('/api/admin/score', requireDoor('admin'), scoringRoutes);
 // The voice lab: the modes compared on the same sentences (routes/voice.js).
 app.use('/api/admin/voice', requireDoor('admin'), voiceLabRoutes);
 

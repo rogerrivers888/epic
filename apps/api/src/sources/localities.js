@@ -96,6 +96,12 @@ export async function outcodesFor(points) {
           council: hit.admin_district ?? null,
           county: hit.admin_county ?? null,
           country: hit.country ?? null,
+          // The full postcode and where ONS puts it, for the cell layer
+          // (domain/reach.js). A sector cannot be worked out from an outcode,
+          // and the point is the evidence of where the sector actually is.
+          postcode: hit.postcode ?? null,
+          lat: typeof hit.latitude === 'number' ? hit.latitude : null,
+          lng: typeof hit.longitude === 'number' ? hit.longitude : null,
         };
       });
     } catch { /* ONS having a moment; the naming pass still runs */ }

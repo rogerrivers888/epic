@@ -272,6 +272,34 @@ export async function placesIn(areaCode, limit = 50) {
   return rows;
 }
 
+/**
+ * Everything one place's score was worked out from, in one row.
+ *
+ * The same join as `placesIn`, for one venue rather than an area, because the
+ * workings screen has to be able to say *these* inputs made *that* number —
+ * and a screen that gathered its inputs differently from the sweep would
+ * explain a score nobody had ever calculated.
+ *
+ * Answers for a place the sweep has never seen too: an owned record with no
+ * sweep row still has a website, a summary and hours, and those are three of
+ * the four things `substanceOf` counts.
+ */
+export async function scoringInputsFor(venueRef) {
+  const { rows } = await query(
+    `select p.venue_ref, p.area_code, p.name as sweep_name, p.crowd_band, p.count_band, p.accolades,
+            p.cuisines as sweep_cuisines, p.chain, p.roam_score, p.owned_score, p.scored_at,
+            r.name as record_name, r.website, r.summary, r.opening_hours, r.cuisines as record_cuisines,
+            r.enrich_state, m.item_count, m.state as menu_state
+       from place_records r
+       full join scout_places p on p.venue_ref = r.venue_ref
+       left join place_menus  m on m.venue_ref = coalesce(r.venue_ref, p.venue_ref)
+      where coalesce(r.venue_ref, p.venue_ref) = $1
+      limit 1`,
+    [venueRef],
+  );
+  return rows[0] ?? null;
+}
+
 /** How the sweep is doing, per area — the owner's figure for the dataset. */
 export async function coverage() {
   const { rows } = await query(
