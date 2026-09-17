@@ -30,7 +30,14 @@ const router = express.Router();
 
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
 
-/** What has been built. The screen's first read, and the tests' way in. */
+/**
+ * What has been built.
+ *
+ * `needsRebuild` names the modes whose rows are short — built before the edge
+ * allowance existed, or built before cells were added. It is said rather than
+ * acted on: rebuilding is minutes of work over every cell, and doing it inside
+ * somebody's read would turn one slow page into a stampede of them.
+ */
 router.get('/', requires('view_library'), async (req, res, next) => {
   try {
     res.json({ ...(await reach.state()), capMinutes: CAP_MINUTES, horizonMinutes: HORIZON_MINUTES, edgeMinutes: EDGE_MINUTES });

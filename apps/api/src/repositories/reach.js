@@ -286,6 +286,24 @@ export async function state() {
             count(distinct from_cell)::int as from_cells
        from reach`,
   );
+  // What each mode was actually built to, and whether it still reaches the
+  // horizon. A matrix built before the edge allowance existed answers every
+  // read happily and is quietly short at the far end, so it has to say so
+  // rather than be silently trusted or silently rebuilt — a rebuild is minutes
+  // of work and must never happen inside somebody's read (Codex, 17 Sep 2026).
+  const { rows: built } = await query(
+    `select mode, max(minutes)::int as cap, count(*)::bigint as pairs,
+            count(distinct from_cell)::int as from_cells
+       from reach group by mode order by mode`,
+  );
+  const { rows: [cellCount] } = await query("select count(*)::int as n from geo_cells where scheme = 'sector'");
+  const modes = built.map((m) => ({
+    mode: m.mode, cap: m.cap, pairs: Number(m.pairs), fromCells: m.from_cells,
+    // Short if it does not reach the horizon, or if cells have been added since
+    // it was built and some of them have no neighbours of their own.
+    shortOfHorizon: m.cap < HORIZON_MINUTES,
+    missingCells: Math.max(0, cellCount.n - m.from_cells),
+  }));
   const { rows: [stamped] } = await query(
     `select count(*) filter (where cell is not null)::int as n,
             count(*) filter (where cell is null)::int as unplaced
@@ -296,6 +314,10 @@ export async function state() {
     cells: cells.cells, cellsWithPlaces: cells.with_places,
     stamped: stamped.n, unplaced: stamped.unplaced,
     pairs: Number(matrix.pairs), fromCells: matrix.from_cells, capMinutes: matrix.cap,
+    modes,
+    // One word for the screen: is anything here out of date?
+    needsRebuild: modes.filter((m) => m.shortOfHorizon || m.missingCells > 0).map((m) => m.mode),
+    horizonMinutes: HORIZON_MINUTES,
     runs,
   };
 }
