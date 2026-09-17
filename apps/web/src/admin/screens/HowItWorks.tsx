@@ -607,6 +607,13 @@ const SECTIONS: Section[] = [
         where: 'not built \u00b7 the atlas\u2019s Uploads section is the only part of it that exists',
       },
       {
+        title: 'A provider\u2019s content is being kept on a saved place',
+        rule: 'When a household saves a place, the whole search result is sent up and stored on the saved row, and that row has no expiry. For a Google place that means their name, address, opening hours and rating are held indefinitely \u2014 which is the one thing the licence does not allow. Only what is ours may be kept there: where it is, what kind of place it is, the household\u2019s own note, and a name from OpenStreetMap.',
+        why: 'Found 17 Sep 2026 while auditing where ratings are persisted. Not patched on the spot because the fix changes where Places, the shortlist and a trip\u2019s stops get their labels from, and the owned record that replaces it is being built as part of the places work.',
+        state: 'planned',
+        where: 'apps/web/src/screens/PlacesScreen.tsx \u00b7 apps/api/src/routes/places.js \u00b7 apps/api/src/repositories/atlas.js \u00b7 household_places.venue',
+      },
+      {
         title: 'Which credentials gate which host categories is not set',
         rule: 'Every credential type ships as a badge and nothing is blocked at Publish, because the gates are empty. Food registration is the law for cooking for paying guests and not for a wine-tasting walk, and a browse category is too coarse a net to say so.',
         why: 'Parked by the owner on 17 Sep 2026 \u2014 but while it is empty Epic is not checking, and the terms have to put compliance on the host.',

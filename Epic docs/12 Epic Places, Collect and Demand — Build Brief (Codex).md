@@ -676,3 +676,37 @@ Two rules from the architecture: the queue only ever shows household-made conten
 owned pictures — **a provider's photograph must never appear in it**, and if one does
 something is wrong upstream; and the reviewer's trail goes to `admin_audit`, which
 already exists, rather than a new table. Design brief §9d has the screen.
+
+## 15. A rule that is being broken today — `household_places.venue`
+
+Found while auditing where a provider's rating is persisted (17 Sep 2026). Not
+fixed, deliberately: the fix changes what labels the Places screen, the trip
+shortlist and trip stops are drawn from, and that is this programme's work
+rather than a patch.
+
+CLAUDE.md is explicit: *"A provider's name, hours, reviews, photos or rating
+never lands there, is never written to `household_places.venue` for a licensed
+ref, and never reaches a device."*
+
+**It does land there.** `apps/web/src/screens/PlacesScreen.tsx:1084` passes the
+whole search result — `venue: v` — to `POST /api/places/save`;
+`routes/places.js:658` passes `req.body?.venue` through untouched; and
+`repositories/atlas.js:54` serialises it into `household_places.venue`. There is
+no scrub anywhere on that path and **no expiry on the table**, so for a
+`google:` ref the provider's name, address, opening hours and rating are held
+indefinitely. A sample of the development database shows `openingHours`,
+`address`, `website`, `cuisines` and `category` already stored; no `rating` yet,
+but only because those rows came from OpenStreetMap and the atlas rather than
+because the path refuses one.
+
+**What the fix is.** The blob may hold only what is ours: coordinates, our
+category and kind, the household's own note, and an OSM-sourced name. Everything
+else comes from the owned record at display time. Two readers have to move with
+it — `atlas.js:255` uses `hp.venue ->> 'name'` as a fallback label, and
+`trips.js:363` and `:623` copy the blob into `trip_shortlist` and `trip_stops`
+(which is the same fixtures-only exception CLAUDE.md already flags for
+`trip_stops.venue_name`). The place index in Part A is where the replacement
+comes from, which is why this is listed here rather than fixed separately.
+
+**Until then it is an open exposure**, and it is on `/admin/how` under What we
+owe so it is not lost.
