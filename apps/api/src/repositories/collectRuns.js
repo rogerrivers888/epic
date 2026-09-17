@@ -12,7 +12,7 @@
  * readable by anything that wants to report on it.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 
 /** How long a run may go untouched before it is treated as stranded. */
 export const STRANDED_AFTER_MS = 10 * 60_000;
@@ -47,13 +47,60 @@ export async function alreadyGoing(refs = []) {
             array_agg(distinct v) as refs
        from collect_runs r
        cross join lateral (
+         -- Both objects, expanded separately. Merged with the concatenation
+         -- operator the right-hand side wins on a shared key, so asking.google
+         -- replaced the whole of todo.google and a second run overlapping a
+         -- *queued* ref outside the current chunk saw no clash (Codex, 17 Sep
+         -- 2026).
          select value as v
-           from jsonb_each(r.todo || r.asking) as lists(key, list),
+           from jsonb_each(r.todo) as lists(key, list),
+                jsonb_array_elements_text(lists.list) as items(value)
+         union all
+         select value
+           from jsonb_each(r.asking) as lists(key, list),
                 jsonb_array_elements_text(lists.list) as items(value)
        ) as theirs
       where r.state = 'running' and theirs.v = any($1::text[])
       group by r.id, r.where_label, r.started_by, r.started_at`, [refs]);
   return rows;
+}
+
+/**
+ * Start a run, unless another is already asking about any of these.
+ *
+ * The check and the insert in one transaction, under one advisory lock. Done
+ * separately, two requests arriving together both checked, both found nothing,
+ * and both inserted — which is the exact double-spend the check exists to stop
+ * (Codex, 17 Sep 2026). The lock is transaction-scoped, so it is released by
+ * the commit whatever happens.
+ */
+export async function startIfClear({ refs, ...run }) {
+  return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', ['epic.collect.start']);
+    const { rows: clash } = await client.query(
+      `select r.id, r.where_label, r.started_by, r.started_at
+         from collect_runs r
+         cross join lateral (
+           select value as v
+             from jsonb_each(r.todo) as lists(key, list),
+                  jsonb_array_elements_text(lists.list) as items(value)
+           union all
+           select value
+             from jsonb_each(r.asking) as lists(key, list),
+                  jsonb_array_elements_text(lists.list) as items(value)
+         ) as theirs
+        where r.state = 'running' and theirs.v = any($1::text[])
+        group by r.id, r.where_label, r.started_by, r.started_at
+        limit 1`, [refs ?? []]);
+    if (clash.length) return { clash: clash[0], run: null };
+    const { rows } = await client.query(
+      `insert into collect_runs (where_label, scope, sources, todo, done, household_id, started_by)
+       values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+      [run.whereLabel ?? null, JSON.stringify(run.scope ?? {}), JSON.stringify(run.sources ?? []),
+        JSON.stringify(run.todo ?? {}), JSON.stringify({ free: 0, google: 0, tripadvisor: 0 }),
+        run.householdId ?? null, run.startedBy ?? null]);
+    return { clash: null, run: rows[0] };
+  });
 }
 
 export async function one(id) {

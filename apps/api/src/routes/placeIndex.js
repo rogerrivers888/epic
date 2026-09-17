@@ -1739,20 +1739,14 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     // same plan and started two runs with the same list, and each paid for the
     // same calls (Codex, 17 Sep 2026). The per-chunk claim bounds the total
     // spend; it cannot tell the money is going twice on one place.
-    const clash = await collectRuns.alreadyGoing([...new Set([...free, ...google, ...tripadvisor])]);
-    if (clash.length) {
-      const it = clash[0];
-      return res.status(409).json({
-        error: 'already_going',
-        message: `A collection${it.where_label ? ` in ${it.where_label}` : ''} is already asking about some of these${it.started_by ? `, started by ${it.started_by}` : ''}. Watch it on Runs rather than starting a second one.`,
-        runId: it.id, startedAt: it.started_at,
-      });
-    }
-
     const household = await currentHousehold();
     // Written down before a word of it is done, so an answer of "started" is a
-    // claim something can check afterwards (Codex, 17 Sep 2026).
-    const run = await collectRuns.start({
+    // claim something can check afterwards (Codex, 17 Sep 2026) — and written
+    // in the same transaction that checks nobody else is already asking about
+    // these places, because two requests arriving together both checked, both
+    // found nothing, and both started.
+    const { clash, run } = await collectRuns.startIfClear({
+      refs: [...new Set([...free, ...google, ...tripadvisor])],
       whereLabel: plan.scope.kind === 'ring' ? `${plan.places} places in a ring` : (plan.scope.area?.name ?? plan.scope.area?.slug ?? null),
       scope: { kind: plan.scope.kind, slug: plan.scope.area?.slug ?? null, cat: req.body?.cat ?? null, sub: req.body?.sub ?? null },
       sources: [...plan.chosen],
@@ -1763,6 +1757,13 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
       householdId: household.id,
       startedBy: req.account?.email ?? null,
     });
+    if (clash) {
+      return res.status(409).json({
+        error: 'already_going',
+        message: `A collection${clash.where_label ? ` in ${clash.where_label}` : ''} is already asking about some of these${clash.started_by ? `, started by ${clash.started_by}` : ''}. Watch it on Runs rather than starting a second one.`,
+        runId: clash.id, startedAt: clash.started_at,
+      });
+    }
     res.json({
       started: true, runId: run.id, places: plan.places, sources: [...plan.chosen],
       free: free.length, paid: google.length + tripadvisor.length,
