@@ -39,6 +39,19 @@ import { estimateTravelMinutes, kmBetween, travelMode } from './travel.js';
 /** How far out the matrix is built. Beyond this a catchment is not a day out. */
 export const CAP_MINUTES = 90;
 
+/**
+ * How much further than asked the matrix looks, in minutes.
+ *
+ * Centre-to-centre is the approximation, and a place near the edge of its
+ * sector can be inside the limit while its sector's centre is outside it. The
+ * exact pass can throw a place away; it cannot go and find one the matrix never
+ * offered, so the asymmetry has to be paid for here. Five minutes is roughly
+ * three kilometres at town speed — comfortably wider than a sector almost
+ * anywhere people live, and cheap, because every candidate it lets through is
+ * then measured properly.
+ */
+export const EDGE_MINUTES = 5;
+
 /** The bands the counts are rolled up into. A search picks the band above its minutes. */
 export const BANDS = [15, 30, 45, 60, 90];
 

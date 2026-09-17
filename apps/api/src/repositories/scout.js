@@ -283,12 +283,22 @@ export async function placesIn(areaCode, limit = 50) {
  * Answers for a place the sweep has never seen too: an owned record with no
  * sweep row still has a website, a summary and hours, and those are three of
  * the four things `substanceOf` counts.
+ *
+ * Both websites come back, and both the chain scale and the site count the
+ * sweep stored. Taking only the owned record's website recalculated a swept
+ * place without one as though it had none and reported drift that was not
+ * there, and re-deriving the chain scale from a name gave a national group the
+ * weight of a small one (Codex, 17 Sep 2026). The inputs have to be the ones
+ * the score was actually made from.
  */
 export async function scoringInputsFor(venueRef) {
   const { rows } = await query(
     `select p.venue_ref, p.area_code, p.name as sweep_name, p.crowd_band, p.count_band, p.accolades,
-            p.cuisines as sweep_cuisines, p.chain, p.roam_score, p.owned_score, p.scored_at,
-            r.name as record_name, r.website, r.summary, r.opening_hours, r.cuisines as record_cuisines,
+            p.cuisines as sweep_cuisines, p.chain, p.chain_scale, p.sites,
+            p.epic_score, p.owned_score, p.scored_at,
+            p.website as sweep_website,
+            r.name as record_name, r.website as record_website, r.summary, r.opening_hours,
+            r.cuisines as record_cuisines,
             r.enrich_state, m.item_count, m.state as menu_state
        from place_records r
        full join scout_places p on p.venue_ref = r.venue_ref

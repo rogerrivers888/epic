@@ -72,6 +72,13 @@ export const slugify = (s) => String(s)
  * Answers in the order asked, with a null where a point is outside the UK or
  * in the sea. A failed batch returns nulls rather than throwing: this is one
  * of two passes and the other one still has something useful to say.
+ *
+ * A batch that failed is marked `{ failed: true }` rather than left null,
+ * because the two are not the same thing and a caller that treats them alike
+ * writes a transient outage down as a permanent fact — the cell layer did
+ * exactly that, and a timed-out batch would have been excluded from the map for
+ * good (Codex, 17 Sep 2026). Callers reading `.outcode` are unaffected: a
+ * failed entry has none either.
  */
 export async function outcodesFor(points) {
   const out = new Array(points.length).fill(null);
@@ -86,7 +93,7 @@ export async function outcodesFor(points) {
         // is not on a postcode's centroid, and the default 100m misses both.
         body: JSON.stringify({ geolocations: slice.map((p) => ({ longitude: p.lng, latitude: p.lat, radius: 2000, limit: 1 })) }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) { for (let n = 0; n < slice.length; n += 1) out[i + n] = { failed: true }; continue; }
       const { result } = await res.json();
       (result ?? []).forEach((r, n) => {
         const hit = r?.result?.[0];
@@ -104,7 +111,12 @@ export async function outcodesFor(points) {
           lng: typeof hit.longitude === 'number' ? hit.longitude : null,
         };
       });
-    } catch { /* ONS having a moment; the naming pass still runs */ }
+    } catch {
+      // ONS having a moment; the naming pass still runs. Said out loud on every
+      // point in the batch so nobody records "we asked and there is nothing
+      // there" about a request that never arrived.
+      for (let n = 0; n < slice.length; n += 1) out[i + n] = { failed: true };
+    }
   }
   return out;
 }

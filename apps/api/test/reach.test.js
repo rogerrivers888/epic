@@ -196,3 +196,30 @@ test('the weights come out of the module, so a screen cannot retype them', () =>
   assert.equal(weights.priorWeight, 150);
   assert.ok(weights.accolade['michelin-star'] > weights.accolade['squaremeal']);
 });
+
+// ---------------------------------------------------------------------------
+// what the review found
+// ---------------------------------------------------------------------------
+
+import { EDGE_MINUTES } from '../src/domain/reach.js';
+import { travelMode } from '../src/domain/travel.js';
+
+test('a mode the screens use is the same mode the table holds', () => {
+  // The screens say `drive` and `walk`; `reachFrom` writes `driving` and
+  // `walking`. A read that did not normalise matched nothing at all and came
+  // back empty, which reads exactly like a country with no places in it.
+  const cells = [{ code: 'a', lat: 51.48, lng: -0.61 }, { code: 'b', lat: 51.44, lng: -0.65 }];
+  for (const [said, held] of [['drive', 'driving'], ['walk', 'walking'], ['car', 'driving'], ['transit', 'transit']]) {
+    assert.equal(travelMode(said), held);
+    const rows = reachFrom(cells[0], cells, { mode: said, capMinutes: 90 });
+    assert.ok(rows.every((r) => r.mode === held), `${said} wrote rows as something other than ${held}`);
+  }
+});
+
+test('the ring is widened at the edge, because the exact pass can only narrow it', () => {
+  // A place near the edge of its sector can be inside the limit while its
+  // sector's centre is outside it. Throwing the centre away loses the place for
+  // good; keeping it costs one measurement.
+  assert.ok(EDGE_MINUTES > 0);
+  assert.ok(EDGE_MINUTES <= 10, 'a wide allowance stops being a filter');
+});

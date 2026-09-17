@@ -54,13 +54,19 @@ router.get('/', requires('view_library'), async (req, res, next) => {
     if (!row) return res.status(404).json({ error: 'not_found', message: 'Nothing held for that ref — it has not been swept or claimed.' });
 
     const name = row.record_name ?? row.sweep_name ?? null;
-    const { scale } = chainScale({ name, sites: row.chain ? 2 : 1 });
+    // The scale the sweep stored, not one re-derived here: a national group
+    // whose name the list does not know would come back as a small chain and be
+    // weighted differently from the score this page is meant to explain.
+    const scale = row.chain_scale ?? chainScale({ name, sites: row.sites ?? (row.chain ? 2 : 1) }).scale;
     const input = {
       crowd: row.crowd_band, count: row.count_band,
       accolades: row.accolades ?? [],
       menuItems: row.menu_state === 'read' ? (row.item_count ?? 0) : 0,
       cuisines: row.record_cuisines?.length ? row.record_cuisines : (row.sweep_cuisines ?? []),
-      website: row.website, summary: row.summary, openingHours: row.opening_hours,
+      // Either source of a website counts, because either one is what the sweep
+      // counted when it scored the place.
+      website: row.record_website ?? row.sweep_website ?? null,
+      summary: row.summary, openingHours: row.opening_hours,
       chainScale: scale,
     };
     const out = workings(input);
@@ -70,8 +76,8 @@ router.get('/', requires('view_library'), async (req, res, next) => {
       // What is on the row against what this recalculation says. They differ
       // whenever a menu has been read or an accolade found since the sweep, and
       // that difference is the reason `rescore` exists and is free.
-      stored: { epicScore: row.roam_score, ownedScore: row.owned_score, at: row.scored_at },
-      drifted: row.roam_score != null && Math.abs(row.roam_score - out.epicScore) >= 0.1,
+      stored: { epicScore: row.epic_score, ownedScore: row.owned_score, at: row.scored_at },
+      drifted: row.epic_score != null && Math.abs(row.epic_score - out.epicScore) >= 0.1,
       area: row.area_code ?? null,
     });
   } catch (err) { next(err); }

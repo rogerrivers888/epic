@@ -24,7 +24,8 @@
  */
 
 import { query } from '../db.js';
-import { CAP_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
+import { CAP_MINUTES, EDGE_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
+import { travelMode } from '../domain/travel.js';
 import { outcodesFor } from '../sources/localities.js';
 import * as providerCalls from './providerCalls.js';
 
@@ -110,6 +111,7 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
   let looked = 0;
   let placed = 0;
   let unplaced = 0;
+  let failed = 0;
   let requests = 0;
   for (;;) {
     const batch = await unstamped(Math.min(BULK, limit - looked));
@@ -119,16 +121,21 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
     looked += batch.length;
     for (let i = 0; i < batch.length; i += 1) {
       const a = answers[i];
+      // A request that failed is not a place that cannot be placed. Writing the
+      // one down as the other would exclude a whole batch from the map for good
+      // on a single timeout, so a failed ask leaves no row and is asked again
+      // next run (Codex, 17 Sep 2026).
+      if (a?.failed) { failed += 1; continue; }
       const sector = sectorOf(a?.postcode);
       if (!sector) {
-        // Asked and unanswerable: in the sea, outside the United Kingdom, or
-        // further from a postcode than ONS will look. Remembered so the next
-        // run does not spend a request on it again.
+        // Asked and answered, and there is nothing there: in the sea, outside
+        // the United Kingdom, or further from a postcode than ONS will look.
+        // Remembered so the next run does not spend a request on it again.
         await query(
           `insert into place_cells (venue_ref, cell, postcode, lat, lng, why)
            values ($1, null, null, $2, $3, $4)
            on conflict (venue_ref) do nothing`,
-          [batch[i].ref, batch[i].lat, batch[i].lng, a ? 'no postcode near it' : 'ONS did not answer'],
+          [batch[i].ref, batch[i].lat, batch[i].lng, a ? 'no postcode near it' : 'no answer for this point'],
         );
         unplaced += 1;
         continue;
@@ -147,12 +154,17 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
       placed += 1;
     }
     if (looked >= limit) break;
+    // Every point in the batch failed, so the same rows come back next time
+    // round. Stop and say so rather than spinning on an outage.
+    if (answers.every((a) => a?.failed)) break;
   }
   if (requests) {
     await providerCalls.record(householdId, 'postcodes', 'reach.stamp', { requests }).catch(() => null);
   }
   await refreshCellCounts();
-  return { looked, placed, unplaced, requests };
+  // A run that could not reach ONS says so rather than reporting a quiet zero:
+  // "nothing left to place" and "nobody answered" look identical otherwise.
+  return { looked, placed, unplaced, failed, requests };
 }
 
 /** How many places sit in each cell. Refreshed rather than incremented. */
@@ -178,16 +190,21 @@ export async function refreshCellCounts() {
  * an interrupted run leaves a table that is short rather than one that is wrong.
  */
 export async function buildMatrix({ mode = 'driving', capMinutes = CAP_MINUTES, scheme = 'sector', onProgress = null } = {}) {
+  // Canonical from here down. `reachFrom` writes `driving`; a delete or a read
+  // with the screen's word for it — `drive` — matches nothing at all, so a
+  // rebuild would leave the old rows in place and a search would come back
+  // empty (Codex, 17 Sep 2026).
+  const canonical = travelMode(mode);
   const cells = await allCells({ scheme });
   const { rows: [run] } = await query(
     `insert into reach_runs (scheme, mode, method, cap_minutes, cells) values ($1, $2, 'estimate', $3, $4) returning id`,
-    [scheme, mode, capMinutes, cells.length],
+    [scheme, canonical, capMinutes, cells.length],
   );
   let pairs = 0;
   try {
     for (let i = 0; i < cells.length; i += 1) {
-      const rows = reachFrom(cells[i], cells, { mode, capMinutes });
-      await query('delete from reach where from_cell = $1 and mode = $2', [cells[i].code, mode]);
+      const rows = reachFrom(cells[i], cells, { mode: canonical, capMinutes });
+      await query('delete from reach where from_cell = $1 and mode = $2', [cells[i].code, canonical]);
       if (rows.length) {
         await query(
           `insert into reach (from_cell, to_cell, mode, minutes, km, method)
@@ -225,7 +242,11 @@ export async function cellAt({ lat, lng, withinKm = 25 }) {
       where lat between $1 and $2 and lng between $3 and $4`,
     [lat - dLat, lat + dLat, lng - dLng, lng + dLng],
   );
-  return nearestCell({ lat, lng }, rows);
+  const near = nearestCell({ lat, lng }, rows);
+  // The box is not the circle: its corner is half again as far as its edge, so
+  // a cell 35km away can sit inside a 25km box. Without this the caller is told
+  // it found something within the limit when it did not (Codex, 17 Sep 2026).
+  return near && near.km <= withinKm ? near : null;
 }
 
 /**
@@ -233,21 +254,21 @@ export async function cellAt({ lat, lng, withinKm = 25 }) {
  *
  * One index, one range, no arithmetic. This is the whole point of the table.
  */
-export async function reachableCells(cell, { minutes = 30, mode = 'driving' } = {}) {
+export async function reachableCells(cell, { minutes = 30, mode = 'driving', edge = EDGE_MINUTES } = {}) {
   const { rows } = await query(
     'select to_cell, minutes, km from reach where from_cell = $1 and mode = $2 and minutes <= $3 order by minutes',
-    [cell, mode, minutes],
+    [cell, travelMode(mode), Math.min(CAP_MINUTES, minutes + edge)],
   );
   return rows;
 }
 
 /** The places inside those cells, by ref. The join the screens will want. */
-export async function placesWithin(cell, { minutes = 30, mode = 'driving' } = {}) {
+export async function placesWithin(cell, { minutes = 30, mode = 'driving', edge = EDGE_MINUTES } = {}) {
   const { rows } = await query(
-    `select p.venue_ref, p.cell, r.minutes
+    `select p.venue_ref, p.cell, p.lat, p.lng, r.minutes
        from reach r join place_cells p on p.cell = r.to_cell
       where r.from_cell = $1 and r.mode = $2 and r.minutes <= $3`,
-    [cell, mode, minutes],
+    [cell, travelMode(mode), Math.min(CAP_MINUTES, minutes + edge)],
   );
   return rows;
 }

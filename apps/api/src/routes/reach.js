@@ -22,7 +22,8 @@
 
 import express from 'express';
 import { requires } from '../access.js';
-import { CAP_MINUTES, labelOf, sectorOf } from '../domain/reach.js';
+import { CAP_MINUTES, EDGE_MINUTES, labelOf, sectorOf } from '../domain/reach.js';
+import { travelMode } from '../domain/travel.js';
 import * as reach from '../repositories/reach.js';
 
 const router = express.Router();
@@ -67,7 +68,9 @@ router.get('/from', requires('view_library'), async (req, res, next) => {
     const cell = String(req.query.cell ?? '').trim();
     if (!cell) throw bad('Which cell? Pass one from /at.');
     const minutes = Math.min(CAP_MINUTES, Math.max(1, Number(req.query.minutes) || 30));
-    const mode = String(req.query.mode ?? 'driving');
+    // The screens say `drive` and `walk`; the table holds `driving` and
+    // `walking`. Normalised here so a mode the app uses never comes back empty.
+    const mode = travelMode(req.query.mode ?? 'driving');
     const cells = await reach.reachableCells(cell, { minutes, mode });
     const places = req.query.places === '1' ? await reach.placesWithin(cell, { minutes, mode }) : null;
     res.json({
@@ -76,7 +79,11 @@ router.get('/from', requires('view_library'), async (req, res, next) => {
       counts: { cells: cells.length, places: places?.length ?? null },
       places: places?.map((p) => ({ ref: p.venue_ref, cell: p.cell, minutes: p.minutes })) ?? null,
       estimated: true,
-      note: 'Travel times are estimated from distance, not routed. The matrix is the filter; a list is still ordered by the exact distance to each place.',
+      // Said out loud because the count is deliberately a little generous: the
+      // matrix looks five minutes past what was asked so that a place at the
+      // edge of its sector is offered, and the exact pass then fences it.
+      edgeMinutes: EDGE_MINUTES,
+      note: 'Travel times are estimated from distance, not routed, and the ring is widened by a few minutes so places at the edge of a postcode sector are not lost. The matrix is the filter; a list is still ordered by the exact distance to each place.',
     });
   } catch (err) { next(err); }
 });
@@ -117,7 +124,7 @@ router.post('/stamp', requires('manage_library'), async (req, res, next) => {
 router.post('/build', requires('manage_library'), async (req, res, next) => {
   try {
     const capMinutes = Math.min(180, Math.max(5, Number(req.body?.capMinutes) || CAP_MINUTES));
-    const mode = String(req.body?.mode ?? 'driving');
+    const mode = travelMode(req.body?.mode ?? 'driving');
     if (req.body?.wait === true) return res.json(await reach.buildMatrix({ mode, capMinutes }));
     res.json({ started: true, mode, capMinutes });
     void reach.buildMatrix({ mode, capMinutes }).catch(() => null);
