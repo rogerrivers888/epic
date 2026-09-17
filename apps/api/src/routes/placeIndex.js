@@ -873,10 +873,21 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
     const before = (await query('select * from place_records where venue_ref = $1', [ref])).rows[0] ?? null;
     const COLUMN = { address: 'address', what_it_is: 'summary', hours: 'opening_hours', prices: 'price_range', phone: 'phone', website: 'website' };
     if (COLUMN[key]) {
+      // An empty box means "we hold none of this", which is null.
+      //
+      // The editor sends back an empty string when somebody clears a field, and
+      // every predicate that asks whether we hold a fact asks `is not null` —
+      // so a cleared summary went on counting towards the score and the
+      // ownership while the screen showed a hole (Codex, 17 Sep 2026).
+      const said = value == null || String(value).trim() === '' ? null : String(value).trim();
       await query(
         `insert into place_records (venue_ref, ${COLUMN[key]}, updated_at) values ($1,$2, now())
-         on conflict (venue_ref) do update set ${COLUMN[key]} = excluded.${COLUMN[key]}, updated_at = now()`, [ref, value]);
-      if (key === 'what_it_is') await query(`update place_records set summary_source = 'ours' where venue_ref = $1`, [ref]);
+         on conflict (venue_ref) do update set ${COLUMN[key]} = excluded.${COLUMN[key]}, updated_at = now()`, [ref, said]);
+      if (key === 'what_it_is') {
+        await query(
+          `update place_records set summary_source = case when $2::text is null then null else 'ours' end
+            where venue_ref = $1`, [ref, said]);
+      }
     } else if (key === 'step_free') {
       // Three states, not two: yes, no, and nobody has looked.
       //
@@ -898,10 +909,27 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
           [ref, yes]);
       } else throw bad('Step-free is yes, no, or empty for "nobody has looked".');
     } else if (key === 'aka') {
-      await query(
-        `insert into place_records (venue_ref, curation, curated_at, updated_at) values ($1, jsonb_build_object('aka', $2::text), now(), now())
-         on conflict (venue_ref) do update set curation = coalesce(place_records.curation, '{}'::jsonb) || jsonb_build_object('aka', $2::text), curated_at = now(), updated_at = now()`,
-        [ref, value == null ? null : String(value)]);
+      // Cleared means the key goes, and `curated_at` goes with it if nothing
+      // else was curated. `holdsAnOwnedFact` counts any `curated_at` as a fact
+      // of ours, so writing `{ aka: "" }` and a fresh timestamp left a record
+      // owned on the strength of an annotation that was no longer there
+      // (Codex, 17 Sep 2026).
+      const said = value == null || String(value).trim() === '' ? null : String(value).trim();
+      if (said === null) {
+        await query(
+          `update place_records
+              set curation = coalesce(curation, '{}'::jsonb) - 'aka',
+                  curated_at = case
+                    when (coalesce(curation, '{}'::jsonb) - 'aka') = '{}'::jsonb then null
+                    else curated_at end,
+                  updated_at = now()
+            where venue_ref = $1`, [ref]);
+      } else {
+        await query(
+          `insert into place_records (venue_ref, curation, curated_at, updated_at) values ($1, jsonb_build_object('aka', $2::text), now(), now())
+           on conflict (venue_ref) do update set curation = coalesce(place_records.curation, '{}'::jsonb) || jsonb_build_object('aka', $2::text), curated_at = now(), updated_at = now()`,
+          [ref, said]);
+      }
     } else if (key === 'subcategory') {
       // By key, or by the words the row prints. The record shows
       // "Food › Restaurants" and the editor sends back what it was shown, so a
@@ -1111,6 +1139,9 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         // 17 Sep 2026).
         if (room.granted < TA_UNITS_PER_VIEW) {
           ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left, and a view bills two`;
+          // The one unit it did grant goes back. Held, it read as nought left
+          // for half an hour (Codex, 17 Sep 2026).
+          await releaseSpend(room.reservation);
         } else {
           try { ta = { ...ta, id, fields: await detailFor('tripadvisor', id, household.id), note: 'fetched live · two locations billed a view' }; }
           catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }

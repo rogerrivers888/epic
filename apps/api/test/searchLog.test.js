@@ -573,3 +573,21 @@ test('the last household to un-save a place stops it being claimed', async () =>
   await withTransaction((client) => atlas.removePlace(client, two.household.id, ref));
   assert.equal(await ownershipOf(), 'identified', 'and now nobody does');
 });
+
+test('a cleared fact is none, not an empty one', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const { holdsAnOwnedFact } = await import('../src/domain/placeIndex.js');
+  // Every predicate that asks whether we hold a fact asks `is not null`, so an
+  // empty string went on counting towards the score and the ownership while the
+  // screen showed a hole (Codex, 17 Sep 2026).
+  assert.equal(holdsAnOwnedFact({ summary: '' }), true, 'an empty string is not null — which is why it must never be stored');
+  assert.equal(holdsAnOwnedFact({ summary: null }), false);
+
+  const ref = 'osm:node/cleared';
+  await owned.ensureRecord(ref);
+  await query(`update place_records set summary = 'Ours.' where venue_ref = $1`, [ref]);
+  assert.equal(await owned.settleOwnership(ref), 'owned');
+  // What the route does with an empty box: null, not ''.
+  await query(`update place_records set summary = null, summary_source = null where venue_ref = $1`, [ref]);
+  assert.equal(await owned.settleOwnership(ref), 'identified');
+});
