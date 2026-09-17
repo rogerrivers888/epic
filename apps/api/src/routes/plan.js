@@ -1490,8 +1490,6 @@ async function runInspire({ household, attending, session, state, append = false
       if (home && idea.place) idea.distanceKm = Number(kmBetween(home, idea.place).toFixed(1));
       await publish({ ideas, placed: ideas.filter((x) => !x.placing).length });
     }
-    await publish({ running: false, stage: 'ready' });
-
     // The planner's ask, written down. An ask that produced nothing is a demand
     // signal exactly as a browse that showed nothing is, and neither can be
     // backfilled (17 Sep 2026).
@@ -1513,7 +1511,11 @@ async function runInspire({ household, attending, session, state, append = false
     });
     // The ideas as they were given, in order, so a replay prints what was shown.
     await searchLog.noteShown(searchId, ideas.map((idea, i) => ({ ref: idea.place?.ref ?? null, position: i + 1 })));
-    await publish({ searchId });
+    // Published *with* the finish, not after it: a client that polls in between
+    // sees `running: false`, stops polling and never learns the id — so every
+    // open and every trip made from these ideas would be dropped and the ask
+    // counted as "clicked nothing" (Codex, 17 Sep 2026).
+    await publish({ running: false, stage: 'ready', searchId });
 
     // What there is at each idea is gathered now, in the background and in
     // order, so opening one is a read rather than a search (owner, 3 Sep 2026).

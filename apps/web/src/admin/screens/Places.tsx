@@ -245,7 +245,7 @@ function Level(props: {
     if (lens === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lens === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lens === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
-    if (lens === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} />;
+    if (lens === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} cat={cat} sub={sub} />;
     if (ring) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
                                                              onCollectIn={(slug) => { props.onWhere(slug); props.onLens('collect'); }} />;
@@ -1331,10 +1331,14 @@ const missingTip = (bar: BarFact[], facts: FactDef[]) => {
  */
 const STALE_MONTHS = 12;
 
-function CollectBoard({ q, level, canManage }: { q: any; level: PlaceLevel; canManage: boolean }) {
+function CollectBoard({ q, level, canManage, cat, sub }: {
+  q: any; level: PlaceLevel; canManage: boolean; cat: string; sub: string;
+}) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceSources>> | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set(['osm', 'atlas', 'own']));
   const [busy, setBusy] = useState(false);
+  /** What happened when it was pressed — including the ceiling saying no. */
+  const [said, setSaid] = useState<string | null>(null);
   useEffect(() => { setData(null); api.adminPlaceSources(q).then(setData).catch(() => setData(null)); }, [q]);
   if (!data) return <Waiting />;
 
@@ -1379,13 +1383,21 @@ function CollectBoard({ q, level, canManage }: { q: any; level: PlaceLevel; canM
     <>
       <View style={styles.subRow}><Kicker>What we could get here</Kicker></View>
       <Ladder columns={columns} rows={rows} keyOf={(r) => r.key} />
-      <Footer left={<Text style={styles.selected}>{`${chosen.length} source${chosen.length === 1 ? '' : 's'} · ${pounds(Math.round(cost))}`}</Text>}>
+      <Footer left={<Text style={styles.selected}>{said ?? `${chosen.length} source${chosen.length === 1 ? '' : 's'} · ${pounds(Math.round(cost))}`}</Text>}>
         <Act label="Work out the scores again · free" tone="secondary" disabled={!canManage || busy}
              onPress={() => { setBusy(true); api.adminRescorePlaces().finally(() => setBusy(false)); }} />
-        {/* One action, not a row per provider. */}
-        <Act label={`Ask them all · ${cost ? pounds(Math.round(cost)) : 'free'}`} icon="download"
+        {/* One action, not a row per provider — and it carries the scope it was
+            pressed in, which is the whole idea of Collect living inside Places
+            (Codex, 17 Sep 2026: it used to throw both away and reindex). */}
+        <Act label={busy ? 'Going…' : `Ask them all · ${cost ? pounds(Math.round(cost)) : 'free'}`} icon="download"
              disabled={!canManage || busy || !chosen.length}
-             onPress={() => { setBusy(true); api.adminReindexPlaces(false).finally(() => setBusy(false)); }} />
+             onPress={() => {
+               setBusy(true); setSaid(null);
+               api.adminCollect({ ...q, cat: cat || undefined, sub: sub || undefined, sources: [...picked] })
+                 .then((r) => setSaid(`Going: ${r.places} places, ${r.free} free${r.paid ? `, ${r.paid} at ${pounds(r.spendPence)}` : ''}.`))
+                 .catch((e: any) => setSaid(e?.body?.message ?? 'That could not be started.'))
+                 .finally(() => setBusy(false));
+             }} />
       </Footer>
     </>
   );

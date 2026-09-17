@@ -2434,6 +2434,15 @@ export const api = {
    */
   adminAskAboutPlaces: (refs: string[]) =>
     post<{ asked: number; refused: { ref: string; why: string }[]; names: { ref: string; name: string }[]; spentPence: number }>('/api/admin/place-index/ask', { refs }),
+  /**
+   * Collect here — go and get what is missing for the area you are standing in.
+   *
+   * Carries its own scope, and the chosen sources decide what is asked. A run
+   * that would cross the month's ceiling is refused with what is left, rather
+   * than half-done.
+   */
+  adminCollect: (p: PlaceWhere & { cat?: string | null; sub?: string | null; sources: string[]; limit?: number }) =>
+    post<{ started: true; places: number; sources: string[]; free: number; paid: number; spendPence: number; leftPence: number }>('/api/admin/place-index/collect', p),
   /** Look for a picture we may keep, and put it in the library if there is one. */
   adminFindPictures: (refs: string[]) =>
     post<{ found: number; results: { ref: string; state: string; rung?: string }[]; spentPence: number }>('/api/admin/place-index/pictures/find', { refs }),
@@ -2476,7 +2485,7 @@ export const api = {
   adminQueueApprove: (ids: string[]) => post<{ approved: number; ids: string[] }>('/api/admin/queue/approve', { ids }),
   /** BO5b — the rejection, beside the message it sends. */
   adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean }) =>
-    post<{ ok: true; id: string; reason: string; told: boolean; message: string | null }>(`/api/admin/queue/${id}/reject`, body),
+    post<{ ok: true; id: string; reason: string; told: boolean; message: string | null; why: string | null }>(`/api/admin/queue/${id}/reject`, body),
   adminQueueReasons: () => request<{ reasons: Record<string, RejectReason[]>; used: { kind: string; reason: string; used: number; last_at: string }[] }>('/api/admin/queue/report/reasons'),
 
   /** What the household did to one of the results — the click stream Demand counts. */

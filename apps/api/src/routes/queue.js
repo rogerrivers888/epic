@@ -109,7 +109,9 @@ router.post('/:id/reject', requires('manage_library'), async (req, res, next) =>
     });
     if (!out) throw bad('That is not one of the reasons for this kind of thing.');
     await writeAudit({ ...actor(req), action: 'queue.reject', subjectType: 'content', subjectId: out.id, subjectLabel: out.reason, after: { reason: out.reason, told: out.told } });
-    res.json({ ok: true, id: out.id, reason: out.reason, told: out.told, message: out.message });
+    // `told` is what actually happened, not what was asked for; `why` says so
+    // in one sentence where nothing went out.
+    res.json({ ok: true, id: out.id, reason: out.reason, told: out.told, message: out.message, why: out.why ?? null });
   } catch (err) { next(err); }
 });
 

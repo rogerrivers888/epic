@@ -1063,6 +1063,23 @@ export async function places(areaSlug, {
   if (show === 'ready') where.push('pi.ready');
   if (show === 'not-ready') where.push('not pi.ready');
   if (missing) { args.push(missing); where.push(`(pi.score_parts->'missing') ? $${args.length}`); }
+  // The name search and the sort happen **in the query**, before the limit.
+  // Filtering two hundred rows that SQL had already picked meant a search could
+  // come back empty with a match sitting at row two hundred and one, and a sort
+  // could never reach the real top of the scope (Codex, 17 Sep 2026).
+  //
+  // The name is not a column here — it lives wherever we are allowed to hold it
+  // — so it is joined in rather than guessed at.
+  const NAME = `coalesce(r.name, a.name, case when pi.venue_ref like 'google:%' then null else sp.name end, pi.venue_ref)`;
+  if (q) { args.push(`%${q}%`); where.push(`${NAME} ilike $${args.length}`); }
+  const MISSING = `jsonb_array_length(coalesce(pi.score_parts->'missing', '[]'::jsonb))`;
+  const UNSEEN = `(select count(*)::int from place_index_sources src where src.venue_ref = pi.venue_ref)`;
+  const ORDER = {
+    missing: `${MISSING} ${desc ? 'desc' : 'asc'}, pi.data_score asc nulls first`,
+    score: `pi.data_score ${desc ? 'desc' : 'asc'} nulls last`,
+    name: `${NAME} ${desc ? 'desc' : 'asc'}`,
+    unseen: `${UNSEEN} ${desc ? 'asc' : 'desc'}`,
+  }[sort] ?? `${MISSING} desc, pi.data_score asc nulls first`;
   args.push(limit);
   const { rows } = await query(`
     select pi.venue_ref, pi.subcategory, pi.category, pi.data_score, pi.ready, pi.score_parts, pi.ownership, pi.oldest_fact,
@@ -1071,12 +1088,15 @@ export async function places(areaSlug, {
            (select upper(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
              where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode
       from place_index pi
+      left join place_records r on r.venue_ref = pi.venue_ref
+      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+      left join lateral (select name from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
      where ${where.join(' and ')}
-     order by pi.data_score asc nulls first
+     order by ${ORDER}
      limit $${args.length}`, args);
   const named = await namesFor(rows.map((r) => r.venue_ref));
   const all = SOURCES.map((s) => s.key);
-  let out = rows.map((r) => {
+  const out = rows.map((r) => {
     const parts = r.score_parts ?? {};
     const seen = new Set((r.srcs ?? '').split(',').filter(Boolean));
     const unseen = all.filter((s) => !seen.has(s));
@@ -1093,16 +1113,6 @@ export async function places(areaSlug, {
       barSet: parts.set !== false,
       unseenBy: unseen, seenBy: [...seen],
     };
-  });
-  if (q) {
-    const needle = q.toLowerCase();
-    out = out.filter((p) => (p.name ?? p.ref).toLowerCase().includes(needle));
-  }
-  const key = { missing: (p) => p.missing, score: (p) => p.score ?? -1, name: (p) => p.name ?? p.ref, unseen: (p) => p.unseenBy.length }[sort] ?? ((p) => p.missing);
-  out.sort((a, b) => {
-    const av = key(a), bv = key(b);
-    if (typeof av === 'string') return desc ? String(bv).localeCompare(av) : av.localeCompare(String(bv));
-    return desc ? bv - av : av - bv;
   });
   return out;
 }

@@ -296,11 +296,17 @@ function RejectSheet({ item, tell, onClose, onDone }: {
   const left = framed && origin ? origin.x : 0;
   const top = framed && origin ? origin.y : 0;
 
+  const [why, setWhy] = useState<string | null>(null);
   const send = async (tell: boolean) => {
     if (!reason) return;
-    setBusy(true);
-    try { await api.adminQueueReject(item.item.id, { reason: reason.key, message: tell ? message : null, tell }); onDone(); }
-    finally { setBusy(false); }
+    setBusy(true); setWhy(null);
+    try {
+      const out = await api.adminQueueReject(item.item.id, { reason: reason.key, message: tell ? message : null, tell });
+      // The rejection stands either way; whether they were told is a separate
+      // fact and the sheet says which happened (Codex, 17 Sep 2026).
+      if (tell && !out.told && out.why) { setWhy(out.why); return; }
+      onDone();
+    } finally { setBusy(false); }
   };
 
   return (
@@ -339,6 +345,14 @@ function RejectSheet({ item, tell, onClose, onDone }: {
             </View>
           </View>
 
+          {why ? (
+            <View style={styles.didNotSend}>
+              <Icon name="alert" size={15} strokeWidth={2} color={colors.ink} />
+              <Text style={styles.didNotSendWord}>{`Turned down, but ${why}.`}</Text>
+              <View style={{ flex: 1 }} />
+              <Act label="Close" tone="secondary" onPress={onDone} />
+            </View>
+          ) : null}
           {/* The three acts wrap rather than run off the sheet: nothing is
               allowed to overflow 390px (CLAUDE.md, and Codex 17 Sep 2026). */}
           <View style={styles.sheetActs}>
@@ -440,6 +454,8 @@ const styles = StyleSheet.create({
   reasonOn: { backgroundColor: colors.surfaceMuted },
   reasonWord: { ...type.body, fontSize: 13.5, color: colors.ink, flex: 1 },
   reasonUsed: { ...type.tiny, fontSize: 12, color: colors.inkMuted, width: 80, textAlign: 'right' },
+  didNotSend: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.surfaceMuted, paddingHorizontal: 14, paddingVertical: 11 },
+  didNotSendWord: { ...type.small, fontSize: 13, color: colors.ink },
   sheetActs: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end',
                borderTopWidth: BORDER, borderTopColor: colors.ruleMuted, paddingTop: 15 },
   radio: { width: 17, height: 17, borderRadius: 999, borderWidth: 1.5, borderColor: colors.decor },

@@ -19,6 +19,7 @@
  */
 
 import { query } from '../db.js';
+import { mailConfigured, sendMail } from '../sources/mail.js';
 
 /** The kinds, in the order the filter prints them. */
 export const KINDS = [
@@ -269,15 +270,48 @@ export async function approve(ids, who) {
  * what was actually sent can be read back rather than reconstructed.
  */
 export async function reject({ id, reason, message = null, tell = false, who }) {
-  const { rows: [q] } = await query('select kind from content_queue where id = $1', [id]);
+  const { rows: [q] } = await query('select kind, household_id, account_id, place_label from content_queue where id = $1', [id]);
   if (!q) return null;
   const r = reasonFor(q.kind, reason);
   if (!r) return null;
+  const body = tell ? (message ?? r.message) : null;
+
+  // "Reject and send this" has to send it.
+  //
+  // `told` is a claim about what a household received, so it is only ever set
+  // once something actually went out. Where there is no address, or no sender
+  // key — which is the owner's to add in Doppler — the rejection still stands
+  // and the screen is told plainly that the message did not go (Codex,
+  // 17 Sep 2026).
+  let told = false;
+  let why = null;
+  if (tell && body) {
+    const { rows: [to] } = await query(
+      `select a.email from accounts a
+        where (a.id = $1 or a.household_id = $2) and a.email is not null
+        order by (a.id = $1) desc, a.created_at limit 1`,
+      [q.account_id, q.household_id]);
+    if (!mailConfigured()) why = 'no sender is configured, so nothing was sent';
+    else if (!to?.email) why = 'this household has no e-mail address on it, so nothing was sent';
+    else {
+      try {
+        await sendMail({
+          to: to.email,
+          subject: `Thanks for the ${q.kind}${q.place_label ? ` of ${q.place_label}` : ''}`,
+          text: body,
+          purpose: 'content.rejected',
+        });
+        told = true;
+      } catch (err) { why = `the message could not be sent: ${err.message}`; }
+    }
+  }
+
   const { rows: [out] } = await query(
     `update content_queue
         set state = 'rejected', reason = $2, message = $3, told = $4, decided_by = $5, decided_at = now()
       where id = $1 returning *`,
-    [id, reason, tell ? (message ?? r.message) : null, Boolean(tell), who ?? null]);
+    [id, reason, body, told, who ?? null]);
+  if (out) out.why = why;
   if (out.subject_type === 'image') {
     await query(`update image_assets set moderation = 'rejected', moderation_note = $2, moderated_by = $3, moderated_at = now() where id = $1::uuid`,
       [out.subject_id, reason, who ?? null]);

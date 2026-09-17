@@ -42,6 +42,37 @@ const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.acco
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
 const lower = (s) => String(s ?? '').trim().toLowerCase();
+/** Pence, said as money, so a limit reads as one. */
+const money = (pence) => `£${(Math.max(0, pence) / 100).toFixed(2)}`;
+
+/**
+ * The ceiling, checked before a call rather than after it.
+ *
+ * "Nothing spends past it" is printed on the Runs board, and a limit that is
+ * only shown is not a limit (Codex, 17 Sep 2026). Everything on a collection
+ * path asks this first, and a run that would cross it is refused with what is
+ * left rather than half-done.
+ */
+async function roomToSpend(pence) {
+  const { rows: [set] } = await query("select value from app_settings where key = 'collect.ceiling_pence'");
+  const ceilingPence = Number(set?.value ?? 25000);
+  const { rows: [spend] } = await query(
+    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
+       from provider_calls where created_at > date_trunc('month', now())`);
+  // The ledger is in dollars; the ceiling is the owner's, in pounds.
+  const spentPence = Math.round(Number(spend?.usd ?? 0) * 100 * 0.79);
+  const left = ceilingPence - spentPence;
+  // A run that spends nothing is never over a ceiling — the ceiling is about
+  // money, and researching a place from its own page costs none. Only a call
+  // that would actually go out is measured against it.
+  return { ok: pence <= 0 || pence <= left, ceilingPence, spentPence, leftPence: Math.max(0, left) };
+}
+
+const overTheCeiling = (res, want, room) => res.status(422).json({
+  error: 'over_the_ceiling',
+  message: `That would spend ${money(want)} and there is ${money(room.leftPence)} left of this month's ${money(room.ceilingPence)}.`,
+  ...room,
+});
 
 /** The ring chooser's three steps, and the three ways of getting there. */
 export const BANDS = [30, 60, 90];
@@ -247,7 +278,14 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
     if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
     const since = Number(req.query.since) || 30;
     const slug = scope.kind === 'area' ? scope.area.slug : null;
-    const { rows } = await query(`
+    // A ring is scoped by the cells inside it, not by an area slug it has not
+    // got: `null` made the predicate true for every search in the database, so a
+    // thirty-minute ring showed the whole estate's demand under its own heading
+    // (Codex, 17 Sep 2026).
+    const cells = scope.kind === 'ring'
+      ? (await reach.reachableCells(scope.cell, { minutes: scope.minutes, mode: travelMode(scope.mode) })).map((c) => c.to_cell)
+      : null;
+    const { rows: everything } = await query(`
       select coalesce(s.subject, '') as subject,
              count(*)::int                                          as searches,
              count(*) filter (where s.empty)::int                    as empty,
@@ -256,7 +294,15 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
         from searches s
        where s.at > now() - ($1 || ' days')::interval
          and ($2::text is null or s.area_slug = $2)
-       group by 1 order by count(*) desc limit 40`, [String(since), slug]);
+         and ($3::text[] is null or s.cell = any($3))
+       group by 1 order by count(*) desc`, [String(since), slug, cells]);
+    // The four headline figures are of every subject, not of the forty the list
+    // has room for.
+    const totals = everything.reduce((t, r) => ({
+      searches: t.searches + r.searches, empty: t.empty + r.empty,
+      noClick: t.noClick + r.no_click, noTrip: t.noTrip + r.no_trip,
+    }), { searches: 0, empty: 0, noClick: 0, noTrip: 0 });
+    const rows = everything.slice(0, 40);
     const labels = new Map((await query('select key, label from shelf_subcategories').then((r) => r.rows)).map((r) => [r.key, r.label]));
     const catLabels = new Map((await query('select key, label from shelf_categories').then((r) => r.rows)).map((r) => [r.key, r.label]));
     const known = new Map((await query(
@@ -264,13 +310,9 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
       [slug ?? ''])).rows.map((r) => [r.subcategory, r.places]));
     res.json({
       ...(await head(scope)),
-      since,
-      totals: {
-        searches: rows.reduce((n, r) => n + r.searches, 0),
-        empty: rows.reduce((n, r) => n + r.empty, 0),
-        noClick: rows.reduce((n, r) => n + r.no_click, 0),
-        noTrip: rows.reduce((n, r) => n + r.no_trip, 0),
-      },
+      since, totals,
+      // How many subjects there are at all, so a list of forty says it is one.
+      subjects: everything.length,
       rows: rows.map((r) => {
         const k = known.get(r.subject) ?? 0;
         const fault = faultOf({ searches: r.searches, empty: r.empty, noClick: r.no_click, noTrip: r.no_trip, known: k });
@@ -848,11 +890,9 @@ router.get('/place/raw', requires('view_library'), async (req, res, next) => {
  * Technical Constraints §13.10). This is the *Curate these N · free* action on
  * every board that has a selection.
  */
-router.post('/curate', requires('manage_library'), async (req, res, next) => {
-  try {
-    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
-    if (!refs.length) throw bad('Nothing selected.');
-    const household = await currentHousehold();
+async function curateThese(refs, householdId) {
+  {
+    const household = { id: householdId };
     // What we already know about each place, so the research has a name and a
     // point to ask the open map with. Without a seed, `own.js` falls back to one
     // billed Google request per place to find out what it is looking at — which
@@ -911,9 +951,19 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
         started += 1;
       } catch (err) { refused.push({ ref, why: whySourceFailed(err?.provider ?? 'own', err) }); }
     }
+    return { started, refused };
+  }
+}
+
+router.post('/curate', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
+    if (!refs.length) throw bad('Nothing selected.');
+    const household = await currentHousehold();
+    const out = await curateThese(refs, household.id);
     await index.rescore();
     await index.refreshStats();
-    res.json({ started, refused, spentPence: 0 });
+    res.json({ ...out, spentPence: 0 });
   } catch (err) { next(err); }
 });
 
@@ -925,17 +975,9 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
  * the numbers thrown away (`domain/scoring.js`); what is kept is the identifier
  * and our own word for it.
  */
-router.post('/ask', requires('manage_library'), async (req, res, next) => {
-  try {
-    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
-    if (!refs.length) throw bad('Nothing selected.');
-    if (!googleSource.enabled()) {
-      return res.status(422).json({
-        error: 'not_switched_on',
-        message: 'Google is not switched on here. The key is the owner\'s to add in Doppler.',
-      });
-    }
-    const household = await currentHousehold();
+async function askThese(refs, householdId) {
+  {
+    const household = { id: householdId };
     const named = await index.namesFor(refs);
     const { rows: pos } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [refs]);
     const at = new Map(pos.map((p) => [p.venue_ref, p]));
@@ -985,8 +1027,29 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
         refused.push({ ref, why: whySourceFailed('google', err) });
       }
     }
-    if (asked) { await index.rescore(); await index.refreshStats(); }
-    res.json({ asked, refused, names, spentPence: Math.round(asked * 1.4) });
+    return { asked, refused, names };
+  }
+}
+
+router.post('/ask', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
+    if (!refs.length) throw bad('Nothing selected.');
+    if (!googleSource.enabled()) {
+      return res.status(422).json({
+        error: 'not_switched_on',
+        message: 'Google is not switched on here. The key is the owner\'s to add in Doppler.',
+      });
+    }
+    // Before a penny of it: what one Place Details call costs, times the number
+    // of them, against what is left of this month's ceiling.
+    const want = Math.round(refs.length * 1.4);
+    const room = await roomToSpend(want);
+    if (!room.ok) return overTheCeiling(res, want, room);
+    const household = await currentHousehold();
+    const out = await askThese(refs, household.id);
+    if (out.asked) { await index.rescore(); await index.refreshStats(); }
+    res.json({ ...out, spentPence: Math.round(out.asked * 1.4) });
   } catch (err) { next(err); }
 });
 
@@ -1024,6 +1087,64 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
     res.json({ found: out.filter((o) => o.state === 'found').length, results: out, spentPence: 0 });
   } catch (err) { next(err); }
 });
+
+/**
+ * Collect here — go and get what is missing, for the area you are standing in.
+ *
+ * Every *Collect* on every Places board ends up here, and it carries its own
+ * scope: a county, a ring, a category, a subcategory. The sources chosen on the
+ * Collect lens decide what is actually asked, and the paid ones are checked
+ * against the month's ceiling before anything goes out.
+ *
+ * It answers immediately and runs on: a collection over fifty places outlives
+ * the gateway, and Runs is the page that watches what is going.
+ */
+router.post('/collect', requires('manage_library'), async (req, res, next) => {
+  try {
+    const scope = await resolveWhere(req.body ?? {});
+    if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass where.');
+    const chosen = new Set((Array.isArray(req.body?.sources) ? req.body.sources : ['own']).map(String));
+    const limit = Math.min(200, Math.max(1, Number(req.body?.limit) || 50));
+
+    // The places in scope that would gain most: the ones that are not ready,
+    // worst first.
+    const args = [];
+    const where = [];
+    if (scope.kind === 'ring') { args.push(scope.refs); where.push(`pi.venue_ref = any($${args.length})`); }
+    else { args.push(scope.area.slug); where.push(`exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $${args.length})`); }
+    if (req.body?.cat) { args.push(String(req.body.cat)); where.push(`pi.category = $${args.length}`); }
+    if (req.body?.sub) { args.push(String(req.body.sub)); where.push(`pi.subcategory = $${args.length}`); }
+    args.push(limit);
+    const { rows } = await query(
+      `select pi.venue_ref, pi.ownership from place_index pi
+        where ${where.join(' and ')}
+        order by pi.ready asc, pi.data_score asc nulls first
+        limit $${args.length}`, args);
+
+    const free = chosen.has('own') || chosen.has('osm') || chosen.has('atlas') ? rows.map((r) => r.venue_ref) : [];
+    const wantsPaid = (chosen.has('google') || chosen.has('tripadvisor')) && googleSource.enabled();
+    // Only a place we hold nothing of our own about is worth a paid call.
+    const paid = wantsPaid ? rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref) : [];
+    const want = Math.round(paid.length * 1.4);
+    const room = await roomToSpend(want);
+    if (!room.ok) return overTheCeiling(res, want, room);
+
+    const household = await currentHousehold();
+    res.json({
+      started: true, places: rows.length, sources: [...chosen],
+      free: free.length, paid: paid.length, spendPence: want, leftPence: room.leftPence,
+    });
+    void (async () => {
+      try {
+        if (free.length) await curateThese(free, household.id);
+        if (paid.length) await askThese(paid, household.id);
+        await index.rescore();
+        await index.refreshStats();
+      } catch (err) { console.warn(`collect: ${err.message}`); }
+    })();
+  } catch (err) { next(err); }
+});
+
 
 // ---------------------------------------------------------------------------
 // pictures
