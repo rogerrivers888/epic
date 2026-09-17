@@ -1134,19 +1134,23 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         // was gone, every uncached comparison went on billing two locations
         // past a cap the Runs board calls hard (Codex, 17 Sep 2026).
         const room = await tripadvisorRoom(TA_UNITS_PER_VIEW);
-        // The *full* two, because that is what a view bills. One left is not
-        // enough for a look, and "any grant will do" spent it anyway (Codex,
-        // 17 Sep 2026).
+        // Both limits, because there are two: the monthly allowance of
+        // locations, and the month's money. A view bills two locations, and one
+        // left is not enough for a look — "any grant will do" spent it anyway
+        // — and nothing was asking about the money at all (Codex, 17 Sep 2026).
+        const purse = await roomToSpend(taCost(1), { holder: 'compare' });
         if (room.granted < TA_UNITS_PER_VIEW) {
           ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left, and a view bills two`;
-          // The one unit it did grant goes back. Held, it read as nought left
-          // for half an hour (Codex, 17 Sep 2026).
-          await releaseSpend(room.reservation);
+        } else if (!purse.ok) {
+          ta.note = `over this month's ceiling · ${money(purse.leftPence)} left`;
         } else {
           try { ta = { ...ta, id, fields: await detailFor('tripadvisor', id, household.id), note: 'fetched live · two locations billed a view' }; }
           catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
-          finally { await releaseSpend(room.reservation); }
         }
+        // Whatever happened, both claims go back: held, they read as nothing
+        // left for half an hour.
+        await releaseSpend(room.reservation);
+        await releaseSpend(purse.reservation);
       }
     }
     columns.push(ta);
@@ -1728,6 +1732,22 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     // lock out everything else for as long as it took.
     const room = await roomToSpend(want, { reserve: false });
     if (!room.ok) return overTheCeiling(res, want, room);
+
+    // Not the same work twice.
+    //
+    // Two people pressing Collect at once — or one person twice — built the
+    // same plan and started two runs with the same list, and each paid for the
+    // same calls (Codex, 17 Sep 2026). The per-chunk claim bounds the total
+    // spend; it cannot tell the money is going twice on one place.
+    const clash = await collectRuns.alreadyGoing([...new Set([...free, ...google, ...tripadvisor])]);
+    if (clash.length) {
+      const it = clash[0];
+      return res.status(409).json({
+        error: 'already_going',
+        message: `A collection${it.where_label ? ` in ${it.where_label}` : ''} is already asking about some of these${it.started_by ? `, started by ${it.started_by}` : ''}. Watch it on Runs rather than starting a second one.`,
+        runId: it.id, startedAt: it.started_at,
+      });
+    }
 
     const household = await currentHousehold();
     // Written down before a word of it is done, so an answer of "started" is a

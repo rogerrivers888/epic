@@ -118,3 +118,28 @@ test('a chunk interrupted mid-call is written off rather than asked again', asyn
   const again = await runs.abandonInFlight(run.id);
   assert.equal(again.refused.length, 2);
 });
+
+test('two people pressing Collect at once do not pay for the same places twice', async () => {
+  // Refs of this test's own, because the runs the earlier tests left going are
+  // still going — which is itself the point.
+  const [p, q, r] = ['clash:one', 'clash:two', 'clash:three'];
+  const run = await runs.start({
+    whereLabel: 'Berkshire', scope: {}, sources: ['google'], todo: { google: [p, q, r] },
+  });
+  // The per-chunk claim bounds the total spend; it cannot tell the money is
+  // going twice on one place (Codex, 17 Sep 2026).
+  const clash = await runs.alreadyGoing([r, 'clash:nobody']);
+  assert.equal(clash.length, 1);
+  assert.equal(clash[0].id, run.id);
+  assert.equal(clash[0].where_label, 'Berkshire');
+
+  // A place in flight counts as somebody else's work too.
+  await runs.claim(run.id, 'google', [p]);
+  assert.equal((await runs.alreadyGoing([p])).length, 1, 'in flight is still taken');
+
+  // And nothing overlapping is free to start.
+  assert.equal((await runs.alreadyGoing(['clash:free'])).length, 0);
+
+  await runs.finish(run.id);
+  assert.equal((await runs.alreadyGoing([p, q, r])).length, 0, 'a finished run holds nothing');
+});

@@ -386,17 +386,26 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     const household = await currentHousehold();
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
-    // Two Google calls where we hold no match, and a Tripadvisor view bills two
-    // locations. Claimed up front, given back at the end whatever happened.
-    const room = await roomToSpend(Math.round(PRICE_PER_UNIT_USD.google * 2 * 100 * USD_TO_GBP), { holder: 'lookup.compare' });
-    if (!room.ok) {
-      return res.status(422).json({
-        error: 'over_the_ceiling',
-        message: `That would spend about £${((PRICE_PER_UNIT_USD.google * 2 * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(room.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
-        leftPence: room.leftPence, ceilingPence: room.ceilingPence,
-      });
-    }
-    const taRoom = tripadvisorSource.enabled() ? await tripadvisorRoom(2) : { granted: 0, left: 0, reservation: null };
+    // What this look would actually spend, claimed before it spends it.
+    //
+    // The worst case is two Google calls — a search for the match and a detail
+    // — and a Tripadvisor view, which bills two locations. But an unconditional
+    // claim for all of it refused the whole screen whenever the month was
+    // spent, even where nothing would go out: a place we already hold both
+    // identifiers for, or a provider that is switched off (Codex, 17 Sep 2026).
+    // So only what is actually needed is claimed, and a look that costs nothing
+    // is never refused.
+    const wants = googleSource.enabled()
+      ? Math.round(PRICE_PER_UNIT_USD.google * 2 * 100 * USD_TO_GBP)
+      : 0;
+    const room = await roomToSpend(wants, { holder: 'lookup.compare' });
+    const taWants = tripadvisorSource.enabled()
+      ? Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP)
+      : 0;
+    const taPurse = await roomToSpend(taWants, { holder: 'lookup.compare.ta' });
+    const taRoom = tripadvisorSource.enabled() && taPurse.ok
+      ? await tripadvisorRoom(2)
+      : { granted: 0, left: 0, reservation: null };
     try {
     const out = await runLookup(settingsOf(req.query), household);
     const item = out.items.find((i) => i.ref === ref);
@@ -412,6 +421,10 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     let google = { key: 'google', label: 'Google', note: null, fields: null, id: null, how: 'none' };
     if (!googleSource.enabled()) {
       google.note = 'Google is not switched on here.';
+    } else if (!room.ok) {
+      // The column says it, rather than the screen refusing: the other columns
+      // are free and still worth reading (Codex, 17 Sep 2026).
+      google.note = `Over this month's ceiling — £${(room.leftPence / 100).toFixed(2)} left.`;
     } else {
       let id = ref.startsWith('google:') ? ref.slice('google:'.length) : records.find((r) => r.source === 'google')?.fields?.sourcePlaceId ?? null;
       let how = id ? 'by its Google identifier' : null;
@@ -450,8 +463,10 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
       // The claim, honoured. A view bills two locations, so fewer than two
       // granted means the month has not got one left — and the branch below
       // used to ask anyway (Codex, 17 Sep 2026).
-      else if (taRoom.granted < 2) {
-        ta.note = `Over the monthly ceiling — ${taRoom.left} location${taRoom.left === 1 ? '' : 's'} left, and a view bills two.`;
+      else if (!taPurse.ok) {
+        ta.note = `Over this month's ceiling — £${(taPurse.leftPence / 100).toFixed(2)} left.`;
+      } else if (taRoom.granted < 2) {
+        ta.note = `Over the monthly allowance — ${taRoom.left} location${taRoom.left === 1 ? '' : 's'} left, and a view bills two.`;
       } else {
         try { ta = { ...ta, id, how: 'matched by name and distance', fields: await detailFor('tripadvisor', id, household.id), note: 'matched by name and distance · fetched live · two locations billed a view' }; }
         catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
@@ -467,6 +482,7 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     res.json({ place: out.place, mode: out.mode, minutes: out.minutes, item: summary, columns, rows });
     } finally {
       await releaseSpend(room.reservation);
+      await releaseSpend(taPurse.reservation);
       await releaseSpend(taRoom.reservation);
     }
   } catch (err) { next(err); }

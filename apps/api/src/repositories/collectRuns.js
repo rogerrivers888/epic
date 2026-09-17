@@ -29,6 +29,33 @@ export async function start({ whereLabel, scope, sources, todo, householdId = nu
   return rows[0];
 }
 
+/**
+ * Is another run already going to ask about any of these?
+ *
+ * Two people pressing Collect at once — or one person twice — built the same
+ * plan and started two runs with the same list, and each paid for the same
+ * calls (Codex, 17 Sep 2026). The per-chunk claim bounds the *total* spend; it
+ * cannot tell that the money is being spent twice on one place.
+ *
+ * Read across `todo` and `asking`, because a place in flight is as much
+ * somebody else's work as one still queued.
+ */
+export async function alreadyGoing(refs = []) {
+  if (!refs.length) return [];
+  const { rows } = await query(
+    `select r.id, r.where_label, r.started_by, r.started_at,
+            array_agg(distinct v) as refs
+       from collect_runs r
+       cross join lateral (
+         select value as v
+           from jsonb_each(r.todo || r.asking) as lists(key, list),
+                jsonb_array_elements_text(lists.list) as items(value)
+       ) as theirs
+      where r.state = 'running' and theirs.v = any($1::text[])
+      group by r.id, r.where_label, r.started_by, r.started_at`, [refs]);
+  return rows;
+}
+
 export async function one(id) {
   const { rows } = await query('select * from collect_runs where id = $1', [id]);
   return rows[0] ?? null;
