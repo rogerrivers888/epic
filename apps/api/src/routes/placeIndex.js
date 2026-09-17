@@ -864,8 +864,17 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
              -- The street, and only the street: an attraction's name is not an
              -- address, and passing it as one gave the matchers the name twice
              -- (Codex, 17 Sep 2026).
+             --
+             -- In own.js's own order of preference — the venue's own page,
+             -- then the open map, then a reverse geocode — and only facts that
+             -- have not expired, because a fact past its retention is one we
+             -- may no longer compose from.
              coalesce(r.address, (select pf.value #>> '{}' from place_facts pf
-                                   where pf.venue_ref = pi.venue_ref and pf.field = 'address' limit 1)) as address,
+                                   where pf.venue_ref = pi.venue_ref and pf.field = 'address'
+                                     and pf.expires_at is null
+                                   order by case pf.source when 'site' then 0 when 'osm' then 1
+                                                           when 'nominatim' then 2 else 3 end
+                                   limit 1)) as address,
              (select l.name from place_areas pa join localities l on l.slug = pa.area_slug
                where pa.venue_ref = pi.venue_ref and l.kind = 'town' limit 1) as locality
         from place_index pi
