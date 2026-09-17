@@ -352,8 +352,14 @@ async function reindexWhileLocked({ onProgress }) {
   onProgress?.({ stage: 'scored', ...scored });
 
   // A rebuild places everything it touched, so the incremental pass afterwards
-  // has nothing left to do.
-  await query('update place_index set placed_at = now()');
+  // has nothing left to do — but only what it touched.
+  //
+  // A place saved while the rebuild was between its area pass and this line was
+  // marked placed without ever having been placed, and `settleNew` then skipped
+  // it: absent from every area board until the next full rebuild (Codex, 17 Sep
+  // 2026). `t0` is when this rebuild started, so anything first seen since is
+  // left for the hourly pass, which is exactly what that pass is for.
+  await query('update place_index set placed_at = now() where first_seen <= $1', [new Date(t0)]);
   const total = (await query('select count(*)::int as n from place_index')).rows[0].n;
   await refreshStats();
   return { places: total, ...scored, ms: Date.now() - t0 };

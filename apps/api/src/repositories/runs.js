@@ -13,7 +13,10 @@ import { query } from '../db.js';
 import { menuCauses } from './scout.js';
 import { OURS_KINDS, oursKindOf } from '../domain/menuCauses.js';
 import * as collectRuns from './collectRuns.js';
-import { USD_TO_GBP } from '../domain/providerPrices.js';
+import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
+
+/** Pounds, to the nearest tenth of a penny, the way the board writes money. */
+const pounds = (gbp) => `£${gbp.toFixed(3).replace(/0$/, '')}`;
 
 /**
  * The eight ways of getting more data.
@@ -36,7 +39,10 @@ export const RUNS = [
     costs: 'free', free: true, action: 'See failures' },
   { key: 'rate', label: 'Ask Google what people think',
     explain: 'Banded into a word at the call; the figure is never written down.',
-    costs: '£0.014 each', free: false, action: 'Choose where' },
+    // From the one price table, never retyped: it said £0.014 while the ledger
+    // charged about £0.025, so the figure beside the button disagreed with the
+    // quote and with the ceiling (Codex, 17 Sep 2026).
+    costs: `${pounds(PRICE_PER_UNIT_USD.google * USD_TO_GBP)} each`, free: false, action: 'Choose where' },
   { key: 'tripadvisor', label: 'Ask Tripadvisor',
     explain: 'Opt-in, and the only run with a hard monthly ceiling.',
     costs: 'licensed', free: false, action: 'Choose where' },
