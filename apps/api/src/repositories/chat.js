@@ -54,8 +54,16 @@ export async function topicsAcross(contextType, contextIds, { limit = 1000 } = {
   return rows;
 }
 
+/**
+ * One topic, by its address.
+ *
+ * `hidden` here as well as in the lists: the filters were only on the listing
+ * queries, so an existing link to a moderated conversation still opened it
+ * (Codex, 17 Sep 2026). The back office reads `chat_topics` directly, so a
+ * reviewer can still see what they decided about.
+ */
 export async function topicById(id) {
-  const { rows } = await query(`${TOPIC_SELECT} where t.id = $1`, [id]);
+  const { rows } = await query(`${TOPIC_SELECT} where t.id = $1 and not t.hidden`, [id]);
   return rows[0] ?? null;
 }
 
@@ -130,8 +138,15 @@ export async function repliesAcross(topicIds) {
   return rows;
 }
 
+/**
+ * One reply, by its id.
+ *
+ * The same rule, and it matters more here: a known rejected reply id could be
+ * quoted, marked as the answer, or lifted into the public FAQ (Codex, 17 Sep
+ * 2026).
+ */
 export async function replyById(id) {
-  const { rows } = await query(`${REPLY_SELECT} where r.id = $1`, [id]);
+  const { rows } = await query(`${REPLY_SELECT} where r.id = $1 and not r.hidden`, [id]);
   return rows[0] ?? null;
 }
 

@@ -121,6 +121,38 @@ const overTheCeiling = (res, want, room) => {
  */
 export const STALE_MONTHS = 12;
 
+/**
+ * What asking Google about one place actually costs.
+ *
+ * Two calls, not one, for a place we have never matched: a Nearby Search to
+ * find out which Google place it is, then a Place Details to read it. The
+ * collection paths priced only the second, so a run reserved half what it spent
+ * (Codex, 17 Sep 2026). A ref that is already `google:`, or that we have
+ * matched before, needs only the detail.
+ */
+const DETAIL_PENCE = 1.4;
+const MATCH_PENCE = 1.4;
+const askingCost = (refs, matched) =>
+  Math.round(refs.reduce((p, ref) =>
+    p + DETAIL_PENCE + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE), 0));
+
+/** Which of these we already hold a Google id for, so no search is needed. */
+async function alreadyMatched(refs) {
+  if (!refs.length) return new Set();
+  const held = await matchesFor(refs, 'google');
+  return new Set([...held.entries()].filter(([, id]) => id).map(([ref]) => ref));
+}
+
+/**
+ * How many locations one Tripadvisor view bills.
+ *
+ * Their detail response carries the locations it covers and the adapter counts
+ * them (`sources/tripadvisor.js`), so the monthly allowance is spent twice as
+ * fast as a count of places would suggest. The cap is claimed in *their* units
+ * (Codex, 17 Sep 2026).
+ */
+const TA_UNITS_PER_VIEW = 2;
+
 /** The ring chooser's three steps, and the three ways of getting there. */
 export const BANDS = [30, 60, 90];
 const MODES = ['drive', 'walk', 'transit'];
@@ -1237,14 +1269,14 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     }
     // Before a penny of it: what one Place Details call costs, times the number
     // of them, against what is left of this month's ceiling.
-    const want = Math.round(refs.length * 1.4);
+    const want = askingCost(refs, await alreadyMatched(refs));
     const room = await roomToSpend(want, { holder: 'ask' });
     if (!room.ok) return overTheCeiling(res, want, room);
     try {
       const household = await currentHousehold();
       const out = await askThese(refs, household.id);
       if (out.asked) { await index.rescore(); await index.refreshStats(); }
-      res.json({ ...out, spentPence: Math.round(out.asked * 1.4) });
+      res.json({ ...out, spentPence: want });
     } finally {
       // The claim is let go whether it went well or not: by now every call it
       // covered is in `provider_calls`, which is what the next one counts.
@@ -1321,7 +1353,8 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
         order by pi.ready asc, pi.data_score asc nulls first
         limit $${args.length}`, args);
 
-    const free = chosen.has('own') || chosen.has('osm') || chosen.has('atlas') ? rows.map((r) => r.venue_ref) : [];
+    const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
+    const everything = rows.map((r) => r.venue_ref);
     // Only a place we hold nothing of our own about is worth a paid call.
     const worthPaying = rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref);
 
@@ -1334,28 +1367,41 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
      * again bought the same answers over (Codex, 17 Sep 2026). A source that
      * has seen a place inside the window is not asked about it again.
      */
-    const { rows: lately } = worthPaying.length ? await query(
+    const SOURCES_ASKED = ['google', 'tripadvisor', ...freeChosen];
+    const { rows: lately } = everything.length ? await query(
       `select source, venue_ref from place_index_sources
         where venue_ref = any($1) and source = any($2)
           and last_seen > now() - ($3 || ' months')::interval`,
-      [worthPaying, ['google', 'tripadvisor'], String(STALE_MONTHS)]) : { rows: [] };
-    const askedLately = new Map([['google', new Set()], ['tripadvisor', new Set()]]);
+      [everything, SOURCES_ASKED, String(STALE_MONTHS)]) : { rows: [] };
+    const askedLately = new Map(SOURCES_ASKED.map((k) => [k, new Set()]));
     for (const r of lately) askedLately.get(r.source)?.add(r.venue_ref);
-    const notLately = (src) => worthPaying.filter((ref) => !askedLately.get(src).has(ref));
+    const notLately = (src, from) => from.filter((ref) => !askedLately.get(src)?.has(ref));
+
+    // Free work obeys the window too. It costs nothing, but re-reading the same
+    // open sources for the same place inside a year is a run that reports work
+    // it did not need to do — and the board promises it is left alone (Codex,
+    // 17 Sep 2026). A place is worth a free pass if *any* chosen free source
+    // has not seen it lately.
+    const free = freeChosen.length
+      ? everything.filter((ref) => freeChosen.some((src) => !askedLately.get(src)?.has(ref)))
+      : [];
+    const freeFresh = everything.length - free.length;
 
     // Each paid source is asked on its own terms, and only if it was chosen and
     // is switched on. One shared `paid` list run through Google was how asking
     // Tripadvisor spent Google's money (Codex, 17 Sep 2026).
-    const google = chosen.has('google') && googleSource.enabled() ? notLately('google') : [];
-    let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? notLately('tripadvisor') : [];
+    const google = chosen.has('google') && googleSource.enabled() ? notLately('google', worthPaying) : [];
+    let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? notLately('tripadvisor', worthPaying) : [];
     // Tripadvisor's ceiling is counted in calls, not in money, so it is enforced
     // here rather than by `roomToSpend`.
     // Asked without claiming: the run takes its calls a chunk at a time.
-    const taLeft = tripadvisor.length ? (await tripadvisorRoom(0)).left : 0;
+    // In places, from their units: a view is two locations.
+    const taLeft = tripadvisor.length
+      ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;
     const taCapped = Math.max(0, tripadvisor.length - taLeft);
     tripadvisor = tripadvisor.slice(0, taLeft);
 
-    const want = Math.round(google.length * 1.4);
+    const want = askingCost(google, await alreadyMatched(google));
     // Checked here without claiming it: the run takes its money a chunk at a
     // time, so holding the whole list's worth for the length of the run would
     // lock out everything else for as long as it took.
@@ -1383,8 +1429,9 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
       // Said out loud, because "we asked about fewer than you chose" is a
       // figure somebody would otherwise go looking for.
       fresh: {
-        google: worthPaying.length - notLately('google').length,
-        tripadvisor: worthPaying.length - notLately('tripadvisor').length,
+        google: worthPaying.length - notLately('google', worthPaying).length,
+        tripadvisor: worthPaying.length - notLately('tripadvisor', worthPaying).length,
+        free: freeFresh,
       },
       staleMonths: STALE_MONTHS,
       // Said out loud rather than swallowed: the ones the monthly ceiling left out.
@@ -1420,15 +1467,19 @@ async function work(runId, householdId) {
       } else if (source === 'google') {
         // The ceiling is asked again per chunk, not once at the start: a run
         // that outlives a deploy must not outlive the month's budget either.
-        const room = await roomToSpend(Math.round(batch.length * 1.4), { holder: `collect:${runId}` });
+        const cost = askingCost(batch, await alreadyMatched(batch));
+        const room = await roomToSpend(cost, { holder: `collect:${runId}` });
         if (!room.ok) { await collectRuns.advance(runId, 'google', batch, { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
         try {
           const out = await askThese(batch, householdId);
-          await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: Math.round(out.asked * 1.4) });
+          // What the whole chunk was claimed at, apportioned to what answered:
+          // a place that did not match still cost the search that found that out.
+          await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: cost });
         } finally { await releaseSpend(room.reservation); }
       } else {
-        const room = await tripadvisorRoom(batch.length);
-        const may = batch.slice(0, room.granted);
+        // Claimed in locations, sliced back into places.
+        const room = await tripadvisorRoom(batch.length * TA_UNITS_PER_VIEW);
+        const may = batch.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
         try {
           const out = may.length ? await askTripadvisor(may, householdId) : { asked: 0, refused: [] };
           await collectRuns.advance(runId, 'tripadvisor', batch, {

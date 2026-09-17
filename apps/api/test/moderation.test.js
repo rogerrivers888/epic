@@ -134,3 +134,33 @@ test('a household whose open entry is rejected can write another one', async () 
   assert.ok(again.id, 'the replacement goes in');
   assert.equal((await queue.one(q.id)).state, 'rejected');
 });
+
+test('a moderated conversation is not reachable by its own address either', async () => {
+  const { household, member } = await aHousehold(query);
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Windsor', 51.48, -0.61, now(), now() + interval '2 days') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, tag_kind, author_member_id, title, body, state)
+     values ('trip', $1, 'general', $2, 'A title', 'A body', 'open') returning *`, [trip.id, member.id]);
+  const { rows: [reply] } = await query(
+    `insert into chat_replies (topic_id, author_member_id, body) values ($1,$2,'Something abusive') returning *`,
+    [topic.id, member.id]);
+  await queue.sync();
+  const qt = (await query(`select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id])).rows[0];
+  const qr = (await query(`select id from content_queue where subject_type = 'chat_reply' and subject_id = $1`, [reply.id])).rows[0];
+
+  assert.ok(await chat.topicById(topic.id));
+  assert.ok(await chat.replyById(reply.id));
+
+  // The filters were only on the listing queries, so an existing link still
+  // opened it and a known reply id could still be quoted or lifted into the
+  // FAQ (Codex, 17 Sep 2026).
+  await queue.reject({ id: qt.id, reason: 'abusive', who: null });
+  await queue.reject({ id: qr.id, reason: 'abusive', who: null });
+  assert.equal(await chat.topicById(topic.id), null);
+  assert.equal(await chat.replyById(reply.id), null);
+
+  // And the reviewer can still see what they decided about.
+  assert.ok((await queue.one(qt.id)).detail?.text);
+});

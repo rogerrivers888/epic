@@ -13,6 +13,7 @@
 
 import { query } from '../db.js';
 import { canBill } from '../constants.js';
+import { costOf } from '../domain/providerPrices.js';
 
 // ---------------------------------------------------------------------------
 // writing
@@ -20,9 +21,15 @@ import { canBill } from '../constants.js';
 
 /** One call, with whatever units the provider counts in. */
 export async function record(householdId, provider, purpose, units = null, sessionId = null) {
+  // The money as well as the meter. The monthly ceiling is a sum of
+  // `estimated_cost_usd`, so a row with a meter and no price is a call the
+  // limit cannot see — and the matcher's Nearby Search was exactly that
+  // (Codex, 17 Sep 2026). `units` arrives here as JSON text from some callers
+  // and as an object from others; both are priced.
+  const meter = typeof units === 'string' ? (() => { try { return JSON.parse(units); } catch { return null; } })() : units;
   await query(
-    'insert into provider_calls (household_id, session_id, provider, purpose, units) values ($1, $2, $3, $4, $5)',
-    [householdId, sessionId, provider, purpose, units],
+    'insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, $2, $3, $4, $5, $6)',
+    [householdId, sessionId, provider, purpose, units, costOf(meter) || null],
   );
 }
 

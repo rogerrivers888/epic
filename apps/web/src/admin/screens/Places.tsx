@@ -1404,8 +1404,8 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
                    // The staleness rule, reported rather than only promised:
                    // asking again inside twelve months buys the same answer
                    // twice (Codex, 17 Sep 2026).
-                   (r.fresh?.google || r.fresh?.tripadvisor)
-                     ? `. ${Math.max(r.fresh.google, r.fresh.tripadvisor)} asked inside the last ${r.staleMonths} months, so left alone`
+                   (r.fresh?.google || r.fresh?.tripadvisor || r.fresh?.free)
+                     ? `. ${Math.max(r.fresh.google, r.fresh.tripadvisor, r.fresh.free)} asked inside the last ${r.staleMonths} months, so left alone`
                      : '',
                    '.',
                  ].join('')))
