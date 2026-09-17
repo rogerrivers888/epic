@@ -2425,9 +2425,18 @@ export const api = {
   /** Write these places up ourselves — their own page, the encyclopedias, OSM. Free. */
   adminCuratePlaces: (refs: string[]) =>
     post<{ started: number; refused: { ref: string; why: string }[]; spentPence: number }>('/api/admin/place-index/curate', { refs }),
-  /** Ask the paid sources about these places. Says what it cost. */
+  /**
+   * Ask the paid sources about these places. Says what it cost.
+   *
+   * `names` is for this screen and no longer: a provider's name is rented, so it
+   * is handed back so a row stops being a bare identifier and is never written
+   * down. What is kept is the band and the identifier, which are ours.
+   */
   adminAskAboutPlaces: (refs: string[]) =>
-    post<{ asked: number; refused: { ref: string; why: string }[]; spentPence: number }>('/api/admin/place-index/ask', { refs }),
+    post<{ asked: number; refused: { ref: string; why: string }[]; names: { ref: string; name: string }[]; spentPence: number }>('/api/admin/place-index/ask', { refs }),
+  /** Look for a picture we may keep, and put it in the library if there is one. */
+  adminFindPictures: (refs: string[]) =>
+    post<{ found: number; results: { ref: string; state: string; rung?: string }[]; spentPence: number }>('/api/admin/place-index/pictures/find', { refs }),
   /** Keeping it current. All three are free and spend nothing. */
   adminReindexPlaces: (wait = false) => post<{ started?: boolean; places?: number; rescored?: number; ms?: number }>('/api/admin/place-index/reindex', { wait }),
   adminRefreshPlaceCounts: () => post<{ n: number; at: string }>('/api/admin/place-index/refresh', {}),

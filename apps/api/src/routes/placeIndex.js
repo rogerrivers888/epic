@@ -33,6 +33,8 @@ import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
+import { crowdBand, countBand } from '../domain/scoring.js';
+import { pictureFor } from '../sources/placePicture.js';
 
 /** Who did it, said the same way every other back-office route says it. */
 const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner (passcode)' });
@@ -851,11 +853,46 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
     if (!refs.length) throw bad('Nothing selected.');
     const household = await currentHousehold();
+    // What we already know about each place, so the research has a name and a
+    // point to ask the open map with. Without a seed, `own.js` falls back to one
+    // billed Google request per place to find out what it is looking at — which
+    // would make a button labelled *free* spend money (Codex, 17 Sep 2026).
+    const named = await index.namesFor(refs);
+    const { rows: known } = await query(`
+      select pi.venue_ref, pi.lat, pi.lng, pi.subcategory,
+             coalesce(r.website, a.website, sp.website) as website,
+             coalesce(r.address, a.name) as address,
+             (select l.name from place_areas pa join localities l on l.slug = pa.area_slug
+               where pa.venue_ref = pi.venue_ref and l.kind = 'town' limit 1) as locality
+        from place_index pi
+        left join place_records r on r.venue_ref = pi.venue_ref
+        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+        left join lateral (select website from scout_places s where s.venue_ref = pi.venue_ref limit 1) sp on true
+       where pi.venue_ref = any($1)`, [refs]);
+    const seedOf = new Map(known.map((k) => [k.venue_ref, k]));
+
     let started = 0;
     const refused = [];
     for (const ref of refs) {
-      try { await enrich(ref, { householdId: household.id, force: true, paid: false }); started += 1; }
-      catch (err) { refused.push({ ref, why: whySourceFailed(err?.provider ?? 'own', err) }); }
+      const k = seedOf.get(ref);
+      const name = named.get(ref)?.name ?? null;
+      if (!name || k?.lat == null) {
+        // Nothing of ours says which place this is, and finding out costs a
+        // call. That is a collection run, not this one.
+        refused.push({ ref, why: 'we hold no name or position to go looking with' });
+        continue;
+      }
+      try {
+        await enrich(ref, {
+          householdId: household.id,
+          seed: { name, lat: k.lat, lng: k.lng, website: k.website, locality: k.locality, category: k.subcategory },
+          // Asked again, but never erasing: a source that happens to answer with
+          // nothing is not evidence that what it said last time was wrong, and
+          // `force` alone would throw the old facts away (Codex, 17 Sep 2026).
+          force: true, replace: false, paid: false,
+        });
+        started += 1;
+      } catch (err) { refused.push({ ref, why: whySourceFailed(err?.provider ?? 'own', err) }); }
     }
     await index.rescore();
     await index.refreshStats();
@@ -887,6 +924,16 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     const at = new Map(pos.map((p) => [p.venue_ref, p]));
     let asked = 0;
     const refused = [];
+    /**
+     * The names, for this screen and no longer.
+     *
+     * A provider's name is rented: it is handed back so the rows the back office
+     * is looking at stop being bare identifiers, and it is **not written down**
+     * (CLAUDE.md). What *is* kept is ours — the band, which is a judgement made
+     * at the moment of the call, and the identifier, so the next question does
+     * not have to be matched again.
+     */
+    const names = [];
     for (const ref of refs) {
       try {
         const id = ref.startsWith('google:') ? ref.slice(7) : (await googleMatchFor({
@@ -895,15 +942,65 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
           householdId: household.id, strict: true,
         }))?.id ?? null;
         if (!id) { refused.push({ ref, why: 'no match' }); continue; }
-        await detailFor('google', id, household.id);
-        await index.noteMany([{ ref }], { source: 'google', sourceId: id });
+        const detail = await detailFor('google', id, household.id);
+        // Banded here, and the figures go no further: `crowdBand` and
+        // `countBand` are the only things that leave this block, and the rating
+        // and the review count die with the response (domain/scoring.js).
+        const crowd = crowdBand(detail?.rating, detail?.ratingCount);
+        const count = countBand(detail?.ratingCount);
+        if (crowd || count) {
+          await query(
+            `insert into place_records (venue_ref, crowd_band, count_band, banded_at, updated_at)
+             values ($1,$2,$3, now(), now())
+             on conflict (venue_ref) do update
+                set crowd_band = coalesce(excluded.crowd_band, place_records.crowd_band),
+                    count_band = coalesce(excluded.count_band, place_records.count_band),
+                    banded_at = now(), updated_at = now()`,
+            [ref, crowd, count]);
+        }
+        // The identifier goes on the row it belongs to, not in the options —
+        // `noteMany` reads it per place (Codex, 17 Sep 2026).
+        await index.noteMany([{ ref, sourceId: id }], { source: 'google' });
+        if (detail?.name) names.push({ ref, name: detail.name });
         asked += 1;
       } catch (err) {
         if (err?.provider !== 'google') throw err;
         refused.push({ ref, why: whySourceFailed('google', err) });
       }
     }
-    res.json({ asked, refused, spentPence: Math.round(asked * 1.4) });
+    if (asked) { await index.rescore(); await index.refreshStats(); }
+    res.json({ asked, refused, names, spentPence: Math.round(asked * 1.4) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Look for a picture of this place we are allowed to keep.
+ *
+ * Walks the ladder in `sources/placePicture.js` — the venue's own logo, then
+ * Wikimedia Commons, then street level — and **writes the bytes and every
+ * licence field into the library**, which is what makes a picture appear.
+ * Enriching a place can learn that a Wikipedia image exists; only this puts one
+ * on the place (Codex, 17 Sep 2026).
+ */
+router.post('/pictures/find', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 25);
+    if (!refs.length) throw bad('Nothing selected.');
+    const { rows } = await query(`
+      select pi.venue_ref, pi.lat, pi.lng, pi.subcategory as category,
+             coalesce(r.name, a.name) as name,
+             coalesce(r.website, a.website) as website,
+             coalesce(r.wikidata_id, a.wikidata_id) as wikidata_id,
+             coalesce(r.wikipedia_url, a.wikipedia_url) as wikipedia_url
+        from place_index pi
+        left join place_records r on r.venue_ref = pi.venue_ref
+        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+       where pi.venue_ref = any($1)`, [refs]);
+    const out = [];
+    for (const place of rows) out.push({ ref: place.venue_ref, ...(await pictureFor(place, { force: true })) });
+    await index.rescore();
+    await index.refreshStats();
+    res.json({ found: out.filter((o) => o.state === 'found').length, results: out, spentPence: 0 });
   } catch (err) { next(err); }
 });
 

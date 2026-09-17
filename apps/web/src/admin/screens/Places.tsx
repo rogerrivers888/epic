@@ -1152,6 +1152,8 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
   const [desc, setDesc] = useQueryState<boolean>('desc', true, { read: (r) => r !== '0', write: (v) => (v ? null : '0') });
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  /** Names fetched from a provider for this screen alone. Never stored. */
+  const [fetched, setFetched] = useState<Record<string, string>>({});
   const [bar, setBar] = useState<ReadyBars['subcategories'][number] | null>(null);
   useEffect(() => { api.adminReadyBars().then((b) => setBar(b.subcategories.find((x) => x.key === sub) ?? null)).catch(() => setBar(null)); }, [sub]);
   useEffect(() => { onNames({ sub: bar?.label ?? sub, cat: bar?.categoryLabel, needs: bar?.facts.filter((f) => f.required).map((f) => f.fact) }); }, [bar, sub, onNames]);
@@ -1173,7 +1175,12 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
     { key: 'name', label: 'Place', tip: 'placeRow', grow: true,
       // A nameless row is the finding: Google is the only source that has ever
       // seen this place, so there is no name we are allowed to hold.
-      cell: (r) => <Text style={[styles.rowName, !r.name && styles.refName]} numberOfLines={1}>{r.name ?? r.ref}</Text> },
+      cell: (r) => (
+        <View style={styles.nameCell}>
+          <Text style={[styles.rowName, !(r.name ?? fetched[r.ref]) && styles.refName]} numberOfLines={1}>{r.name ?? fetched[r.ref] ?? r.ref}</Text>
+          {!r.name && fetched[r.ref] ? <Text style={styles.rowNote}>fetched · not kept</Text> : null}
+        </View>
+      ) },
     { key: 'unseen', label: 'Unseen by', tip: 'unseenBy', width: 104, align: 'left', sort: 'unseen',
       cell: (r) => (r.unseenBy.length === 0 ? <Blank />
         : r.unseenBy.length === 1 ? <Word muted>{sourceWord(r.unseenBy[0])}</Word>
@@ -1272,7 +1279,15 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
                      : nameless ? `Fetch the ${nameless} name${nameless === 1 ? '' : 's'} · ${pounds(Math.round(nameless * 1.4))}`
                      : picked.size ? 'Nothing to fetch · we hold every name' : 'Fetch the names'}
              disabled={!canManage || !nameless || busy != null}
-             onPress={() => { setBusy('google'); api.adminAskAboutPlaces(data?.rows.filter((r) => picked.has(r.ref) && !r.name).map((r) => r.ref) ?? []).finally(() => { setBusy(null); setPicked(new Set()); reload(); }); }} />
+             onPress={() => {
+               setBusy('google');
+               api.adminAskAboutPlaces(data?.rows.filter((r) => picked.has(r.ref) && !r.name).map((r) => r.ref) ?? [])
+                 // Held for this screen and not written down: a provider's name
+                 // is rented, and the row it fills stops being a bare id only
+                 // while you are looking at it.
+                 .then((r) => setFetched((f) => ({ ...f, ...Object.fromEntries(r.names.map((n) => [n.ref, n.name])) })))
+                 .finally(() => { setBusy(null); setPicked(new Set()); reload(); });
+             }} />
       </Footer>
     </>
   );
@@ -1459,7 +1474,7 @@ function PlaceBoard({ refId, canManage, onClose, phone }: { refId: string; canMa
       {tab === 'record' ? <RecordTab place={place} canManage={canManage} onSaved={load} /> : null}
       {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} /> : null}
       {tab === 'score' ? <ScoreTab refId={refId} canManage={canManage} /> : null}
-      {tab === 'pictures' ? <PlacePicturesTab place={place} canManage={canManage} /> : null}
+      {tab === 'pictures' ? <PlacePicturesTab place={place} canManage={canManage} onFound={load} /> : null}
       {tab === 'raw' ? <RawTab refId={refId} /> : null}
       {tab === 'history' ? <HistoryTab refId={refId} /> : null}
     </AdminPage>
@@ -1575,7 +1590,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
               asking a household is a message and needs a sender key, which is
               the owner's to add — so it says so rather than doing nothing. */}
           <Act label={busy === 'commons' ? 'Looking…' : 'Look on Commons · free'} small tone="secondary" disabled={!canManage || busy != null}
-               onPress={() => { setBusy('commons'); api.adminCuratePlaces([place.ref]).finally(() => { setBusy(null); onSaved(); }); }} />
+               onPress={() => { setBusy('commons'); api.adminFindPictures([place.ref]).finally(() => { setBusy(null); onSaved(); }); }} />
           <Act label="Ask a household · needs a sender" small tone="secondary" disabled onPress={() => {}} />
         </View>
 
@@ -1879,7 +1894,7 @@ const weightRows = (w: any) => {
 };
 
 /** The pictures on one place, with every licence field. */
-function PlacePicturesTab({ place, canManage }: { place: PlaceDetail; canManage: boolean }) {
+function PlacePicturesTab({ place, canManage, onFound }: { place: PlaceDetail; canManage: boolean; onFound: () => void }) {
   const [sel, setSel] = useState(0);
   const [looking, setLooking] = useState(false);
   const { width } = useViewport();
@@ -1893,7 +1908,7 @@ function PlacePicturesTab({ place, canManage }: { place: PlaceDetail; canManage:
               household is a message, and a message needs a sender key the owner
               has to add — so it says so rather than doing nothing. */}
           <Act label={looking ? 'Looking…' : 'Look on Commons · free'} tone="secondary" disabled={!canManage || looking}
-               onPress={() => { setLooking(true); api.adminCuratePlaces([place.ref]).finally(() => setLooking(false)); }} />
+               onPress={() => { setLooking(true); api.adminFindPictures([place.ref]).finally(() => { setLooking(false); onFound(); }); }} />
           <Act label="Ask a household · needs a sender" tone="secondary" disabled onPress={() => {}} />
         </View>
       </View>
