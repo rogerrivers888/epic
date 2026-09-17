@@ -1798,7 +1798,9 @@ function ScoreTab({ refId, canManage }: { refId: string; canManage: boolean }) {
   const [missing, setMissing] = useState(false);
   const load = useCallback(() => {
     setData(null);
-    api.adminScore(refId).then((d) => { setData(d); setMissing(false); }).catch(() => setMissing(true));
+    api.adminScore(refId)
+      .then((d) => { setData(d.scored === false ? null : d); setMissing(d.scored === false); })
+      .catch(() => setMissing(true));
   }, [refId]);
   useEffect(load, [load]);
   const { width } = useViewport();

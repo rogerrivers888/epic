@@ -61,9 +61,25 @@ export async function discardExpiredFacts() {
 
 export async function ensureRecord(venueRef) {
   await query('insert into place_records (venue_ref) values ($1) on conflict do nothing', [venueRef]);
-  // A place we hold our own research on is owned, and the index has to know the
-  // moment it becomes one (Codex, 17 Sep 2026). Awaited: the next read on this
-  // path is often the screen that just asked for it.
+  // The row, not the claim.
+  //
+  // `ensureRecord` runs *before* the research does, so calling the place owned
+  // here marked an empty record — and a failed one — as a place we hold our own
+  // facts about. Collect then skipped it as not worth a paid call and left the
+  // free window closed on it for a year, while coverage said the county was in
+  // better shape than it was (Codex, 17 Sep 2026). Ownership is claimed by
+  // `own()` when a fact actually lands.
+  await noteMany([{ ref: venueRef }], { source: 'own' });
+}
+
+/**
+ * Now we hold something of our own about it.
+ *
+ * Called from the research itself, once a fact has been written. This is the
+ * only place the index is told a place is owned outside a full rebuild, and the
+ * rebuild asks the same question of the same columns.
+ */
+export async function noteOwned(venueRef) {
   await noteMany([{ ref: venueRef, ownership: 'owned' }], { source: 'own' });
 }
 
@@ -99,12 +115,19 @@ export async function knownCategory(venueRef) {
  */
 export async function writeRecord(venueRef, columns, values, attribution, provenance) {
   const sets = columns.map((c, i) => `${c} = $${i + 2}`).join(', ');
-  await query(
+  const { rows } = await query(
     `update place_records set ${sets},
        attribution = $${columns.length + 2}, provenance = $${columns.length + 3}, updated_at = now()
-     where venue_ref = $1`,
+     where venue_ref = $1
+     returning (coalesce(summary, website, opening_hours, price_range, address, phone) is not null
+                or accessibility <> '{}'::jsonb
+                or curated_at is not null) as holds_something`,
     [venueRef, ...values, JSON.stringify(attribution), JSON.stringify(provenance)],
   );
+  // This is the moment a place becomes ours: a fact of our own has landed on
+  // it. Before this, the record is an empty row `ensureRecord` made so the
+  // research had somewhere to write (Codex, 17 Sep 2026).
+  if (rows[0]?.holds_something) await noteOwned(venueRef);
 }
 
 export async function recordAttempt(venueRef, a) {

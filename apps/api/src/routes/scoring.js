@@ -45,13 +45,23 @@ router.get('/weights', requires('view_library'), async (req, res, next) => {
  * for are worked out and the rest are marked as not held, which is the more
  * useful reading anyway — "this is 3.1 because we know four things about it"
  * is the sentence the whole screen exists to make possible.
+ *
+ * A place we hold *nothing* to score answers 200 and says so. It used to be a
+ * 404, which the screen read correctly and the browser console read as an error
+ * — an ordinary state should not look like a failure (found by opening the
+ * screen, 17 Sep 2026).
  */
 router.get('/', requires('view_library'), async (req, res, next) => {
   try {
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw Object.assign(new Error('Which place? Pass its ref.'), { status: 400, code: 'ref_required' });
     const row = await scoringInputsFor(ref);
-    if (!row) return res.status(404).json({ error: 'not_found', message: 'Nothing held for that ref — it has not been swept or claimed.' });
+    if (!row) {
+      return res.json({
+        ref, name: null, scored: false,
+        why: 'Not scored — this place has not been swept or claimed.',
+      });
+    }
 
     const name = row.record_name ?? row.sweep_name ?? null;
     // The scale the sweep stored, not one re-derived here: a national group
@@ -73,7 +83,7 @@ router.get('/', requires('view_library'), async (req, res, next) => {
     };
     const out = workings(input);
     res.json({
-      ref, name,
+      ref, name, scored: true,
       ...out,
       // What is on the row against what this recalculation says. They differ
       // whenever a menu has been read or an accolade found since the sweep, and
@@ -98,7 +108,12 @@ router.post('/', requires('manage_library'), async (req, res, next) => {
     const ref = String(req.body?.ref ?? '').trim();
     if (!ref) throw Object.assign(new Error('Which place? Pass its ref.'), { status: 400, code: 'ref_required' });
     const row = await scoringInputsFor(ref);
-    if (!row) return res.status(404).json({ error: 'not_found', message: 'Nothing held for that ref — it has not been swept or claimed.' });
+    if (!row) {
+      return res.json({
+        ref, name: null, scored: false,
+        why: 'Not scored — this place has not been swept or claimed.',
+      });
+    }
     const name = row.record_name ?? row.sweep_name ?? null;
     const scale = row.chain_scale ?? chainScale({ name, sites: row.sites ?? (row.chain ? 2 : 1) }).scale;
     const out = workings({

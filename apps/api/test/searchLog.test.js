@@ -369,3 +369,53 @@ test('the three kinds of ownership are counted as three', async () => {
   assert.equal(direct.claimed, 1);
   assert.equal(direct.identified, 1);
 });
+
+test('a subcategory finds its own five numbers without being told its category', async () => {
+  // The rollup keeps the category on a subcategory row because it is worth
+  // reading; the lookup asked for `category = ''` against rows stored under
+  // `culture`, so the subcategory board printed a dash for every one of its
+  // five numbers while its own list showed twelve places (found by opening the
+  // screen, 17 Sep 2026).
+  await query(`insert into localities (slug, name, kind, parent_slug)
+               values ('subshire', 'Subshire', 'county', 'gb') on conflict (slug) do nothing`);
+  const { rows: [sub] } = await query(
+    `select key, category_key from shelf_subcategories where active limit 1`);
+  const refs = ['osm:node/sub-1', 'osm:node/sub-2'];
+  await index.noteMany(refs.map((ref) => ({ ref })), { countryCode: 'GB' });
+  await query(
+    `update place_index set subcategory = $2, category = $3, derived_by = 'hand' where venue_ref = any($1)`,
+    [refs, sub.key, sub.category_key]);
+  await query(
+    `insert into place_areas (venue_ref, area_slug) select r, 'subshire' from unnest($1::text[]) as r
+     on conflict do nothing`, [refs]);
+  await index.refreshStats();
+
+  const asked = await index.statsFor('subshire', { subcategory: sub.key });
+  assert.equal(asked.known, 2, 'the subcategory decides its own category');
+  // And a category on its own still answers for the category grain.
+  const cat = await index.statsFor('subshire', { category: sub.category_key });
+  assert.equal(cat.known, 2);
+});
+
+test('an empty record is not research, and the write that earns it says so', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'osm:node/earn-it';
+  // `ensureRecord` runs *before* the research: calling this owned marked every
+  // place we had merely noticed as one we had researched, which took it out of
+  // Collect's reach and overstated coverage (Codex, 17 Sep 2026).
+  await owned.ensureRecord(ref);
+  let { rows: [row] } = await query('select ownership from place_index where venue_ref = $1', [ref]);
+  assert.equal(row.ownership, 'identified');
+
+  // A fact of our own lands, and now it is ours.
+  await owned.writeRecord(ref, ['summary'], ['A sentence we wrote.'], [], { name: 'osm' });
+  ({ rows: [row] } = await query('select ownership from place_index where venue_ref = $1', [ref]));
+  assert.equal(row.ownership, 'owned');
+
+  // And the full rebuild asks the same question of the same columns.
+  const bare = 'osm:node/still-empty';
+  await owned.ensureRecord(bare);
+  await index.reindex();
+  const { rows: [after] } = await query('select ownership from place_index where venue_ref = $1', [bare]);
+  assert.equal(after.ownership, 'identified', 'a rebuild must not promote an empty row either');
+});

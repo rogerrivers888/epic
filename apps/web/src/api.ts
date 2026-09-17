@@ -2480,7 +2480,15 @@ export const api = {
    * ranking with the licensed input removed, which is what proves the ordering
    * survives a provider going dark.
    */
-  adminScore: (ref: string) => request<ScoreWorkings>(`/api/admin/score${qs({ ref })}`),
+  /**
+   * One place's score and how it got there.
+   *
+   * A place we hold nothing to score comes back with `scored: false` and the
+   * words to print — a 200, not a 404, because "never swept" is an ordinary
+   * state rather than a failure.
+   */
+  adminScore: (ref: string) =>
+    request<ScoreWorkings & { scored?: boolean; why?: string }>(`/api/admin/score${qs({ ref })}`),
   adminScoreWeights: () => request<{ weights: Record<string, any> }>('/api/admin/score/weights'),
 
   /** BO3a / BO3c — the runs that spend, and which of them need looking at. */

@@ -36,6 +36,21 @@ export const SOURCES = [
 
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
+/**
+ * What makes a `place_records` row an *owned* place.
+ *
+ * Any one fact of our own is enough — a sentence we wrote, the address of their
+ * own page, the hours they publish, a price band, a street, a telephone number,
+ * whether you can get in without steps. An empty row is a place we have noticed
+ * and not researched, and calling that owned is how 1,357 of 1,361 places came
+ * to look researched on a board whose average score was ten (17 Sep 2026).
+ */
+const OWNED_RECORD = `(
+  coalesce(r.summary, r.website, r.opening_hours, r.price_range, r.address, r.phone) is not null
+  or r.accessibility <> '{}'::jsonb
+  or r.curated_at is not null
+)`;
+
 // ---------------------------------------------------------------------------
 // the bar
 // ---------------------------------------------------------------------------
@@ -179,14 +194,23 @@ export async function reindex({ onProgress = null } = {}) {
            lng = coalesce(place_index.lng, excluded.lng),
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
 
+  // An owned record is one that holds something of ours to read.
+  //
+  // `ensureRecord` makes an empty row the moment a household touches a place,
+  // and calling that owned counted every place we had merely *noticed* as one
+  // we had researched — so coverage read better than it was and Collect skipped
+  // the places that most needed it (Codex, 17 Sep 2026). The same question
+  // `noteOwned` answers, asked of the same columns.
   await query(`
     insert into place_index (venue_ref, lat, lng, derived_by, ownership, first_seen, last_seen)
-    select r.venue_ref, r.lat, r.lng, 'own', 'owned', r.first_owned, r.updated_at
+    select r.venue_ref, r.lat, r.lng, 'own',
+           case when ${OWNED_RECORD} then 'owned' else 'identified' end,
+           r.first_owned, r.updated_at
       from place_records r
     on conflict (venue_ref) do update
        set lat = coalesce(place_index.lat, excluded.lat),
            lng = coalesce(place_index.lng, excluded.lng),
-           ownership = 'owned',
+           ownership = case when excluded.ownership = 'owned' then 'owned' else place_index.ownership end,
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
 
   // A household claiming a place is the third kind of ownership: we may hold
@@ -809,9 +833,17 @@ const FIVE = `
 
 /** The five numbers every level prints, for one area. */
 export async function statsFor(areaSlug, { category = '', subcategory = '' } = {}) {
+  // A subcategory decides its own category, so asking for both would be asking
+  // the caller to know something it has no reason to. The rollup keeps the
+  // category on the row because it is worth reading; the *lookup* ignores it
+  // whenever a subcategory is given — otherwise the subcategory board asked for
+  // `category = ''` against rows stored under `culture` and every one of its
+  // five numbers came back a dash while its own list showed twelve places
+  // (found by opening the screen, 17 Sep 2026).
   const { rows } = await query(
     `select ${FIVE} from area_stats st
-      where st.area_slug = $1 and st.category = $2 and st.subcategory = $3 and st.source = '' and st.ownership = ''`,
+      where st.area_slug = $1 and st.subcategory = $3 and st.source = '' and st.ownership = ''
+        and ($3 <> '' or st.category = $2)`,
     [lower(areaSlug), category ?? '', subcategory ?? '']);
   const r = rows[0] ?? { known: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, avg_score: null };
   return {

@@ -49,3 +49,13 @@ test('a meter handed over as JSON text is priced the same as an object', () => {
   // And something that is not JSON at all is nought rather than a throw.
   assert.equal(costOf('not json'), 0);
 });
+
+test('a bare count is priced against the provider that was called', () => {
+  // `logRouting` passes a number of Routes calls, not a keyed meter. Those rows
+  // went into the ledger at no cost, so routing spend was invisible to the
+  // ceiling (Codex, 17 Sep 2026).
+  assert.equal(costOf(4, 'google-routes'), costOf({ 'google-routes': 4 }));
+  assert.equal(costOf('4', 'google-routes'), costOf({ 'google-routes': 4 }));
+  // A number with nobody to attribute it to is not guessed at.
+  assert.equal(costOf(4), 0);
+});
