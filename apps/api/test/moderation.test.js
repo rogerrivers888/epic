@@ -348,3 +348,30 @@ test('a household is told only about a rejection that was written down', async (
   assert.equal(row.told, false);
   assert.match(out.why ?? '', /nothing was sent/);
 });
+
+test('a rejected offer’s introduction is not readable by its own address', async () => {
+  const openTo = await import('../src/repositories/openTo.js');
+  const mine = await aHousehold(query);
+  const theirs = await aHousehold(query);
+  const entry = async (h) => (await query(
+    `insert into open_entries (household_id, scope, kind, state) values ($1, 'standing', 'adult', 'active') returning *`,
+    [h.household.id])).rows[0];
+  const a = await entry(mine);
+  const b = await entry(theirs);
+  const { rows: [match] } = await query(
+    `insert into open_matches (host_entry_id, guest_entry_id, kind, stage)
+     values ($1,$2,'adult','videos') returning *`, [a.id, b.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'open_entry' and subject_id = $1`, [a.id]);
+
+  assert.ok(await openTo.matchById(match.id), 'readable while it is live');
+
+  // The list already dropped ended matches; the point reads did not, so
+  // somebody holding an existing link could still fetch a moderated
+  // introduction and the private hello videos inside it (Codex, 17 Sep 2026).
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+  assert.equal(await openTo.matchById(match.id), null, 'and not once it has been ended');
+  // The paths that have to see one to act on it still can.
+  assert.ok(await openTo.matchById(match.id, null, { withEnded: true }));
+});

@@ -104,6 +104,10 @@ export async function totals({ areaSlug = null, since = 30 } = {}) {
               count(*) filter (where outcome = 'tripped')::int as tripped
          from searches
         where at > now() - ($1 || ' days')::interval and ($2::text is null or area_slug = $2)
+          -- Not the ones already folded up. A roll-up without dropping leaves
+          -- the rows in place *and* writes the aggregate, so counting both
+          -- doubled every rolled search for ever (Codex, 17 Sep 2026).
+          and rolled_at is null
      ), folded as (
        select coalesce(sum(searches), 0)::int as searches, coalesce(sum(empty), 0)::int as empty,
               coalesce(sum(no_click), 0)::int as no_click, coalesce(sum(no_trip), 0)::int as no_trip,
@@ -122,15 +126,32 @@ export async function totals({ areaSlug = null, since = 30 } = {}) {
 
 /** What was asked for, and how each subject is failing. */
 export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}) {
+  // The rows we still hold *and* the months folded up, the same two terms the
+  // headline figures add. Reading only the live rows meant the totals would
+  // include a rolled month and every subject row would leave it out, which is a
+  // board that does not add up — and the rollup keeps the subject on purpose
+  // (Codex, 17 Sep 2026).
   const { rows } = await query(
-    `select coalesce(subject, '') as subject,
-            count(*)::int as searches,
-            count(*) filter (where empty)::int as empty,
-            count(*) filter (where not empty and outcome = 'none')::int as no_click,
-            count(*) filter (where outcome in ('clicked','saved'))::int as no_trip
-       from searches
-      where at > now() - ($1 || ' days')::interval and ($2::text is null or area_slug = $2)
-      group by 1 order by count(*) desc limit $3`,
+    `with both as (
+       select coalesce(subject, '') as subject, 1 as searches,
+              (case when empty then 1 else 0 end) as empty,
+              (case when not empty and outcome = 'none' then 1 else 0 end) as no_click,
+              (case when outcome in ('clicked','saved') then 1 else 0 end) as no_trip
+         from searches
+        where at > now() - ($1 || ' days')::interval
+          and ($2::text is null or area_slug = $2)
+          and rolled_at is null
+       union all
+       select subject, searches, empty, no_click, no_trip
+         from search_rollups
+        where month >= date_trunc('month', now() - ($1 || ' days')::interval)
+          and ($2::text is null or area_slug = $2)
+     )
+     select subject,
+            sum(searches)::int as searches, sum(empty)::int as empty,
+            sum(no_click)::int as no_click, sum(no_trip)::int as no_trip
+       from both
+      group by 1 order by sum(searches) desc limit $3`,
     [String(since), areaSlug, limit]);
   return rows.map((r) => ({
     subject: r.subject || null, searches: r.searches, empty: r.empty, noClick: r.no_click, noTrip: r.no_trip,

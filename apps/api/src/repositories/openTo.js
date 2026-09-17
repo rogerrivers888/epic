@@ -95,8 +95,22 @@ export async function candidatesFor(entry) {
 // introductions
 // ---------------------------------------------------------------------------
 
-export async function matchById(id, client) {
-  const { rows } = await on(client)('select * from open_matches where id = $1', [id]);
+/**
+ * One introduction, by its address.
+ *
+ * An ended one is not readable. The list already dropped them; the point reads
+ * did not, so somebody holding an existing link could still fetch a moderated
+ * introduction and the private hello videos inside it after the offer behind it
+ * had been rejected (Codex, 17 Sep 2026). A moderator's decision has to reach
+ * the thing, and a URL somebody already has is the thing.
+ *
+ * `withEnded` is for the paths that have to see one to act on it — ending it,
+ * or reading its state for the person who ended it.
+ */
+export async function matchById(id, client, { withEnded = false } = {}) {
+  const { rows } = await on(client)(
+    `select * from open_matches
+      where id = $1 and ($2 or stage not in ('ended', 'lapsed'))`, [id, withEnded]);
   return rows[0] ?? null;
 }
 
