@@ -14,11 +14,14 @@
  */
 
 import express from 'express';
-import { requires } from '../access.js';
+import { can, requires } from '../access.js';
 import { query } from '../db.js';
 import * as searches from '../repositories/searches.js';
 import * as index from '../repositories/placeIndex.js';
 import { faultOf, SHORT_FAULT } from '../domain/placeIndex.js';
+import { detailFor } from '../sources/compare.js';
+import { googleSource } from '../sources/google.js';
+import { currentHousehold } from './household.js';
 
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -99,6 +102,35 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
     const shown = events.filter((e) => e.kind === 'shown');
     const refs = [...new Set(events.map((e) => e.venue_ref).filter(Boolean))];
     const names = await index.namesFor(refs);
+
+    /**
+     * The names we do not hold, asked for rather than claimed.
+     *
+     * `namesFor` reads only what is ours, and deliberately never hands back a
+     * stored copy of a provider's name — so a Google-only row comes back
+     * nameless. The replay used to count those as "refetched" and put a price
+     * on them without a single call going out (Codex, 17 Sep 2026).
+     *
+     * Asking is opt-in (`?names=1`), needs `manage_library` because it spends,
+     * and what comes back is handed to this screen and written down nowhere.
+     */
+    const nameless = refs.filter((r) => !names.get(r)?.name && String(r).startsWith('google:'));
+    let asked = 0;
+    let why = null;
+    if (!nameless.length) why = null;
+    else if (String(req.query.names ?? '') !== '1') why = 'not asked';
+    else if (!can(req, 'manage_library')) why = 'asking costs a call, and that needs Manage the library';
+    else if (!googleSource.enabled()) why = 'Google is not switched on here';
+    else {
+      const household = await currentHousehold();
+      for (const ref of nameless) {
+        try {
+          const detail = await detailFor('google', ref.slice(7), household.id);
+          if (detail?.name) { names.set(ref, { name: detail.name, from: 'google' }); asked += 1; }
+        } catch { /* one that will not answer is one bare row, not a failed replay */ }
+      }
+      if (!asked) why = 'asked, and none of them answered';
+    }
     const { rows: scored } = await query(
       'select venue_ref, data_score, subcategory from place_index where venue_ref = any($1)', [refs]);
     const byRef = new Map(scored.map((r) => [r.venue_ref, r]));
@@ -173,9 +205,13 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       sourcesQueried: (search.sources_queried ?? []).map((k) => SOURCE_WORD[k] ?? k),
       degraded: search.degraded ?? [],
       rows,
-      // What this replay cost: a name we do not hold has to be fetched.
-      refetched: rows.filter((r) => !r.name).length,
-      refetchedPence: rows.filter((r) => !r.name).length * 1.4,
+      // What this replay actually cost, and what is still bare. A figure that
+      // counts what was *not* fetched is a bill for nothing.
+      refetched: asked,
+      refetchedPence: Math.round(asked * 1.4 * 10) / 10,
+      nameless: rows.filter((r) => !r.name).length,
+      // Why a row is still an identifier — never left to be guessed at.
+      namelessWhy: why,
     });
   } catch (err) { next(err); }
 });

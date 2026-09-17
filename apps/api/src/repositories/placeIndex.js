@@ -614,6 +614,16 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
               ownership = case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'
                                when place_index.ownership = 'claimed' or excluded.ownership = 'claimed' then 'claimed'
                                else 'identified' end,
+              -- An ownership that moved is a place that counts differently, and
+              -- area_stats counts ownership. Clearing placed_at puts it back
+              -- in settleNew's hands so the rollups catch up on the hour
+              -- rather than at the next full rebuild (Codex, 17 Sep 2026).
+              placed_at = case
+                when place_index.ownership <> (
+                  case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'
+                       when place_index.ownership = 'claimed' or excluded.ownership = 'claimed' then 'claimed'
+                       else 'identified' end)
+                then null else place_index.placed_at end,
               last_seen = now()`,
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified']));
     // Who has returned each place, which may be more than one of them.
@@ -634,7 +644,7 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
     });
     if (triples.length) {
       const src = triples.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
-      await exec(
+      const said = await exec(
         `insert into place_index_sources (venue_ref, source, source_place_id)
          values ${src}
          on conflict (venue_ref, source) do update
@@ -642,8 +652,17 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
                 -- An identifier we have just paid to find fills a row that had
                 -- none. It never overwrites one we already hold: the match is
                 -- the thing that stops us paying for it twice (Codex, 17 Sep).
-                source_place_id = coalesce(place_index_sources.source_place_id, excluded.source_place_id)`,
+                source_place_id = coalesce(place_index_sources.source_place_id, excluded.source_place_id)
+         -- xmax is nought on a row this statement inserted, which is how a new
+         -- source is told from one we already knew about.
+         returning venue_ref, (xmax = 0) as first_time`,
         triples.flat());
+      // A source nobody had seen before changes the sources lens, so those
+      // places go back in the settling queue too.
+      const fresh = [...new Set(said.rows.filter((r) => r.first_time).map((r) => r.venue_ref))];
+      if (fresh.length) {
+        await exec('update place_index set placed_at = null where venue_ref = any($1)', [fresh]);
+      }
     }
     return { noted: rows.length };
   };

@@ -164,8 +164,16 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
  */
 function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; canManage: boolean }) {
   const [data, setData] = useState<SearchReplay | null>(null);
+  const [asking, setAsking] = useState(false);
   useEffect(() => { setData(null); api.adminDemandSearch(id).then(setData).catch(() => setData(null)); }, [id]);
   if (!data) return <AdminPage><Waiting /></AdminPage>;
+  // Asking for the names we hold none of is a paid call each, so it is a button
+  // with the price on it and never something the drawer does on open. The
+  // count used to be printed as though it had happened (Codex, 17 Sep 2026).
+  const askNames = () => {
+    setAsking(true);
+    api.adminDemandSearch(id, true).then(setData).catch(() => null).finally(() => setAsking(false));
+  };
 
   const columns: Col<SearchReplay['rows'][number]>[] = [
     { key: 'no', label: 'No.', tip: 'position', width: 42, align: 'left',
@@ -230,8 +238,18 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
         <Fact label="Sources asked" value={data.sourcesQueried.length ? data.sourcesQueried.join(', ') : '—'} />
         <Fact label="Any degraded" value={data.degraded.length ? data.degraded.join(', ') : 'no'} />
         <Fact label="Names re-fetched for this replay" value={data.refetched ? `${data.refetched} · ${pounds(Math.round(data.refetchedPence))}` : 'none'} />
+        {/* A row we hold no name for stays an identifier, and the reason it
+            does is said out loud rather than read as a bill (Codex, 17 Sep
+            2026: the count used to price names nothing had fetched). */}
+        {data.nameless ? <Fact label="Still an identifier" value={`${data.nameless}${data.namelessWhy ? ` · ${data.namelessWhy}` : ''}`} /> : null}
         <Fact label="Held against" value={data.heldAgainst} />
       </View>
+      {data.nameless && data.namelessWhy === 'not asked' ? (
+        <Footer left={<Word muted>{`${data.nameless} of these are identifiers we hold no name for. Asking Google costs a call each.`}</Word>}>
+          <Act label={asking ? 'Asking…' : `Ask for the ${data.nameless} missing names · ${pounds(Math.round(data.nameless * 1.4))}`}
+               icon="search" disabled={!canManage || asking} onPress={askNames} />
+        </Footer>
+      ) : null}
     </AdminPage>
   );
 }

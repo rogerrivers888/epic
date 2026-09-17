@@ -1568,7 +1568,10 @@ export type SearchReplay = {
     position: number; ref: string | null; name: string | null; subcategory: string | null;
     score: number | null; scoreThen: boolean; did: string; strong: boolean; dwellMs: number | null;
   }[];
+  /** What the replay actually asked for and what it cost. */
   refetched: number; refetchedPence: number;
+  /** Rows that are still bare identifiers, and why they still are. */
+  nameless: number; namelessWhy: string | null;
 };
 
 
@@ -2482,7 +2485,15 @@ export const api = {
   /** BO4a — three numbers, never one rate. */
   adminDemand: (p: { where?: string | null; since?: number } = {}) => request<DemandReport>(`/api/admin/demand${qs(p)}`),
   /** BO4b — one search, replayed exactly as they saw it. */
-  adminDemandSearch: (id: string) => request<SearchReplay>(`/api/admin/demand/search${qs({ id })}`),
+  /**
+   * One search, replayed.
+   *
+   * `names: true` asks the provider for the names of the rows we hold none of.
+   * That is a paid call each and needs Manage the library, so it is opt-in and
+   * the cost is on the button — not something a page load does forty times.
+   */
+  adminDemandSearch: (id: string, names = false) =>
+    request<SearchReplay>(`/api/admin/demand/search${qs({ id, names: names ? '1' : undefined })}`),
   adminDemandSize: () => request<{ rows: string; oldest: string | null }>('/api/admin/demand/size'),
 
   /** BO5a — one queue with a filter, not a queue per kind. */

@@ -343,9 +343,20 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
     const rows = everything.slice(0, 40);
     const labels = new Map((await query('select key, label from shelf_subcategories').then((r) => r.rows)).map((r) => [r.key, r.label]));
     const catLabels = new Map((await query('select key, label from shelf_categories').then((r) => r.rows)).map((r) => [r.key, r.label]));
-    const known = new Map((await query(
-      `select subcategory, places from area_stats where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''`,
-      [slug ?? ''])).rows.map((r) => [r.subcategory, r.places]));
+    // How many places there are per subject, which decides the fault.
+    //
+    // A ring has no area slug, so reading `area_stats` for one answered nothing
+    // and every subject inside a ring was reported as "no places" — the wrong
+    // one of the three faults, and the one that sends a collection budget
+    // somewhere it is not needed (Codex, 17 Sep 2026). A ring counts its own
+    // refs, the way the rest of its figures do.
+    const known = new Map((scope.kind === 'ring'
+      ? (await query(
+        `select subcategory, count(*)::int as places from place_index
+          where venue_ref = any($1) and subcategory is not null group by subcategory`, [scope.refs])).rows
+      : (await query(
+        `select subcategory, places from area_stats where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''`,
+        [slug ?? ''])).rows).map((r) => [r.subcategory, r.places]));
     res.json({
       ...(await head(scope)),
       since, totals,
@@ -1147,12 +1158,43 @@ async function askTripadvisor(refs, householdId) {
   return { asked, refused, names };
 }
 
-/** How many Tripadvisor calls this month has left, before one is made. */
-async function tripadvisorRoom() {
-  const { rows } = await query(
-    `select count(*)::int as calls from provider_calls
-      where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
-  return Math.max(0, TRIPADVISOR_CAP - (rows[0]?.calls ?? 0));
+/**
+ * How many Tripadvisor calls this month has left — and a claim on them.
+ *
+ * The same shape as `roomToSpend`, and for the same reason: two runs reading
+ * the same unlocked count both found room near the cap and between them went
+ * past it (Codex, 17 Sep 2026). This is the one ceiling that is contractual
+ * rather than budgetary, so it is the one that least tolerates a race.
+ *
+ * `want: 0` asks without claiming, for a screen that only wants to say how many
+ * are left.
+ */
+export async function tripadvisorRoom(want = 0) {
+  return withTransaction(async (client) => {
+    await client.query(
+      `insert into app_settings (key, value) values ('collect.tripadvisor_cap', $1::text::jsonb)
+       on conflict (key) do nothing`, [String(TRIPADVISOR_CAP)]);
+    await client.query(
+      `select value from app_settings where key = 'collect.tripadvisor_cap' for update`);
+    await client.query('delete from spend_reservations where expires_at < now()');
+    const { rows: [made] } = await client.query(
+      `select count(*)::int as calls from provider_calls
+        where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
+    const { rows: [held] } = await client.query(
+      `select coalesce(sum(calls), 0)::int as calls from spend_reservations where provider = 'tripadvisor'`);
+    const left = Math.max(0, TRIPADVISOR_CAP - made.calls - held.calls);
+    // Whatever fits, and never more: a batch is cut to what is left rather than
+    // refused whole, because half a county's worth of answers is worth having.
+    const granted = Math.max(0, Math.min(want, left));
+    let reservation = null;
+    if (granted > 0) {
+      const { rows: [r] } = await client.query(
+        `insert into spend_reservations (pence, calls, provider, holder)
+         values (0, $1, 'tripadvisor', $2) returning id`, [granted, 'collect']);
+      reservation = r.id;
+    }
+    return { left, granted, reservation };
+  });
 }
 
 router.post('/ask', requires('manage_library'), async (req, res, next) => {
@@ -1262,7 +1304,8 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? worthPaying : [];
     // Tripadvisor's ceiling is counted in calls, not in money, so it is enforced
     // here rather than by `roomToSpend`.
-    const taLeft = tripadvisor.length ? await tripadvisorRoom() : 0;
+    // Asked without claiming: the run takes its calls a chunk at a time.
+    const taLeft = tripadvisor.length ? (await tripadvisorRoom(0)).left : 0;
     const taCapped = Math.max(0, tripadvisor.length - taLeft);
     tripadvisor = tripadvisor.slice(0, taLeft);
 
@@ -1331,13 +1374,15 @@ async function work(runId, householdId) {
           await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: Math.round(out.asked * 1.4) });
         } finally { await releaseSpend(room.reservation); }
       } else {
-        const left = await tripadvisorRoom();
-        const may = batch.slice(0, left);
-        const out = may.length ? await askTripadvisor(may, householdId) : { asked: 0, refused: [] };
-        await collectRuns.advance(runId, 'tripadvisor', batch, {
-          done: out.asked,
-          refused: [...out.refused, ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly ceiling' }))],
-        });
+        const room = await tripadvisorRoom(batch.length);
+        const may = batch.slice(0, room.granted);
+        try {
+          const out = may.length ? await askTripadvisor(may, householdId) : { asked: 0, refused: [] };
+          await collectRuns.advance(runId, 'tripadvisor', batch, {
+            done: out.asked,
+            refused: [...out.refused, ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly ceiling' }))],
+          });
+        } finally { await releaseSpend(room.reservation); }
       }
     }
     await index.settleNew();

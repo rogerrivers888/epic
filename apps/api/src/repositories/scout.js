@@ -723,11 +723,17 @@ export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
  * ordering by the other is the drift this exists to stop.
  */
 export async function rescoreOne(venueRef, epicScore, ownedScore) {
+  // Arithmetic only: nothing was fetched, so nothing was seen again.
+  //
+  // `scored_at` and `banded_at` are both claims about *evidence* — when the
+  // rating behind the band was read — and the place detail prints the busy
+  // signal against them. Moving them on a recalculation made a year-old band
+  // read as this morning's (Codex, 17 Sep 2026).
   await query(
-    'update scout_places set epic_score = $2, owned_score = $3, scored_at = now() where venue_ref = $1',
+    'update scout_places set epic_score = $2, owned_score = $3 where venue_ref = $1',
     [venueRef, epicScore, ownedScore]);
   await query(
-    'update place_records set epic_score = $2, banded_at = now() where venue_ref = $1',
+    'update place_records set epic_score = $2, updated_at = now() where venue_ref = $1',
     [venueRef, epicScore]);
   await query(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score)

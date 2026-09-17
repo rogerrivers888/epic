@@ -69,3 +69,32 @@ test('free work is never measured against a ceiling', async () => {
   assert.equal(free.ok, true, 'researching a place from its own page costs nothing');
   assert.equal(free.reservation, null);
 });
+
+test('Tripadvisor is capped in calls, and a claim is what makes it a cap', async () => {
+  await query('delete from spend_reservations');
+  await query("delete from provider_calls where provider = 'tripadvisor'");
+  const { tripadvisorRoom } = await import('../src/routes/placeIndex.js');
+  const cap = Number(process.env.EPIC_LOOKUP_TRIPADVISOR_CAP ?? process.env.ROAM_LOOKUP_TRIPADVISOR_CAP ?? 120);
+
+  // Asking without claiming, for a screen that only wants the number.
+  const look = await tripadvisorRoom(0);
+  assert.equal(look.left, cap);
+  assert.equal(look.reservation, null);
+
+  // A run claims what it is about to ask for, and the next one sees it — which
+  // is the whole difference between a cap and a hope (Codex, 17 Sep 2026).
+  const first = await tripadvisorRoom(cap - 2);
+  assert.equal(first.granted, cap - 2);
+  assert.ok(first.reservation);
+  const second = await tripadvisorRoom(10);
+  assert.equal(second.granted, 2, 'whatever fits, and never more');
+
+  await releaseSpend(first.reservation);
+  await releaseSpend(second.reservation);
+  assert.equal((await tripadvisorRoom(0)).left, cap, 'giving it back gives it back');
+
+  // A claim on calls is never also a claim on money.
+  const held = await tripadvisorRoom(5);
+  assert.equal((await roomToSpend(1, { reserve: false })).claimedPence, 0);
+  await releaseSpend(held.reservation);
+});
