@@ -113,7 +113,14 @@ export async function totals({ areaSlug = null, since = 30 } = {}) {
               coalesce(sum(no_click), 0)::int as no_click, coalesce(sum(no_trip), 0)::int as no_trip,
               coalesce(sum(tripped), 0)::int as tripped
          from search_rollups
+        -- Only a month that lies *wholly* inside the window. Truncating the
+        -- edge to the first of the month pulled the whole of August into a
+        -- thirty-day report made on the 18th of September (Codex, 17 Sep 2026),
+        -- and a rolled month cannot be cut: it is one number for the month.
         where month >= date_trunc('month', now() - ($1 || ' days')::interval)
+                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
+                                  >= (now() - ($1 || ' days')::interval)
+                             then interval '0 month' else interval '1 month' end)
           and ($2::text is null or area_slug = $2)
      )
      select live.searches + folded.searches as searches, live.empty + folded.empty as empty,
@@ -144,7 +151,13 @@ export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}
        union all
        select subject, searches, empty, no_click, no_trip
          from search_rollups
+        -- The same rule as the headline figures: a rolled month is one number
+        -- and cannot be cut, so it counts only when the whole of it is inside
+        -- the window (Codex, 17 Sep 2026).
         where month >= date_trunc('month', now() - ($1 || ' days')::interval)
+                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
+                                  >= (now() - ($1 || ' days')::interval)
+                             then interval '0 month' else interval '1 month' end)
           and ($2::text is null or area_slug = $2)
      )
      select subject,

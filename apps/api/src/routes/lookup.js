@@ -439,12 +439,18 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     // identifiers for, or a provider that is switched off (Codex, 17 Sep 2026).
     // So only what is actually needed is claimed, and a look that costs nothing
     // is never refused.
-    // Three Google requests at worst: the ring search this screen runs, then a
-    // search to match the place, then its detail. All three are billed and only
-    // two were being claimed (Codex, 17 Sep 2026).
-    const wants = googleSource.enabled()
-      ? Math.round(PRICE_PER_UNIT_USD.google * 3 * 100 * USD_TO_GBP)
-      : 0;
+    // What this look will *actually* ask for.
+    //
+    // At worst three Google requests: the ring search this screen runs, a
+    // search to match the place, then its detail. But a cached ring, or a place
+    // we already hold the identifier for, needs fewer — and claiming three
+    // regardless meant a comparison that would spend nothing, or almost
+    // nothing, was refused the Google column near the ceiling (Codex, 17 Sep
+    // 2026). The ring is counted as one because the cache cannot be asked
+    // without running it; the match is counted only where we hold no id.
+    const heldId = ref.startsWith('google:') || Boolean((await matchesFor([ref], 'google')).get(ref));
+    const calls = googleSource.enabled() ? 1 + (heldId ? 1 : 2) : 0;
+    const wants = Math.round(PRICE_PER_UNIT_USD.google * calls * 100 * USD_TO_GBP);
     const room = await roomToSpend(wants, { holder: 'lookup.compare' });
     const taWants = tripadvisorSource.enabled()
       ? Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP)
@@ -563,6 +569,19 @@ router.post('/rate', requires('manage_library'), async (req, res, next) => {
     const kind = req.body?.kind === 'food' ? 'food' : 'activities';
     const limit = Math.min(60, Math.max(1, Number(req.body?.limit) || 30));
     if (!googleSource.enabled()) return res.status(409).json({ error: 'google_off', message: 'Google is not switched on here.' });
+    // The ceiling, before any of it. This run makes up to `limit` billed calls
+    // and a ring search on top, and nothing was asking — so it could make sixty
+    // of them after the month was spent (Codex, 17 Sep 2026).
+    const purse = await roomToSpend(
+      Math.round(PRICE_PER_UNIT_USD.google * (limit + 1) * 100 * USD_TO_GBP), { holder: 'lookup.rate' });
+    if (!purse.ok) {
+      return res.status(422).json({
+        error: 'over_the_ceiling',
+        message: `That would spend up to £${((PRICE_PER_UNIT_USD.google * (limit + 1) * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        leftPence: purse.leftPence, ceilingPence: purse.ceilingPence,
+      });
+    }
+    try {
     const out = await runLookup(settings, household);
     // Never the same place twice in a run: a remembered miss is done with, and
     // an answer held in memory — figures or none — is done with. A match on
@@ -597,6 +616,7 @@ router.post('/rate', requires('manage_library'), async (req, res, next) => {
       if (f && (f.rating != null || f.ratingCount != null)) rated += 1;
     }
     res.json({ kind, looked: page.length, matched, rated, missed, failed, remaining: Math.max(0, wanting.length - page.length) });
+    } finally { await releaseSpend(purse.reservation); }
   } catch (err) { next(err); }
 });
 
@@ -621,6 +641,18 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     const kind = req.body?.kind === 'food' ? 'food' : 'activities';
     const limit = Math.min(40, Math.max(1, Number(req.body?.limit) || 20));
     if (!tripadvisorSource.enabled()) return res.status(409).json({ error: 'tripadvisor_off', message: 'Tripadvisor is not switched on here.' });
+    // The money as well as the locations. The allowance was counted below and
+    // nothing asked what it would cost (Codex, 17 Sep 2026).
+    const purse = await roomToSpend(
+      Math.round(2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP), { holder: 'lookup.tripadvisor' });
+    if (!purse.ok) {
+      return res.status(422).json({
+        error: 'over_the_ceiling',
+        message: `That would spend up to £${((2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        leftPence: purse.leftPence, ceilingPence: purse.ceilingPence,
+      });
+    }
+    try {
     const out = await runLookup(settings, household);
     let used = await tripadvisorUsed(household.id);
     const pool = notOwnedOf(out, kind);
@@ -652,6 +684,7 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
       await sleep(250);
     }
     res.json({ kind, looked, matched, missed, used, cap: TRIPADVISOR_CAP, stopped, remaining: stopped ? 0 : Math.max(0, wanting.length - page.length) });
+    } finally { await releaseSpend(purse.reservation); }
   }).catch(next).finally(() => { if (tripadvisorRuns.get(household.id) === mine) tripadvisorRuns.delete(household.id); });
   tripadvisorRuns.set(household.id, mine);
 });
@@ -669,7 +702,13 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     const settings = settingsOf(req.body ?? {});
     const ref = String(req.body?.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
-    const out = await runLookup(settings, household);
+    // The research itself is free — it reads the venue's own page and the open
+    // encyclopedias — but finding the place first is a ring search, and that is
+    // billed at every rented source (Codex, 17 Sep 2026).
+    const purse = await affordable(1);
+    let out;
+    try { out = await runLookup(settings, household, { without: purse.without }); }
+    finally { await purse.release(); }
     const item = out.items.find((i) => i.ref === ref);
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
 

@@ -617,3 +617,21 @@ test('a month folded up and dropped is still in the headline figures', async () 
   assert.equal(after.searches, 1, 'the search survives as an aggregate');
   assert.equal(after.tripped, 1, 'and so does the conversion');
 });
+
+test('a rolled month counts only when the whole of it is inside the window', async () => {
+  const { household } = await aHousehold(query);
+  // A search in the month *before* last, folded up and dropped.
+  const twoMonthsBack = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 2, 15));
+  const id = await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'windowshire' });
+  await query('update searches set at = $2 where id = $1', [id, twoMonthsBack.toISOString()]);
+  await log.rollUp({ before: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)), drop: true });
+
+  // A thirty-day window starts partway through last month. Truncating that edge
+  // to the first of the month pulled a whole month of history into it (Codex,
+  // 17 Sep 2026), and a rolled month is one number that cannot be cut.
+  const near = await log.totals({ areaSlug: 'windowshire', since: 30 });
+  assert.equal(near.searches, 0, 'a month that is only partly inside the window is left out');
+
+  const far = await log.totals({ areaSlug: 'windowshire', since: 3650 });
+  assert.equal(far.searches, 1, 'and a window that covers it whole counts it');
+});
