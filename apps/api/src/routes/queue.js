@@ -46,6 +46,15 @@ router.get('/', requires('view_library'), async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/** Which reasons get used — so the common one can be designed out. */
+// Above `/:id` on purpose: Express matches in order, so a dynamic route
+// declared first swallows `/report/reasons` and tries to read "report" as a
+// uuid — which is why the screen could not load its reason counts at all
+// (Codex, 17 Sep 2026).
+router.get('/report/reasons', requires('view_library'), async (_req, res, next) => {
+  try { res.json({ reasons: queue.REASONS, used: await queue.reasonCounts() }); } catch (err) { next(err); }
+});
+
 /** One item, with everything needed to decide without leaving the queue. */
 router.get('/:id', requires('view_library'), async (req, res, next) => {
   try {
@@ -122,11 +131,6 @@ router.post('/:id/report', requires('view_library'), async (req, res, next) => {
     if (!out) return res.status(404).json({ error: 'not_found', message: 'Nothing in the queue by that id.' });
     res.json({ ok: true, id: out.id });
   } catch (err) { next(err); }
-});
-
-/** Which reasons get used — so the common one can be designed out. */
-router.get('/report/reasons', requires('view_library'), async (_req, res, next) => {
-  try { res.json({ reasons: queue.REASONS, used: await queue.reasonCounts() }); } catch (err) { next(err); }
 });
 
 export default router;

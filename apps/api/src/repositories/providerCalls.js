@@ -29,7 +29,7 @@ export async function record(householdId, provider, purpose, units = null, sessi
   const meter = typeof units === 'string' ? (() => { try { return JSON.parse(units); } catch { return null; } })() : units;
   await query(
     'insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, $2, $3, $4, $5, $6)',
-    [householdId, sessionId, provider, purpose, units, costOf(meter) || null],
+    [householdId, sessionId, provider, purpose, units, costOf(units) || null],
   );
 }
 

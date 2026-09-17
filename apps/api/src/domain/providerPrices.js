@@ -39,9 +39,17 @@ export const PRICE_PER_UNIT_USD = {
  * — so a Tripadvisor view that billed two locations is two, not one.
  */
 export function costOf(units) {
-  if (!units || typeof units !== 'object') return 0;
+  // Some callers hand over the meter as an object and some as JSON text — the
+  // column is jsonb and both work for it. Only one of them used to be priced,
+  // so `/api/places/suggest`'s Google calls went in at no cost and the ceiling
+  // could not see them (Codex, 17 Sep 2026).
+  const meter = typeof units === 'string'
+    ? (() => { try { return JSON.parse(units); } catch { return null; } })()
+    : units;
+  if (!meter || typeof meter !== 'object') return 0;
+  const units_ = meter;
   let usd = 0;
-  for (const [key, n] of Object.entries(units)) {
+  for (const [key, n] of Object.entries(units_)) {
     usd += (PRICE_PER_UNIT_USD[key] ?? 0) * (Number(n) || 0);
   }
   // Six places: a tenth of a cent matters when the ceiling is £250 and the
@@ -50,5 +58,9 @@ export function costOf(units) {
 }
 
 /** How many of a provider's own billable units one meter records. */
-export const unitsOf = (units, provider) =>
-  (units && typeof units === 'object' ? Number(units[provider]) || 0 : 0);
+export function unitsOf(units, provider) {
+  const meter = typeof units === 'string'
+    ? (() => { try { return JSON.parse(units); } catch { return null; } })()
+    : units;
+  return meter && typeof meter === 'object' ? Number(meter[provider]) || 0 : 0;
+}

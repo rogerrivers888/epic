@@ -39,3 +39,13 @@ test('every priced provider is a name an adapter actually meters', () => {
 test('several providers on one meter add up', () => {
   assert.equal(costOf({ google: 2, 'google-routes': 4, osm: 100 }), Math.round((0.017 * 2 + 0.005 * 4) * 1e6) / 1e6);
 });
+
+test('a meter handed over as JSON text is priced the same as an object', () => {
+  // `/api/places/suggest` serialises its meter before recording. Only the
+  // object form used to be priced, so those Google calls went into the ledger
+  // at no cost and the monthly ceiling could not see them (Codex, 17 Sep 2026).
+  assert.equal(costOf(JSON.stringify({ google: 3 })), costOf({ google: 3 }));
+  assert.equal(unitsOf(JSON.stringify({ tripadvisor: 2 }), 'tripadvisor'), 2);
+  // And something that is not JSON at all is nought rather than a throw.
+  assert.equal(costOf('not json'), 0);
+});

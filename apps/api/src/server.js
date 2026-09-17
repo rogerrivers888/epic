@@ -154,7 +154,16 @@ app.use('/api', deviceRoutes);
 
 // Provider money is spent under these, so they are held to a tighter number
 // than the rest of the API (limits.js).
-for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places']) app.use(path, spendLimit);
+// The paid-search limiter, on the paths that can spend.
+//
+// `/api/discover/event` is the click stream: no provider is asked, nothing is
+// billed, and a household tapping through forty results used to burn the
+// allowance for the searches themselves (Codex, 17 Sep 2026). It is named here
+// rather than moved, because its address belongs beside the search it reports on.
+const NOT_A_SEARCH = new Set(['/event']);
+for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places']) {
+  app.use(path, (req, res, next) => (NOT_A_SEARCH.has(req.path) ? next() : spendLimit(req, res, next)));
+}
 // Speech is a paid minute per request, held to its own number per household
 // (`voiceLimit`) as well as the monthly minutes in routes/voice.js.
 app.use('/api/voice', voiceLimit);

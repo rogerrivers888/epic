@@ -1367,7 +1367,17 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
      * again bought the same answers over (Codex, 17 Sep 2026). A source that
      * has seen a place inside the window is not asked about it again.
      */
-    const SOURCES_ASKED = ['google', 'tripadvisor', ...freeChosen];
+    // The free pass is one act, so it is keyed on one source.
+    //
+    // `curateThese` runs `enrich`, which reads the venue's own page, the open
+    // map and the encyclopedias together — it cannot be asked for only one of
+    // them, and what it writes is an `own` source row. Keying the window on
+    // the three names separately meant choosing Atlas alone offered work for
+    // ever, because nothing ever wrote an `atlas` row for an ordinary place
+    // (Codex, 17 Sep 2026). The three rows on the board still say what each
+    // source has given us; the run itself is one.
+    const FREE_KEY = 'own';
+    const SOURCES_ASKED = ['google', 'tripadvisor', ...(freeChosen.length ? [FREE_KEY] : [])];
     const { rows: lately } = everything.length ? await query(
       `select source, venue_ref from place_index_sources
         where venue_ref = any($1) and source = any($2)
@@ -1379,12 +1389,8 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
 
     // Free work obeys the window too. It costs nothing, but re-reading the same
     // open sources for the same place inside a year is a run that reports work
-    // it did not need to do — and the board promises it is left alone (Codex,
-    // 17 Sep 2026). A place is worth a free pass if *any* chosen free source
-    // has not seen it lately.
-    const free = freeChosen.length
-      ? everything.filter((ref) => freeChosen.some((src) => !askedLately.get(src)?.has(ref)))
-      : [];
+    // it did not need to do — and the board promises it is left alone.
+    const free = freeChosen.length ? notLately(FREE_KEY, everything) : [];
     const freeFresh = everything.length - free.length;
 
     // Each paid source is asked on its own terms, and only if it was chosen and

@@ -1352,7 +1352,10 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
       // The staleness rule, said on the row: a place is not asked again inside
       // twelve months unless something about it has changed.
       would: s.key === 'google' ? identified : Math.max(0, known - held),
-      pence: s.paid ? (s.key === 'google' ? 1.4 : 0) : 0,
+      // A place we have never matched costs two calls: the search that finds
+      // which Google place it is, then the detail (Codex, 17 Sep 2026). The
+      // board prints the worst case and the run reports what it actually was.
+      pence: s.paid ? (s.key === 'google' ? 2.8 : 0) : 0,
     };
   });
   const chosen = rows.filter((r) => picked.has(r.key));
@@ -1383,6 +1386,14 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
     <>
       <View style={styles.subRow}><Kicker>What we could get here</Kicker></View>
       <Ladder columns={columns} rows={rows} keyOf={(r) => r.key} />
+      {/* Said once, because the board cannot promise otherwise: the three free
+          sources are one research pass. `own.js` reads the venue's own page,
+          the open map and the encyclopedias together and cannot be asked for
+          one of them alone, so ticking any of the three runs all three (Codex,
+          17 Sep 2026). The rows still say what each has given us. */}
+      <View style={styles.subRow}>
+        <Word muted>The three free sources are one pass — our own research reads all three together.</Word>
+      </View>
       <Footer left={<Text style={styles.selected}>{said ?? `${chosen.length} source${chosen.length === 1 ? '' : 's'} · ${pounds(Math.round(cost))}`}</Text>}>
         <Act label="Work out the scores again · free" tone="secondary" disabled={!canManage || busy}
              onPress={() => { setBusy(true); api.adminRescorePlaces().finally(() => setBusy(false)); }} />
