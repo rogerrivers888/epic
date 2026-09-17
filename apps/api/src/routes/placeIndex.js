@@ -910,8 +910,21 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     const { rows: [att] } = await query(
       `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'rejected' limit 1`, [ref]);
     const { rows: [sweep] } = await query('select * from scout_places where venue_ref = $1 order by last_seen desc limit 1', [ref]);
-    const mine = rec
-      ? { source: 'own', fields: Object.fromEntries(Object.entries(rec).filter(([, v]) => v != null)) }
+    // An empty `place_records` row does not count as ours.
+    //
+    // `ensureRecord` makes one the moment a household touches a place, and
+    // before the research runs — so any such row won this and the comparison
+    // labelled the database's own bookkeeping "Owned record" while suppressing
+    // an atlas or sweep record that actually held the facts (Codex, 17 Sep
+    // 2026). The same question the index asks.
+    const ours = rec && (
+      [rec.summary, rec.website, rec.opening_hours, rec.price_range, rec.address, rec.phone, rec.name]
+        .some((v) => v != null)
+      || (rec.accessibility && Object.keys(rec.accessibility).length > 0)
+      || rec.curated_at != null
+    ) ? rec : null;
+    const mine = ours
+      ? { source: 'own', fields: Object.fromEntries(Object.entries(ours).filter(([, v]) => v != null)) }
       : att ? { source: 'atlas', fields: { name: att.name, summary: att.summary, website: att.website, lat: att.lat, lng: att.lng, wikidata_id: att.wikidata_id, wikipedia_url: att.wikipedia_url, crowd_band: att.crowd_band, count_band: att.count_band, epic_score: att.epic_score } }
       : sweep ? { source: 'sweep', fields: { name: sweep.name, website: sweep.website, lat: sweep.lat, lng: sweep.lng, cuisines: sweep.cuisines, crowd_band: sweep.crowd_band, count_band: sweep.count_band, epic_score: sweep.epic_score } }
       : null;
@@ -1187,7 +1200,17 @@ async function askThese(refs, householdId) {
           lat: at.get(ref)?.lat ?? null, lng: at.get(ref)?.lng ?? null,
           householdId: household.id, strict: true,
         }))?.id ?? null;
-        if (!id) { refused.push({ ref, why: 'no match' }); continue; }
+        if (!id) {
+          // Asked, and there is no such place there. Without a row the place
+          // read "not asked" for ever, sailed past the twelve-month window on
+          // every collection, and was quoted as spending a match call each time
+          // — while `googleMatchFor` was answering out of its remembered miss
+          // (Codex, 17 Sep 2026). A row with no identifier is exactly the
+          // second of the two states the board keeps apart.
+          await index.noteMany([{ ref }], { source: 'google' });
+          refused.push({ ref, why: 'no match' });
+          continue;
+        }
         const detail = await detailFor('google', id, household.id);
         // Banded here, and the figures go no further: `crowdBand` and
         // `countBand` are the only things that leave this block, and the rating

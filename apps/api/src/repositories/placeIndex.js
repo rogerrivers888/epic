@@ -369,30 +369,55 @@ export async function buildIfEmpty() {
   // one connection and unlocked on another, which fails quietly and leaks the
   // lock until that connection is recycled (`reach.js` does the same thing for
   // the same reason).
-  const client = await pool.connect();
-  try {
-    const { rows: [got] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as mine', [BUILD_LOCK]);
-    if (!got.mine) return { built: false, places: 0, why: 'another instance is building it' };
-    try {
+  return underTheBuildLock(
+    async () => {
       // The second look, now that nobody else can be in here: whoever lost the
       // race may have finished the whole thing while we waited.
-      const { rows: [again] } = await client.query('select count(*)::int as n from place_index');
+      const { rows: [again] } = await query('select count(*)::int as n from place_index');
       if (again.n > 0) return { built: false, places: again.n };
       // The bars first. Scoring against an empty `ready_bars` marks every place
       // "not set" and not ready, which is a worse answer than no answer — it
       // reads as a finding rather than as a job that has not run.
       await seedBars();
       return { built: true, ...await reindex() };
-    } finally {
-      await client.query('select pg_advisory_unlock(hashtext($1))', [BUILD_LOCK]).catch(() => null);
-    }
+    },
+    { built: false, places: 0, why: 'another instance is building it' },
+  );
+}
+
+/**
+ * The lock every rebuild of the derived tables is taken under.
+ *
+ * `reindex()` deletes and refills `place_areas`, the labels and `area_stats`
+ * wholesale, and `settleNew()` writes the same tables for a handful of places.
+ * Run together — two instances booting, or the first build racing the hourly
+ * sweep in one process — either can fail or leave half a set of rollups, and
+ * because any row in `place_index` makes the next `buildIfEmpty()` return
+ * early, an incomplete first build would never retry itself (Codex, 17 Sep
+ * 2026).
+ *
+ * An advisory lock belongs to a *connection*, so it is taken on a client of our
+ * own and released on the same one; through the pool it could be taken on one
+ * and unlocked on another, which fails quietly and leaks the lock. `reach.js`
+ * does the same thing for the same reason.
+ *
+ * Whoever does not get it does not queue: the pass already going is about to do
+ * the same work.
+ */
+async function underTheBuildLock(fn, ifBusy) {
+  const client = await pool.connect();
+  try {
+    const { rows: [got] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as mine', [BUILD_LOCK]);
+    if (!got.mine) return ifBusy;
+    try { return await fn(); }
+    finally { await client.query('select pg_advisory_unlock(hashtext($1))', [BUILD_LOCK]).catch(() => null); }
   } finally {
     client.release();
   }
 }
 
-/** What the first build is claimed under. */
-const BUILD_LOCK = 'epic.placeIndex.firstBuild';
+/** What a rebuild is claimed under. */
+const BUILD_LOCK = 'epic.placeIndex.build';
 
 /**
  * Place the ones nobody has placed yet.
@@ -411,6 +436,14 @@ const BUILD_LOCK = 'epic.placeIndex.firstBuild';
  * safe to run when there is nothing to do: one indexed read that finds nothing.
  */
 export async function settleNew({ limit = 5000 } = {}) {
+  // Under the same lock as a full rebuild: the two write the same tables, and a
+  // settling pass running inside a rebuild can leave either half-done (Codex,
+  // 17 Sep 2026). Whoever does not get the lock does nothing — the rebuild
+  // going on is about to place everything anyway.
+  return underTheBuildLock(() => settleWhileLocked(limit), { settled: 0, why: 'a rebuild is going on' });
+}
+
+async function settleWhileLocked(limit) {
   // Same reason as `buildIfEmpty`: a first sweep on a fresh installation must
   // not score its places against a bar nobody has set.
   await seedBars();
@@ -751,45 +784,54 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
  * places and is answered from `place_index` directly.
  */
 export async function refreshStats() {
-  await query('delete from area_stats');
-  // Three kinds, counted as three. Owned used to mean "not identified", which
-  // put every place a household had merely *claimed* into the figure the screen
-  // defines as holding our own research — so coverage read better than it was
-  // and the places most worth curating were the ones hidden by it (Codex,
-  // 17 Sep 2026).
-  const shared = `
-      count(*)::int                                                        as places,
-      count(*) filter (where pi.ownership = 'owned')::int                   as owned,
-      count(*) filter (where pi.ownership = 'claimed')::int                 as claimed,
-      count(*) filter (where pi.ownership = 'identified')::int              as identified,
-      count(*) filter (where pi.ready)::int                                 as ready,
-      avg(pi.data_score)::real                                              as avg_score`;
-  await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
-    select pa.area_slug, '', '', '', '', ${shared}
-      from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
-     group by pa.area_slug`);
-  await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
-    select pa.area_slug, pi.category, '', '', '', ${shared}
-      from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
-     where pi.category is not null
-     group by pa.area_slug, pi.category`);
-  await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
-    select pa.area_slug, coalesce(pi.category, ''), pi.subcategory, '', '', ${shared}
-      from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
-     where pi.subcategory is not null
-     group by pa.area_slug, pi.category, pi.subcategory`);
-  await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
-    select pa.area_slug, '', '', src.source, '', ${shared}
-      from place_areas pa
-      join place_index pi on pi.venue_ref = pa.venue_ref
-      join place_index_sources src on src.venue_ref = pi.venue_ref
-     group by pa.area_slug, src.source`);
-  const { rows } = await query('select count(*)::int as n, max(refreshed_at) as at from area_stats');
-  return rows[0];
+  // Emptied and refilled in one go.
+  //
+  // The delete committed on its own and four inserts followed it, so anybody
+  // reading a board in between saw an empty dashboard — and an insert that
+  // failed left `area_stats` half-built until the next successful refresh
+  // (Codex, 17 Sep 2026). In one transaction, a reader holds the previous
+  // complete answer until the replacement is ready.
+  return withTransaction(async (client) => {
+    await client.query('delete from area_stats');
+    // Three kinds, counted as three. Owned used to mean "not identified", which
+    // put every place a household had merely *claimed* into the figure the screen
+    // defines as holding our own research — so coverage read better than it was
+    // and the places most worth curating were the ones hidden by it (Codex,
+    // 17 Sep 2026).
+    const shared = `
+        count(*)::int                                                        as places,
+        count(*) filter (where pi.ownership = 'owned')::int                   as owned,
+        count(*) filter (where pi.ownership = 'claimed')::int                 as claimed,
+        count(*) filter (where pi.ownership = 'identified')::int              as identified,
+        count(*) filter (where pi.ready)::int                                 as ready,
+        avg(pi.data_score)::real                                              as avg_score`;
+    await client.query(`
+      insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
+      select pa.area_slug, '', '', '', '', ${shared}
+        from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
+       group by pa.area_slug`);
+    await client.query(`
+      insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
+      select pa.area_slug, pi.category, '', '', '', ${shared}
+        from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
+       where pi.category is not null
+       group by pa.area_slug, pi.category`);
+    await client.query(`
+      insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
+      select pa.area_slug, coalesce(pi.category, ''), pi.subcategory, '', '', ${shared}
+        from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
+       where pi.subcategory is not null
+       group by pa.area_slug, pi.category, pi.subcategory`);
+    await client.query(`
+      insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
+      select pa.area_slug, '', '', src.source, '', ${shared}
+        from place_areas pa
+        join place_index pi on pi.venue_ref = pa.venue_ref
+        join place_index_sources src on src.venue_ref = pi.venue_ref
+       group by pa.area_slug, src.source`);
+    const { rows } = await client.query('select count(*)::int as n, max(refreshed_at) as at from area_stats');
+    return rows[0];
+  });
 }
 
 /** When the counts were last rebuilt, so the screen can say "4 min ago". */

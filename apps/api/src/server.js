@@ -555,10 +555,17 @@ const sweep = async () => {
 // The index is derived, so on an installation that predates it there is nothing
 // in it and every board in Places reads empty until somebody presses Rebuild.
 // Once, at boot, and only when there is something to put in it.
-void buildIfEmpty()
+//
+// The first sweep waits for it. They write the same tables, and a settling pass
+// running inside a rebuild can leave either half-done — and because any row in
+// `place_index` makes the next `buildIfEmpty()` return early, an incomplete
+// first build would never retry itself (Codex, 17 Sep 2026). They also share a
+// lock, so two *instances* cannot collide either; this is the one-process half
+// of the same rule, and it means the boot log reads in the order it happened.
+const indexBuilt = buildIfEmpty()
   .then((r) => { if (r?.built) console.log(`epic-api: places — built the index for the first time, ${r.places} place(s)`); })
   .catch((err) => console.warn(`epic-api: places — could not build the index: ${err.message}`));
-void sweep();
+void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 
 // The owned place layer researches in the background: anything a household has
