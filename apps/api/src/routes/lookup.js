@@ -447,7 +447,12 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     else {
       const id = ref.startsWith('tripadvisor:') ? ref.slice('tripadvisor:'.length) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
       if (!id) ta.note = 'Not joined yet — run "Ask Tripadvisor" on the not-owned list to match it by name.';
-      else {
+      // The claim, honoured. A view bills two locations, so fewer than two
+      // granted means the month has not got one left — and the branch below
+      // used to ask anyway (Codex, 17 Sep 2026).
+      else if (taRoom.granted < 2) {
+        ta.note = `Over the monthly ceiling — ${taRoom.left} location${taRoom.left === 1 ? '' : 's'} left, and a view bills two.`;
+      } else {
         try { ta = { ...ta, id, how: 'matched by name and distance', fields: await detailFor('tripadvisor', id, household.id), note: 'matched by name and distance · fetched live · two locations billed a view' }; }
         catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
       }

@@ -160,6 +160,10 @@ async function alreadyMatched(refs) {
  */
 const TA_UNITS_PER_VIEW = 2;
 
+/** What asking Tripadvisor about this many places costs, in pence. */
+const taCost = (places) =>
+  Math.round(places * TA_UNITS_PER_VIEW * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP);
+
 /** The ring chooser's three steps, and the three ways of getting there. */
 export const BANDS = [30, 60, 90];
 const MODES = ['drive', 'walk', 'transit'];
@@ -1638,7 +1642,12 @@ async function planCollect(where) {
   const taCapped = Math.max(0, tripadvisor.length - taLeft);
   tripadvisor = tripadvisor.slice(0, taLeft);
 
-  const want = askingCost(google, await alreadyMatched(google));
+  // What the whole run would spend, both providers. Tripadvisor's locations are
+  // priced as well as counted, and `roomToSpend` bounds *total* provider spend —
+  // so leaving them out of `want` admitted runs there was no budget for (Codex,
+  // 17 Sep 2026). Its monthly count is the other, stricter limit and is claimed
+  // separately.
+  const want = askingCost(google, await alreadyMatched(google)) + taCost(tripadvisor.length);
   return {
     scope, chosen, limit,
     // How many this run will actually touch, which is what the board prints.
@@ -1754,16 +1763,31 @@ async function work(runId, householdId) {
           await collectRuns.done(runId, 'google', { done: out.asked, refused: out.refused, spentPence: cost });
         } finally { await releaseSpend(room.reservation); }
       } else {
-        // Claimed in locations, sliced back into places.
+        // Claimed twice, because there are two limits: the monthly count of
+        // locations, and the month's money. Both are Tripadvisor's, and only
+        // the first was being asked (Codex, 17 Sep 2026).
         const room = await tripadvisorRoom(batch.length * TA_UNITS_PER_VIEW);
         const may = batch.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
+        const cost = taCost(may.length);
+        const purse = await roomToSpend(cost, { holder: `collect:${runId}` });
         try {
-          const out = may.length ? await askTripadvisor(may, householdId) : { asked: 0, refused: [] };
+          const go = purse.ok ? may : [];
+          const out = go.length ? await askTripadvisor(go, householdId) : { asked: 0, refused: [] };
           await collectRuns.done(runId, 'tripadvisor', {
             done: out.asked,
-            refused: [...out.refused, ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly ceiling' }))],
+            // What it cost, so a run with Tripadvisor work in it does not read
+            // as free on the Runs board.
+            spentPence: taCost(out.asked),
+            refused: [
+              ...out.refused,
+              ...(purse.ok ? [] : may.map((ref) => ({ ref, why: 'over this month\u2019s ceiling' }))),
+              ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly allowance of locations' })),
+            ],
           });
-        } finally { await releaseSpend(room.reservation); }
+        } finally {
+          await releaseSpend(room.reservation);
+          await releaseSpend(purse.reservation);
+        }
       }
     }
     await index.settleNew();
