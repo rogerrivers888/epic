@@ -802,7 +802,8 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
             <Text style={type.tiny}>
               {counting ? 'Counting…'
                 : !would ? '—'
-                  : `${would.count} would move in · ${would.already} already here`}
+                  : !would.carriers ? `No place we hold carries a ${sourceWord(nsOf(labels[0].label))} word`
+                    : `${would.count} would move in · ${would.already} already here`}
             </Text>
           </View>
           {would && would.moving.length ? (
@@ -817,6 +818,13 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
               ))}
               {would.count > 12 ? <Text style={type.tiny}>and {would.count - 12} more</Text> : null}
             </View>
+          ) : would && !would.carriers ? (
+            /* Not "nothing would move": the rule is about places we do not hold
+               yet, which is a different answer and the one that is true. */
+            <Text style={type.tiny}>
+              It will file them as the sweep finds them. {would.of.toLocaleString()} places are in the library today and
+              none of them carries one of these words.
+            </Text>
           ) : would && !would.count ? (
             <Text style={type.tiny}>Nothing we hold would move.</Text>
           ) : null}

@@ -532,12 +532,22 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
       ?? (a.external_ref ? String(a.external_ref) : null)
       ?? (a.slug ? `atlas:${a.slug}` : null);
 
+    // How many of our places could this rule even speak to. A Google word can
+    // never move one: the library is built from Wikidata and OpenStreetMap, so
+    // a held place carries `wikidata:` and `atlas:` words and no provider's.
+    // Answering "nothing would move" to that reads as a rule that does nothing,
+    // when the truth is that the rule is about places we do not hold yet.
+    const ns = String(add).split(':', 1)[0];
+    let carriers = 0;
+
     const moving = [];
     let already = 0;
     for (const a of all) {
       const ref = refOf(a);
       if (!ref) continue;
       const at = { ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] };
+      const words = labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] });
+      if (words.some((w) => String(w).startsWith(`${ns}:`))) carriers += 1;
       const was = shelvesForAtlas(at, rules, tax.vocab).subcategory;
       if (was === subcategory) { already += 1; continue; }
       const now = shelvesForAtlas(at, after, tax.vocab).subcategory;
@@ -548,7 +558,7 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
       });
     }
     moving.sort((x, y) => String(x.name).localeCompare(String(y.name)));
-    res.json({ add, subcategory, already, moving: moving.slice(0, 200), count: moving.length });
+    res.json({ add, subcategory, already, carriers, of: all.length, moving: moving.slice(0, 200), count: moving.length });
   } catch (err) { next(err); }
 });
 

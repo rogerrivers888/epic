@@ -2458,6 +2458,8 @@ export const api = {
   taxonomyWould: (add: string, subcategory: string, state?: 'published' | 'all') =>
     request<{
       add: string; subcategory: string; already: number; count: number;
+      /** How many held places carry any word of this label's source. */
+      carriers: number; of: number;
       moving: { ref: string; name: string; region: string | null; from: string | null; fromLabel: string | null }[];
     }>(`/api/admin/taxonomy/would${qs({ add, subcategory, state })}`),
   /** A drawer's places, or the places carrying one provider word. */
