@@ -507,15 +507,17 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
     const [tax, rules] = await Promise.all([taxonomy.taxonomy(), shelfRules.rules()]);
     if (!tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
 
-    // A copy with the rule in it. The scope is the one the label belongs to, so
-    // a provider word goes in `labels` and one of ours in `ours` -- the same
-    // choice `PUT /rules` makes, made the same way.
-    const scope = scopeFor(add);
+    // A copy with the rule in it. `scopeFor` answers with the scope *and* the
+    // subject it would be stored under -- a provider word goes in `labels`
+    // under its full name, one of ours in `ours` under its bare key -- and
+    // reading it as a bare string keyed every trial rule under "[object
+    // Object]", so nothing ever moved (Codex, 17 Sep 2026).
+    const { scope, subject, labels: canon } = scopeFor([add]);
     const after = {};
     for (const [k, v] of Object.entries(rules)) after[k] = new Map(v);
     if (!after[scope]) throw bad(`${add} is not a label we can write a rule in`);
-    after[scope].set(add, {
-      scope, subject: add, subject_label: add, subcategory, labels: [add], weights: {}, taught_by: null,
+    after[scope].set(subject, {
+      scope, subject, subject_label: add, subcategory, labels: canon, weights: {}, taught_by: null,
     });
 
     const state = req.query.state === 'all' ? null : 'published';

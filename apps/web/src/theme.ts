@@ -325,9 +325,25 @@ export function setAdminThemePref(pref: AdminThemePref) {
   applyTheme(pref === 'follow' ? resolveTheme() : pref);
 }
 
+/**
+ * True while the back office is holding the palette.
+ *
+ * The system listener below re-resolves the *app's* preference, so a laptop
+ * flipping to dark at sunset repainted the back office in whatever the app was
+ * set to and took its dark away (Codex, 17 Sep 2026). While the back office is
+ * on screen its own choice wins, and the listener leaves it alone.
+ */
+let adminHolds: AdminThemePref | null = null;
+export const adminHoldsTheme = (pref: AdminThemePref | null) => { adminHolds = pref; };
+
 if (isWeb) {
   applyTheme();
-  if (typeof window.matchMedia === 'function') window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (getThemePref() === 'system') applyTheme(); });
+  if (typeof window.matchMedia === 'function') {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+      if (adminHolds) { applyTheme(adminHolds === 'follow' ? resolveTheme() : adminHolds); return; }
+      if (getThemePref() === 'system') applyTheme();
+    });
+  }
 }
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };

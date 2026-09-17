@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AdminThemePref, applyTheme, getAdminThemePref, resolveTheme, setAdminThemePref,
+  AdminThemePref, adminHoldsTheme, applyTheme, getAdminThemePref, resolveTheme, setAdminThemePref,
 } from '../theme';
 
 /**
@@ -14,11 +14,12 @@ import {
 export function useAdminTheme(): { pref: AdminThemePref; setPref: (p: AdminThemePref) => void } {
   const [pref, setPrefState] = useState<AdminThemePref>(getAdminThemePref());
   useEffect(() => {
+    adminHoldsTheme(pref);
     applyTheme(pref === 'follow' ? resolveTheme() : pref);
     // Leaving the back office hands the palette back to the app, whatever the
     // back office was set to: the two are different preferences and the app's
     // is the one that outlives this screen.
-    return () => applyTheme(resolveTheme());
+    return () => { adminHoldsTheme(null); applyTheme(resolveTheme()); };
   }, [pref]);
   const setPref = useCallback((p: AdminThemePref) => { setAdminThemePref(p); setPrefState(p); }, []);
   return { pref, setPref };
