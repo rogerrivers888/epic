@@ -271,3 +271,29 @@ test('forty photographs of one beach are one decision', async () => {
     `select count(*)::int as n from content_queue where kind = 'photo' and venue_ref = $1 and state <> 'approved'`, [ref]);
   assert.equal(left.n, 0);
 });
+
+test('a household reporting a conversation makes it jump the queue', async () => {
+  const { household, member } = await aHousehold(query);
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Windsor', 51.48, -0.61, now(), now() + interval '2 days') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, tag_kind, author_member_id, title, body, state)
+     values ('trip', $1, 'general', $2, 'A title', 'A body', 'open') returning *`, [trip.id, member.id]);
+  await queue.sync();
+  const state = async () => (await query(
+    `select reported, report_reason from content_queue where subject_type = 'chat_topic' and subject_id = $1`,
+    [topic.id])).rows[0];
+  assert.equal((await state()).reported, false);
+
+  // Reporting writes `chat_reports` and nothing else, and the queue row was
+  // made with reported = false — after which `on conflict do nothing` meant no
+  // later pass ever promoted it (Codex, 17 Sep 2026).
+  await query(
+    `insert into chat_reports (topic_id, member_id, reason) values ($1, $2, 'abusive')`,
+    [topic.id, member.id]);
+  await queue.sync();
+  const after = await state();
+  assert.equal(after.reported, true, 'reported content jumps the queue');
+  assert.equal(after.report_reason, 'abusive', 'and says why');
+});

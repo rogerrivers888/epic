@@ -69,7 +69,13 @@ export async function ensureRecord(venueRef) {
   // free window closed on it for a year, while coverage said the county was in
   // better shape than it was (Codex, 17 Sep 2026). Ownership is claimed by
   // `own()` when a fact actually lands.
-  await noteMany([{ ref: venueRef }], { source: 'own' });
+  //
+  // And no source row either: `place_index_sources.last_seen` for `own` is what
+  // the twelve-month staleness window reads, so stamping it before the research
+  // ran — or after one that found nothing — shut the free pass out of that
+  // place for a year, which is the exact case this is meant to fix (Codex,
+  // 17 Sep 2026).
+  await noteMany([{ ref: venueRef }]);
 }
 
 /**

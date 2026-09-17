@@ -136,17 +136,39 @@ export async function oneSearch(id) {
  * is a setting rather than a migration written under pressure.
  */
 export async function rollUp({ before, drop = false } = {}) {
+  // Each search exactly once, whatever order the runs are made in.
+  //
+  // `rolled_at` is the marker (migration 157). Counting every row before the
+  // cutoff and *replacing* the month's totals lost the part an earlier run had
+  // already rolled and dropped; *adding* them would double-count a run made
+  // twice without dropping. Counting only the rows nobody has counted yet is
+  // right in both cases (Codex, 17 Sep 2026).
   const { rows: [n] } = await query(`
+    with unrolled as (
+      update searches set rolled_at = now()
+       where at < $1 and rolled_at is null
+      returning at, area_slug, subject, empty, outcome
+    )
     insert into search_rollups (month, area_slug, subject, searches, empty, no_click, no_trip)
     select date_trunc('month', at)::date, coalesce(area_slug, ''), coalesce(subject, ''),
            count(*)::int, count(*) filter (where empty)::int,
            count(*) filter (where not empty and outcome = 'none')::int,
            count(*) filter (where outcome in ('clicked','saved'))::int
-      from searches where at < $1
+      from unrolled
      group by 1,2,3
+    -- Added to, not replaced.
+    --
+    -- A cutoff in the middle of a month rolls that month's early rows and drops
+    -- them; the next run sees only what is left, and replacing the totals threw
+    -- away the part already rolled — permanently, because the rows behind it
+    -- are gone (Codex, 17 Sep 2026). The log cannot be backfilled, so a rollup
+    -- that loses counts loses them for good.
     on conflict (month, area_slug, subject) do update
-       set searches = excluded.searches, empty = excluded.empty,
-           no_click = excluded.no_click, no_trip = excluded.no_trip, rolled_at = now()
+       set searches = search_rollups.searches + excluded.searches,
+           empty = search_rollups.empty + excluded.empty,
+           no_click = search_rollups.no_click + excluded.no_click,
+           no_trip = search_rollups.no_trip + excluded.no_trip,
+           rolled_at = now()
     returning 1`, [before]);
   let dropped = 0;
   if (drop) {

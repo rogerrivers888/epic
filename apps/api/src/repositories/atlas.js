@@ -38,14 +38,35 @@ const MILES_FROM = (latParam, lngParam) => `(3958.7613 * acos(least(1, greatest(
  *  - the kind follows the category once one is known, so a place saved as
  *    "other" stops being "other" the moment a visit says it is a restaurant.
  */
+/**
+ * Which provider a reference came from, from the reference itself.
+ *
+ * `google:ChIJ…` is Google's, `osm:node/…` is OpenStreetMap's, `atlas:…` is our
+ * own harvest's. Anything we cannot read is nobody's, and saying nothing is
+ * better than guessing.
+ */
+const sourceOfRef = (ref) => {
+  const head = String(ref ?? '').split(':')[0];
+  return ['google', 'osm', 'atlas', 'tripadvisor'].includes(head) ? [head] : [];
+};
+
 export async function upsertHouseholdPlace(client, householdId, p) {
   // A household act claims a place, and a claimed place is one the back office
   // counts (Codex, 17 Sep 2026). The index holds the ref and the position; the
   // name and everything else stay where they already legitimately live — and it
   // is written through the same client, so it commits or rolls back with the
   // claim rather than beside it.
+  //
+  // The provider that returned it goes on the row too. Without it, a place a
+  // household had just saved from a Google result showed Google as never having
+  // seen it, and Collect offered to go and ask them for something they had
+  // returned a moment ago (Codex, 17 Sep 2026). The ref names its own source.
   await noteMany(
-    [{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null, countryCode: p.countryCode ?? 'GB', ownership: 'claimed' }],
+    [{
+      ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null,
+      countryCode: p.countryCode ?? 'GB', ownership: 'claimed',
+      sources: sourceOfRef(p.venueRef),
+    }],
     { client });
   await on(client)(
     `insert into household_places (household_id, venue_ref, label, kind, category, lat, lng, country, country_code, locality, venue, note)

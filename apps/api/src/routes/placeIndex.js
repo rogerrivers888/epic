@@ -947,8 +947,17 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
       const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
       if (!id) ta.note = 'not asked';
       else {
-        try { ta = { ...ta, id, fields: await detailFor('tripadvisor', id, household.id), note: 'fetched live · two locations billed a view' }; }
-        catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
+        // The monthly ceiling, here as well. Collect claims its locations
+        // before it asks, and this comparison did not — so once the allowance
+        // was gone, every uncached comparison went on billing two locations
+        // past a cap the Runs board calls hard (Codex, 17 Sep 2026).
+        const room = await tripadvisorRoom(TA_UNITS_PER_VIEW);
+        if (!room.granted) ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left`;
+        else {
+          try { ta = { ...ta, id, fields: await detailFor('tripadvisor', id, household.id), note: 'fetched live · two locations billed a view' }; }
+          catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
+          finally { await releaseSpend(room.reservation); }
+        }
       }
     }
     columns.push(ta);

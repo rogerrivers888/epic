@@ -197,6 +197,26 @@ export async function syncFlagged() {
      group by f.venue_ref, f.field
     having count(distinct f.value::text) > 2
     on conflict (subject_type, subject_id) do nothing`);
+
+  // Somebody reported it, so it jumps the queue.
+  //
+  // A household reporting a topic or a reply writes `chat_reports` and nothing
+  // else, and the queue row was inserted with `reported = false` — after which
+  // `on conflict do nothing` meant no later pass ever promoted it, so genuinely
+  // reported content sat in the ordinary waiting lane for ever (Codex, 17 Sep
+  // 2026). The report is the truth; the queue row is a view of it.
+  await query(`
+    update content_queue q
+       set reported = true,
+           report_reason = coalesce(q.report_reason, r.reason)
+      from (
+        select 'chat_topic' as kind, topic_id::text as id, min(reason) as reason
+          from chat_reports where topic_id is not null group by topic_id
+        union all
+        select 'chat_reply', reply_id::text, min(reason)
+          from chat_reports where reply_id is not null group by reply_id
+      ) r
+     where q.subject_type = r.kind and q.subject_id = r.id and not q.reported`);
 }
 
 /**

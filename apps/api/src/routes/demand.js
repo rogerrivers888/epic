@@ -20,6 +20,7 @@ import * as searches from '../repositories/searches.js';
 import * as index from '../repositories/placeIndex.js';
 import { faultOf, SHORT_FAULT } from '../domain/placeIndex.js';
 import { detailFor } from '../sources/compare.js';
+import { roomToSpend, releaseSpend } from './placeIndex.js';
 import { googleSource } from '../sources/google.js';
 import { currentHousehold } from './household.js';
 
@@ -133,6 +134,15 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
     else if (!can(req, 'manage_library')) why = 'asking costs a call, and that needs Manage the library';
     else if (!googleSource.enabled()) why = 'Google is not switched on here';
     else {
+      // The ceiling, before the calls rather than after them. A replay near the
+      // limit could take the month past a bound the Runs board calls hard
+      // (Codex, 17 Sep 2026). Priced the same way Collect prices a Google ask.
+      const want = Math.round(nameless.length * 2.8);
+      const room = await roomToSpend(want, { holder: 'replay' });
+      if (!room.ok) {
+        why = `that would spend about £${(want / 100).toFixed(2)} and there is £${(room.leftPence / 100).toFixed(2)} left of this month`;
+        asked = 0;
+      } else {
       const household = await currentHousehold();
       // What it cost is read off the ledger, not counted from the answers.
       //
@@ -150,6 +160,8 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       spentPence = Math.max(0, Math.round(((await googleSpentPence()) - spentBefore) * 10) / 10);
       asked = nameless.length;
       if (!named) why = 'asked, and none of them answered';
+      await releaseSpend(room.reservation);
+      }
     }
     const { rows: scored } = await query(
       'select venue_ref, data_score, subcategory from place_index where venue_ref = any($1)', [refs]);
