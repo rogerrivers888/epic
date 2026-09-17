@@ -159,6 +159,13 @@ const HELD_SQL = `
  * always behind the screen reading it.
  */
 export async function reindex({ onProgress = null } = {}) {
+  // Under the build lock, like every other rebuild. A manual one could land on
+  // top of the hourly settling pass or on another manual one, and all three
+  // delete and refill the same derived tables (Codex, 17 Sep 2026).
+  return underTheBuildLock(() => reindexWhileLocked({ onProgress }), { places: 0, skipped: 'a rebuild is already going on' });
+}
+
+async function reindexWhileLocked({ onProgress }) {
   const t0 = Date.now();
 
   // 1 — every place, from every harvest. `on conflict` keeps `first_seen`, so a
@@ -247,8 +254,22 @@ export async function reindex({ onProgress = null } = {}) {
     on conflict (venue_ref, source) do update set last_seen = greatest(place_index_sources.last_seen, excluded.last_seen)`);
   await query(`
     insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
-    select r.venue_ref, 'own', r.venue_ref, r.first_owned, r.updated_at from place_records r
+    select r.venue_ref, 'own', r.venue_ref, r.first_owned, r.updated_at
+      from place_records r
+     -- Only a record that holds something of ours. ensureRecord makes an
+     -- empty row before the research runs, and the own row's last_seen is
+     -- what the twelve-month free-collection window reads — so stamping one
+     -- here shut the free pass out of every unresearched place for a year,
+     -- which is the exact thing ensureRecord was changed to stop doing
+     -- (Codex, 17 Sep 2026). The same predicate, asked in the same words.
+     where ${OWNED_RECORD}
     on conflict (venue_ref, source) do update set last_seen = greatest(place_index_sources.last_seen, excluded.last_seen)`);
+  // And any row an earlier build synthesised for an empty record goes, or the
+  // window stays shut on it until the record is finally researched.
+  await query(`
+    delete from place_index_sources src
+     where src.source = 'own'
+       and exists (select 1 from place_records r where r.venue_ref = src.venue_ref and not ${OWNED_RECORD})`);
   // An OSM reference held on a record or an attraction is OSM having seen it,
   // whatever the ref itself is keyed on.
   await query(`

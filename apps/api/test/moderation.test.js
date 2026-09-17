@@ -297,3 +297,30 @@ test('a household reporting a conversation makes it jump the queue', async () =>
   assert.equal(after.reported, true, 'reported content jumps the queue');
   assert.equal(after.report_reason, 'abusive', 'and says why');
 });
+
+test('reporting one reply does not report the conversation it is in', async () => {
+  const { household, member } = await aHousehold(query);
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Windsor', 51.48, -0.61, now(), now() + interval '2 days') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, tag_kind, author_member_id, title, body, state)
+     values ('trip', $1, 'general', $2, 'A fine question', 'A body', 'open') returning *`, [trip.id, member.id]);
+  const { rows: [reply] } = await query(
+    `insert into chat_replies (topic_id, author_member_id, body) values ($1,$2,'Something abusive') returning *`,
+    [topic.id, member.id]);
+  await queue.sync();
+
+  // `chat_reports.topic_id` is mandatory, so a reply's report carries its
+  // topic's id too. Reading that as a report of the topic promoted an
+  // otherwise blameless conversation (Codex, 17 Sep 2026).
+  await query(
+    `insert into chat_reports (topic_id, reply_id, member_id, reason) values ($1,$2,$3,'abusive')`,
+    [topic.id, reply.id, member.id]);
+  await queue.sync();
+
+  const reported = async (kind, id) => (await query(
+    `select reported from content_queue where subject_type = $1 and subject_id = $2`, [kind, id])).rows[0]?.reported;
+  assert.equal(await reported('chat_reply', reply.id), true, 'the reply was reported');
+  assert.equal(await reported('chat_topic', topic.id), false, 'and the question it hangs off was not');
+});

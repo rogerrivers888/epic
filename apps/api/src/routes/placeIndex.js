@@ -1854,9 +1854,15 @@ router.put('/bars/:sub', requires('manage_library'), async (req, res, next) => {
 router.post('/reindex', requires('manage_library'), async (req, res, next) => {
   try {
     await index.seedBars();
+    // `reindex()` takes the build lock itself, so a rebuild landing on top of
+    // the hourly settling pass or on another rebuild finds it busy and says so
+    // rather than half-filling the same tables (Codex, 17 Sep 2026). That holds
+    // for the detached path as much as the waiting one.
     if (req.body?.wait === true) return res.json(await index.reindex());
     res.json({ started: true });
-    void index.reindex().catch(() => null);
+    void index.reindex().then((r) => {
+      if (r?.skipped) console.log(`epic-api: places — rebuild skipped, ${r.skipped}`);
+    }).catch(() => null);
   } catch (err) { next(err); }
 });
 

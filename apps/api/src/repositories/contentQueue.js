@@ -210,8 +210,12 @@ export async function syncFlagged() {
        set reported = true,
            report_reason = coalesce(q.report_reason, r.reason)
       from (
+        -- A reply's report carries its topic's id too, because the column is
+        -- mandatory. Reading it as a report of the topic promoted an otherwise
+        -- unreported conversation every time one reply in it was flagged
+        -- (Codex, 17 Sep 2026).
         select 'chat_topic' as kind, topic_id::text as id, min(reason) as reason
-          from chat_reports where topic_id is not null group by topic_id
+          from chat_reports where topic_id is not null and reply_id is null group by topic_id
         union all
         select 'chat_reply', reply_id::text, min(reason)
           from chat_reports where reply_id is not null group by reply_id
