@@ -368,12 +368,32 @@ taxonomyRoutes.get('/not-sure', requires('view_library'), async (req, res, next)
  * words carried — so a column can be read and changed.
  */
 /**
- * The ref namespaces whose content is rented rather than owned. A row from one
- * of these is an identifier and the annotations we made ourselves; its name,
- * hours, rating and photos are the provider's and are never stored
+ * The providers whose content is rented rather than owned. A row displayed from
+ * one of these is an identifier and the annotations we made ourselves; its
+ * name, hours, rating and photos are the provider's and are never stored
  * (Technical Constraints §13.10).
  */
 const RENTED = new Set(['google', 'yelp', 'tripadvisor', 'foursquare']);
+
+/**
+ * Whether a row's *content* is rented — which is not the same question as who
+ * found it.
+ *
+ * The sweep finds a place on Google and then tries to match it on the map. A
+ * match keeps OpenStreetMap's name, position and website under ODbL and is
+ * ours for good, but the row still carries the `google:…` it was discovered by,
+ * so reading the ref's namespace called it rented and the panel said we kept
+ * only the identifier (Codex, 17 Sep 2026). `display_source` is the column that
+ * records the answer: `activitySweep` writes it as 'google' when the display
+ * must be fetched live and null when the record is owned.
+ */
+const rentedRow = (a, ref) => {
+  if (a.display_source) return RENTED.has(String(a.display_source).toLowerCase());
+  // Rows written before that column: their attribution says what was kept.
+  const att = Array.isArray(a.attribution) ? a.attribution : [];
+  if (att.length) return att.some((x) => RENTED.has(String(x.source ?? '').toLowerCase()));
+  return RENTED.has(String(ref).split(':', 1)[0]);
+};
 
 taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) => {
   try {
@@ -447,7 +467,7 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
         // licensed provider's row is an identifier and nothing else, which is
         // why 381 of these have no name.
         source: a.source ?? null,
-        rented: RENTED.has(String(ref).split(':', 1)[0]),
+        rented: rentedRow(a, ref),
         named: Boolean(a.name) && !/^\(.*\)$/.test(String(a.name)),
         state: a.state ?? null,
         outcode: a.outcode ?? null,

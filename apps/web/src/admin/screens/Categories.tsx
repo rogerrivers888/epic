@@ -1486,7 +1486,7 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
           "the attributes and what we hold in our database... you should apply
           to all the other options on this page"). */}
       <DrawerPlaces
-        sc={null} word={`google:${r.key}`}
+        sc={null} word={`google:${r.key}`} feeds={r.landing?.subcategory ?? null}
         title={r.landing?.subcategory ? `${subLabel(r.landing.subcategory)} \u2014 what this word fills` : 'What this word fills'}
         canManage={canManage} wide={wide} onChanged={onChanged}
       />
@@ -1728,16 +1728,24 @@ const sourceName = (pl: DrawerPlace) => {
   return SOURCES[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : '\u2014');
 };
 
-function DrawerPlaces({ sc, word, title, canManage, wide, onChanged }: {
+function DrawerPlaces({ sc, word, feeds, title, canManage, wide, onChanged }: {
   /** The drawer whose places these are, or null when this is a word's list. */
   sc: ShelfSubcategory | null;
-  /** A provider word, when the list is "places carrying this word". */
+  /** A provider word, when the list is the drawer that word fills. */
   word?: string;
+  /**
+   * Which drawer the word fills right now.
+   *
+   * A word's list is the places of wherever it lands, so re-mapping the word
+   * changes the whole list — and keying only on the word left the old drawer's
+   * places under the new mapping (Codex, 17 Sep 2026).
+   */
+  feeds?: string | null;
   title: string;
   canManage: boolean; wide: boolean;
   onChanged: (said: string, undo?: () => Promise<void>) => Promise<void>;
 }) {
-  const scope = word ?? sc?.key ?? '';
+  const scope = `${word ?? sc?.key ?? ''}|${feeds ?? ''}`;
   const [data, setData] = useState<Awaited<ReturnType<typeof api.taxonomyDrawer>> | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
