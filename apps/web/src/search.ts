@@ -42,11 +42,25 @@ export function heldSearch(surface: Surface, queryId: string | null | undefined,
   refs.forEach((ref, i) => { if (ref) positions.set(`${queryId}:${ref}`, i + 1); });
 }
 
+/** The places each search has already had an `open` counted for. */
+const openedOnce = new Set<string>();
+
 /** What the household did to one of the results. */
 export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string | null) {
   const queryId = current.get(surface);
   if (!queryId) return;
   const key = `${queryId}:${venueRef ?? ''}`;
+  // An open is counted once per place per search.
+  //
+  // The screen reports one each time the address names a place, and closing the
+  // drawer clears the address — so going back to the same card counted a second
+  // open, and the replay's "opened" figure grew every time somebody changed
+  // their mind (Codex, 17 Sep 2026). The dwell on the later look is still
+  // measured; it is the count that must not double.
+  if (kind === 'open') {
+    if (openedOnce.has(key)) { opened.set(key, Date.now()); return; }
+    openedOnce.add(key);
+  }
   // How long they stayed on the place before leaving — the dwell on a replay.
   let dwellMs: number | null = null;
   if (kind === 'open') opened.set(key, Date.now());

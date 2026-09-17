@@ -49,6 +49,8 @@ import { foodNear } from '../repositories/scout.js';
 import { recordsNear } from '../repositories/ownedPlaces.js';
 import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold } from './household.js';
+import { roomToSpend, releaseSpend, tripadvisorRoom } from './placeIndex.js';
+import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 
 export const router = express.Router();
 
@@ -374,11 +376,28 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
 // The field map, the detail cache and the line-up moved to sources/compare.js
 // when Places began asking the same question of an indexed row (17 Sep 2026).
 
-router.get('/compare', requires('view_library'), async (req, res, next) => {
+router.get('/compare', requires('manage_library'), async (req, res, next) => {
   try {
+    // `manage_library`, and a claim on the money before either provider is
+    // asked. This is the older of the two comparison screens and it is still
+    // mounted, so it could spend under `view_library` with nothing consulting
+    // the ceiling the Runs board calls hard — while the newer one claimed both
+    // (Codex, 17 Sep 2026). Looking is looking; this asks.
     const household = await currentHousehold();
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
+    // Two Google calls where we hold no match, and a Tripadvisor view bills two
+    // locations. Claimed up front, given back at the end whatever happened.
+    const room = await roomToSpend(Math.round(PRICE_PER_UNIT_USD.google * 2 * 100 * USD_TO_GBP), { holder: 'lookup.compare' });
+    if (!room.ok) {
+      return res.status(422).json({
+        error: 'over_the_ceiling',
+        message: `That would spend about £${((PRICE_PER_UNIT_USD.google * 2 * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(room.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        leftPence: room.leftPence, ceilingPence: room.ceilingPence,
+      });
+    }
+    const taRoom = tripadvisorSource.enabled() ? await tripadvisorRoom(2) : { granted: 0, left: 0, reservation: null };
+    try {
     const out = await runLookup(settingsOf(req.query), household);
     const item = out.items.find((i) => i.ref === ref);
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
@@ -441,6 +460,10 @@ router.get('/compare', requires('view_library'), async (req, res, next) => {
       c.filled = rows.filter((r) => r.keys[c.key] && !blank(r.cells[c.key])).length;
     }
     res.json({ place: out.place, mode: out.mode, minutes: out.minutes, item: summary, columns, rows });
+    } finally {
+      await releaseSpend(room.reservation);
+      await releaseSpend(taRoom.reservation);
+    }
   } catch (err) { next(err); }
 });
 

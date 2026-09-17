@@ -1569,21 +1569,29 @@ async function planCollect(where) {
   else { args.push(scope.area.slug); wh.push(`exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $${args.length})`); }
   if (where?.cat) { args.push(String(where.cat)); wh.push(`pi.category = $${args.length}`); }
   if (where?.sub) { args.push(String(where.sub)); wh.push(`pi.subcategory = $${args.length}`); }
-  args.push(limit);
-  const { rows } = await query(
+  // A wide net, cut to the run's size *after* the freshness rule.
+  //
+  // Taking the worst `limit` rows first and then dropping the ones asked about
+  // inside twelve months meant a run could do nothing at all — and do nothing
+  // again next time, because the ordering never changes, so the eligible places
+  // below the cut were never reached (Codex, 17 Sep 2026). The net is twenty
+  // times the run, which is enough to find work behind a wall of fresh answers
+  // and still bounded.
+  args.push(limit * 20);
+  const { rows: candidates } = await query(
     `select pi.venue_ref, pi.ownership from place_index pi
       where ${wh.join(' and ')}
       order by pi.ready asc, pi.data_score asc nulls first
       limit $${args.length}`, args);
 
   const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
-  const everything = rows.map((r) => r.venue_ref);
+  const everything = candidates.map((r) => r.venue_ref);
   // Only a place we hold nothing of our own about is worth a paid call — which
   // is both the identified ones and the claimed ones. A claimed place is one a
   // household has said matters and we still hold nothing about: the best
   // candidate there is, and splitting owned from claimed had quietly taken all
   // of them out of Collect's reach (Codex, 17 Sep 2026).
-  const worthPaying = rows.filter((r) => r.ownership !== 'owned').map((r) => r.venue_ref);
+  const worthPaying = candidates.filter((r) => r.ownership !== 'owned').map((r) => r.venue_ref);
 
   /**
    * The staleness rule, enforced rather than printed.
@@ -1610,14 +1618,20 @@ async function planCollect(where) {
   for (const r of lately) askedLately.get(r.source)?.add(r.venue_ref);
   const notLately = (src, from) => from.filter((ref) => !askedLately.get(src)?.has(ref));
 
-  const free = freeChosen.length ? notLately(FREE_KEY, everything) : [];
-  const freeFresh = everything.length - free.length;
+  // Cut to the run's size here, where "eligible" is finally known. Each list
+  // is cut on its own, because a source with nothing fresh in front of it
+  // should not be held back by one that has.
+  const take = (list) => list.slice(0, limit);
+  const freeEligible = freeChosen.length ? notLately(FREE_KEY, everything) : [];
+  const free = take(freeEligible);
+  // How many the window left alone, out of everything the net found.
+  const freeFresh = everything.length - freeEligible.length;
 
   // Each paid source on its own terms, and only if it was chosen and is
   // switched on. One shared list run through Google was how asking Tripadvisor
   // spent Google's money (Codex, 17 Sep 2026).
-  const google = chosen.has('google') && googleSource.enabled() ? notLately('google', worthPaying) : [];
-  let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? notLately('tripadvisor', worthPaying) : [];
+  const google = chosen.has('google') && googleSource.enabled() ? take(notLately('google', worthPaying)) : [];
+  let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? take(notLately('tripadvisor', worthPaying)) : [];
   // Tripadvisor's ceiling is counted in their locations, and a view is two.
   const taLeft = tripadvisor.length
     ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;
@@ -1626,7 +1640,9 @@ async function planCollect(where) {
 
   const want = askingCost(google, await alreadyMatched(google));
   return {
-    scope, chosen, limit, places: rows.length,
+    scope, chosen, limit,
+    // How many this run will actually touch, which is what the board prints.
+    places: new Set([...free, ...google, ...tripadvisor]).size,
     free, freeFresh, google, tripadvisor, taCapped, taLeft,
     want,
     fresh: {
