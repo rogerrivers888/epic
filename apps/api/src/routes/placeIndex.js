@@ -1689,7 +1689,23 @@ async function planCollect(where) {
   // switched on. One shared list run through Google was how asking Tripadvisor
   // spent Google's money (Codex, 17 Sep 2026).
   const google = chosen.has('google') && googleSource.enabled() ? take(notLately('google', worthPaying)) : [];
-  let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? take(notLately('tripadvisor', worthPaying)) : [];
+  // Only the ones Tripadvisor is actually joined to.
+  //
+  // `askTripadvisor` makes no call for a ref it has no match for — that is the
+  // rule that stops a view being spent looking for a place we have never
+  // matched — so putting the unmatched ones in the plan quoted work that would
+  // not happen, could refuse the whole run as over the ceiling, and let them
+  // eat the run's limit ahead of the places that would actually be asked
+  // (Codex, 17 Sep 2026).
+  const taEligible = chosen.has('tripadvisor') && tripadvisorSource.enabled()
+    ? await (async () => {
+      const could = notLately('tripadvisor', worthPaying);
+      if (!could.length) return [];
+      const joined = await matchesFor(could, 'tripadvisor');
+      return could.filter((ref) => ref.startsWith('tripadvisor:') || joined.get(ref));
+    })()
+    : [];
+  let tripadvisor = take(taEligible);
   // Tripadvisor's ceiling is counted in their locations, and a view is two.
   const taLeft = tripadvisor.length
     ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;

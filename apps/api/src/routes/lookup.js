@@ -332,7 +332,16 @@ async function runLookup({ q, minutes, mode }, household, { without = [] } = {})
  *
  * `n` is how many requests that screen makes of the paid source at worst.
  */
-async function affordable(n = 1) {
+/**
+ * How many billed Google requests one ring search makes.
+ *
+ * `googleSource.search` expands an empty category list into both halves — food
+ * and things to do — and issues a Nearby request for each. Counting the ring as
+ * one call reserved about half what it spends (Codex, 17 Sep 2026).
+ */
+const RING_CALLS = 2;
+
+async function affordable(n = RING_CALLS) {
   const google = googleSource.enabled()
     ? await roomToSpend(Math.round(PRICE_PER_UNIT_USD.google * n * 100 * USD_TO_GBP), { holder: 'lookup' })
     : { ok: false, reservation: null, leftPence: 0 };
@@ -354,8 +363,9 @@ async function affordable(n = 1) {
 router.get('/', requires('view_library'), async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    // One search each. What the month cannot afford is left out of it.
-    const purse = await affordable(1);
+    // One ring search, which is two billed Google requests. What the month
+    // cannot afford is left out of it.
+    const purse = await affordable();
     try {
       const out = await runLookup(settingsOf(req.query), household, { without: purse.without });
       res.json({
@@ -378,7 +388,7 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
     const household = await currentHousehold();
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
-    const purse = await affordable(1);
+    const purse = await affordable();
     let out;
     try { out = await runLookup(settingsOf(req.query), household, { without: purse.without }); }
     finally { await purse.release(); }
@@ -446,10 +456,11 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     // we already hold the identifier for, needs fewer — and claiming three
     // regardless meant a comparison that would spend nothing, or almost
     // nothing, was refused the Google column near the ceiling (Codex, 17 Sep
-    // 2026). The ring is counted as one because the cache cannot be asked
-    // without running it; the match is counted only where we hold no id.
+    // 2026). The ring is two requests — `googleSource.search` expands an empty
+    // category list into food and things to do — and the match is counted only
+    // where we hold no identifier.
     const heldId = ref.startsWith('google:') || Boolean((await matchesFor([ref], 'google')).get(ref));
-    const calls = googleSource.enabled() ? 1 + (heldId ? 1 : 2) : 0;
+    const calls = googleSource.enabled() ? RING_CALLS + (heldId ? 1 : 2) : 0;
     const wants = Math.round(PRICE_PER_UNIT_USD.google * calls * 100 * USD_TO_GBP);
     const room = await roomToSpend(wants, { holder: 'lookup.compare' });
     const taWants = tripadvisorSource.enabled()
@@ -573,11 +584,11 @@ router.post('/rate', requires('manage_library'), async (req, res, next) => {
     // and a ring search on top, and nothing was asking — so it could make sixty
     // of them after the month was spent (Codex, 17 Sep 2026).
     const purse = await roomToSpend(
-      Math.round(PRICE_PER_UNIT_USD.google * (limit + 1) * 100 * USD_TO_GBP), { holder: 'lookup.rate' });
+      Math.round(PRICE_PER_UNIT_USD.google * (limit + RING_CALLS) * 100 * USD_TO_GBP), { holder: 'lookup.rate' });
     if (!purse.ok) {
       return res.status(422).json({
         error: 'over_the_ceiling',
-        message: `That would spend up to £${((PRICE_PER_UNIT_USD.google * (limit + 1) * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        message: `That would spend up to £${((PRICE_PER_UNIT_USD.google * (limit + RING_CALLS) * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
         leftPence: purse.leftPence, ceilingPence: purse.ceilingPence,
       });
     }
@@ -705,7 +716,7 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     // The research itself is free — it reads the venue's own page and the open
     // encyclopedias — but finding the place first is a ring search, and that is
     // billed at every rented source (Codex, 17 Sep 2026).
-    const purse = await affordable(1);
+    const purse = await affordable();
     let out;
     try { out = await runLookup(settings, household, { without: purse.without }); }
     finally { await purse.release(); }
