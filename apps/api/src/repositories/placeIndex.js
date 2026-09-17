@@ -172,7 +172,10 @@ async function reindexWhileLocked({ onProgress }) {
   //     rebuild never rewrites when we first saw something.
   await query(`
     insert into place_index (venue_ref, lat, lng, country_code, category, subcategory, derived_by, ownership, first_seen, last_seen)
-    select coalesce(a.venue_ref, 'atlas:' || a.id::text), a.lat, a.lng, coalesce(reg.country_code, 'GB'),
+    -- Null, not 'GB'. A region with no country is a country nobody has told us,
+    -- and guessing here put the place under Great Britain for good — the exact
+    -- thing migration 159 exists to stop (Codex, 17 Sep 2026).
+    select coalesce(a.venue_ref, 'atlas:' || a.id::text), a.lat, a.lng, reg.country_code,
            null, null, 'harvest',
            -- Owned means we hold our own research on it, so it survives every
            -- provider going dark. A harvested row with nothing but a name and a
@@ -193,7 +196,8 @@ async function reindexWhileLocked({ onProgress }) {
 
   await query(`
     insert into place_index (venue_ref, lat, lng, country_code, derived_by, ownership, first_seen, last_seen)
-    select sp.venue_ref, sp.lat, sp.lng, coalesce(sa.country_code, 'GB'), 'sweep', 'identified', min(sp.first_seen), max(sp.last_seen)
+    -- The same: an area with no country says nothing rather than saying Britain.
+    select sp.venue_ref, sp.lat, sp.lng, sa.country_code, 'sweep', 'identified', min(sp.first_seen), max(sp.last_seen)
       from scout_places sp left join scout_areas sa on sa.code = sp.area_code
      group by sp.venue_ref, sp.lat, sp.lng, sa.country_code
     on conflict (venue_ref) do update

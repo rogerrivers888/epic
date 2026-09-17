@@ -12,6 +12,7 @@
 // local scout has its own purse.
 
 import { HOUSEHOLD_MONTHLY_CALL_BOUND } from '../claude.js';
+import { PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 import { SCOUT_MONTHLY_RUNS } from './localscout.js';
 import { VOICE_MINUTES_MONTHLY } from './openai.js';
 
@@ -40,28 +41,28 @@ export const LINES = [
   {
     key: 'google', label: 'Google Places', source: 'google', unit: 'request', unitPlural: 'requests',
     what: 'A browse makes one Nearby Search request per kind (food, things to do); a dish or name search makes one Text Search; opening a place makes one Place Details request.',
-    allowance: { kind: 'monthly', limit: 5000, beyondUsd: 0.032, basis: "Google's Pro-tier free threshold for Nearby and Text Search (5,000 a month each, not pooled)" },
+    allowance: { kind: 'monthly', limit: 5000, beyondUsd: PRICE_PER_UNIT_USD['google'], basis: "Google's Pro-tier free threshold for Nearby and Text Search (5,000 a month each, not pooled)" },
     legacyUnitsPerCall: () => 2,
     console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
     key: 'google-photos', label: 'Google photos', source: 'google', unit: 'photo', unitPlural: 'photos',
     what: 'Each place photo shown is one Place Photo request, streamed through the API so the key stays server-side.',
-    allowance: { kind: 'monthly', limit: 1000, beyondUsd: 0.007, basis: "Google's free threshold for Place Details Photos" },
+    allowance: { kind: 'monthly', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['google-photos'], basis: "Google's free threshold for Place Details Photos" },
     legacyUnitsPerCall: () => 1,
     console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
     key: 'google-routes', label: 'Google Routes', source: 'google', unit: 'element', unitPlural: 'elements',
     what: 'Real travel times. A plan asks for one origin against up to 200 places (one element each); a journey is one element.',
-    allowance: { kind: 'monthly', limit: 5000, beyondUsd: 0.01, basis: "Google's free threshold for the traffic-aware (Advanced) Routes tier" },
+    allowance: { kind: 'monthly', limit: 5000, beyondUsd: PRICE_PER_UNIT_USD['google-routes'], basis: "Google's free threshold for the traffic-aware (Advanced) Routes tier" },
     legacyUnitsPerCall: (purpose) => (purpose === 'plan.matrix' ? 100 : 1),
     console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
     key: 'tripadvisor', label: 'Tripadvisor', source: 'tripadvisor', unit: 'location', unitPlural: 'locations',
     what: 'Billed per location ID returned, not per search: a page of 10, each name lookup, and two for opening a place (details and reviews).',
-    allowance: { kind: 'lifetime', limit: 1000, beyondUsd: 0.015, basis: 'Terra Discover: 1,000 free for the life of the account, then $0.015 a location' },
+    allowance: { kind: 'lifetime', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['tripadvisor'], basis: `Terra Discover: 1,000 free for the life of the account, then $${PRICE_PER_UNIT_USD['tripadvisor']} a location` },
     legacyUnitsPerCall: () => 10,
     console: { label: 'Tripadvisor developer portal', url: 'https://www.tripadvisor.com/developers' },
   },

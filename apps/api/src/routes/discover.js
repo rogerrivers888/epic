@@ -180,13 +180,19 @@ router.post('/select', async (req, res, next) => {
     }
 
     const rows = await impressions.markSelected(queryId, venueKey);
+    // Nothing recorded until the selection is real.
+    //
+    // A valid search id with a stale or malformed venue key answered 404 and
+    // still moved that search's outcome — an outcome for something that was
+    // never selected (Codex, 17 Sep 2026). And it went in without the
+    // household, so it skipped the ownership check `logEvent` does.
+    if (!rows.length) return res.status(404).json({ error: 'impression_not_found' });
     // The same act, in the search log: a saved place is an outcome, and the
     // outcome only ever moves forward.
     await searchLog.logEvent({
-      searchId: queryId, venueRef: venueKey,
+      searchId: queryId, venueRef: venueKey, householdId: household.id,
       kind: status === 'saved' ? 'save' : status === 'dismissed' ? 'dismiss' : 'open',
     });
-    if (!rows.length) return res.status(404).json({ error: 'impression_not_found' });
     await visitsRepo.recordLedger(household.id, rows[0].source, rows[0].source_place_id, status);
     res.json({ recorded: true, venueKey, status, sources: rows.map((r) => r.source) });
   } catch (err) {

@@ -15,21 +15,37 @@
  * priced at nought and says so rather than guessing.
  */
 
-/** US dollars per billable unit, at the published list prices. */
+/**
+ * US dollars per billable unit, at the list prices, for the units the adapters
+ * actually meter.
+ *
+ * The one place these numbers live. `sources/pricing.js` reads them for the
+ * `beyondUsd` it shows the owner beside each free allowance, and the ledger
+ * reads them to fill `estimated_cost_usd` — so the figure on Settings › Usage
+ * and the figure the monthly ceiling sums cannot drift apart. They did: a
+ * second table here priced Places at $0.017 against the model's $0.032 and
+ * photos at nothing, and the ceiling is a sum of these, so it was undercounted
+ * by about half (Codex, 17 Sep 2026).
+ *
+ * This module imports nothing on purpose. It sat above `pricing.js` in the
+ * graph and importing it back made a cycle that broke three test files at load
+ * — the prices are the leaf, and the model that presents them is not.
+ *
+ * A meter key that is not here is nought, and says so rather than guessing:
+ * `osm`, `fixtures` and the free tiers cannot bill.
+ */
 export const PRICE_PER_UNIT_USD = {
-  // Places API, one request per Place Details or Nearby Search call.
-  google: 0.017,
-  // Routes API, priced per element rather than per request.
-  'google-routes': 0.005,
-  // Licensed and capped rather than metered in money.
-  tripadvisor: 0,
-  osm: 0,
-  fixtures: 0,
-  datathistle: 0,
-  liteapi: 0,
-  predicthq: 0,
-  seatgeek: 0,
-  ticketmaster: 0,
+  // Places API: one billable request per Nearby Search, Text Search or Place
+  // Details call, past the 5,000-a-month Pro-tier threshold.
+  google: 0.032,
+  // Place Photos, past 1,000 a month.
+  'google-photos': 0.007,
+  // Routes API, priced per element rather than per request, past 5,000.
+  'google-routes': 0.01,
+  // Tripadvisor: a location, past the 1,000 free for the life of the account —
+  // and separately bounded by a hard monthly count, which is the limit that
+  // actually stops it (`TRIPADVISOR_CAP`).
+  tripadvisor: 0.015,
 };
 
 /**

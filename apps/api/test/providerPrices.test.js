@@ -10,14 +10,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PRICE_PER_UNIT_USD, costOf, unitsOf } from '../src/domain/providerPrices.js';
+import { LINES } from '../src/sources/pricing.js';
+
+/** The list price of one line, from the one cost model there is. */
+const listPrice = (key) => LINES.find((l) => l.key === key)?.allowance?.beyondUsd ?? 0;
 
 test('a meter with a price becomes money', () => {
-  assert.equal(costOf({ google: 1 }), 0.017);
-  assert.equal(costOf({ google: 10 }), 0.17);
-  // One Tripadvisor view bills two locations. It has no per-call price — it is
-  // bounded by a hard monthly count instead — and that is not the same as its
-  // being free of limits.
-  assert.equal(costOf({ tripadvisor: 2 }), 0);
+  // Read from `sources/pricing.js`, never retyped: a second copy of the prices
+  // had already drifted to about half the real ones, and the ceiling is a sum of
+  // them (Codex, 17 Sep 2026).
+  assert.equal(costOf({ google: 1 }), listPrice('google'));
+  assert.equal(costOf({ google: 10 }), Math.round(listPrice('google') * 10 * 1e6) / 1e6);
+  // One Tripadvisor view bills two locations, at its own list price — and it is
+  // *also* bounded by a hard monthly count, which is the limit that actually
+  // stops it.
+  assert.equal(costOf({ tripadvisor: 2 }), Math.round(listPrice('tripadvisor') * 2 * 1e6) / 1e6);
   assert.equal(unitsOf({ tripadvisor: 2 }, 'tripadvisor'), 2);
 });
 
@@ -34,10 +41,15 @@ test('every priced provider is a name an adapter actually meters', () => {
     assert.ok(/^[a-z-]+$/.test(key), `${key} is not a meter key`);
   }
   assert.ok(PRICE_PER_UNIT_USD.google > 0, 'the one provider that bills per request has a price');
+  // And every price is the model's, so the two cannot drift apart again.
+  for (const [key, usd] of Object.entries(PRICE_PER_UNIT_USD)) assert.equal(usd, listPrice(key));
 });
 
 test('several providers on one meter add up', () => {
-  assert.equal(costOf({ google: 2, 'google-routes': 4, osm: 100 }), Math.round((0.017 * 2 + 0.005 * 4) * 1e6) / 1e6);
+  assert.equal(
+    costOf({ google: 2, 'google-routes': 4, osm: 100 }),
+    Math.round((listPrice('google') * 2 + listPrice('google-routes') * 4) * 1e6) / 1e6,
+  );
 });
 
 test('a meter handed over as JSON text is priced the same as an object', () => {
