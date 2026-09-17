@@ -77,6 +77,21 @@ export type TripSeed = {
 /** Inside a trip: which of Find / Shortlist / The day you were on, per trip. */
 type TripPageMemory = { section: Section };
 
+/**
+ * Nothing rendered; one cleanup.
+ *
+ * A conversion held on the way into the new-trip form is reported by the path
+ * that makes the trip and dropped by the one that closes it — but somebody can
+ * also leave with the back gesture or the tab bar, and a value that outlives
+ * the flow would attach itself to whatever trip they made next (Codex, 17 Sep
+ * 2026). `conversionHappened` runs first on the created path, so by the time
+ * this unmounts there is nothing left to drop.
+ */
+function Abandon() {
+  useEffect(() => () => conversionAbandoned(), []);
+  return null;
+}
+
 export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUsed }: {
   /** Which layer the address asks for: the list, the new-trip form, or one trip on one of its tabs. */
   route: Extract<Route, { name: 'trips' }>;
@@ -187,6 +202,11 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     const askedPlace = query.get('place');
     const askedKind = query.get('kind');
     return (
+      <>
+      {/* Leaving the form by any route that is not "created" drops the held
+          conversion. `onClose` catches the button; this catches the back
+          gesture, the tab bar and the app switcher (Codex, 17 Sep 2026). */}
+      <Abandon />
       <CreateTripScreen
         household={household}
         seed={{
@@ -226,6 +246,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
           navigate(paths.tripTravel(tripId), { replace: true });
         }}
       />
+      </>
     );
   }
 

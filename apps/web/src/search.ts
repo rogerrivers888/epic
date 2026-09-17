@@ -61,21 +61,34 @@ export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
  * outcome (Codex, 17 Sep 2026). So the intent is held, and it is reported by
  * the path that actually makes the trip — or dropped when the form is closed.
  */
-let pending: { surface: Surface; ref: string | null } | null = null;
+let pending: { surface: Surface; ref: string | null; at: number } | null = null;
+
+/**
+ * How long an unconverted intent stands.
+ *
+ * Closing the form clears it, but somebody can also walk away with the back
+ * button or the app switcher, and a value that outlives the flow would attach
+ * itself to whatever trip they made next week (Codex, 17 Sep 2026). A few
+ * minutes is longer than making a trip takes and shorter than doing anything
+ * else.
+ */
+const PENDING_FOR_MS = 5 * 60_000;
 
 export function holdConversion(surface: Surface, venueRef?: string | null) {
-  pending = { surface, ref: venueRef ?? null };
+  pending = { surface, ref: venueRef ?? null, at: Date.now() };
 }
 
 /** The trip exists. Now it counts. */
 export function conversionHappened() {
-  if (!pending) return;
-  const { surface, ref } = pending;
+  const held = pending;
   pending = null;
-  noteSearchEvent(surface, 'add_to_trip', ref);
+  if (!held) return;
+  // Too old to be this trip: the household went somewhere else and came back.
+  if (Date.now() - held.at > PENDING_FOR_MS) return;
+  noteSearchEvent(held.surface, 'add_to_trip', held.ref);
 }
 
-/** They closed the form. Nothing was made, so nothing is counted. */
+/** They closed the form, or left it. Nothing was made, so nothing is counted. */
 export function conversionAbandoned() {
   pending = null;
 }

@@ -70,12 +70,37 @@ export async function fail(id, problem) {
   return rows[0] ?? null;
 }
 
-/** Runs that were going and have not been touched since — a deploy, usually. */
+/**
+ * Runs that were going and have not been touched since — a deploy, usually.
+ *
+ * Read-only, for a board that wants to say so.
+ */
 export async function stranded() {
   const { rows } = await query(
     `select * from collect_runs
       where state = 'running' and touched_at < now() - ($1 || ' milliseconds')::interval
       order by started_at`, [String(STRANDED_AFTER_MS)]);
+  return rows;
+}
+
+/**
+ * The same, claimed — one statement, so only one process gets them.
+ *
+ * Two API instances booting together both read the same stranded run and both
+ * started a worker on it, and each would have made the same paid calls before
+ * either wrote `todo` back (Codex, 17 Sep 2026). Moving `touched_at` inside the
+ * statement that selects them is the claim: the second instance's predicate no
+ * longer matches, so it finds nothing and starts nothing.
+ */
+export async function claimStranded() {
+  const { rows } = await query(
+    `update collect_runs set touched_at = now()
+      where id in (
+        select id from collect_runs
+         where state = 'running' and touched_at < now() - ($1 || ' milliseconds')::interval
+         order by started_at
+         for update skip locked)
+      returning *`, [String(STRANDED_AFTER_MS)]);
   return rows;
 }
 

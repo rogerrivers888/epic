@@ -164,3 +164,48 @@ test('a moderated conversation is not reachable by its own address either', asyn
   // And the reviewer can still see what they decided about.
   assert.ok((await queue.one(qt.id)).detail?.text);
 });
+
+test('a photograph decided in the queue pays the contributor, and reverses when reversed', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [account] } = await query(
+    `insert into accounts (email, household_id) values ($1, $2) returning *`,
+    [`shots-${Math.random().toString(36).slice(2, 8)}@example.com`, household.id]);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_account_id, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, $3, 'household') returning *`,
+    [`ref-${Math.random().toString(36).slice(2, 8)}`, account.id, household.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+
+  const points = async () => (await query(
+    'select coalesce(sum(points), 0)::int as n from image_rewards where image_id = $1', [img.id])).rows[0].n;
+  assert.equal(await points(), 0);
+
+  // Moving ordinary moderation into the queue quietly stopped contributors
+  // getting the points the Library path awards (Codex, 17 Sep 2026).
+  await queue.approve([q.id], null);
+  assert.equal(await points(), 10);
+
+  await queue.reject({ id: q.id, reason: 'dark', who: null });
+  assert.equal(await points(), 0, 'and a reversal takes them back');
+});
+
+test('a decision made on the Library screen reaches the queue row', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, 'household') returning *`,
+    [`ref-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+  await queue.sync();
+  const state = async () => (await query(
+    `select state from content_queue where subject_type = 'image' and subject_id = $1`, [img.id])).rows[0].state;
+  assert.equal(await state(), 'waiting');
+
+  // The Library endpoint is still there, and a decision made on it used to
+  // leave the queue showing an approved photograph as waiting — and let
+  // somebody decide it a second time, the other way (Codex, 17 Sep 2026).
+  await query(`update image_assets set moderation = 'approved' where id = $1`, [img.id]);
+  await queue.sync();
+  assert.equal(await state(), 'approved');
+});

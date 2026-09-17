@@ -67,3 +67,18 @@ test('the board reads the last run, and counts what is left', async () => {
   // A failed run is not silently retried: the board asks somebody to look.
   assert.equal(await runs.finish(run.id), null);
 });
+
+test('two instances cannot both pick up the same interrupted run', async () => {
+  const run = await runs.start({ whereLabel: 'Contested', scope: {}, sources: ['google'], todo: { google: ['a', 'b'] } });
+  await query(`update collect_runs set touched_at = now() - interval '20 minutes' where id = $1`, [run.id]);
+
+  // Both instances read it before, and both started a worker — each about to
+  // make the same paid calls (Codex, 17 Sep 2026). The claim and the selection
+  // are one statement now.
+  const [first, second] = await Promise.all([runs.claimStranded(), runs.claimStranded()]);
+  const got = [...first, ...second].filter((r) => r.id === run.id);
+  assert.equal(got.length, 1, 'exactly one of them gets it');
+
+  // And it is not offered again until it goes quiet once more.
+  assert.equal((await runs.claimStranded()).find((r) => r.id === run.id), undefined);
+});

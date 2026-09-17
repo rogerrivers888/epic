@@ -1513,7 +1513,10 @@ async function work(runId, householdId) {
  * minutes, so this cannot start a second worker on a run that is simply slow.
  */
 export async function resumeCollections() {
-  const waiting = await collectRuns.stranded();
+  // Claimed, not merely read: the claim and the selection are one statement, so
+  // two instances booting together cannot both pick up the same run and make
+  // the same paid calls (Codex, 17 Sep 2026).
+  const waiting = await collectRuns.claimStranded();
   if (!waiting.length) return { resumed: 0 };
   let resumed = 0;
   for (const run of waiting) {

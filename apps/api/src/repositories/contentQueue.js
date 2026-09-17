@@ -103,7 +103,14 @@ export async function sync() {
       from image_assets ia
       left join households h on h.id = ia.contributor_household_id
      where ia.contributor_household_id is not null
-    on conflict (subject_type, subject_id) do nothing`);
+    -- A decision made on the Library screen has to reach the queue row, or the
+    -- queue goes on showing an approved photograph as waiting and lets
+    -- somebody decide it a second time, the other way (Codex, 17 Sep 2026).
+    -- image_assets.moderation is the truth about a photograph; the queue row
+    -- is a view of it.
+    on conflict (subject_type, subject_id) do update
+       set state = excluded.state
+     where content_queue.state <> excluded.state`);
 
   // A household's own words about a place they went to.
   await query(`
@@ -295,7 +302,7 @@ export async function approve(ids, who) {
   // because the queue row now says "approved".
   for (const r of rows) {
     if (r.subject_type === 'image') {
-      await query(`update image_assets set moderation = 'approved', moderated_by = $2, moderated_at = now() where id = $1::uuid`, [r.subject_id, who ?? null]);
+      await decideImage(r.subject_id, 'approved', { who });
       const { rows: [q] } = await query('select venue_ref from content_queue where id = $1', [r.id]);
       if (q?.venue_ref) await rescorePlace(q.venue_ref);
       continue;
@@ -390,6 +397,42 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   return out;
 }
 
+
+/**
+ * A photograph decided in the queue, points and all.
+ *
+ * The Library screen's own moderation endpoint awards the contributor their
+ * points and reverses them when a decision is reversed. Moving ordinary
+ * moderation into the queue quietly stopped that happening, so a household got
+ * the thank-you e-mail and none of the points they were promised (Codex,
+ * 17 Sep 2026). Same rules, same figures, one path.
+ */
+async function decideImage(imageId, moderation, { note = null, who = null } = {}) {
+  const { rows: [before] } = await query(
+    `select id, moderation, reward_points, contributor_account_id, contributor_household_id
+       from image_assets where id = $1::uuid`, [imageId]);
+  if (!before) return null;
+  await query(
+    `update image_assets set moderation = $2, moderation_note = coalesce($3, moderation_note),
+            moderated_by = $4, moderated_at = now(), updated_at = now()
+      where id = $1::uuid`, [imageId, moderation, note, who ?? null]);
+  if (!before.contributor_account_id || moderation === before.moderation) return before;
+  // The same ten points, and the same reversal, as the Library path.
+  if (moderation === 'approved') {
+    await query(
+      `insert into image_rewards (account_id, household_id, image_id, points, reason, awarded_by)
+       values ($1,$2,$3,$4,'accepted',$5)`,
+      [before.contributor_account_id, before.contributor_household_id, imageId, before.reward_points || 10, who ?? null]);
+  } else if (before.moderation === 'approved') {
+    await query(
+      `insert into image_rewards (account_id, household_id, image_id, points, reason, note, awarded_by)
+       values ($1,$2,$3,$4,'reversed',$5,$6)`,
+      [before.contributor_account_id, before.contributor_household_id, imageId,
+        -(before.reward_points || 10), note, who ?? null]);
+  }
+  return before;
+}
+
 /**
  * The place's score again, because a picture is one of the facts it is judged on.
  *
@@ -410,9 +453,7 @@ async function rescorePlace(venueRef) {
  */
 async function suppress(subjectType, subjectId, { reason, who }) {
   if (subjectType === 'image') {
-    await query(
-      `update image_assets set moderation = 'rejected', moderation_note = $2, moderated_by = $3, moderated_at = now()
-        where id = $1::uuid`, [subjectId, reason, who ?? null]);
+    await decideImage(subjectId, 'rejected', { note: reason, who });
     // The link is left alone on purpose. Every read that puts a picture in
     // front of anybody already joins `moderation = 'approved'`, so the flag is
     // what suppresses it — and deleting the links as well would make the
