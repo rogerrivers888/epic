@@ -265,7 +265,15 @@ router.get('/area', requires('view_library'), async (req, res, next) => {
       ...(await head(scope)),
       stats: await statsOf(scope, { category: req.query.cat ?? '', subcategory: req.query.sub ?? '' }),
       refreshedAt: await index.statsAge(),
-      ringBands: BANDS, modes: MODES,
+      ringBands: BANDS,
+      // Which ways of getting about the matrix can answer *here*.
+      //
+      // The chooser used to offer all three whatever was built, so tapping Walk
+      // or Transit in a country with only a driving matrix gave an empty board
+      // and nothing said why (17 Sep 2026, the verification audit). Building a
+      // mode is a run, on Runs; this is the reading.
+      modes: MODES,
+      modesBuilt: await index.modesFor(scope),
     });
   } catch (err) { next(err); }
 });
@@ -318,7 +326,11 @@ router.get('/categories', requires('view_library'), async (req, res, next) => {
       // The subcategories there are at all, so "9 of 9" can be printed.
       subcategories: (await query('select count(*)::int as n from shelf_subcategories where active')).rows[0].n,
       categories: rows, facts: FACTS,
-      labels: req.query.by === 'labels'
+      // `words`, not `by`. A ring's travel mode is carried in `by`, so the
+      // words toggle sharing the name meant opening the Labels view — or the
+      // Subcategories view — of a walking ring silently counted a driving one
+      // (17 Sep 2026, the verification audit).
+      labels: req.query.words === 'labels'
         ? await index.labels(scope.kind === 'area' ? scope.area.slug : null, { refs: scope.kind === 'ring' ? scope.refs : null })
         : null,
     });
@@ -580,7 +592,11 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       `select l.slug, l.name, l.kind from place_areas pa join localities l on l.slug = pa.area_slug where pa.venue_ref = $1 order by l.kind`, [ref]);
     const { rows: pictures } = await query(`
       select ia.id, ia.source, ia.licence, ia.licence_url, ia.creator, ia.credit_line, ia.title,
-             ia.source_page_url, ia.width, ia.height, ia.bytes, ia.fetched_at, ia.may_store, ia.moderation, li.role
+             ia.source_page_url, ia.width, ia.height, ia.bytes, ia.fetched_at, ia.may_store, ia.moderation,
+             li.role, li.subject_type as link_kind,
+             -- An attraction's picture says the attraction; a place's says this
+             -- place, which is the one we are standing on.
+             (select a.name from attractions a where a.id::text = li.subject_id and li.subject_type = 'attraction') as on_place_name
         from image_links li join image_assets ia on ia.id = li.image_id
        where (li.subject_type = 'place' and li.subject_id = $1)
           or (li.subject_type = 'attraction' and li.subject_id = $2)
@@ -699,6 +715,10 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
         id: p.id, source: p.source, licence: p.licence, licenceUrl: p.licence_url, creator: p.creator,
         credit: p.credit_line, title: p.title, page: p.source_page_url, width: p.width, height: p.height,
         bytes: p.bytes, fetchedAt: p.fetched_at, owned: p.may_store, role: p.role,
+        // Which place it is attached to, so the drawer's Pictures tab can print
+        // it the way the Pictures board does. Without it the column read a
+        // permanent dash (17 Sep 2026, the verification audit).
+        onPlace: p.on_place_name ?? (p.link_kind === 'place' ? name.name : null),
       })),
       // Identifiers, and what it means when there is not one: `not asked` is not
       // the same fact as `no match`, and the two must stay visibly different.
@@ -1332,83 +1352,124 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
  * It answers immediately and runs on: a collection over fifty places outlives
  * the gateway, and Runs is the page that watches what is going.
  */
+/**
+ * What a collection would actually do, before it does it.
+ *
+ * The board used to work its own figures out — "every identified place in the
+ * county", priced at a per-call rate it kept its own copy of — while the run
+ * took fifty places, dropped everything asked inside twelve months, and priced
+ * an unmatched place at two calls rather than one. So a county could quote four
+ * figures for a run that would ask about fifty (17 Sep 2026, the verification
+ * audit). This is the plan, and both the quote and the run read it, so they
+ * cannot disagree.
+ */
+async function planCollect(where) {
+  const scope = await resolveWhere(where ?? {});
+  if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass where.');
+  // A GET carries them comma-separated; a POST carries an array. Both are read.
+  const chosen = new Set((Array.isArray(where?.sources)
+    ? where.sources
+    : String(where?.sources ?? 'own').split(',')).map((x) => String(x).trim()).filter(Boolean));
+  const limit = Math.min(200, Math.max(1, Number(where?.limit) || 50));
+
+  // The places in scope that would gain most: the ones that are not ready,
+  // worst first.
+  const args = [];
+  const wh = [];
+  if (scope.kind === 'ring') { args.push(scope.refs); wh.push(`pi.venue_ref = any($${args.length})`); }
+  else { args.push(scope.area.slug); wh.push(`exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $${args.length})`); }
+  if (where?.cat) { args.push(String(where.cat)); wh.push(`pi.category = $${args.length}`); }
+  if (where?.sub) { args.push(String(where.sub)); wh.push(`pi.subcategory = $${args.length}`); }
+  args.push(limit);
+  const { rows } = await query(
+    `select pi.venue_ref, pi.ownership from place_index pi
+      where ${wh.join(' and ')}
+      order by pi.ready asc, pi.data_score asc nulls first
+      limit $${args.length}`, args);
+
+  const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
+  const everything = rows.map((r) => r.venue_ref);
+  // Only a place we hold nothing of our own about is worth a paid call.
+  const worthPaying = rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref);
+
+  /**
+   * The staleness rule, enforced rather than printed.
+   *
+   * The design asks for "a staleness rule so a place is not re-asked inside
+   * twelve months unless something changed", and the board says so on the row —
+   * but nothing checked it, so reopening the same scope and pressing again
+   * bought the same answers over (Codex, 17 Sep 2026).
+   *
+   * The free pass is one act, so it is keyed on one source: `curateThese` runs
+   * `enrich`, which reads the venue's own page, the open map and the
+   * encyclopedias together and cannot be asked for one of them alone. What it
+   * writes is an `own` row, so that is the window's key; keying it on the three
+   * names separately meant choosing Atlas alone offered work for ever.
+   */
+  const FREE_KEY = 'own';
+  const SOURCES_ASKED = ['google', 'tripadvisor', ...(freeChosen.length ? [FREE_KEY] : [])];
+  const { rows: lately } = everything.length ? await query(
+    `select source, venue_ref from place_index_sources
+      where venue_ref = any($1) and source = any($2)
+        and last_seen > now() - ($3 || ' months')::interval`,
+    [everything, SOURCES_ASKED, String(STALE_MONTHS)]) : { rows: [] };
+  const askedLately = new Map(SOURCES_ASKED.map((k) => [k, new Set()]));
+  for (const r of lately) askedLately.get(r.source)?.add(r.venue_ref);
+  const notLately = (src, from) => from.filter((ref) => !askedLately.get(src)?.has(ref));
+
+  const free = freeChosen.length ? notLately(FREE_KEY, everything) : [];
+  const freeFresh = everything.length - free.length;
+
+  // Each paid source on its own terms, and only if it was chosen and is
+  // switched on. One shared list run through Google was how asking Tripadvisor
+  // spent Google's money (Codex, 17 Sep 2026).
+  const google = chosen.has('google') && googleSource.enabled() ? notLately('google', worthPaying) : [];
+  let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? notLately('tripadvisor', worthPaying) : [];
+  // Tripadvisor's ceiling is counted in their locations, and a view is two.
+  const taLeft = tripadvisor.length
+    ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;
+  const taCapped = Math.max(0, tripadvisor.length - taLeft);
+  tripadvisor = tripadvisor.slice(0, taLeft);
+
+  const want = askingCost(google, await alreadyMatched(google));
+  return {
+    scope, chosen, limit, places: rows.length,
+    free, freeFresh, google, tripadvisor, taCapped, taLeft,
+    want,
+    fresh: {
+      google: worthPaying.length - notLately('google', worthPaying).length,
+      tripadvisor: worthPaying.length - notLately('tripadvisor', worthPaying).length,
+      free: freeFresh,
+    },
+  };
+}
+
+/**
+ * The quote: the same plan, read rather than run.
+ *
+ * `view_library`, because looking at what something would cost is looking.
+ */
+router.get('/collect/quote', requires('view_library'), async (req, res, next) => {
+  try {
+    const plan = await planCollect(req.query);
+    const room = await roomToSpend(plan.want, { reserve: false });
+    res.json({
+      ...(await head(plan.scope)),
+      places: plan.places, limit: plan.limit, staleMonths: STALE_MONTHS,
+      // Per source, so every figure on the board is derivable from this.
+      would: { free: plan.free.length, google: plan.google.length, tripadvisor: plan.tripadvisor.length },
+      fresh: plan.fresh,
+      spendPence: plan.want,
+      tripadvisorCapped: plan.taCapped, tripadvisorLeft: plan.taLeft,
+      leftPence: room.leftPence, overTheCeiling: !room.ok,
+    });
+  } catch (err) { next(err); }
+});
+
 router.post('/collect', requires('manage_library'), async (req, res, next) => {
   try {
-    const scope = await resolveWhere(req.body ?? {});
-    if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass where.');
-    const chosen = new Set((Array.isArray(req.body?.sources) ? req.body.sources : ['own']).map(String));
-    const limit = Math.min(200, Math.max(1, Number(req.body?.limit) || 50));
-
-    // The places in scope that would gain most: the ones that are not ready,
-    // worst first.
-    const args = [];
-    const where = [];
-    if (scope.kind === 'ring') { args.push(scope.refs); where.push(`pi.venue_ref = any($${args.length})`); }
-    else { args.push(scope.area.slug); where.push(`exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $${args.length})`); }
-    if (req.body?.cat) { args.push(String(req.body.cat)); where.push(`pi.category = $${args.length}`); }
-    if (req.body?.sub) { args.push(String(req.body.sub)); where.push(`pi.subcategory = $${args.length}`); }
-    args.push(limit);
-    const { rows } = await query(
-      `select pi.venue_ref, pi.ownership from place_index pi
-        where ${where.join(' and ')}
-        order by pi.ready asc, pi.data_score asc nulls first
-        limit $${args.length}`, args);
-
-    const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
-    const everything = rows.map((r) => r.venue_ref);
-    // Only a place we hold nothing of our own about is worth a paid call.
-    const worthPaying = rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref);
-
-    /**
-     * The staleness rule, enforced rather than printed.
-     *
-     * The design asks for "a staleness rule so a place is not re-asked inside
-     * twelve months unless something changed", and the board says so on the
-     * row — but nothing checked it, so reopening the same scope and pressing
-     * again bought the same answers over (Codex, 17 Sep 2026). A source that
-     * has seen a place inside the window is not asked about it again.
-     */
-    // The free pass is one act, so it is keyed on one source.
-    //
-    // `curateThese` runs `enrich`, which reads the venue's own page, the open
-    // map and the encyclopedias together — it cannot be asked for only one of
-    // them, and what it writes is an `own` source row. Keying the window on
-    // the three names separately meant choosing Atlas alone offered work for
-    // ever, because nothing ever wrote an `atlas` row for an ordinary place
-    // (Codex, 17 Sep 2026). The three rows on the board still say what each
-    // source has given us; the run itself is one.
-    const FREE_KEY = 'own';
-    const SOURCES_ASKED = ['google', 'tripadvisor', ...(freeChosen.length ? [FREE_KEY] : [])];
-    const { rows: lately } = everything.length ? await query(
-      `select source, venue_ref from place_index_sources
-        where venue_ref = any($1) and source = any($2)
-          and last_seen > now() - ($3 || ' months')::interval`,
-      [everything, SOURCES_ASKED, String(STALE_MONTHS)]) : { rows: [] };
-    const askedLately = new Map(SOURCES_ASKED.map((k) => [k, new Set()]));
-    for (const r of lately) askedLately.get(r.source)?.add(r.venue_ref);
-    const notLately = (src, from) => from.filter((ref) => !askedLately.get(src)?.has(ref));
-
-    // Free work obeys the window too. It costs nothing, but re-reading the same
-    // open sources for the same place inside a year is a run that reports work
-    // it did not need to do — and the board promises it is left alone.
-    const free = freeChosen.length ? notLately(FREE_KEY, everything) : [];
-    const freeFresh = everything.length - free.length;
-
-    // Each paid source is asked on its own terms, and only if it was chosen and
-    // is switched on. One shared `paid` list run through Google was how asking
-    // Tripadvisor spent Google's money (Codex, 17 Sep 2026).
-    const google = chosen.has('google') && googleSource.enabled() ? notLately('google', worthPaying) : [];
-    let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? notLately('tripadvisor', worthPaying) : [];
-    // Tripadvisor's ceiling is counted in calls, not in money, so it is enforced
-    // here rather than by `roomToSpend`.
-    // Asked without claiming: the run takes its calls a chunk at a time.
-    // In places, from their units: a view is two locations.
-    const taLeft = tripadvisor.length
-      ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;
-    const taCapped = Math.max(0, tripadvisor.length - taLeft);
-    tripadvisor = tripadvisor.slice(0, taLeft);
-
-    const want = askingCost(google, await alreadyMatched(google));
+    const plan = await planCollect(req.body ?? {});
+    const { free, google, tripadvisor, want } = plan;
     // Checked here without claiming it: the run takes its money a chunk at a
     // time, so holding the whole list's worth for the length of the run would
     // lock out everything else for as long as it took.
@@ -1419,9 +1480,9 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     // Written down before a word of it is done, so an answer of "started" is a
     // claim something can check afterwards (Codex, 17 Sep 2026).
     const run = await collectRuns.start({
-      whereLabel: scope.kind === 'ring' ? `${rows.length} places in a ring` : (scope.area?.name ?? scope.area?.slug ?? null),
-      scope: { kind: scope.kind, slug: scope.area?.slug ?? null, cat: req.body?.cat ?? null, sub: req.body?.sub ?? null },
-      sources: [...chosen],
+      whereLabel: plan.scope.kind === 'ring' ? `${plan.places} places in a ring` : (plan.scope.area?.name ?? plan.scope.area?.slug ?? null),
+      scope: { kind: plan.scope.kind, slug: plan.scope.area?.slug ?? null, cat: req.body?.cat ?? null, sub: req.body?.sub ?? null },
+      sources: [...plan.chosen],
       todo: { free, google, tripadvisor },
       // Whose run it is, on the row: a resume happens outside any request, and
       // `currentHousehold()` there answers with the founding household — which
@@ -1430,19 +1491,15 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
       startedBy: req.account?.email ?? null,
     });
     res.json({
-      started: true, runId: run.id, places: rows.length, sources: [...chosen],
+      started: true, runId: run.id, places: plan.places, sources: [...plan.chosen],
       free: free.length, paid: google.length + tripadvisor.length,
       google: google.length, tripadvisor: tripadvisor.length,
       // Said out loud, because "we asked about fewer than you chose" is a
       // figure somebody would otherwise go looking for.
-      fresh: {
-        google: worthPaying.length - notLately('google', worthPaying).length,
-        tripadvisor: worthPaying.length - notLately('tripadvisor', worthPaying).length,
-        free: freeFresh,
-      },
+      fresh: plan.fresh,
       staleMonths: STALE_MONTHS,
       // Said out loud rather than swallowed: the ones the monthly ceiling left out.
-      tripadvisorCapped: taCapped, tripadvisorLeft: taLeft,
+      tripadvisorCapped: plan.taCapped, tripadvisorLeft: plan.taLeft,
       spendPence: want, leftPence: room.leftPence,
     });
     void work(run.id, household.id);
@@ -1562,7 +1619,17 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
       select ia.id, ia.source, ia.licence, ia.licence_url, ia.creator, ia.creator_url, ia.credit_line,
              ia.title, ia.caption, ia.source_page_url, ia.width, ia.height, ia.bytes, ia.fetched_at,
              ia.contributor_household_id,
-             (select li.subject_type || ':' || li.subject_id from image_links li where li.image_id = ia.id limit 1) as on_place,
+             -- What it is a picture *of*, in words.
+             --
+             -- This used to hand back "place:osm:123" and the board printed it
+             -- unresolved (17 Sep 2026, the verification audit). An attraction
+             -- knows its own name; a place's name comes from the same ladder
+             -- every other name on these screens comes from, so the ref is
+             -- handed over beside the words and resolved once.
+             (select li.subject_id from image_links li where li.image_id = ia.id limit 1) as on_ref,
+             (select li.subject_type from image_links li where li.image_id = ia.id limit 1) as on_kind,
+             (select a.name from image_links li join attractions a on a.id::text = li.subject_id
+               where li.image_id = ia.id and li.subject_type = 'attraction' limit 1) as on_attraction,
              (select li.role from image_links li where li.image_id = ia.id limit 1) as role
         from image_assets ia
        where ${where.join(' and ')}
@@ -1586,6 +1653,9 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
     // the answer.
     const { rows: [matching] } = await query(
       `select count(*)::int as n from image_assets ia where ${where.join(' and ')}`, args.slice(0, -1));
+    // One read of the name ladder for the whole page, not one per row.
+    const placeNames = await index.namesFor(
+      [...new Set(rows.filter((p) => p.on_kind === 'place' && p.on_ref).map((p) => p.on_ref))]);
     res.json({
       matching: matching.n,
       pictures: rows.map((p) => ({
@@ -1593,7 +1663,11 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
         creator: p.creator, creatorUrl: p.creator_url, credit: p.credit_line,
         title: p.title, caption: p.caption, page: p.source_page_url,
         width: p.width, height: p.height, bytes: p.bytes, fetchedAt: p.fetched_at,
-        onPlace: p.on_place, role: p.role, fromHousehold: Boolean(p.contributor_household_id),
+        onRef: p.on_ref ?? null, onKind: p.on_kind ?? null,
+        // The words, resolved: an attraction's own name, or the place's from
+        // the name ladder, or nothing — which means it is attached to nothing.
+        onPlace: p.on_attraction ?? (p.on_kind === 'place' ? (placeNames.get(p.on_ref)?.name ?? null) : null),
+        role: p.role, fromHousehold: Boolean(p.contributor_household_id),
         attribution: Boolean(p.credit_line),
       })),
       counts: { ...counts, noPicture: noPicture.n },

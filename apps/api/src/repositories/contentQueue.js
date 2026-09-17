@@ -195,16 +195,25 @@ export async function syncFlagged() {
     on conflict (subject_type, subject_id) do nothing`);
 }
 
-/** The counts the filter prints, per kind and per state. */
-export async function counts({ areaSlug = null } = {}) {
+/**
+ * The counts the filter prints, per kind and per state.
+ *
+ * The kind counts follow the state that is being looked at. They were always
+ * the waiting counts, so selecting Approved left every kind chip showing its
+ * waiting number beside a list of approved rows — two filters disagreeing about
+ * the same rows (17 Sep 2026, the verification audit). The state counts are
+ * always all of them, because that is what those chips are for.
+ */
+export async function counts({ areaSlug = null, state: forState = 'waiting' } = {}) {
   const { rows } = await query(
     `select kind, state, reported, count(*)::int as n from content_queue
       where ($1::text is null or area_slug = $1) group by 1,2,3`, [areaSlug]);
   const kind = Object.fromEntries(KINDS.map((k) => [k.key, 0]));
   const state = Object.fromEntries(STATES.map((s) => [s, 0]));
   let reported = 0;
+  const counting = STATES.includes(forState) ? forState : 'waiting';
   for (const r of rows) {
-    if (r.state === 'waiting') kind[r.kind] = (kind[r.kind] ?? 0) + r.n;
+    if (counting === 'reported' ? r.reported : r.state === counting) kind[r.kind] = (kind[r.kind] ?? 0) + r.n;
     state[r.state] = (state[r.state] ?? 0) + r.n;
     if (r.reported) reported += r.n;
   }

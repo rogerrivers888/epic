@@ -831,6 +831,29 @@ const FIVE = `
   coalesce(st.ready, 0)      as ready_count,
   st.avg_score               as avg_score`;
 
+/**
+ * Which ways of getting about the matrix can answer, where we are standing.
+ *
+ * A mode with no `cell_builds` row for these cells has no reach rows either, so
+ * a ring in that mode comes back empty — and an empty board that looks like an
+ * answer is worse than a control that says it is not built yet (17 Sep 2026,
+ * the verification audit).
+ */
+export async function modesFor(scope) {
+  const { rows } = scope?.kind === 'ring' && scope.cell
+    ? await query(
+      `select distinct cb.mode from cell_builds cb
+        where cb.from_cell = $1`, [scope.cell])
+    : await query(
+      `select distinct cb.mode from cell_builds cb
+         join geo_cells g on g.code = cb.from_cell
+        where $1::text is null or g.country_code = upper($1)`,
+      [scope?.kind === 'area' ? (scope.area?.country_code ?? null) : null]);
+  // Said in the words the screen uses, not the matrix's.
+  const SAID = { driving: 'drive', walking: 'walk', transit: 'transit' };
+  return [...new Set(rows.map((r) => SAID[r.mode] ?? r.mode))];
+}
+
 /** The five numbers every level prints, for one area. */
 export async function statsFor(areaSlug, { category = '', subcategory = '' } = {}) {
   // A subcategory decides its own category, so asking for both would be asking
@@ -1222,14 +1245,32 @@ export async function sources(areaSlug, { refs = null, limit = 60 } = {}) {
      order by count(*) desc
      limit $${scope.args.length + 1}`, [...scope.args, limit]);
   const labels = new Map((await query('select key, label from shelf_subcategories')).rows.map((r) => [r.key, r.label]));
-  // Which sources we have ever asked anywhere. A source never asked reads
-  // "not asked" on every row, never as nothing.
+  // When each source was last asked about a place *here*.
+  //
+  // The column's own words are "when this source was last asked about a place
+  // here", and it printed the word "somewhere" — because all it was given was a
+  // boolean, taken from every source anywhere (17 Sep 2026, the verification
+  // audit). `place_index_sources.last_seen` is the date, and the scope is the
+  // one the board is standing in.
+  const { rows: seen } = await query(`
+    with scoped as (select pi.venue_ref from place_index pi where ${scope.sql})
+    select src.source, max(src.last_seen) as at, count(*)::int as n
+      from place_index_sources src join scoped s on s.venue_ref = src.venue_ref
+     group by src.source`, scope.args);
+  const lastHere = new Map(seen.map((r) => [r.source, r.at]));
+  // And whether it has ever been asked anywhere, so a source with nothing here
+  // reads "not asked here" rather than "never asked at all".
   const asked = new Set((await query('select distinct source from place_index_sources')).rows.map((r) => r.source));
   // How many subcategories there are at all, because "5 of 59" is the finding:
   // the ones that are not listed are the ones nothing landed in.
   const all = (await query('select count(*)::int as n from shelf_subcategories where active')).rows[0].n;
   return {
-    sources: SOURCES.map((s) => ({ ...s, asked: asked.has(s.key) })),
+    sources: SOURCES.map((s) => ({
+      ...s,
+      asked: asked.has(s.key),
+      // The date the column asks for, and null where it has never been asked here.
+      askedHere: lastHere.get(s.key) ?? null,
+    })),
     subcategories: all,
     rows: rows.map((r) => ({
       key: r.subcategory, label: labels.get(r.subcategory) ?? r.subcategory, known: r.known,

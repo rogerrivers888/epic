@@ -182,7 +182,22 @@ export const TRIPADVISOR_CAP = Number(process.env.EPIC_LOOKUP_TRIPADVISOR_CAP ??
  * a morning's work.
  */
 export async function failures(runKey) {
-  if (runKey !== 'menus') return { ours: [], theirs: [], totals: { tried: 0, read: 0, failed: 0, ours: 0 } };
+  const run = RUNS.find((r) => r.key === runKey) ?? null;
+  // Only the menu reader keeps a per-place failure list. The others either
+  // cannot fail per place or record their failures on the run. Saying which run
+  // this is, and that it keeps no list, is the difference between an empty
+  // board and an empty board titled "Read the menus" (17 Sep 2026, the
+  // verification audit).
+  if (runKey !== 'menus') {
+    return {
+      runKey, label: run?.label ?? 'That run', ours: [], theirs: [],
+      totals: { tried: 0, read: 0, failed: 0, ours: 0 },
+      keepsAList: false,
+      why: run
+        ? `${run.label} does not keep a failure list per place. What it last did is on Runs.`
+        : 'No run by that name.',
+    };
+  }
   const causes = await menuCauses();
   const { rows: ours } = await query(
     `select venue_ref, coalesce(venue_label, venue_ref) as label, why, read_at
@@ -197,6 +212,7 @@ export async function failures(runKey) {
             max(read_at) as last
        from place_menus`);
   return {
+    runKey, label: run?.label ?? 'Read the menus', keepsAList: true, why: null,
     totals,
     ours: OURS_KINDS.map((k) => ({
       key: k.key, label: k.label, n: byKind.get(k.key).length,
@@ -209,6 +225,13 @@ export async function failures(runKey) {
 }
 
 /** The places behind one failure cause, so a row is a piece of work you can open. */
+/**
+ * The places behind one cause.
+ *
+ * `place_menus` only, because the menu reader is the only run with a per-place
+ * failure list — the route used to ignore its own `:key`, so asking any other
+ * run for its failures answered with the menus' (17 Sep 2026).
+ */
 export async function failing(cause, { oursKind = null, limit = 200 } = {}) {
   const { rows } = await query(
     `select venue_ref, coalesce(venue_label, venue_ref) as label, why, menu_url, read_at, attempts

@@ -179,8 +179,15 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
           {/* A run's timestamp is the kind of thing you quote, so it is the date and
               the time rather than "10 days ago". */}
-          <Kicker>{`Read the menus${t.last ? ` · ${day(t.last)}, ${new Date(t.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`}</Kicker>
-          <Text style={styles.title}>{`${(t.failed ?? 0).toLocaleString()} could not be read`}</Text>
+          {/* The run's own name, from the API. Hard-coded, this board said
+              "Read the menus" whatever run it had been opened for (17 Sep
+              2026, the verification audit). */}
+          <Kicker>{`${data.label ?? 'Read the menus'}${t.last ? ` · ${day(t.last)}, ${new Date(t.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`}</Kicker>
+          <Text style={styles.title}>
+            {data.keepsAList === false
+              ? (data.why ?? 'This run keeps no failure list per place.')
+              : `${(t.failed ?? 0).toLocaleString()} could not be read`}
+          </Text>
         </View>
         <View style={styles.five}>
           <Stat label="Tried" value={(t.tried ?? 0).toLocaleString()} tip="tried" />

@@ -31,7 +31,14 @@ router.get('/:key/failures', requires('view_library'), async (req, res, next) =>
 /** The places behind one cause, so a row of work is a link you can send somebody. */
 router.get('/:key/failing', requires('view_library'), async (req, res, next) => {
   try {
-    res.json({ rows: await runs.failing(String(req.query.cause ?? 'unknown'), { oursKind: req.query.ours ? String(req.query.ours) : null }) });
+    // The key is honoured rather than ignored: only the menu reader keeps this
+    // list, and answering with the menus' failures for any other run was a
+    // board that looked full of work belonging to something else (17 Sep 2026).
+    if (String(req.params.key) !== 'menus') return res.json({ rows: [], keepsAList: false });
+    res.json({
+      rows: await runs.failing(String(req.query.cause ?? 'unknown'), { oursKind: req.query.ours ? String(req.query.ours) : null }),
+      keepsAList: true,
+    });
   } catch (err) { next(err); }
 });
 

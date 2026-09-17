@@ -1368,6 +1368,14 @@ export type PlaceLevel = {
   refreshedAt?: string | null;
   /** The ring chooser's three steps and three ways. Named apart from the quality lens's score bands. */
   ringBands?: number[]; modes?: string[];
+  /**
+   * Which of those ways the matrix can actually answer here.
+   *
+   * A mode nobody has built has no reach rows, so a ring in it comes back
+   * empty — and an empty board that looks like an answer is worse than a
+   * control that says it is not built yet.
+   */
+  modesBuilt?: string[];
 };
 
 export type PlaceCountry = PlaceStats & {
@@ -1410,7 +1418,13 @@ export type PlaceCategory = PlaceStats & {
 /** BO2c's other half: a provider's own word, and what it points at in ours. */
 export type PlaceLabel = PlaceStats & { key: string; label: string; pointsAt: string | null };
 
-export type PlaceSourceDef = { key: string; label: string; explain: string; optIn: boolean; paid: boolean; asked: boolean };
+export type PlaceSourceDef = {
+  key: string; label: string; explain: string; optIn: boolean; paid: boolean;
+  /** Whether this source has ever been asked anywhere. */
+  asked: boolean;
+  /** When it was last asked about a place *here*, which is what the column says. */
+  askedHere?: string | null;
+};
 export type PlaceSourceRow = {
   key: string; label: string; known: number;
   /** `null` where that source has never been asked anywhere — different from nought. */
@@ -1481,6 +1495,8 @@ export type PlaceDetail = {
     id: string; source: string; licence: string | null; licenceUrl: string | null; creator: string | null;
     credit: string | null; title: string | null; page: string | null; width: number | null; height: number | null;
     bytes: number | null; fetchedAt: string | null; owned: boolean; role: string | null;
+    /** Which place it is attached to, in words — the same column the Pictures board prints. */
+    onPlace: string | null;
   }[];
   ids: { key: string; label: string; value: string | null; state: 'held' | 'not-asked' | 'no-match' | 'none' }[];
   atlas: { id: string; state: string; pinned: boolean; note: string | null; rank: number | null; scoreParts: Record<string, unknown> } | null;
@@ -1513,7 +1529,9 @@ export type PictureIndex = {
     creator: string | null; creatorUrl: string | null; credit: string | null;
     title: string | null; caption: string | null; page: string | null;
     width: number | null; height: number | null; bytes: number | null; fetchedAt: string | null;
-    onPlace: string | null; role: string | null; fromHousehold: boolean; attribution: boolean;
+    /** What it is a picture of, in words — resolved, never `place:osm:123`. */
+    onPlace: string | null; onRef: string | null; onKind: string | null;
+    role: string | null; fromHousehold: boolean; attribution: boolean;
   }[];
   counts: { owned: number; household: number; needs_attribution: number; noPicture: number };
   facets: { key: string; label: string; n: number }[];
@@ -1550,6 +1568,13 @@ export type RunsList = {
   stranded: { id: string; scope: string; stage: string; started_at: string; touched_at: string; counts: Record<string, unknown> }[];
 };
 export type RunFailures = {
+  /**
+   * Which run this is, and whether it keeps a failure list at all.
+   *
+   * Only the menu reader does. The board used to title itself "Read the menus"
+   * whatever it had been opened for.
+   */
+  runKey?: string; label?: string; keepsAList?: boolean; why?: string | null;
   totals: { tried: number; read: number; failed: number; ours: number; last: string | null };
   ours: { key: string; label: string; n: number; examples: string[] }[];
   theirs: { key: string; label: string; detail: string; fix: string; n: number; examples: string[] }[];
@@ -2386,8 +2411,32 @@ export const api = {
   adminPlaceCoverage: (p: PlaceWhere) =>
     request<{ rows: PlaceCoverageRow[]; towns: number; outcodes: number; allTowns: number; refreshedAt: string | null }>(`/api/admin/place-index/coverage${qs(p)}`),
   /** BO2c / BO2o / BO2p — the taxonomy with the counts left-joined onto it. */
-  adminPlaceCategories: (p: PlaceWhere & { cat?: string | null; since?: number; by?: string }) =>
+  /**
+   * BO2c / BO2p — the shelves, or the words that fill them.
+   *
+   * `words` rather than `by`: `by` is the ring's travel mode and is part of
+   * `PlaceWhere`, so a second meaning on the same key silently made a walking
+   * ring's category ladder count a driving one.
+   */
+  adminPlaceCategories: (p: PlaceWhere & { cat?: string | null; since?: number; words?: string }) =>
       request<PlaceLevel & { categories: PlaceCategory[]; facts: FactDef[]; subcategories: number; labels: PlaceLabel[] | null }>(`/api/admin/place-index/categories${qs(p)}`),
+  /**
+   * What a collection would actually do, before it does it.
+   *
+   * The board used to work its own figures out — every identified place in the
+   * county, at its own copy of the per-call rate — while the run took fifty,
+   * dropped everything asked inside twelve months, and priced an unmatched
+   * place at two calls. Both sides read this now, so they cannot disagree.
+   */
+  adminCollectQuote: (p: PlaceWhere & { cat?: string | null; sub?: string | null; sources: string[]; limit?: number }) =>
+    request<{
+      places: number; limit: number; staleMonths: number;
+      would: { free: number; google: number; tripadvisor: number };
+      fresh: { google: number; tripadvisor: number; free: number };
+      spendPence: number; tripadvisorCapped: number; tripadvisorLeft: number;
+      leftPence: number; overTheCeiling: boolean;
+    }>(`/api/admin/place-index/collect/quote${qs({ ...p, sources: p.sources.join(',') })}`),
+
   /** BO2d — which providers have ever seen these places. */
   adminPlaceSources: (p: PlaceWhere) =>
     request<PlaceLevel & { sources: PlaceSourceDef[]; rows: PlaceSourceRow[]; subcategories: number }>(`/api/admin/place-index/sources${qs(p)}`),
@@ -2708,7 +2757,15 @@ export const api = {
   scoutSweep: (code: string) => post<Record<string, unknown>>(`/api/admin/scout/areas/${code}/sweep`, {}),
   scoutRescore: (code: string) => post<{ code: string; rescored: number }>(`/api/admin/scout/areas/${code}/rescore`, {}),
   scoutFillMenus: (limit = 5) => post<Record<string, unknown>>('/api/admin/scout/menus/fill', { limit }),
-  scoutReadMenus: (limit = 10) => post<{ started: number }>('/api/admin/scout/menus/read', { limit }),
+  /**
+   * Read the menus.
+   *
+   * `ref` reads one place's and waits for it, which is what the Read button on
+   * a place's own record needs; without it the whole board did the batch or
+   * nothing.
+   */
+  scoutReadMenus: (limit = 10, ref?: string) =>
+    post<{ started?: number; read?: number }>('/api/admin/scout/menus/read', ref ? { ref, wait: true } : { limit }),
   scoutRetryMenus: () => post<{ requeued: number }>('/api/admin/scout/menus/retry', {}),
   scoutMisses: () => request<{ misses: ScoutMenuMiss[] }>('/api/admin/scout/menus/missing'),
   /** The backlog grouped by what would fix it — "seventeen places, one fix". */

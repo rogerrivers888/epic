@@ -275,7 +275,8 @@ function Level(props: {
             stats={lens === 'demand' ? null : <Five stats={level.stats} ring={ring} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
       <LensRow lens={lens} onLens={props.onLens}
                right={ring
-                 ? <RingChooser minutes={within ?? 30} mode={mode} onMinutes={props.onWithin} onMode={props.onBy} cells={level.cells} />
+                 ? <RingChooser minutes={within ?? 30} mode={mode} onMinutes={props.onWithin} onMode={props.onBy}
+                                cells={level.cells} modesBuilt={level.modesBuilt} />
                  : <AreaSearch onWhere={props.onWhere} />} />
       {body}
     </AdminPage>
@@ -427,8 +428,10 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
 }
 
 /** 30 min · 1 hour · 90 min, by car, walking or transit. */
-function RingChooser({ minutes, mode, onMinutes, onMode, cells }: {
+function RingChooser({ minutes, mode, onMinutes, onMode, cells, modesBuilt }: {
   minutes: number; mode: string; onMinutes: (m: number) => void; onMode: (m: string) => void; cells: number | null;
+  /** Which ways of getting about the matrix can answer here; undefined means "do not know, offer them all". */
+  modesBuilt?: string[];
 }) {
   return (
     <Explain tip={['How far out', cells == null
@@ -445,13 +448,23 @@ function RingChooser({ minutes, mode, onMinutes, onMode, cells }: {
           ))}
         </View>
         <View style={styles.segment}>
-          {MODES.map((m) => (
-            <Press key={m} effect="none" onPress={() => onMode(m)} accessibilityRole="button"
-                   accessibilityState={{ selected: mode === m }} accessibilityLabel={MODE_LABEL[m]}
-                   style={[styles.segItem, mode === m && styles.segItemOn]}>
-              <Text style={[styles.segWord, mode === m && styles.segWordOn]}>{MODE_LABEL[m]}</Text>
-            </Press>
-          ))}
+          {MODES.map((m) => {
+            // A way of getting about the matrix has not been built here cannot
+            // answer, and a ring drawn in it comes back empty with nothing to
+            // say why. The word stays — removing a control is the owner's call
+            // — and says what it is waiting for (17 Sep 2026).
+            const built = !modesBuilt || modesBuilt.includes(m);
+            return (
+              <Explain key={m} tip={built ? null : (['Not worked out yet', `The reachability matrix has not been built for ${MODE_LABEL[m].toLowerCase()} here. It is a free run, on Runs.`] as const)}>
+                <Press effect="none" onPress={() => (built ? onMode(m) : undefined)} accessibilityRole="button"
+                       disabled={!built}
+                       accessibilityState={{ selected: mode === m, disabled: !built }} accessibilityLabel={MODE_LABEL[m]}
+                       style={[styles.segItem, mode === m && styles.segItemOn]}>
+                  <Text style={[styles.segWord, mode === m && styles.segWordOn, !built && styles.segWordOff]}>{MODE_LABEL[m]}</Text>
+                </Press>
+              </Explain>
+            );
+          })}
         </View>
       </View>
     </Explain>
@@ -679,7 +692,7 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
   const [by, setBy] = useQueryState<'subcategories' | 'labels'>('words', 'subcategories', asOneOf(['subcategories', 'labels'] as const, 'subcategories'));
   useEffect(() => {
     setData(null);
-    api.adminPlaceCategories({ ...q, cat: cat || undefined, by: by === 'labels' ? 'labels' : undefined })
+    api.adminPlaceCategories({ ...q, cat: cat || undefined, words: by === 'labels' ? 'labels' : undefined })
       .then(setData).catch(() => setData(null));
   }, [q, cat, by]);
 
@@ -1139,6 +1152,12 @@ const RingFact = ({ label, value, tip }: { label: string; value: string; tip: an
 // BO2q — the places themselves
 // ---------------------------------------------------------------------------
 
+/** What each hole's own button says, and the run behind it. */
+type FieldAction = 'write' | 'find' | 'read' | 'ask';
+const ACTION_WORD: Record<FieldAction, string> = {
+  write: 'Write', find: 'Find', read: 'Read', ask: `Ask · ${pounds(3)}`,
+};
+
 const SHOW = ['not-ready', 'ready', 'all'] as const;
 const SHOW_LABEL: Record<string, string> = { 'not-ready': 'Not ready', ready: 'Ready', all: 'All' };
 
@@ -1344,27 +1363,41 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
   const [busy, setBusy] = useState(false);
   /** What happened when it was pressed — including the ceiling saying no. */
   const [said, setSaid] = useState<string | null>(null);
+  /**
+   * What the run would actually do, from the run's own arithmetic.
+   *
+   * Every figure in the footer and the last two columns comes from here rather
+   * than from a copy of the rules kept on the screen, which is what let the
+   * board quote four figures for a run of fifty places (17 Sep 2026).
+   */
+  const [quote, setQuote] = useState<Awaited<ReturnType<typeof api.adminCollectQuote>> | null>(null);
   useEffect(() => { setData(null); api.adminPlaceSources(q).then(setData).catch(() => setData(null)); }, [q]);
+  useEffect(() => {
+    setQuote(null);
+    api.adminCollectQuote({ ...q, cat: cat || undefined, sub: sub || undefined, sources: [...picked] })
+      .then(setQuote).catch(() => setQuote(null));
+  }, [q, cat, sub, picked]);
   if (!data) return <Waiting />;
 
   const known = level.stats.known;
-  const identified = level.stats.identified;
+  // How many each source would be asked about, and what that would cost —
+  // both from the quote, so the board and the run agree by construction.
+  const wouldFor = (key: string) => {
+    if (!quote) return null;
+    if (key === 'google') return quote.would.google;
+    if (key === 'tripadvisor') return quote.would.tripadvisor;
+    // The three open sources are one research pass, so they share its figure.
+    return picked.has(key) ? quote.would.free : null;
+  };
   const rows = data.sources.map((s) => {
     const held = data.rows.reduce((n, r) => n + (r.counts[s.key] ?? 0), 0);
-    return {
-      ...s,
-      held,
-      // The staleness rule, said on the row: a place is not asked again inside
-      // twelve months unless something about it has changed.
-      would: s.key === 'google' ? identified : Math.max(0, known - held),
-      // A place we have never matched costs two calls: the search that finds
-      // which Google place it is, then the detail (Codex, 17 Sep 2026). The
-      // board prints the worst case and the run reports what it actually was.
-      pence: s.paid ? (s.key === 'google' ? 2.8 : 0) : 0,
-    };
+    return { ...s, held, would: wouldFor(s.key) };
   });
   const chosen = rows.filter((r) => picked.has(r.key));
-  const cost = chosen.reduce((n, r) => n + r.would * r.pence, 0);
+  // Money, from the quote. Tripadvisor costs no money at all — it is bounded by
+  // a monthly count of locations — and the screen used to price it at nought
+  // per place, which read as free rather than as capped (17 Sep 2026).
+  const cost = quote?.spendPence ?? 0;
 
   const columns: Col<typeof rows[number]>[] = [
     { key: 'tick', label: '', width: 26, align: 'left', stops: true,
@@ -1378,13 +1411,32 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
       ),
       cellTip: (r) => [r.label, r.explain] as const },
     { key: 'asked', label: 'Last asked', tip: ['Last asked', `When this source was last asked about a place here. Nothing is asked again inside ${STALE_MONTHS} months unless something about the place has changed.`] as const,
-      width: 140, align: 'right', cell: (r) => (r.asked ? <Word muted>somewhere</Word> : <NotAsked />),
-      cellTip: (r) => (r.asked ? null : 'notAsked') },
+      width: 140, align: 'right',
+      // The date, not the word "somewhere". The column promises when, and all
+      // it used to be given was a boolean (17 Sep 2026, the verification audit).
+      cell: (r) => (r.askedHere ? <Word muted>{day(r.askedHere)}</Word> : <NotAsked />),
+      cellTip: (r) => (r.askedHere
+        ? null
+        : ([r.label, r.asked
+          ? `${r.label} has been asked about places elsewhere, and about none here.`
+          : `${r.label} has never been asked about a place anywhere.`] as const)) },
     { key: 'held', label: 'Already held', tip: 'known', width: 130, align: 'right', cell: (r) => <Num n={r.held || null} /> },
-    { key: 'would', label: 'Would ask about', tip: ['Would ask about', `How many places here this source has not been asked about, after the ${STALE_MONTHS}-month rule.`] as const,
-      width: 150, align: 'right', cell: (r) => <Num n={r.would || null} strong /> },
+    { key: 'would', label: 'Would ask about',
+      tip: ['Would ask about', `How many places this run would ask this source about — after the ${quote?.staleMonths ?? STALE_MONTHS}-month rule, and capped at the ${quote?.limit ?? 50} the run takes at a time. The run's own figure, not an estimate.`] as const,
+      width: 150, align: 'right',
+      cell: (r) => (picked.has(r.key) ? <Num n={r.would || null} strong /> : <Word muted>—</Word>) },
     { key: 'cost', label: 'What it would cost', tip: 'providerSpend', width: 160, align: 'right',
-      cell: (r) => (r.paid ? <Word>{pounds(Math.round(r.would * r.pence))}</Word> : <Word muted>free</Word>) },
+      cell: (r) => {
+        if (!r.paid) return <Word muted>free</Word>;
+        if (!picked.has(r.key)) return <Word muted>—</Word>;
+        // Tripadvisor costs no money: it is bounded by a monthly count of
+        // locations instead, and "£0.00" read as free rather than as capped
+        // (17 Sep 2026).
+        if (r.key === 'tripadvisor') {
+          return <Word>{`${r.would ?? 0} of ${quote?.tripadvisorLeft ?? 0} left`}</Word>;
+        }
+        return <Word>{pounds(Math.round(quote?.spendPence ?? 0))}</Word>;
+      } },
   ];
 
   return (
@@ -1399,7 +1451,15 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
       <View style={styles.subRow}>
         <Word muted>The three free sources are one pass — our own research reads all three together.</Word>
       </View>
-      <Footer left={<Text style={styles.selected}>{said ?? `${chosen.length} source${chosen.length === 1 ? '' : 's'} · ${pounds(Math.round(cost))}`}</Text>}>
+      <Footer left={<Text style={styles.selected}>{said ?? [
+        `${chosen.length} source${chosen.length === 1 ? '' : 's'} · ${cost ? pounds(Math.round(cost)) : 'free'}`,
+        quote ? ` · ${quote.places} place${quote.places === 1 ? '' : 's'} this run` : '',
+        // The places the twelve-month rule leaves alone, said before the run
+        // rather than found missing afterwards.
+        quote && (quote.fresh.free || quote.fresh.google || quote.fresh.tripadvisor)
+          ? ` · ${Math.max(quote.fresh.free, quote.fresh.google, quote.fresh.tripadvisor)} asked inside ${quote.staleMonths} months, left alone`
+          : '',
+      ].join('')}</Text>}>
         <Act label="Work out the scores again · free" tone="secondary" disabled={!canManage || busy}
              onPress={() => { setBusy(true); api.adminRescorePlaces().finally(() => setBusy(false)); }} />
         {/* One action, not a row per provider — and it carries the scope it was
@@ -1536,6 +1596,30 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
 
   useEffect(() => { api.adminPlaceReach(place.ref).then(setReach).catch(() => setReach(null)); }, [place.ref]);
 
+  /**
+   * A hole offers the thing that would fill it, and pressing it runs that thing.
+   *
+   * The API marks each hole with the action that fills it and the buttons all
+   * opened the edit box instead, so four of them did nothing at all (17 Sep
+   * 2026, the verification audit). Ask is the only one that spends, and it is
+   * the only one that says a price.
+   */
+  const runFor = async (key: string, action: FieldAction) => {
+    setBusy(key);
+    try {
+      if (action === 'write') await api.adminCuratePlaces([place.ref]);
+      else if (action === 'find') {
+        // The website first, because everything else is read off it; a picture
+        // is the other thing Find is offered for.
+        if (key === 'website') await api.adminCuratePlaces([place.ref]);
+        else await api.adminFindPictures([place.ref]);
+      } else if (action === 'read') await api.scoutReadMenus(1, place.ref);
+      else if (action === 'ask') await api.adminAskAboutPlaces([place.ref]);
+    } catch { /* the row stays a hole, and says so */ }
+    setBusy(null);
+    onSaved();
+  };
+
   const save = async (key: string) => {
     setSaving(true);
     try { await api.adminEditPlace({ ref: place.ref, field: key, value: draft }); setEditing(null); onSaved(); }
@@ -1578,8 +1662,15 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
                     </Press>
                   </Explain>
                 ) : f.action && canManage ? (
-                  <Act label={f.action === 'write' ? 'Write' : f.action === 'find' ? 'Find' : f.action === 'read' ? 'Read' : 'Ask'}
-                       small tone="secondary" onPress={() => { setEditing(f.key); setDraft(''); }} />
+                  // Each of these runs the thing that would fill the hole,
+                  // rather than opening the same edit box Edit opens: Write
+                  // researches it from the open sources, Find looks for the
+                  // venue's own page or a picture we may keep, Read reads their
+                  // menu, Ask asks the paid source and says what it cost
+                  // (17 Sep 2026, the verification audit).
+                  <Act label={busy === f.key ? '…' : (ACTION_WORD[f.action as FieldAction] ?? 'Ask')}
+                       small tone="secondary" disabled={busy != null}
+                       onPress={() => runFor(f.key, f.action as FieldAction)} />
                 ) : null}
               </View>
               <Press effect="none" onPress={() => setOpen(open === f.key ? null : f.key)} hitSlop={8}
@@ -1622,8 +1713,13 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
             // A picture can be linked to the place and to its atlas row at once,
             // so the position is part of the key.
             <Explain key={`${p.id}-${i}`} tip={p.owned ? null : 'rented'} style={[styles.thumb, !p.owned && { opacity: 0.5 }]}>
-              <View style={styles.thumbImage} />
-              <Text style={styles.thumbNote}>{p.owned ? (p.source ?? 'ours') : 'rented'}</Text>
+              {/* The picture, not a grey box. The ids were in hand and the panel
+                  drew N empty squares under the words "N owned" (17 Sep 2026,
+                  the verification audit). */}
+              <View style={styles.thumbImage}>
+                <Image source={{ uri: api.imageUrl(p.id, 240) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
+              </View>
+              <Text style={styles.thumbNote} numberOfLines={1}>{p.owned ? (p.source ?? 'ours') : 'rented'}</Text>
             </Explain>
           ))}
         </View>
@@ -2396,6 +2492,7 @@ const styles = StyleSheet.create({
   segment: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted },
   segItem: { paddingHorizontal: 14, paddingVertical: 8 },
   segItemOn: { backgroundColor: colors.selected },
+  segWordOff: { color: colors.inkMuted },
   segWord: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
   segWordOn: { fontWeight: '700', color: colors.selectedFg },
 

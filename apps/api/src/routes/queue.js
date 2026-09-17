@@ -30,7 +30,7 @@ router.get('/', requires('view_library'), async (req, res, next) => {
     const rows = await queue.list({ kind, state, areaSlug });
     res.json({
       kinds: queue.KINDS, states: queue.STATES,
-      counts: await queue.counts({ areaSlug }),
+      counts: await queue.counts({ areaSlug, state }),
       state, kind: kind ?? 'all', where: areaSlug,
       rows: rows.map((r) => ({
         id: r.id, kind: r.kind, subjectType: r.subject_type, subjectId: r.subject_id,
