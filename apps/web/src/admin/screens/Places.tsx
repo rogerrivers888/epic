@@ -252,8 +252,37 @@ function Level(props: {
     () => ({ ...q, ...(lens === 'category' && cat ? { cat } : {}), ...(lens === 'category' && sub ? { sub } : {}) }),
     [q, lens, cat, sub],
   );
-  useEffect(() => { setLevel(null); api.adminPlaceArea(scoped as any).then(setLevel).catch(() => setLevel(null)); }, [scoped]);
+  /**
+   * A name we have never heard of is an answer, not a blank page.
+   *
+   * `/area` answers 404 for one, and the screen sat on its waiting state for
+   * ever — an address somebody typed or was sent drew nothing at all (17 Sep
+   * 2026, the verification audit). The way out is the search box, so it is the
+   * thing the page offers.
+   */
+  const [noSuchArea, setNoSuchArea] = useState<string | null>(null);
+  useEffect(() => {
+    setLevel(null); setNoSuchArea(null);
+    api.adminPlaceArea(scoped as any)
+      .then((l) => { setLevel(l); setNoSuchArea(null); })
+      .catch((e: any) => setNoSuchArea(e?.body?.message ?? 'Nothing here by that name yet.'));
+  }, [scoped]);
 
+  if (noSuchArea) {
+    return (
+      <AdminPage>
+        <View style={styles.trail}>
+          <Press effect="none" onPress={props.onUp} accessibilityRole="button" accessibilityLabel="All countries" style={styles.trailBack}>
+            <Icon name="back" size={15} strokeWidth={2.2} color={colors.accent} />
+            <Text style={styles.trailWord}>All countries</Text>
+          </Press>
+        </View>
+        <Band kicker="NOT A PLACE WE KNOW" title={where} stats={null} />
+        <View style={styles.subRow}><Word muted>{noSuchArea}</Word></View>
+        <View style={[styles.search, { width: 320 }]}><AreaSearch onWhere={props.onWhere} /></View>
+      </AdminPage>
+    );
+  }
   if (!level) return <AdminPage><Waiting /></AdminPage>;
 
   // BO2l — Places at 390. The one number you would check on a train is ready %,
