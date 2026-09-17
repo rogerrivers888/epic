@@ -388,6 +388,20 @@ export async function state({ scheme = 'sector', country = 'GB' } = {}) {
     'select count(*)::int as n from geo_cells where scheme = $1 and country_code = $2',
     [scheme, country],
   );
+  // The last full build of each mode, and whether it actually finished.
+  //
+  // A rebuild replaces a cell's marker as that cell finishes, so an interrupted
+  // one leaves every untouched cell holding a marker that still looks current —
+  // and if the caps happen to match, nothing in the markers themselves gives it
+  // away (Codex, 17 Sep 2026). The run row does: it is left `running` by a
+  // process that died and `failed` by one that threw, and only a run that
+  // reached the end is `done`.
+  const { rows: lastRuns } = await query(
+    `select distinct on (mode) mode, state, cells, pairs, started_at, finished_at, why
+       from reach_runs where scheme = $1 order by mode, started_at desc`,
+    [scheme],
+  );
+  const lastRun = Object.fromEntries(lastRuns.map((r) => [r.mode, r]));
   // A mode with rows in the matrix and no build record at all: written before
   // this table existed, or by a run that died before its first origin landed.
   // Reported as short rather than left off, because a mode that vanishes from
@@ -401,17 +415,23 @@ export async function state({ scheme = 'sector', country = 'GB' } = {}) {
       group by r.mode order by r.mode`,
     [scheme, country],
   );
-  const modes = built.map((m) => ({
-    mode: m.mode,
-    cap: m.lowest_cap,
-    // A rebuild part-way through has origins at two different caps. Saying both
-    // is the only honest answer, and the low one is the one that matters.
-    partWayThrough: m.lowest_cap !== m.highest_cap,
-    pairs: Number(m.pairs),
-    fromCells: m.built_cells,
-    shortOfHorizon: m.lowest_cap < HORIZON_MINUTES,
-    missingCells: Math.max(0, cellCount.n - m.built_cells),
-  })).concat(unrecorded
+  const modes = built.map((m) => {
+    const run = lastRun[m.mode] ?? null;
+    return {
+      mode: m.mode,
+      cap: m.lowest_cap,
+      // A rebuild part-way through has origins at two different caps. Saying
+      // both is the only honest answer, and the low one is the one that matters.
+      partWayThrough: m.lowest_cap !== m.highest_cap,
+      pairs: Number(m.pairs),
+      fromCells: m.built_cells,
+      shortOfHorizon: m.lowest_cap < HORIZON_MINUTES,
+      missingCells: Math.max(0, cellCount.n - m.built_cells),
+      // A build that never reached the end, however current its markers look.
+      interrupted: Boolean(run && run.state !== 'done'),
+      lastBuild: run ? { state: run.state, at: run.finished_at ?? run.started_at, why: run.why } : null,
+    };
+  }).concat(unrecorded
     .filter((u) => !built.some((b) => b.mode === u.mode))
     .map((u) => ({
       mode: u.mode, cap: null, partWayThrough: false,
@@ -431,7 +451,7 @@ export async function state({ scheme = 'sector', country = 'GB' } = {}) {
     pairs: Number(matrix.pairs), fromCells: matrix.from_cells, capMinutes: matrix.cap,
     modes,
     // One word for the screen: is anything here out of date?
-    needsRebuild: modes.filter((m) => m.shortOfHorizon || m.missingCells > 0).map((m) => m.mode),
+    needsRebuild: modes.filter((m) => m.shortOfHorizon || m.missingCells > 0 || m.interrupted).map((m) => m.mode),
     horizonMinutes: HORIZON_MINUTES,
     runs,
   };
