@@ -56,6 +56,63 @@ export async function advance(id, source, refs, { done = 0, spentPence = 0, refu
   return rows[0] ?? null;
 }
 
+/**
+ * Take a chunk off the list *before* the calls go out.
+ *
+ * The worker used to take it off afterwards, so a deploy between the calls and
+ * the write left every one of those places on `todo` and the resumed run paid
+ * for them all again (Codex, 17 Sep 2026). They move to `asking` first: still
+ * on the row, so nothing is lost, and no longer on the list, so nothing is
+ * asked twice.
+ */
+export async function claim(id, source, refs) {
+  const { rows } = await query(
+    `update collect_runs
+        set todo = jsonb_set(todo, array[$2::text],
+                    coalesce((select jsonb_agg(v) from jsonb_array_elements_text(todo->$2::text) as t(v)
+                               where v <> all($3::text[])), '[]'::jsonb)),
+            asking = jsonb_set(asking, array[$2::text], to_jsonb($3::text[])),
+            touched_at = now()
+      where id = $1 returning *`, [id, source, refs]);
+  return rows[0] ?? null;
+}
+
+/** The chunk came back. What is in hand is recorded and the claim let go. */
+export async function done(id, source, { done: n = 0, spentPence = 0, refused = [] } = {}) {
+  const { rows } = await query(
+    `update collect_runs
+        set asking = jsonb_set(asking, array[$2::text], '[]'::jsonb),
+            done = jsonb_set(done, array[$2::text],
+                    to_jsonb(coalesce((done->>$2::text)::int, 0) + $3::int)),
+            refused = refused || $4::jsonb,
+            spent_pence = spent_pence + $5::int,
+            touched_at = now()
+      where id = $1 returning *`,
+    [id, source, n, JSON.stringify(refused), spentPence]);
+  return rows[0] ?? null;
+}
+
+/**
+ * A chunk that was in flight when something stopped.
+ *
+ * We cannot know whether those calls were billed, and the safe direction is not
+ * to pay twice: a place we did not ask about is a gap somebody can see on the
+ * board, and a place we paid for twice is invisible. So they are recorded as
+ * refused, with the reason, and the run carries on.
+ */
+export async function abandonInFlight(id) {
+  const run = await one(id);
+  if (!run) return null;
+  const stuck = Object.entries(run.asking ?? {}).flatMap(([source, refs]) =>
+    (Array.isArray(refs) ? refs : []).map((ref) => ({ ref, why: `interrupted while asking ${source}; not asked again, to avoid paying twice` })));
+  if (!stuck.length) return run;
+  const { rows } = await query(
+    `update collect_runs
+        set asking = '{}'::jsonb, refused = refused || $2::jsonb, touched_at = now()
+      where id = $1 returning *`, [id, JSON.stringify(stuck)]);
+  return rows[0] ?? null;
+}
+
 export async function finish(id) {
   const { rows } = await query(
     `update collect_runs set state = 'done', finished_at = now(), touched_at = now()
@@ -109,11 +166,13 @@ export async function latest() {
   const { rows } = await query('select * from collect_runs order by started_at desc limit 1');
   const r = rows[0];
   if (!r) return null;
-  const left = Object.values(r.todo ?? {}).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0);
+  const count = (o) => Object.values(o ?? {}).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0);
+  // What is still to do, and what it is asking about right now.
+  const left = count(r.todo) + count(r.asking);
   const asked = Object.values(r.done ?? {}).reduce((n, v) => n + (Number(v) || 0), 0);
   return {
     id: r.id, state: r.state, where: r.where_label, sources: r.sources ?? [],
-    left, asked, spentPence: r.spent_pence, problem: r.problem,
+    left, asking: count(r.asking), asked, spentPence: r.spent_pence, problem: r.problem,
     startedAt: r.started_at, touchedAt: r.touched_at, finishedAt: r.finished_at,
     stranded: r.state === 'running' && Date.now() - new Date(r.touched_at).getTime() > STRANDED_AFTER_MS,
   };

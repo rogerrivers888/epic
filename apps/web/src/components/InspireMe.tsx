@@ -385,6 +385,13 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       // session knows, and its answer survives the tab being opened and closed
       // all afternoon.
       if (kept.length) { setIdeas(kept); setReply(s.reply); setFoundAt(s.startedAt ?? memory.foundAt ?? savedAt); }
+      // The search these ideas came from, so what is done with them after the
+      // tab is reopened counts against the ask that produced them. Only the
+      // still-running path registered it, which is the *unusual* case — a
+      // restored session has normally finished, and opening one of its ideas
+      // was either dropped or counted against an older ask (Codex, 17 Sep
+      // 2026).
+      heldSearch('plan', s.searchId, kept.map((i) => i.place?.ref ?? i.id));
       if (s.running) {
         setBusy(true); setStage(s.stage ?? 'thinking');
         const startedAt = s.startedAt ? new Date(s.startedAt).getTime() : Date.now();

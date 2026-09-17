@@ -82,3 +82,39 @@ test('two instances cannot both pick up the same interrupted run', async () => {
   // And it is not offered again until it goes quiet once more.
   assert.equal((await runs.claimStranded()).find((r) => r.id === run.id), undefined);
 });
+
+test('a chunk comes off the list before the calls go out, not after', async () => {
+  const run = await runs.start({
+    whereLabel: 'Interruptible', scope: {}, sources: ['google'], todo: { google: ['a', 'b', 'c'] },
+  });
+  // Taking it off afterwards meant a deploy between the calls and the write
+  // left the whole chunk on `todo`, and the resumed run paid for all of it
+  // again (Codex, 17 Sep 2026).
+  const claimed = await runs.claim(run.id, 'google', ['a', 'b']);
+  assert.deepEqual(claimed.todo.google, ['c'], 'off the list');
+  assert.deepEqual(claimed.asking.google, ['a', 'b'], 'and still on the row');
+
+  const after = await runs.done(run.id, 'google', { done: 2, spentPence: 3 });
+  assert.deepEqual(after.asking.google, []);
+  assert.equal(after.done.google, 2);
+  assert.equal(after.spent_pence, 3);
+});
+
+test('a chunk interrupted mid-call is written off rather than asked again', async () => {
+  const run = await runs.start({ whereLabel: 'Cut off', scope: {}, sources: ['google'], todo: { google: ['a', 'b', 'c'] } });
+  await runs.claim(run.id, 'google', ['a', 'b']);
+  // The process dies here. We cannot know whether those two were billed.
+
+  const back = await runs.abandonInFlight(run.id);
+  const inFlight = (r) => Object.values(r.asking ?? {}).reduce((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+  assert.equal(inFlight(back), 0, 'nothing is still in flight');
+  assert.deepEqual(back.todo.google, ['c'], 'the rest of the list is untouched');
+  assert.equal(back.refused.length, 2);
+  // The safe direction is not to pay twice: a place we did not ask about is a
+  // gap somebody can see, and one we paid for twice is invisible.
+  for (const r of back.refused) assert.match(r.why, /avoid paying twice/);
+
+  // And it is safe to call when nothing was in flight.
+  const again = await runs.abandonInFlight(run.id);
+  assert.equal(again.refused.length, 2);
+});

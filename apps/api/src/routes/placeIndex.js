@@ -1581,20 +1581,24 @@ async function work(runId, householdId) {
       const source = ['google', 'tripadvisor', 'free'].find((k) => (todo[k] ?? []).length);
       if (!source) break;
       const batch = todo[source].slice(0, collectRuns.CHUNK);
+      // Off the list before the first call goes out. Taking it off afterwards
+      // meant a deploy in between left the whole chunk on `todo` and the
+      // resumed run paid for all of it again (Codex, 17 Sep 2026).
+      await collectRuns.claim(runId, source, batch);
       if (source === 'free') {
         const out = await curateThese(batch, householdId);
-        await collectRuns.advance(runId, 'free', batch, { done: out.started, refused: out.refused });
+        await collectRuns.done(runId, 'free', { done: out.started, refused: out.refused });
       } else if (source === 'google') {
         // The ceiling is asked again per chunk, not once at the start: a run
         // that outlives a deploy must not outlive the month's budget either.
         const cost = askingCost(batch, await alreadyMatched(batch));
         const room = await roomToSpend(cost, { holder: `collect:${runId}` });
-        if (!room.ok) { await collectRuns.advance(runId, 'google', batch, { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
+        if (!room.ok) { await collectRuns.done(runId, 'google', { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
         try {
           const out = await askThese(batch, householdId);
           // What the whole chunk was claimed at, apportioned to what answered:
           // a place that did not match still cost the search that found that out.
-          await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: cost });
+          await collectRuns.done(runId, 'google', { done: out.asked, refused: out.refused, spentPence: cost });
         } finally { await releaseSpend(room.reservation); }
       } else {
         // Claimed in locations, sliced back into places.
@@ -1602,7 +1606,7 @@ async function work(runId, householdId) {
         const may = batch.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
         try {
           const out = may.length ? await askTripadvisor(may, householdId) : { asked: 0, refused: [] };
-          await collectRuns.advance(runId, 'tripadvisor', batch, {
+          await collectRuns.done(runId, 'tripadvisor', {
             done: out.asked,
             refused: [...out.refused, ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly ceiling' }))],
           });
@@ -1638,6 +1642,10 @@ export async function resumeCollections() {
     // the board asks for it to be started again rather than quietly finishing
     // it wrongly.
     if (!run.household_id) { await collectRuns.fail(run.id, 'it was interrupted and we cannot tell whose run it was'); continue; }
+    // Whatever it was in the middle of asking about is written off rather than
+    // asked again: we cannot know whether those calls were billed, and the safe
+    // direction is not to pay twice (Codex, 17 Sep 2026).
+    await collectRuns.abandonInFlight(run.id);
     void work(run.id, run.household_id);
     resumed += 1;
   }
