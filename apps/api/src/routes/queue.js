@@ -37,6 +37,9 @@ router.get('/', requires('view_library'), async (req, res, next) => {
         maker: r.maker_label, place: r.place_label, ref: r.venue_ref, area: r.area_slug,
         state: r.state, reported: r.reported, madeAt: r.made_at,
         reason: r.reason, told: r.told,
+        // The first words of it, and — for a flagged fact — which fact.
+        preview: r.preview ? String(r.preview).replace(/\s+/g, ' ').trim() : null,
+        field: r.field ?? null,
         // A photograph's own id, so a row can draw a thumbnail of the thing it
         // is asking about.
         imageId: r.kind === 'photo' && r.subject_type === 'image' ? r.subject_id : null,

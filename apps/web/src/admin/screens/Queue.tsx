@@ -31,6 +31,24 @@ import { AdminPage, ago, day, pounds, since } from '../kit';
 import { Explain } from '../explain';
 import { Word, Blank, Act, Footer, Kicker, Stat } from '../table';
 
+/**
+ * The word a sentence uses for a kind, not the word a column header uses.
+ *
+ * "Thanks for the photograph", never "Thanks for the photo" — the message used
+ * to interpolate the key itself (17 Sep 2026, the verification audit). The API
+ * carries `said` on each kind; this is the fallback for one it does not name.
+ */
+const SAID: Record<string, string> = {
+  photo: 'photograph', review: 'review', rating: 'rating',
+  note: 'note on a dish', offer: 'offer', message: 'message', data: 'flag',
+};
+const said = (kind: string) => SAID[kind] ?? kind;
+
+/** The fact three sources disagree about, in our own words. */
+const FIELD_WORD: Record<string, string> = {
+  opening_hours: 'hours', website: 'website', phone: 'telephone number', address: 'address',
+};
+
 export function Queue({ canManage }: { canManage: boolean }) {
   const [kind, setKind] = useQueryState<string>('kind', 'all', asText);
   const [state, setState] = useQueryState<string>('state', 'waiting', asText);
@@ -137,11 +155,20 @@ export function Queue({ canManage }: { canManage: boolean }) {
                 {picked.has(r.id) ? <Icon name="check" size={13} strokeWidth={2.6} color={colors.selectedFg} /> : null}
               </Press>
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                {/* The row says the thing, in its own words: "Note on a dish ·
+                    Bhel Puri House", and a flagged fact says what disagrees
+                    rather than the word "Data" (BO5a). The state is only on the
+                    row being decided — on every row it was noise (17 Sep 2026,
+                    the verification audit). */}
                 <Text style={[styles.listName, open === r.id && styles.strong]} numberOfLines={1}>
-                  {`${r.kind[0].toUpperCase()}${r.kind.slice(1)}${r.place ? ` · ${r.place}` : r.ref ? ` · ${r.ref}` : ''}`}
+                  {r.kind === 'data'
+                    ? `Three sources disagree${r.field ? ` on the ${FIELD_WORD[r.field] ?? r.field}` : ''}`
+                    : `${said(r.kind)[0].toUpperCase()}${said(r.kind).slice(1)}${r.place ? ` · ${r.place}` : r.ref ? ` · ${r.ref}` : ''}`}
                 </Text>
                 <Text style={styles.listNote} numberOfLines={1}>
-                  {[r.maker ?? 'flagged by us', since(r.madeAt), r.reported ? 'reported' : r.state].filter(Boolean).join(' · ')}
+                  {r.kind === 'data'
+                    ? [r.place ?? r.ref, 'flagged by us', since(r.madeAt)].filter(Boolean).join(' · ')
+                    : [r.maker ?? 'flagged by us', since(r.madeAt), r.reported ? 'reported' : (open === r.id ? r.state : null)].filter(Boolean).join(' · ')}
                 </Text>
               </View>
             </Press>
@@ -231,7 +258,10 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
 
       <View>
         <Kicker>About it</Kicker>
-        <Fact label="Made by" value={item.made ? `${item.made.name} · ${item.made.kept} kept before` : it.maker ?? '—'} />
+        {/* BO5a: "The Hartleys · 4 photographs before, all kept". */}
+        <Fact label="Made by" value={item.made
+          ? `${item.made.name}${item.made.kept ? ` · ${item.made.kept} ${item.made.kept === 1 ? 'thing' : 'things'} before, all kept` : ' · nothing before this'}`
+          : it.maker ?? '—'} />
         <Fact label={item.picture ? 'Taken' : 'Made'} value={day(it.madeAt)} />
         {/* One of the five rejection reasons is "somebody's face is in it", so
             the screen has to say whether anything has looked. Nothing does yet,
@@ -239,7 +269,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
         {item.picture ? <Fact label="Faces" value={item.faces} /> : null}
         {item.picture ? <Fact label="Size" value={item.picture.width && item.picture.height ? `${item.picture.width} × ${item.picture.height}` : '—'} /> : null}
         {item.picture ? <Fact label="Licence" value={item.picture.licence ?? 'the household’s own'} /> : null}
-        <Fact label="Earned so far" value={item.made ? pounds(item.made.points) : '—'} last />
+        <Fact label="Earned so far" value={item.made ? `${pounds(item.made.points)} of credit` : '—'} last />
       </View>
 
       {it.state === 'waiting' ? (
@@ -266,6 +296,10 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
             <Text style={styles.nextName}>{next.place ?? next.ref ?? cap(nextWord(next.kind))}</Text>
             <Text style={styles.listNote}>{[next.maker, since(next.madeAt)].filter(Boolean).join(' · ')}</Text>
           </View>
+          {/* The words themselves. BO5a prints the review in full and the block
+              printed a name and a date, which is not enough to decide on
+              (17 Sep 2026, the verification audit). */}
+          {next.preview ? <Text style={styles.previewText}>{`“${next.preview}”`}</Text> : null}
           <View style={styles.actions}>
             <Act label="Approve" icon="check" tone="solid" disabled={!canManage || busy} onPress={() => onApproveNext(next.id)} />
             <Act label="Reject, and tell them why" tone="secondary" disabled={!canManage || busy} onPress={() => onOpenNext(next.id)} />
@@ -346,7 +380,9 @@ function RejectSheet({ item, tell, onClose, onDone }: {
             <Kicker>{tell ? 'The message' : 'The message · not being sent'}</Kicker>
             {/* Written next to the button that sends it, not composed afterwards. */}
             <View style={styles.message}>
-              <Text style={styles.messageTitle}>{`Thanks for the ${item.item.kind}${item.item.place ? ` of ${item.item.place}` : ''}`}</Text>
+              {/* The word, not the key: "photograph", not "photo" — and the
+                  same sentence the e-mail carries (17 Sep 2026). */}
+              <Text style={styles.messageTitle}>{`Thanks for the ${said(item.item.kind)}${item.item.place ? ` of ${item.item.place}` : ''}`}</Text>
               <TextInput value={message} onChangeText={setMessage} multiline
                          style={styles.messageInput} accessibilityLabel="What they will be told"
                          placeholder="What they will be told" placeholderTextColor={colors.inkMuted} />

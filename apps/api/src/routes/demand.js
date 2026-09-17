@@ -217,6 +217,13 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       subjectLabel: search.subject ? labels.get(search.subject) ?? search.subject : null,
       asked: search.asked,
       where: areaName ?? search.cell, minutes: search.minutes, mode: search.mode,
+      // How many searches this area has had, so the way back says what it is
+      // going back to (BO4b: "← Berkshire · 4,412 searches").
+      searchesHere: search.area_slug
+        ? (await query(
+          `select count(*)::int as n from searches where area_slug = $1 and at > now() - interval '30 days'`,
+          [search.area_slug])).rows[0].n
+        : null,
       identified: Boolean(search.account_id), heldAgainst: search.account_id ? 'an account' : 'a household',
       shown: search.shown_total,
       opened: events.filter((e) => e.kind === 'open').length,
@@ -228,7 +235,7 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // What this replay actually cost, from the ledger, and what is still
       // bare. A figure that counts what was *not* fetched is a bill for nothing.
       refetched: named,
-      asked,
+      askedAbout: asked,
       refetchedPence: spentPence,
       nameless: rows.filter((r) => !r.name).length,
       // Why a row is still an identifier — never left to be guessed at.

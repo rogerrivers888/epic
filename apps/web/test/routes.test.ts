@@ -234,14 +234,28 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(parseRoute('/admin/places?where=sl4-1qn&within=30&by=drive&cat=family&sub=play'), { name: 'admin', screen: 'places' });
   assert.equal(splitHref('/admin/places?where=sl4&place=google%3AChIJabc').query.get('place'), 'google:ChIJabc');
   assert.equal(splitHref('/admin/places?where=gb&by=city&sort=empty').query.get('sort'), 'empty');
-  assert.equal(splitHref('/admin/places?pictures=1&q=castle+winter').query.get('q'), 'castle winter');
+  // BO2j writes the picture board's own address, and its search has its own key:
+  // `q` is the place-name filter on BO2q, and one key with two meanings meant a
+  // picture search left behind became a place filter (17 Sep 2026).
+  assert.equal(splitHref('/admin/places?pictures=all&pic=castle+winter').query.get('pic'), 'castle winter');
+  assert.equal(splitHref('/admin/places?pictures=all&pic=x&facet=household').query.get('facet'), 'household');
   assert.equal(splitHref('/admin/places?ready=restaurants').query.get('ready'), 'restaurants');
+  // A layer inside the place drawer is its own address, so a licence argument
+  // or a score can be sent to somebody (BO2h, BO2i, BO2j, BO2r).
+  assert.equal(splitHref('/admin/places?where=gb&place=atlas%3A9f7&tab=score').query.get('tab'), 'score');
+  for (const t of ['record', 'compare', 'score', 'pictures', 'raw', 'history']) {
+    assert.equal(splitHref(`/admin/places?place=atlas%3A9f7&tab=${t}`).query.get('tab'), t);
+  }
   // Runs only watches; one run's failures are its own address.
   assert.deepEqual(roundTrip('/admin/runs'), { name: 'admin', screen: 'runs' });
   assert.equal(splitHref('/admin/runs?run=menus&view=failures').query.get('view'), 'failures');
+  // One cause's places are a piece of work, and a piece of work is a link.
+  assert.equal(splitHref('/admin/runs?run=menus&view=failures&cause=ours%3Atimeout').query.get('cause'), 'ours:timeout');
   // Demand, and one search replayed exactly as they saw it.
   assert.deepEqual(roundTrip('/admin/demand'), { name: 'admin', screen: 'demand' });
-  assert.equal(splitHref('/admin/demand?where=berkshire&since=30').query.get('since'), '30');
+  // BO4a spells the window with its unit: `?since=30d`.
+  assert.equal(splitHref('/admin/demand?where=berkshire&since=30d').query.get('since'), '30d');
+  assert.equal(splitHref('/admin/demand?where=berkshire&since=90d').query.get('since'), '90d');
   assert.equal(splitHref('/admin/demand?search=9a2f').query.get('search'), '9a2f');
   // The content queue: one queue with a filter, not a queue per kind.
   assert.deepEqual(roundTrip('/admin/queue'), { name: 'admin', screen: 'queue' });

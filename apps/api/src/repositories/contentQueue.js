@@ -23,16 +23,20 @@ import { mailConfigured, sendMail } from '../sources/mail.js';
 
 /** The kinds, in the order the filter prints them. */
 export const KINDS = [
-  { key: 'photo',   label: 'Photo',   batch: true  },
-  { key: 'review',  label: 'Review',  batch: false },
-  { key: 'rating',  label: 'Rating',  batch: false },
-  { key: 'note',    label: 'Note',    batch: false },
-  { key: 'offer',   label: 'Offer',   batch: false },
-  { key: 'message', label: 'Message', batch: false },
+  // `said` is the word a sentence uses — "Thanks for the photograph of Dinton
+  // Pastures" — where `label` is the word a column header uses. The message used
+  // to interpolate the key and read "Thanks for the photo" (17 Sep 2026, the
+  // verification audit).
+  { key: 'photo',   label: 'Photo',   said: 'photograph',    batch: true  },
+  { key: 'review',  label: 'Review',  said: 'review',        batch: false },
+  { key: 'rating',  label: 'Rating',  said: 'rating',        batch: false },
+  { key: 'note',    label: 'Note',    said: 'note on a dish', batch: false },
+  { key: 'offer',   label: 'Offer',   said: 'offer',         batch: false },
+  { key: 'message', label: 'Message', said: 'message',       batch: false },
   // Flagged data quality: the hours three sources disagree about. Not made by a
   // household, but it is the same act — somebody looks and decides — so it is in
   // the same queue rather than in a screen of its own.
-  { key: 'data',    label: 'Data',    batch: false },
+  { key: 'data',    label: 'Data',    said: 'flag',          batch: false },
 ];
 
 export const STATES = ['waiting', 'approved', 'rejected', 'reported'];
@@ -226,11 +230,28 @@ export async function counts({ areaSlug = null, state: forState = 'waiting' } = 
 /** The queue itself. Reported first, because it is on a different clock. */
 export async function list({ kind = null, state = 'waiting', areaSlug = null, limit = 120 } = {}) {
   const { rows } = await query(
-    `select * from content_queue
-      where ($1::text is null or kind = $1)
-        and ($2::text = 'reported' and reported or $2::text <> 'reported' and state = $2)
-        and ($3::text is null or area_slug = $3)
-      order by reported desc, made_at asc
+    `select q.*,
+            -- The first words of the thing, so the row and the "next" block can
+            -- show what is being decided rather than only that something is.
+            -- BO5a prints the review; the list used to print a name and a date
+            -- (17 Sep 2026, the verification audit).
+            case q.subject_type
+              when 'visit'       then (select left(v.note, 240)   from visits v        where v.id = q.subject_id::uuid)
+              when 'rating'      then (select left(r.comment, 240) from ratings r      where r.id = q.subject_id::uuid)
+              when 'host_review' then (select left(hr.text, 240)  from host_reviews hr where hr.id = q.subject_id::uuid)
+              when 'chat_topic'  then (select left(coalesce(t.body, t.title), 240) from chat_topics t where t.id = q.subject_id::uuid)
+              when 'chat_reply'  then (select left(rp.body, 240)  from chat_replies rp where rp.id = q.subject_id::uuid)
+              when 'open_entry'  then (select left(e.transcript, 240) from open_entries e where e.id = q.subject_id::uuid)
+              else null
+            end as preview,
+            -- Which fact three sources disagree about, so a flagged row says so
+            -- rather than saying "Data".
+            case when q.kind = 'data' then split_part(q.subject_id, '#', 2) else null end as field
+       from content_queue q
+      where ($1::text is null or q.kind = $1)
+        and ($2::text = 'reported' and q.reported or $2::text <> 'reported' and q.state = $2)
+        and ($3::text is null or q.area_slug = $3)
+      order by q.reported desc, q.made_at asc
       limit $4`, [kind, state, areaSlug, limit]);
   return rows;
 }
@@ -371,7 +392,8 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
       try {
         await sendMail({
           to: to.email,
-          subject: `Thanks for the ${q.kind}${q.place_label ? ` of ${q.place_label}` : ''}`,
+          // The word, not the key: "photograph", not "photo".
+          subject: `Thanks for the ${KINDS.find((k) => k.key === q.kind)?.said ?? q.kind}${q.place_label ? ` of ${q.place_label}` : ''}`,
           text: body,
           purpose: 'content.rejected',
         });

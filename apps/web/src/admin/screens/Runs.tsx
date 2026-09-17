@@ -32,9 +32,18 @@ const PHONE = 900;
 export function Runs({ canManage }: { canManage: boolean }) {
   const [run, setRun] = useQueryState<string>('run', '', asText);
   const [view, setView] = useQueryState<string>('view', '', asText);
+  // Held here rather than inside the board, so closing it takes the expanded
+  // cause with it: `?cause=ours:timeout` survived with nothing open (17 Sep
+  // 2026, the verification audit).
+  const [cause, setCause] = useQueryState<string>('cause', '', asText);
   const { width } = useViewport();
 
-  if (run && view === 'failures') return <FailuresBoard runKey={run} canManage={canManage} onClose={() => { setView(''); setRun(''); }} />;
+  if (run && view === 'failures') {
+    return (
+      <FailuresBoard runKey={run} canManage={canManage} cause={cause} onCause={setCause}
+                     onClose={() => { setView(''); setRun(''); setCause(''); }} />
+    );
+  }
   return width < PHONE ? <RunsPhone canManage={canManage} onFailures={(k) => { setRun(k); setView('failures'); }} />
     : <RunsBoard canManage={canManage} onFailures={(k) => { setRun(k); setView('failures'); }} />;
 }
@@ -141,11 +150,18 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
 // BO3b — one run's failures, ours kept separate
 // ---------------------------------------------------------------------------
 
-function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canManage: boolean; onClose: () => void }) {
+function FailuresBoard({ runKey, canManage, onClose, cause, onCause }: {
+  runKey: string; canManage: boolean; onClose: () => void;
+  /**
+   * In the address: the places behind one cause are a piece of work, and a
+   * piece of work is a link you can send somebody (Codex, 17 Sep 2026). Held
+   * by the screen above so closing the board takes it with it.
+   */
+  cause: string; onCause: (c: string) => void;
+}) {
   const [data, setData] = useState<RunFailures | null>(null);
-  // In the address: the places behind one cause are a piece of work, and a piece
-  // of work is a link you can send somebody (Codex, 17 Sep 2026).
-  const [open, setOpen] = useQueryState<string>('cause', '', asText);
+  const open = cause;
+  const setOpen = onCause;
   const [rows, setRows] = useState<{ venue_ref: string; label: string; why: string }[] | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [runs, setRuns] = useState<number | null>(null);

@@ -85,7 +85,15 @@ export function Places({ canManage }: { canManage: boolean }) {
   // (Codex, 17 Sep 2026).
   const lens: Lens = (cat || sub) && lensAsked === 'coverage' ? 'category' : lensAsked;
   const [place, setPlace] = useQueryState<string>('place', '', asText);
-  const [pictures, setPictures] = useQueryState<boolean>('pictures', false, asFlag);
+  // Lifted, so closing the drawer can take it with it: `?tab=score` used to
+  // survive on a level board that has no tabs (17 Sep 2026).
+  const [tab, setTab] = useQueryState<PlaceTab>('tab', 'record', asOneOf(PLACE_TABS, 'record'));
+  // `?pictures=all`, as BO2j spells it. `1` is still read, so an older link
+  // still opens (17 Sep 2026, the verification audit).
+  const [pictures, setPictures] = useQueryState<boolean>('pictures', false, {
+    read: (raw) => raw === 'all' || raw === '1' || raw === 'true',
+    write: (v) => (v ? 'all' : null),
+  });
   const [readyFor, setReadyFor] = useQueryState<string>('ready', '', asText);
 
   // `by` does double duty on purpose, exactly as the boards spell it: on a ring
@@ -96,9 +104,21 @@ export function Places({ canManage }: { canManage: boolean }) {
   const mode = ring ? ((MODES as readonly string[]).includes(by) ? by : 'drive') : 'drive';
   const breakdownBy = !ring ? (((BY as readonly string[]).includes(by) ? by : 'county') as By) : 'county';
 
+  // Closing a layer takes its own settings with it.
+  //
+  // `?tab=score` survived a closed place drawer, `?q=` survived a closed
+  // Pictures board — and `q` is the picture search on one board and the
+  // place-name filter on another, so a search left behind became a filter
+  // somewhere else (17 Sep 2026, the verification audit).
   if (pictures) return <PicturesBoard onClose={() => setPictures(false)} />;
   if (readyFor) return <ReadyBarBoard sub={readyFor} canManage={canManage} onClose={() => setReadyFor('')} onPick={setReadyFor} />;
-  if (place) return <PlaceBoard refId={place} canManage={canManage} onClose={() => setPlace('')} phone={phone} />;
+  if (place) {
+    return (
+      <PlaceBoard refId={place} canManage={canManage} phone={phone}
+                  tab={tab} onTab={setTab}
+                  onClose={() => { setPlace(''); setTab('record'); }} />
+    );
+  }
   if (!where) return <Countries onPick={(slug) => setWhere(slug)} onPictures={() => setPictures(true)} onBar={() => setReadyFor('restaurants')} canManage={canManage} />;
 
   return (
@@ -288,7 +308,12 @@ const AREA_WORD: Record<string, string> = { country: 'COUNTRY', county: 'COUNTY'
 const kickerOf = (l: PlaceLevel) => {
   // A ring drawn round a town says TOWN, not POSTCODE: what it is drawn round is
   // a fact about the place, and the ring is how far out from it.
-  if (l.kind === 'ring') return `${AREA_WORD[l.fromKind ?? 'postcode'] ?? 'POSTCODE'} · ${l.minutes} MINUTES BY ${MODE_LABEL[l.mode ?? 'drive'].toUpperCase()}`;
+  // A ring says POSTCODE, not POSTCODE DISTRICT — BO2o spells it, and the
+  // kicker already has the ring's own words after it to carry (17 Sep 2026).
+  if (l.kind === 'ring') {
+    const from = !l.fromKind || l.fromKind === 'postcode' ? 'POSTCODE' : (AREA_WORD[l.fromKind] ?? 'POSTCODE');
+    return `${from} · ${l.minutes} MINUTES BY ${MODE_LABEL[l.mode ?? 'drive'].toUpperCase()}`;
+  }
   return AREA_WORD[l.areaKind] ?? 'AREA';
 };
 
@@ -835,6 +860,21 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
   /** The category a group heading belongs to, so the heading carries its figures. */
   groupOfCategory?: (key: string) => PlaceCategory | null;
 }) {
+  /**
+   * Which of a subcategory's required facts is the one that sets it apart.
+   *
+   * A fact the others on this ladder do not all need. The board draws that one
+   * in ink and the rest muted — "picture, what it is, hours, **a menu**" —
+   * because the menu is the whole reason a restaurant's bar is not a museum's.
+   * `needsStrong` was defined and never used (17 Sep 2026, the verification
+   * audit).
+   */
+  const judged = useMemo(() => rows.filter((r: any) => r.barSet && (r.needs ?? []).length), [rows]);
+  const setsItApart = useCallback(
+    (fact: string) => judged.length >= 2 && !judged.every((r: any) => (r.needs ?? []).includes(fact)),
+    [judged],
+  );
+
   const columns: Col<any>[] = [
     { key: 'label', label: 'Our subcategory', note: of ? `${rows.length} of ${of}` : undefined, tip: 'ourSubcategory', grow: true,
       cell: (s) => <Text style={[styles.rowName, s.known === 0 && styles.rowNameEmpty]}>{s.label}</Text> },
@@ -854,7 +894,19 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
             cell: (s: any) => (s.known === 0
               ? <Act label="Go and find some" icon="download" small disabled={!canManage} onPress={() => onCollect?.()} />
               : s.barSet
-                ? <Text style={styles.needs}>{s.needs.map((f: string) => factLabel.get(f) ?? f).join(', ')}</Text>
+                ? (
+                  // The distinguishing fact in ink, as the board draws it: a
+                  // restaurant differs from its siblings by needing a menu, and
+                  // that is the word worth seeing. `needsStrong` was defined
+                  // and never used (17 Sep 2026, the verification audit).
+                  <Text style={styles.needs}>
+                    {s.needs.map((f: string, i: number) => (
+                      <Text key={f} style={setsItApart(f) ? styles.needsStrong : undefined}>
+                        {`${i ? ', ' : ''}${factLabel.get(f) ?? f}`}
+                      </Text>
+                    ))}
+                  </Text>
+                )
                 : <Word muted>not set</Word>) },
         ] as Col<any>[])),
     ...(inRing ? ([{ key: 'go', label: '', width: 78, align: 'right', stops: true,
@@ -1504,8 +1556,12 @@ const PLACE_TAB_LABEL: Record<PlaceTab, string> = {
   pictures: 'Pictures', raw: 'What each source returned', history: 'History',
 };
 
-function PlaceBoard({ refId, canManage, onClose, phone }: { refId: string; canManage: boolean; onClose: () => void; phone: boolean }) {
-  const [tab, setTab] = useQueryState<PlaceTab>('tab', 'record', asOneOf(PLACE_TABS, 'record'));
+function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
+  refId: string; canManage: boolean; onClose: () => void; phone: boolean;
+  /** Held by the screen above, so closing the drawer takes `?tab=` with it. */
+  tab: PlaceTab; onTab: (t: PlaceTab) => void;
+}) {
+  const setTab = onTab;
   const [place, setPlace] = useState<PlaceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [curating, setCurating] = useState(false);
@@ -2145,7 +2201,10 @@ function HistoryTab({ refId }: { refId: string }) {
 function PicturesBoard({ onClose }: { onClose: () => void }) {
   // In the address: the board's own URL is `?pictures=all&q=castle+winter`, and
   // a picture search you cannot send somebody is half a search.
-  const [q, setQ] = useQueryState<string>('q', '', asText);
+  // `pic`, not `q`. `q` is the place-name filter on BO2q, and one key with two
+  // meanings meant a picture search left in the address became a place filter
+  // once you drilled into a subcategory (17 Sep 2026, the verification audit).
+  const [q, setQ] = useQueryState<string>('pic', '', asText);
   const [facet, setFacet] = useQueryState<string>('facet', '', asText);
   const [data, setData] = useState<PictureIndex | null>(null);
   const [sel, setSel] = useState(0);

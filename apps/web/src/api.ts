@@ -1601,10 +1601,19 @@ export type SearchReplay = {
     position: number; ref: string | null; name: string | null; subcategory: string | null;
     score: number | null; scoreThen: boolean; did: string; strong: boolean; dwellMs: number | null;
   }[];
-  /** What the replay actually asked for and what it cost. */
-  refetched: number; refetchedPence: number;
+  /**
+   * What the replay actually asked for and what it cost.
+   *
+   * `asked` is how many were asked about, `refetched` how many came back with a
+   * name, and `refetchedPence` what the ledger says it cost — read from the
+   * calls actually made, so a cached answer is not billed and a call that came
+   * back empty is not free.
+   */
+  refetched: number; askedAbout: number; refetchedPence: number;
   /** Rows that are still bare identifiers, and why they still are. */
   nameless: number; namelessWhy: string | null;
+  /** How many searches the area this one was in has had, for the way back. */
+  searchesHere?: number | null;
 };
 
 
@@ -1634,7 +1643,8 @@ export type ScoreWorkings = {
 
 export type RejectReason = { key: string; label: string; message: string | null };
 export type QueueList = {
-  kinds: { key: string; label: string; batch: boolean }[];
+  /** `label` is the column word; `said` is the word a sentence uses. */
+  kinds: { key: string; label: string; said?: string; batch: boolean }[];
   states: string[];
   counts: { kind: Record<string, number>; state: Record<string, number>; reported: number; oldest: string | null };
   state: string; kind: string; where: string | null;
@@ -1643,6 +1653,10 @@ export type QueueList = {
     maker: string | null; place: string | null; ref: string | null; area: string | null;
     state: string; reported: boolean; madeAt: string; reason: string | null; told: boolean; batchable: boolean;
     imageId: string | null;
+    /** The first words of the thing being decided, so the row shows it (BO5a). */
+    preview: string | null;
+    /** For a flagged fact, which fact three sources disagree about. */
+    field: string | null;
   }[];
 };
 export type QueueItem = {

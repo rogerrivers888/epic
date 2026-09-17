@@ -29,7 +29,12 @@ import { Ladder, Num, Word, Blank, Bar, Act, Footer, Kicker, Stat, type Col } fr
 
 export function Demand({ canManage }: { canManage: boolean }) {
   const [where, setWhere] = useQueryState<string>('where', '', asText);
-  const [since, setSince] = useQueryState<number | null>('since', 30, asNumber(30));
+  // `30d`, as the board spells it (BO4a: `?where=berkshire&since=30d`). A bare
+  // number is still read, so an older link still opens.
+  const [since, setSince] = useQueryState<number | null>('since', 30, {
+    read: (raw) => { const n = Number(String(raw).replace(/d$/, '')); return Number.isFinite(n) && n > 0 ? n : 30; },
+    write: (v) => (v == null || v === 30 ? null : `${v}d`),
+  });
   const [search, setSearch] = useQueryState<string>('search', '', asText);
 
   if (search) return <Replay id={search} onClose={() => setSearch('')} canManage={canManage} />;
@@ -206,8 +211,12 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
       <View style={styles.trail}>
         <Press effect="none" onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to Demand" style={styles.trailBack}>
           <Icon name="back" size={15} strokeWidth={2.2} color={colors.accent} />
-          <Text style={styles.trailWord}>Demand</Text>
+          {/* Where you came from and how much of it there is, as BO4b spells
+              it: "← Berkshire · 4,412 searches" (17 Sep 2026, the verification
+              audit — it read "← Demand" wherever you had come from). */}
+          <Text style={styles.trailWord}>{data.where ?? 'Demand'}</Text>
         </Press>
+        <Text style={styles.trailNote}>{data.searchesHere == null ? '' : `· ${data.searchesHere.toLocaleString()} searches`}</Text>
       </View>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
@@ -220,7 +229,15 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
             data.identified ? 'signed in' : 'not signed in',
             askedWords(data.asked),
           ].filter(Boolean).join(' · ')}</Kicker>
-          <Text style={styles.title}>{[data.subjectLabel ?? 'Anything', data.where, data.minutes ? `within ${data.minutes} min` : null].filter(Boolean).join(', ')}</Text>
+          {/* The day, too. BO4b's title is "Anything, Windsor, Saturday" and
+              the day was never drawn — which is the part that makes a replay
+              recognisable (17 Sep 2026, the verification audit). */}
+          <Text style={styles.title}>{[
+            data.subjectLabel ?? 'Anything',
+            data.where,
+            when.toLocaleDateString([], { weekday: 'long' }),
+            data.minutes ? `within ${data.minutes} min` : null,
+          ].filter(Boolean).join(', ')}</Text>
         </View>
         <View style={styles.five}>
           <Stat label="Shown" value={data.shown} tip="shown" />
@@ -295,6 +312,7 @@ const styles = StyleSheet.create({
 
   trail: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   trailBack: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  trailNote: { ...type.small, color: colors.inkMuted },
   trailWord: { ...type.small, fontSize: 13, fontWeight: '700', color: colors.accent },
 
   segment: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted },
