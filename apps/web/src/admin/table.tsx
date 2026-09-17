@@ -283,9 +283,22 @@ export const Footer = ({ children, left }: { children: React.ReactNode; left?: R
 );
 
 /** The uppercase label over a block. A label, never a sentence. */
-export const Kicker = ({ children, accent }: { children: React.ReactNode; accent?: boolean }) => (
-  <Text style={[styles.kicker, accent && { color: colors.accent }]}>{children}</Text>
-);
+/**
+ * A section heading, and it explains itself too.
+ *
+ * The owner asked for this in his own words (17 Sep 2026): "when I hover over
+ * any 1 of the headers, it should give me a tooltip explaining what the header
+ * is." The design tips its column headers and its figures and leaves its
+ * section headings bare; a section heading is a header, so it carries one here.
+ * `tip` is optional so a heading that is only the word above a thing it already
+ * names does not have to invent a sentence.
+ */
+export const Kicker = ({ children, accent, tip }: {
+  children: React.ReactNode; accent?: boolean; tip?: TipKey | Tip | null;
+}) => {
+  const word = <Text style={[styles.kicker, accent && { color: colors.accent }]}>{children}</Text>;
+  return tip ? <Explain tip={tip} cursor="help">{word}</Explain> : word;
+};
 
 /** One of the five numbers at the top of every level. */
 export function Stat({ label, value, tip, accent, big, mark = false }: {

@@ -119,7 +119,7 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
     <AdminPage>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
-          <Kicker>Runs that spend</Kicker>
+          <Kicker tip="sectionRunsThatSpend">Runs that spend</Kicker>
           <Text style={styles.title}>Collect</Text>
         </View>
         <View style={styles.five}>
@@ -198,7 +198,7 @@ function FailuresBoard({ runKey, canManage, onClose, cause, onCause }: {
           {/* The run's own name, from the API. Hard-coded, this board said
               "Read the menus" whatever run it had been opened for (17 Sep
               2026, the verification audit). */}
-          <Kicker>{`${data.label ?? 'Read the menus'}${t.last ? ` · ${day(t.last)}, ${new Date(t.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`}</Kicker>
+          <Kicker tip="sectionRunFailures">{`${data.label ?? 'Read the menus'}${t.last ? ` · ${day(t.last)}, ${new Date(t.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`}</Kicker>
           <Text style={styles.title}>
             {data.keepsAList === false
               ? (data.why ?? 'This run keeps no failure list per place.')
@@ -214,7 +214,7 @@ function FailuresBoard({ runKey, canManage, onClose, cause, onCause }: {
 
       {/* Ours, on its own and above theirs, where it cannot be skimmed past. */}
       <View style={{ gap: 9 }}>
-        <Kicker accent>{`Ours · ${t.ours ?? 0} of the ${t.failed ?? 0}`}</Kicker>
+        <Kicker accent tip="sectionOurs">{`Ours · ${t.ours ?? 0} of the ${t.failed ?? 0}`}</Kicker>
         <View style={styles.oursBlock}>
           {data.ours.length === 0 ? <View style={{ padding: 14 }}><Word muted>None of the failures were ours.</Word></View> : data.ours.map((c, i) => (
             <React.Fragment key={c.key}>
@@ -234,7 +234,7 @@ function FailuresBoard({ runKey, canManage, onClose, cause, onCause }: {
       </View>
 
       <View style={{ gap: 9 }}>
-        <Kicker>{`Theirs · ${(t.failed ?? 0) - (t.ours ?? 0)} of the ${t.failed ?? 0}`}</Kicker>
+        <Kicker tip="sectionTheirs">{`Theirs · ${(t.failed ?? 0) - (t.ours ?? 0)} of the ${t.failed ?? 0}`}</Kicker>
         <View>
           {data.theirs.map((c, i) => (
             <React.Fragment key={c.key}>
@@ -307,7 +307,7 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
   return (
     <AdminPage>
       <View style={styles.bandPhone}>
-        <Kicker>Today</Kicker>
+        <Kicker tip="sectionToday">Today</Kicker>
         <Text style={styles.titlePhone}>
           {going ? `One run going, ${word(needs)} need${needs === 1 ? 's' : ''} you`
             : needs ? `${cap(word(needs))} need${needs === 1 ? 's' : ''} you` : 'Nothing needs you'}
@@ -364,7 +364,7 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
       ) : null}
 
       <View style={styles.spend}>
-        <Kicker>Spend</Kicker>
+        <Kicker tip="sectionSpend">Spend</Kicker>
         <Explain tip="spentThisMonthCeiling" style={{ gap: 3 }}>
           <Text style={styles.spendBig}>{pounds(data.spentPence)}</Text>
           <Text style={styles.rowNote}>{`of ${pounds(data.ceilingPence)} this month`}</Text>

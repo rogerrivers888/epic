@@ -383,7 +383,7 @@ function Band({ kicker, title, stats, right }: { kicker: string; title: string; 
   return (
     <View style={styles.band}>
       <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
-        <Kicker>{kicker}</Kicker>
+        <Kicker tip="sectionLevel">{kicker}</Kicker>
         <Text style={[styles.title, width < PHONE && styles.titlePhone]}>{title}</Text>
       </View>
       {stats}
@@ -434,7 +434,7 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
   return (
     <View style={styles.lensRow}>
       <View style={styles.lensLeft}>
-        <Kicker>Cut by</Kicker>
+        <Kicker tip="sectionCutBy">Cut by</Kicker>
         <View style={styles.lenses}>
           {LENSES.map((l) => (
             <Explain key={l} tip={l === 'collect' ? 'collect' : null} cursor="pointer">
@@ -610,7 +610,7 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
   return (
     <>
       <View style={styles.subRow}>
-        <Kicker>Break it down by</Kicker>
+        <Kicker tip="sectionBreakDown">Break it down by</Kicker>
         <View style={styles.lenses}>
           {BY.map((b) => (
             <Explain key={b} tip={b === 'city' ? 'cityOrTown' : null} cursor="pointer">
@@ -675,7 +675,7 @@ function CoverageBoard({ q, onWhere, onCollect }: {
     <>
       <View style={styles.subRow}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9 }}>
-          <Kicker>Where</Kicker>
+          <Kicker tip="sectionWhere">Where</Kicker>
           {data ? <Text style={styles.rowNote}>{`${data.towns} of ${data.allTowns || data.towns} towns · ${data.outcodes} outcodes`}</Text> : null}
         </View>
         <View style={{ flex: 1 }} />
@@ -1022,7 +1022,7 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
     <>
       <View style={[styles.split, width < 1100 && { flexDirection: 'column' }]}>
         <View style={[styles.distribution, width < 1100 && { width: '100%' }]}>
-          <Kicker>Data score</Kicker>
+          <Kicker tip="sectionDataScore">Data score</Kicker>
           <View style={{ gap: 7, marginTop: 9 }}>
             {bands.map((b) => (
               <Explain key={b.band} tip={b.band === 'not scored' ? 'unscored' : 'dataScoreBand'} style={styles.barRow}>
@@ -1035,7 +1035,7 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
             ))}
           </View>
           <View style={{ height: spacing.lg }} />
-          <Kicker>Oldest fact</Kicker>
+          <Kicker tip="sectionOldestFact">Oldest fact</Kicker>
           <View style={{ marginTop: 6 }}>
             {data.stale.map((s, i) => (
               <Explain key={s.key} tip={s.key === 'over12' ? 'oldestFactOver12' : s.key === 'never' ? 'oldestFactNever' : 'oldestFactBand'}
@@ -1047,7 +1047,7 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
           </View>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Kicker>Worth owning next</Kicker>
+          <Kicker tip="sectionWorthOwningNext">Worth owning next</Kicker>
           <View style={{ height: 9 }} />
           <Ladder columns={columns} rows={data.worth} keyOf={(r) => r.ref}
                   empty={<Word muted>Everything here is already owned.</Word>} />
@@ -1172,7 +1172,7 @@ function RingBoard({ q, onSub, onLens, onWithin }: {
               highlight={(r) => r.known === 0 && r.searches > 0}
               empty={<Word muted>Nothing in reach yet.</Word>} />
       <View style={styles.ringFacts}>
-        <Kicker>This ring</Kicker>
+        <Kicker tip="sectionThisRing">This ring</Kicker>
         <View style={styles.ringRow}>
           <RingFact label="Nearest postcode area" tip="nearestPostcodeArea" value={f.cellLabel ?? '—'} />
           <RingFact label="Postcode areas in reach" tip="postcodeAreasInReach" value={`${f.cellsInReach.toLocaleString()} of ${f.cellsTotal.toLocaleString()}`} />
@@ -1292,7 +1292,7 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
     <>
       <View style={styles.subRow}>
         <View style={styles.lensLeft}>
-          <Kicker>Show</Kicker>
+          <Kicker tip="sectionShow">Show</Kicker>
           <View style={styles.lenses}>
             {SHOW.map((s) => (
               <Press key={s} effect="none" onPress={() => setShow(s)} accessibilityRole="tab"
@@ -1493,7 +1493,7 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
 
   return (
     <>
-      <View style={styles.subRow}><Kicker>What we could get here</Kicker></View>
+      <View style={styles.subRow}><Kicker tip="sectionWhatWeCouldGet">What we could get here</Kicker></View>
       <Ladder columns={columns} rows={rows} keyOf={(r) => r.key} />
       {/* Said once, because the board cannot promise otherwise: the three free
           sources are one research pass. `own.js` reads the venue's own page,
@@ -1617,7 +1617,7 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
 
       <View style={styles.lensRow}>
         <View style={styles.lensLeft}>
-          <Kicker>Looking at</Kicker>
+          <Kicker tip="sectionLookingAt">Looking at</Kicker>
           <View style={styles.lenses}>
             {PLACE_TABS.map((t) => (
               <Press key={t} effect="none" onPress={() => setTab(t)} accessibilityRole="tab"
@@ -1769,7 +1769,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
       </View>
 
       <View style={[styles.side, width < 1100 && { width: '100%', borderLeftWidth: 0, paddingLeft: 0 }]}>
-        <Kicker>{`Pictures · ${place.pictures.filter((p) => p.owned).length} owned`}</Kicker>
+        <Kicker tip="sectionPicturesOnPlace">{`Pictures · ${place.pictures.filter((p) => p.owned).length} owned`}</Kicker>
         <View style={styles.thumbs}>
           {place.pictures.length === 0 ? <Word muted>None yet.</Word> : place.pictures.slice(0, 6).map((p, i) => (
             // A picture can be linked to the place and to its atlas row at once,
@@ -1795,7 +1795,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
         </View>
 
         <View style={{ height: spacing.lg }} />
-        <Kicker>Not checked</Kicker>
+        <Kicker tip="sectionNotChecked">Not checked</Kicker>
         {/* Which sources, not just how many: the board's own tooltip says "open it
             to see which and run them", so the row opens (Codex, 17 Sep 2026). */}
         {([['free', place.unseen.filter((u) => !u.paid)], ['paid', place.unseen.filter((u) => u.paid)]] as const).map(([which, list], i) => (
@@ -1831,7 +1831,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
         ))}
 
         <View style={{ height: spacing.lg }} />
-        <Kicker>This place in other systems</Kicker>
+        <Kicker tip="sectionOtherSystems">This place in other systems</Kicker>
         {place.ids.map((id, i) => (
           <View key={id.key} style={[styles.idRow, i === place.ids.length - 1 && { borderBottomWidth: 0 }]}>
             <Text style={styles.idLabel}>{id.label}</Text>
@@ -1933,7 +1933,7 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
           travel is said before it travels. */}
       {reach && !reach.onlyThis ? (
         <View style={{ gap: 8, marginTop: spacing.lg }}>
-          <Kicker>Changing the shelf</Kicker>
+          <Kicker tip="sectionChangingTheShelf">Changing the shelf</Kicker>
           <Explain tip="thisIsTheRuleNotThisPlace" style={styles.ruleWarn}>
             <Text style={styles.ruleWarnBig}>{`Changes every ${reach.rule ?? 'place this rule catches'}`}</Text>
             <Text style={styles.ruleWarnSmall}>{`${reach.places.toLocaleString()} places · ${reach.counties.toLocaleString()} counties`}</Text>
@@ -1997,7 +1997,7 @@ function ScoreTab({ refId, canManage }: { refId: string; canManage: boolean }) {
       </View>
       <View style={[styles.split, width < 1100 && { flexDirection: 'column' }]}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Kicker>Inputs</Kicker>
+          <Kicker tip="sectionInputs">Inputs</Kicker>
           <View style={{ height: 9 }} />
           <View style={styles.recordHead}>
             <Explain tip="input" style={{ flex: 1 }}><Text style={styles.headLabelSmall}>Input</Text></Explain>
@@ -2048,7 +2048,7 @@ function ScoreTab({ refId, canManage }: { refId: string; canManage: boolean }) {
           ) : null}
         </View>
         <View style={[styles.side, { width: 400 }, width < 1100 && { width: '100%', borderLeftWidth: 0, paddingLeft: 0 }]}>
-          <Kicker>Weights</Kicker>
+          <Kicker tip="sectionWeights">Weights</Kicker>
           <View style={{ height: 6 }} />
           {weightRows(weights).map((w, i, all) => (
             <Explain key={w.label} tip={w.tip} style={[styles.weightRow, i === all.length - 1 && { borderBottomWidth: 0 }]}>
@@ -2138,7 +2138,7 @@ function PlacePicturesTab({ place, canManage, onFound }: { place: PlaceDetail; c
   return (
     <View style={[styles.split, width < 1100 && { flexDirection: 'column' }]}>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Kicker>{`${owned.length} picture${owned.length === 1 ? '' : 's'}`}</Kicker>
+        <Kicker tip="sectionPicturesOnPlace">{`${owned.length} picture${owned.length === 1 ? '' : 's'}`}</Kicker>
         <View style={styles.grid}>
           {owned.map((x, i) => (
             <Press key={`${x.id}-${i}`} effect="none" onPress={() => setSel(i)} accessibilityRole="button"
@@ -2275,7 +2275,7 @@ function PicturesBoard({ onClose }: { onClose: () => void }) {
       {!data ? <Waiting /> : (
         <View style={[styles.split, width < 1100 && { flexDirection: 'column' }]}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Kicker>{`${data.matching.toLocaleString()} pictures`}</Kicker>
+            <Kicker tip="sectionPicturesHere">{`${data.matching.toLocaleString()} pictures`}</Kicker>
             <View style={styles.grid}>
               {data.pictures.map((x, i) => (
                 <Press key={x.id} effect="none" onPress={() => setSel(i)} accessibilityRole="button"
@@ -2297,7 +2297,7 @@ function PicturesBoard({ onClose }: { onClose: () => void }) {
             </View>
           </View>
           <View style={[styles.side, { width: 392 }, width < 1100 && { width: '100%', borderLeftWidth: 0, paddingLeft: 0 }]}>
-            <Kicker>The one selected</Kicker>
+            <Kicker tip="sectionTheOneSelected">The one selected</Kicker>
             {p ? <PictureFacts p={p} /> : <Word muted>Pick one.</Word>}
           </View>
         </View>
@@ -2386,7 +2386,7 @@ function ReadyBarBoard({ sub, canManage, onClose, onPick }: {
       <Band kicker="THE BAR, PER KIND OF PLACE · SET NATIONALLY" title="What counts as ready" />
       <View style={[styles.split, width < 1100 && { flexDirection: 'column' }]}>
         <View style={[{ width: 260 }, width < 1100 && { width: '100%' }]}>
-          <Kicker>{`${data.subcategories.length} subcategories`}</Kicker>
+          <Kicker tip="sectionSubcategoriesHere">{`${data.subcategories.length} subcategories`}</Kicker>
           <ScrollView style={{ maxHeight: 520 }}>
             {data.subcategories.map((s) => (
               <Press key={s.key} effect="none" onPress={() => setPick(s.key)} accessibilityRole="button"
@@ -2402,7 +2402,7 @@ function ReadyBarBoard({ sub, canManage, onClose, onPick }: {
         </View>
 
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Kicker>{`A ${singular(row?.label ?? pick)} is ready when it has · ${(row?.places ?? 0).toLocaleString()} in Britain`}</Kicker>
+          <Kicker tip="sectionReadyWhen">{`A ${singular(row?.label ?? pick)} is ready when it has · ${(row?.places ?? 0).toLocaleString()} in Britain`}</Kicker>
           <View style={{ height: 9 }} />
           {facts.map((f) => {
             const d = draft.find((x) => x.fact === f.key)!;
@@ -2429,7 +2429,7 @@ function ReadyBarBoard({ sub, canManage, onClose, onPick }: {
           })}
 
           <View style={styles.effect}>
-            <Kicker>If saved</Kicker>
+            <Kicker tip="sectionIfSaved">If saved</Kicker>
             <View style={styles.effectRow}>
               <EffectFact label={`${row?.label ?? 'These'} ready now`} tip="restaurantsReadyNow"
                           big={effect?.shareNow == null ? '—' : `${effect.shareNow}%`} small={effect ? effect.readyNow.toLocaleString() : ''} />
@@ -2493,7 +2493,7 @@ function PlacesPhone({ level, q, lens, onLens, onWhere, onUp }: {
         </Press>
       </View>
       <View style={{ gap: 5, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 14 }}>
-        <Kicker>{kickerOf(level)}</Kicker>
+        <Kicker tip="sectionLevel">{kickerOf(level)}</Kicker>
         <Text style={styles.titlePhone}>{level.name}</Text>
       </View>
 

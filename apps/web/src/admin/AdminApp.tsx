@@ -28,7 +28,7 @@ import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useActivity } from '../hooks/useActivity';
 import { useAdminTheme } from '../hooks/useAdminTheme';
-import { Explains } from './explain';
+import { Explain, Explains } from './explain';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { Overview } from './screens/Overview';
 import { People } from './screens/People';
@@ -128,6 +128,11 @@ function Lights() {
   );
 }
 
+/** Which written explanation each rail group carries. */
+const GROUP_TIP: Record<string, 'railData' | 'railAdmin' | 'railMain'> = {
+  Data: 'railData', Admin: 'railAdmin', Main: 'railMain',
+};
+
 export function AdminApp({ access, screen, onScreen, onLeave }: {
   access: Access | null;
   /** Which screen the address asks for — `/admin/reporting` and so on. */
@@ -185,17 +190,29 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
     // A row on a wide screen (rail beside the page), a column on a phone (a
     // strip of chips above it). One tree either way, so switching the shell's
     // Web/Mobile toggle keeps the screen you were on (CLAUDE.md).
+    //
+    // `Explains` wraps the whole shell, not only the page. It used to wrap the
+    // page alone, so the rail's own headings had handlers and nowhere to draw
+    // — three headers that gave no tooltip however they were wired (17 Sep
+    // 2026, the verification audit).
+    <Explains>
     <View style={[styles.root, !desktop && styles.rootPhone]}>
       {desktop ? (
         <View style={styles.rail}>
           <View style={styles.brand}>
             <Wordmark height={30} ground={colors.bg} />
-            <Text style={styles.badge}>Back office</Text>
+            <Explain tip="railBackOffice" cursor="help"><Text style={styles.badge}>Back office</Text></Explain>
           </View>
 
           {items.map((n, i) => (
             <React.Fragment key={n.key}>
-              {n.group && items[i - 1]?.group !== n.group ? <Text style={styles.navGroup}>{n.group}</Text> : null}
+              {/* A group heading is a header, and the owner asked for a tooltip
+                  on any of them (17 Sep 2026). */}
+              {n.group && items[i - 1]?.group !== n.group ? (
+                <Explain tip={GROUP_TIP[n.group] ?? null} cursor="help">
+                  <Text style={styles.navGroup}>{n.group}</Text>
+                </Explain>
+              ) : null}
               <Press
                 onPress={() => setScreen(n.key)}
                 style={[styles.navItem, screen === n.key && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
@@ -227,7 +244,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       ) : (
         <View style={styles.phoneHead}>
           <View style={styles.phoneHeadTop}>
-            <Text style={styles.badge}>Back office</Text>
+            <Explain tip="railBackOffice" cursor="help"><Text style={styles.badge}>Back office</Text></Explain>
             <View style={{ flex: 1 }} />
             <Lights />
             <Press onPress={onLeave} accessibilityRole="button" style={styles.leaveSmall}>
@@ -255,8 +272,9 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {/* One tooltip panel for the whole back office, positioned in the page's
           own coordinate space so it lands where it should inside the shell's
           phone frame as well (explain.tsx). */}
-      <View style={styles.content}><Explains>{body}</Explains></View>
+      <View style={styles.content}>{body}</View>
     </View>
+    </Explains>
   );
 }
 

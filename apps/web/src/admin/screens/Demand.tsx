@@ -87,12 +87,15 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
     <AdminPage>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
-          <Kicker>{`${data.area ? data.area.name : 'Everywhere'} · last ${since} days`}</Kicker>
+          <Kicker tip="sectionOver">{`${data.area ? data.area.name : 'Everywhere'} · last ${since} days`}</Kicker>
           <Text style={styles.title}>{`${data.totals.searches.toLocaleString()} searches`}</Text>
           {/* The second title: the name this screen would have if the owner
               prefers a thing you do to a report. Both are shown so he can see
               them together (BO7a). */}
-          <Text style={styles.alt}>Asked for</Text>
+          {/* The second name, and a hover that says it is a second name — the
+              design offers it as the alternative and nobody has picked (17 Sep
+              2026). */}
+          <Explain tip="askedForName" cursor="help"><Text style={styles.alt}>Asked for</Text></Explain>
         </View>
         <View style={styles.five}>
           <Stat label="Came back empty" value={data.totals.empty.toLocaleString()} tip="emptyTotal" big mark />
@@ -102,7 +105,7 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
       </View>
 
       <View style={styles.subRow}>
-        <Kicker>Over</Kicker>
+        <Kicker tip="sectionOver">Over</Kicker>
         <View style={styles.segment}>
           {WINDOWS.map((w) => (
             <Press key={w} effect="none" onPress={() => onSince(w)} accessibilityRole="button"
@@ -130,7 +133,7 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
               } />
 
       <View style={{ gap: 9 }}>
-        <Kicker>Searches · most recent first</Kicker>
+        <Kicker tip="sectionRecentSearches">Searches · most recent first</Kicker>
         <View>
           {data.log.map((s, i) => (
             <View key={s.id} style={[styles.logRow, i === data.log.length - 1 && { borderBottomWidth: 0 }]}>
@@ -222,7 +225,7 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
         <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
           {/* Who was going, as counts — never a name, and never anything a
               provider owns. */}
-          <Kicker>{[
+          <Kicker tip="sectionLevel">{[
             when.toLocaleDateString([], { day: 'numeric', month: 'short' }),
             when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             data.surface,

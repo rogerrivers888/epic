@@ -102,7 +102,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
     <AdminPage>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
-          <Kicker>From households</Kicker>
+          <Kicker tip="sectionFromHouseholds">From households</Kicker>
           <Text style={styles.title}>What has come in</Text>
         </View>
         <View style={styles.five}>
@@ -115,7 +115,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
 
       <View style={styles.filters}>
         <View style={styles.filterGroup}>
-          <Kicker>Kind</Kicker>
+          <Kicker tip="sectionKind">Kind</Kicker>
           <View style={styles.words}>
             <Word2 label="All" on={kind === 'all'} onPress={() => setKind('all')} />
             {data.kinds.map((k) => (
@@ -124,7 +124,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
           </View>
         </View>
         <View style={styles.filterGroup}>
-          <Kicker>State</Kicker>
+          <Kicker tip="sectionState">State</Kicker>
           <View style={styles.words}>
             {data.states.map((s) => (
               <Word2 key={s} label={s[0].toUpperCase() + s.slice(1)} on={state === s} onPress={() => setState(s)} />
@@ -229,7 +229,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
   return (
     <View style={{ gap: spacing.lg }}>
       <View>
-        <Kicker>Where it would go</Kicker>
+        <Kicker tip="sectionWhereItWouldGo">Where it would go</Kicker>
         {/* A light card, because this is a preview of what a household sees. */}
         <View style={styles.preview}>
           {item.picture ? (
@@ -271,7 +271,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
       </View>
 
       <View>
-        <Kicker>About it</Kicker>
+        <Kicker tip="sectionAboutIt">About it</Kicker>
         {/* BO5a: "The Hartleys · 4 photographs before, all kept". */}
         <Fact label="Made by" value={item.made
           ? `${item.made.name}${item.made.kept ? ` · ${item.made.kept} ${item.made.kept === 1 ? 'thing' : 'things'} before, all kept` : ' · nothing before this'}`
@@ -305,7 +305,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
           you back to the list between every decision. */}
       {next ? (
         <View style={styles.next}>
-          <Kicker>{`Next · ${nextWord(next.kind)}`}</Kicker>
+          <Kicker tip="sectionNextInQueue">{`Next · ${nextWord(next.kind)}`}</Kicker>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9, flexWrap: 'wrap' }}>
             <Text style={styles.nextName}>{next.place ?? next.ref ?? cap(nextWord(next.kind))}</Text>
             <Text style={styles.listNote}>{[next.maker, since(next.madeAt)].filter(Boolean).join(' · ')}</Text>
@@ -372,7 +372,7 @@ function RejectSheet({ item, tell, onClose, onDone }: {
       <View style={[styles.sheet, { left: left + Math.max(0, (width - Math.min(760, width - 32)) / 2), top: top + 40, width: Math.min(760, width - 32), maxHeight: height - 80 }]}>
         <ScrollView contentContainerStyle={{ padding: 26, gap: spacing.lg }}>
           <View style={{ gap: 5, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 14 }}>
-            <Kicker>{`Rejecting · ${item.item.maker ?? 'a household'}`}</Kicker>
+            <Kicker tip="sectionRejecting">{`Rejecting · ${item.item.maker ?? 'a household'}`}</Kicker>
             <Text style={styles.sheetTitle}>Why are you turning it down?</Text>
           </View>
 
@@ -391,7 +391,7 @@ function RejectSheet({ item, tell, onClose, onDone }: {
 
           {/* The message is only composed where it is going to be sent. */}
           <View style={{ gap: 9, borderTopWidth: BORDER, borderTopColor: colors.ruleMuted, paddingTop: 14, opacity: tell ? 1 : 0.55 }}>
-            <Kicker>{tell ? 'The message' : 'The message · not being sent'}</Kicker>
+            <Kicker tip="sectionTheMessage">{tell ? 'The message' : 'The message · not being sent'}</Kicker>
             {/* Written next to the button that sends it, not composed afterwards. */}
             <View style={styles.message}>
               {/* The word, not the key: "photograph", not "photo" — and the
