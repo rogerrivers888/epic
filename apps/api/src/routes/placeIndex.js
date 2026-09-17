@@ -303,7 +303,20 @@ router.get('/coverage', requires('view_library'), async (req, res, next) => {
       rows,
       towns: rows.filter((r) => r.kind === 'town').length,
       outcodes: rows.filter((r) => r.kind === 'postcode').length,
-      allTowns: (await query('select count(*)::int as n from localities where kind = $1 and parent_slug = $2', ['town', where])).rows[0].n,
+      // How many towns there are at all, so a list that is a slice says so.
+      //
+      // A town is parented to its county, never to the country (migration 145
+      // keeps that hierarchy), so at country level `parent_slug = 'gb'` counted
+      // nothing and the board fell back to the number of rows it had — "30 of
+      // 30 towns" over a country with hundreds (Codex, 17 Sep 2026).
+      allTowns: (await query(
+        `select count(*)::int as n from localities l
+          where l.kind = 'town'
+            and case when $2 = '' then true
+                     when exists (select 1 from localities c where c.slug = $1 and c.kind = 'country')
+                       then l.country_code = upper($2)
+                     else l.parent_slug = $1 end`,
+        [where, (await index.areaBySlug(where))?.country_code ?? ''])).rows[0].n,
       refreshedAt: await index.statsAge(),
     });
   } catch (err) { next(err); }
@@ -376,6 +389,40 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
     // (Codex, 17 Sep 2026).
     const cells = scope.kind === 'ring'
       ? (await reach.reachableCells(scope.cell, { minutes: scope.minutes, mode: travelMode(scope.mode) })).map((c) => c.to_cell)
+      : scope.kind === 'area' && scope.area.kind === 'town'
+        // A town's searches are not filed under the town. `whereOf` normalises
+        // a town to its parent county on purpose — the county is the honest
+        // grain for a point search — so a town lens asking for its own slug got
+        // nothing at all (Codex, 17 Sep 2026). Its own cells are the answer.
+        ? (await query(
+          `select distinct pi.cell from place_index pi
+             join place_areas pa on pa.venue_ref = pi.venue_ref
+            where pa.area_slug = $1 and pi.cell is not null`, [scope.area.slug])).rows.map((r) => r.cell)
+        : null;
+    // A town whose places have no cell yet cannot be told apart from its county
+    // at all, and zeros would read as "nobody asked". It reads the county's
+    // figures and says whose they are (17 Sep 2026).
+    const asCounty = scope.kind === 'area' && scope.area.kind === 'town' && !(cells ?? []).length
+      ? (await index.areaBySlug(scope.area.parent_slug ?? '')) ?? null
+      : null;
+    // Everything under this area, not only this area.
+    //
+    // Searches are filed against a county, so Great Britain asking for
+    // `area_slug = 'gb'` found only the handful nobody could place — its
+    // counties' searches were all missing (Codex, 17 Sep 2026).
+    // A country's counties do not carry `parent_slug` — the country was added
+    // later (migration 145) and the hierarchy was left as it stood — so a
+    // country's descendants are "every locality with this country code", and a
+    // county's are itself plus the towns that name it.
+    const slugs = scope.kind === 'area' && scope.area.kind !== 'town'
+      ? (await query(
+        scope.area.kind === 'country'
+          ? `select slug from localities where country_code = upper($2) or slug = $1`
+          // `$2` is unused here and still bound, because both branches take the
+          // same two parameters and Postgres refuses a statement given more
+          // than it names.
+          : `select slug from localities where ($2 = $2) and (slug = $1 or parent_slug = $1)`,
+        [scope.area.slug, scope.area.country_code ?? ''])).rows.map((r) => r.slug)
       : null;
     const { rows: everything } = await query(`
       select coalesce(s.subject, '') as subject,
@@ -385,9 +432,10 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
              count(*) filter (where s.outcome in ('clicked','saved'))::int   as no_trip
         from searches s
        where s.at > now() - ($1 || ' days')::interval
-         and ($2::text is null or s.area_slug = $2)
+         and ($2::text[] is null or s.area_slug = any($2))
          and ($3::text[] is null or s.cell = any($3))
-       group by 1 order by count(*) desc`, [String(since), slug, cells]);
+       group by 1 order by count(*) desc`,
+    [String(since), asCounty ? [asCounty.slug] : slugs, asCounty ? null : cells]);
     // The four headline figures are of every subject, not of the forty the list
     // has room for.
     const totals = everything.reduce((t, r) => ({
@@ -414,6 +462,10 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
     res.json({
       ...(await head(scope)),
       since, totals,
+      // Whose figures these are, where they are not this area's own. A point
+      // search is filed against a county, so a town with no cells of its own
+      // reads its county's and says so rather than showing nought.
+      figuresFrom: asCounty ? { slug: asCounty.slug, name: asCounty.name, why: 'a search is recorded against a county' } : null,
       // How many subjects there are at all, so a list of forty says it is one.
       subjects: everything.length,
       rows: rows.map((r) => {

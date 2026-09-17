@@ -64,7 +64,9 @@ export async function upsertHouseholdPlace(client, householdId, p) {
   await noteMany(
     [{
       ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null,
-      countryCode: p.countryCode ?? 'GB', ownership: 'claimed',
+      // Null, not a guess: a save that does not know the country says nothing
+      // rather than filing the place under Great Britain (Codex, 17 Sep 2026).
+      countryCode: p.countryCode ?? null, ownership: 'claimed',
       sources: sourceOfRef(p.venueRef),
     }],
     { client });

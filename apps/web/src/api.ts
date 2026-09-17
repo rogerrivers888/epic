@@ -2472,7 +2472,16 @@ export const api = {
   adminPlaceQuality: (p: PlaceWhere) => request<PlaceLevel & PlaceQuality>(`/api/admin/place-index/quality${qs(p)}`),
   /** BO2f — the gaps ranked by what was actually searched for. */
   adminPlaceDemand: (p: PlaceWhere & { since?: number }) =>
-    request<PlaceLevel & { since: number; totals: DemandTotals; rows: DemandRow[] }>(`/api/admin/place-index/demand${qs(p)}`),
+    request<PlaceLevel & {
+      since: number; totals: DemandTotals; rows: DemandRow[];
+      /**
+       * Whose figures these are, where they are not this area's own.
+       *
+       * A point search is recorded against a county, so a town with no cells of
+       * its own reads its county's and says so rather than showing nought.
+       */
+      figuresFrom: { slug: string; name: string; why: string } | null;
+    }>(`/api/admin/place-index/demand${qs(p)}`),
   /** BO2g — a town and its ring, read from the matrix rather than calculated. */
   adminPlaceRing: (p: PlaceWhere) => request<PlaceLevel & PlaceRing>(`/api/admin/place-index/ring${qs(p)}`),
   /** BO2q — the places themselves. */

@@ -1176,6 +1176,14 @@ function DemandLens({ q, canManage, onCollect }: { q: any; canManage: boolean; o
           <Stat label="Never tripped" value={data.totals.noTrip.toLocaleString()} tip="neverTripped" mark />
         </View>
       </View>
+      {/* Whose figures these are, where they are not this area's own: a point
+          search is recorded against a county, so a town with no cells of its
+          own reads its county's (17 Sep 2026). Said once, above the ladder. */}
+      {data.figuresFrom ? (
+        <View style={styles.subRow}>
+          <Word muted>{`${data.figuresFrom.name}'s figures — ${data.figuresFrom.why}.`}</Word>
+        </View>
+      ) : null}
       <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.subject ?? 'anything'}
               highlight={(r) => r.fault === 'empty-always'}
               empty={<Word muted>Nothing has been searched for here yet.</Word>} />

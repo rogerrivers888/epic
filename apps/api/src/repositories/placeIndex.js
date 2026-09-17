@@ -478,6 +478,25 @@ async function settleWhileLocked(limit) {
   if (!waiting.length) return { settled: 0 };
   const refs = waiting.map((r) => r.venue_ref);
 
+  // 0 — the country, where something knows it and the row does not.
+  //
+  //     The write path says nothing when it does not know, so this fills it
+  //     from the same places the rebuild reads — the sweep's area, the
+  //     harvest's region — and leaves it null when nobody knows. Without it a
+  //     newly swept place had no country, and the country is the first area
+  //     every board reads through (Codex, 17 Sep 2026).
+  await query(`
+    update place_index pi set country_code = coalesce(sa.country_code, reg.country_code)
+      from (select venue_ref from place_index where venue_ref = any($1) and country_code is null) todo
+      left join lateral (
+        select sa.country_code from scout_places sp join scout_areas sa on sa.code = sp.area_code
+         where sp.venue_ref = todo.venue_ref limit 1) sa on true
+      left join lateral (
+        select reg.country_code from attractions a join regions reg on reg.slug = a.region_slug
+         where (a.venue_ref = todo.venue_ref or 'atlas:' || a.id::text = todo.venue_ref) limit 1) reg on true
+     where pi.venue_ref = todo.venue_ref
+       and coalesce(sa.country_code, reg.country_code) is not null`, [refs]);
+
   // 1 — where they are. The same four sources the rebuild reads, and the same
   //     rule that a town carries its county. Nothing is deleted first: these
   //     places have no area rows yet, by definition.
@@ -699,7 +718,7 @@ export async function shelveAll({ refs = null } = {}) {
  * index is a derived thing, and a place must never fail to be *kept* because it
  * could not be *counted*.
  */
-export async function noteMany(places = [], { source = null, countryCode = 'GB', ownership = null, client = null } = {}) {
+export async function noteMany(places = [], { source = null, countryCode = null, ownership = null, client = null } = {}) {
   const rows = places.map((p) => (typeof p === 'string' ? { ref: p } : p)).filter((p) => p?.ref);
   if (!rows.length) return { noted: 0 };
   const write = async (exec) => {
@@ -714,15 +733,15 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
        on conflict (venue_ref) do update
           set lat = coalesce(place_index.lat, excluded.lat),
               lng = coalesce(place_index.lng, excluded.lng),
-              -- A place does not change country, in either direction, so this
-              -- clause does not touch it at all: the country is decided when the
-              -- place is first seen and nothing later moves it (Codex, 17 Sep
-              -- 2026, three rounds on this one line). Two half-rules were tried
-              -- and both leaked — a default that could be overwritten, and then
-              -- a confirmed value that could not be told from the default. A
-              -- place first noted with nothing said keeps the default until a
-              -- rebuild, which reads the country off the harvest and the sweep
-              -- rather than guessing it from a save.
+              -- The first source that knows fills it, and nothing overwrites
+              -- it afterwards (Codex, 17 Sep 2026, four rounds on this one
+              -- line). Two earlier rules leaked — a default that could be
+              -- overwritten, then a confirmed value that could not be told
+              -- from the default — and the third was "never change", which
+              -- filed every place nobody had told us about under Great
+              -- Britain, permanently. Null is the honest third state
+              -- (migration 159): nobody has said.
+              country_code = coalesce(place_index.country_code, excluded.country_code),
               -- identified < claimed < owned, and only ever upward: a household
               -- claiming a place we already research does not un-own it.
               ownership = case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'
