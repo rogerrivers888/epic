@@ -484,19 +484,28 @@ if (authConfigured()) {
 } else {
   console.warn('epic-api: EPIC_PASSCODE is not set. Every /api request will answer 503 until the owner adds it in Doppler.');
 }
-// Two sweeps, once on start and then daily.
+// Two sweeps, once on start and then hourly.
 //
 // Expired and revoked API sessions are a hash and two dates, but they are not
 // needed either. Expired *planning* sessions matter more: their state holds the
-// provider's venue names and ratings, migration 026 gave them ten hours for
-// that reason, and until now nothing ever actually deleted one.
+// provider's venue names and ratings, and migration 026 gave them ten hours for
+// exactly that reason.
+//
+// **Hourly rather than daily, because the interval is part of the retention.**
+// Ten hours of life, an hour's grace and a daily sweep meant a row holding a
+// provider's ratings could still be sitting in the table thirty-five hours
+// after it was made, depending on what time of day it happened to be created
+// (Codex, 17 Sep 2026). Ten plus one plus one is a figure that matches what
+// Technical Constraints 13.22 says out loud. The delete is one indexed
+// predicate over a small table, so the cost of running it twenty-four times as
+// often is not worth measuring.
 const sweep = async () => {
   await sweepDeadSessions().catch(() => null);
   const plans = await sweepExpiredPlanSessions().catch(() => null);
   if (plans) console.log(`epic-api: swept ${plans} expired planning session(s)`);
 };
 void sweep();
-setInterval(() => { void sweep(); }, 24 * 3600_000).unref?.();
+setInterval(() => { void sweep(); }, 3600_000).unref?.();
 
 // The owned place layer researches in the background: anything a household has
 // claimed but that has not been looked at yet, and the sweep that discards any
