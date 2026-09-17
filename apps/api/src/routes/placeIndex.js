@@ -728,6 +728,15 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
         { key: 'google', label: 'Google', value: ref.startsWith('google:') ? ref.slice(7) : null, state: ref.startsWith('google:') ? 'held' : asked.has('google') ? 'no-match' : 'not-asked' },
         { key: 'wikidata', label: 'Wikidata', value: att?.wikidata_id ?? rec?.wikidata_id ?? null, state: (att?.wikidata_id ?? rec?.wikidata_id) ? 'held' : att ? 'no-match' : 'not-asked' },
         { key: 'tripadvisor', label: 'Tripadvisor', value: seen.find((s) => s.source === 'tripadvisor')?.source_place_id ?? null, state: asked.has('tripadvisor') ? 'held' : 'not-asked' },
+        // A council's own reference for the place — BO2r lists it beside the
+        // others (`WIN-PLAY-014`). Nothing holds one yet: no local-authority
+        // register is switched on, so the row reads "not asked", which is the
+        // finding rather than a gap (17 Sep 2026, the verification audit).
+        {
+          key: 'council', label: 'Council ref',
+          value: factOf('council_ref')?.value ?? null,
+          state: factOf('council_ref') ? 'held' : 'not-asked',
+        },
       ],
       atlas: att ? { id: att.id, state: att.state, pinned: att.pinned, note: att.note, rank: att.rank, scoreParts: att.score_parts } : null,
     });

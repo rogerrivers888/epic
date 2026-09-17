@@ -1657,6 +1657,14 @@ export type QueueList = {
     preview: string | null;
     /** For a flagged fact, which fact three sources disagree about. */
     field: string | null;
+    /**
+     * Every id this row stands for.
+     *
+     * Forty photographs of one beach are one decision and one row (BO5a,
+     * "Coral Beach, 12 of them"). `of` is how many, `makers` is who made them.
+     * Nothing a person wrote ever groups — a review is read on its own.
+     */
+    batch: string[]; of: number; makers: string[];
   }[];
 };
 export type QueueItem = {

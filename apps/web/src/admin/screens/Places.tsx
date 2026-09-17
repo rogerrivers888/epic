@@ -1598,13 +1598,19 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
       </View>
       <Band kicker={kicker} title={place.name ?? place.ref} stats={
         tab === 'score' ? null : (
+          // BO2h's four and BO2r's five, which are the same drawer: DATA
+          // SCORE · READY · OLDEST FACT · SEEN BY, plus what BO2r adds. Ready
+          // and Seen by were missing, and their words sat unused in tips.ts
+          // (17 Sep 2026, the verification audit).
           <View style={styles.five}>
-            <Stat label="Score" value={place.score ?? '—'} tip="scoreNow" mark />
+            <Stat label="Data score" value={place.score ?? '—'} tip="dataScore" mark />
+            <Stat label="Ready" value={place.ready ? 'Yes' : 'No'} tip="ready" mark />
             <Stat label="Have · missing" value={`${place.have} · ${place.missingCount}`} mark
                   tip={['Have · missing', `Counts only the ${place.have + place.missingCount} facts this kind of place is judged on. Everything else is recorded when we have it and never counts against the score.`]} />
+            <Stat label="Seen by" value={place.seenBy} tip="seenBy" mark />
             <Stat label="Unseen by" value={place.unseen.length} tip="unseenByPlace" accent mark />
             <Stat label="Pictures" value={place.pictures.filter((p) => p.owned).length} tip="pictures" mark />
-            <Stat label="Oldest fact" value={place.oldestFact ? ago(place.oldestFact) : 'never'} tip="oldestFactStalest" mark />
+            <Stat label="Oldest fact" value={place.oldestFact ? ago(place.oldestFact) : 'never'} tip="oldestFactPlace" mark />
           </View>
         )
       } />
@@ -1849,6 +1855,7 @@ const Detail = ({ label, value }: { label: string; value: string }) => (
 
 /** BO2h — ours beside each provider's, field by field. Only ours is editable. */
 function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: boolean; onEdit: (field: string) => void }) {
+  const { navigate } = useRouter();
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCompare>> | null>(null);
   const [match, setMatch] = useState(false);
   const [reach, setReach] = useState<{ rule: string | null; places: number; counties: number; onlyThis: boolean } | null>(null);
@@ -1931,6 +1938,14 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
             <Text style={styles.ruleWarnBig}>{`Changes every ${reach.rule ?? 'place this rule catches'}`}</Text>
             <Text style={styles.ruleWarnSmall}>{`${reach.places.toLocaleString()} places · ${reach.counties.toLocaleString()} counties`}</Text>
           </Explain>
+          {/* BO2h carries the action beside the warning: how far a change would
+              travel is said here, and the rule itself is changed on Categories,
+              where the rule lives. It was drawn with no way out of it (17 Sep
+              2026, the verification audit). */}
+          <View style={{ flexDirection: 'row' }}>
+            <Act label="Change the rule" tone="secondary" icon="edit"
+                 onPress={() => navigate('/admin/categories')} />
+          </View>
         </View>
       ) : null}
 
@@ -1995,7 +2010,16 @@ function ScoreTab({ refId, canManage }: { refId: string; canManage: boolean }) {
               <Text style={[styles.fieldValue, { flex: 1 }]}>{i.label}</Text>
               {/* The word the input gave us, and behind it the arithmetic that
                   got there — which is what the column header promises. */}
-              <Explain tip={i.how ? ([`How we got to this`, i.how] as const) : null} style={{ width: 170 }}>
+              {/* "How we got to this **word**" — the finished sentence, which
+                  sat in tips.ts unused while the screen showed the unfinished
+                  one. The crowd and the count each have their own written
+                  explanation; anything else carries the arithmetic the API
+                  hands back (17 Sep 2026, the verification audit). */}
+              <Explain
+                tip={i.key === 'crowd' ? 'howWeGotToHigh'
+                  : i.key === 'count' ? 'howWeGotToVeryBusy'
+                    : i.how ? ([`How we got to this word`, i.how] as const) : null}
+                style={{ width: 170 }}>
                 {i.held
                   ? <Text style={styles.fieldStrong}>{sayInput(i.value, i.kind)}</Text>
                   : <Word muted>{noneWord(i.key)}</Word>}

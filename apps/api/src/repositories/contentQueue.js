@@ -256,6 +256,42 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null, li
   return rows;
 }
 
+/**
+ * Forty beach photographs are one decision, so they are one row.
+ *
+ * BO5a draws them that way — "Photo · Coral Beach, 12 of them" over "4
+ * households · 3 days ago" — and it is the whole point of batch approval: the
+ * list used to be forty rows of the same place, which is forty decisions to
+ * skim past (17 Sep 2026, the verification audit).
+ *
+ * Only photographs group, and only by place. A person's review is never folded
+ * into a count of reviews, because it is theirs and it is read on its own.
+ */
+export function group(rows = []) {
+  const out = [];
+  const batchesAt = new Map();
+  for (const r of rows) {
+    const batchable = KINDS.find((k) => k.key === r.kind)?.batch ?? false;
+    // A photograph with no place is nobody's batch: it is one thing on its own.
+    if (!batchable || !r.venue_ref || r.reported) { out.push(r); continue; }
+    const key = `${r.kind}:${r.venue_ref}`;
+    const at = batchesAt.get(key);
+    if (at == null) {
+      batchesAt.set(key, out.length);
+      out.push({ ...r, batch: [r.id], makers: new Set([r.maker_label].filter(Boolean)) });
+      continue;
+    }
+    const head = out[at];
+    head.batch.push(r.id);
+    if (r.maker_label) head.makers.add(r.maker_label);
+    // The oldest is what the row's age means, and the list is oldest first.
+    if (new Date(r.made_at) < new Date(head.made_at)) head.made_at = r.made_at;
+  }
+  return out.map((r) => (r.batch
+    ? { ...r, batch: r.batch, of: r.batch.length, makers: [...r.makers] }
+    : { ...r, batch: [r.id], of: 1, makers: [r.maker_label].filter(Boolean) }));
+}
+
 /** One item, with everything the reviewer needs to decide without leaving. */
 export async function one(id) {
   const { rows: [q] } = await query('select * from content_queue where id = $1', [id]);

@@ -12,31 +12,33 @@
  * same thing in every lens — "one word, one meaning" is the sixth of the laws,
  * and two tables that had drifted apart would be impossible to notice.
  *
- * Copy is the design's, verbatim. Where the same title carries two bodies the
- * key says which — `ready` is the general definition, `readyPlayground` is the
- * one a playground's own board shows.
+ * Copy is the design's, verbatim.
+ *
+ * **Nothing unused lives here.** Thirty-three of these were defined and
+ * referenced by nothing (17 Sep 2026, the verification audit), in three
+ * different ways: superseded by a hover the screen composes with the real
+ * figures in it, duplicated from a source of truth on the API side — the fact
+ * definitions in `domain/placeIndex.js`, the run definitions in
+ * `repositories/runs.js`, the owed-item states in `HowItWorks.tsx` — or
+ * unreachable because the figure the words explain is not on any board. All
+ * three are the same mistake: a second place for the words to live, which is
+ * exactly what this file exists to prevent. A tip whose figure is not drawn is
+ * a missing figure, not a spare sentence.
  */
 
 /** `[title, body]` — the title is the lime line above, the body the sentence under it. */
 export type Tip = readonly [title: string, body: string];
 
 export const TIPS = {
-  accoladesNothingFound: ['Accolades · nothing found', 'Michelin, the AA, Good Food and the National Trust were searched on this name and position. None matched, so nothing is credited — a search that ran, not one we skipped.'],
   afterTheChange: ['After the change', 'How many would meet the bar you are composing, as a share and a count.'],
-  askGoogleWhatPeopleThink: ['Ask Google what people think', 'Banded into a word at the call; the figure is never written down.'],
-  askTripadvisor: ['Ask Tripadvisor', 'Opt-in, and the only run with a hard monthly ceiling.'],
   askedFor: ['Asked for', 'The subject a household searched for in the last 30 days.'],
   avgScore: ['Average score', 'The mean data score here, 0 to 100 — weighted completeness over the facts that kind of place needs. Not a place\'s Epic score, which ranks how good it is.'],
   avgScoreCategory: ['Average score', 'The mean data score of the places in this category here.'],
-  avgScoreShort: ['Average score', 'The mean data score here, 0 to 100 — weighted completeness over the facts that kind of place needs.'],
   avgScoreSubcategory: ['Average score', 'The mean data score of the places in this subcategory here.'],
-  avgScoreThese: ['Average score', 'The mean data score of these 402 places, 0 to 100.'],
   beenThere: ['Been there', 'How many people have left a review, added across every provider that has returned this place and banded at the moment of the call. A fact about how busy it is, not how good it is — and a word rather than a figure, because the figure is somebody else\'s and is never written down.'],
   britainOverall: ['Britain overall', 'The national readiness figure before and after the change.'],
-  builtOff: ['Built, off', 'Built and deliberately switched off until you decide to switch it on.'],
   cap: ['Cap', 'The ceiling enforced before the call is made, not after.'],
   ceiling: ['Ceiling', 'The monthly spend limit. Nothing spends past it.'],
-  checkOurOrderingAgainstTheirs: ['Check our ordering against theirs', 'Our order beside the licensed one. Verdicts are kept and the figures dropped.'],
   checked: ['Checked', 'When we last confirmed it against its source.'],
   cityOrTown: ['City or town', 'Break the same level down by town instead of county. A town nests under its county; an outcode does not.'],
   collect: ['Collect', 'What we could get for this area, which sources could supply it and what each would cost. Starting a run happens here, where the gap is; the Runs page only watches what is already going.'],
@@ -46,7 +48,6 @@ export const TIPS = {
   county: ['County', 'A county is a shape, so it needs no radius — a town or a postcode may take one.'],
   dataScore: ['Data score', 'Weighted completeness over the facts this kind of place needs, worked out again from scratch each time.'],
   dataScoreBand: ['Data score band', 'How many places here score in that range, out of 100.'],
-  designationsALookupNotABand: ['Designations · a lookup, not a band', 'Historic England\'s register matched on name and position: list entry 1117776, Grade I. A public register, so the grade itself is kept — nothing is banded and nothing is thrown away.'],
   distancesComputed: ['Distances computed', 'None, because the answer was worked out once rather than per search.'],
   dwell: ['Dwell', 'How long they stayed on the place before leaving.'],
   editableColumn: ['Ours, so editable', 'We wrote or derived this, so it can be changed here. A provider\'s column cannot be edited — it changes when they change it.'],
@@ -56,16 +57,12 @@ export const TIPS = {
   fact: ['Fact', 'One field a household would expect to see on the place.'],
   fault: ['Fault', 'Which of the three numbers on the left is the worst, named plainly. No places — we hold none, so nothing could be shown. Wrong places — we showed some and nobody opened them, so the mapping is off. Thin places — they were opened and nobody went, so the records are too sparse to convince. Under a fifth on all three reads Working; a fifth or more on all three reads All three.'],
   field: ['Field', 'Every field a place can carry, whether or not we hold it.'],
-  freeSources: ['Free sources', 'Atlas, Commons and the council list have never been asked about this place. Open it to see which and run them.'],
   fromHouseholds: ['From households', 'Photographs a household sent us. Ours to keep, unlike a provider\'s.'],
   google: ['Google', 'Rented: identifiers and counts only, with nothing stored.'],
   googleOnlyNoName: ['Google only, no name', 'Of those, the ones only Google has returned, so we hold no name for them. Fetching a name costs £0.014 each.'],
-  haveMissing: ['Have · missing', 'Counts only the three facts a playground is judged on — a picture, what it is, opening hours. Everything else is recorded when we have it and never counts against the score.'],
   hours: ['Hours', 'Opening hours, and when they were last checked.'],
-  howFarOut: ['How far out', '1,412 postcode areas are within 30 minutes of SL4 1. That was worked out once, so answering this does no sums.'],
   howWeGotToHigh: ['How we got to this word', 'The rating every provider returned, pulled towards 4.15 in proportion to how few reviews there are, then banded: 4.55 and above is top, 4.3 to 4.54 high, 4.0 to 4.29 good, below that mixed. Only the word is kept — the rating and the counts are never written down.'],
   howWeGotToVeryBusy: ['How we got to this word', 'How many people have left a review, added across every provider that returned this place, banded at the moment of the call: two thousand and over is thousands, five hundred is many, a hundred is hundreds, below that a few. The figure itself is not stored.'],
-  howWellKnownACountWeKeep: ['How well known · a count we keep', 'Wikidata Q170314 carries 61 sitelinks, the number of language editions with an article. Public data, so the figure is stored. Above 40 counts as widely known.'],
   identifiedOnly: ['Identified only', 'We know from Google that the place exists and we own nothing about it. A place a household has saved is counted as Claimed rather than here.'],
   input: ['Input', 'One thing that went into the score.'],
   itsScore: ['Its score', 'That place\'s data score at the time they were shown it.'],
@@ -83,14 +80,11 @@ export const TIPS = {
   noRating: ['No rating', 'OSM carries no ratings, and no rating-bearing source has returned this place, so there is no band.'],
   notAsked: ['Not asked', 'We have never spent a call asking this source about this place, so we hold no id for it there. Different from asking and finding nothing.'],
   notCounted: ['Not counted', 'A playground is not judged on this, so it never counts against the score. The bar is set per kind of place.'],
-  notRequired: ['Not required', 'A playground is not judged on this.'],
-  notStarted: ['Not started', 'Obligations nobody has begun.'],
   nothingToCount: ['Nothing to count', 'No source that carries review counts has returned this place, so there is no figure — not a figure of zero.'],
   oldestFactBand: ['Oldest fact', 'How long ago the stalest fact on those places was last checked.'],
   oldestFactNever: ['Oldest fact', 'Places where nothing has ever been checked.'],
   oldestFactOver12: ['Oldest fact', 'These look complete and are not. Completeness on its own never shows this.'],
   oldestFactPlace: ['Oldest fact', 'How long ago the stalest fact on this place was checked.'],
-  oldestFactStalest: ['Oldest fact', 'The age of the stalest thing we hold. A complete-looking place can still be out of date.'],
   oneSourceOnly: ['One source only', 'Places here that a single source has ever returned. If that source went dark we would lose them.'],
   openTheRow: ['Open the row', 'Expands to the exact record and key it came from, and the raw value as the source returned it.'],
   opened: ['Opened', 'How many of them they tapped into.'],
@@ -105,9 +99,6 @@ export const TIPS = {
   owned: ['Owned', 'We hold our own research on it, so it survives every provider going dark. A place a household merely saved is Claimed, not this.'],
   claimed: ['Claimed', 'A household saved, shortlisted or visited it, so it matters — but we still hold nothing of our own about it. The shortest list of places worth researching.'],
   ownedInput: ['Owned', 'Yes means we can keep this input for good — our own research, or a public register. No means it is licensed: we may read it to work out a band, but not store it, so it has to be fetched again.'],
-  paidSources: ['Paid sources', 'Google at £0.014 a place, and Tripadvisor against this month\'s allowance. Open it to see which and what each costs.'],
-  parked: ['Parked', 'Parked on purpose, to be raised again rather than decided now.'],
-  pictureColumn: ['Picture', 'A photograph we own outright, not one rented from a provider.'],
   pictureFact: ['Picture', 'A photograph we own outright and may keep.'],
   pictures: ['Pictures', 'Photographs we own outright. Rented ones cannot be stored and do not count.'],
   placeRow: ['Place', 'Open it for every field, where each came from, and how it scored.'],
@@ -120,16 +111,12 @@ export const TIPS = {
   providerSpend: ['Provider spend', 'What answering this cost in outbound calls.'],
   rating: ['Rating', 'A word, not a figure. At the moment of the call we read every provider\'s rating and how many people left it, pull the rating towards the average of everything the more thinly it is reviewed, and pick a band: 4.55 and above is top, 4.3 to 4.54 high, 4.0 to 4.29 good, below that mixed. The figures are then thrown away and only the word is kept, so a five from eleven diners cannot out-rank a 4.6 from two thousand.'],
   read: ['Read', 'Menus we successfully read.'],
-  readTheMenus: ['Read the menus', 'Reads a venue\'s own menu. 132 of the 341 failures were ours.'],
   ready: ['Ready', 'Enough data to describe the place properly to a household. The bar is set per kind of place: a restaurant needs a menu, a playground never has one.'],
-  readyPlayground: ['Ready', 'A playground is ready with a picture and a sentence saying what it is. It never needs a menu.'],
   readyShort: ['Ready', 'Enough data to describe the place properly to a household, with the bar set per kind of place.'],
   rented: ['Rented', 'It exists on Google but we cannot store it, so it does not count as a picture we own.'],
   reported: ['Reported', 'Content somebody has flagged. A different job on a different clock, so it jumps the queue.'],
   restaurantsReadyNow: ['Restaurants ready now', 'How many meet the current bar, as a share and a count.'],
   rowsRead: ['Rows read', 'How many database rows answered this ring. One, because the reachable set was worked out in advance.'],
-  runHarvest: ['The attraction harvest', 'Wikidata and Wikipedia, ranked, with pictures we may keep. 107 regions.'],
-  runSweep: ['The postcode sweep', 'One outcode\'s food census. Chains are dropped and ratings banded at the call.'],
   runTripadvisorCap: ['Tripadvisor', 'Opt-in and capped at 120 locations a month, enforced before the call is made.'],
   running: ['Running', 'Runs in flight now.'],
   saved: ['Saved', 'How many they kept.'],
@@ -146,22 +133,16 @@ export const TIPS = {
   sourceTripadvisor: ['Tripadvisor', 'Opt-in and capped at 120 locations a month, so an empty column usually means we did not spend the call.'],
   spentThisMonth: ['Spent this month', 'Every outbound call is attributed, so this is the real figure and not an estimate.'],
   spentThisMonthCeiling: ['Spent this month', 'Every outbound call is attributed, so this is the real figure and not an estimate. Nothing spends past the ceiling.'],
-  startingAssumptionFromItsKind: ['Starting assumption · from its kind', 'Every subcategory carries a floor so a place with no other evidence is not ranked at nothing. Historic houses start at 4 of a possible 20. Ours, and kept.'],
   state: ['State', 'Where it has got to. There is no done state until something is done.'],
-  stepFree: ['Step-free', 'Recorded when we have it. A playground is not judged on it, so it never counts against the score.'],
   subcategory: ['Subcategory', 'Which of our subcategories that place sits in.'],
   theRun: ['The run', 'One way of getting more data, with what it costs and what its cap is.'],
   theThreeFaultsAsABar: ['The three faults, as a bar', 'Left to right: came back empty, clicked nothing, never tripped. The widest band is where that subject is failing.'],
-  theirSide: ['Their side', 'How many failed this way. Nothing we can fix by deploying.'],
   thisIsTheRuleNotThisPlace: ['This is the rule, not this place', 'Changing it moves every place the rule catches. To change only Thorpe Park, pin it — a pin survives the next re-rank.'],
   travelTimes: ['Travel times', 'Whether we can answer "within 30 minutes" here. We work out the driving time between every postcode area once, so a search reads one row instead of doing sums.'],
   travelTimesWorkedOut: ['Travel times worked out', 'When we last worked out the driving times. Redone yearly, or when the roads change materially.'],
   tried: ['Tried', 'Menus we attempted to read.'],
   tripped: ['Tripped', 'Whether any of it ended up in a trip.'],
   unseenBy: ['Unseen by', 'Sources that have never returned this place. One is named; more than one shows the count — open the place for which.'],
-  unseenBy2Sources: ['Unseen by 2 sources', 'Atlas and Tripadvisor have never returned it.'],
-  unseenBy3Sources: ['Unseen by 3 sources', 'Google, Atlas and Tripadvisor have never returned it.'],
-  unseenBy4Sources: ['Unseen by 4 sources', 'OSM, Atlas, Tripadvisor and the sweep have never returned it.'],
   unseenByPlace: ['Unseen by', 'Sources that have never returned this place. Listed on the right with what each would cost.'],
   waiting: ['Waiting', 'Household-made content nobody has looked at yet.'],
   weKnowOf: ['We know of', 'How many places we hold here for that subject, however little we hold about each.'],
@@ -172,7 +153,6 @@ export const TIPS = {
   weightSplit: ['Weight', 'How the three parts of the score are balanced against each other.'],
   whatIsInReach: ['What is in reach', 'Everything inside the ring, read from the matrix rather than calculated.'],
   whatItGaveUs: ['What it gave us', 'The word or figure this input contributed. Hover any value below for the arithmetic behind it.'],
-  whatItIsColumn: ['What it is', 'A sentence describing the place, written by us.'],
   whatItIsFact: ['What it is', 'A sentence of our own saying what the place is.'],
   whatItNeeds: ['What it needs', 'The facts this kind of place must have before it counts as ready.'],
   whatTheyDid: ['What they did', 'Whether they scrolled past it, opened it, saved it or never reached it.'],
@@ -187,15 +167,11 @@ export const TIPS = {
   whichFault: ['Which fault', 'Shown nothing, clicked nothing, or never tripped — three different faults.'],
   whoFixesIt: ['Who fixes it', 'Each fault has one owner, which is why there is no single rate on this screen.'],
   whose: ['Whose', 'Who has to act on it.'],
-  withThisBuild: ['With this build', 'Obligations that ship alongside the search log, not after it.'],
   withoutTheLicensedBit: ['Without the licensed bit', 'The same score with the two rented inputs removed — what survives a provider going dark.'],
-  workOutTheScoresAgain: ['Work out the scores again', 'No network and nothing spent. Run it after any change to the ready bar.'],
   worth: ['Worth', 'What each input contributed. The column adds to the score above it.'],
-  writeItUpOurselves: ['Write it up ourselves', 'From the venue\'s own site, Wikipedia and OSM — never from a provider\'s reviews.'],
   ourLabel: ['Their word', 'A word a provider uses for a kind of place, in our vocabulary — `namespace:key`. Every one is listed whether or not anything here carries it, because a word we have written a rule for and nothing lands on is a finding too.'],
   pointsAt: ['Points at', 'Which of our own labels this provider\'s word means. It is what lets a rule written in our words read a place said in theirs.'],
   unscored: ['Not scored yet', 'Places in a subcategory nobody has set a bar for. They are not nought — there is nothing yet to judge them against.'],
-  estimatedRing: ['Estimated, not routed', 'The travel times in the matrix are worked out from distance rather than from the road network, so the ring is an estimate. The list of twenty at the end is ordered exactly.'],
   edgeMinutes: ['A few minutes generous', 'The matrix is read a few minutes past what was asked, so a place at the edge of its postcode area is offered rather than lost. The exact pass then fences it.'],
 } as const satisfies Record<string, Tip>;
 

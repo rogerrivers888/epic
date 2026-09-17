@@ -27,7 +27,9 @@ router.get('/', requires('view_library'), async (req, res, next) => {
     const state = queue.STATES.includes(String(req.query.state)) ? String(req.query.state) : 'waiting';
     // Cheap and idempotent, so the queue is never behind what households did.
     await queue.sync().catch(() => null);
-    const rows = await queue.list({ kind, state, areaSlug });
+    // Grouped: forty photographs of one beach are one decision and one row
+    // (BO5a, "Coral Beach, 12 of them"). Nothing a person wrote ever groups.
+    const rows = queue.group(await queue.list({ kind, state, areaSlug }));
     res.json({
       kinds: queue.KINDS, states: queue.STATES,
       counts: await queue.counts({ areaSlug, state }),
@@ -44,6 +46,9 @@ router.get('/', requires('view_library'), async (req, res, next) => {
         // is asking about.
         imageId: r.kind === 'photo' && r.subject_type === 'image' ? r.subject_id : null,
         batchable: queue.KINDS.find((k) => k.key === r.kind)?.batch ?? false,
+        // Every id this row stands for, so approving it approves the lot, and
+        // who made them — "4 households" rather than one name.
+        batch: r.batch ?? [r.id], of: r.of ?? 1, makers: r.makers ?? [],
       })),
     });
   } catch (err) { next(err); }

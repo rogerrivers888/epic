@@ -237,3 +237,37 @@ test('rejecting an offer ends the introductions it is already part of', async ()
   assert.equal(other.state, 'active');
   assert.equal(other.hidden, false);
 });
+
+test('forty photographs of one beach are one decision', async () => {
+  const { household } = await aHousehold(query);
+  const ref = 'osm:node/coral-beach';
+  const make = async (n) => {
+    const { rows: [img] } = await query(
+      `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+       values ('household', $1, true, 'pending', $2, 'household') returning *`,
+      [`beach-${n}-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+    await query(
+      `insert into image_links (image_id, subject_type, subject_id, role, position) values ($1,'place',$2,'gallery',$3)`,
+      [img.id, ref, n]);
+    return img;
+  };
+  for (let n = 0; n < 4; n += 1) await make(n);
+  await queue.sync();
+  const rows = queue.group(await queue.list({ kind: 'photo' }));
+  const batch = rows.find((r) => r.venue_ref === ref);
+  // BO5a draws them as one row — "Coral Beach, 12 of them" — and it is the
+  // whole point of batch approval (17 Sep 2026, the verification audit).
+  assert.ok(batch, 'the four are one row');
+  assert.equal(batch.of, 4);
+  assert.equal(batch.batch.length, 4);
+
+  // A person's review is never folded into a count of reviews.
+  const reviews = queue.group(await queue.list({ kind: 'review' }));
+  for (const r of reviews) assert.equal(r.of, 1, 'a review is read on its own');
+
+  // Approving the row approves the lot.
+  await queue.approve(batch.batch, null);
+  const { rows: [left] } = await query(
+    `select count(*)::int as n from content_queue where kind = 'photo' and venue_ref = $1 and state <> 'approved'`, [ref]);
+  assert.equal(left.n, 0);
+});

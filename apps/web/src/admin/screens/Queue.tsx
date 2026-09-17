@@ -78,11 +78,17 @@ export function Queue({ canManage }: { canManage: boolean }) {
 
   // Counted before the early return: a hook that only runs once the data has
   // arrived changes the order of hooks between renders, and React refuses.
+  // Photographs, counted as photographs rather than as rows: a row can stand
+  // for twelve of them (17 Sep 2026, the verification audit).
   const batchable = useMemo(
-    () => (data?.rows ?? []).filter((r) => picked.has(r.id) && r.batchable).length,
+    () => (data?.rows ?? []).filter((r) => picked.has(r.id) && r.batchable)
+      .reduce((n, r) => n + (r.of ?? 1), 0),
     [data, picked],
   );
-  const notBatchable = picked.size - batchable;
+  const notBatchable = useMemo(
+    () => (data?.rows ?? []).filter((r) => picked.has(r.id) && !r.batchable).length,
+    [data, picked],
+  );
 
   const approve = useCallback(async (ids: string[]) => {
     setBusy(true);
@@ -163,12 +169,17 @@ export function Queue({ canManage }: { canManage: boolean }) {
                 <Text style={[styles.listName, open === r.id && styles.strong]} numberOfLines={1}>
                   {r.kind === 'data'
                     ? `Three sources disagree${r.field ? ` on the ${FIELD_WORD[r.field] ?? r.field}` : ''}`
-                    : `${said(r.kind)[0].toUpperCase()}${said(r.kind).slice(1)}${r.place ? ` · ${r.place}` : r.ref ? ` · ${r.ref}` : ''}`}
+                    : `${said(r.kind)[0].toUpperCase()}${said(r.kind).slice(1)}${r.place ? ` · ${r.place}` : r.ref ? ` · ${r.ref}` : ''}${(r.of ?? 1) > 1 ? `, ${r.of} of them` : ''}`}
                 </Text>
                 <Text style={styles.listNote} numberOfLines={1}>
                   {r.kind === 'data'
                     ? [r.place ?? r.ref, 'flagged by us', since(r.madeAt)].filter(Boolean).join(' · ')
-                    : [r.maker ?? 'flagged by us', since(r.madeAt), r.reported ? 'reported' : (open === r.id ? r.state : null)].filter(Boolean).join(' · ')}
+                    : [
+                      // "4 households" where a batch came from several of them.
+                      (r.makers?.length ?? 0) > 1 ? `${r.makers.length} households` : (r.maker ?? 'flagged by us'),
+                      since(r.madeAt),
+                      r.reported ? 'reported' : (open === r.id ? r.state : null),
+                    ].filter(Boolean).join(' · ')}
                 </Text>
               </View>
             </Press>
@@ -182,7 +193,10 @@ export function Queue({ canManage }: { canManage: boolean }) {
                 never a batch that contains something a person wrote. */}
             <Act label={`Approve the ${batchable}`} small tone="secondary"
                  disabled={!canManage || busy || batchable === 0 || notBatchable > 0}
-                 onPress={() => approve(data.rows.filter((r) => picked.has(r.id) && r.batchable).map((r) => r.id))} />
+                 onPress={() => approve(data.rows
+                   .filter((r) => picked.has(r.id) && r.batchable)
+                   // Every id the row stands for, not the row's own.
+                   .flatMap((r) => r.batch ?? [r.id]))} />
           </View>
         </View>
 
