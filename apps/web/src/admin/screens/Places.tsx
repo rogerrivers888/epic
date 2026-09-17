@@ -1775,7 +1775,15 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
               <Text style={[styles.fieldMeta, { width: 92 }]}>
                 {f.checked === 'never' ? 'never' : f.checked ? day(f.checked) : '—'}
               </Text>
-              <View style={{ width: 72 }}>
+              <View style={{ width: f.editable && f.action ? 128 : 72, flexDirection: 'row', gap: 6, justifyContent: 'flex-end' }}>
+                {/* Both, where a hole can be typed into *and* filled by a run:
+                    the two used to shadow each other whichever way the flags
+                    fell (17 Sep 2026). */}
+                {f.action && canManage ? (
+                  <Act label={busy === f.key ? '…' : (ACTION_WORD[f.action as FieldAction] ?? 'Ask')}
+                       small tone="secondary" disabled={busy != null}
+                       onPress={() => runFor(f.key, f.action as FieldAction)} />
+                ) : null}
                 {f.editable && canManage ? (
                   <Explain tip="editableValue">
                     <Press effect="none" onPress={() => { setEditing(f.key); setDraft(String(f.value ?? '')); }}
@@ -1784,16 +1792,6 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
                       <Text style={styles.editWord}>Edit</Text>
                     </Press>
                   </Explain>
-                ) : f.action && canManage ? (
-                  // Each of these runs the thing that would fill the hole,
-                  // rather than opening the same edit box Edit opens: Write
-                  // researches it from the open sources, Find looks for the
-                  // venue's own page or a picture we may keep, Read reads their
-                  // menu, Ask asks the paid source and says what it cost
-                  // (17 Sep 2026, the verification audit).
-                  <Act label={busy === f.key ? '…' : (ACTION_WORD[f.action as FieldAction] ?? 'Ask')}
-                       small tone="secondary" disabled={busy != null}
-                       onPress={() => runFor(f.key, f.action as FieldAction)} />
                 ) : null}
               </View>
               <Press effect="none" onPress={() => setOpen(open === f.key ? null : f.key)} hitSlop={8}

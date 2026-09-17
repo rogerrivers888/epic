@@ -698,7 +698,18 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
     // Every field a place can carry, whether or not we hold it. A dash is a hole
     // to fill; `n/a` is a fact this kind of place is not judged on.
     const judged = new Set(scored.parts.judged.map((j) => j.fact));
-    const OURS = new Set(['ours', 'own', 'curate', 'hand', 'claim']);
+    // Whose values are ours to change.
+    //
+    // The open sources are on the list because their content is ours to keep
+    // for good (CLAUDE.md): the atlas, Wikipedia, Wikidata, OpenStreetMap and
+    // the venue's own published page. A sentence from Wikipedia that we could
+    // not correct was the whole reason the curation column exists. A licensed
+    // provider's value is never here — it changes when they change it, and a
+    // copy of it we could overwrite would be a copy we may not keep.
+    const OURS = new Set([
+      'ours', 'own', 'curate', 'hand', 'claim',
+      'atlas', 'wikipedia', 'wikidata', 'osm', 'openstreetmap', 'commons', 'their site', 'site',
+    ]);
     const field = (key, label, value, source, checked, fact = null, editable = false, action = null, note = null, reference = null) => {
       const from = value == null ? null : asWord(source);
       const held = value != null;
@@ -714,13 +725,23 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
         note, reference,
         counted,
         notCounted: fact ? !judged.has(fact) : false,
-        // **Ours, so editable.** The Source column's own tooltip says it: a
-        // provider's value changes when they change it, and a copy of it we
-        // could overwrite would be a copy we are not allowed to keep. So the
-        // flag follows where the value came from, not a list (Codex, 17 Sep).
-        editable: editable && held && OURS.has(String(from ?? '').toLowerCase()),
-        // A hole offers the thing that would fill it. It used to be shadowed by
-        // Edit, so Write, Find and Ask were unreachable.
+        // **Ours, so editable — and a hole is ours too.**
+        //
+        // The Source column's own tooltip says the rule: a provider's value
+        // changes when they change it, and a copy of it we could overwrite
+        // would be a copy we are not allowed to keep. So the flag follows where
+        // the value came from.
+        //
+        // But a field we hold *nothing* for came from nobody, and requiring
+        // `held` meant only a value that already existed could be edited —
+        // "Also known as", the address, the prices, step-free and the telephone
+        // number were all blank rows with no way to fill them in (Codex, 17 Sep
+        // 2026). A hole with a run behind it offers the run; a hole without one
+        // can be typed into.
+        editable: editable && (!held || OURS.has(String(from ?? '').toLowerCase())),
+        // A hole offers the thing that would fill it *and* the box to type it
+        // in. It used to offer only one of the two, whichever way round the
+        // flags fell (Codex, 17 Sep 2026, and again on the editability fix).
         action: held ? null : action,
       };
     };
@@ -853,17 +874,40 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
          on conflict (venue_ref) do update set ${COLUMN[key]} = excluded.${COLUMN[key]}, updated_at = now()`, [ref, value]);
       if (key === 'what_it_is') await query(`update place_records set summary_source = 'ours' where venue_ref = $1`, [ref]);
     } else if (key === 'step_free') {
-      await query(
-        `insert into place_records (venue_ref, accessibility, updated_at) values ($1, jsonb_build_object('stepFree', $2::boolean), now())
-         on conflict (venue_ref) do update set accessibility = place_records.accessibility || jsonb_build_object('stepFree', $2::boolean), updated_at = now()`,
-        [ref, value === true || value === 'yes']);
+      // Three states, not two: yes, no, and nobody has looked.
+      //
+      // Every value that was not `true` or `yes` became a definite "no",
+      // including an empty one — so an administrator could not remove a
+      // step-free fact that was wrong. Clearing it recorded the opposite claim,
+      // kept the fact counted as held, and left the score saying so (Codex,
+      // 17 Sep 2026).
+      const said = value == null ? '' : String(value).trim().toLowerCase();
+      if (said === '') {
+        await query(
+          `update place_records set accessibility = accessibility - 'stepFree', updated_at = now()
+            where venue_ref = $1`, [ref]);
+      } else if (['yes', 'no', 'true', 'false'].includes(said)) {
+        const yes = said === 'yes' || said === 'true';
+        await query(
+          `insert into place_records (venue_ref, accessibility, updated_at) values ($1, jsonb_build_object('stepFree', $2::boolean), now())
+           on conflict (venue_ref) do update set accessibility = place_records.accessibility || jsonb_build_object('stepFree', $2::boolean), updated_at = now()`,
+          [ref, yes]);
+      } else throw bad('Step-free is yes, no, or empty for "nobody has looked".');
     } else if (key === 'aka') {
       await query(
         `insert into place_records (venue_ref, curation, curated_at, updated_at) values ($1, jsonb_build_object('aka', $2::text), now(), now())
          on conflict (venue_ref) do update set curation = coalesce(place_records.curation, '{}'::jsonb) || jsonb_build_object('aka', $2::text), curated_at = now(), updated_at = now()`,
         [ref, value == null ? null : String(value)]);
     } else if (key === 'subcategory') {
-      const { rows: [sub] } = await query('select key, category_key from shelf_subcategories where key = $1', [String(value)]);
+      // By key, or by the words the row prints. The record shows
+      // "Food › Restaurants" and the editor sends back what it was shown, so a
+      // save of the unchanged value answered "No such subcategory" and there
+      // was no way to make the edit without knowing a hidden database key
+      // (Codex, 17 Sep 2026).
+      const said = String(value ?? '').split('›').pop().trim();
+      const { rows: [sub] } = await query(
+        `select key, category_key from shelf_subcategories
+          where key = $1 or lower(label) = lower($2) limit 1`, [String(value), said]);
       if (!sub) throw bad('No such subcategory.');
       await query(`update place_index set subcategory = $2, category = $3, derived_by = 'hand' where venue_ref = $1`, [ref, sub.key, sub.category_key]);
     } else if (key === 'outcode') {
