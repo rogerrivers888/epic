@@ -284,3 +284,34 @@ test('the harvest reaches the index, including the rows that have no reference o
                                from attractions a where a.region_slug = 'testshire')`);
   assert.equal(rows.length, 2, 'both of them, whether or not they came with a reference');
 });
+
+test('a place two sources returned is recorded as two, not as the run that asked', async () => {
+  // A sweep result is often Google *and* OpenStreetMap. Handing the index only
+  // the synthetic `sweep` made every combined place read as single-source on
+  // the sources lens (Codex, 17 Sep 2026).
+  await index.noteMany(
+    [{ ref: 'google:both-of-them', lat: 51.5, lng: -0.6, sources: ['sweep', 'google', 'osm'] }],
+    { source: 'sweep' });
+  const { rows } = await query(
+    `select source from place_index_sources where venue_ref = $1 order by source`, ['google:both-of-them']);
+  assert.deepEqual(rows.map((r) => r.source), ['google', 'osm', 'sweep']);
+
+  // A list that names the same source twice is one row, not a statement that
+  // cannot see its own duplicate.
+  await index.noteMany([{ ref: 'osm:node/twice', sources: ['osm', 'osm'] }], { source: 'sweep' });
+  const { rows: once } = await query(
+    'select count(*)::int as n from place_index_sources where venue_ref = $1', ['osm:node/twice']);
+  assert.equal(once[0].n, 1);
+});
+
+test('every result the household could tap is in the replay, not the first sixty', async () => {
+  const { household } = await aHousehold(query);
+  const id = await log.noteSearch({
+    householdId: household.id, surface: 'inspire', shownTotal: 250, shown: [{ kind: 'idea', n: 250 }],
+  });
+  await log.noteShown(id, Array.from({ length: 250 }, (_, i) => ({ ref: `osm:node/${i}`, position: i + 1 })));
+  const { rows } = await query(
+    `select count(*)::int as n, max(position)::int as last from search_events where search_id = $1 and kind = 'shown'`, [id]);
+  assert.equal(rows[0].n, 250, 'the replay is built from these rows and nothing else');
+  assert.equal(rows[0].last, 250);
+});

@@ -144,7 +144,15 @@ export async function putPlace(areaCode, p, run = query) {
   // whichever handle the sweep is writing on, so it commits with the place.
   // The sweep's `run` may be the pool or a client; only a client means a
   // transaction, and only then does a failure here belong to the caller.
-  await noteMany([{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null }],
+  await noteMany(
+    [{
+      ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null,
+      // Everyone who actually returned it, not only the run that asked. The
+      // same list this function writes to `from_sources` below — throwing it
+      // away here made every combined place look single-source on the index's
+      // own sources lens (Codex, 17 Sep 2026).
+      sources: ['sweep', ...(Array.isArray(p.from) ? p.from : [])],
+    }],
     { source: 'sweep', client: run === query ? null : { query: run } });
   await run(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,

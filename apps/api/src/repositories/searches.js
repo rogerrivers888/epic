@@ -207,9 +207,19 @@ export async function noteSearch(input) {
 export async function noteShown(searchId, items = []) {
   if (!searchId || !items.length) return;
   try {
-    const values = items.map((_, i) => `($1, 'shown', $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4}::jsonb)`).join(',');
-    await query(
-      `insert into search_events (search_id, kind, venue_ref, position, meta) values ${values}`,
-      [searchId, ...items.flatMap((it, i) => [it.ref ?? null, it.position ?? i + 1, JSON.stringify({ score: it.score ?? null, source: it.source ?? null })])]);
+    // Every one of them, in chunks.
+    //
+    // The callers used to cut the list at sixty, but the replay is built out of
+    // these rows alone — so a browse of two hundred and fifty places replayed as
+    // sixty, and anything the household did with the other hundred and ninety
+    // had nothing to hang off (Codex, 17 Sep 2026). Chunked because a single
+    // statement of a few hundred tuples is what the parameter limit is for.
+    for (let at = 0; at < items.length; at += 200) {
+      const chunk = items.slice(at, at + 200);
+      const values = chunk.map((_, i) => `($1, 'shown', $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4}::jsonb)`).join(',');
+      await query(
+        `insert into search_events (search_id, kind, venue_ref, position, meta) values ${values}`,
+        [searchId, ...chunk.flatMap((it, i) => [it.ref ?? null, it.position ?? at + i + 1, JSON.stringify({ score: it.score ?? null, source: it.source ?? null })])]);
+    }
   } catch { /* the log is not worth a failed search */ }
 }

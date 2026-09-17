@@ -508,11 +508,14 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
     if (!sessionId || opening) return;
     const head = things[idea.id]?.headline ?? null;
     const already = opened[idea.id];
-    noteSearchEvent('plan', 'add_to_trip', idea.place?.ref ?? idea.id);
     if (already) { onOpenTrip?.(already.tripId, openOpts(head)); return; }
     setOpening(idea.id); setError(null);
     try {
       const r = await api.inspireTrip({ sessionId, ideaId: idea.id, attendingMemberIds: attendingIds });
+      // After it exists, never before. Reported up front, a trip that failed to
+      // be made still moved the search to "tripped", so Demand read a
+      // conversion that had not happened (Codex, 17 Sep 2026).
+      noteSearchEvent('plan', 'add_to_trip', idea.place?.ref ?? idea.id);
       setOpened((s) => ({ ...s, [idea.id]: { tripId: r.tripId, title: r.title, seeded: r.seeded } }));
       onOpenTrip?.(r.tripId, openOpts(head));
     } catch (e: any) { setError(e?.message || String(e)); } finally { setOpening(null); }

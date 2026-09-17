@@ -8,7 +8,7 @@ import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { heldSearch, noteSearchEvent } from '../search';
+import { heldSearch, holdConversion, noteSearchEvent } from '../search';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
@@ -1059,9 +1059,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         ) : null}
         onAdd={onCreateTrip ? (it) => {
           // The third of Demand's three: a place opened and actually taken
-          // somewhere. Reported before the drawer closes, so the close event
-          // does not overwrite it.
-          noteSearchEvent('inspire', 'add_to_trip', it.venueRef);
+          // somewhere. Held rather than reported, because this only opens the
+          // new-trip form — it is counted when a trip is actually made
+          // (Codex, 17 Sep 2026).
+          holdConversion('inspire', it.venueRef);
           closeDrawer();
           onCreateTrip({
             place: { ref: it.venueRef, label: it.name, lat: it.lat as number, lng: it.lng as number },

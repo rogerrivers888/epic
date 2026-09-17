@@ -616,8 +616,24 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
                                else 'identified' end,
               last_seen = now()`,
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified']));
-    if (source) {
-      const src = rows.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
+    // Who has returned each place, which may be more than one of them.
+    //
+    // A sweep result is often Google *and* OpenStreetMap, and the sweep keeps
+    // that in `scout_places.from_sources` — but only the synthetic `sweep` was
+    // handed to the index, so the sources lens undercounted both and read
+    // combined places as single-source (Codex, 17 Sep 2026).
+    const triples = rows.flatMap((p) => {
+      const said = Array.isArray(p.sources) && p.sources.length ? p.sources : [p.source ?? source];
+      return said
+        .filter(Boolean)
+        .map((s) => [p.ref, String(s), p.sourceId ?? null])
+        // Two names for the same source in one list would be two identical
+        // tuples, and `on conflict` cannot see a duplicate inside its own
+        // statement.
+        .filter((t, i, all) => all.findIndex((o) => o[1] === t[1]) === i);
+    });
+    if (triples.length) {
+      const src = triples.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
       await exec(
         `insert into place_index_sources (venue_ref, source, source_place_id)
          values ${src}
@@ -627,7 +643,7 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
                 -- none. It never overwrites one we already hold: the match is
                 -- the thing that stops us paying for it twice (Codex, 17 Sep).
                 source_place_id = coalesce(place_index_sources.source_place_id, excluded.source_place_id)`,
-        rows.flatMap((p) => [p.ref, p.source ?? source, p.sourceId ?? null]));
+        triples.flat());
     }
     return { noted: rows.length };
   };

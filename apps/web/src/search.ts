@@ -51,3 +51,31 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
 
 /** Which search a surface is standing on, where a screen needs to say so. */
 export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
+
+/**
+ * A conversion that has been asked for but has not happened yet.
+ *
+ * "Add to trip" on Inspire only seeds and opens the new-trip form, which the
+ * household can close without making anything. Reporting the conversion there
+ * marked every opening of the form as a trip and inflated Demand's third
+ * outcome (Codex, 17 Sep 2026). So the intent is held, and it is reported by
+ * the path that actually makes the trip — or dropped when the form is closed.
+ */
+let pending: { surface: Surface; ref: string | null } | null = null;
+
+export function holdConversion(surface: Surface, venueRef?: string | null) {
+  pending = { surface, ref: venueRef ?? null };
+}
+
+/** The trip exists. Now it counts. */
+export function conversionHappened() {
+  if (!pending) return;
+  const { surface, ref } = pending;
+  pending = null;
+  noteSearchEvent(surface, 'add_to_trip', ref);
+}
+
+/** They closed the form. Nothing was made, so nothing is counted. */
+export function conversionAbandoned() {
+  pending = null;
+}

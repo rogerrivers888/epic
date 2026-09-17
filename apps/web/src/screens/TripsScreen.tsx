@@ -23,6 +23,7 @@ import { getSpeakPref } from './SettingsScreen';
 import { SourceDataPanel } from '../components/SourceData';
 import { isAdmin } from '../admin';
 import { recallScreen, rememberScreen } from '../screenState';
+import { conversionAbandoned, conversionHappened } from '../search';
 import { asOneOf, useQueryState, useRouter } from '../router';
 import { paths, TRIP_TABS, type ChatLayer, type Route, type TripSection } from '../routes';
 import { tripName } from './tripName';
@@ -202,14 +203,24 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
           kind: askedKind === 'holiday' || from?.kind === 'trip' ? 'holiday'
             : askedKind === 'day' || from?.kind === 'outing' || from?.kind === 'now' ? 'day' : undefined,
         }}
-        onClose={() => { onSeedUsed?.(); setPicked(null); back(paths.trips()); }}
+        onClose={() => {
+          // Closed without making anything, so a conversion held on the way in
+          // is dropped rather than counted (Codex, 17 Sep 2026).
+          conversionAbandoned();
+          onSeedUsed?.(); setPicked(null); back(paths.trips());
+        }}
         onCreated={async (t) => {
+          // The trip exists. This is the point at which Demand's third outcome
+          // is true, and the only point at which it is reported.
+          conversionHappened();
           onSeedUsed?.();
           setPicked(null);
           await load();
           navigate(paths.trip(t.trip.id), { replace: true });
         }}
         onGettingThere={(tripId) => {
+          // The other way out with a trip actually made.
+          conversionHappened();
           onSeedUsed?.();
           setPicked(null);
           navigate(paths.tripTravel(tripId), { replace: true });
