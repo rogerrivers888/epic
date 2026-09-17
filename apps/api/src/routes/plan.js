@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import { z } from 'zod/v4';
 import { withTransaction } from '../db.js';
+import * as searchLog from '../repositories/searches.js';
 import * as planSessions from '../repositories/planSessions.js';
 import * as tripsRepo from '../repositories/trips.js';
 import * as atlasRepo from '../repositories/atlas.js';
@@ -1490,6 +1491,21 @@ async function runInspire({ household, attending, session, state, append = false
       await publish({ ideas, placed: ideas.filter((x) => !x.placing).length });
     }
     await publish({ running: false, stage: 'ready' });
+
+    // The planner's ask, written down. An ask that produced nothing is a demand
+    // signal exactly as a browse that showed nothing is, and neither can be
+    // backfilled (17 Sep 2026).
+    await searchLog.noteSearch({
+      householdId: household.id, surface: 'plan',
+      ...(await searchLog.whereOf({ lat: home?.lat ?? null, lng: home?.lng ?? null })),
+      lat: home?.lat ?? null, lng: home?.lng ?? null,
+      minutes: state.input?.maxTravelMinutes ?? null,
+      asked: { moods: state.input?.moods ?? [], budget: state.input?.budget ?? 'any', party: attending.length, typed: Boolean(state.input?.brief) },
+      subject: (state.input?.moods ?? []).length === 1 ? state.input.moods[0] : null,
+      shownTotal: ideas.length,
+      shown: [{ kind: 'idea', n: ideas.length }],
+      sourcesQueried: ['claude'], degraded: [],
+    });
 
     // What there is at each idea is gathered now, in the background and in
     // order, so opening one is a read rather than a search (owner, 3 Sep 2026).

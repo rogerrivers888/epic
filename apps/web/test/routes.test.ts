@@ -223,6 +223,34 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/categories'), { name: 'admin', screen: 'categories' });
   // Hosting › Skills: the five vocabularies, the review queue and the source register (13 Sep 2026).
   assert.deepEqual(roundTrip('/admin/skills'), { name: 'admin', screen: 'skills' });
+  // Places, Runs, Demand and the content queue (17 Sep 2026). Every level of
+  // Places is a query on one address: `?where=` is the level, `?lens=` how it is
+  // cut, `?cat=`/`?sub=` how far down the ladder, `?place=` one place over any
+  // of them — so a piece of work is a link somebody can be sent.
+  assert.deepEqual(roundTrip('/admin/places'), { name: 'admin', screen: 'places' });
+  assert.deepEqual(parseRoute('/admin/places?where=gb'), { name: 'admin', screen: 'places' });
+  assert.deepEqual(parseRoute('/admin/places?where=berkshire&lens=category'), { name: 'admin', screen: 'places' });
+  assert.deepEqual(parseRoute('/admin/places?where=windsor&within=30&by=drive'), { name: 'admin', screen: 'places' });
+  assert.deepEqual(parseRoute('/admin/places?where=sl4-1qn&within=30&by=drive&cat=family&sub=play'), { name: 'admin', screen: 'places' });
+  assert.equal(splitHref('/admin/places?where=sl4&place=google%3AChIJabc').query.get('place'), 'google:ChIJabc');
+  assert.equal(splitHref('/admin/places?where=gb&by=city&sort=empty').query.get('sort'), 'empty');
+  assert.equal(splitHref('/admin/places?pictures=1&q=castle+winter').query.get('q'), 'castle winter');
+  assert.equal(splitHref('/admin/places?ready=restaurants').query.get('ready'), 'restaurants');
+  // Runs only watches; one run's failures are its own address.
+  assert.deepEqual(roundTrip('/admin/runs'), { name: 'admin', screen: 'runs' });
+  assert.equal(splitHref('/admin/runs?run=menus&view=failures').query.get('view'), 'failures');
+  // Demand, and one search replayed exactly as they saw it.
+  assert.deepEqual(roundTrip('/admin/demand'), { name: 'admin', screen: 'demand' });
+  assert.equal(splitHref('/admin/demand?where=berkshire&since=30').query.get('since'), '30');
+  assert.equal(splitHref('/admin/demand?search=9a2f').query.get('search'), '9a2f');
+  // The content queue: one queue with a filter, not a queue per kind.
+  assert.deepEqual(roundTrip('/admin/queue'), { name: 'admin', screen: 'queue' });
+  assert.equal(splitHref('/admin/queue?state=waiting&where=berkshire').query.get('state'), 'waiting');
+  // The four that dissolved into Places still resolve, so no address anybody
+  // kept lands on a 404 — they are simply no longer in the rail.
+  assert.deepEqual(roundTrip('/admin/coverage'), { name: 'admin', screen: 'coverage' });
+  assert.deepEqual(roundTrip('/admin/library'), { name: 'admin', screen: 'library' });
+  assert.deepEqual(roundTrip('/admin/scout'), { name: 'admin', screen: 'scout' });
   assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'overview' });
 });
 

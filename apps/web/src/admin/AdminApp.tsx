@@ -28,6 +28,7 @@ import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useActivity } from '../hooks/useActivity';
 import { useAdminTheme } from '../hooks/useAdminTheme';
+import { Explains } from './explain';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { Overview } from './screens/Overview';
 import { People } from './screens/People';
@@ -36,6 +37,9 @@ import { Reporting } from './screens/Reporting';
 import { Audit, Plans, Roles } from './screens/Governance';
 import { Library } from './screens/Library';
 import { Places } from './screens/Places';
+import { Runs } from './screens/Runs';
+import { Demand } from './screens/Demand';
+import { Queue } from './screens/Queue';
 import { Coverage } from './screens/Coverage';
 import { Lookup } from './screens/Lookup';
 import { Scout } from './screens/Scout';
@@ -70,23 +74,33 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'households', label: 'Households', icon: 'household', needs: 'view_accounts', sub: 'What each one does, and what it costs' },
   { key: 'activity', label: 'Activity', icon: 'list', needs: 'view_activity', sub: 'Everything that has happened' },
   { key: 'reporting', label: 'Reporting', icon: 'places', needs: 'view_reporting', sub: 'Engagement, revenue and usage' },
-  { key: 'lookup', label: 'Lookup', icon: 'search', needs: 'view_library', sub: 'One place, one travel time, and what every source has inside it' },
-  { key: 'coverage', label: 'Coverage', icon: 'plan', needs: 'view_library', sub: 'Where the holes are, and a way into each one' },
-  { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'A county, a town or a postcode district, and everything in it' },
-  { key: 'library', label: 'Atlas', icon: 'owned', needs: 'view_library', sub: 'Attractions by county, and the pictures we own' },
-  { key: 'scout', label: 'The sweep', icon: 'search', needs: 'view_library', sub: 'Postcode areas, their best restaurants and their menus' },
+  /**
+   * Data. Five screens that were each bound to a different table became three
+   * bound to three questions (17 Sep 2026): Places is what we know and where,
+   * Demand is what people asked for and what we failed to give them, and the
+   * content queue is what households sent us. Runs is the monitor for the long
+   * jobs — starting one happens on Places, where the gap is.
+   *
+   * Atlas, the sweep, Coverage and Lookup dissolved into Places. Their addresses
+   * still resolve so nothing anybody kept lands on a 404; they are simply not in
+   * this rail any more.
+   */
+  { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'What we know, where, and how good it is', group: 'Data' },
+  { key: 'demand', label: 'Demand', icon: 'list', needs: 'view_reporting', sub: 'What people asked for, and what we failed to give them', group: 'Data' },
   { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
   { key: 'categories', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Categories and subcategories, every provider\'s words, and the rules that map one onto the other', group: 'Data' },
-  { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences' },
-  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports' },
-  { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before' },
-  { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced' },
-  { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities' },
-  { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on' },
-  { key: 'audit', label: 'Audit', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom' },
+  { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'Data' },
+  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports', group: 'Data' },
+  { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
+  { key: 'queue', label: 'Content queue', icon: 'preview', needs: 'view_library', sub: 'What households have sent us, and whether it is fit to publish', group: 'Data' },
+  { key: 'runs', label: 'Runs', icon: 'download', needs: 'view_library', sub: 'What is going, what it cost, and what failed', group: 'Data' },
+  { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced', group: 'Admin' },
+  { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities', group: 'Admin' },
+  { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on', group: 'Admin' },
+  { key: 'audit', label: 'Audit', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'Admin' },
   // No capability: the decisions behind what Epic does are not a privilege, and
   // an account that can see any of this should be able to see why.
-  { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives' },
+  { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives', group: 'Admin' },
 ];
 
 /**
@@ -146,6 +160,9 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'lookup' ? <Lookup canManage={can('manage_library')} /> : null}
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}
+      {screen === 'runs' ? <Runs canManage={can('manage_library')} /> : null}
+      {screen === 'demand' ? <Demand canManage={can('manage_library')} /> : null}
+      {screen === 'queue' ? <Queue canManage={can('manage_library')} /> : null}
       {screen === 'library' ? <Library canManage={can('manage_library')} /> : null}
       {screen === 'scout' ? <Scout canManage={can('manage_library')} /> : null}
       {screen === 'sources' ? <Sources /> : null}
@@ -235,7 +252,10 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
         </View>
       )}
 
-      <View style={styles.content}>{body}</View>
+      {/* One tooltip panel for the whole back office, positioned in the page's
+          own coordinate space so it lands where it should inside the shell's
+          phone frame as well (explain.tsx). */}
+      <View style={styles.content}><Explains>{body}</Explains></View>
     </View>
   );
 }

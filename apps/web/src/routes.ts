@@ -240,11 +240,27 @@ export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers',
 export type PrototypeSection = 'plan' | 'places' | 'trips' | 'household' | 'settings';
 export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips', 'household', 'settings'];
 
+/**
+ * The back office's screens.
+ *
+ * `runs`, `demand` and `queue` arrived on 17 Sep 2026 with the place index: five
+ * screens that were each bound to a different table became three bound to three
+ * questions, plus a monitor for the long jobs.
+ *
+ * `coverage`, `lookup`, `library` and `scout` are the four that dissolved into
+ * Places. They are **kept resolvable on purpose**: the owner's rule is that a
+ * control he has questioned is a thing to make clear rather than to delete, and
+ * any address anybody has kept still lands somewhere rather than on a 404. They
+ * are no longer in the rail.
+ */
 export type AdminScreen =
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
-  | 'lookup' | 'coverage' | 'places' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
+  | 'places' | 'demand' | 'runs' | 'queue'
+  | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
 export const ADMIN_SCREENS: AdminScreen[] = [
-  'overview', 'accounts', 'households', 'activity', 'reporting', 'lookup', 'coverage', 'places', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'mail', 'roles', 'plans', 'audit', 'how',
+  'overview', 'accounts', 'households', 'activity', 'reporting',
+  'places', 'demand', 'runs', 'queue',
+  'lookup', 'coverage', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'mail', 'roles', 'plans', 'audit', 'how',
 ];
 
 /**

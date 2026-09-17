@@ -25,6 +25,7 @@ import { resolveConcept, conceptByKey } from '../domain/concepts.js';
 import { kmBetween } from '../domain/travel.js';
 import { contentsOf, groundsRadiusKm, researchInside } from '../sources/inside.js';
 import { researchRestrictions, restrictionsEnabled } from '../sources/restrictions.js';
+import * as searchLog from '../repositories/searches.js';
 import { currentHousehold, loadMembers } from './household.js';
 import { fileWhere, upsertHouseholdPlace } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
@@ -427,7 +428,22 @@ places.get('/search', async (req, res, next) => {
     // A ride belongs to its park, not to the list beside it.
     markContained(shown);
 
+    // The search, written down. A browse is a search too, and one that showed
+    // nothing here is exactly the coverage hole Collect exists to fill.
+    const searchId = await searchLog.noteSearch({
+      householdId: household.id, accountId: req.account?.id ?? null, surface: 'places',
+      ...(await searchLog.whereOf({ lat: near.lat, lng: near.lng })),
+      lat: near.lat, lng: near.lng, radiusKm,
+      asked: { categories, typed: Boolean(q) },
+      subject: categories.length === 1 ? categories[0] : null,
+      shownTotal: shown.length,
+      shown: Object.entries(shown.reduce((acc, v) => { const k = v.subcategory ?? v.shelf ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([subcategory, n]) => ({ subcategory, n })),
+      sourcesQueried, degraded,
+    });
+    await searchLog.noteShown(searchId, shown.map((v, i) => ({ ref: v.venueRef, position: i + 1, source: v.source })));
+
     res.json({
+      queryId: searchId,
       near: { label: near.label, lat: near.lat, lng: near.lng, how: near.how },
       radiusKm,
       results: shown,

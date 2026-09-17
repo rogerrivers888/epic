@@ -51,6 +51,7 @@
  */
 
 import { Router } from 'express';
+import * as searchLog from '../repositories/searches.js';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
@@ -575,7 +576,25 @@ inspire.get('/near', async (req, res, next) => {
 
     const counts = Object.fromEntries(tax.active.categories.map((m) => [m.key, items.filter((i) => i.moods.includes(m.key)).length]));
 
+    // The home screen is a search too, and the one people make most. Written
+    // down from the first day, because none of it can be backfilled and an
+    // Inspire that showed nothing for a town is the coverage hole that matters
+    // most — it is the first thing anybody sees.
+    const searchId = await searchLog.noteSearch({
+      householdId: household.id, accountId: req.account?.id ?? null, surface: 'inspire',
+      ...(await searchLog.whereOf({ lat: centre.lat, lng: centre.lng, areaSlug: locality })),
+      lat: centre.lat, lng: centre.lng, mode,
+      asked: { party: members.length, locality: Boolean(locality) },
+      subject: null,
+      shownTotal: items.length,
+      shown: Object.entries(items.reduce((acc, i) => { const k = i.subcategory ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([subcategory, n]) => ({ subcategory, n })),
+      sourcesQueried: lookAround.live ? ['atlas', 'live'] : ['atlas'],
+      degraded: lookAround.failed ? ['live'] : [],
+    });
+    await searchLog.noteShown(searchId, items.slice(0, 60).map((i, n) => ({ ref: i.venueRef, position: n + 1 })));
+
     res.json({
+      queryId: searchId,
       place: { label, ...centre, locality },
       from: origin,
       mode,

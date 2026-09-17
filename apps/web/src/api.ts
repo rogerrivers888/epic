@@ -1329,6 +1329,272 @@ export type KeyReport = {
   note: string;
 };
 
+
+// ---------------------------------------------------------------------------
+// Places, Runs, Demand and the content queue
+// ---------------------------------------------------------------------------
+//
+// The shapes behind the three screens that replaced five. Nothing here carries a
+// provider's content: a place is an identifier, a position, our own shelf and
+// our own score, and a name only where we are allowed to keep one. A `google:`
+// ref nobody owns comes back with `name: null`, and the nameless row on screen
+// is the finding — it means Google is the only source that has ever seen it.
+
+/** Where a level is pointed. Only what differs from the default is written down. */
+export type PlaceWhere = { where?: string | null; within?: number | null; by?: string | null };
+
+/** The five numbers every level prints, whatever level it is. */
+export type PlaceStats = {
+  known: number; owned: number; identified: number;
+  readyCount: number; ready: number | null; avgScore: number | null;
+};
+
+export type PlaceLevel = {
+  kind: 'area' | 'ring' | 'none';
+  slug: string; name: string; areaKind: string;
+  /** What a ring was drawn round — a town, a postcode district — or null on a level. */
+  fromKind?: string | null;
+  minutes: number | null; mode: string | null; cells: number | null;
+  trail: ({ slug: string; label: string } & PlaceStats)[];
+  stats: PlaceStats;
+  refreshedAt?: string | null;
+  /** The ring chooser's three steps and three ways. Named apart from the quality lens's score bands. */
+  ringBands?: number[]; modes?: string[];
+};
+
+export type PlaceCountry = PlaceStats & {
+  slug: string; name: string; countryCode: string;
+  cells: number; built: number;
+  /** Whether this country can answer "within 30 minutes" yet. */
+  travel: 'ready' | 'part' | 'none';
+};
+
+export type PlaceAreaRow = PlaceStats & {
+  slug: string; name: string; kind: string; parent: string | null;
+  searches: number; empty: number;
+};
+
+export type PlaceCoverageRow = {
+  slug: string; name: string; kind: string;
+  /** An outcode says which towns its own places sit in — the way back across the two ladders. */
+  within: string | null;
+  known: number; owned: number; ready: number | null;
+  picture: number | null; description: number | null; hours: number | null;
+  website: number | null; menu: number | null; shelf: number | null;
+};
+
+export type FactDef = { key: string; label: string; short: string; explain: string };
+export type BarFact = { fact: string; weight: number; required: boolean };
+
+export type PlaceSubcategory = PlaceStats & {
+  key: string; label: string; category: string;
+  searches: number; empty: number;
+  /** What this kind of place is judged on, so the row can say it in words. */
+  needs: string[]; barSet: boolean;
+};
+export type PlaceCategory = PlaceStats & {
+  key: string; label: string; searches: number; empty: number;
+  subcategories: PlaceSubcategory[];
+};
+
+export type PlaceSourceDef = { key: string; label: string; explain: string; optIn: boolean; paid: boolean; asked: boolean };
+export type PlaceSourceRow = {
+  key: string; label: string; known: number;
+  /** `null` where that source has never been asked anywhere — different from nought. */
+  counts: Record<string, number | null>;
+  oneOnly: number; googleOnly: number;
+};
+
+export type PlaceQuality = {
+  bands: { band: string; n: number }[];
+  unscored: number;
+  stale: { key: string; label: string; n: number }[];
+  worth: {
+    ref: string; name: string | null; subcategory: string | null; outcode: string | null;
+    sources: string[];
+    /** A word, never a figure: the rating is banded at the call and the number dropped. */
+    rating: string | null; been: string | null; score: number | null;
+  }[];
+};
+
+export type DemandTotals = { searches: number; empty: number; noClick: number; noTrip: number; tripped?: number };
+export type DemandRow = {
+  subject: string | null; label: string; noSubject?: boolean;
+  searches: number; empty: number; noClick: number; noTrip: number; known: number | null;
+  fault: string; faultLabel: string; shortFault: string; owner: string | null; act: string | null;
+};
+
+export type PlaceRing = {
+  rows: { key: string; label: string; known: number; owned: number; ready: number | null; avgScore: number | null; searches: number; nearest: number | null }[];
+  ring: {
+    cell: string; cellLabel: string | null; cellsInReach: number; cellsTotal: number;
+    rowsRead: number; distancesComputed: number; spendPence: number;
+    builtAt: string | null; estimated: boolean; edgeMinutes: number;
+  };
+};
+
+export type PlaceRow = {
+  ref: string; name: string | null; nameFrom: string | null;
+  category: string | null; subcategory: string | null; outcode: string | null;
+  score: number | null; ready: boolean; ownership: string; oldestFact: string | null;
+  /** `yes` held, `no` a hole, `n/a` not judged on it, `yes-uncounted` held but not counted. */
+  facts: Record<string, 'yes' | 'no' | 'n/a' | 'yes-uncounted'>;
+  missing: number; missingFacts: string[]; barSet: boolean;
+  unseenBy: string[]; seenBy: string[];
+};
+
+export type PlaceField = {
+  key: string; label: string; value: string | null; source: string | null; checked: string | null;
+  /** What the column has no room for: it belongs in the row when it is opened. */
+  note: string | null;
+  counted: boolean | null; notCounted: boolean; editable: boolean; action: string | null;
+};
+
+export type PlaceDetail = {
+  ref: string; name: string | null; nameFrom: string | null;
+  category: string | null; subcategory: string | null; ownership: string;
+  score: number | null; ready: boolean; scoreParts: Record<string, any>;
+  oldestFact: string | null; seenBy: number; lat: number | null; lng: number | null; cell: string | null;
+  have: number; missingCount: number;
+  areas: { slug: string; name: string; kind: string }[];
+  sources: { source: string; id: string | null; firstSeen: string; lastSeen: string }[];
+  unseen: (PlaceSourceDef & { pence: number | null })[];
+  unseenFree: number; unseenPaid: number;
+  record: PlaceField[];
+  facts: { field: string; source: string; value: unknown; licence: string; retention: string; fetchedAt: string; expiresAt: string | null }[];
+  pictures: {
+    id: string; source: string; licence: string | null; licenceUrl: string | null; creator: string | null;
+    credit: string | null; title: string | null; page: string | null; width: number | null; height: number | null;
+    bytes: number | null; fetchedAt: string | null; owned: boolean; role: string | null;
+  }[];
+  ids: { key: string; label: string; value: string | null; state: 'held' | 'not-asked' | 'no-match' | 'none' }[];
+  atlas: { id: string; state: string; pinned: boolean; note: string | null; rank: number | null; scoreParts: Record<string, unknown> } | null;
+};
+
+export type CompareColumn = { key: string; label: string; note: string | null; id?: string | null; of?: number; filled?: number };
+export type CompareRow = { key: string; keys: Record<string, string | null>; cells: Record<string, unknown> };
+export type RawSource = {
+  key: string; label: string; explain: string;
+  state: 'held' | 'not-asked' | 'no-match'; id: string | null; lastSeen: string | null;
+  fields: { field: string; value: unknown; licence: string; retention: string; fetchedAt: string; expiresAt: string | null }[];
+};
+export type PlaceHistoryRow = { at: string; what: string; who: string | null; kind: 'edit' | 'call'; usd?: number };
+
+export type PictureIndex = {
+  pictures: {
+    id: string; source: string; licence: string | null; licenceUrl: string | null;
+    creator: string | null; creatorUrl: string | null; credit: string | null;
+    title: string | null; caption: string | null; page: string | null;
+    width: number | null; height: number | null; bytes: number | null; fetchedAt: string | null;
+    onPlace: string | null; role: string | null; fromHousehold: boolean; attribution: boolean;
+  }[];
+  counts: { owned: number; household: number; needs_attribution: number; noPicture: number };
+  facets: { key: string; label: string; n: number }[];
+};
+
+export type ReadyBars = {
+  facts: FactDef[]; weights: Record<string, number>;
+  subcategories: {
+    key: string; label: string; category: string; categoryLabel: string;
+    places: number; ready: number; set: boolean; facts: BarFact[];
+  }[];
+  britain: PlaceStats;
+};
+export type BarEffect = {
+  places: number; readyNow: number; readyAfter: number;
+  shareNow: number | null; shareAfter: number | null;
+  stopBeingReady: number; startBeingReady: number; countiesMoved: number;
+  britainNow: number | null; britainAfter: number | null; rescore: number;
+};
+
+export type Run = {
+  key: string; label: string; explain: string; costs: string; free: boolean; action: string;
+  state: 'running' | 'idle' | 'failures' | 'failed';
+  where: string; cap: string; lastAt: string | null;
+  progress?: number | null; startedAt?: string | null; error?: string | null;
+  stranded?: { since: string; why: string } | null;
+  spentPence?: number; tried?: number; read?: number; failed?: number; ours?: number;
+  calls?: number; capLeft?: number; capOf?: number; done?: number; places?: number;
+};
+export type RunsList = {
+  runs: Run[]; running: number; needsLooking: number;
+  spentPence: number; calls: number; ceilingPence: number;
+  tripadvisor: { left: number; of: number };
+  stranded: { id: string; scope: string; stage: string; started_at: string; touched_at: string; counts: Record<string, unknown> }[];
+};
+export type RunFailures = {
+  totals: { tried: number; read: number; failed: number; ours: number; last: string | null };
+  ours: { key: string; label: string; n: number; examples: string[] }[];
+  theirs: { key: string; label: string; detail: string; fix: string; n: number; examples: string[] }[];
+};
+
+export type DemandReport = {
+  area: { slug: string; name: string; kind: string } | null;
+  since: number; totals: DemandTotals; rows: DemandRow[];
+  log: {
+    id: string; at: string; surface: string; subject: string | null; label: string;
+    where: string | null; minutes: number | null; mode: string | null;
+    shown: number; empty: boolean; opened: number; tripped: number; outcome: string;
+    identified: boolean; asked: Record<string, unknown>;
+  }[];
+  replayPence: number;
+};
+export type SearchReplay = {
+  id: string; at: string; surface: string; subject: string | null; asked: Record<string, unknown>;
+  where: string | null; minutes: number | null; mode: string | null;
+  identified: boolean; heldAgainst: string;
+  shown: number; opened: number; saved: number; tripped: boolean;
+  sourcesQueried: string[]; degraded: string[];
+  rows: {
+    position: number; ref: string | null; name: string | null; subcategory: string | null;
+    score: number | null; scoreThen: boolean; did: string; strong: boolean; dwellMs: number | null;
+  }[];
+  refetched: number; refetchedPence: number;
+};
+
+
+export type ScoreWorkings = {
+  ref: string; name: string | null;
+  inputs: { key: string; label: string; value: unknown; kind: string; held: boolean }[];
+  parts: {
+    key: string; label: string; points: number | null;
+    weightEpic: number | null; weightOwned: number | null;
+    intoEpic: number; intoOwned: number; note?: string | null;
+    each?: { key: string; points: number }[]; capped?: boolean;
+  }[];
+  chain: { scale: string; weight: number };
+  epicScore: number; ownedScore: number; licensedInput: boolean;
+  weights: Record<string, any>;
+  stored: { epicScore: number | null; ownedScore: number | null; at: string | null };
+  drifted: boolean; area: string | null;
+};
+
+export type RejectReason = { key: string; label: string; message: string | null };
+export type QueueList = {
+  kinds: { key: string; label: string; batch: boolean }[];
+  states: string[];
+  counts: { kind: Record<string, number>; state: Record<string, number>; reported: number; oldest: string | null };
+  state: string; kind: string; where: string | null;
+  rows: {
+    id: string; kind: string; subjectType: string; subjectId: string;
+    maker: string | null; place: string | null; ref: string | null; area: string | null;
+    state: string; reported: boolean; madeAt: string; reason: string | null; told: boolean; batchable: boolean;
+  }[];
+};
+export type QueueItem = {
+  item: {
+    id: string; kind: string; subjectType: string; subjectId: string;
+    maker: string | null; place: string | null; ref: string | null; area: string | null;
+    state: string; reported: boolean; reportReason: string | null; madeAt: string;
+    reason: string | null; message: string | null; told: boolean;
+  };
+  detail: Record<string, any> | null;
+  picture: { id: string; title: string | null; caption: string | null; licence: string | null; credit_line: string | null; width: number | null; height: number | null; bytes: number | null; fetched_at: string; moderation: string; reward_points: number; creator: string | null } | null;
+  made: { name: string; kept: number; points: number } | null;
+  reasons: RejectReason[];
+  batchable: boolean;
+};
+
 export const api = {
   health: () => request<{ ok: boolean; db: string }>('/health'),
   sources: () => request<SourcesStatus>('/api/sources'),
@@ -1477,7 +1743,7 @@ export const api = {
 
   /** `sources` is the exact set of sources for this one search (e.g. 'osm,tripadvisor'); omitted = the default set, which never includes opt-in sources. */
   searchPlaces: (p: { q?: string; near?: string; categories?: string; radiusKm?: number; sources?: string }) =>
-    request<{ near: Place & { how: string }; radiusKm: number; results: Venue[]; sourcesQueried: string[]; degradedSources: { source: string; error: string }[]; attribution: string[] }>(`/api/places/search${qs(p)}`),
+    request<{ queryId: string | null; near: Place & { how: string }; radiusKm: number; results: Venue[]; sourcesQueried: string[]; degradedSources: { source: string; error: string }[]; attribution: string[] }>(`/api/places/search${qs(p)}`),
   place: (venueRef: string) =>
     request<{ venueRef: string; venue: Venue | null; household: Venue['household']; visits: Visit[]; menu?: MenuLink | null; ours?: OwnedRecord | null;
       /** Why the source could not answer, already in plain words — never a provider's error text (api/src/sources/why.js). */
@@ -2057,6 +2323,112 @@ export const api = {
     post<{ credential: CredentialWaiting }>(`/api/admin/skills/credentials/${id}`, body),
   adminVocabularySources: () => request<{ sources: VocabularySource[] }>('/api/admin/skills/sources'),
   adminSaveVocabularySource: (body: { key: string } & Record<string, unknown>) => put<{ source: VocabularySource }>('/api/admin/skills/source', body),
+
+  // -------------------------------------------------------------------------
+  // Places, Runs, Demand and the content queue (17 Sep 2026)
+  // -------------------------------------------------------------------------
+  //
+  // Five back-office screens that were each bound to a different table became
+  // three bound to three questions — what do we know and where, what did people
+  // ask for, and what have households sent us — plus Runs, a monitor for the
+  // long jobs. Everything below reads `place_index`, which holds identifiers and
+  // our own derivations and never a provider's content.
+
+  /** BO2m — every country, and whether its travel times are worked out yet. */
+  adminCountries: () => request<{ countries: PlaceCountry[]; refreshedAt: string | null }>('/api/admin/place-index/countries'),
+  /** The five numbers, the breadcrumb and the ring's own facts, for any level. */
+  adminPlaceArea: (p: PlaceWhere) => request<PlaceLevel>(`/api/admin/place-index/area${qs(p)}`),
+  /** BO2a / BO2n — the level cut by county, by city or by postcode district. */
+  adminPlaceBreakdown: (p: PlaceWhere & { by?: string; sort?: string; desc?: string; since?: number }) =>
+    request<{ rows: PlaceAreaRow[]; totals: PlaceStats }>(`/api/admin/place-index/breakdown${qs(p)}`),
+  /** BO2b — the coverage grid, towns and outcodes together. */
+  adminPlaceCoverage: (p: PlaceWhere) =>
+    request<{ rows: PlaceCoverageRow[]; towns: number; outcodes: number; allTowns: number; refreshedAt: string | null }>(`/api/admin/place-index/coverage${qs(p)}`),
+  /** BO2c / BO2o / BO2p — the taxonomy with the counts left-joined onto it. */
+  adminPlaceCategories: (p: PlaceWhere & { cat?: string | null; since?: number }) =>
+    request<PlaceLevel & { categories: PlaceCategory[]; facts: FactDef[] }>(`/api/admin/place-index/categories${qs(p)}`),
+  /** BO2d — which providers have ever seen these places. */
+  adminPlaceSources: (p: PlaceWhere) =>
+    request<PlaceLevel & { sources: PlaceSourceDef[]; rows: PlaceSourceRow[] }>(`/api/admin/place-index/sources${qs(p)}`),
+  /** BO2e — the score distribution, staleness, and what is worth owning next. */
+  adminPlaceQuality: (p: PlaceWhere) => request<PlaceLevel & PlaceQuality>(`/api/admin/place-index/quality${qs(p)}`),
+  /** BO2f — the gaps ranked by what was actually searched for. */
+  adminPlaceDemand: (p: PlaceWhere & { since?: number }) =>
+    request<PlaceLevel & { since: number; totals: DemandTotals; rows: DemandRow[] }>(`/api/admin/place-index/demand${qs(p)}`),
+  /** BO2g — a town and its ring, read from the matrix rather than calculated. */
+  adminPlaceRing: (p: PlaceWhere) => request<PlaceLevel & PlaceRing>(`/api/admin/place-index/ring${qs(p)}`),
+  /** BO2q — the places themselves. */
+  adminPlaceList: (p: PlaceWhere & { cat?: string | null; sub?: string | null; show?: string; q?: string; missing?: string; sort?: string; desc?: string }) =>
+    request<PlaceLevel & { rows: PlaceRow[]; facts: FactDef[]; bar: BarFact[]; counted: string[] }>(`/api/admin/place-index/places${qs(p)}`),
+  /** BO2h / BO2r — one place, every field, and what nobody has asked yet. */
+  adminPlace: (ref: string) => request<PlaceDetail>(`/api/admin/place-index/place${qs({ ref })}`),
+  /** BO2h — ours beside each provider's. Spends: one detail call per place. */
+  adminPlaceCompare: (ref: string, match = false) =>
+    request<{ ref: string; name: string | null; columns: CompareColumn[]; rows: CompareRow[]; ours: string[] }>(`/api/admin/place-index/place/compare${qs({ ref, match: match ? 1 : undefined })}`),
+  /** BO2r — literally the fields each source returned, and which were never asked. */
+  adminPlaceRaw: (ref: string) => request<{ ref: string; sources: RawSource[] }>(`/api/admin/place-index/place/raw${qs({ ref })}`),
+  /** BO2r's History: which run changed what. */
+  adminPlaceHistory: (ref: string) => request<{ rows: PlaceHistoryRow[] }>(`/api/admin/place-index/place/history${qs({ ref })}`),
+  /** How far a change to the shelf would travel, before it travels. */
+  adminPlaceReach: (ref: string, sub?: string) =>
+    request<{ rule: string | null; places: number; counties: number; onlyThis: boolean; to: string | null }>(`/api/admin/place-index/place/reach${qs({ ref, sub })}`),
+  /** Edit one of our own values. A provider's column is never editable. */
+  adminEditPlace: (body: { ref: string; field: string; value: unknown }) =>
+    request<{ ok: true; ref: string; field: string }>('/api/admin/place-index/place', { method: 'PATCH', body: JSON.stringify(body) }),
+  /** BO2j — the picture index, with every licence field. */
+  adminPictures: (p: { q?: string; facet?: string; limit?: number } = {}) => request<PictureIndex>(`/api/admin/place-index/pictures${qs(p)}`),
+  /** BO2k — what counts as ready, per kind of place. */
+  adminReadyBars: () => request<ReadyBars>('/api/admin/place-index/bars'),
+  adminReadyBarFacts: (sub: string) => request<{ places: number; held: Record<string, number> }>(`/api/admin/place-index/bars/${encodeURIComponent(sub)}/facts`),
+  /** What saving this bar would do, stated before it saves. */
+  adminReadyBarEffect: (sub: string, facts: BarFact[]) => post<BarEffect>(`/api/admin/place-index/bars/${encodeURIComponent(sub)}/effect`, { facts }),
+  adminSaveReadyBar: (sub: string, facts: BarFact[]) => put<{ ok: true; rescored: number }>(`/api/admin/place-index/bars/${encodeURIComponent(sub)}`, { facts }),
+  /** Keeping it current. All three are free and spend nothing. */
+  adminReindexPlaces: (wait = false) => post<{ started?: boolean; places?: number; rescored?: number; ms?: number }>('/api/admin/place-index/reindex', { wait }),
+  adminRefreshPlaceCounts: () => post<{ n: number; at: string }>('/api/admin/place-index/refresh', {}),
+  adminRescorePlaces: (subcategory?: string) => post<{ rescored: number }>('/api/admin/place-index/rescore', { subcategory }),
+  /** The area search box: a county, a town or a postcode. */
+  adminPlaceSearch: (q: string) =>
+    request<{ areas: { slug: string; name: string; kind: string; parent: string | null }[]; postcode: { sector: string; cell: string; label: string; bands: number[]; modes: string[] } | null }>(`/api/admin/place-index/search${qs({ q })}`),
+
+
+  /**
+   * BO2i — one place's Epic score with its working shown: what went in, what
+   * each part was worth, and the two numbers out. `ownedScore` is the same
+   * ranking with the licensed input removed, which is what proves the ordering
+   * survives a provider going dark.
+   */
+  adminScore: (ref: string) => request<ScoreWorkings>(`/api/admin/score${qs({ ref })}`),
+  adminScoreWeights: () => request<{ weights: Record<string, any> }>('/api/admin/score/weights'),
+
+  /** BO3a / BO3c — the runs that spend, and which of them need looking at. */
+  adminRuns: () => request<RunsList>('/api/admin/runs'),
+  /** BO3b — one run's failures, ours kept separate from theirs. */
+  adminRunFailures: (key: string) => request<RunFailures>(`/api/admin/runs/${key}/failures`),
+  adminRunFailing: (key: string, p: { cause: string; ours?: string }) =>
+    request<{ rows: { venue_ref: string; label: string; why: string; menu_url: string | null; read_at: string; attempts: number }[] }>(`/api/admin/runs/${key}/failing${qs(p)}`),
+  adminRunHistory: (key: string) => request<{ rows: Record<string, unknown>[] }>(`/api/admin/runs/${key}/history`),
+  adminSetCollectCeiling: (pence: number) => put<{ pence: number }>('/api/admin/runs/ceiling', { pence }),
+
+  /** BO4a — three numbers, never one rate. */
+  adminDemand: (p: { where?: string | null; since?: number } = {}) => request<DemandReport>(`/api/admin/demand${qs(p)}`),
+  /** BO4b — one search, replayed exactly as they saw it. */
+  adminDemandSearch: (id: string) => request<SearchReplay>(`/api/admin/demand/search${qs({ id })}`),
+  adminDemandSize: () => request<{ rows: string; oldest: string | null }>('/api/admin/demand/size'),
+
+  /** BO5a — one queue with a filter, not a queue per kind. */
+  adminQueue: (p: { kind?: string; state?: string; where?: string | null } = {}) => request<QueueList>(`/api/admin/queue${qs(p)}`),
+  adminQueueItem: (id: string) => request<QueueItem>(`/api/admin/queue/${id}`),
+  adminQueueApprove: (ids: string[]) => post<{ approved: number; ids: string[] }>('/api/admin/queue/approve', { ids }),
+  /** BO5b — the rejection, beside the message it sends. */
+  adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean }) =>
+    post<{ ok: true; id: string; reason: string; told: boolean; message: string | null }>(`/api/admin/queue/${id}/reject`, body),
+  adminQueueReasons: () => request<{ reasons: Record<string, RejectReason[]>; used: { kind: string; reason: string; used: number; last_at: string }[] }>('/api/admin/queue/report/reasons'),
+
+  /** What the household did to one of the results — the click stream Demand counts. */
+  searchEvent: (body: { queryId: string; kind: 'open' | 'dismiss' | 'save' | 'shortlist' | 'add_to_trip' | 'refine' | 'close'; venueRef?: string | null; position?: number | null; dwellMs?: number | null }) =>
+    post<{ ok: true }>('/api/discover/event', body),
+
   reportHost: (id: string, reason: string, offerId?: string | null) => post<{ ok: true; message: string }>(`/api/hosts/${id}/report`, { reason, offerId }),
   bookings: () => request<{ bookings: Booking[] }>('/api/bookings'),
   booking: (id: string) => request<{ booking: Booking; payments: PaymentsConfig }>(`/api/bookings/${id}`),

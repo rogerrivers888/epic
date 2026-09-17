@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import * as impressions from '../repositories/impressions.js';
+import * as searchLog from '../repositories/searches.js';
 import * as visitsRepo from '../repositories/visits.js';
 import { searchAllSources } from '../sources/index.js';
 import { deriveCatchment, detourMinutes, isTravelMode, reachRadiusKm, TRAVEL_MODES } from '../domain/travel.js';
@@ -89,6 +90,29 @@ router.post('/', async (req, res, next) => {
     const queryId = crypto.randomUUID();
     await impressions.recordImpressions(household.id, queryId, candidates);
 
+    // The search itself, written down. Until 17 Sep 2026 `queryId` was made here,
+    // handed to the client and never stored, so the where, the filters, the
+    // counts and the outcome died with the response — and none of it can be
+    // backfilled. A search that returned nothing is logged as loudly as one that
+    // returned forty, because that is the one worth knowing about.
+    const where = await searchLog.whereOf({ lat: origin.lat, lng: origin.lng });
+    await searchLog.noteSearch({
+      id: queryId, householdId: household.id, accountId: req.account?.id ?? null,
+      sessionId: req.session?.id ?? null, surface: 'find',
+      ...where, lat: origin.lat, lng: origin.lng,
+      radiusKm: reachRadiusKm(mode, maxTravelMinutes), mode, minutes: maxTravelMinutes,
+      // Counts and our own words only — never a provider's label, and never the
+      // free text somebody typed.
+      asked: { categories, party: attendees.length, events: Boolean(includeEvents), excludeSeen: Boolean(excludeSeen), typed: Boolean(searchQuery.trim()) },
+      subject: Array.isArray(categories) && categories.length === 1 ? String(categories[0]) : null,
+      shownTotal: candidates.length,
+      shown: Object.entries(candidates.reduce((acc, c) => { const k = c.source ?? 'unknown'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([source, n]) => ({ source, n })),
+      sourcesQueried, degraded,
+    });
+    await searchLog.noteShown(queryId, candidates.map((c, i) => ({
+      ref: `${c.source}:${c.sourcePlaceId}`, position: i + 1, source: c.source,
+    })));
+
     res.json({
       queryId,
       catchment: {
@@ -119,6 +143,27 @@ router.post('/', async (req, res, next) => {
 });
 
 /**
+ * What the household did to one of the results.
+ *
+ * The click stream between "shown" and "saved" did not exist, so the second and
+ * third of the three faults — shown things and clicked none, clicked and never
+ * tripped — could not be told apart from each other or from a search nobody
+ * made. `queryId` is the search's own id now, which is also what
+ * `source_impressions.query_id` has always claimed to be.
+ */
+router.post('/event', async (req, res, next) => {
+  try {
+    const { queryId, kind, venueRef = null, position = null, dwellMs = null } = req.body || {};
+    const KINDS = ['open', 'dismiss', 'save', 'shortlist', 'add_to_trip', 'refine', 'close'];
+    if (!queryId || !KINDS.includes(kind)) {
+      return res.status(400).json({ error: 'kind_required', message: `kind must be one of ${KINDS.join(', ')}` });
+    }
+    await searchLog.logEvent({ searchId: queryId, kind, venueRef, position, dwellMs });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+/**
  * Record that the household chose a candidate (Epic 2 C6). This is the other
  * half of source attribution — without a recorded selection there is never
  * evidence that a source influenced a real decision, and no grounds to drop it.
@@ -133,6 +178,12 @@ router.post('/select', async (req, res, next) => {
     }
 
     const rows = await impressions.markSelected(queryId, venueKey);
+    // The same act, in the search log: a saved place is an outcome, and the
+    // outcome only ever moves forward.
+    await searchLog.logEvent({
+      searchId: queryId, venueRef: venueKey,
+      kind: status === 'saved' ? 'save' : status === 'dismissed' ? 'dismiss' : 'open',
+    });
     if (!rows.length) return res.status(404).json({ error: 'impression_not_found' });
     await visitsRepo.recordLedger(household.id, rows[0].source, rows[0].source_place_id, status);
     res.json({ recorded: true, venueKey, status, sources: rows.map((r) => r.source) });

@@ -28,6 +28,7 @@ import { api } from '../../api';
 import { colors, fonts, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
+import { Explain } from '../explain';
 
 /**
  * `live` — Epic does this today.
@@ -643,6 +644,108 @@ const STATE: Record<State, { label: string; tone: 'ok' | 'warn' | 'plain' }> = {
   planned: { label: 'Decided · not built', tone: 'plain' },
 };
 
+
+// ---------------------------------------------------------------------------
+// What we owe
+// ---------------------------------------------------------------------------
+
+/**
+ * The obligations this work creates, and where each has got to.
+ *
+ * Owner, 17 Sep 2026: "In that How It Works section, you can add a section about
+ * stuff we need to do, and you can add these marketing requirements in there."
+ *
+ * The same honesty rule as the rest of the page: a thing we have not done is
+ * said plainly rather than left off, and **there is no done state until
+ * something is done**. A table with a state word per row, and nothing else — no
+ * prose, because this is a list of work rather than an argument.
+ */
+type Owed = { what: string; state: 'Not started' | 'With the log' | 'Built, off' | 'Parked, on purpose'; whose: 'Owner' | 'Engineering' };
+
+const OWED: Owed[] = [
+  { what: 'Say in the privacy notice that searches and taps are recorded against an account', state: 'Not started', whose: 'Owner' },
+  { what: 'Write the legitimate-interests assessment · two pages, once', state: 'Not started', whose: 'Owner' },
+  { what: 'Build the marketing opt-in with the search log, not after it', state: 'With the log', whose: 'Engineering' },
+  { what: 'An unsubscribe in every message that is not a service message', state: 'Not started', whose: 'Engineering' },
+  { what: 'Export and erasure reach the search log', state: 'With the log', whose: 'Engineering' },
+  { what: 'Revisit retention at 50 million rows · the aggregate path is built and switched off', state: 'Built, off', whose: 'Owner' },
+  { what: 'Reply to Heritage Crafts about referencing the Red List properly', state: 'Not started', whose: 'Owner' },
+  { what: 'Four things outside the repo still called Roam', state: 'Not started', whose: 'Owner' },
+  { what: 'Decide which credentials are compulsory to publish, per browse category', state: 'Parked, on purpose', whose: 'Owner' },
+];
+
+const OWED_TIP: Record<Owed['state'], readonly [string, string]> = {
+  'Not started': ['Not started', 'Obligations nobody has begun.'],
+  'With the log': ['With this build', 'Obligations that ship alongside the search log, not after it.'],
+  'Built, off': ['Built, off', 'Built and deliberately switched off until you decide to switch it on.'],
+  'Parked, on purpose': ['Parked', 'Parked on purpose, to be raised again rather than decided now.'],
+};
+
+function WhatWeOwe() {
+  const count = (s: Owed['state']) => OWED.filter((o) => o.state === s).length;
+  return (
+    <View style={owedStyles.block}>
+      <View style={owedStyles.band}>
+        <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
+          <Text style={owedStyles.kicker}>/admin/how</Text>
+          <Text style={owedStyles.title}>What we owe</Text>
+        </View>
+        <View style={owedStyles.stats}>
+          <Explain tip={OWED_TIP['Not started']} style={{ gap: 2 }}>
+            <Text style={[owedStyles.kicker, { color: colors.accent }]}>Not started</Text>
+            <Text style={[owedStyles.statValue, { color: colors.accent }]}>{count('Not started')}</Text>
+          </Explain>
+          <Explain tip={OWED_TIP['With the log']} style={{ gap: 2 }}>
+            <Text style={owedStyles.kicker}>With this build</Text>
+            <Text style={owedStyles.statValue}>{count('With the log')}</Text>
+          </Explain>
+          <Explain tip={OWED_TIP['Built, off']} style={{ gap: 2 }}>
+            <Text style={owedStyles.kicker}>Built, off</Text>
+            <Text style={owedStyles.statValue}>{count('Built, off')}</Text>
+          </Explain>
+          <Explain tip={OWED_TIP['Parked, on purpose']} style={{ gap: 2 }}>
+            <Text style={owedStyles.kicker}>Parked</Text>
+            <Text style={owedStyles.statValue}>{count('Parked, on purpose')}</Text>
+          </Explain>
+        </View>
+      </View>
+
+      <View style={owedStyles.head}>
+        <Explain tip="whatWeOwe" style={{ flex: 1 }}><Text style={owedStyles.headLabel}>What we owe</Text></Explain>
+        <Explain tip="state" style={{ width: 150 }}><Text style={owedStyles.headLabel}>State</Text></Explain>
+        <Explain tip="whose" style={{ width: 140 }}><Text style={owedStyles.headLabel}>Whose</Text></Explain>
+      </View>
+      {OWED.map((o, i) => (
+        <View key={o.what} style={[owedStyles.row, i === OWED.length - 1 && { borderBottomWidth: 0 }]}>
+          <Explain tip="whatWeOwe" style={{ flex: 1, minWidth: 0 }}><Text style={owedStyles.what}>{o.what}</Text></Explain>
+          <Explain tip={OWED_TIP[o.state]} style={{ width: 150 }}>
+            <Text style={[owedStyles.state, o.state === 'Not started' && { color: colors.accent, fontWeight: '700' }]}>{o.state}</Text>
+          </Explain>
+          <Explain tip="whose" style={{ width: 140 }}><Text style={owedStyles.whose}>{o.whose}</Text></Explain>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const owedStyles = StyleSheet.create({
+  block: { gap: 0 },
+  band: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.xl, flexWrap: 'wrap',
+          borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 16, marginBottom: 16 },
+  kicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
+  title: { ...type.title, fontSize: 27, letterSpacing: -0.81, lineHeight: 30 },
+  stats: { flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' },
+  statValue: { ...type.title, fontSize: 20, fontWeight: '800', color: colors.ink, fontVariant: ['tabular-nums'] },
+  head: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md, paddingBottom: 9,
+          borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
+  headLabel: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 11,
+         borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  what: { ...type.body, fontSize: 13.5, color: colors.ink },
+  state: { ...type.small, fontSize: 13, fontWeight: '600', color: colors.ink },
+  whose: { ...type.small, fontSize: 13, color: colors.inkMuted },
+});
+
 export function HowItWorks() {
   // What is true this minute rather than in general: are travel times real
   // right now, or is the quota spent and everything an estimate?
@@ -667,6 +770,8 @@ export function HowItWorks() {
               : paused ? `Google Routes has no quota left just now, so travel times are worked out from the distance until ${new Date(paused.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
                 : 'Google Routes is answering, so travel times on screen are real ones.'}
       </Banner>
+
+      <WhatWeOwe />
 
       {SECTIONS.map((s) => (
         <Panel key={s.key} title={s.title} sub={s.blurb} padded={false}>

@@ -39,6 +39,7 @@ import { geocode, providerCalls as geocodeCalls } from '../sources/geocode.js';
 import { searchAreas, providerCalls as areaCalls } from '../sources/areas.js';
 import { whySourceFailed, sourceName } from '../sources/why.js';
 import { travelMode } from '../domain/travel.js';
+import { OUR_LABEL, detailFor, blank, lineUp } from '../sources/compare.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { fold, kindOf, priorityOf, reachKm, tally, total, withinReach, RING_CAP_KM } from '../domain/lookup.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
@@ -370,75 +371,8 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
  * The rows line up the fields that mean the same thing under three names,
  * then list what only one column has. A blank cell is a hole, and the point.
  */
-const PAIRS = [
-  ['name', 'name', 'name'], ['category', 'category', 'category'], ['address', 'address', 'address'], ['lat', 'lat', 'lat'], ['lng', 'lng', 'lng'],
-  ['website', 'website', 'website'], ['phone', 'phone', 'ta_phone'], ['opening_hours', 'openingHours', 'openingHours'], ['price_range', 'priceLevel', 'priceLevel'],
-  ['cuisines', 'cuisines', 'cuisines'], ['experiences', 'experiences', 'experiences'], ['dietary_options', 'dietaryOptions', null],
-  ['good_for_children', 'goodForChildren', 'goodForChildren'], ['summary', 'summary', 'ta_description'], ['image_url', 'photos', null],
-  ['booking_url', 'reservable', null], ['menu_url', null, null], ['menu_label', null, null], ['email', null, 'ta_email'], ['socials', null, null],
-  ['accessibility', null, null], ['postcode', null, null], ['osm_ref', null, null], ['wikidata_id', null, null], ['wikipedia_url', null, null],
-  ['curation', null, null], ['crowd_band', 'rating', 'rating'], ['count_band', 'ratingCount', 'ratingCount'], ['epic_score', null, 'ta_ranking_data'],
-  [null, 'aiSummary', null], [null, 'reviewSummary', null], [null, 'reviews', 'reviews'], [null, 'openNow', null], [null, 'mapsUrl', 'externalUrl'], [null, 'menuForChildren', null],
-  [null, null, 'ta_awards'], [null, null, 'ta_subratings'], [null, null, 'ta_trip_types'], [null, null, 'ta_review_rating_count'], [null, null, 'labels'],
-];
-const COLS = ['ours', 'google', 'tripadvisor'];
-const OUR_LABEL = { own: 'Owned record', atlas: 'The atlas', sweep: 'The sweep' };
-const details = new Map();
-const DETAIL_TTL_MS = 6 * 3600_000;
-// Two opens of the same place before the first has answered share one call.
-const detailsInFlight = new Map();
-
-/**
- * One detail call for this identifier at this provider, whatever is asking.
- * The ledger is written whether or not the provider answered: a call that
- * timed out after it reached them was still a call (Codex, 12 Sep 2026).
- */
-async function detailFor(provider, id, householdId) {
-  const key = `${provider}:${id}`;
-  const held = details.get(key);
-  if (held && Date.now() - held.at < DETAIL_TTL_MS) return held.detail;
-  if (detailsInFlight.has(key)) return detailsInFlight.get(key);
-  const run = (async () => {
-    const meter = {};
-    try {
-      const raw = provider === 'google' ? await googleSource.get(id, { meter }) : await tripadvisorSource.get(id, { meter });
-      // A photo is a signed proxy reference here, not a picture: what the
-      // comparison wants is that there are three and who took them.
-      const detail = { ...raw, photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })) };
-      details.set(key, { at: Date.now(), detail });
-      while (details.size > 300) details.delete(details.keys().next().value);
-      return detail;
-    } finally {
-      if (Object.keys(meter).length) await visitsRepo.recordProviderCall(householdId, provider, 'admin.lookup.compare', meter).catch(() => null);
-      detailsInFlight.delete(key);
-    }
-  })();
-  detailsInFlight.set(key, run);
-  return run;
-}
-
-const blank = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
-
-/** The rows: the pairs first, then what only one column has, each cell carrying which key it came from. */
-function lineUp(fields) {
-  const rows = [];
-  const used = { ours: new Set(), google: new Set(), tripadvisor: new Set() };
-  for (const trio of PAIRS) {
-    const keys = Object.fromEntries(COLS.map((c, n) => [c, trio[n]]));
-    const present = COLS.some((c) => keys[c] && fields[c] && keys[c] in fields[c]);
-    if (!present) continue;
-    const cells = {};
-    for (const c of COLS) { if (keys[c] && fields[c] && keys[c] in fields[c]) cells[c] = fields[c][keys[c]]; if (keys[c]) used[c].add(keys[c]); }
-    rows.push({ key: trio.find(Boolean), keys, cells });
-  }
-  for (const c of COLS) {
-    for (const k of Object.keys(fields[c] ?? {})) {
-      if (used[c].has(k)) continue;
-      rows.push({ key: k, keys: { [c]: k }, cells: { [c]: fields[c][k] } });
-    }
-  }
-  return rows;
-}
+// The field map, the detail cache and the line-up moved to sources/compare.js
+// when Places began asking the same question of an indexed row (17 Sep 2026).
 
 router.get('/compare', requires('view_library'), async (req, res, next) => {
   try {

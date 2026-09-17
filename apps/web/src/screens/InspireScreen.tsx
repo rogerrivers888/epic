@@ -8,6 +8,7 @@ import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
+import { heldSearch, noteSearchEvent } from '../search';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
@@ -354,6 +355,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         refresh: refresh ? 1 : undefined,
       });
       setPool(r);
+      // The home screen is a search too, and what happens next to each card is
+      // the click stream Demand counts (search.ts).
+      heldSearch('inspire', (r as any).queryId, (r.items ?? []).map((i: any) => i.venueRef));
     } catch (e: any) {
       setPool(null);
       setError(e?.message ?? 'Epic could not look around just now.');
@@ -626,7 +630,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     () => { const it = openedRef ? (pool?.items ?? []).find((i) => i.venueRef === openedRef) : null; return it ? asDrawerItem(it) : null; },
     [openedRef, pool],
   );
-  const closeDrawer = () => setQuery({ place: null }, { replace: false });
+  const closeDrawer = () => { noteSearchEvent('inspire', 'close', openedRef); setQuery({ place: null }, { replace: false }); };
+
+  // Opening a place is the first of the three things Demand counts. Reported
+  // once each time the address names a new one, so scrolling past costs nothing
+  // and a back-and-forth is not counted twice.
+  useEffect(() => { if (openedRef) noteSearchEvent('inspire', 'open', openedRef); }, [openedRef]);
 
   /**
    * The heart in the drawer: keep this place, or take it back out. Keeping it
@@ -643,7 +652,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     const now = !isKept(i);
     setKept((k) => ({ ...k, [i.venueRef]: now }));
     try {
-      if (now) await api.savePlace(i.venueRef, 'saved', { label: i.name, category: i.category, lat: i.lat, lng: i.lng });
+      if (now) {
+        await api.savePlace(i.venueRef, 'saved', { label: i.name, category: i.category, lat: i.lat, lng: i.lng });
+        noteSearchEvent('inspire', 'save', i.venueRef);
+      }
       else await api.deleteAtlasPlace(i.venueRef);
     } catch (e: any) {
       setKept((k) => ({ ...k, [i.venueRef]: !now }));
@@ -1046,6 +1058,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           </Press>
         ) : null}
         onAdd={onCreateTrip ? (it) => {
+          // The third of Demand's three: a place opened and actually taken
+          // somewhere. Reported before the drawer closes, so the close event
+          // does not overwrite it.
+          noteSearchEvent('inspire', 'add_to_trip', it.venueRef);
           closeDrawer();
           onCreateTrip({
             place: { ref: it.venueRef, label: it.name, lat: it.lat as number, lng: it.lng as number },

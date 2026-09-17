@@ -1,0 +1,266 @@
+/**
+ * Demand — what people asked for, and what we failed to give them.
+ *
+ * **Three numbers, never one conversion rate.** A single rate hides which of the
+ * three faults it was, and the three have different owners:
+ *
+ *   · **shown nothing** → we hold no places here. Collect fixes it.
+ *   · **clicked nothing** → we showed the wrong ones. The category rules fix it.
+ *   · **clicked, never tripped** → the record is too thin to convince. The data
+ *     score on that place fixes it.
+ *
+ * A search that returned nothing is logged as loudly as one that returned forty,
+ * and none of it can be backfilled — every day it was not written is gone.
+ *
+ * (The name is the one thing the design would change: *Asked for* is the
+ * alternative, and both are on the board so the owner can see them together.)
+ */
+
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { Press } from '../../components/press';
+import { Icon } from '../../components/Icon';
+import { colors, spacing, type, BORDER } from '../../theme';
+import { asNumber, asText, useQueryState, useRouter } from '../../router';
+import { api, type DemandReport, type DemandRow, type SearchReplay } from '../../api';
+import { AdminPage, ago, duration, pounds } from '../kit';
+import { Explain } from '../explain';
+import { Ladder, Num, Word, Blank, Bar, Act, Footer, Kicker, Stat, type Col } from '../table';
+
+export function Demand({ canManage }: { canManage: boolean }) {
+  const [where, setWhere] = useQueryState<string>('where', '', asText);
+  const [since, setSince] = useQueryState<number | null>('since', 30, asNumber(30));
+  const [search, setSearch] = useQueryState<string>('search', '', asText);
+
+  if (search) return <Replay id={search} onClose={() => setSearch('')} canManage={canManage} />;
+  return <Report where={where} since={since ?? 30} onSince={setSince} onWhere={setWhere} onSearch={setSearch} />;
+}
+
+// ---------------------------------------------------------------------------
+// BO4a — three numbers
+// ---------------------------------------------------------------------------
+
+const WINDOWS = [7, 30, 90];
+
+function Report({ where, since, onSince, onWhere, onSearch }: {
+  where: string; since: number; onSince: (n: number) => void; onWhere: (s: string) => void; onSearch: (id: string) => void;
+}) {
+  const [data, setData] = useState<DemandReport | null>(null);
+  const { navigate } = useRouter();
+  useEffect(() => { setData(null); api.adminDemand({ where: where || undefined, since }).then(setData).catch(() => setData(null)); }, [where, since]);
+  if (!data) return <AdminPage><Waiting /></AdminPage>;
+
+  const share = (n: number, of: number) => (of > 0 ? n / of : 0);
+  const columns: Col<DemandRow>[] = [
+    { key: 'label', label: 'Asked for', tip: 'askedFor', grow: true,
+      cell: (r) => (
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+          <Text style={[styles.rowName, r.fault === 'empty-always' && styles.strong]}>{r.label}</Text>
+          {r.noSubject ? <Text style={styles.rowNote}>no subject given</Text> : null}
+        </View>
+      ) },
+    { key: 'searches', label: 'Searches', tip: 'searches', width: 110, align: 'right', cell: (r) => <Num n={r.searches || null} /> },
+    { key: 'bar', label: 'Came back empty · clicked nothing · never tripped', tip: 'theThreeFaultsAsABar', width: 290, align: 'left',
+      cell: (r) => (
+        <Bar parts={[
+          { key: 'empty', share: share(r.empty, r.searches), alpha: 1 },
+          { key: 'noClick', share: share(r.noClick, r.searches), alpha: 0.52 },
+          { key: 'noTrip', share: share(r.noTrip, r.searches), alpha: 0.22 },
+        ]} />
+      ) },
+    { key: 'fault', label: 'Which fault', tip: 'whichFault', width: 180, align: 'left',
+      cell: (r) => <Text style={[styles.fault, (r.fault === 'wrong-places' || r.fault === 'thin-places' || r.fault === 'empty-always') && styles.strong]}>{r.faultLabel}</Text>,
+      cellTip: (r) => (r.fault === 'wrong-places' ? 'noClickShort' : r.fault === 'thin-places' ? 'neverTripped' : r.fault === 'no-places' || r.fault === 'empty-always' ? 'emptyTotal' : 'whichFault') },
+    { key: 'owner', label: 'Who fixes it', tip: 'whoFixesIt', width: 180, align: 'left', stops: true,
+      cell: (r) => (r.act === 'collect' && r.fault === 'empty-always'
+        ? <Act label="Collect" small onPress={() => navigate(`/admin/places?where=${encodeURIComponent(where || 'gb')}&lens=collect`)} />
+        : r.owner ? <Text style={[styles.owner, r.fault === 'wrong-places' || r.fault === 'thin-places' ? { color: colors.accent, fontWeight: '700' } : null]}>{r.owner}</Text>
+        : <Blank />) },
+  ];
+
+  return (
+    <AdminPage>
+      <View style={styles.band}>
+        <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
+          <Kicker>{`${data.area ? data.area.name : 'Everywhere'} · last ${since} days`}</Kicker>
+          <Text style={styles.title}>{`${data.totals.searches.toLocaleString()} searches`}</Text>
+          {/* The second title: the name this screen would have if the owner
+              prefers a thing you do to a report. Both are shown so he can see
+              them together (BO7a). */}
+          <Text style={styles.alt}>Asked for</Text>
+        </View>
+        <View style={styles.five}>
+          <Stat label="Came back empty" value={data.totals.empty.toLocaleString()} tip="emptyTotal" big />
+          <Stat label="Clicked nothing" value={data.totals.noClick.toLocaleString()} tip="noClick" big />
+          <Stat label="Never tripped" value={data.totals.noTrip.toLocaleString()} tip="neverTripped" big />
+        </View>
+      </View>
+
+      <View style={styles.subRow}>
+        <Kicker>Over</Kicker>
+        <View style={styles.segment}>
+          {WINDOWS.map((w) => (
+            <Press key={w} effect="none" onPress={() => onSince(w)} accessibilityRole="button"
+                   accessibilityState={{ selected: since === w }} accessibilityLabel={`${w} days`}
+                   style={[styles.segItem, since === w && styles.segItemOn]}>
+              <Text style={[styles.segWord, since === w && styles.segWordOn]}>{`${w} days`}</Text>
+            </Press>
+          ))}
+        </View>
+        {where ? (
+          <Press effect="none" onPress={() => onWhere('')} accessibilityRole="button" accessibilityLabel="Everywhere">
+            <Text style={styles.chipOff}>{`${data.area?.name ?? where} ✕`}</Text>
+          </Press>
+        ) : null}
+      </View>
+
+      <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.subject ?? 'anything'}
+              highlight={(r) => r.fault === 'empty-always'}
+              empty={<Word muted>Nothing has been searched for here yet. The log is written from the day it was built and cannot be backfilled.</Word>} />
+
+      <View style={{ gap: 9 }}>
+        <Kicker>Searches · most recent first</Kicker>
+        <View>
+          {data.log.map((s, i) => (
+            <View key={s.id} style={[styles.logRow, i === data.log.length - 1 && { borderBottomWidth: 0 }]}>
+              <Text style={[styles.rowNote, { width: 130 }]}>{ago(s.at)}</Text>
+              <Text style={[styles.logWhat, { flex: 1 }]} numberOfLines={1}>
+                {[s.label, s.where, s.minutes ? `within ${s.minutes} min` : null].filter(Boolean).join(' · ')}
+              </Text>
+              <Text style={[styles.logOutcome, { width: 150 }]}>
+                {s.empty ? 'came back empty' : `${s.shown} shown, ${s.tripped ? `${s.tripped} tripped` : `${s.opened} clicked`}`}
+              </Text>
+              <Explain tip={['Held against', s.identified ? 'This search is held against an account, so the same person’s searches can be read together.' : 'Nobody was signed in, so this search is held against the household only.']}
+                       style={{ width: 140 }}>
+                <Text style={[styles.rowNote, { textAlign: 'right' }]}>{s.identified ? 'signed in' : 'not signed in'}</Text>
+              </Explain>
+              <View style={{ width: 140, alignItems: 'flex-end' }}>
+                <Act label={`Replay · ${pounds(data.replayPence)}`} small tone={s.empty ? 'secondary' : 'primary'} onPress={() => onSearch(s.id)} />
+              </View>
+            </View>
+          ))}
+          {data.log.length === 0 ? <Word muted>Nothing logged in this window.</Word> : null}
+        </View>
+      </View>
+    </AdminPage>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BO4b — one search, replayed
+// ---------------------------------------------------------------------------
+
+/**
+ * Exactly what that household was shown, in order, with what they did to each
+ * row. The stored rows are identifiers; names are re-resolved at display, and a
+ * `google:` ref we hold no name for costs a call — so this is a deliberate
+ * action with its cost on the button, never something a list does on load.
+ */
+function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; canManage: boolean }) {
+  const [data, setData] = useState<SearchReplay | null>(null);
+  useEffect(() => { setData(null); api.adminDemandSearch(id).then(setData).catch(() => setData(null)); }, [id]);
+  if (!data) return <AdminPage><Waiting /></AdminPage>;
+
+  const columns: Col<SearchReplay['rows'][number]>[] = [
+    { key: 'no', label: 'No.', tip: 'position', width: 42, align: 'left',
+      cell: (r) => <Text style={[styles.pos, r.strong && styles.strong]}>{r.position}</Text> },
+    { key: 'name', label: 'What they were shown', tip: 'whatTheyWereShown', grow: true,
+      cell: (r) => <Text style={[styles.rowName, r.strong && styles.strong, !r.name && styles.refName]} numberOfLines={1}>{r.name ?? r.ref}</Text> },
+    { key: 'sub', label: 'Subcategory', tip: 'subcategory', width: 190, align: 'left',
+      cell: (r) => (r.subcategory ? <Word>{r.subcategory}</Word> : <Blank />) },
+    { key: 'score', label: 'Its score', tip: 'itsScore', width: 120, align: 'right', cell: (r) => <Num n={r.score} /> },
+    { key: 'did', label: 'What they did', tip: 'whatTheyDid', width: 160, align: 'left',
+      cell: (r) => <Text style={[styles.did, r.strong && styles.strong, !r.strong && { color: colors.inkMuted }]}>{r.did}</Text> },
+    { key: 'dwell', label: 'Dwell', tip: 'dwell', width: 130, align: 'right',
+      cell: (r) => (r.dwellMs ? <Word>{duration(Math.round(r.dwellMs / 1000))}</Word> : <Blank />) },
+  ];
+
+  const when = new Date(data.at);
+  return (
+    <AdminPage>
+      <View style={styles.trail}>
+        <Press effect="none" onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to Demand" style={styles.trailBack}>
+          <Icon name="back" size={15} strokeWidth={2.2} color={colors.accent} />
+          <Text style={styles.trailWord}>Demand</Text>
+        </Press>
+      </View>
+      <View style={styles.band}>
+        <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
+          <Kicker>{[
+            when.toLocaleDateString([], { day: 'numeric', month: 'short' }),
+            when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            data.surface,
+            data.identified ? 'signed in' : 'not signed in',
+          ].join(' · ')}</Kicker>
+          <Text style={styles.title}>{[data.subject ?? 'Anything', data.where, data.minutes ? `within ${data.minutes} min` : null].filter(Boolean).join(', ')}</Text>
+        </View>
+        <View style={styles.five}>
+          <Stat label="Shown" value={data.shown} tip="shown" />
+          <Stat label="Opened" value={data.opened} tip="opened" />
+          <Stat label="Saved" value={data.saved} tip="saved" />
+          <Stat label="Tripped" value={data.tripped ? 'Yes' : 'No'} tip="tripped" />
+        </View>
+      </View>
+
+      <Ladder columns={columns} rows={data.rows} keyOf={(r) => `${r.position}-${r.ref}`}
+              highlight={(r) => r.strong}
+              empty={<Word muted>Nothing was shown for this search — which is the finding.</Word>} />
+
+      <View style={styles.facts}>
+        <Fact label="Sources asked" value={data.sourcesQueried.length ? data.sourcesQueried.join(', ') : '—'} />
+        <Fact label="Any degraded" value={data.degraded.length ? data.degraded.join(', ') : 'no'} />
+        <Fact label="Names re-fetched for this replay" value={data.refetched ? `${data.refetched} · ${pounds(Math.round(data.refetchedPence))}` : 'none'} />
+        <Fact label="Held against" value={data.heldAgainst} />
+      </View>
+    </AdminPage>
+  );
+}
+
+const Fact = ({ label, value }: { label: string; value: string }) => (
+  <View style={{ gap: 2 }}>
+    <Text style={styles.factLabel}>{label}</Text>
+    <Text style={styles.factValue}>{value}</Text>
+  </View>
+);
+
+const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityIndicator color={colors.accent} /></View>;
+
+const styles = StyleSheet.create({
+  band: {
+    flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
+    gap: spacing.xl, flexWrap: 'wrap',
+    borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 17,
+  },
+  title: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
+  alt: { ...type.tiny, fontSize: 11, fontWeight: '700', letterSpacing: 0.44, textTransform: 'uppercase', color: colors.accent },
+  five: { flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' },
+  subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, flexWrap: 'wrap' },
+
+  trail: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  trailBack: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  trailWord: { ...type.small, fontSize: 13, fontWeight: '700', color: colors.accent },
+
+  segment: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted },
+  segItem: { paddingHorizontal: 14, paddingVertical: 8 },
+  segItemOn: { backgroundColor: colors.selected },
+  segWord: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
+  segWordOn: { fontWeight: '700', color: colors.selectedFg },
+  chipOff: { ...type.tiny, fontSize: 11.5, fontWeight: '700', color: colors.accent },
+
+  rowName: { ...type.body, fontSize: 13.5, fontWeight: '600', color: colors.ink },
+  rowNote: { ...type.tiny, fontSize: 12, color: colors.inkMuted },
+  refName: { fontWeight: '400', color: colors.inkMuted },
+  strong: { fontWeight: '700' },
+  fault: { ...type.small, fontSize: 13, color: colors.ink },
+  owner: { ...type.small, fontSize: 13, color: colors.inkMuted },
+  pos: { ...type.body, fontSize: 14, color: colors.inkMuted },
+  did: { ...type.small, fontSize: 13, color: colors.ink },
+
+  logRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  logWhat: { ...type.small, fontSize: 13, color: colors.ink },
+  logOutcome: { ...type.small, fontSize: 13, color: colors.ink },
+
+  facts: { flexDirection: 'row', gap: 34, flexWrap: 'wrap', borderTopWidth: BORDER, borderTopColor: colors.ruleMuted, paddingTop: 14 },
+  factLabel: { ...type.tiny, fontSize: 12, color: colors.inkMuted },
+  factValue: { ...type.small, fontSize: 13, fontWeight: '600', color: colors.ink },
+});

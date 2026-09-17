@@ -5,6 +5,7 @@ import { useViewport } from '../hooks/useViewport';
 import { Icon } from '../components/Icon';
 import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, PhotoFiled, TripBrief, Venue, Visit } from '../api';
 import { VenueDrawer } from '../components/VenueDrawer';
+import { heldSearch, noteSearchEvent } from '../search';
 import { CARD_H, CARD_W, VenueThumb } from '../components/VenueThumb';
 import { Flag } from '../components/Flag';
 import { Wordmark } from '../components/Wordmark';
@@ -1076,12 +1077,16 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
         q: q.trim() || undefined, radiusKm, sources: sources?.join(',') || undefined,
       });
       setRes(r.results);
+      // The search is written down at the API; this holds its id so what the
+      // household does next to each row can be counted (search.ts).
+      heldSearch('places', r.queryId, r.results.map((v) => v.venueRef));
       if (!r.results.length) setMsg('Nothing found nearby. Try the name of the place.');
     } catch (e: any) { setMsg(e.message); } finally { setBusy(false); }
   };
 
   const save = async (v: Venue, status: 'saved' | 'special' = 'saved') => {
     await api.savePlace(v.venueRef, status, { label: v.name, venue: v, category: v.category, lat: v.lat, lng: v.lng, ...ctx });
+    noteSearchEvent('places', 'save', v.venueRef);
     setMsg(`Saved ${v.name} to try.`);
     await onAdded();
   };
@@ -1120,7 +1125,8 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
           createVia={async (body) => { await api.createVisit({ venueRef: rating.venueRef, venueLabel: rating.name, category: rating.category, lat: rating.lat, lng: rating.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: body.venue, ...ctx }); }} />
       ) : null}
       {res?.slice(0, 40).map((v) => (
-        <VenueRow key={v.venueRef} venue={v} stack={!wide} onPress={() => onOpen(v)} action={
+        <VenueRow key={v.venueRef} venue={v} stack={!wide}
+                  onPress={() => { noteSearchEvent('places', 'open', v.venueRef); onOpen(v); }} action={
           <Row>
             <Button label="Been" kind="secondary" onPress={() => setRating(v)} />
             <Button label="To try" kind="ghost" onPress={() => save(v)} />

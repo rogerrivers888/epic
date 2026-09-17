@@ -165,3 +165,29 @@ export function causeOf({ why = null, state = null, website = null, menuUrl = nu
 
   return 'unknown';
 }
+
+/**
+ * Which of *ours* it was.
+ *
+ * `ours` is one cause because one sentence covers it — "this is a bug of ours,
+ * not a finding about their website" — but a report that says "132 were ours"
+ * and stops there cannot be worked. These four each name a different fix, and
+ * the report prints them above theirs where they cannot be skimmed past
+ * (132 of the first 341 failures were Epic's own).
+ */
+export const OURS_KINDS = [
+  { key: 'timeout',   label: 'The fetch timed out before we sent anything',
+    test: /timed out|ETIMEDOUT|socket hang up|ECONNRESET|aborted|overloaded/i },
+  { key: 'not_there', label: 'We asked for a page that does not exist on their site',
+    test: /\b404\b|not found|no such page|ENOTFOUND|ERR_NAME_NOT_RESOLVED/i },
+  { key: 'unparsed',  label: 'We could not parse a menu we had already downloaded',
+    test: /is not defined|is not a function|cannot read propert|undefined is not|null is not an object|Unexpected token|parse/i },
+  { key: 'limit',     label: 'We ran into a limit or a key of our own',
+    test: /api[_ ]?key|unauthori[sz]ed|rate.?limit|quota|429|credit balance|budget is spent|model budget|insufficient|internal server error/i },
+];
+
+/** The kind of ours, or `unparsed` when the sentence does not say. */
+export function oursKindOf(why) {
+  const w = String(why ?? '');
+  return OURS_KINDS.find((k) => k.test.test(w))?.key ?? 'unparsed';
+}

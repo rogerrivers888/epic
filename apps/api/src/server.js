@@ -34,6 +34,10 @@ import lookupRoutes from './routes/lookup.js';
 import reachRoutes from './routes/reach.js';
 import scoringRoutes from './routes/scoring.js';
 import { router as localityRoutes } from './routes/localities.js';
+import placeIndexRoutes from './routes/placeIndex.js';
+import runsRoutes from './routes/runs.js';
+import demandRoutes from './routes/demand.js';
+import queueRoutes from './routes/queue.js';
 import { resumeInterrupted } from './sources/harvest.js';
 import activityRoutes from './routes/activity.js';
 import { places as placeRoutes, visits as visitRoutes } from './routes/places.js';
@@ -182,6 +186,17 @@ app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
 // source register (routes/hostSkills.js). Its own capability pair, because
 // approving a word is not the same privilege as reading the queue.
 app.use('/api/admin/skills', requireDoor('admin'), skillsAdminRoutes);
+// Places: one index, every lens (routes/placeIndex.js). Five screens that were
+// each bound to a different table became one bound to a question, and this is
+// what it reads. The older locality routes stay mounted beneath it — nothing
+// that had a link to them has lost it.
+app.use('/api/admin/place-index', requireDoor('admin'), placeIndexRoutes);
+// Runs: the monitor. Starting a run happens on Places, where the gap is.
+app.use('/api/admin/runs', requireDoor('admin'), runsRoutes);
+// Demand: what people asked for, and which of the three faults it was.
+app.use('/api/admin/demand', requireDoor('admin'), demandRoutes);
+// The content queue: one queue over everything a household made.
+app.use('/api/admin/queue', requireDoor('admin'), queueRoutes);
 app.use('/api/admin/places', requireDoor('admin'), localityRoutes);
 // Lookup: what every source has for one place, and what each record holds (routes/lookup.js).
 app.use('/api/admin/lookup', requireDoor('admin'), lookupRoutes);
