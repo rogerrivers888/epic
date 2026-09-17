@@ -23,6 +23,7 @@ import { detailFor } from '../sources/compare.js';
 import { roomToSpend, releaseSpend } from './placeIndex.js';
 import { googleSource } from '../sources/google.js';
 import { currentHousehold } from './household.js';
+import { USD_TO_GBP } from '../domain/providerPrices.js';
 
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -98,7 +99,7 @@ async function googleSpentPence() {
     `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
        from provider_calls where provider = 'google' and created_at > date_trunc('month', now())`);
   // The ledger is in dollars; everything on these screens is in pence.
-  return Number(r?.usd ?? 0) * 100 * 0.79;
+  return Number(r?.usd ?? 0) * 100 * USD_TO_GBP;
 }
 
 router.get('/search', requires('view_reporting'), async (req, res, next) => {

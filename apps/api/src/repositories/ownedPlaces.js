@@ -89,6 +89,48 @@ export async function noteOwned(venueRef) {
   await noteMany([{ ref: venueRef, ownership: 'owned' }], { source: 'own' });
 }
 
+/**
+ * What this place's ownership *is*, after whatever just happened to it.
+ *
+ * `noteOwned` only ever moves upward, which is right for research arriving and
+ * wrong for a fact being cleared: an administrator emptying a place's only
+ * owned field left it marked owned for good, so coverage overstated the county
+ * and Collect skipped a place that needed it (Codex, 17 Sep 2026). This asks
+ * the question from scratch — the same three columns the index and the rebuild
+ * ask — and is the only thing that can take an ownership down again.
+ */
+export async function settleOwnership(venueRef) {
+  const { rows } = await query(
+    `update place_index pi set ownership = case
+         when exists (
+           select 1 from place_records r
+            where r.venue_ref = pi.venue_ref
+              and (coalesce(r.summary, r.website, r.opening_hours, r.price_range, r.address, r.phone) is not null
+                   or r.accessibility <> '{}'::jsonb
+                   or r.curated_at is not null))
+           then 'owned'
+         when exists (
+           select 1 from attractions a
+            where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
+              and a.state <> 'rejected'
+              and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
+           then 'owned'
+         when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)
+           then 'claimed'
+         else 'identified' end
+      where pi.venue_ref = $1
+      returning ownership`, [venueRef]);
+  // The source row follows the answer: `own` means we hold something, so it
+  // goes when we no longer do — and its timestamp is what the free-collection
+  // window reads.
+  if (rows[0]?.ownership !== 'owned') {
+    await query(`delete from place_index_sources where venue_ref = $1 and source = 'own'`, [venueRef]);
+  } else {
+    await noteMany([{ ref: venueRef, ownership: 'owned' }], { source: 'own' });
+  }
+  return rows[0]?.ownership ?? null;
+}
+
 export async function recordFor(venueRef) {
   const { rows } = await query('select * from place_records where venue_ref = $1', [venueRef]);
   return rows[0] ?? null;

@@ -30,6 +30,7 @@ import { OUR_LABEL, detailFor, blank, lineUp } from '../sources/compare.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { TRIPADVISOR_CAP } from '../repositories/runs.js';
+import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import * as collectRuns from '../repositories/collectRuns.js';
 import * as ownedPlaces from '../repositories/ownedPlaces.js';
 import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
@@ -81,7 +82,7 @@ export async function roomToSpend(pence, { holder = null, reserve = true } = {})
     const { rows: [held] } = await client.query(
       'select coalesce(sum(pence), 0)::int as pence from spend_reservations');
     // The ledger is in dollars; the ceiling is the owner's, in pounds.
-    const spentPence = Math.round(Number(spend?.usd ?? 0) * 100 * 0.79);
+    const spentPence = Math.round(Number(spend?.usd ?? 0) * 100 * USD_TO_GBP);
     const claimed = held.pence;
     const left = ceilingPence - spentPence - claimed;
     // A run that spends nothing is never over a ceiling — the ceiling is about
@@ -131,8 +132,13 @@ export const STALE_MONTHS = 12;
  * (Codex, 17 Sep 2026). A ref that is already `google:`, or that we have
  * matched before, needs only the detail.
  */
-const DETAIL_PENCE = 1.4;
-const MATCH_PENCE = 1.4;
+// What one Places request costs us, in pence, from the one price table there
+// is. A hard-coded 1.4p was the old figure and the ledger now records $0.032 a
+// request — so a run reserved a little over half what it spent, and near the
+// ceiling that is a run admitted with no room (Codex, 17 Sep 2026).
+const pencePerCall = () => Math.round(PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP * 100) / 100;
+const DETAIL_PENCE = pencePerCall();
+const MATCH_PENCE = pencePerCall();
 const askingCost = (refs, matched) =>
   Math.round(refs.reduce((p, ref) =>
     p + DETAIL_PENCE + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE), 0));
@@ -902,7 +908,10 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
     // said we had never researched the place and the free-collection window
     // treated it as never asked (Codex, 17 Sep 2026). The outcode counts, now
     // that it lands on the record the rebuild reads.
-    if (!['subcategory', 'busy'].includes(key)) await ownedPlaces.noteOwned(ref);
+    // Asked from scratch rather than nudged upward: clearing a place's only
+    // owned field has to be able to take the ownership back down, and
+    // `noteOwned` only ever moves it up (Codex, 17 Sep 2026).
+    if (key !== 'subcategory') await ownedPlaces.settleOwnership(ref);
     // Scored *and* counted. The edit can change what a place is judged on, or
     // which area or shelf it is in, and the boards read `area_stats` — so
     // rescoring alone left every headline stale until somebody pressed Refresh
@@ -989,8 +998,12 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     // labelled the database's own bookkeeping "Owned record" while suppressing
     // an atlas or sweep record that actually held the facts (Codex, 17 Sep
     // 2026). The same question the index asks.
+    // The same fields the index counts, which deliberately do not include the
+    // name: a record holding only a name is a place we have noticed, and
+    // treating it as ours suppressed a richer atlas or sweep record (Codex,
+    // 17 Sep 2026).
     const ours = rec && (
-      [rec.summary, rec.website, rec.opening_hours, rec.price_range, rec.address, rec.phone, rec.name]
+      [rec.summary, rec.website, rec.opening_hours, rec.price_range, rec.address, rec.phone]
         .some((v) => v != null)
       || (rec.accessibility && Object.keys(rec.accessibility).length > 0)
       || rec.curated_at != null

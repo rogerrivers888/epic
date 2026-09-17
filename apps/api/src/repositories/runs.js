@@ -13,6 +13,7 @@ import { query } from '../db.js';
 import { menuCauses } from './scout.js';
 import { OURS_KINDS, oursKindOf } from '../domain/menuCauses.js';
 import * as collectRuns from './collectRuns.js';
+import { USD_TO_GBP } from '../domain/providerPrices.js';
 
 /**
  * The eight ways of getting more data.
@@ -164,7 +165,7 @@ export async function list() {
     // A run that stopped, failed or was never picked up. Two of them is a number
     // somebody has to act on today.
     needsLooking: rows.filter((r) => r.stranded || r.state === 'failed' || (r.key === 'menus' && r.ours > 0)).length,
-    spentPence: Math.round(Number(spend?.usd ?? 0) * 100 * 0.79),
+    spentPence: Math.round(Number(spend?.usd ?? 0) * 100 * USD_TO_GBP),
     calls: spend?.calls ?? 0,
     ceilingPence: Number(ceiling?.value ?? 25000),
     tripadvisor: { left: Math.max(0, TRIPADVISOR_CAP - (ta?.calls ?? 0)), of: TRIPADVISOR_CAP },

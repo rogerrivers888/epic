@@ -49,6 +49,16 @@ export const PRICE_PER_UNIT_USD = {
 };
 
 /**
+ * Dollars to pounds, for the screens and the ceiling.
+ *
+ * The provider list prices are in dollars and everything the owner reads is in
+ * pounds. One rate, in one place, so the ceiling and the boards cannot disagree
+ * about what a call cost. It is a rate we choose rather than one we look up:
+ * the real number is on the invoice, and this is for deciding when to look.
+ */
+export const USD_TO_GBP = 0.79;
+
+/**
  * What one call's meter comes to.
  *
  * `units` is what the adapters counted — `{ google: 1 }`, `{ tripadvisor: 2 }`

@@ -525,3 +525,26 @@ test('a shelf nothing supports any more is cleared by a rebuild', async () => {
   assert.equal((await shelfOf('osm:node/orphaned')).subcategory, null, 'a derived shelf does not outlive what derived it');
   assert.equal((await shelfOf('osm:node/by-hand')).subcategory, 'galleries', 'a decision survives');
 });
+
+test('clearing a place’s only owned fact takes its ownership back down', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'osm:node/up-and-down';
+  await owned.ensureRecord(ref);
+  const ownershipOf = async () => (await query(
+    'select ownership from place_index where venue_ref = $1', [ref])).rows[0].ownership;
+  const ownRow = async () => (await query(
+    `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'own'`, [ref])).rows[0].n;
+  assert.equal(await ownershipOf(), 'identified');
+
+  await query(`update place_records set summary = 'A sentence we wrote.' where venue_ref = $1`, [ref]);
+  assert.equal(await owned.settleOwnership(ref), 'owned');
+  assert.equal(await ownRow(), 1, 'and the source row says we hold something');
+
+  // An administrator clears the only owned field. `noteOwned` only ever moves
+  // ownership upward, so this used to stay "owned" for good — coverage
+  // overstated the county and Collect skipped a place that needed it (Codex,
+  // 17 Sep 2026).
+  await query(`update place_records set summary = null where venue_ref = $1`, [ref]);
+  assert.equal(await owned.settleOwnership(ref), 'identified');
+  assert.equal(await ownRow(), 0, 'and the source row goes with it');
+});
