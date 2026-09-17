@@ -201,7 +201,7 @@ test('the weights come out of the module, so a screen cannot retype them', () =>
 // what the review found
 // ---------------------------------------------------------------------------
 
-import { EDGE_MINUTES } from '../src/domain/reach.js';
+import { EDGE_MINUTES, HORIZON_MINUTES } from '../src/domain/reach.js';
 import { travelMode } from '../src/domain/travel.js';
 
 test('a mode the screens use is the same mode the table holds', () => {
@@ -222,4 +222,15 @@ test('the ring is widened at the edge, because the exact pass can only narrow it
   // good; keeping it costs one measurement.
   assert.ok(EDGE_MINUTES > 0);
   assert.ok(EDGE_MINUTES <= 10, 'a wide allowance stops being a filter');
+});
+
+test('the matrix is built wider than anybody may ask, or the allowance does nothing', () => {
+  // Building to the same ninety minutes the cap allows would cancel the edge
+  // allowance at exactly the distance it matters most: a place genuinely within
+  // ninety minutes whose sector centre estimates at ninety-two would not be in
+  // the table at all, and no amount of widening the read could find it.
+  assert.ok(HORIZON_MINUTES > CAP_MINUTES, 'the horizon is not past the cap');
+  assert.equal(HORIZON_MINUTES, CAP_MINUTES + EDGE_MINUTES);
+  // And the widest ask still gets its full allowance inside the horizon.
+  assert.ok(CAP_MINUTES + EDGE_MINUTES <= HORIZON_MINUTES);
 });

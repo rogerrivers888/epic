@@ -22,7 +22,7 @@
 
 import express from 'express';
 import { requires } from '../access.js';
-import { CAP_MINUTES, EDGE_MINUTES, labelOf, sectorOf } from '../domain/reach.js';
+import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, labelOf, sectorOf } from '../domain/reach.js';
 import { travelMode } from '../domain/travel.js';
 import * as reach from '../repositories/reach.js';
 
@@ -33,7 +33,7 @@ const bad = (message, code = 'bad_request') => Object.assign(new Error(message),
 /** What has been built. The screen's first read, and the tests' way in. */
 router.get('/', requires('view_library'), async (req, res, next) => {
   try {
-    res.json({ ...(await reach.state()), capMinutes: CAP_MINUTES });
+    res.json({ ...(await reach.state()), capMinutes: CAP_MINUTES, horizonMinutes: HORIZON_MINUTES, edgeMinutes: EDGE_MINUTES });
   } catch (err) { next(err); }
 });
 
@@ -123,7 +123,9 @@ router.post('/stamp', requires('manage_library'), async (req, res, next) => {
  */
 router.post('/build', requires('manage_library'), async (req, res, next) => {
   try {
-    const capMinutes = Math.min(180, Math.max(5, Number(req.body?.capMinutes) || CAP_MINUTES));
+    // Built to the horizon rather than to the cap: the matrix has to hold the
+    // edge allowance or the allowance does nothing at ninety minutes.
+    const capMinutes = Math.min(180, Math.max(5, Number(req.body?.capMinutes) || HORIZON_MINUTES));
     const mode = travelMode(req.body?.mode ?? 'driving');
     if (req.body?.wait === true) return res.json(await reach.buildMatrix({ mode, capMinutes }));
     res.json({ started: true, mode, capMinutes });

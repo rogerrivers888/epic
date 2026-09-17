@@ -36,7 +36,7 @@
 
 import { estimateTravelMinutes, kmBetween, travelMode } from './travel.js';
 
-/** How far out the matrix is built. Beyond this a catchment is not a day out. */
+/** The furthest anybody may ask for. Beyond this a catchment is not a day out. */
 export const CAP_MINUTES = 90;
 
 /**
@@ -51,6 +51,18 @@ export const CAP_MINUTES = 90;
  * then measured properly.
  */
 export const EDGE_MINUTES = 5;
+
+/**
+ * How far out the matrix is actually built.
+ *
+ * Wider than the furthest anybody may ask for, by exactly the edge allowance.
+ * Building to the same ninety minutes the cap allows would quietly cancel the
+ * allowance at the one distance it is most needed: a place genuinely within
+ * ninety minutes, whose sector's centre estimates at ninety-two, would not be
+ * in the table at all and no amount of widening the read could find it
+ * (Codex, 17 Sep 2026).
+ */
+export const HORIZON_MINUTES = CAP_MINUTES + EDGE_MINUTES;
 
 /** The bands the counts are rolled up into. A search picks the band above its minutes. */
 export const BANDS = [15, 30, 45, 60, 90];

@@ -24,7 +24,7 @@
  */
 
 import { query } from '../db.js';
-import { CAP_MINUTES, EDGE_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
+import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
 import { travelMode } from '../domain/travel.js';
 import { outcodesFor } from '../sources/localities.js';
 import * as providerCalls from './providerCalls.js';
@@ -189,7 +189,7 @@ export async function refreshCellCounts() {
  * rows for a cell are replaced one cell at a time inside its own statement, so
  * an interrupted run leaves a table that is short rather than one that is wrong.
  */
-export async function buildMatrix({ mode = 'driving', capMinutes = CAP_MINUTES, scheme = 'sector', onProgress = null } = {}) {
+export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUTES, scheme = 'sector', onProgress = null } = {}) {
   // Canonical from here down. `reachFrom` writes `driving`; a delete or a read
   // with the screen's word for it — `drive` — matches nothing at all, so a
   // rebuild would leave the old rows in place and a search would come back
@@ -257,7 +257,7 @@ export async function cellAt({ lat, lng, withinKm = 25 }) {
 export async function reachableCells(cell, { minutes = 30, mode = 'driving', edge = EDGE_MINUTES } = {}) {
   const { rows } = await query(
     'select to_cell, minutes, km from reach where from_cell = $1 and mode = $2 and minutes <= $3 order by minutes',
-    [cell, travelMode(mode), Math.min(CAP_MINUTES, minutes + edge)],
+    [cell, travelMode(mode), Math.min(HORIZON_MINUTES, minutes + edge)],
   );
   return rows;
 }
@@ -268,7 +268,7 @@ export async function placesWithin(cell, { minutes = 30, mode = 'driving', edge 
     `select p.venue_ref, p.cell, p.lat, p.lng, r.minutes
        from reach r join place_cells p on p.cell = r.to_cell
       where r.from_cell = $1 and r.mode = $2 and r.minutes <= $3`,
-    [cell, travelMode(mode), Math.min(CAP_MINUTES, minutes + edge)],
+    [cell, travelMode(mode), Math.min(HORIZON_MINUTES, minutes + edge)],
   );
   return rows;
 }
