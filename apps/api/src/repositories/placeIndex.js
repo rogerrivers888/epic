@@ -377,9 +377,19 @@ async function reindexWhileLocked({ onProgress }) {
  * empty *and* there is something to put in it — not on a fresh database, and
  * never a second time.
  */
+/** What the first build writes down when it finishes, so a failure can retry. */
+const BUILT_KEY = 'placeIndex.builtAt';
+
 export async function buildIfEmpty() {
-  const { rows: [have] } = await query('select count(*)::int as n from place_index');
-  if (have.n > 0) return { built: false, places: have.n };
+  // "Has a build ever *finished*", not "are there any rows".
+  //
+  // A rebuild is not one transaction — it cannot be, it deletes and refills
+  // four tables and scores a million places — so a build that fell over
+  // halfway had already committed its first inserts. Any row then counted as
+  // proof it had finished, and the next boot skipped it for ever, leaving the
+  // areas or the shelves or the rollups half-built (Codex, 17 Sep 2026).
+  const { rows: [done] } = await query('select value from app_settings where key = $1', [BUILT_KEY]);
+  if (done) return { built: false, why: 'a build has already finished' };
   const { rows: [any] } = await query(`
     select (select count(*) from attractions)     +
            (select count(*) from scout_places)    +
@@ -403,8 +413,8 @@ export async function buildIfEmpty() {
     async () => {
       // The second look, now that nobody else can be in here: whoever lost the
       // race may have finished the whole thing while we waited.
-      const { rows: [again] } = await query('select count(*)::int as n from place_index');
-      if (again.n > 0) return { built: false, places: again.n };
+      const { rows: [again] } = await query('select value from app_settings where key = $1', [BUILT_KEY]);
+      if (again) return { built: false, why: 'a build finished while we waited' };
       // The bars first. Scoring against an empty `ready_bars` marks every place
       // "not set" and not ready, which is a worse answer than no answer — it
       // reads as a finding rather than as a job that has not run.
@@ -414,7 +424,13 @@ export async function buildIfEmpty() {
       // "somebody else is rebuilding" — so the first build on an upgraded
       // installation reported success and did nothing at all (Codex, 17 Sep
       // 2026).
-      return { built: true, ...await reindexWhileLocked({ onProgress: null }) };
+      const out = await reindexWhileLocked({ onProgress: null });
+      // Written down only now — after everything, so a failure anywhere above
+      // leaves this unset and the next boot tries again.
+      await query(
+        `insert into app_settings (key, value) values ($1, to_jsonb(now()::text))
+         on conflict (key) do update set value = excluded.value, updated_at = now()`, [BUILT_KEY]);
+      return { built: true, ...out };
     },
     { built: false, places: 0, why: 'another instance is building it' },
   );

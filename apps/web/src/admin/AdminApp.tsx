@@ -165,7 +165,11 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'lookup' ? <Lookup canManage={can('manage_library')} /> : null}
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}
-      {screen === 'runs' ? <Runs canManage={can('manage_library')} /> : null}
+      {/* Two capabilities, because two different things: starting a run is the
+          library's, and setting the month's ceiling is the settings'. One flag
+          gave a library manager an enabled box that always answered 403, and
+          gave a settings manager no box at all (Codex, 17 Sep 2026). */}
+      {screen === 'runs' ? <Runs canManage={can('manage_library')} canSetCeiling={can('manage_settings')} /> : null}
       {screen === 'demand' ? <Demand canManage={can('manage_library')} /> : null}
       {screen === 'queue' ? <Queue canManage={can('manage_library')} /> : null}
       {screen === 'library' ? <Library canManage={can('manage_library')} /> : null}

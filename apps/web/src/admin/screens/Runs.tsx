@@ -29,7 +29,11 @@ import { Ladder, Num, Word, Blank, Progress, Act, Footer, Kicker, Stat, type Col
 
 const PHONE = 900;
 
-export function Runs({ canManage }: { canManage: boolean }) {
+export function Runs({ canManage, canSetCeiling }: {
+  canManage: boolean;
+  /** Setting the month's ceiling is `manage_settings`, not `manage_library`. */
+  canSetCeiling: boolean;
+}) {
   const [run, setRun] = useQueryState<string>('run', '', asText);
   const [view, setView] = useQueryState<string>('view', '', asText);
   // Held here rather than inside the board, so closing it takes the expanded
@@ -45,14 +49,16 @@ export function Runs({ canManage }: { canManage: boolean }) {
     );
   }
   return width < PHONE ? <RunsPhone canManage={canManage} onFailures={(k) => { setRun(k); setView('failures'); }} />
-    : <RunsBoard canManage={canManage} onFailures={(k) => { setRun(k); setView('failures'); }} />;
+    : <RunsBoard canManage={canManage} canSetCeiling={canSetCeiling} onFailures={(k) => { setRun(k); setView('failures'); }} />;
 }
 
 // ---------------------------------------------------------------------------
 // BO3a — the run list
 // ---------------------------------------------------------------------------
 
-function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: (key: string) => void }) {
+function RunsBoard({ canManage, canSetCeiling, onFailures }: {
+  canManage: boolean; canSetCeiling: boolean; onFailures: (key: string) => void;
+}) {
   const [data, setData] = useState<RunsList | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** The ceiling, being typed. A number goes in a small box — never a stepper. */
@@ -152,7 +158,7 @@ function RunsBoard({ canManage, onFailures }: { canManage: boolean; onFailures: 
                 </View>
               )
               : (
-                <Press effect="none" onPress={() => { if (canManage) { setDraft(String(Math.round(data.ceilingPence / 100))); setEditing(true); } }}
+                <Press effect="none" onPress={() => { if (canSetCeiling) { setDraft(String(Math.round(data.ceilingPence / 100))); setEditing(true); } }}
                        accessibilityRole="button" accessibilityLabel="Change the monthly ceiling">
                   <Text style={styles.ceilingWord}>{pounds(data.ceilingPence)}</Text>
                 </Press>
