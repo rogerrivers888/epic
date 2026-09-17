@@ -471,12 +471,13 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
        on conflict (venue_ref) do update
           set lat = coalesce(place_index.lat, excluded.lat),
               lng = coalesce(place_index.lng, excluded.lng),
-              -- A place saved abroad is filed abroad, and a later note that
-              -- says nothing does not drag it back to the default (Codex,
-              -- 17 Sep 2026). GB is that default, so it never overwrites —
-              -- which is right anyway: a place does not change country.
-              country_code = case when excluded.country_code = 'GB' then place_index.country_code
-                                  else excluded.country_code end,
+              -- A place saved abroad is filed abroad, and a place does not
+              -- change country (Codex, 17 Sep 2026). So a country is only ever
+              -- written where none was really known: the default stands in for
+              -- "nobody said", and once something real is there a later save
+              -- carrying different location metadata cannot refile it.
+              country_code = case when place_index.country_code = 'GB' then excluded.country_code
+                                  else place_index.country_code end,
               -- identified < claimed < owned, and only ever upward: a household
               -- claiming a place we already research does not un-own it.
               ownership = case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'
