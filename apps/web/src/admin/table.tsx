@@ -99,11 +99,11 @@ export function Ladder<T>({
               <Press effect="none" onPress={() => onSort(c.sort!)} accessibilityRole="button"
                      accessibilityLabel={`Sort by ${c.label}`}
                      style={[styles.headSort, { justifyContent: alignOf(c.align) }]}>
-                <Text style={[styles.headLabel, sort === c.sort && styles.headLabelOn, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
+                <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, sort === c.sort && styles.headLabelOn, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
                 {sort === c.sort ? <Icon name={desc ? 'expand' : 'collapse'} size={11} strokeWidth={2.6} color={colors.ink} /> : null}
               </Press>
             ) : (
-              <Text style={[styles.headLabel, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
+              <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
             )}
             {c.note ? <Text style={[styles.headNote, { textAlign: textAlign(c.align) }]}>{c.note}</Text> : null}
           </Explain>
@@ -212,8 +212,21 @@ export function Pct({ v, strong, min = 44 }: { v: number | null | undefined; str
   );
 }
 
-/** The same, for a score out of 100 rather than a share. */
-export const ScoreCell = ({ v, strong }: { v: number | null | undefined; strong?: boolean }) => <Pct v={v} strong={strong} min={40} />;
+/**
+ * A score out of a hundred, tinted the same way a share is — but **printed as a
+ * figure**, because the band above it prints 52 and a column that printed 52%
+ * would be a second meaning for the same number (Codex, 17 Sep 2026).
+ */
+export function ScoreCell({ v, strong }: { v: number | null | undefined; strong?: boolean }) {
+  if (v == null) return <Blank />;
+  const alpha = 0.05 + Math.max(0, Math.min(100, v)) / 100 * 0.35;
+  return (
+    <View style={[styles.pct, { minWidth: 40 }]}>
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.selected, opacity: alpha }]} pointerEvents="none" />
+      <Text style={[styles.num, strong && styles.strong]}>{v}</Text>
+    </View>
+  );
+}
 
 /** A bar that is a share of a whole, drawn the way BO4a draws its three faults. */
 export function Bar({ parts, height = 16 }: { parts: { key: string; share: number; alpha: number }[]; height?: number }) {

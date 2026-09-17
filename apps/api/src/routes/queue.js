@@ -13,6 +13,7 @@ import express from 'express';
 import { requires } from '../access.js';
 import * as queue from '../repositories/contentQueue.js';
 import { writeAudit } from '../repositories/roles.js';
+import { stampImage } from '../sources/photoLinks.js';
 
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -60,7 +61,12 @@ router.get('/:id', requires('view_library'), async (req, res, next) => {
       detail: item.detail,
       // The photograph itself, not a description of it: a photo queue whose
       // photo cannot be seen cannot be worked (Codex, 17 Sep 2026).
-      picture: item.picture ? { ...item.picture, imageId: item.picture.id } : null,
+      //
+      // A household's upload is served only on a signed link until somebody has
+      // looked at it — which is this screen — so the link is stamped here. The
+      // bare id 404s, which is the point: a pending photograph is not public
+      // because it is sitting in a queue.
+      picture: item.picture ? { ...stampImage(item.picture), imageId: item.picture.id } : null,
       // What this household has sent before and what it has earned, because a
       // decision about one photograph is a decision about a person.
       made: item.maker ? { name: item.maker.name, kept: item.maker.kept, points: item.maker.points } : null,

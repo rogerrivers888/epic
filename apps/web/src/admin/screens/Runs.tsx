@@ -148,7 +148,9 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
   const [open, setOpen] = useQueryState<string>('cause', '', asText);
   const [rows, setRows] = useState<{ venue_ref: string; label: string; why: string }[] | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [runs, setRuns] = useState<number | null>(null);
   useEffect(() => { api.adminRunFailures(runKey).then(setData).catch(() => setData(null)); }, [runKey]);
+  useEffect(() => { api.adminRuns().then((r) => setRuns(r.runs.length)).catch(() => setRuns(null)); }, []);
   useEffect(() => {
     if (!open) { setRows(null); return; }
     const [cause, ours] = open.split(':');
@@ -171,7 +173,7 @@ function FailuresBoard({ runKey, canManage, onClose }: { runKey: string; canMana
           <Icon name="back" size={15} strokeWidth={2.2} color={colors.accent} />
           <Text style={styles.trailWord}>Collect</Text>
         </Press>
-        <Text style={styles.trailNote}>· 8 runs</Text>
+        <Text style={styles.trailNote}>{runs == null ? '' : `· ${runs} runs`}</Text>
       </View>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
@@ -266,6 +268,7 @@ const Behind = ({ rows }: { rows: { venue_ref: string; label: string; why: strin
 function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: (key: string) => void }) {
   const [data, setData] = useState<RunsList | null>(null);
   const [worst, setWorst] = useState<{ label: string; n: number } | null>(null);
+  const [picking, setPicking] = useState(false);
   useEffect(() => { api.adminRuns().then(setData).catch(() => setData(null)); }, []);
   // The one cause behind most of our own failures — the board names it on the
   // row, because "132 were ours" is not something you can act on and "timed out
@@ -312,7 +315,8 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
             <Text style={styles.rowNote}>Killed by</Text>
             <Text style={styles.phoneFact}>a deploy</Text>
           </View>
-          <Act label="Pick it up" tone="solid" disabled={!canManage} onPress={() => {}} />
+          <Act label={picking ? 'Picking it up…' : 'Pick it up'} tone="solid" disabled={!canManage || picking}
+               onPress={() => { setPicking(true); api.libraryHarvest({ scope: 'failed' }).finally(() => { setPicking(false); api.adminRuns().then(setData).catch(() => null); }); }} />
         </View>
       ) : null}
 
@@ -371,9 +375,13 @@ function plainly(why: string | null | undefined): string {
   if (w === 'menu_had_no_items') return 'the page opened and there were no dishes on it';
   if (w === 'menu_unreadable') return 'we could not read the page we downloaded';
   if (w === 'menu_url_required') return 'we have no address to read';
-  // Anything the crawler wrote as a sentence already is a sentence; anything
-  // that is still a code is said as one rather than printed as one.
-  return /^[a-z0-9_]+$/.test(w) ? w.replace(/_/g, ' ') : w.length > 90 ? `${w.slice(0, 88)}…` : w;
+  // Anything the crawler wrote as a sentence already is a sentence, and those
+  // are worth reading — they name the restaurant and what its site did. Anything
+  // that still looks like a machine talking to itself is not, however short it
+  // is truncated to.
+  if (/^[a-z0-9_]+$/.test(w)) return w.replace(/_/g, ' ');
+  if (/\bat [A-Za-z$_][\w$.]*\s*\(|Expected one of|node_modules|Error:|\bundefined\b/.test(w)) return 'something of ours went wrong';
+  return w.length > 90 ? `${w.slice(0, 88)}…` : w;
 }
 
 /** Small numbers are words on a headline: the board reads "two need you". */

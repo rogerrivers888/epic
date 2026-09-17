@@ -32,6 +32,7 @@ import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
+import { enrich } from '../sources/own.js';
 
 /** Who did it, said the same way every other back-office route says it. */
 const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner (passcode)' });
@@ -763,7 +764,12 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
           from: key && !blank(r.cells.ours)
             ? [from, f?.fetched_at ? `${Math.max(1, Math.round((Date.now() - new Date(f.fetched_at).getTime()) / 2_592_000_000))} mo ago` : null].filter(Boolean).join(' · ') || 'ours'
             : key ? 'we hold none' : null,
-          editable: Boolean(key && OURS_FIELDS.includes(key)),
+          // Ours, so editable — and "ours" means where the value actually came
+          // from, not a list of field names. The record tab already decided it
+          // that way; two tabs with two answers is worse than either (Codex,
+          // 17 Sep 2026).
+          editable: Boolean(key && OURS_FIELDS.includes(key) && !blank(r.cells.ours)
+            && OUR_HANDS.has(String(from ?? '').toLowerCase())),
         };
       }),
       ours: OURS_FIELDS,
@@ -776,6 +782,8 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
 /** Which of the compared rows are ours, and therefore the only editable ones. */
 const OURS_FIELDS = ['address', 'website', 'summary', 'opening_hours', 'price_range', 'phone', 'curation', 'crowd_band', 'count_band'];
 const OUR_SOURCE = { own: 'ours', atlas: 'the atlas', sweep: 'the sweep' };
+/** Where a value has to have come from for us to be allowed to change it. */
+const OUR_HANDS = new Set(['ours', 'own', 'curate', 'hand', 'claim']);
 
 /**
  * A field said the way a household would say it.
@@ -826,6 +834,76 @@ router.get('/place/raw', requires('view_library'), async (req, res, next) => {
         fields: bySource.get(s.key) ?? [],
       })),
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Write these places up ourselves. Free, and nothing here is a provider's.
+ *
+ * `own.js` researches a place from its own published page, the open
+ * encyclopedias and OpenStreetMap — never from a provider's reviews — and what
+ * it finds lands in `place_records`, which is ours to keep (CLAUDE.md, and
+ * Technical Constraints §13.10). This is the *Curate these N · free* action on
+ * every board that has a selection.
+ */
+router.post('/curate', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
+    if (!refs.length) throw bad('Nothing selected.');
+    const household = await currentHousehold();
+    let started = 0;
+    const refused = [];
+    for (const ref of refs) {
+      try { await enrich(ref, { householdId: household.id, force: true, paid: false }); started += 1; }
+      catch (err) { refused.push({ ref, why: whySourceFailed(err?.provider ?? 'own', err) }); }
+    }
+    await index.rescore();
+    await index.refreshStats();
+    res.json({ started, refused, spentPence: 0 });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Ask the paid sources about these places, and say what it cost.
+ *
+ * One Place Details call each, attributed in `provider_calls` like every other
+ * outbound call. The figures it reads are banded at the moment of the call and
+ * the numbers thrown away (`domain/scoring.js`); what is kept is the identifier
+ * and our own word for it.
+ */
+router.post('/ask', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
+    if (!refs.length) throw bad('Nothing selected.');
+    if (!googleSource.enabled()) {
+      return res.status(422).json({
+        error: 'not_switched_on',
+        message: 'Google is not switched on here. The key is the owner\'s to add in Doppler.',
+      });
+    }
+    const household = await currentHousehold();
+    const named = await index.namesFor(refs);
+    const { rows: pos } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [refs]);
+    const at = new Map(pos.map((p) => [p.venue_ref, p]));
+    let asked = 0;
+    const refused = [];
+    for (const ref of refs) {
+      try {
+        const id = ref.startsWith('google:') ? ref.slice(7) : (await googleMatchFor({
+          venueRef: ref, name: named.get(ref)?.name ?? null,
+          lat: at.get(ref)?.lat ?? null, lng: at.get(ref)?.lng ?? null,
+          householdId: household.id, strict: true,
+        }))?.id ?? null;
+        if (!id) { refused.push({ ref, why: 'no match' }); continue; }
+        await detailFor('google', id, household.id);
+        await index.noteMany([{ ref }], { source: 'google', sourceId: id });
+        asked += 1;
+      } catch (err) {
+        if (err?.provider !== 'google') throw err;
+        refused.push({ ref, why: whySourceFailed('google', err) });
+      }
+    }
+    res.json({ asked, refused, spentPence: Math.round(asked * 1.4) });
   } catch (err) { next(err); }
 });
 

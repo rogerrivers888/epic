@@ -120,15 +120,20 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
      * is decided by the deepest thing they *did* touch — anything below the
      * furthest they reached was never reached (Codex, 17 Sep 2026).
      */
-    const deepest = Math.max(0, ...events.filter((e) => e.kind !== 'shown').map((e) => e.position ?? 0));
+    const touched = events.filter((e) => e.kind !== 'shown');
+    const deepest = Math.max(0, ...touched.map((e) => e.position ?? 0));
     const word = (list, position) => {
       const kinds = new Set((list ?? []).map((e) => e.kind));
       if (kinds.has('add_to_trip')) return { label: 'Opened, then tripped', strong: true };
       if (kinds.has('save') || kinds.has('shortlist')) return { label: 'Opened, then saved', strong: true };
       if (kinds.has('dismiss')) return { label: 'Dismissed', strong: false };
       if (kinds.has('open')) return { label: 'Opened, then closed', strong: true };
-      // Nothing was done to it. Whether they ever got to it is the question, and
-      // the deepest row they touched is the only honest answer we hold.
+      // Nothing was done to it, and there are three ways that can be true. The
+      // deepest row they touched is the only evidence we hold about how far down
+      // they got — so where they touched nothing at all, we do not know, and the
+      // row says that rather than claiming they never reached it (Codex and the
+      // verification pass, 17 Sep 2026).
+      if (!touched.length) return { label: 'Not opened', strong: false };
       return { label: position <= deepest ? 'Scrolled past' : 'Never reached', strong: false };
     };
 

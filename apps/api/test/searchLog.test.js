@@ -164,10 +164,16 @@ test('the live write carries the country and the ownership, and only ever upward
   assert.equal((await query('select ownership from place_index where venue_ref = $1', [ref])).rows[0].ownership, 'owned',
     'ownership never goes backwards');
 
-  // And a place does not change country: once something real is on the row, a
-  // later save carrying different location metadata cannot refile it.
+  // And a place does not change country, in either direction: neither a later
+  // save carrying different location metadata, nor one carrying none.
   await index.noteMany([{ ref, countryCode: 'ES' }]);
   assert.equal((await query('select country_code from place_index where venue_ref = $1', [ref])).rows[0].country_code, 'PT');
+
+  const british = `osm:node/${Math.floor(Math.random() * 1e9)}`;
+  await index.noteMany([{ ref: british, countryCode: 'GB' }]);
+  await index.noteMany([{ ref: british, countryCode: 'ES' }]);
+  assert.equal((await query('select country_code from place_index where venue_ref = $1', [british])).rows[0].country_code, 'GB',
+    'a place genuinely in Britain is not refiled to Spain either');
 });
 
 test('a failure on the pool is swallowed; a failure in a transaction is not', async () => {

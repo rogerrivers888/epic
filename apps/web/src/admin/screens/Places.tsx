@@ -241,19 +241,23 @@ function Level(props: {
 
   const body = (() => {
     if (lens === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing} onMissing={setMissing} onNames={setNames} onWiden={props.onWithin} within={within} />;
-    if (lens === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} />;
+    if (lens === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} />;
     if (lens === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lens === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lens === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
     if (lens === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} />;
     if (ring) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
-    if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage} />;
+    if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
+                                                             onCollectIn={(slug) => { props.onWhere(slug); props.onLens('collect'); }} />;
     return <CoverageBoard q={q} onWhere={props.onWhere} onCollect={() => props.onLens('collect')} />;
   })();
 
   // Where the level is standing: the category, then the subcategory. Each is a
   // step back out, and each renames the board and its five numbers.
   const deep = [
+    // A ring is a step in its own right: the board's breadcrumb reads
+    // "Great Britain · SL4 1QN · 30 minutes by car · Family · Playgrounds".
+    ...(ring ? [{ label: `${level.name} · ${within} minutes by ${MODE_LABEL[mode].toLowerCase()}`, onPress: (cat || sub) ? () => { props.onCat(''); props.onSub(''); } : undefined }] : []),
     ...(lens === 'category' && cat ? [{ label: names.cat ?? cat, onPress: sub ? () => props.onSub('') : undefined }] : []),
     ...(lens === 'category' && sub ? [{ label: names.sub ?? sub }] : []),
   ];
@@ -265,7 +269,8 @@ function Level(props: {
 
   return (
     <AdminPage>
-      <Trail level={level} onUp={props.onUp} onWhere={props.onWhere} extra={deep} />
+      <Trail level={level} onUp={props.onUp} onWhere={props.onWhere} extra={deep}
+             onSelf={() => { props.onCat(''); props.onSub(''); props.onLens('coverage'); }} />
       <Band kicker={kicker} title={title}
             stats={lens === 'demand' ? null : <Five stats={level.stats} ring={ring} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
       <LensRow lens={lens} onLens={props.onLens}
@@ -293,8 +298,10 @@ const kickerOf = (l: PlaceLevel) => {
  * Playgrounds`, so a category and a subcategory are steps you can take back out
  * of rather than something you leave by a footer link (Codex, 17 Sep 2026).
  */
-function Trail({ level, onUp, onWhere, extra = [] }: {
+function Trail({ level, onUp, onWhere, onSelf, extra = [] }: {
   level: PlaceLevel; onUp: () => void; onWhere: (slug: string) => void;
+  /** Back to the level itself, out of whatever is open over it. */
+  onSelf?: () => void;
   /** The steps below the level itself — the ring, the category, the subcategory. */
   extra?: { label: string; onPress?: () => void }[];
 }) {
@@ -312,12 +319,18 @@ function Trail({ level, onUp, onWhere, extra = [] }: {
   }
   const steps = [
     ...level.trail.map((t) => ({ label: t.label, onPress: () => onWhere(t.slug) })),
-    ...(extra.length ? [{ label: level.name, onPress: undefined }] : []),
+    // The level itself is a step you can go back to, not a label: from a
+    // subcategory, tapping the county is how you leave the ladder.
+    ...(extra.length && !extra[0].label.startsWith(level.name) ? [{ label: level.name, onPress: onSelf }] : []),
     ...extra,
   ];
+  // The arrow is one step back — the last crumb before where you are now, and
+  // never a step with nothing behind it (Codex, 17 Sep 2026).
+  const back = [...steps].slice(0, -1).reverse().find((t) => t.onPress)?.onPress
+    ?? (up ? () => onWhere(up.slug) : onUp);
   return (
     <View style={styles.trail}>
-      <Press effect="none" onPress={() => (extra.length ? extra[extra.length - 1].onPress?.() : up ? onWhere(up.slug) : onUp())}
+      <Press effect="none" onPress={back}
              accessibilityRole="button" accessibilityLabel="Back" style={styles.trailBack}>
         <Icon name="back" size={15} strokeWidth={2.2} color={colors.accent} />
       </Press>
@@ -506,9 +519,10 @@ const Waiting = () => <View style={{ paddingVertical: spacing.xl, alignItems: 'f
 // BO2a / BO2n — the level, cut by county, city or postcode district
 // ---------------------------------------------------------------------------
 
-function BreakdownBoard({ q, by, onBy, onWhere, canManage }: {
+function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
   q: any; by: By; onBy: (b: string) => void; canManage: boolean;
   onWhere: (slug: string, opts?: { within?: number | null; by?: string }) => void;
+  onCollectIn: (slug: string) => void;
 }) {
   const [data, setData] = useState<{ rows: PlaceAreaRow[]; all: number; totals: PlaceStats } | null>(null);
   // In the address: the board's own URL carries `&sort=empty.desc`, and a board
@@ -575,7 +589,9 @@ function BreakdownBoard({ q, by, onBy, onWhere, canManage }: {
       ) : <Waiting />}
       <Footer>
         <Act label="Add a country" tone="secondary" disabled onPress={() => {}} />
-        {worst ? <Act label={`Collect in ${worst.name}`} icon="download" disabled={!canManage} onPress={() => onWhere(worst.slug, {})} /> : null}
+        {/* Where the gap is, on the Collect lens — the same door every other
+            board's Collect opens (Codex, 17 Sep 2026). */}
+        {worst ? <Act label={`Collect in ${worst.name}`} icon="download" disabled={!canManage} onPress={() => onCollectIn(worst.slug)} /> : null}
       </Footer>
     </>
   );
@@ -643,8 +659,10 @@ function CoverageBoard({ q, onWhere, onCollect }: {
 // BO2c / BO2o / BO2p — the category ladder, driven by the taxonomy
 // ---------------------------------------------------------------------------
 
-function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, within }: {
+function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, within, onCollect }: {
   q: any; cat: string; onCat: (c: string) => void; onSub: (s: string) => void; canManage: boolean;
+  /** Collect lives inside Places, so every one of these opens its lens. */
+  onCollect: () => void;
   onNames: (n: { cat?: string; sub?: string; subs?: number; needs?: string[] }) => void;
   onWiden: (m: number) => void; within: number | null;
 }) {
@@ -676,13 +694,13 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
       <>
         {data && c
           ? <SubcategoryLadder rows={c.subcategories} onSub={onSub} factLabel={factLabel} canManage={canManage}
-                               inRing={q.within != null} of={c.subcategories.length} />
+                               inRing={q.within != null} of={c.subcategories.length} onCollect={onCollect} />
           : <Waiting />}
         <Footer>
           {q.within != null && (within ?? 30) < 90
             ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
             : null}
-          {c ? <Act label={`Collect ${c.label.toLowerCase()} places here`} icon="download" onPress={() => {}} disabled={!canManage} /> : null}
+          {c ? <Act label={`Collect ${c.label.toLowerCase()} places here`} icon="download" disabled={!canManage} onPress={onCollect} /> : null}
         </Footer>
       </>
     );
@@ -716,7 +734,7 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
     { key: 'go', label: '', width: 78, align: 'right', stops: true,
       cell: (c) => (c.known > 0
         ? <Icon name="more" size={15} strokeWidth={2} color={colors.inkMuted} />
-        : <Act label="Collect" small tone="secondary" disabled={!canManage} onPress={() => {}} />) },
+        : <Act label="Collect" small tone="secondary" disabled={!canManage} onPress={onCollect} />) },
   ];
 
   return (
@@ -746,7 +764,7 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
                 highlight={(c) => c.searches > 0 && c.empty / Math.max(1, c.searches) > 0.2} />
       ) : (
         <SubcategoryLadder rows={shown} onSub={onSub} factLabel={factLabel} canManage={canManage} inRing={false}
-                           of={data.subcategories}
+                           of={data.subcategories} onCollect={onCollect}
                            groupOfCategory={(key) => all.find((x) => x.key === key) ?? null} />
       )}
       <Footer>
@@ -758,7 +776,7 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
         {q.within != null && (within ?? 30) < 90
           ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
           : null}
-        <Act label={q.within != null ? 'Collect in this ring' : 'Collect here'} icon="download" disabled={!canManage} onPress={() => {}} />
+        <Act label={q.within != null ? 'Collect in this ring' : 'Collect here'} icon="download" disabled={!canManage} onPress={onCollect} />
       </Footer>
     </>
   );
@@ -790,9 +808,10 @@ function LabelLadder({ rows }: { rows: PlaceLabel[] }) {
                  empty={<Word muted>No words have been taught yet.</Word>} />;
 }
 
-function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, groupOfCategory }: {
+function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, groupOfCategory, onCollect }: {
   rows: (PlaceCategory['subcategories'][number] & { categoryLabel?: string })[];
   onSub: (s: string) => void; factLabel: Map<string, string>; canManage: boolean; inRing: boolean;
+  onCollect?: () => void;
   /** How many there are at all, so the header can say "9 of 9". */
   of?: number;
   /** The category a group heading belongs to, so the heading carries its figures. */
@@ -815,7 +834,7 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
       : ([
           { key: 'needs', label: 'What it needs', tip: 'whatItNeeds', width: 300, align: 'left', stops: true,
             cell: (s: any) => (s.known === 0
-              ? <Act label="Go and find some" icon="download" small disabled={!canManage} onPress={() => {}} />
+              ? <Act label="Go and find some" icon="download" small disabled={!canManage} onPress={() => onCollect?.()} />
               : s.barSet
                 ? <Text style={styles.needs}>{s.needs.map((f: string) => factLabel.get(f) ?? f).join(', ')}</Text>
                 : <Word muted>not set</Word>) },
@@ -823,7 +842,7 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
     ...(inRing ? ([{ key: 'go', label: '', width: 78, align: 'right', stops: true,
       cell: (s: any) => (s.known > 0
         ? <Icon name="more" size={15} strokeWidth={2} color={colors.inkMuted} />
-        : <Act label="Collect" small tone="secondary" disabled={!canManage} onPress={() => {}} />) }] as Col<any>[]) : []),
+        : <Act label="Collect" small tone="secondary" disabled={!canManage} onPress={() => onCollect?.()} />) }] as Col<any>[]) : []),
   ];
   return (
     <Ladder columns={columns} rows={rows} keyOf={(s) => s.key}
@@ -898,6 +917,7 @@ const tipForSource = (key: string) => ({
 function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string) => void; canManage: boolean }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceQuality>> | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
   const { width } = useViewport();
   useEffect(() => { setData(null); setPicked(new Set()); api.adminPlaceQuality(q).then(setData).catch(() => setData(null)); }, [q]);
   if (!data) return <Waiting />;
@@ -964,12 +984,15 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
         </View>
       </View>
       <Footer left={picked.size ? <Text style={styles.selected}>{`${picked.size} selected`}</Text> : null}>
-        <Act label={picked.size ? `Curate these ${picked.size} · free` : 'Curate them · free'} tone="secondary"
-             disabled={!canManage || !picked.size} onPress={() => {}} />
+        <Act label={busy === 'curate' ? 'Curating…' : picked.size ? `Curate these ${picked.size} · free` : 'Curate them · free'} tone="secondary"
+             disabled={!canManage || !picked.size || busy != null}
+             onPress={() => { setBusy('curate'); api.adminCuratePlaces([...picked]).finally(() => { setBusy(null); setPicked(new Set()); }); }} />
         {/* A button that spends says what it costs, and one with nothing chosen
-            does not claim a price it cannot know. */}
+            does not claim a price it cannot know. Asking Google needs a key the
+            owner has to add, so it says that rather than doing nothing. */}
         <Act label={picked.size ? `Ask Google about these ${picked.size} · ${pounds(Math.round(picked.size * 1.4))}` : 'Ask Google about them'}
-             disabled={!canManage || !picked.size} onPress={() => {}} />
+             disabled={!canManage || !picked.size || busy != null}
+             onPress={() => { setBusy('google'); api.adminAskAboutPlaces([...picked]).finally(() => { setBusy(null); setPicked(new Set()); }); }} />
       </Footer>
     </>
   );
@@ -1128,15 +1151,17 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
   const [sort, setSort] = useQueryState<string>('sort', 'missing', asText);
   const [desc, setDesc] = useQueryState<boolean>('desc', true, { read: (r) => r !== '0', write: (v) => (v ? null : '0') });
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
   const [bar, setBar] = useState<ReadyBars['subcategories'][number] | null>(null);
   useEffect(() => { api.adminReadyBars().then((b) => setBar(b.subcategories.find((x) => x.key === sub) ?? null)).catch(() => setBar(null)); }, [sub]);
   useEffect(() => { onNames({ sub: bar?.label ?? sub, cat: bar?.categoryLabel, needs: bar?.facts.filter((f) => f.required).map((f) => f.fact) }); }, [bar, sub, onNames]);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setData(null);
     api.adminPlaceList({ ...q, cat: cat || undefined, sub, show, q: query || undefined, missing: missing || undefined, sort, desc: desc ? undefined : '0' })
       .then(setData).catch(() => setData(null));
   }, [q, cat, sub, show, query, missing, sort, desc]);
+  useEffect(reload, [reload]);
 
   const counted = data?.counted ?? [];
   const facts: FactDef[] = data?.facts ?? [];
@@ -1237,14 +1262,17 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
         {q.within != null && (within ?? 30) < 90
           ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
           : null}
-        <Act label={picked.size ? `Curate these ${picked.size} · free` : 'Curate them · free'} tone="secondary"
-             disabled={!canManage || !picked.size} onPress={() => {}} />
+        <Act label={busy === 'curate' ? 'Curating…' : picked.size ? `Curate these ${picked.size} · free` : 'Curate them · free'} tone="secondary"
+             disabled={!canManage || !picked.size || busy != null}
+             onPress={() => { setBusy('curate'); api.adminCuratePlaces([...picked]).finally(() => { setBusy(null); setPicked(new Set()); reload(); }); }} />
         {/* Fetching a name is the one thing on this board that spends, and the
             button says what it costs before it is pressed. Only the rows we hold
             no name for cost anything: the rest are already ours to print. */}
-        <Act label={nameless ? `Fetch the ${nameless} name${nameless === 1 ? '' : 's'} · ${pounds(Math.round(nameless * 1.4))}`
-                             : picked.size ? 'Nothing to fetch · we hold every name' : 'Fetch the names'}
-             disabled={!canManage || !nameless} onPress={() => {}} />
+        <Act label={busy === 'google' ? 'Asking…'
+                     : nameless ? `Fetch the ${nameless} name${nameless === 1 ? '' : 's'} · ${pounds(Math.round(nameless * 1.4))}`
+                     : picked.size ? 'Nothing to fetch · we hold every name' : 'Fetch the names'}
+             disabled={!canManage || !nameless || busy != null}
+             onPress={() => { setBusy('google'); api.adminAskAboutPlaces(data?.rows.filter((r) => picked.has(r.ref) && !r.name).map((r) => r.ref) ?? []).finally(() => { setBusy(null); setPicked(new Set()); reload(); }); }} />
       </Footer>
     </>
   );
@@ -1363,6 +1391,7 @@ function PlaceBoard({ refId, canManage, onClose, phone }: { refId: string; canMa
   const [tab, setTab] = useQueryState<PlaceTab>('tab', 'record', asOneOf(PLACE_TABS, 'record'));
   const [place, setPlace] = useState<PlaceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [curating, setCurating] = useState(false);
   const load = useCallback(() => {
     setPlace(null); setError(null);
     api.adminPlace(refId).then(setPlace).catch((e: any) => setError(e?.body?.message ?? 'Nothing indexed under that ref yet.'));
@@ -1421,7 +1450,8 @@ function PlaceBoard({ refId, canManage, onClose, phone }: { refId: string; canMa
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Act label="Curate it · free" tone="secondary" disabled={!canManage} onPress={() => {}} />
+          <Act label={curating ? 'Curating…' : 'Curate it · free'} tone="secondary" disabled={!canManage || curating}
+               onPress={() => { setCurating(true); api.adminCuratePlaces([refId]).finally(() => { setCurating(false); load(); }); }} />
           <Act label="Compare all three · £0.014" disabled={!canManage} onPress={() => setTab('compare')} />
         </View>
       </View>
@@ -1474,7 +1504,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
                 {f.value
                   ? <Text style={styles.fieldValue}>{f.value}</Text>
                   : f.notCounted
-                    ? <Na tip="notRequired" />
+                    ? <Na tip={['Not required', `${kindWord(place.subcategory ?? 'this kind of place')} is not judged on this, so it never counts against the score.`]} />
                     : <Blank />}
               </View>
               <Text style={[styles.fieldMeta, { width: 84 }]}>{f.source ?? '—'}</Text>
@@ -1504,7 +1534,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
               <View style={styles.expand}>
                 <Detail label="Reference" value={f.reference ?? (f.source ? `${f.source}${f.checked ? ` · ${day(f.checked)}` : ''}` : 'we hold none')} />
                 <Detail label="Raw value" value={f.value ? `"${f.value}"` : '—'} />
-                {f.note ? <Detail label="Set by" value={f.note} /> : null}
+                <Detail label="Set by" value={f.note ?? (f.source ? sourceWord(f.source) : 'nothing yet')} />
                 <Detail label="Counts towards ready" value={f.counted == null ? '—' : f.counted ? 'yes' : 'no, recorded only'} />
               </View>
             ) : null}
@@ -1544,8 +1574,8 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
           {/* Curate is the run that looks for a picture we are allowed to keep;
               asking a household is a message and needs a sender key, which is
               the owner's to add — so it says so rather than doing nothing. */}
-          <Act label="Look on Commons · free" small tone="secondary" disabled={!canManage || busy != null}
-               onPress={() => { setBusy('commons'); api.adminRescorePlaces().finally(() => { setBusy(null); onSaved(); }); }} />
+          <Act label={busy === 'commons' ? 'Looking…' : 'Look on Commons · free'} small tone="secondary" disabled={!canManage || busy != null}
+               onPress={() => { setBusy('commons'); api.adminCuratePlaces([place.ref]).finally(() => { setBusy(null); onSaved(); }); }} />
           <Act label="Ask a household · needs a sender" small tone="secondary" disabled onPress={() => {}} />
         </View>
 
@@ -1569,7 +1599,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
               </Press>
               <Act label={which === 'free' ? 'Run them' : `${pounds(Math.round(list.length * 1.4))} · ask`} small tone="secondary"
                    disabled={!canManage || !list.length || busy != null}
-                   onPress={() => { setBusy(which); (which === 'free' ? api.adminRescorePlaces() : api.adminPlaceCompare(place.ref, true)).finally(() => { setBusy(null); onSaved(); }); }} />
+                   onPress={() => { setBusy(which); (which === 'free' ? api.adminCuratePlaces([place.ref]) : api.adminAskAboutPlaces([place.ref])).finally(() => { setBusy(null); onSaved(); }); }} />
             </Explain>
             {openSources === which ? (
               <View style={styles.expand}>
@@ -1617,10 +1647,25 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
   useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
   if (!data) return <Waiting />;
 
+  /**
+   * A value, said rather than serialised.
+   *
+   * An empty object is a blank, not `{}`; an object of facts is its facts in
+   * words; and nothing is ever printed as JSON, which is a database's own
+   * output and not a thing anybody reads (Codex, 17 Sep 2026).
+   */
   const say = (v: unknown): string => {
     if (v == null || v === '') return '';
-    if (Array.isArray(v)) return v.map((x) => (typeof x === 'object' && x ? (x as any).label ?? (x as any).key ?? JSON.stringify(x) : String(x))).join(', ');
-    if (typeof v === 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) {
+      const parts = v.map((x) => (x && typeof x === 'object' ? (x as any).label ?? (x as any).key ?? (x as any).name ?? '' : String(x))).filter(Boolean);
+      return parts.join(', ');
+    }
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    if (typeof v === 'object') {
+      const held = Object.entries(v as Record<string, unknown>).filter(([, x]) => x != null && x !== '' && x !== false);
+      if (!held.length) return '';
+      return held.map(([k, x]) => (x === true ? fieldWord(k).toLowerCase() : `${fieldWord(k).toLowerCase()} ${say(x)}`)).join(', ');
+    }
     return String(v);
   };
   /** Four facts, kept apart: we hold it, we never asked, no such place, off here. */
@@ -1836,6 +1881,7 @@ const weightRows = (w: any) => {
 /** The pictures on one place, with every licence field. */
 function PlacePicturesTab({ place, canManage }: { place: PlaceDetail; canManage: boolean }) {
   const [sel, setSel] = useState(0);
+  const [looking, setLooking] = useState(false);
   const { width } = useViewport();
   const owned = place.pictures;
   if (!owned.length) {
@@ -1843,8 +1889,12 @@ function PlacePicturesTab({ place, canManage }: { place: PlaceDetail; canManage:
       <View style={{ gap: spacing.md }}>
         <Word muted>No picture we own.</Word>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Act label="Look on Commons · free" tone="secondary" disabled={!canManage} onPress={() => {}} />
-          <Act label="Ask a household" tone="secondary" disabled={!canManage} onPress={() => {}} />
+          {/* Curate is the run that looks for a picture we may keep; asking a
+              household is a message, and a message needs a sender key the owner
+              has to add — so it says so rather than doing nothing. */}
+          <Act label={looking ? 'Looking…' : 'Look on Commons · free'} tone="secondary" disabled={!canManage || looking}
+               onPress={() => { setLooking(true); api.adminCuratePlaces([place.ref]).finally(() => setLooking(false)); }} />
+          <Act label="Ask a household · needs a sender" tone="secondary" disabled onPress={() => {}} />
         </View>
       </View>
     );

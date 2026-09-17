@@ -1617,7 +1617,7 @@ export type QueueItem = {
     reason: string | null; message: string | null; told: boolean;
   };
   detail: Record<string, any> | null;
-  picture: { id: string; imageId: string; title: string | null; caption: string | null; licence: string | null; credit_line: string | null; width: number | null; height: number | null; bytes: number | null; fetched_at: string; moderation: string; reward_points: number; creator: string | null } | null;
+  picture: { id: string; imageId: string; sig?: string; exp?: number; title: string | null; caption: string | null; licence: string | null; credit_line: string | null; width: number | null; height: number | null; bytes: number | null; fetched_at: string; moderation: string; reward_points: number; creator: string | null } | null;
   made: { name: string; kept: number; points: number } | null;
   /** Whether anything has looked for a face in it. "not looked for" is an answer. */
   faces: string;
@@ -2422,6 +2422,12 @@ export const api = {
   /** The travel-time matrix: stamp the places with a cell, then work the times out. */
   adminReachState: () => request<{ cells: number; withPlaces: number; places: number; needsRebuild?: string[] }>('/api/admin/reach'),
   adminBuildReach: (mode = 'driving') => post<{ started?: boolean; cells?: number; pairs?: number }>('/api/admin/reach/refresh', { mode }),
+  /** Write these places up ourselves — their own page, the encyclopedias, OSM. Free. */
+  adminCuratePlaces: (refs: string[]) =>
+    post<{ started: number; refused: { ref: string; why: string }[]; spentPence: number }>('/api/admin/place-index/curate', { refs }),
+  /** Ask the paid sources about these places. Says what it cost. */
+  adminAskAboutPlaces: (refs: string[]) =>
+    post<{ asked: number; refused: { ref: string; why: string }[]; spentPence: number }>('/api/admin/place-index/ask', { refs }),
   /** Keeping it current. All three are free and spend nothing. */
   adminReindexPlaces: (wait = false) => post<{ started?: boolean; places?: number; rescored?: number; ms?: number }>('/api/admin/place-index/reindex', { wait }),
   adminRefreshPlaceCounts: () => post<{ n: number; at: string }>('/api/admin/place-index/refresh', {}),

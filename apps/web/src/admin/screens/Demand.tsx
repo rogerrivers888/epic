@@ -182,7 +182,12 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
         ? 'itsScore'
         : ['Its score · now', 'The log did not keep this place\'s score at the time, so this is what it scores today.'] as const) },
     { key: 'did', label: 'What they did', tip: 'whatTheyDid', width: 160, align: 'left',
-      cell: (r) => <Text style={[styles.did, r.strong && styles.strong, !r.strong && { color: colors.inkMuted }]}>{r.did}</Text> },
+      cell: (r) => <Text style={[styles.did, r.strong && styles.strong, !r.strong && { color: colors.inkMuted }]}>{r.did}</Text>,
+      // "Not opened" is a fourth state and it means we cannot tell: they touched
+      // nothing at all, so there is no evidence of how far down the list they got.
+      cellTip: (r) => (r.did === 'Not opened'
+        ? ['Not opened', 'They tapped nothing at all on this search, so there is no evidence of how far down the list they read. Scrolled past and Never reached can only be told apart by something they touched.'] as const
+        : 'whatTheyDid') },
     { key: 'dwell', label: 'Dwell', tip: 'dwell', width: 130, align: 'right',
       cell: (r) => (r.dwellMs ? <Word>{duration(Math.round(r.dwellMs / 1000))}</Word> : <Blank />) },
   ];

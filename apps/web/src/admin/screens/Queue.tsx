@@ -193,7 +193,9 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
         <View style={styles.preview}>
           {item.picture ? (
             <View style={styles.previewImage}>
-              <Image source={{ uri: api.imageUrl(item.picture.imageId, 700) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
+              {/* On the signed link the API stamped: a photograph still in the
+                  queue is not public, and the bare id is a 404 by design. */}
+              <Image source={{ uri: api.imageUrl(item.picture, 700) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
             </View>
           ) : null}
           <View style={styles.previewBody}>
@@ -222,9 +224,13 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
       <View>
         <Kicker>About it</Kicker>
         <Fact label="Made by" value={item.made ? `${item.made.name} · ${item.made.kept} kept before` : it.maker ?? '—'} />
-        <Fact label="Made" value={day(it.madeAt)} />
+        <Fact label={item.picture ? 'Taken' : 'Made'} value={day(it.madeAt)} />
+        {/* One of the five rejection reasons is "somebody's face is in it", so
+            the screen has to say whether anything has looked. Nothing does yet,
+            and saying so is the honest answer rather than "none found". */}
+        {item.picture ? <Fact label="Faces" value={item.faces} /> : null}
         {item.picture ? <Fact label="Size" value={item.picture.width && item.picture.height ? `${item.picture.width} × ${item.picture.height}` : '—'} /> : null}
-        {item.picture ? <Fact label="Licence" value={item.picture.licence ?? 'household’s own'} /> : null}
+        {item.picture ? <Fact label="Licence" value={item.picture.licence ?? 'the household’s own'} /> : null}
         <Fact label="Earned so far" value={item.made ? pounds(item.made.points) : '—'} last />
       </View>
 
@@ -249,7 +255,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
         <View style={styles.next}>
           <Kicker>{`Next · ${nextWord(next.kind)}`}</Kicker>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9, flexWrap: 'wrap' }}>
-            <Text style={styles.nextName}>{next.place ?? next.ref ?? nextWord(next.kind)}</Text>
+            <Text style={styles.nextName}>{next.place ?? next.ref ?? cap(nextWord(next.kind))}</Text>
             <Text style={styles.listNote}>{[next.maker, since(next.madeAt)].filter(Boolean).join(' · ')}</Text>
           </View>
           <View style={styles.actions}>
@@ -262,6 +268,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, next, onApproveN
   );
 }
 
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 const nextWord = (kind: string) => ({ photo: 'a photograph', review: 'a review', rating: 'a rating', note: 'a note', data: 'a disagreement', offer: 'an offer', message: 'a message' } as Record<string, string>)[kind] ?? kind;
 
 // ---------------------------------------------------------------------------
