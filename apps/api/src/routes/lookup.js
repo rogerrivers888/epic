@@ -51,6 +51,7 @@ import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold } from './household.js';
 import { roomToSpend, releaseSpend, tripadvisorRoom } from './placeIndex.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
+import { searchKept } from '../sources/cache.js';
 
 export const router = express.Router();
 
@@ -213,7 +214,7 @@ function itemOfRecord(r, taught, tax) {
  * and the fence. Both endpoints run it; the second is a cache hit on the
  * search and a few milliseconds on our own tables.
  */
-async function runLookup({ q, minutes, mode }, household, { without = [] } = {}) {
+async function runLookup({ q, minutes, mode }, household, { afford = null } = {}) {
   const started = Date.now();
   const place = await whereIs(q, household);
   if (!place) throw Object.assign(new Error(`Nowhere called "${q}" could be found.`), { status: 404, code: 'not_found' });
@@ -225,15 +226,22 @@ async function runLookup({ q, minutes, mode }, household, { without = [] } = {})
   const rented = rentedSources();
   // No deadline: this is somebody looking at what the sources hold, not a
   // screen waiting on a spinner, so OpenStreetMap is waited for properly.
-  const r = await searchCached({
+  const params = {
     center: centre, radiusKm, categories: [], query: '', includeEvents: false,
-    // `without` is what the month's ceiling has refused. The search itself is a
-    // billed call, and it went out even when the claim for the comparison's
-    // calls had been denied — so opening this screen by a link could spend
-    // after the ceiling had said no (Codex, 17 Sep 2026).
-    sources: rented.filter(asked).map((s) => s.key).filter((k) => !without.includes(k)),
-    deadlineMs: null,
-  });
+    sources: rented.filter(asked).map((s) => s.key), deadlineMs: null,
+  };
+  // The ceiling is asked only if the sources are going to be.
+  //
+  // The ring search is a billed call, and it went out even when the month had
+  // said no — but a search already held costs nothing, and refusing *that*
+  // dropped results that were sitting in memory (Codex, 17 Sep 2026). So the
+  // cache is consulted first, and only a fetch has to be afforded.
+  let purse = { without: [], release: async () => {} };
+  if (afford && !searchKept(params)) purse = await afford();
+  const r = await searchCached({
+    ...params,
+    sources: params.sources.filter((k) => !purse.without.includes(k)),
+  }).finally(() => purse.release());
   if (r.fetched) await visitsRepo.recordProviderCall(household.id, r.sourcesQueried.join('+') || 'none', 'admin.lookup', r.units);
 
   // Our own pools are read whole, up to a ceiling no ring in Britain reaches
@@ -363,18 +371,13 @@ async function affordable(n = RING_CALLS) {
 router.get('/', requires('view_library'), async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    // One ring search, which is two billed Google requests. What the month
-    // cannot afford is left out of it.
-    const purse = await affordable();
-    try {
-      const out = await runLookup(settingsOf(req.query), household, { without: purse.without });
-      res.json({
-        ...out,
-        items: out.items.map(({ records, resolved, ...item }) => ({ ...item, recordCount: records.length })),
-        // Said plainly, because a shorter list is otherwise a mystery.
-        notAsked: purse.without,
-      });
-    } finally { await purse.release(); }
+    // One ring search, which is two billed Google requests — asked for only if
+    // the search is not already held.
+    const out = await runLookup(settingsOf(req.query), household, { afford: affordable });
+    res.json({
+      ...out,
+      items: out.items.map(({ records, resolved, ...item }) => ({ ...item, recordCount: records.length })),
+    });
   } catch (err) { next(err); }
 });
 
@@ -388,10 +391,7 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
     const household = await currentHousehold();
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
-    const purse = await affordable();
-    let out;
-    try { out = await runLookup(settingsOf(req.query), household, { without: purse.without }); }
-    finally { await purse.release(); }
+    const out = await runLookup(settingsOf(req.query), household, { afford: affordable });
     const item = out.items.find((i) => i.ref === ref);
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
     const { records, resolved, ...summary } = item;
@@ -473,11 +473,17 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     try {
     // Whatever the month cannot afford is left out of the search as well: the
     // search is itself a billed call, and its cost is inside the same claim.
-    const broke = [
-      ...(googleSource.enabled() && !room.ok ? ['google'] : []),
-      ...(tripadvisorSource.enabled() && !taPurse.ok ? ['tripadvisor'] : []),
-    ];
-    const out = await runLookup(settingsOf(req.query), household, { without: broke });
+    const out = await runLookup(settingsOf(req.query), household, {
+      // The comparison has already claimed its own calls; the ring is claimed
+      // here, and only if it is not already held.
+      afford: async () => ({
+        without: [
+          ...(googleSource.enabled() && !room.ok ? ['google'] : []),
+          ...(tripadvisorSource.enabled() && !taPurse.ok ? ['tripadvisor'] : []),
+        ],
+        release: async () => {},
+      }),
+    });
     const item = out.items.find((i) => i.ref === ref);
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
     const { records, resolved, ...summary } = item;
@@ -716,10 +722,7 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     // The research itself is free — it reads the venue's own page and the open
     // encyclopedias — but finding the place first is a ring search, and that is
     // billed at every rented source (Codex, 17 Sep 2026).
-    const purse = await affordable();
-    let out;
-    try { out = await runLookup(settings, household, { without: purse.without }); }
-    finally { await purse.release(); }
+    const out = await runLookup(settings, household, { afford: affordable });
     const item = out.items.find((i) => i.ref === ref);
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
 

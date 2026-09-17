@@ -210,12 +210,13 @@ export async function rollUp({ before, drop = false } = {}) {
   // already rolled and dropped; *adding* them would double-count a run made
   // twice without dropping. Counting only the rows nobody has counted yet is
   // right in both cases (Codex, 17 Sep 2026).
-  const { rows: [n] } = await query(`
+  const { rows: [counted] } = await query(`
     with unrolled as (
       update searches set rolled_at = now()
        where at < $1 and rolled_at is null
       returning at, area_slug, subject, empty, outcome
     )
+    , folded as (
     insert into search_rollups (month, area_slug, subject, searches, empty, no_click, no_trip, tripped)
     select date_trunc('month', at)::date, coalesce(area_slug, ''), coalesce(subject, ''),
            count(*)::int, count(*) filter (where empty)::int,
@@ -240,13 +241,20 @@ export async function rollUp({ before, drop = false } = {}) {
            no_trip = search_rollups.no_trip + excluded.no_trip,
            tripped = search_rollups.tripped + excluded.tripped,
            rolled_at = now()
-    returning 1`, [before]);
+    returning 1
+    )
+    -- How many searches were folded up, not how many groups they fell into: the
+    -- insert returns a row per (month, area, subject), and reading the first of
+    -- them reported "1" however many thousands had been rolled (Codex, 17 Sep
+    -- 2026).
+    select (select count(*)::int from unrolled) as rolled,
+           (select count(*)::int from folded) as groups`, [before]);
   let dropped = 0;
   if (drop) {
     const { rowCount } = await query('delete from searches where at < $1', [before]);
     dropped = rowCount;
   }
-  return { rolled: n ? 1 : 0, dropped };
+  return { rolled: counted?.rolled ?? 0, groups: counted?.groups ?? 0, dropped };
 }
 
 /** How big the log has got — the trigger to revisit retention is a count, not a date. */

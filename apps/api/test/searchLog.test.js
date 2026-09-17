@@ -95,6 +95,10 @@ test('the aggregate-and-drop path is built, and drops nothing unless it is told 
   await query(`update searches set at = now() - interval '400 days' where id = $1`, [id]);
   const kept = await log.rollUp({ before: new Date(Date.now() - 365 * 86400_000) });
   assert.equal(kept.dropped, 0, 'retention is the owner\'s decision, and the default is to keep');
+  // How many searches were folded up, not how many groups they fell into — it
+  // used to say 1 however many thousands had been rolled (Codex, 17 Sep 2026).
+  assert.equal(kept.rolled, 1);
+  assert.equal(kept.groups, 1);
   assert.ok((await query('select count(*)::int as n from search_rollups')).rows[0].n > 0);
   const dropped = await log.rollUp({ before: new Date(Date.now() - 365 * 86400_000), drop: true });
   assert.equal(dropped.dropped, 1);
