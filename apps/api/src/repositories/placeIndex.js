@@ -400,7 +400,12 @@ export async function buildIfEmpty() {
       // "not set" and not ready, which is a worse answer than no answer — it
       // reads as a finding rather than as a job that has not run.
       await seedBars();
-      return { built: true, ...await reindex() };
+      // The already-locked implementation, not `reindex()`: we are holding the
+      // lock, and asking for it again on another pooled connection answered
+      // "somebody else is rebuilding" — so the first build on an upgraded
+      // installation reported success and did nothing at all (Codex, 17 Sep
+      // 2026).
+      return { built: true, ...await reindexWhileLocked({ onProgress: null }) };
     },
     { built: false, places: 0, why: 'another instance is building it' },
   );

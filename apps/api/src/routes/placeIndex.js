@@ -31,6 +31,7 @@ import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { TRIPADVISOR_CAP } from '../repositories/runs.js';
 import * as collectRuns from '../repositories/collectRuns.js';
+import * as ownedPlaces from '../repositories/ownedPlaces.js';
 import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
@@ -679,7 +680,11 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
             'ours', null, null, true, null, null, pi.derived_by),
       // Our own words for this place, which is what every rule is written
       // against. Ours, and therefore ours to change.
-      field('labels', 'Labels', (labelRows.map((l) => l.label).join(' · ') || null), 'ours', pi.indexed_at, null, true),
+      // Read-only. The words a place was filed by come from the shelving rules,
+      // and the row used to offer an editor whose save the PATCH route refused
+      // — every attempt a 400 (Codex, 17 Sep 2026). The rule is changed on
+      // Categories, and the warning beside the shelf says how far that travels.
+      field('labels', 'Labels', (labelRows.map((l) => l.label).join(' · ') || null), 'ours', pi.indexed_at, null, false),
       field('what_it_is', 'What it is', rec?.summary ?? att?.summary ?? null, rec?.summary_source ?? att?.summary_source ?? null, rec?.curated_at ?? null, 'what_it_is', true, 'write',
             null, rec?.curated_from?.length ? `read from ${rec.curated_from.join(', ')}` : null),
       field('hours', 'Opening hours', hoursVal,
@@ -804,6 +809,18 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
       if (!sub) throw bad('No such subcategory.');
       await query(`update place_index set subcategory = $2, category = $3, derived_by = 'hand' where venue_ref = $1`, [ref, sub.key, sub.category_key]);
     } else if (key === 'outcode') {
+      // Written where a rebuild will read it again.
+      //
+      // `place_areas` is derived: the rebuild deletes it and recreates it from
+      // the attractions, the sweep and our own records — so a correction made
+      // only there was thrown away the next time anybody pressed Rebuild, and
+      // the wrong outcode came back (Codex, 17 Sep 2026). The owned record's
+      // postcode is where a rebuild takes it from, so that is where it goes,
+      // and `place_areas` is updated now so the boards do not wait.
+      await query(
+        `insert into place_records (venue_ref, postcode, updated_at) values ($1,$2, now())
+         on conflict (venue_ref) do update set postcode = excluded.postcode, updated_at = now()`,
+        [ref, value ? String(value).toUpperCase() : null]);
       await query('delete from place_areas pa using localities l where l.slug = pa.area_slug and pa.venue_ref = $1 and l.kind = $2', [ref, 'postcode']);
       if (value) await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', [ref, lower(value)]);
     } else if (key === 'busy') {
@@ -827,10 +844,13 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
     // the rebuild asks does not count it, so marking the place owned here would
     // be undone by the next rebuild (17 Sep 2026, the verification audit). One
     // definition, asked the same way in every place that asks it.
-    if (!['subcategory', 'outcode', 'busy'].includes(key)) {
-      await query(
-        `update place_index set ownership = 'owned' where venue_ref = $1 and ownership <> 'owned'`, [ref]);
-    }
+    //
+    // Through `noteOwned`, which is the one path that claims ownership: it
+    // writes the `own` source row as well, and without that the sources lens
+    // said we had never researched the place and the free-collection window
+    // treated it as never asked (Codex, 17 Sep 2026). The outcode counts, now
+    // that it lands on the record the rebuild reads.
+    if (!['subcategory', 'busy'].includes(key)) await ownedPlaces.noteOwned(ref);
     // Scored *and* counted. The edit can change what a place is judged on, or
     // which area or shelf it is in, and the boards read `area_stats` — so
     // rescoring alone left every headline stale until somebody pressed Refresh

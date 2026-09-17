@@ -474,3 +474,20 @@ test('a search is rolled up exactly once, whatever order the runs are made in', 
   await log.rollUp({ before: new Date(Date.UTC(2025, 6, 1)), drop: true });
   assert.equal(await totals(), 4);
 });
+
+test('the first build on an upgraded installation actually builds', async () => {
+  // `buildIfEmpty` holds the build lock and then called `reindex()`, which asks
+  // for the same advisory lock on another pooled connection — so it answered
+  // "somebody else is rebuilding", and the first build on an upgraded
+  // installation reported success and did nothing at all (Codex, 17 Sep 2026).
+  await query('delete from place_index');
+  const out = await index.buildIfEmpty();
+  assert.equal(out.built, true);
+  assert.ok(out.places > 0, 'and there are places in it');
+  const { rows: [n] } = await query('select count(*)::int as n from place_index');
+  assert.equal(n.n, out.places);
+
+  // And a second call does nothing, because there is nothing to do.
+  const again = await index.buildIfEmpty();
+  assert.equal(again.built, false);
+});
