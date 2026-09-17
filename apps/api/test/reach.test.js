@@ -262,3 +262,19 @@ test('the refresh writes the way back, or a new sector is reachable from nowhere
     assert.equal(back.km, r.km);
   }
 });
+
+test('a centre that has barely moved is not worth rebuilding the country for', () => {
+  // Adding one postcode to a sector that already holds forty shifts its centre
+  // by metres. Invalidating on every stamp would turn each incremental refresh
+  // into a full rebuild; never invalidating leaves every time involving that
+  // centre worked out from where it used to be. The threshold is the judgement,
+  // and it belongs well inside the error already in a centre-to-centre estimate.
+  const cell = { lat: 51.4839, lng: -0.6084, points: 40 };
+  const nudged = recentre(cell, { lat: 51.4845, lng: -0.6090 });
+  assert.ok(kmBetween(cell, nudged) < 0.25, 'one more postcode in a busy sector moved the centre a quarter of a kilometre');
+
+  // A sector known by one place, given a second a long way off, genuinely moves.
+  const thin = { lat: 51.4839, lng: -0.6084, points: 1 };
+  const shifted = recentre(thin, { lat: 51.5400, lng: -0.6500 });
+  assert.ok(kmBetween(thin, shifted) > 0.25, 'a sector known by one place did not move when a second landed 6km away');
+});

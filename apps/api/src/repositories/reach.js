@@ -23,14 +23,22 @@
  * arithmetic over open coordinates.
  */
 
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
-import { travelMode } from '../domain/travel.js';
+import { kmBetween, travelMode } from '../domain/travel.js';
 import { outcodesFor } from '../sources/localities.js';
 import * as providerCalls from './providerCalls.js';
 
 /** ONS's bulk reverse takes 100 points a request. */
 const BULK = 100;
+
+/**
+ * How far a cell's centre has to move before its neighbours are worked out
+ * again. Two hundred and fifty metres is well inside the error already in a
+ * centre-to-centre estimate, and well outside the drift of adding one more
+ * postcode to a sector that already holds forty.
+ */
+const RECENTRE_KM = 0.25;
 
 // ---------------------------------------------------------------------------
 // cells
@@ -59,6 +67,14 @@ export async function noteCell({ sector, lat, lng, source = 'postcodes.io' }) {
   const moved = recentre(rows[0], { lat, lng });
   await query('update geo_cells set lat = $2, lng = $3, points = $4, updated_at = now() where code = $1',
     [code, moved.lat, moved.lng, moved.points]);
+  // Every travel time involving this cell was worked out from where its centre
+  // used to be. A few metres does not matter and invalidating on every stamp
+  // would turn each refresh into a full rebuild, so the marker is thrown away
+  // only when the centre has actually gone somewhere — and the next refresh
+  // then rebuilds the cell in both directions (Codex, 17 Sep 2026).
+  if (kmBetween(rows[0], moved) > RECENTRE_KM) {
+    await query('delete from cell_builds where from_cell = $1', [code]);
+  }
   return code;
 }
 
@@ -256,6 +272,33 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
  */
 export async function refresh({ mode = 'driving', stampLimit = 2000, cellLimit = 2000 } = {}) {
   const canonical = travelMode(mode);
+  // One at a time, estate-wide.
+  //
+  // Two sweeps finishing within a minute of each other would otherwise refresh
+  // at once, and the older one holds a list of cells taken before the newer one
+  // added a sector: it can then delete and rewrite an origin *after* the newer
+  // refresh wrote that sector's edge, removing the edge for good while leaving
+  // both markers looking current — after which every later refresh skips both
+  // cells (Codex, 17 Sep 2026). The lock is held for the life of a transaction
+  // on one connection, and a caller that cannot get it does not queue: the run
+  // already going is about to do the same work.
+  const client = await pool.connect();
+  try {
+    const { rows: [lock] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as got', [LOCK]);
+    if (!lock.got) return { skipped: 'another refresh is running', mode: canonical };
+    try {
+      return await refreshWhileLocked({ canonical, stampLimit, cellLimit });
+    } finally {
+      await client.query('select pg_advisory_unlock(hashtext($1))', [LOCK]).catch(() => null);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+const LOCK = 'epic.reach.refresh';
+
+async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
   const stamped = await stampPlaces({ limit: stampLimit });
 
   const { rows: todo } = await query(
@@ -274,7 +317,11 @@ export async function refresh({ mode = 'driving', stampLimit = 2000, cellLimit =
   let pairs = 0;
   for (const cell of todo) {
     const rows = reachFrom(cell, all, { mode: canonical, capMinutes: HORIZON_MINUTES });
-    await query('delete from reach where from_cell = $1 and mode = $2', [cell.code, canonical]);
+    // Both directions are deleted, not just this cell's own rows. If the cell
+    // has moved, a neighbour it has moved away from would otherwise keep a row
+    // pointing at it for ever — the write below replaces every edge that
+    // touches this cell, so every edge that touches it has to go first.
+    await query('delete from reach where (from_cell = $1 or to_cell = $1) and mode = $2', [cell.code, canonical]);
     if (rows.length) {
       const froms = [], tos = [], mins = [], kms = [];
       for (const r of rows) {

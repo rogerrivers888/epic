@@ -61,6 +61,7 @@ import { APP_URL, canonicalRedirect } from './origins.js';
 import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
+import { refresh as refreshReach } from './repositories/reach.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
 const app = express();
@@ -499,10 +500,20 @@ if (authConfigured()) {
 // Technical Constraints 13.22 says out loud. The delete is one indexed
 // predicate over a small table, so the cost of running it twenty-four times as
 // often is not worth measuring.
+//
+// The matrix's refresh rides along with it. The sweep calls `refresh()` itself
+// when an area finishes, but that is the only thing that calls it, so a run
+// where ONS timed out left those places unstamped until the area's next sweep
+// six months later (Codex, 17 Sep 2026). On the hour it costs two queries when
+// there is nothing to do, and it is what makes "the matrix keeps up on its own"
+// true rather than true-when-a-sweep-succeeds.
 const sweep = async () => {
   await sweepDeadSessions().catch(() => null);
   const plans = await sweepExpiredPlanSessions().catch(() => null);
   if (plans) console.log(`epic-api: swept ${plans} expired planning session(s)`);
+  const reach = await refreshReach({ mode: 'driving' }).catch(() => null);
+  if (reach?.cells) console.log(`epic-api: reach — ${reach.cells} cell(s) worked out, ${reach.pairs} pair(s)`);
+  if (reach?.stamped?.failed) console.log(`epic-api: reach — ${reach.stamped.failed} point(s) ONS could not answer for; will try again on the hour`);
 };
 void sweep();
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
