@@ -112,6 +112,15 @@ const overTheCeiling = (res, want, room) => {
   });
 };
 
+/**
+ * How long a paid answer stands before it is worth buying again.
+ *
+ * The design's own words: "a staleness rule so a place is not re-asked inside
+ * twelve months unless something changed". The same number the Collect board
+ * prints.
+ */
+export const STALE_MONTHS = 12;
+
 /** The ring chooser's three steps, and the three ways of getting there. */
 export const BANDS = [30, 60, 90];
 const MODES = ['drive', 'walk', 'transit'];
@@ -538,7 +547,7 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       `select l.slug, l.name, l.kind from place_areas pa join localities l on l.slug = pa.area_slug where pa.venue_ref = $1 order by l.kind`, [ref]);
     const { rows: pictures } = await query(`
       select ia.id, ia.source, ia.licence, ia.licence_url, ia.creator, ia.credit_line, ia.title,
-             ia.source_page_url, ia.width, ia.height, ia.bytes, ia.fetched_at, ia.may_store, li.role
+             ia.source_page_url, ia.width, ia.height, ia.bytes, ia.fetched_at, ia.may_store, ia.moderation, li.role
         from image_links li join image_assets ia on ia.id = li.image_id
        where (li.subject_type = 'place' and li.subject_id = $1)
           or (li.subject_type = 'attraction' and li.subject_id = $2)
@@ -560,7 +569,10 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       return s;
     };
     const held = {
-      picture: pictures.some((p) => p.may_store),
+      // Approved, not merely keepable — the same condition `HELD_SQL` applies.
+      // Reading only `may_store` here let this tab say a picture was held while
+      // the score on the same page said it was not (Codex, 17 Sep 2026).
+      picture: pictures.some((p) => p.may_store && p.moderation === 'approved'),
       what_it_is: Boolean(rec?.summary ?? att?.summary ?? rec?.curation?.summary),
       hours: Boolean(hoursVal),
       menu: menus[0]?.state === 'read',
@@ -734,6 +746,17 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
         `insert into place_records (venue_ref, count_band, updated_at) values ($1,$2, now())
          on conflict (venue_ref) do update set count_band = excluded.count_band, updated_at = now()`,
         [ref, value]);
+    }
+    // Writing a fact of our own onto a place is what "owned" means.
+    //
+    // Every branch above except the subcategory and the outcode puts a value in
+    // `place_records`, and a place we hold our own research on is not
+    // "identified" any more. Left alone, the rollups still counted it as one
+    // and paid collection went on thinking it was worth a call (Codex, 17 Sep
+    // 2026).
+    if (key !== 'subcategory' && key !== 'outcode') {
+      await query(
+        `update place_index set ownership = 'owned' where venue_ref = $1 and ownership <> 'owned'`, [ref]);
     }
     // Scored *and* counted. The edit can change what a place is judged on, or
     // which area or shelf it is in, and the boards read `area_stats` — so
@@ -1177,8 +1200,13 @@ export async function tripadvisorRoom(want = 0) {
     await client.query(
       `select value from app_settings where key = 'collect.tripadvisor_cap' for update`);
     await client.query('delete from spend_reservations where expires_at < now()');
+    // The units they bill for, not the rows we wrote. One Tripadvisor view is
+    // two billed locations, so counting rows let sixty views spend a hundred
+    // and twenty of an allowance the board said was a hundred and twenty
+    // (Codex, 17 Sep 2026).
     const { rows: [made] } = await client.query(
-      `select count(*)::int as calls from provider_calls
+      `select coalesce(sum(greatest(coalesce((units->>'tripadvisor')::int, 1), 1)), 0)::int as calls
+         from provider_calls
         where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
     const { rows: [held] } = await client.query(
       `select coalesce(sum(calls), 0)::int as calls from spend_reservations where provider = 'tripadvisor'`);
@@ -1297,11 +1325,29 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     // Only a place we hold nothing of our own about is worth a paid call.
     const worthPaying = rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref);
 
+    /**
+     * The staleness rule, enforced rather than printed.
+     *
+     * The design asks for "a staleness rule so a place is not re-asked inside
+     * twelve months unless something changed", and the board says so on the
+     * row — but nothing checked it, so reopening the same scope and pressing
+     * again bought the same answers over (Codex, 17 Sep 2026). A source that
+     * has seen a place inside the window is not asked about it again.
+     */
+    const { rows: lately } = worthPaying.length ? await query(
+      `select source, venue_ref from place_index_sources
+        where venue_ref = any($1) and source = any($2)
+          and last_seen > now() - ($3 || ' months')::interval`,
+      [worthPaying, ['google', 'tripadvisor'], String(STALE_MONTHS)]) : { rows: [] };
+    const askedLately = new Map([['google', new Set()], ['tripadvisor', new Set()]]);
+    for (const r of lately) askedLately.get(r.source)?.add(r.venue_ref);
+    const notLately = (src) => worthPaying.filter((ref) => !askedLately.get(src).has(ref));
+
     // Each paid source is asked on its own terms, and only if it was chosen and
     // is switched on. One shared `paid` list run through Google was how asking
     // Tripadvisor spent Google's money (Codex, 17 Sep 2026).
-    const google = chosen.has('google') && googleSource.enabled() ? worthPaying : [];
-    let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? worthPaying : [];
+    const google = chosen.has('google') && googleSource.enabled() ? notLately('google') : [];
+    let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? notLately('tripadvisor') : [];
     // Tripadvisor's ceiling is counted in calls, not in money, so it is enforced
     // here rather than by `roomToSpend`.
     // Asked without claiming: the run takes its calls a chunk at a time.
@@ -1334,6 +1380,13 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
       started: true, runId: run.id, places: rows.length, sources: [...chosen],
       free: free.length, paid: google.length + tripadvisor.length,
       google: google.length, tripadvisor: tripadvisor.length,
+      // Said out loud, because "we asked about fewer than you chose" is a
+      // figure somebody would otherwise go looking for.
+      fresh: {
+        google: worthPaying.length - notLately('google').length,
+        tripadvisor: worthPaying.length - notLately('tripadvisor').length,
+      },
+      staleMonths: STALE_MONTHS,
       // Said out loud rather than swallowed: the ones the monthly ceiling left out.
       tripadvisorCapped: taCapped, tripadvisorLeft: taLeft,
       spendPence: want, leftPence: room.leftPence,

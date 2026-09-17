@@ -315,3 +315,25 @@ test('every result the household could tap is in the replay, not the first sixty
   assert.equal(rows[0].n, 250, 'the replay is built from these rows and nothing else');
   assert.equal(rows[0].last, 250);
 });
+
+test('a search outside the cells we hold is written down as outside them', async () => {
+  const { household } = await aHousehold(query);
+  // Unbounded, the nearest-cell lookup filed a search in continental Europe
+  // under whichever UK cell was closest, and then under that cell's county — a
+  // demand report nobody could act on and nobody could spot (Codex, 17 Sep
+  // 2026).
+  await query(
+    `insert into geo_cells (code, scheme, label, lat, lng, source, outcode)
+     values ('TESTCELL', 'outcode', 'Test cell', 51.48, -0.61, 'test', 'sl4')
+     on conflict (code) do update set lat = excluded.lat, lng = excluded.lng`);
+  const near = await log.whereOf({ lat: 51.49, lng: -0.62 });
+  assert.equal(near.cell, 'TESTCELL', 'a cell that is actually near is used');
+
+  const far = await log.whereOf({ lat: 45.46, lng: 9.19 });   // Milan
+  assert.equal(far.cell, null, 'and one that is not, is not');
+  assert.equal(far.areaSlug, null);
+
+  // The search is still written down: where it happened is a finding.
+  const id = await log.noteSearch({ householdId: household.id, surface: 'places', ...far, lat: 45.46, lng: 9.19, empty: true });
+  assert.ok(id);
+});

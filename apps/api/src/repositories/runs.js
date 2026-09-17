@@ -82,8 +82,11 @@ export async function list() {
     `select count(*)::int as calls, max(created_at) as last
        from provider_calls where provider = 'google' and purpose like 'admin.lookup.rate%'
         and created_at > now() - interval '90 days'`);
+  // Their billable units, not our rows: one view is two locations (Codex,
+  // 17 Sep 2026).
   const ta = await one(
-    `select count(*)::int as calls, max(created_at) as last
+    `select coalesce(sum(greatest(coalesce((units->>'tripadvisor')::int, 1), 1)), 0)::int as calls,
+            max(created_at) as last
        from provider_calls where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);
   const bench = await one('select count(*)::int as n, max(ran_at) as last from source_bench_runs').catch(() => null);

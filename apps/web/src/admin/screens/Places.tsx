@@ -1401,6 +1401,12 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
                    // Said out loud rather than swallowed: Tripadvisor's ceiling
                    // is counted in calls, so the ones it left out are named.
                    r.tripadvisorCapped ? ` (${r.tripadvisorCapped} left out — ${r.tripadvisorLeft} Tripadvisor calls left this month)` : '',
+                   // The staleness rule, reported rather than only promised:
+                   // asking again inside twelve months buys the same answer
+                   // twice (Codex, 17 Sep 2026).
+                   (r.fresh?.google || r.fresh?.tripadvisor)
+                     ? `. ${Math.max(r.fresh.google, r.fresh.tripadvisor)} asked inside the last ${r.staleMonths} months, so left alone`
+                     : '',
                    '.',
                  ].join('')))
                  .catch((e: any) => setSaid(e?.body?.message ?? 'That could not be started.'))

@@ -2450,6 +2450,8 @@ export const api = {
       /** Per provider, because the two paid sources are not interchangeable:
        *  Google's ceiling is money and Tripadvisor's is a count of calls. */
       google: number; tripadvisor: number; tripadvisorCapped: number; tripadvisorLeft: number;
+      /** Places a source has already seen inside the staleness window, so not asked again. */
+      fresh: { google: number; tripadvisor: number }; staleMonths: number;
       spendPence: number; leftPence: number;
     }>('/api/admin/place-index/collect', p),
   /** Look for a picture we may keep, and put it in the library if there is one. */

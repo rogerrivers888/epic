@@ -179,9 +179,22 @@ export async function whereOf({ lat = null, lng = null, areaSlug = null } = {}) 
     if (l) return { areaSlug: l.kind === 'town' && l.parent_slug ? l.parent_slug : l.slug, cell: null };
   }
   if (lat == null || lng == null) return { areaSlug: null, cell: null };
+  // Nearest, *and near*.
+  //
+  // Unbounded, this filed a search in continental Europe under whichever UK
+  // cell happened to be closest — and then under that cell's county, which is
+  // a demand report nobody could act on and nobody could spot (Codex, 17 Sep
+  // 2026). A cell is about 5 km across, so a degree either way is generous and
+  // still says "not here" for anywhere we do not cover.
+  const NEAR_DEGREES = 1;
   const { rows: [cell] } = await query(
     `select code, outcode from geo_cells
-      order by (lat - $1) * (lat - $1) + (lng - $2) * (lng - $2) limit 1`, [lat, lng]);
+      where lat between $1::double precision - $3::double precision and $1::double precision + $3::double precision
+        and lng between $2::double precision - $3::double precision and $2::double precision + $3::double precision
+      order by (lat - $1::double precision) * (lat - $1::double precision)
+             + (lng - $2::double precision) * (lng - $2::double precision) limit 1`, [lat, lng, NEAR_DEGREES]);
+  // Outside the coverage: the search is written down with where it was and no
+  // area at all, which is the truth and is itself a finding.
   if (!cell) return { areaSlug: null, cell: null };
   // The county an outcode's own places fall in. An outcode does not nest under a
   // county, so this is the commonest answer rather than a claimed one.

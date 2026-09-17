@@ -8,6 +8,7 @@
  */
 
 import { query } from '../db.js';
+import { costOf } from '../domain/providerPrices.js';
 
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
@@ -197,5 +198,10 @@ export async function statusForRefs(householdId, refs) {
 }
 
 export async function recordProviderCall(householdId, provider, purpose, units = null) {
-  await query('insert into provider_calls (household_id, provider, purpose, units) values ($1, $2, $3, $4)', [householdId, provider, purpose, units]);
+  // The money too, not only the count. The monthly ceiling is a sum of
+  // `estimated_cost_usd`, so a row that carried a meter and no price was a call
+  // the limit could not see (Codex, 17 Sep 2026).
+  await query(
+    'insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, $2, $3, $4, $5)',
+    [householdId, provider, purpose, units, costOf(units) || null]);
 }
