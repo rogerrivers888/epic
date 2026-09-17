@@ -375,3 +375,29 @@ test('a rejected offer’s introduction is not readable by its own address', asy
   // The paths that have to see one to act on it still can.
   assert.ok(await openTo.matchById(match.id, null, { withEnded: true }));
 });
+
+test('the queue’s limit counts decisions, so one place’s photographs cannot fill it', async () => {
+  const { household } = await aHousehold(query);
+  const ref = 'osm:node/many-photographs';
+  for (let n = 0; n < 6; n += 1) {
+    const { rows: [img] } = await query(
+      `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+       values ('household', $1, true, 'pending', $2, 'household') returning *`,
+      [`many-${n}-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+    await query(
+      `insert into image_links (image_id, subject_type, subject_id, role, position) values ($1,'place',$2,'gallery',$3)`,
+      [img.id, ref, n]);
+  }
+  await queue.sync();
+
+  // Cutting the rows before grouping meant a place with more waiting
+  // photographs than the limit showed a partial batch — approving it left the
+  // rest to come back — and pushed every review and message off the end
+  // (Codex, 17 Sep 2026). A batch is one decision however many are in it.
+  const rows = queue.group(await queue.list({}), { limit: 3 });
+  assert.equal(rows.length, 3, 'three decisions');
+  const batch = rows.find((r) => r.venue_ref === ref);
+  if (batch) assert.equal(batch.of, 6, 'and the whole batch is in the one it belongs to');
+  const whole = queue.group(await queue.list({ kind: 'photo' }), { limit: 1 });
+  assert.equal(whole[0].of, 6, 'never a partial batch');
+});

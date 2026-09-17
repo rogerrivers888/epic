@@ -8,7 +8,7 @@ import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { heldSearch, holdConversion, noteSearchEvent } from '../search';
+import { heldSearch, holdConversion, noteSearchEvent, searchIdOf } from '../search';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
@@ -635,7 +635,16 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // Opening a place is the first of the three things Demand counts. Reported
   // once each time the address names a new one, so scrolling past costs nothing
   // and a back-and-forth is not counted twice.
-  useEffect(() => { if (openedRef) noteSearchEvent('inspire', 'open', openedRef); }, [openedRef]);
+  //
+  // And only once the search it belongs to is known. Opening the screen
+  // straight at `?place=…` ran this before the pool had come back, so the open
+  // was dropped — or counted against whatever Inspire search was still in
+  // memory — and never retried, which reads as "clicked nothing" on a board
+  // built to tell that apart from everything else (Codex, 17 Sep 2026).
+  const held = searchIdOf('inspire');
+  useEffect(() => {
+    if (openedRef && held) noteSearchEvent('inspire', 'open', openedRef);
+  }, [openedRef, held]);
 
   /**
    * The heart in the drawer: keep this place, or take it back out. Keeping it

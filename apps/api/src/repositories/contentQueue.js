@@ -252,7 +252,7 @@ export async function counts({ areaSlug = null, state: forState = 'waiting' } = 
 }
 
 /** The queue itself. Reported first, because it is on a different clock. */
-export async function list({ kind = null, state = 'waiting', areaSlug = null, limit = 120 } = {}) {
+export async function list({ kind = null, state = 'waiting', areaSlug = null } = {}) {
   const { rows } = await query(
     `select q.*,
             -- The first words of the thing, so the row and the "next" block can
@@ -275,8 +275,7 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null, li
       where ($1::text is null or q.kind = $1)
         and ($2::text = 'reported' and q.reported or $2::text <> 'reported' and q.state = $2)
         and ($3::text is null or q.area_slug = $3)
-      order by q.reported desc, q.made_at asc
-      limit $4`, [kind, state, areaSlug, limit]);
+      order by q.reported desc, q.made_at asc`, [kind, state, areaSlug]);
   return rows;
 }
 
@@ -291,7 +290,7 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null, li
  * Only photographs group, and only by place. A person's review is never folded
  * into a count of reviews, because it is theirs and it is read on its own.
  */
-export function group(rows = []) {
+export function group(rows = [], { limit = 120 } = {}) {
   const out = [];
   const batchesAt = new Map();
   for (const r of rows) {
@@ -311,7 +310,14 @@ export function group(rows = []) {
     // The oldest is what the row's age means, and the list is oldest first.
     if (new Date(r.made_at) < new Date(head.made_at)) head.made_at = r.made_at;
   }
-  return out.map((r) => (r.batch
+  // The limit is in *decisions*, applied after the grouping.
+  //
+  // Cutting the rows first meant a place with more than a hundred and twenty
+  // waiting photographs showed a partial batch — approving it left the rest to
+  // come back as another decision — and pushed every review and message off the
+  // end (Codex, 17 Sep 2026). A batch is one decision however many photographs
+  // are in it, so that is what the limit counts.
+  return out.slice(0, limit).map((r) => (r.batch
     ? { ...r, batch: r.batch, of: r.batch.length, makers: [...r.makers] }
     : { ...r, batch: [r.id], of: 1, makers: [r.maker_label].filter(Boolean) }));
 }
