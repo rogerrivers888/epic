@@ -20,12 +20,12 @@ export const STRANDED_AFTER_MS = 10 * 60_000;
 /** How many places one chunk asks about before the row is written again. */
 export const CHUNK = 10;
 
-export async function start({ whereLabel, scope, sources, todo, startedBy = null }) {
+export async function start({ whereLabel, scope, sources, todo, householdId = null, startedBy = null }) {
   const { rows } = await query(
-    `insert into collect_runs (where_label, scope, sources, todo, done, started_by)
-     values ($1,$2,$3,$4,$5,$6) returning *`,
+    `insert into collect_runs (where_label, scope, sources, todo, done, household_id, started_by)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
     [whereLabel ?? null, JSON.stringify(scope ?? {}), JSON.stringify(sources ?? []),
-      JSON.stringify(todo ?? {}), JSON.stringify({ free: 0, google: 0, tripadvisor: 0 }), startedBy]);
+      JSON.stringify(todo ?? {}), JSON.stringify({ free: 0, google: 0, tripadvisor: 0 }), householdId, startedBy]);
   return rows[0];
 }
 

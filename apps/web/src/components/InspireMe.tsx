@@ -301,6 +301,12 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
         try { s = await api.inspireStatus(sessionId); } catch { /* the next poll asks again */ }
         if (!s) { if (Date.now() - startedAt > 100_000) throw new Error(`Epic has not answered for over a minute and a half — quote run ${started.ref} if it keeps happening.`); continue; }
         if (s.ideas) setIdeas(s.ideas);
+        // Show me 5 more is a new ask, with a search id of its own. Registering
+        // only the first loop's id logged every click on the new ideas against
+        // the old search, and counted the new one as having been clicked on
+        // nothing — one of the three demand faults, invented (Codex, 17 Sep
+        // 2026).
+        heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id));
         setStage(s.stage); setPlaced(s.placed ?? 0);
         if (s.error) throw new Error(`${s.error} (run ${started.ref})`);
         if (!s.running) { setFoundAt(new Date().toISOString()); break; }

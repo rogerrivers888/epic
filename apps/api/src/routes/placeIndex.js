@@ -19,7 +19,7 @@
 
 import express from 'express';
 import { can, requires } from '../access.js';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import * as reach from '../repositories/reach.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
@@ -55,26 +55,62 @@ const money = (pence) => `£${(Math.max(0, pence) / 100).toFixed(2)}`;
  * path asks this first, and a run that would cross it is refused with what is
  * left rather than half-done.
  */
-async function roomToSpend(pence) {
-  const { rows: [set] } = await query("select value from app_settings where key = 'collect.ceiling_pence'");
-  const ceilingPence = Number(set?.value ?? 25000);
-  const { rows: [spend] } = await query(
-    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
-       from provider_calls where created_at > date_trunc('month', now())`);
-  // The ledger is in dollars; the ceiling is the owner's, in pounds.
-  const spentPence = Math.round(Number(spend?.usd ?? 0) * 100 * 0.79);
-  const left = ceilingPence - spentPence;
-  // A run that spends nothing is never over a ceiling — the ceiling is about
-  // money, and researching a place from its own page costs none. Only a call
-  // that would actually go out is measured against it.
-  return { ok: pence <= 0 || pence <= left, ceilingPence, spentPence, leftPence: Math.max(0, left) };
+export async function roomToSpend(pence, { holder = null, reserve = true } = {}) {
+  return withTransaction(async (client) => {
+    // The lock is on the setting the ceiling is written in, taken before it is
+    // read. Two runs asking at once are then serialised on it, so the second
+    // one sees the first one's claim rather than the same stale total (Codex,
+    // 17 Sep 2026).
+    // The row is made first if it is not there. `for update` over no rows locks
+    // nothing at all, so without this the very first two callers on a fresh
+    // installation would serialise on nothing and both walk through.
+    await client.query(
+      `insert into app_settings (key, value) values ('collect.ceiling_pence', '25000'::jsonb)
+       on conflict (key) do nothing`);
+    const { rows: [set] } = await client.query(
+      `select value from app_settings where key = 'collect.ceiling_pence' for update`);
+    const ceilingPence = Number(set?.value ?? 25000);
+    // Reservations that outlived the run that took them. By now whatever they
+    // covered is in `provider_calls`, and counting both would refuse spending
+    // that is genuinely there.
+    await client.query('delete from spend_reservations where expires_at < now()');
+    const { rows: [spend] } = await client.query(
+      `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
+         from provider_calls where created_at > date_trunc('month', now())`);
+    const { rows: [held] } = await client.query(
+      'select coalesce(sum(pence), 0)::int as pence from spend_reservations');
+    // The ledger is in dollars; the ceiling is the owner's, in pounds.
+    const spentPence = Math.round(Number(spend?.usd ?? 0) * 100 * 0.79);
+    const claimed = held.pence;
+    const left = ceilingPence - spentPence - claimed;
+    // A run that spends nothing is never over a ceiling — the ceiling is about
+    // money, and researching a place from its own page costs none. Only a call
+    // that would actually go out is measured against it.
+    const ok = pence <= 0 || pence <= left;
+    let reservation = null;
+    if (ok && reserve && pence > 0) {
+      const { rows: [r] } = await client.query(
+        'insert into spend_reservations (pence, holder) values ($1,$2) returning id', [pence, holder]);
+      reservation = r.id;
+    }
+    return { ok, reservation, ceilingPence, spentPence, claimedPence: claimed, leftPence: Math.max(0, left) };
+  });
 }
 
-const overTheCeiling = (res, want, room) => res.status(422).json({
-  error: 'over_the_ceiling',
-  message: `That would spend ${money(want)} and there is ${money(room.leftPence)} left of this month's ${money(room.ceilingPence)}.`,
-  ...room,
-});
+/** Give back what a run did not spend, the moment it is known. */
+export const releaseSpend = (id) =>
+  (id ? query('delete from spend_reservations where id = $1', [id]).catch(() => null) : Promise.resolve());
+
+const overTheCeiling = (res, want, room) => {
+  // `reservation` is bookkeeping, not an answer: nothing was claimed, because
+  // nothing was allowed.
+  const { reservation, ok, ...said } = room;
+  return res.status(422).json({
+    error: 'over_the_ceiling',
+    message: `That would spend ${money(want)} and there is ${money(room.leftPence)} left of this month's ${money(room.ceilingPence)}.`,
+    ...said,
+  });
+};
 
 /** The ring chooser's three steps, and the three ways of getting there. */
 export const BANDS = [30, 60, 90];
@@ -475,6 +511,13 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
 
     const name = (await index.namesFor([ref])).get(ref) ?? { name: null, from: null };
     const { rows: [rec] } = await query('select * from place_records where venue_ref = $1', [ref]);
+    // A harvested attraction's hours live on its detail row, not on an owned
+    // record. `HELD_SQL` counts those, so a place could be `ready` in the index
+    // and say "hours missing" on its own tab (Codex, 17 Sep 2026).
+    const { rows: [atlasDetail] } = await query(
+      `select d.visit->>'openingHours' as hours
+         from attractions a join attraction_details d on d.attraction_id = a.id
+        where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'rejected' limit 1`, [ref]);
     const { rows: [att] } = await query(
       `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'rejected' limit 1`, [ref]);
     const { rows: [sweep] } = await query('select * from scout_places where venue_ref = $1 order by last_seen desc limit 1', [ref]);
@@ -496,7 +539,7 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
     const subLabel = new Map((await query('select key, label from shelf_subcategories')).rows.map((r) => [r.key, r.label]));
 
     const factOf = (field) => facts.find((f) => f.field === field) ?? null;
-    const hoursVal = rec?.opening_hours ?? null;
+    const hoursVal = rec?.opening_hours ?? atlasDetail?.hours ?? null;
     // A source is a word, not a URL and not a sentence: the sentence belongs in
     // the row when it is opened, and a host is what the column has room for.
     const asWord = (v) => {
@@ -562,7 +605,9 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       field('labels', 'Labels', (labelRows.map((l) => l.label).join(' · ') || null), 'ours', pi.indexed_at, null, true),
       field('what_it_is', 'What it is', rec?.summary ?? att?.summary ?? null, rec?.summary_source ?? att?.summary_source ?? null, rec?.curated_at ?? null, 'what_it_is', true, 'write',
             null, rec?.curated_from?.length ? `read from ${rec.curated_from.join(', ')}` : null),
-      field('hours', 'Opening hours', hoursVal, factOf('opening_hours')?.source ?? (hoursVal ? 'ours' : null), factOf('opening_hours')?.fetched_at ?? null, 'hours', true, 'ask',
+      field('hours', 'Opening hours', hoursVal,
+            factOf('opening_hours')?.source ?? (rec?.opening_hours ? 'ours' : atlasDetail?.hours ? 'atlas' : null),
+            factOf('opening_hours')?.fetched_at ?? null, 'hours', true, 'ask',
             null, factOf('opening_hours') ? `place_facts ${ref} · opening_hours · ${factOf('opening_hours').source}` : null),
       field('prices', 'Prices', rec?.price_range ?? null, rec?.price_range ? 'ours' : factOf('price_range')?.source ?? null, factOf('price_range')?.fetched_at ?? null, 'prices', true),
       field('step_free', 'Step-free', rec?.accessibility?.stepFree == null ? null : (rec.accessibility.stepFree ? 'yes' : 'no'), 'ours', rec?.updated_at ?? null, 'step_free', true),
@@ -672,9 +717,19 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
       await query('delete from place_areas pa using localities l where l.slug = pa.area_slug and pa.venue_ref = $1 and l.kind = $2', [ref, 'postcode']);
       if (value) await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', [ref, lower(value)]);
     } else if (key === 'busy') {
-      await query(`update place_records set count_band = $2 where venue_ref = $1`, [ref, value]);
+      // A sweep-only place has no owned record yet, and an UPDATE against no row
+      // reported success while changing nothing (Codex, 17 Sep 2026).
+      await query(
+        `insert into place_records (venue_ref, count_band, updated_at) values ($1,$2, now())
+         on conflict (venue_ref) do update set count_band = excluded.count_band, updated_at = now()`,
+        [ref, value]);
     }
-    await index.rescore();
+    // Scored *and* counted. The edit can change what a place is judged on, or
+    // which area or shelf it is in, and the boards read `area_stats` — so
+    // rescoring alone left every headline stale until somebody pressed Refresh
+    // (Codex, 17 Sep 2026).
+    await index.rescore({ refs: [ref] });
+    await index.refreshStats();
     await writeAudit({ ...actor(req), action: 'place.edit', subjectType: 'place', subjectId: ref, subjectLabel: key, before: { [key]: before?.[COLUMN[key]] ?? null }, after: { [key]: value } });
     res.json({ ok: true, ref, field: key });
   } catch (err) { next(err); }
@@ -738,6 +793,13 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     // Ours: the owned record first, because it is the one researched from the
     // open web; the atlas or the sweep if that is all we hold.
     const { rows: [rec] } = await query('select * from place_records where venue_ref = $1', [ref]);
+    // A harvested attraction's hours live on its detail row, not on an owned
+    // record. `HELD_SQL` counts those, so a place could be `ready` in the index
+    // and say "hours missing" on its own tab (Codex, 17 Sep 2026).
+    const { rows: [atlasDetail] } = await query(
+      `select d.visit->>'openingHours' as hours
+         from attractions a join attraction_details d on d.attraction_id = a.id
+        where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'rejected' limit 1`, [ref]);
     const { rows: [att] } = await query(
       `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'rejected' limit 1`, [ref]);
     const { rows: [sweep] } = await query('select * from scout_places where venue_ref = $1 order by last_seen desc limit 1', [ref]);
@@ -1106,12 +1168,18 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     // Before a penny of it: what one Place Details call costs, times the number
     // of them, against what is left of this month's ceiling.
     const want = Math.round(refs.length * 1.4);
-    const room = await roomToSpend(want);
+    const room = await roomToSpend(want, { holder: 'ask' });
     if (!room.ok) return overTheCeiling(res, want, room);
-    const household = await currentHousehold();
-    const out = await askThese(refs, household.id);
-    if (out.asked) { await index.rescore(); await index.refreshStats(); }
-    res.json({ ...out, spentPence: Math.round(out.asked * 1.4) });
+    try {
+      const household = await currentHousehold();
+      const out = await askThese(refs, household.id);
+      if (out.asked) { await index.rescore(); await index.refreshStats(); }
+      res.json({ ...out, spentPence: Math.round(out.asked * 1.4) });
+    } finally {
+      // The claim is let go whether it went well or not: by now every call it
+      // covered is in `provider_calls`, which is what the next one counts.
+      await releaseSpend(room.reservation);
+    }
   } catch (err) { next(err); }
 });
 
@@ -1199,7 +1267,10 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
     tripadvisor = tripadvisor.slice(0, taLeft);
 
     const want = Math.round(google.length * 1.4);
-    const room = await roomToSpend(want);
+    // Checked here without claiming it: the run takes its money a chunk at a
+    // time, so holding the whole list's worth for the length of the run would
+    // lock out everything else for as long as it took.
+    const room = await roomToSpend(want, { reserve: false });
     if (!room.ok) return overTheCeiling(res, want, room);
 
     const household = await currentHousehold();
@@ -1210,6 +1281,10 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
       scope: { kind: scope.kind, slug: scope.area?.slug ?? null, cat: req.body?.cat ?? null, sub: req.body?.sub ?? null },
       sources: [...chosen],
       todo: { free, google, tripadvisor },
+      // Whose run it is, on the row: a resume happens outside any request, and
+      // `currentHousehold()` there answers with the founding household — which
+      // would attribute somebody else's calls to them (Codex, 17 Sep 2026).
+      householdId: household.id,
       startedBy: req.account?.email ?? null,
     });
     res.json({
@@ -1249,10 +1324,12 @@ async function work(runId, householdId) {
       } else if (source === 'google') {
         // The ceiling is asked again per chunk, not once at the start: a run
         // that outlives a deploy must not outlive the month's budget either.
-        const room = await roomToSpend(Math.round(batch.length * 1.4));
+        const room = await roomToSpend(Math.round(batch.length * 1.4), { holder: `collect:${runId}` });
         if (!room.ok) { await collectRuns.advance(runId, 'google', batch, { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
-        const out = await askThese(batch, householdId);
-        await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: Math.round(out.asked * 1.4) });
+        try {
+          const out = await askThese(batch, householdId);
+          await collectRuns.advance(runId, 'google', batch, { done: out.asked, refused: out.refused, spentPence: Math.round(out.asked * 1.4) });
+        } finally { await releaseSpend(room.reservation); }
       } else {
         const left = await tripadvisorRoom();
         const may = batch.slice(0, left);
@@ -1282,9 +1359,17 @@ async function work(runId, householdId) {
 export async function resumeCollections() {
   const waiting = await collectRuns.stranded();
   if (!waiting.length) return { resumed: 0 };
-  const household = await currentHousehold();
-  for (const run of waiting) void work(run.id, household.id);
-  return { resumed: waiting.length };
+  let resumed = 0;
+  for (const run of waiting) {
+    // No household on the row means the run predates this column, and guessing
+    // one would put its calls on somebody's account. It is failed instead, so
+    // the board asks for it to be started again rather than quietly finishing
+    // it wrongly.
+    if (!run.household_id) { await collectRuns.fail(run.id, 'it was interrupted and we cannot tell whose run it was'); continue; }
+    void work(run.id, run.household_id);
+    resumed += 1;
+  }
+  return { resumed };
 }
 
 

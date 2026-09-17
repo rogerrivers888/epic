@@ -454,7 +454,10 @@ export async function ratingOf(hostId) {
   const { rows } = await query(
     `select count(*)::int as count, avg(stars)::numeric(3,2) as rating,
             (select coalesce(sum(heads), 0)::int from experience_bookings b where b.host_id = $1 and b.state = 'attended') as guests
-       from host_reviews where host_id = $1 and side = 'guest' and publish_on <= current_date`,
+       -- Hidden too: a moderated review disappearing from the list while
+       -- still moving the rating and the count is the same review, half taken
+       -- down (Codex, 17 Sep 2026).
+       from host_reviews where host_id = $1 and side = 'guest' and publish_on <= current_date and not hidden`,
     [hostId],
   );
   return { count: rows[0].count, rating: rows[0].rating == null ? null : Number(rows[0].rating), guests: rows[0].guests };

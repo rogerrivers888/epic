@@ -112,8 +112,13 @@ const HELD_SQL = `
          x.picture, x.what_it_is, x.hours, x.menu, x.prices, x.step_free, x.website, x.oldest_fact
     from (
       select pi.venue_ref,
+             -- Approved, not merely keepable. may_store is a licence fact and
+             -- stays true on a household photograph that is still waiting, and
+             -- on one a moderator has rejected — so the bar counted pictures
+             -- nobody will ever be shown (Codex, 17 Sep 2026). The same
+             -- condition every read that publishes one applies.
              (exists (select 1 from image_links li join image_assets ia on ia.id = li.image_id
-                       where ia.may_store
+                       where ia.may_store and ia.moderation = 'approved'
                          and ((li.subject_type = 'place' and li.subject_id = pi.venue_ref)
                            or (li.subject_type = 'attraction' and li.subject_id = a.id::text)))) as picture,
              (coalesce(r.summary, a.summary, r.curation->>'summary') is not null)                 as what_it_is,
@@ -327,6 +332,10 @@ export async function buildIfEmpty() {
            (select count(*) from place_records)   +
            (select count(*) from household_places) as n`);
   if (!Number(any.n)) return { built: false, places: 0 };
+  // The bars first. Scoring against an empty `ready_bars` marks every place
+  // "not set" and not ready, which is a worse answer than no answer — it reads
+  // as a finding rather than as a job that has not run (Codex, 17 Sep 2026).
+  await seedBars();
   return { built: true, ...await reindex() };
 }
 
@@ -347,6 +356,9 @@ export async function buildIfEmpty() {
  * safe to run when there is nothing to do: one indexed read that finds nothing.
  */
 export async function settleNew({ limit = 5000 } = {}) {
+  // Same reason as `buildIfEmpty`: a first sweep on a fresh installation must
+  // not score its places against a bar nobody has set.
+  await seedBars();
   const { rows: waiting } = await query(
     'select venue_ref from place_index where placed_at is null limit $1', [limit]);
   if (!waiting.length) return { settled: 0 };

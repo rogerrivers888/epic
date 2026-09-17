@@ -296,6 +296,8 @@ export async function approve(ids, who) {
   for (const r of rows) {
     if (r.subject_type === 'image') {
       await query(`update image_assets set moderation = 'approved', moderated_by = $2, moderated_at = now() where id = $1::uuid`, [r.subject_id, who ?? null]);
+      const { rows: [q] } = await query('select venue_ref from content_queue where id = $1', [r.id]);
+      if (q?.venue_ref) await rescorePlace(q.venue_ref);
       continue;
     }
     if (r.subject_type === 'open_entry') {
@@ -374,12 +376,29 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   // moment its hold expired, because nothing that reads it knows the queue
   // exists (Codex, 17 Sep 2026). Each kind is suppressed where it lives, in the
   // way that table already understands.
-  if (out) await suppress(out.subject_type, out.subject_id, { reason, who });
+  if (out) {
+    await suppress(out.subject_type, out.subject_id, { reason, who });
+    // A picture is one of the six facts the ready bar is judged on, and only an
+    // approved one counts — so a decision about a photograph changes the place's
+    // score (Codex, 17 Sep 2026).
+    if (out.subject_type === 'image' && out.venue_ref) await rescorePlace(out.venue_ref);
+  }
   await query(
     `insert into rejection_counts (kind, reason, used, last_at) values ($1,$2,1, now())
      on conflict (kind, reason) do update set used = rejection_counts.used + 1, last_at = now()`,
     [q.kind, reason]);
   return out;
+}
+
+/**
+ * The place's score again, because a picture is one of the facts it is judged on.
+ *
+ * Imported lazily: the index reads the queue's tables and the queue now reads
+ * the index's, and a cycle at module load is a worse problem than a promise.
+ */
+async function rescorePlace(venueRef) {
+  const index = await import('./placeIndex.js');
+  await index.rescore({ refs: [venueRef] }).catch(() => null);
 }
 
 /**
