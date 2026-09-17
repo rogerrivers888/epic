@@ -45,7 +45,7 @@ import { suggestFor, sureDecisionFor, sureMappingFor, WHY_UNSURE } from '../doma
 import { examplesOfType } from '../sources/google.js';
 import { currentHousehold } from './household.js';
 import * as visitsRepo from '../repositories/visits.js';
-import { SHELF_FLOOR, shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
+import { SHELF_FLOOR, ourLabelsOf, shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
 
@@ -537,7 +537,20 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
     // a held place carries `wikidata:` and `atlas:` words and no provider's.
     // Answering "nothing would move" to that reads as a rule that does nothing,
     // when the truth is that the rule is about places we do not hold yet.
-    const ns = String(add).split(':', 1)[0];
+    //
+    // Asked of the rule's *scope*, not the label's namespace. One of our own
+    // words is never on a place as `epic:something` -- it is derived from the
+    // place's other words through the vocabulary and held bare -- so looking
+    // for the prefix said no place carries an Epic word, of every place there
+    // is (Codex, 17 Sep 2026).
+    const couldSpeakTo = (a, words) => {
+      if (scope === 'ours') return ourLabelsOf(words, tax.vocab).length > 0;
+      if (scope === 'kind') return (a.kinds ?? []).length > 0;
+      if (scope === 'category') return Boolean(a.category);
+      if (scope === 'place') return true;
+      const ns = String(add).split(':', 1)[0];
+      return words.some((w) => String(w).startsWith(`${ns}:`));
+    };
     let carriers = 0;
 
     const moving = [];
@@ -547,7 +560,7 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
       if (!ref) continue;
       const at = { ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] };
       const words = labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] });
-      if (words.some((w) => String(w).startsWith(`${ns}:`))) carriers += 1;
+      if (couldSpeakTo(a, words)) carriers += 1;
       const was = shelvesForAtlas(at, rules, tax.vocab).subcategory;
       if (was === subcategory) { already += 1; continue; }
       const now = shelvesForAtlas(at, after, tax.vocab).subcategory;
