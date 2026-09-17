@@ -68,12 +68,20 @@ export async function noteCell({ sector, lat, lng, source = 'postcodes.io' }) {
   await query('update geo_cells set lat = $2, lng = $3, points = $4, updated_at = now() where code = $1',
     [code, moved.lat, moved.lng, moved.points]);
   // Every travel time involving this cell was worked out from where its centre
-  // used to be. A few metres does not matter and invalidating on every stamp
-  // would turn each refresh into a full rebuild, so the marker is thrown away
-  // only when the centre has actually gone somewhere — and the next refresh
-  // then rebuilds the cell in both directions (Codex, 17 Sep 2026).
-  if (kmBetween(rows[0], moved) > RECENTRE_KM) {
-    await query('delete from cell_builds where from_cell = $1', [code]);
+  // was at the time. The comparison is against **that** centre, not against the
+  // last nudge: forty stamps moving the mean twenty metres each never trip a
+  // step threshold, and the cell ends up the better part of a kilometre from
+  // where its rows were calculated with a marker still reading as current
+  // (Codex, 17 Sep 2026). A few metres does not matter, and invalidating on
+  // every stamp would turn each refresh into a full rebuild.
+  const { rows: markers } = await query(
+    'select mode, built_lat, built_lng from cell_builds where from_cell = $1', [code],
+  );
+  const drifted = markers.filter((m) => m.built_lat == null
+    || kmBetween({ lat: m.built_lat, lng: m.built_lng }, moved) > RECENTRE_KM);
+  if (drifted.length) {
+    await query('delete from cell_builds where from_cell = $1 and mode = any($2::text[])',
+      [code, drifted.map((m) => m.mode)]);
   }
   return code;
 }
@@ -234,12 +242,13 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
       // completeness is a fact about each origin, not something that can be
       // read back out of the times it happens to hold.
       await query(
-        `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, at)
-         values ($1, $2, $3, $4, 'estimate', now())
+        `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
+         values ($1, $2, $3, $4, 'estimate', $5, $6, now())
          on conflict (from_cell, mode) do update
            set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs,
-               method = excluded.method, at = excluded.at`,
-        [cells[i].code, canonical, capMinutes, rows.length],
+               method = excluded.method, built_lat = excluded.built_lat,
+               built_lng = excluded.built_lng, at = excluded.at`,
+        [cells[i].code, canonical, capMinutes, rows.length, cells[i].lat, cells[i].lng],
       );
       pairs += rows.length;
       if (onProgress && i % 100 === 0) { try { onProgress({ done: i + 1, of: cells.length, pairs }); } catch { /* not the build */ } }
@@ -337,11 +346,12 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
       );
     }
     await query(
-      `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, at)
-       values ($1, $2, $3, $4, 'estimate', now())
+      `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
+       values ($1, $2, $3, $4, 'estimate', $5, $6, now())
        on conflict (from_cell, mode) do update
-         set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs, method = excluded.method, at = excluded.at`,
-      [cell.code, canonical, HORIZON_MINUTES, rows.length],
+         set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs, method = excluded.method,
+             built_lat = excluded.built_lat, built_lng = excluded.built_lng, at = excluded.at`,
+      [cell.code, canonical, HORIZON_MINUTES, rows.length, cell.lat, cell.lng],
     );
     pairs += rows.length;
   }
