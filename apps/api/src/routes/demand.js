@@ -137,12 +137,21 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // The ceiling, before the calls rather than after them. A replay near the
       // limit could take the month past a bound the Runs board calls hard
       // (Codex, 17 Sep 2026). Priced the same way Collect prices a Google ask.
-      const want = Math.round(nameless.length * 2.8);
+      // One call each, not two. Every one of these is already a `google:` ref,
+      // so its place id goes straight to Place Details — there is no search to
+      // pay for (Codex, 17 Sep 2026). Reserving twice the cost could refuse a
+      // replay there was budget for.
+      const want = Math.round(nameless.length * 1.4);
       const room = await roomToSpend(want, { holder: 'replay' });
       if (!room.ok) {
         why = `that would spend about £${(want / 100).toFixed(2)} and there is £${(room.leftPence / 100).toFixed(2)} left of this month`;
         asked = 0;
       } else {
+      // Everything after the claim is inside a `try`, so the claim is given
+      // back whether or not the asking worked. Released only on the way out, a
+      // failure held a bite of the month's budget until it expired (Codex,
+      // 17 Sep 2026).
+      try {
       const household = await currentHousehold();
       // What it cost is read off the ledger, not counted from the answers.
       //
@@ -160,7 +169,7 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       spentPence = Math.max(0, Math.round(((await googleSpentPence()) - spentBefore) * 10) / 10);
       asked = nameless.length;
       if (!named) why = 'asked, and none of them answered';
-      await releaseSpend(room.reservation);
+      } finally { await releaseSpend(room.reservation); }
       }
     }
     const { rows: scored } = await query(

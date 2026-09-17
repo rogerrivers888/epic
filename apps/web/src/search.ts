@@ -26,9 +26,18 @@ const current = new Map<Surface, string>();
 const positions = new Map<string, number>();
 const opened = new Map<string, number>();
 
-/** A search answered: remember its id, and where each result sat. */
+/**
+ * A search answered: remember its id, and where each result sat.
+ *
+ * A new set of results with **no** id forgets the old one rather than keeping
+ * it. The planner publishes fresh ideas while it is still placing them and
+ * writes the search down afterwards, so for a second or two the poll calls this
+ * with the new ideas and no id — and holding the previous id meant a quick tap
+ * was recorded against the *previous* search (Codex, 17 Sep 2026). Attributing
+ * it to nothing is a gap; attributing it to the wrong search is a wrong number.
+ */
 export function heldSearch(surface: Surface, queryId: string | null | undefined, refs: (string | null | undefined)[] = []) {
-  if (!queryId) return;
+  if (!queryId) { current.delete(surface); return; }
   current.set(surface, queryId);
   refs.forEach((ref, i) => { if (ref) positions.set(`${queryId}:${ref}`, i + 1); });
 }
