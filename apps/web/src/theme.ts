@@ -305,6 +305,26 @@ export function setThemePref(pref: ThemePref) {
   applyTheme(resolveTheme(pref));
 }
 
+/**
+ * The back office has a theme of its own.
+ *
+ * The owner, 17 Sep 2026: "pin the back office to dark, please, but I may want
+ * to toggle it, so retain the ability to switch." It is dark by default and the
+ * household app is not, so the two cannot share one preference. `follow` hands
+ * it back to whatever the app is set to.
+ */
+export type AdminThemePref = ThemeName | 'follow';
+export const ADMIN_THEME_KEY = 'epic.theme.admin';
+export const getAdminThemePref = (): AdminThemePref => {
+  if (!isWeb || typeof localStorage === 'undefined') return 'dark';
+  const v = localStorage.getItem(ADMIN_THEME_KEY);
+  return v === 'dark' || v === 'light' || v === 'follow' ? v : 'dark';
+};
+export function setAdminThemePref(pref: AdminThemePref) {
+  if (isWeb && typeof localStorage !== 'undefined') localStorage.setItem(ADMIN_THEME_KEY, pref);
+  applyTheme(pref === 'follow' ? resolveTheme() : pref);
+}
+
 if (isWeb) {
   applyTheme();
   if (typeof window.matchMedia === 'function') window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (getThemePref() === 'system') applyTheme(); });

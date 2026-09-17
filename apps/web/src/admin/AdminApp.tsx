@@ -27,6 +27,7 @@ import { Icon, IconName } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useActivity } from '../hooks/useActivity';
+import { useAdminTheme } from '../hooks/useAdminTheme';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { Overview } from './screens/Overview';
 import { People } from './screens/People';
@@ -87,6 +88,31 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   // an account that can see any of this should be able to see why.
   { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives' },
 ];
+
+/**
+ * Light or dark, for the back office alone.
+ *
+ * Two words rather than a switch, because a switch has to say what it is a
+ * switch *for* and these say it themselves. The household app keeps its own
+ * setting either way.
+ */
+function Lights() {
+  const { pref, setPref } = useAdminTheme();
+  const now = pref === 'follow' ? 'dark' : pref;
+  return (
+    <View style={styles.lights}>
+      {(['dark', 'light'] as const).map((k) => (
+        <Press key={k} effect="none" onPress={() => setPref(k)} accessibilityRole="button"
+               accessibilityState={{ selected: now === k }} accessibilityLabel={`${k} back office`}
+               style={[styles.light, now === k && styles.lightOn]}>
+          <Text style={[type.tiny, { fontWeight: '700', color: now === k ? colors.selectedFg : colors.inkMuted }]}>
+            {k === 'dark' ? 'Dark' : 'Light'}
+          </Text>
+        </Press>
+      ))}
+    </View>
+  );
+}
 
 export function AdminApp({ access, screen, onScreen, onLeave }: {
   access: Access | null;
@@ -178,12 +204,15 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               <Icon name="back" size={14} color={colors.ink} />
               <Text style={[type.small, { color: colors.ink }]}>The household app</Text>
             </Press>
+            <Lights />
           </View>
         </View>
       ) : (
         <View style={styles.phoneHead}>
           <View style={styles.phoneHeadTop}>
             <Text style={styles.badge}>Back office</Text>
+            <View style={{ flex: 1 }} />
+            <Lights />
             <Press onPress={onLeave} accessibilityRole="button" style={styles.leaveSmall}>
               <Icon name="back" size={13} color={colors.ink} />
               <Text style={type.tiny}>The app</Text>
@@ -237,6 +266,9 @@ const styles = StyleSheet.create({
   navLabel: { ...type.small, fontSize: 13.5, color: colors.ink },
 
   profile: { gap: 1, paddingTop: spacing.lg, marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.lineSoft, paddingHorizontal: spacing.xs },
+  lights: { flexDirection: 'row', alignSelf: 'flex-start', marginTop: spacing.sm },
+  light: { paddingHorizontal: 9, paddingVertical: 4 },
+  lightOn: { backgroundColor: colors.selected },
   leave: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 13 },
 
   rootPhone: { flexDirection: 'column' },
