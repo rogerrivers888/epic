@@ -1314,7 +1314,7 @@ router.get('/runs/:ref', async (req, res, next) => {
     // the whole of what we are allowed to hold it for, so nothing derived from
     // it is answered with. Said as its own answer rather than as "no such run",
     // which is the distinction this lookup exists to make.
-    if (run.expires_at && new Date(run.expires_at).getTime() <= Date.now()) {
+    if (run.expired) {
       return res.status(410).json({
         error: 'run_expired',
         message: `Run ${ref.toUpperCase()} has expired. A run can be read for ten hours after it is made.`,

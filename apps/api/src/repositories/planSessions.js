@@ -81,10 +81,19 @@ export async function recordSessionCall(householdId, sessionId, provider, purpos
  * the window it was allowed for (Codex, 17 Sep 2026). Returning the row and
  * making the caller decide is the shape that keeps the two answers apart; it
  * only works if every caller decides.
+ *
+ * `expired` is computed by the database with its own `now()`, not by comparing
+ * a timestamp against the API's clock. The two machines are not the same
+ * machine: if the API's clock trails Postgres's, a row the database considers
+ * finished still reads as live, and the guard fails in exactly the direction
+ * that serves licensed content (Codex, 17 Sep 2026).
  */
 export async function planSessionByRef(householdId, ref) {
   const { rows } = await query(
-    `select id, trip_id, created_at, updated_at, expires_at, state from plan_sessions
+    `select id, trip_id, created_at, updated_at, expires_at,
+            expires_at <= now() as expired,
+            state
+       from plan_sessions
       where household_id = $1 and replace(id::text, '-', '') like $2 || '%'
       order by created_at desc limit 1`,
     [householdId, ref],
