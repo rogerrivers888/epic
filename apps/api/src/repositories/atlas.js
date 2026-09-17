@@ -122,7 +122,10 @@ export async function removePlace(client, householdId, venueRef) {
     'select 1 from household_places where venue_ref = $1 limit 1', [venueRef]);
   if (!rows.length) {
     await on(client)(
-      `update place_index set ownership = 'identified'
+      // `placed_at` goes too, so the hourly pass recounts it. Without that the
+      // area and country boards went on counting a place nobody had saved as
+      // claimed until an unrelated refresh (Codex, 17 Sep 2026).
+      `update place_index set ownership = 'identified', placed_at = null
         where venue_ref = $1 and ownership = 'claimed'`, [venueRef]);
   }
 }

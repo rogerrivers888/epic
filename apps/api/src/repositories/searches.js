@@ -87,14 +87,35 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
 
 /** The three numbers, never one rate. */
 export async function totals({ areaSlug = null, since = 30 } = {}) {
+  // The rows we still hold, plus the months we have folded up and dropped.
+  //
+  // Retention is switched off by default, so today these two are the first term
+  // and nothing. The moment somebody switches it on, the board would have lost
+  // every search older than the window — and the log cannot be backfilled, so
+  // it would have lost them for good (Codex, 17 Sep 2026). A rolled month is
+  // counted whole: it is a month, and the window is in days, so it counts when
+  // the whole of it is inside the window.
   const { rows: [r] } = await query(
-    `select count(*)::int as searches,
-            count(*) filter (where empty)::int as empty,
-            count(*) filter (where not empty and outcome = 'none')::int as no_click,
-            count(*) filter (where outcome in ('clicked','saved'))::int as no_trip,
-            count(*) filter (where outcome = 'tripped')::int as tripped
-       from searches
-      where at > now() - ($1 || ' days')::interval and ($2::text is null or area_slug = $2)`,
+    `with live as (
+       select count(*)::int as searches,
+              count(*) filter (where empty)::int as empty,
+              count(*) filter (where not empty and outcome = 'none')::int as no_click,
+              count(*) filter (where outcome in ('clicked','saved'))::int as no_trip,
+              count(*) filter (where outcome = 'tripped')::int as tripped
+         from searches
+        where at > now() - ($1 || ' days')::interval and ($2::text is null or area_slug = $2)
+     ), folded as (
+       select coalesce(sum(searches), 0)::int as searches, coalesce(sum(empty), 0)::int as empty,
+              coalesce(sum(no_click), 0)::int as no_click, coalesce(sum(no_trip), 0)::int as no_trip,
+              coalesce(sum(tripped), 0)::int as tripped
+         from search_rollups
+        where month >= date_trunc('month', now() - ($1 || ' days')::interval)
+          and ($2::text is null or area_slug = $2)
+     )
+     select live.searches + folded.searches as searches, live.empty + folded.empty as empty,
+            live.no_click + folded.no_click as no_click, live.no_trip + folded.no_trip as no_trip,
+            live.tripped + folded.tripped as tripped
+       from live, folded`,
     [String(since), areaSlug]);
   return { searches: r.searches, empty: r.empty, noClick: r.no_click, noTrip: r.no_trip, tripped: r.tripped };
 }
@@ -161,11 +182,14 @@ export async function rollUp({ before, drop = false } = {}) {
        where at < $1 and rolled_at is null
       returning at, area_slug, subject, empty, outcome
     )
-    insert into search_rollups (month, area_slug, subject, searches, empty, no_click, no_trip)
+    insert into search_rollups (month, area_slug, subject, searches, empty, no_click, no_trip, tripped)
     select date_trunc('month', at)::date, coalesce(area_slug, ''), coalesce(subject, ''),
            count(*)::int, count(*) filter (where empty)::int,
            count(*) filter (where not empty and outcome = 'none')::int,
-           count(*) filter (where outcome in ('clicked','saved'))::int
+           count(*) filter (where outcome in ('clicked','saved'))::int,
+           -- The third outcome, and the only one that says something went
+           -- right. Dropped, it was gone for good (Codex, 17 Sep 2026).
+           count(*) filter (where outcome = 'tripped')::int
       from unrolled
      group by 1,2,3
     -- Added to, not replaced.
@@ -180,6 +204,7 @@ export async function rollUp({ before, drop = false } = {}) {
            empty = search_rollups.empty + excluded.empty,
            no_click = search_rollups.no_click + excluded.no_click,
            no_trip = search_rollups.no_trip + excluded.no_trip,
+           tripped = search_rollups.tripped + excluded.tripped,
            rolled_at = now()
     returning 1`, [before]);
   let dropped = 0;

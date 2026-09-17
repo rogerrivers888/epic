@@ -195,10 +195,24 @@ async function reindexWhileLocked({ onProgress }) {
 
   await query(`
     insert into place_index (venue_ref, lat, lng, country_code, derived_by, ownership, first_seen, last_seen)
-    -- The same: an area with no country says nothing rather than saying Britain.
-    select sp.venue_ref, sp.lat, sp.lng, sa.country_code, 'sweep', 'identified', min(sp.first_seen), max(sp.last_seen)
+    -- One row per place, whatever it is grouped by.
+    --
+    -- The same venue can sit in two swept areas — a restaurant on an outcode
+    -- boundary is in both — with different coordinates or a different country
+    -- on each. Grouping by those emitted two rows for one primary key, and
+    -- an upsert cannot touch the same row twice, so the whole
+    -- statement aborted: the first build and every rebuild, on data that is
+    -- perfectly valid (Codex, 17 Sep 2026).
+    --
+    -- The most recently seen row wins the position, and the country says
+    -- nothing rather than saying Britain where the area does not know.
+    select sp.venue_ref,
+           (array_agg(sp.lat order by sp.last_seen desc))[1],
+           (array_agg(sp.lng order by sp.last_seen desc))[1],
+           (array_agg(sa.country_code order by sp.last_seen desc))[1],
+           'sweep', 'identified', min(sp.first_seen), max(sp.last_seen)
       from scout_places sp left join scout_areas sa on sa.code = sp.area_code
-     group by sp.venue_ref, sp.lat, sp.lng, sa.country_code
+     group by sp.venue_ref
     on conflict (venue_ref) do update
        set lat = coalesce(place_index.lat, excluded.lat),
            lng = coalesce(place_index.lng, excluded.lng),

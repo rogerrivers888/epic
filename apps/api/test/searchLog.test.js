@@ -473,6 +473,13 @@ test('a search is rolled up exactly once, whatever order the runs are made in', 
   // And a third run counts nothing twice.
   await log.rollUp({ before: new Date(Date.UTC(2025, 6, 1)), drop: true });
   assert.equal(await totals(), 4);
+
+  // The conversions come with them. Dropped, they were gone for good, and this
+  // is the only outcome that says something went right (Codex, 17 Sep 2026).
+  const { rows: [cols] } = await query(
+    `select tripped from search_rollups where area_slug = 'rollshire' and subject = 'museums' and month = $1`,
+    [month]);
+  assert.equal(typeof cols.tripped, 'number');
 });
 
 test('the first build on an upgraded installation actually builds', async () => {
@@ -590,4 +597,23 @@ test('a cleared fact is none, not an empty one', async () => {
   // What the route does with an empty box: null, not ''.
   await query(`update place_records set summary = null, summary_source = null where venue_ref = $1`, [ref]);
   assert.equal(await owned.settleOwnership(ref), 'identified');
+});
+
+test('a month folded up and dropped is still in the headline figures', async () => {
+  const { household } = await aHousehold(query);
+  const id = await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'keepshire' });
+  await log.logEvent({ searchId: id, kind: 'add_to_trip', householdId: household.id });
+
+  const before = await log.totals({ areaSlug: 'keepshire', since: 3650 });
+  assert.equal(before.searches, 1);
+  assert.equal(before.tripped, 1);
+
+  // Retention is off by default, so this is the moment it would be switched on.
+  // The board used to read only `searches`, so folding a month up and dropping
+  // it lost every search in it — and the log cannot be backfilled (Codex,
+  // 17 Sep 2026).
+  await log.rollUp({ before: new Date(Date.now() + 86_400_000), drop: true });
+  const after = await log.totals({ areaSlug: 'keepshire', since: 3650 });
+  assert.equal(after.searches, 1, 'the search survives as an aggregate');
+  assert.equal(after.tripped, 1, 'and so does the conversion');
 });
