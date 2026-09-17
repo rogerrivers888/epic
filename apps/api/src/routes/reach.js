@@ -121,6 +121,24 @@ router.post('/stamp', requires('manage_library'), async (req, res, next) => {
 });
 
 /**
+ * POST /refresh — bring the matrix up to date without rebuilding it.
+ *
+ * What a sweep leaves behind: a few hundred new places, a handful of new
+ * sectors. This stamps them and works out only the cells that have no
+ * neighbours yet, which is seconds rather than minutes. The sweep calls it
+ * itself; this is here so it can be run by hand when something has gone in by
+ * another door.
+ */
+router.post('/refresh', requires('manage_library'), async (req, res, next) => {
+  try {
+    const mode = travelMode(req.body?.mode ?? 'driving');
+    if (req.body?.wait === true) return res.json(await reach.refresh({ mode }));
+    res.json({ started: true, mode });
+    void reach.refresh({ mode }).catch(() => null);
+  } catch (err) { next(err); }
+});
+
+/**
  * POST /build — work the matrix out.
  *
  * No network and no provider spend: it is arithmetic over the cells, and it can

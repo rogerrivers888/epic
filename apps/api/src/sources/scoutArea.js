@@ -30,6 +30,7 @@
 // went looking, and the researcher is happy to be handed a place directly.
 
 import * as scout from '../repositories/scout.js';
+import * as reach from '../repositories/reach.js';
 import * as owned from '../repositories/ownedPlaces.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { osmSource } from './osm.js';
@@ -297,6 +298,14 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
   // rest theirs, and anything missed here is picked up by `researchBacklog`
   // rather than waiting for the next sweep in six months.
   if (!provisional) await research(kept);
+
+  // Put the new places on the map, in the sense the matrix means it: a postcode
+  // sector each, and neighbours for any sector nobody had seen before. Seconds,
+  // no network beyond ONS, and it is what stops the matrix quietly falling
+  // behind the dataset it is supposed to describe. Not waited on and never
+  // allowed to fail a sweep — the places are already written, and the next
+  // refresh picks up whatever this one missed.
+  void reach.refresh({ mode: 'driving' }).catch(() => null);
 
   return { code, state: kept.length ? 'done' : 'failed', seen, chains, kept: kept.length, dropped: committed.dropped.length, googleCalls, notes, nextSweepAt: next.toISOString() };
 }

@@ -234,3 +234,31 @@ test('the matrix is built wider than anybody may ask, or the allowance does noth
   // And the widest ask still gets its full allowance inside the horizon.
   assert.ok(CAP_MINUTES + EDGE_MINUTES <= HORIZON_MINUTES);
 });
+
+test('the refresh writes the way back, or a new sector is reachable from nowhere', () => {
+  // A new cell needs its own neighbours *and* a row from each of them pointing
+  // at it. Without the second, the places in a newly swept town are invisible
+  // to every search but one that happens to start inside it.
+  const existing = [
+    { code: 'sector:SL4 1', lat: 51.4839, lng: -0.6084 },
+    { code: 'sector:SL5 9', lat: 51.4045, lng: -0.6706 },
+  ];
+  const fresh = { code: 'sector:ZZ1 1', lat: 51.4900, lng: -0.6100 };
+  const all = [...existing, fresh];
+
+  const out = reachFrom(fresh, all, { mode: 'driving', capMinutes: 90 });
+  const others = out.filter((r) => r.to_cell !== fresh.code);
+  assert.ok(others.length, 'the new cell found no neighbours to write back to');
+
+  // The estimate is a function of the distance between two points and nothing
+  // else, which is what makes the reverse row the same row with its ends
+  // swapped. If that ever stops being true, the refresh is writing wrong rows.
+  for (const r of others) {
+    const other = all.find((c) => c.code === r.to_cell);
+    const back = reachFrom(other, all, { mode: 'driving', capMinutes: 90 })
+      .find((x) => x.to_cell === fresh.code);
+    assert.ok(back, `${other.code} cannot reach the new cell`);
+    assert.equal(back.minutes, r.minutes, 'the estimate is not symmetric any more');
+    assert.equal(back.km, r.km);
+  }
+});

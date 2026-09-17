@@ -237,6 +237,78 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
   return { cells: cells.length, pairs, runId: run.id };
 }
 
+/**
+ * Bring the matrix up to date without rebuilding it.
+ *
+ * A full build is every cell against every other cell, which is minutes of work
+ * and gets slower as the country fills in. Almost every day, though, what has
+ * actually changed is that a sweep found forty restaurants in one town and two
+ * new sectors appeared. This does that much and no more: stamp what is
+ * unstamped, then work out neighbours only for the cells that have none, or
+ * that were built before the horizon moved.
+ *
+ * **Both directions are written at once.** A new cell needs its own neighbours,
+ * but every cell already in range of it needs a row pointing back, or the new
+ * sector is reachable from nowhere and the places in it are invisible to every
+ * search but its own. The estimate is symmetric — it is a function of the
+ * distance between two points and nothing else — so the reverse row is the same
+ * row with its ends swapped, and does not have to be worked out twice.
+ */
+export async function refresh({ mode = 'driving', stampLimit = 2000, cellLimit = 2000 } = {}) {
+  const canonical = travelMode(mode);
+  const stamped = await stampPlaces({ limit: stampLimit });
+
+  const { rows: todo } = await query(
+    `select g.code, g.label, g.lat, g.lng
+       from geo_cells g
+       left join cell_builds b on b.from_cell = g.code and b.mode = $1
+      where g.scheme = 'sector'
+        and (b.from_cell is null or b.cap_minutes < $2)
+      order by g.places desc, g.code
+      limit $3`,
+    [canonical, HORIZON_MINUTES, cellLimit],
+  );
+  if (!todo.length) return { stamped, cells: 0, pairs: 0, mode: canonical };
+
+  const all = await allCells({ scheme: 'sector' });
+  let pairs = 0;
+  for (const cell of todo) {
+    const rows = reachFrom(cell, all, { mode: canonical, capMinutes: HORIZON_MINUTES });
+    await query('delete from reach where from_cell = $1 and mode = $2', [cell.code, canonical]);
+    if (rows.length) {
+      const froms = [], tos = [], mins = [], kms = [];
+      for (const r of rows) {
+        froms.push(r.from_cell); tos.push(r.to_cell); mins.push(r.minutes); kms.push(r.km);
+        // The way back, for every cell that is not this one.
+        if (r.to_cell !== r.from_cell) { froms.push(r.to_cell); tos.push(r.from_cell); mins.push(r.minutes); kms.push(r.km); }
+      }
+      await query(
+        `insert into reach (from_cell, to_cell, mode, minutes, km, method)
+         select f, t, $3, m, k, 'estimate' from unnest($1::text[], $2::text[], $4::smallint[], $5::real[]) as u(f, t, m, k)
+         on conflict (from_cell, to_cell, mode) do update set minutes = excluded.minutes, km = excluded.km, method = excluded.method`,
+        [froms, tos, canonical, mins, kms],
+      );
+    }
+    await query(
+      `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, at)
+       values ($1, $2, $3, $4, 'estimate', now())
+       on conflict (from_cell, mode) do update
+         set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs, method = excluded.method, at = excluded.at`,
+      [cell.code, canonical, HORIZON_MINUTES, rows.length],
+    );
+    pairs += rows.length;
+  }
+  // The cells that gained a row pointing back at a new neighbour now hold more
+  // pairs than their own build said they did. Corrected here rather than left
+  // to drift, because that count is what the report calls completeness.
+  await query(
+    `update cell_builds b set pairs = c.n
+       from (select from_cell, mode, count(*)::int as n from reach group by from_cell, mode) c
+      where c.from_cell = b.from_cell and c.mode = b.mode and c.n <> b.pairs`,
+  );
+  return { stamped, cells: todo.length, pairs, mode: canonical };
+}
+
 // ---------------------------------------------------------------------------
 // reading it
 // ---------------------------------------------------------------------------
