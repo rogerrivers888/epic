@@ -492,7 +492,12 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
       await exec(
         `insert into place_index_sources (venue_ref, source, source_place_id)
          values ${src}
-         on conflict (venue_ref, source) do update set last_seen = now()`,
+         on conflict (venue_ref, source) do update
+            set last_seen = now(),
+                -- An identifier we have just paid to find fills a row that had
+                -- none. It never overwrites one we already hold: the match is
+                -- the thing that stops us paying for it twice (Codex, 17 Sep).
+                source_place_id = coalesce(place_index_sources.source_place_id, excluded.source_place_id)`,
         rows.flatMap((p) => [p.ref, p.source ?? source, p.sourceId ?? null]));
     }
     return { noted: rows.length };

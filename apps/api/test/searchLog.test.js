@@ -137,6 +137,13 @@ test('a place that is kept is indexed, and the write is not silently swallowed',
   assert.equal(Number(rows[0].lat).toFixed(2), '51.48');
   assert.equal((await query('select source from place_index_sources where venue_ref = $1', [ref])).rows[0].source, 'osm');
 
+  // An identifier learned later fills a row that had none, and never overwrites
+  // one we already hold: a match is what stops us paying to find it twice.
+  await index.noteMany([{ ref, sourceId: 'node/99' }], { source: 'osm' });
+  assert.equal((await query('select source_place_id from place_index_sources where venue_ref = $1', [ref])).rows[0].source_place_id, 'node/99');
+  await index.noteMany([{ ref, sourceId: 'node/other' }], { source: 'osm' });
+  assert.equal((await query('select source_place_id from place_index_sources where venue_ref = $1', [ref])).rows[0].source_place_id, 'node/99');
+
   // Idempotent, and a second sighting never loses a position we already had.
   await index.noteMany([{ ref }], { source: 'osm' });
   assert.equal((await query('select count(*)::int as n from place_index where venue_ref = $1', [ref])).rows[0].n, 1);

@@ -885,7 +885,11 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
       try {
         await enrich(ref, {
           householdId: household.id,
-          seed: { name, lat: k.lat, lng: k.lng, website: k.website, locality: k.locality, category: k.subcategory },
+          // The address goes in too: `seedFor` returns a supplied seed whole as
+          // soon as it has a name and a point, so anything left out is lost —
+          // and the street is what tells two branches of one group apart
+          // (Codex, 17 Sep 2026).
+          seed: { name, lat: k.lat, lng: k.lng, website: k.website, locality: k.locality, address: k.address, category: k.subcategory },
           // Asked again, but never erasing: a source that happens to answer with
           // nothing is not evidence that what it said last time was wrong, and
           // `force` alone would throw the old facts away (Codex, 17 Sep 2026).
@@ -997,7 +1001,14 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
         left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
        where pi.venue_ref = any($1)`, [refs]);
     const out = [];
-    for (const place of rows) out.push({ ref: place.venue_ref, ...(await pictureFor(place, { force: true })) });
+    for (const place of rows) {
+      // Not forced. A photograph somebody in the house took outranks anything we
+      // could go and find, and `force` walks straight past that guard — so a
+      // logo would demote a household's own picture to the gallery (Codex,
+      // 17 Sep 2026). Looking again where there is already a hero is what the
+      // ladder's own first rung is for.
+      out.push({ ref: place.venue_ref, ...(await pictureFor(place)) });
+    }
     await index.rescore();
     await index.refreshStats();
     res.json({ found: out.filter((o) => o.state === 'found').length, results: out, spentPence: 0 });
