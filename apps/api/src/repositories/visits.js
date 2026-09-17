@@ -8,7 +8,7 @@
  */
 
 import { query } from '../db.js';
-import { costOf } from '../domain/providerPrices.js';
+import * as providerCalls from './providerCalls.js';
 
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
@@ -197,11 +197,13 @@ export async function statusForRefs(householdId, refs) {
   return { visitRows: visitRows.rows, ledgerRows: ledgerRows.rows };
 }
 
-export async function recordProviderCall(householdId, provider, purpose, units = null) {
-  // The money too, not only the count. The monthly ceiling is a sum of
-  // `estimated_cost_usd`, so a row that carried a meter and no price was a call
-  // the limit could not see (Codex, 17 Sep 2026).
-  await query(
-    'insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, $2, $3, $4, $5)',
-    [householdId, provider, purpose, units, costOf(units) || null]);
-}
+/**
+ * One outbound call, attributed.
+ *
+ * Through `providerCalls.record`, which is the only thing that writes to that
+ * table now: there were four copies of this insert and only some of them filled
+ * `estimated_cost_usd`, so the monthly ceiling was blind to whichever paths
+ * used the others (Codex, 17 Sep 2026).
+ */
+export const recordProviderCall = (householdId, provider, purpose, units = null) =>
+  providerCalls.record(householdId, provider, purpose, units);

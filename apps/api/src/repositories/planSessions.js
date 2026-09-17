@@ -12,6 +12,7 @@
  */
 
 import { query } from '../db.js';
+import * as providerCalls from './providerCalls.js';
 
 /**
  * Delete sessions whose time is up.
@@ -59,13 +60,16 @@ export async function planSessionForDay(householdId, tripId, dayId) {
   return rows[0] ?? null;
 }
 
-/** What one session's searches cost, attributed to the session that spent it. */
-export async function recordSessionCall(householdId, sessionId, provider, purpose, units = null) {
-  await query(
-    'insert into provider_calls (household_id, session_id, provider, purpose, units) values ($1, $2, $3, $4, $5)',
-    [householdId, sessionId, provider, purpose, units],
-  );
-}
+/**
+ * What one session's searches cost, attributed to the session that spent it.
+ *
+ * Through the one writer, not a fourth copy of the same insert. There were four
+ * of them and only some filled `estimated_cost_usd`, so the monthly ceiling was
+ * blind to whichever paths happened to use the others — a class of bug rather
+ * than an instance of one (Codex, 17 Sep 2026).
+ */
+export const recordSessionCall = (householdId, sessionId, provider, purpose, units = null) =>
+  providerCalls.record(householdId, provider, purpose, units, sessionId);
 
 /**
  * A session by its short reference — the eight characters a run is quoted by.

@@ -697,31 +697,37 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
  */
 export async function refreshStats() {
   await query('delete from area_stats');
+  // Three kinds, counted as three. Owned used to mean "not identified", which
+  // put every place a household had merely *claimed* into the figure the screen
+  // defines as holding our own research — so coverage read better than it was
+  // and the places most worth curating were the ones hidden by it (Codex,
+  // 17 Sep 2026).
   const shared = `
       count(*)::int                                                        as places,
-      count(*) filter (where pi.ownership <> 'identified')::int             as owned,
+      count(*) filter (where pi.ownership = 'owned')::int                   as owned,
+      count(*) filter (where pi.ownership = 'claimed')::int                 as claimed,
       count(*) filter (where pi.ownership = 'identified')::int              as identified,
       count(*) filter (where pi.ready)::int                                 as ready,
       avg(pi.data_score)::real                                              as avg_score`;
   await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, identified, ready, avg_score)
+    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
     select pa.area_slug, '', '', '', '', ${shared}
       from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
      group by pa.area_slug`);
   await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, identified, ready, avg_score)
+    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
     select pa.area_slug, pi.category, '', '', '', ${shared}
       from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
      where pi.category is not null
      group by pa.area_slug, pi.category`);
   await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, identified, ready, avg_score)
+    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
     select pa.area_slug, coalesce(pi.category, ''), pi.subcategory, '', '', ${shared}
       from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
      where pi.subcategory is not null
      group by pa.area_slug, pi.category, pi.subcategory`);
   await query(`
-    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, identified, ready, avg_score)
+    insert into area_stats (area_slug, category, subcategory, source, ownership, places, owned, claimed, identified, ready, avg_score)
     select pa.area_slug, '', '', src.source, '', ${shared}
       from place_areas pa
       join place_index pi on pi.venue_ref = pa.venue_ref
@@ -762,6 +768,10 @@ const ORDER_BY = {
 const FIVE = `
   coalesce(st.places, 0)     as known,
   coalesce(st.owned, 0)      as owned,
+  -- A household said it matters; we still hold nothing of our own about it.
+  -- Kept apart from both of the others, because it is its own answer and it is
+  -- the shortest route to a place worth curating (Codex, 17 Sep 2026).
+  coalesce(st.claimed, 0)    as claimed,
   coalesce(st.identified, 0) as identified,
   coalesce(st.ready, 0)      as ready_count,
   st.avg_score               as avg_score`;
@@ -772,9 +782,9 @@ export async function statsFor(areaSlug, { category = '', subcategory = '' } = {
     `select ${FIVE} from area_stats st
       where st.area_slug = $1 and st.category = $2 and st.subcategory = $3 and st.source = '' and st.ownership = ''`,
     [lower(areaSlug), category ?? '', subcategory ?? '']);
-  const r = rows[0] ?? { known: 0, owned: 0, identified: 0, ready_count: 0, avg_score: null };
+  const r = rows[0] ?? { known: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, avg_score: null };
   return {
-    known: r.known, owned: r.owned, identified: r.identified,
+    known: r.known, owned: r.owned, claimed: r.claimed, identified: r.identified,
     readyCount: r.ready_count, ready: readyShare(r.ready_count, r.known),
     avgScore: r.avg_score == null ? null : Math.round(r.avg_score),
   };
@@ -782,11 +792,12 @@ export async function statsFor(areaSlug, { category = '', subcategory = '' } = {
 
 /** The same five, for a set of refs (a ring, or a selection). */
 export async function statsForRefs(refs, { category = '', subcategory = '' } = {}) {
-  if (!refs?.length) return { known: 0, owned: 0, identified: 0, readyCount: 0, ready: null, avgScore: null };
+  if (!refs?.length) return { known: 0, owned: 0, claimed: 0, identified: 0, readyCount: 0, ready: null, avgScore: null };
   const { rows } = await query(
     `select count(*)::int as known,
-            count(*) filter (where ownership <> 'identified')::int as owned,
-            count(*) filter (where ownership = 'identified')::int  as identified,
+            count(*) filter (where ownership = 'owned')::int        as owned,
+            count(*) filter (where ownership = 'claimed')::int      as claimed,
+            count(*) filter (where ownership = 'identified')::int   as identified,
             count(*) filter (where ready)::int as ready_count,
             avg(data_score)::real as avg_score
        from place_index
@@ -797,7 +808,7 @@ export async function statsForRefs(refs, { category = '', subcategory = '' } = {
         and ($3::text = '' or subcategory = $3)`, [refs, category ?? '', subcategory ?? '']);
   const r = rows[0];
   return {
-    known: r.known, owned: r.owned, identified: r.identified, readyCount: r.ready_count,
+    known: r.known, owned: r.owned, claimed: r.claimed, identified: r.identified, readyCount: r.ready_count,
     ready: readyShare(r.ready_count, r.known), avgScore: r.avg_score == null ? null : Math.round(r.avg_score),
   };
 }
@@ -832,7 +843,7 @@ export async function countries() {
      order by coalesce(st.places, 0) desc, l.name`);
   return rows.map((r) => ({
     slug: r.slug, name: r.name, countryCode: r.country_code,
-    known: r.known, owned: r.owned, identified: r.identified,
+    known: r.known, owned: r.owned, claimed: r.claimed, identified: r.identified,
     readyCount: r.ready_count, ready: readyShare(r.ready_count, r.known),
     avgScore: r.avg_score == null ? null : Math.round(r.avg_score),
     cells: r.cells, built: r.built, searches: r.searches,
@@ -912,7 +923,7 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
 
   const out = rows.map((r) => ({
     slug: r.slug, name: r.name, kind: r.kind, parent: r.parent_name ?? null,
-    known: r.known, owned: r.owned, identified: r.identified,
+    known: r.known, owned: r.owned, claimed: r.claimed, identified: r.identified,
     readyCount: r.ready_count, ready: readyShare(r.ready_count, r.known),
     avgScore: r.avg_score == null ? null : Math.round(r.avg_score),
     searches: r.searches, empty: r.empty,
@@ -949,7 +960,8 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
               join localities t on t.slug = pa3.area_slug and t.kind = 'town'
              where pa3.venue_ref in (select venue_ref from place_areas where area_slug = l.slug)) as towns,
            count(*)::int as known,
-           count(*) filter (where pi.ownership <> 'identified')::int as owned,
+           count(*) filter (where pi.ownership = 'owned')::int as owned,
+           count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where r.ready)::int as ready_count,
            count(*) filter (where (r.score_parts->'held') ? 'picture')::int    as picture,
            count(*) filter (where (r.score_parts->'held') ? 'what_it_is'
@@ -974,7 +986,7 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
     // An outcode says which towns its own places sit in — the way back across
     // the two ladders, and the only honest thing to print beside it.
     within: r.kind === 'postcode' ? r.towns : null,
-    known: r.known, owned: r.owned,
+    known: r.known, owned: r.owned, claimed: r.claimed ?? 0,
     ready: pct(r.ready_count, r.known),
     picture: pct(r.picture, r.known), description: pct(r.description, r.known),
     hours: pct(r.hours, r.known), website: pct(r.website, r.known),
@@ -999,7 +1011,8 @@ export async function categories(areaSlug, { refs = null, category = null, since
   const { rows: held } = await query(`
     select pi.category, pi.subcategory,
            count(*)::int as known,
-           count(*) filter (where pi.ownership <> 'identified')::int as owned,
+           count(*) filter (where pi.ownership = 'owned')::int as owned,
+           count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where pi.ownership = 'identified')::int  as identified,
            count(*) filter (where pi.ready)::int as ready_count,
            avg(pi.data_score)::real as avg_score
@@ -1009,8 +1022,8 @@ export async function categories(areaSlug, { refs = null, category = null, since
   const byCat = new Map();
   for (const h of held) {
     if (!h.category) continue;
-    const c = byCat.get(h.category) ?? { known: 0, owned: 0, identified: 0, ready_count: 0, sum: 0, n: 0 };
-    c.known += h.known; c.owned += h.owned; c.identified += h.identified; c.ready_count += h.ready_count;
+    const c = byCat.get(h.category) ?? { known: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, sum: 0, n: 0 };
+    c.known += h.known; c.owned += h.owned; c.claimed += h.claimed; c.identified += h.identified; c.ready_count += h.ready_count;
     if (h.avg_score != null) { c.sum += h.avg_score * h.known; c.n += h.known; }
     byCat.set(h.category, c);
   }
@@ -1047,7 +1060,7 @@ export async function categories(areaSlug, { refs = null, category = null, since
       const d = demand.get(t.category_key);
       current = {
         key: t.category_key, label: t.category_label, subcategories: [],
-        known: c?.known ?? 0, owned: c?.owned ?? 0, identified: c?.identified ?? 0,
+        known: c?.known ?? 0, owned: c?.owned ?? 0, claimed: c?.claimed ?? 0, identified: c?.identified ?? 0,
         readyCount: c?.ready_count ?? 0, ready: readyShare(c?.ready_count ?? 0, c?.known ?? 0),
         avgScore: c && c.n ? Math.round(c.sum / c.n) : null,
         searches: d?.searches ?? 0, empty: d?.empty ?? 0,
@@ -1061,7 +1074,7 @@ export async function categories(areaSlug, { refs = null, category = null, since
     const bar = bars_.get(t.sub_key) ?? [];
     current.subcategories.push({
       key: t.sub_key, label: t.sub_label, category: t.category_key,
-      known: h?.known ?? 0, owned: h?.owned ?? 0, identified: h?.identified ?? 0,
+      known: h?.known ?? 0, owned: h?.owned ?? 0, claimed: h?.claimed ?? 0, identified: h?.identified ?? 0,
       readyCount: h?.ready_count ?? 0, ready: h ? readyShare(h.ready_count, h.known) : null,
       avgScore: h?.avg_score == null ? null : Math.round(h.avg_score),
       searches: d?.searches ?? 0, empty: d?.empty ?? 0,
@@ -1093,7 +1106,8 @@ export async function labels(areaSlug, { refs = null, limit = 400 } = {}) {
   const { rows: held } = await query(`
     select pil.label,
            count(*)::int as known,
-           count(*) filter (where pi.ownership <> 'identified')::int as owned,
+           count(*) filter (where pi.ownership = 'owned')::int as owned,
+           count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where pi.ready)::int as ready_count,
            avg(pi.data_score)::real as avg_score
       from place_index_labels pil
@@ -1108,7 +1122,7 @@ export async function labels(areaSlug, { refs = null, limit = 400 } = {}) {
     const h = by.get(v.word);
     return {
       key: v.word, label: v.label, pointsAt: v.points_at,
-      known: h?.known ?? 0, owned: h?.owned ?? 0,
+      known: h?.known ?? 0, owned: h?.owned ?? 0, claimed: h?.claimed ?? 0,
       readyCount: h?.ready_count ?? 0, ready: h ? readyShare(h.ready_count, h.known) : null,
       avgScore: h?.avg_score == null ? null : Math.round(h.avg_score),
     };
@@ -1135,7 +1149,7 @@ export async function sources(areaSlug, { refs = null, limit = 60 } = {}) {
              // "Ours" is the same fact the OWNED figure above it is, so it is
              // counted the same way. Counting the `own` *source* instead made
              // one screen say 58 owned over a column of dashes (Codex, 17 Sep).
-             ? `count(*) filter (where s.ownership <> 'identified')::int as src_${i}`
+             ? `count(*) filter (where s.ownership = 'owned')::int as src_${i}`
              : `count(*) filter (where exists (select 1 from place_index_sources q where q.venue_ref = s.venue_ref and q.source = '${x.key}'))::int as src_${i}`)).join(',\n           ')},
            count(*) filter (where coalesce(n.sources, 0) = 1)::int as one_only,
            count(*) filter (where coalesce(n.sources, 0) = 1 and s.venue_ref like 'google:%')::int as google_only

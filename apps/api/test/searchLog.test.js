@@ -337,3 +337,35 @@ test('a search outside the cells we hold is written down as outside them', async
   const id = await log.noteSearch({ householdId: household.id, surface: 'places', ...far, lat: 45.46, lng: 9.19, empty: true });
   assert.ok(id);
 });
+
+test('the three kinds of ownership are counted as three', async () => {
+  // Owned used to mean "not identified", which put every place a household had
+  // merely claimed into the figure the screen defines as holding our own
+  // research — so coverage read better than it was and the places most worth
+  // curating were the ones hidden by it (Codex, 17 Sep 2026).
+  await query(`insert into localities (slug, name, kind, parent_slug)
+               values ('ownershire', 'Ownershire', 'county', 'gb') on conflict (slug) do nothing`);
+  const refs = ['osm:node/own-me', 'osm:node/claim-me', 'osm:node/just-seen'];
+  await index.noteMany([
+    { ref: refs[0], ownership: 'owned' },
+    { ref: refs[1], ownership: 'claimed' },
+    { ref: refs[2] },
+  ], { countryCode: 'GB' });
+  await query(
+    `insert into place_areas (venue_ref, area_slug)
+     select r, 'ownershire' from unnest($1::text[]) as r on conflict do nothing`, [refs]);
+  await index.refreshStats();
+
+  const stats = await index.statsFor('ownershire');
+  assert.equal(stats.known, 3);
+  assert.equal(stats.owned, 1, 'only our own research is owned');
+  assert.equal(stats.claimed, 1, 'a household saying it matters is its own answer');
+  assert.equal(stats.identified, 1);
+  assert.equal(stats.owned + stats.claimed + stats.identified, stats.known, 'and the three add up');
+
+  // The same three, read straight off a set of refs rather than the rollups.
+  const direct = await index.statsForRefs(refs);
+  assert.equal(direct.owned, 1);
+  assert.equal(direct.claimed, 1);
+  assert.equal(direct.identified, 1);
+});

@@ -8,6 +8,7 @@
  */
 
 import { query } from '../db.js';
+import * as providerCalls from './providerCalls.js';
 
 /** The transaction's client if there is one, otherwise the pool. */
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
@@ -463,12 +464,9 @@ export async function recordLedger(householdId, venueRef, status, client) {
 // spend
 // ---------------------------------------------------------------------------
 
-export async function recordProviderCall(householdId, provider, purpose, units = null) {
-  await query(
-    'insert into provider_calls (household_id, provider, purpose, units) values ($1, $2, $3, $4)',
-    [householdId, provider, purpose, units],
-  );
-}
+/** Through the one writer, so the money is filled in (Codex, 17 Sep 2026). */
+export const recordProviderCall = (householdId, provider, purpose, units = null) =>
+  providerCalls.record(householdId, provider, purpose, units);
 
 // ---------------------------------------------------------------------------
 // the journey: the day worked out end to end

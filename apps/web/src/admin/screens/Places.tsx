@@ -131,9 +131,9 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
   useEffect(load, [load]);
 
   const totals = useMemo(() => (data?.countries ?? []).reduce((acc, c) => ({
-    known: acc.known + c.known, owned: acc.owned + c.owned, identified: acc.identified + c.identified,
+    known: acc.known + c.known, owned: acc.owned + c.owned, claimed: acc.claimed + c.claimed, identified: acc.identified + c.identified,
     readyCount: acc.readyCount + c.readyCount, sum: acc.sum + (c.avgScore ?? 0) * c.known, n: acc.n + (c.avgScore == null ? 0 : c.known),
-  }), { known: 0, owned: 0, identified: 0, readyCount: 0, sum: 0, n: 0 }), [data]);
+  }), { known: 0, owned: 0, claimed: 0, identified: 0, readyCount: 0, sum: 0, n: 0 }), [data]);
 
   const rows = useMemo(() => {
     const list = [...(data?.countries ?? [])];
@@ -178,7 +178,7 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
     <AdminPage>
       <Band kicker="EVERYWHERE EPIC HAS LOOKED" title="Select a country" stats={
         <Five stats={{
-          known: totals.known, owned: totals.owned, identified: totals.identified,
+          known: totals.known, owned: totals.owned, claimed: totals.claimed, identified: totals.identified,
           readyCount: totals.readyCount, ready: totals.known ? Math.round((totals.readyCount / totals.known) * 100) : null,
           avgScore: totals.n ? Math.round(totals.sum / totals.n) : null,
         }} />
@@ -391,6 +391,11 @@ function Five({ stats, ring, kind = null, needs = null }: {
     <View style={styles.five}>
       <Stat label="Known" value={said(stats.known)} tip="known" />
       <Stat label="Owned" value={said(stats.owned)} tip="owned" />
+      {/* Claimed is its own answer: a household said the place matters and we
+          still hold nothing about it, which is the shortest list of places
+          worth researching. It used to be folded into Owned, so coverage read
+          better than it was (Codex, 17 Sep 2026). */}
+      <Stat label="Claimed" value={said(stats.claimed)} tip="claimed" />
       <Stat label="Identified only" value={said(stats.identified)} tip="identifiedOnly" accent />
       <Stat label="Ready" value={stats.ready == null ? '—' : `${stats.ready}%`} tip={readyTip} mark />
       <Stat label="Avg score" value={stats.avgScore == null ? '—' : stats.avgScore} tip={scoreTip} mark />
@@ -531,7 +536,7 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
   const [desc, setDesc] = useQueryState<boolean>('desc', true, { read: (r) => r !== '0', write: (v) => (v ? null : '0') });
   useEffect(() => {
     setData(null);
-    api.adminPlaceBreakdown({ ...q, by, sort, desc: desc ? undefined : '0' }).then(setData).catch(() => setData({ rows: [], all: 0, totals: { known: 0, owned: 0, identified: 0, readyCount: 0, ready: null, avgScore: null } }));
+    api.adminPlaceBreakdown({ ...q, by, sort, desc: desc ? undefined : '0' }).then(setData).catch(() => setData({ rows: [], all: 0, totals: { known: 0, owned: 0, claimed: 0, identified: 0, readyCount: 0, ready: null, avgScore: null } }));
   }, [q, by, sort, desc]);
 
   const columns: Col<PlaceAreaRow>[] = [

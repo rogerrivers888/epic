@@ -1345,7 +1345,15 @@ export type PlaceWhere = { where?: string | null; within?: number | null; by?: s
 
 /** The five numbers every level prints, whatever level it is. */
 export type PlaceStats = {
-  known: number; owned: number; identified: number;
+  /**
+   * Three kinds of ownership, counted as three.
+   *
+   * `owned` is "we hold our own research on it"; `claimed` is "a household said
+   * it matters and we hold nothing"; `identified` is "somebody returned it and
+   * nobody has done either". They add up to `known`. Claimed used to be folded
+   * into owned, which made coverage read better than it was (Codex, 17 Sep 2026).
+   */
+  known: number; owned: number; claimed: number; identified: number;
   readyCount: number; ready: number | null; avgScore: number | null;
 };
 

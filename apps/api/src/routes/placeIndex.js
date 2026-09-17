@@ -432,7 +432,8 @@ router.get('/ring', requires('view_library'), async (req, res, next) => {
     if (scope.kind !== 'ring') throw bad('That is not somewhere a ring can start from.');
     const { rows } = await query(`
       select pi.subcategory, count(*)::int as known,
-             count(*) filter (where pi.ownership <> 'identified')::int as owned,
+             count(*) filter (where pi.ownership = 'owned')::int as owned,
+           count(*) filter (where pi.ownership = 'claimed')::int as claimed,
              count(*) filter (where pi.ready)::int as ready_count,
              avg(pi.data_score)::real as avg_score
         from place_index pi where pi.venue_ref = any($1) and pi.subcategory is not null
@@ -475,7 +476,7 @@ router.get('/ring', requires('view_library'), async (req, res, next) => {
         const h = held.get(s.key);
         return {
           key: s.key, label: s.label,
-          known: h?.known ?? 0, owned: h?.owned ?? 0,
+          known: h?.known ?? 0, owned: h?.owned ?? 0, claimed: h?.claimed ?? 0,
           ready: h ? (h.known ? Math.round((h.ready_count / h.known) * 100) : null) : null,
           avgScore: h?.avg_score == null ? null : Math.round(h.avg_score),
           searches: searches.get(s.key) ?? 0,
