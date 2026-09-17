@@ -548,3 +548,28 @@ test('clearing a place’s only owned fact takes its ownership back down', async
   assert.equal(await owned.settleOwnership(ref), 'identified');
   assert.equal(await ownRow(), 0, 'and the source row goes with it');
 });
+
+test('the last household to un-save a place stops it being claimed', async () => {
+  const atlas = await import('../src/repositories/atlas.js');
+  const { withTransaction } = await testDatabase();
+  const one = await aHousehold(query);
+  const two = await aHousehold(query);
+  const ref = 'google:SHARED-CLAIM';
+
+  const save = (h) => withTransaction((client) => atlas.upsertHouseholdPlace(client, h.household.id, {
+    venueRef: ref, label: 'Somewhere', kind: 'saved', lat: 51.5, lng: -0.6, countryCode: 'GB',
+  }));
+  await save(one); await save(two);
+  const ownershipOf = async () => (await query(
+    'select ownership from place_index where venue_ref = $1', [ref])).rows[0].ownership;
+  assert.equal(await ownershipOf(), 'claimed');
+
+  // Saving promotes the shared index row and nothing took it back, so coverage
+  // and Collect went on treating a place nobody had saved as one somebody had
+  // (Codex, 17 Sep 2026).
+  await withTransaction((client) => atlas.removePlace(client, one.household.id, ref));
+  assert.equal(await ownershipOf(), 'claimed', 'one of the two still has it');
+
+  await withTransaction((client) => atlas.removePlace(client, two.household.id, ref));
+  assert.equal(await ownershipOf(), 'identified', 'and now nobody does');
+});

@@ -111,6 +111,20 @@ export async function removePlace(client, householdId, venueRef) {
   const [source, ...rest] = String(venueRef).split(':');
   await on(client)('delete from household_places where household_id = $1 and venue_ref = $2', [householdId, venueRef]);
   await on(client)('delete from place_ledger where household_id = $1 and source = $2 and source_place_id = $3', [householdId, source, rest.join(':')]);
+  // And if that was the last household holding it, it is not claimed any more.
+  //
+  // Saving promotes the shared index row to `claimed`, and nothing took it back
+  // — so coverage and Collect went on treating a place nobody had saved as one
+  // somebody had, and even a rebuild kept the value because its conflict clause
+  // only ever promotes (Codex, 17 Sep 2026). In the same transaction as the
+  // removal, so the two agree.
+  const { rows } = await on(client)(
+    'select 1 from household_places where venue_ref = $1 limit 1', [venueRef]);
+  if (!rows.length) {
+    await on(client)(
+      `update place_index set ownership = 'identified'
+        where venue_ref = $1 and ownership = 'claimed'`, [venueRef]);
+  }
 }
 
 // ---------------------------------------------------------------------------

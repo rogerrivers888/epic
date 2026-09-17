@@ -431,13 +431,39 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   if (!r) return null;
   const body = tell ? (message ?? r.message) : null;
 
+  // Written down first, then acted on, then told.
+  //
+  // The message used to go out before the queue row was updated, so a failure
+  // in between left a household thanked for a decision that had not been
+  // recorded — and the next person to look would decide it again (Codex,
+  // 17 Sep 2026). `told` therefore starts false and is set in a second write,
+  // once something has actually gone out.
+  const { rows: [out] } = await query(
+    `update content_queue
+        set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now()
+      where id = $1 returning *`,
+    [id, reason, body, who ?? null]);
+
+  // A rejection has to reach the thing itself.
+  //
+  // Marking the queue row and stopping there left an abusive review public the
+  // moment its hold expired, because nothing that reads it knows the queue
+  // exists (Codex, 17 Sep 2026). Each kind is suppressed where it lives, in the
+  // way that table already understands.
+  if (out) {
+    await suppress(out.subject_type, out.subject_id, { reason, who });
+    // A picture is one of the six facts the ready bar is judged on, and only an
+    // approved one counts — so a decision about a photograph changes the
+    // place's score (Codex, 17 Sep 2026).
+    if (out.subject_type === 'image' && out.venue_ref) await rescorePlace(out.venue_ref);
+  }
+
   // "Reject and send this" has to send it.
   //
   // `told` is a claim about what a household received, so it is only ever set
   // once something actually went out. Where there is no address, or no sender
   // key — which is the owner's to add in Doppler — the rejection still stands
-  // and the screen is told plainly that the message did not go (Codex,
-  // 17 Sep 2026).
+  // and the screen is told plainly that the message did not go.
   let told = false;
   let why = null;
   if (tell && body) {
@@ -460,31 +486,14 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
         told = true;
       } catch (err) { why = `the message could not be sent: ${err.message}`; }
     }
+    if (told) await query('update content_queue set told = true where id = $1', [id]);
   }
 
-  const { rows: [out] } = await query(
-    `update content_queue
-        set state = 'rejected', reason = $2, message = $3, told = $4, decided_by = $5, decided_at = now()
-      where id = $1 returning *`,
-    [id, reason, body, told, who ?? null]);
-  if (out) out.why = why;
-  // A rejection has to reach the thing itself.
-  //
-  // Marking the queue row and stopping there left an abusive review public the
-  // moment its hold expired, because nothing that reads it knows the queue
-  // exists (Codex, 17 Sep 2026). Each kind is suppressed where it lives, in the
-  // way that table already understands.
-  if (out) {
-    await suppress(out.subject_type, out.subject_id, { reason, who });
-    // A picture is one of the six facts the ready bar is judged on, and only an
-    // approved one counts — so a decision about a photograph changes the place's
-    // score (Codex, 17 Sep 2026).
-    if (out.subject_type === 'image' && out.venue_ref) await rescorePlace(out.venue_ref);
-  }
   await query(
     `insert into rejection_counts (kind, reason, used, last_at) values ($1,$2,1, now())
      on conflict (kind, reason) do update set used = rejection_counts.used + 1, last_at = now()`,
     [q.kind, reason]);
+  if (out) { out.told = told; out.why = why; }
   return out;
 }
 

@@ -324,3 +324,27 @@ test('reporting one reply does not report the conversation it is in', async () =
   assert.equal(await reported('chat_reply', reply.id), true, 'the reply was reported');
   assert.equal(await reported('chat_topic', topic.id), false, 'and the question it hangs off was not');
 });
+
+test('a household is told only about a rejection that was written down', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, 'household') returning *`,
+    [`order-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+
+  // The message used to go out before the row was updated, so a failure in
+  // between thanked somebody for a decision nothing had recorded — and the next
+  // person to look would decide it again (Codex, 17 Sep 2026).
+  const out = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(out.state, 'rejected', 'the decision is recorded whatever the message did');
+  const { rows: [row] } = await query('select state, told, reason from content_queue where id = $1', [q.id]);
+  assert.equal(row.state, 'rejected');
+  assert.equal(row.reason, 'dark');
+  // No sender is configured here, so nothing went out — and the row says so
+  // rather than claiming the household was told.
+  assert.equal(row.told, false);
+  assert.match(out.why ?? '', /nothing was sent/);
+});

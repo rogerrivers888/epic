@@ -1106,8 +1106,12 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         // was gone, every uncached comparison went on billing two locations
         // past a cap the Runs board calls hard (Codex, 17 Sep 2026).
         const room = await tripadvisorRoom(TA_UNITS_PER_VIEW);
-        if (!room.granted) ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left`;
-        else {
+        // The *full* two, because that is what a view bills. One left is not
+        // enough for a look, and "any grant will do" spent it anyway (Codex,
+        // 17 Sep 2026).
+        if (room.granted < TA_UNITS_PER_VIEW) {
+          ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left, and a view bills two`;
+        } else {
           try { ta = { ...ta, id, fields: await detailFor('tripadvisor', id, household.id), note: 'fetched live · two locations billed a view' }; }
           catch (err) { ta = { ...ta, id, note: whySourceFailed('tripadvisor', err) }; }
           finally { await releaseSpend(room.reservation); }
