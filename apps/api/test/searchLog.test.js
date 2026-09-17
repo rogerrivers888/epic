@@ -491,3 +491,37 @@ test('the first build on an upgraded installation actually builds', async () => 
   const again = await index.buildIfEmpty();
   assert.equal(again.built, false);
 });
+
+test('an event only ever lands on the household’s own search', async () => {
+  // Anybody signed in who got hold of another search's id could add events to
+  // it and move its outcome — somebody else's demand figures, written by a
+  // stranger (Codex, 17 Sep 2026).
+  const mine = await aHousehold(query);
+  const theirs = await aHousehold(query);
+  const id = await log.noteSearch({ householdId: mine.household.id, surface: 'places' });
+
+  assert.equal(await log.logEvent({ searchId: id, kind: 'open', householdId: theirs.household.id }), null);
+  let { rows: [row] } = await query('select outcome from searches where id = $1', [id]);
+  assert.equal(row.outcome, 'none', 'and nothing moved');
+
+  assert.equal(await log.logEvent({ searchId: id, kind: 'open', householdId: mine.household.id }), true);
+  ({ rows: [row] } = await query('select outcome from searches where id = $1', [id]));
+  assert.equal(row.outcome, 'clicked');
+});
+
+test('a shelf nothing supports any more is cleared by a rebuild', async () => {
+  // The old shelf used to stay, so even a full rebuild went on counting the
+  // place under a drawer nothing put it in. A shelf set by hand is somebody's
+  // decision and survives (Codex, 17 Sep 2026).
+  await query(
+    `insert into place_index (venue_ref, ownership, derived_by, category, subcategory)
+     values ('osm:node/orphaned', 'identified', 'sweep', 'culture', 'galleries'),
+            ('osm:node/by-hand', 'identified', 'hand', 'culture', 'galleries')
+     on conflict (venue_ref) do update
+        set category = excluded.category, subcategory = excluded.subcategory, derived_by = excluded.derived_by`);
+  await index.reindex();
+  const shelfOf = async (ref) => (await query(
+    'select category, subcategory, derived_by from place_index where venue_ref = $1', [ref])).rows[0];
+  assert.equal((await shelfOf('osm:node/orphaned')).subcategory, null, 'a derived shelf does not outlive what derived it');
+  assert.equal((await shelfOf('osm:node/by-hand')).subcategory, 'galleries', 'a decision survives');
+});

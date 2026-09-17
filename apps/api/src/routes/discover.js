@@ -158,7 +158,9 @@ router.post('/event', async (req, res, next) => {
     if (!queryId || !KINDS.includes(kind)) {
       return res.status(400).json({ error: 'kind_required', message: `kind must be one of ${KINDS.join(', ')}` });
     }
-    await searchLog.logEvent({ searchId: queryId, kind, venueRef, position, dwellMs });
+    // Only against this household's own search (Codex, 17 Sep 2026).
+    const household = await currentHousehold();
+    await searchLog.logEvent({ searchId: queryId, kind, venueRef, position, dwellMs, householdId: household.id });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

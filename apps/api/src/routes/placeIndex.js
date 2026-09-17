@@ -1009,17 +1009,31 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     else {
       let id = ref.startsWith('google:') ? ref.slice(7) : (await matchesFor([ref], 'google')).get(ref) ?? null;
       let how = id ? 'by its Google identifier' : null;
-      if (!id && req.query.match === '1') {
-        try {
-          const m = await googleMatchFor({ venueRef: ref, name: named.name, lat: pi.lat, lng: pi.lng, householdId: household.id, strict: true });
-          id = m?.id ?? null; how = id ? 'matched by name and distance' : null;
-        } catch (err) { if (err?.provider !== 'google') throw err; google.note = whySourceFailed('google', err); }
-      }
-      if (google.note) { /* said in plain words above */ }
-      else if (id) {
-        try { google = { ...google, id, how, fields: await detailFor('google', id, household.id), note: `${how} · fetched live` }; }
-        catch (err) { google = { ...google, id, how, note: whySourceFailed('google', err) }; }
-      } else google.note = req.query.match === '1' ? 'no match' : 'not asked';
+      // The ceiling, before either call.
+      //
+      // Both the match and the detail are billed, and this screen asked for
+      // them without consulting it at all — so the ceiling the Runs board calls
+      // hard could be walked through by opening a comparison (Codex, 17 Sep
+      // 2026). The Tripadvisor column below has always claimed its locations;
+      // this is the same rule for money. Two calls where a match is needed,
+      // one where we already hold the identifier.
+      const wants = id ? DETAIL_PENCE : DETAIL_PENCE + MATCH_PENCE;
+      const room = await roomToSpend(Math.round(wants), { holder: 'compare' });
+      if (!room.ok) {
+        google.note = `over this month's ceiling · ${money(room.leftPence)} left`;
+      } else try {
+        if (!id && req.query.match === '1') {
+          try {
+            const m = await googleMatchFor({ venueRef: ref, name: named.name, lat: pi.lat, lng: pi.lng, householdId: household.id, strict: true });
+            id = m?.id ?? null; how = id ? 'matched by name and distance' : null;
+          } catch (err) { if (err?.provider !== 'google') throw err; google.note = whySourceFailed('google', err); }
+        }
+        if (google.note) { /* said in plain words above */ }
+        else if (id) {
+          try { google = { ...google, id, how, fields: await detailFor('google', id, household.id), note: `${how} · fetched live` }; }
+          catch (err) { google = { ...google, id, how, note: whySourceFailed('google', err) }; }
+        } else google.note = req.query.match === '1' ? 'no match' : 'not asked';
+      } finally { await releaseSpend(room.reservation); }
     }
     columns.push(google);
 

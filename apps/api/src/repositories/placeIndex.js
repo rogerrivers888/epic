@@ -663,7 +663,9 @@ export async function shelveAll({ refs = null } = {}) {
   const words = [];
   const flush = async () => {
     if (chunk.length) {
-      const values = chunk.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4})`).join(',');
+      // Cast, because a row that clears a shelf is four nulls and Postgres
+      // cannot infer a type from nothing (17 Sep 2026).
+      const values = chunk.map((_, i) => `($${i * 4 + 1}::text,$${i * 4 + 2}::text,$${i * 4 + 3}::text,$${i * 4 + 4}::text)`).join(',');
       await query(
         `update place_index pi set category = v.cat, subcategory = v.sub, derived_by = v.by
            from (values ${values}) as v(ref, cat, sub, by)
@@ -694,7 +696,16 @@ export async function shelveAll({ refs = null } = {}) {
       said = labelsOf(venue);
       by = r.own_category ? 'own' : 'sweep';
     }
-    if (!filed) continue;
+    if (!filed) {
+      // Nothing resolves it any more — its attraction was rejected, or the
+      // classification it was filed by is gone. The old shelf used to stay,
+      // so even a full rebuild went on counting the place under a drawer
+      // nothing put it in (Codex, 17 Sep 2026). A shelf set by hand is
+      // somebody's decision and survives; a derived one does not outlive what
+      // derived it.
+      if (r.derived_by !== 'hand') { chunk.push([r.venue_ref, null, null, null]); if (chunk.length >= 500) await flush(); }
+      continue;
+    }
     for (const w of said) words.push([r.venue_ref, w]);
     const sub = filed.subcategory && (!live.size || live.has(filed.subcategory)) ? filed.subcategory : null;
     const cat = filed.category ?? filed.shelves?.[0] ?? null;

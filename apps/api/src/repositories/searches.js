@@ -50,15 +50,27 @@ export async function logSearch({
  * click does not undo the click — because the three faults are counted off it
  * and a number that can go backwards is a number nobody can act on.
  */
-export async function logEvent({ searchId, kind, venueRef = null, position = null, dwellMs = null, meta = {} } = {}) {
+export async function logEvent({ searchId, kind, venueRef = null, position = null, dwellMs = null, meta = {}, householdId = null } = {}) {
   if (!searchId) return null;
   // A client holding an id from before a deploy, or from a search that was never
   // written, must not turn a tap into a five hundred. The log is worth having and
   // it is not worth that.
-  try { return await writeEvent({ searchId, kind, venueRef, position, dwellMs, meta }); } catch { return null; }
+  try { return await writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, householdId }); } catch { return null; }
 }
 
-async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta }) {
+async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, householdId = null }) {
+  // The search has to be this household's.
+  //
+  // Anybody signed in who got hold of another search's id could add events to
+  // it and move its outcome, which is somebody else's demand figures written by
+  // a stranger (Codex, 17 Sep 2026). Given a household, the write only lands on
+  // a search that belongs to it; given none — the anonymous surfaces — it lands
+  // as before, because there is nobody to check against.
+  if (householdId) {
+    const { rows } = await query(
+      'select 1 from searches where id = $1 and household_id = $2', [searchId, householdId]);
+    if (!rows.length) return null;
+  }
   await query(
     `insert into search_events (search_id, kind, venue_ref, position, dwell_ms, meta)
      values ($1,$2,$3,$4,$5,$6::jsonb)`,
