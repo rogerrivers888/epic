@@ -1308,7 +1308,19 @@ router.get('/runs/:ref', async (req, res, next) => {
     const ref = String(req.params.ref || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
     if (ref.length < 6) return res.status(400).json({ error: 'ref_too_short', message: 'A run number is eight characters, e.g. 322FCB98.' });
     const run = await planSessions.planSessionByRef(household.id, ref);
-    if (!run) return res.status(404).json({ error: 'run_not_found', message: `No run here begins ${ref.toUpperCase()}. Runs are kept for twelve hours.` });
+    if (!run) return res.status(404).json({ error: 'run_not_found', message: `No run here begins ${ref.toUpperCase()}. A run can be read for ten hours.` });
+    // Found, and past its time. The row is still here — it is swept within the
+    // hour — but its state holds the provider's content and the ten hours is
+    // the whole of what we are allowed to hold it for, so nothing derived from
+    // it is answered with. Said as its own answer rather than as "no such run",
+    // which is the distinction this lookup exists to make.
+    if (run.expires_at && new Date(run.expires_at).getTime() <= Date.now()) {
+      return res.status(410).json({
+        error: 'run_expired',
+        message: `Run ${ref.toUpperCase()} has expired. A run can be read for ten hours after it is made.`,
+        expiredAt: run.expires_at,
+      });
+    }
     const st = run.state || {};
     const calls = await planSessions.callsOfSession(run.id);
     const started = st.runStartedAt ? new Date(st.runStartedAt) : new Date(run.created_at);

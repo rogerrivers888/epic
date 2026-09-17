@@ -73,10 +73,18 @@ export async function recordSessionCall(householdId, sessionId, provider, purpos
  * Matched as a prefix of the id with the dashes taken out, because that is the
  * form the number is shown in. Not expiry-filtered: "no run here begins that"
  * and "that run has expired" are different answers and the route says which.
+ *
+ * **`expires_at` comes back with it and the route must check it before it
+ * reads `state`.** The row survives its expiry by up to an hour of grace and
+ * the wait for the next sweep, and the state holds the provider's content, so a
+ * reader that only asked "is there a row" was serving licensed material past
+ * the window it was allowed for (Codex, 17 Sep 2026). Returning the row and
+ * making the caller decide is the shape that keeps the two answers apart; it
+ * only works if every caller decides.
  */
 export async function planSessionByRef(householdId, ref) {
   const { rows } = await query(
-    `select id, trip_id, created_at, updated_at, state from plan_sessions
+    `select id, trip_id, created_at, updated_at, expires_at, state from plan_sessions
       where household_id = $1 and replace(id::text, '-', '') like $2 || '%'
       order by created_at desc limit 1`,
     [householdId, ref],
