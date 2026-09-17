@@ -386,14 +386,14 @@ const RENTED = new Set(['google', 'yelp', 'tripadvisor', 'foursquare']);
  * only the identifier (Codex, 17 Sep 2026). `display_source` is the column that
  * records the answer: `activitySweep` writes it as 'google' when the display
  * must be fetched live and null when the record is owned.
+ *
+ * Null is the answer, not a gap to fill in from somewhere else. When a later
+ * sweep matches a Google pointer to the map it sets `display_source = null` and
+ * leaves the original Google attribution alone, so reading the attribution as a
+ * fallback marked the upgraded row rented all over again (Codex, second pass).
+ * Nothing else writes a licensed row, so null means owned wherever it appears.
  */
-const rentedRow = (a, ref) => {
-  if (a.display_source) return RENTED.has(String(a.display_source).toLowerCase());
-  // Rows written before that column: their attribution says what was kept.
-  const att = Array.isArray(a.attribution) ? a.attribution : [];
-  if (att.length) return att.some((x) => RENTED.has(String(x.source ?? '').toLowerCase()));
-  return RENTED.has(String(ref).split(':', 1)[0]);
-};
+const rentedRow = (a) => RENTED.has(String(a.display_source ?? '').toLowerCase());
 
 taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) => {
   try {
@@ -467,7 +467,7 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
         // licensed provider's row is an identifier and nothing else, which is
         // why 381 of these have no name.
         source: a.source ?? null,
-        rented: rentedRow(a, ref),
+        rented: rentedRow(a),
         named: Boolean(a.name) && !/^\(.*\)$/.test(String(a.name)),
         state: a.state ?? null,
         outcode: a.outcode ?? null,
