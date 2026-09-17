@@ -1035,7 +1035,13 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
       cell: (r) => (
         <View style={styles.nameCell}>
           <Text style={[styles.rowName, !r.name && styles.refName]}>{r.name ?? r.ref}</Text>
-          <Text style={styles.rowNote}>{[r.subcategory, r.outcode, sourcesSentence(r.sources)].filter(Boolean).join(' · ')}</Text>
+          {/* Why it is on this list. A place a household has saved is the
+              shortest route to something worth doing, so it says so (Codex,
+              17 Sep 2026). */}
+          <Text style={styles.rowNote}>
+            {[r.ownership === 'claimed' ? 'a household saved it' : null, r.subcategory, r.outcode, sourcesSentence(r.sources)]
+              .filter(Boolean).join(' · ')}
+          </Text>
         </View>
       ) },
     { key: 'been', label: 'Been there', tip: 'beenThere', width: 120, align: 'right',

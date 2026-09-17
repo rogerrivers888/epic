@@ -419,3 +419,26 @@ test('an empty record is not research, and the write that earns it says so', asy
   const { rows: [after] } = await query('select ownership from place_index where venue_ref = $1', [bare]);
   assert.equal(after.ownership, 'identified', 'a rebuild must not promote an empty row either');
 });
+
+test('a place a household saved is the first thing worth owning, not hidden', async () => {
+  // Splitting owned from claimed took every saved place out of Collect's reach
+  // and off "Worth owning next" — the two lists whose whole job is to find
+  // places worth researching (Codex, 17 Sep 2026). A claimed place is one
+  // somebody has already said matters and we hold nothing about.
+  await query(`insert into localities (slug, name, kind, parent_slug)
+               values ('worthshire', 'Worthshire', 'county', 'gb') on conflict (slug) do nothing`);
+  const claimed = 'osm:node/somebody-saved-it';
+  const seen = 'osm:node/nobody-asked';
+  await index.noteMany([{ ref: claimed, ownership: 'claimed' }, { ref: seen }], { countryCode: 'GB' });
+  await query(
+    `insert into place_areas (venue_ref, area_slug) select r, 'worthshire' from unnest($1::text[]) as r
+     on conflict do nothing`, [[claimed, seen]]);
+  await index.refreshStats();
+
+  const q = await index.quality('worthshire');
+  const refs = q.worth.map((w) => w.ref);
+  assert.ok(refs.includes(claimed), 'a saved place is worth owning next');
+  assert.ok(refs.includes(seen), 'and so is one nobody has asked about');
+  assert.equal(refs[0], claimed, 'the one somebody has already said matters comes first');
+  assert.equal(q.worth.find((w) => w.ref === claimed)?.ownership, 'claimed', 'and the row says why it is here');
+});

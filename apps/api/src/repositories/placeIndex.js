@@ -1315,8 +1315,15 @@ export async function quality(areaSlug, { refs = null, limit = 12 } = {}) {
       from place_index pi
       left join lateral (select count_band, crowd_band from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
       left join place_records r on r.venue_ref = pi.venue_ref
-     where ${scope.sql} and pi.ownership = 'identified'
-     order by case coalesce(sp.count_band, r.count_band)
+     -- Everything we hold no research on, which is the identified ones *and*
+     -- the claimed ones. A claimed place is one a household said matters and we
+     -- still hold nothing about — the shortest list of places worth owning
+     -- next, and requiring "identified" hid every one of them (Codex, 17 Sep
+     -- 2026). A claimed place sorts above an identified one on the same
+     -- evidence, because somebody has already said so.
+     where ${scope.sql} and pi.ownership <> 'owned'
+     order by (pi.ownership = 'claimed') desc,
+              case coalesce(sp.count_band, r.count_band)
                 when 'thousands' then 4 when 'many' then 3 when 'hundreds' then 2 when 'few' then 1 else 0 end desc,
               case coalesce(sp.crowd_band, r.crowd_band)
                 when 'top' then 4 when 'high' then 3 when 'good' then 2 when 'mixed' then 1 else 0 end desc,
@@ -1345,6 +1352,9 @@ export async function quality(areaSlug, { refs = null, limit = 12 } = {}) {
       // A word, not a figure — and a place nothing rating-bearing has returned
       // gets no band at all rather than a zero.
       rating: w.crowd_band, been: w.count_band, score: w.data_score,
+      // Which of the two reasons it is here: a household said it matters, or
+      // nobody has and we hold nothing either way (Codex, 17 Sep 2026).
+      ownership: w.ownership,
     })),
   };
 }

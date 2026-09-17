@@ -1441,6 +1441,12 @@ export type PlaceQuality = {
     sources: string[];
     /** A word, never a figure: the rating is banded at the call and the number dropped. */
     rating: string | null; been: string | null; score: number | null;
+    /**
+     * Why it is on this list: `claimed` means a household said it matters and
+     * we hold nothing about it — the shortest route to something worth doing —
+     * and `identified` means nobody has and we hold nothing either way.
+     */
+    ownership: string;
   }[];
 };
 

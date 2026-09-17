@@ -1409,8 +1409,12 @@ async function planCollect(where) {
 
   const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
   const everything = rows.map((r) => r.venue_ref);
-  // Only a place we hold nothing of our own about is worth a paid call.
-  const worthPaying = rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref);
+  // Only a place we hold nothing of our own about is worth a paid call — which
+  // is both the identified ones and the claimed ones. A claimed place is one a
+  // household has said matters and we still hold nothing about: the best
+  // candidate there is, and splitting owned from claimed had quietly taken all
+  // of them out of Collect's reach (Codex, 17 Sep 2026).
+  const worthPaying = rows.filter((r) => r.ownership !== 'owned').map((r) => r.venue_ref);
 
   /**
    * The staleness rule, enforced rather than printed.
