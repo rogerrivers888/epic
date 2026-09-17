@@ -443,7 +443,7 @@ export async function publishedReviews(hostId) {
   const { rows } = await query(
     `select r.stars, r.chips, r.text, r.publish_on, o.title
        from host_reviews r join host_offers o on o.id = r.offer_id
-      where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date
+      where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not r.hidden
       order by r.publish_on desc limit 50`,
     [hostId],
   );

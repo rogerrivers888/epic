@@ -35,7 +35,10 @@ const TOPIC_SELECT = `
 /** Every topic in a context, newest activity first. */
 export async function topicsOf(contextType, contextId, { limit = 500 } = {}) {
   const { rows } = await query(
-    `${TOPIC_SELECT} where t.context_type = $1 and t.context_id = $2 order by last_at desc limit $3`,
+    // `hidden` is what a moderator's rejection leaves behind (contentQueue.js,
+    // migration 147). It is not deleted, so the decision can be looked at again
+    // — but nobody is shown it.
+    `${TOPIC_SELECT} where t.context_type = $1 and t.context_id = $2 and not t.hidden order by last_at desc limit $3`,
     [contextType, contextId, limit],
   );
   return rows;
@@ -45,7 +48,7 @@ export async function topicsOf(contextType, contextId, { limit = 500 } = {}) {
 export async function topicsAcross(contextType, contextIds, { limit = 1000 } = {}) {
   if (!contextIds.length) return [];
   const { rows } = await query(
-    `${TOPIC_SELECT} where t.context_type = $1 and t.context_id = any($2::uuid[]) order by last_at desc limit $3`,
+    `${TOPIC_SELECT} where t.context_type = $1 and t.context_id = any($2::uuid[]) and not t.hidden order by last_at desc limit $3`,
     [contextType, contextIds, limit],
   );
   return rows;
@@ -95,7 +98,7 @@ export async function deleteTopic(id) {
 export async function askCounts(tripId) {
   const { rows } = await query(
     `select tag_ref, count(*)::int as n from chat_topics
-      where context_type = 'trip' and context_id = $1 and tag_kind = 'stop' group by tag_ref`,
+      where context_type = 'trip' and context_id = $1 and tag_kind = 'stop' and not hidden group by tag_ref`,
     [tripId],
   );
   return new Map(rows.map((r) => [r.tag_ref, r.n]));

@@ -2442,7 +2442,13 @@ export const api = {
    * than half-done.
    */
   adminCollect: (p: PlaceWhere & { cat?: string | null; sub?: string | null; sources: string[]; limit?: number }) =>
-    post<{ started: true; places: number; sources: string[]; free: number; paid: number; spendPence: number; leftPence: number }>('/api/admin/place-index/collect', p),
+    post<{
+      started: true; places: number; sources: string[]; free: number; paid: number;
+      /** Per provider, because the two paid sources are not interchangeable:
+       *  Google's ceiling is money and Tripadvisor's is a count of calls. */
+      google: number; tripadvisor: number; tripadvisorCapped: number; tripadvisorLeft: number;
+      spendPence: number; leftPence: number;
+    }>('/api/admin/place-index/collect', p),
   /** Look for a picture we may keep, and put it in the library if there is one. */
   adminFindPictures: (refs: string[]) =>
     post<{ found: number; results: { ref: string; state: string; rung?: string }[]; spentPence: number }>('/api/admin/place-index/pictures/find', { refs }),

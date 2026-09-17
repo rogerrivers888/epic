@@ -1394,7 +1394,15 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
              onPress={() => {
                setBusy(true); setSaid(null);
                api.adminCollect({ ...q, cat: cat || undefined, sub: sub || undefined, sources: [...picked] })
-                 .then((r) => setSaid(`Going: ${r.places} places, ${r.free} free${r.paid ? `, ${r.paid} at ${pounds(r.spendPence)}` : ''}.`))
+                 .then((r) => setSaid([
+                   `Going: ${r.places} places, ${r.free} free`,
+                   r.google ? `, ${r.google} to Google at ${pounds(r.spendPence)}` : '',
+                   r.tripadvisor ? `, ${r.tripadvisor} to Tripadvisor` : '',
+                   // Said out loud rather than swallowed: Tripadvisor's ceiling
+                   // is counted in calls, so the ones it left out are named.
+                   r.tripadvisorCapped ? ` (${r.tripadvisorCapped} left out — ${r.tripadvisorLeft} Tripadvisor calls left this month)` : '',
+                   '.',
+                 ].join('')))
                  .catch((e: any) => setSaid(e?.body?.message ?? 'That could not be started.'))
                  .finally(() => setBusy(false));
              }} />

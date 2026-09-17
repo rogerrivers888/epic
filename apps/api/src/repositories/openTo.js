@@ -28,14 +28,17 @@ export async function entryById(id, client) {
 /** This household's live entry for a scope: its standing one, or the one for a trip. */
 export async function entryFor(householdId, { scope = 'standing', tripId = null } = {}) {
   const { rows } = await query(
-    `select * from open_entries where household_id = $1 and state = 'active' and scope = $2 and ($3::uuid is null or trip_id = $3::uuid) limit 1`,
+    `select * from open_entries where household_id = $1 and state = 'active' and not hidden and scope = $2 and ($3::uuid is null or trip_id = $3::uuid) limit 1`,
     [householdId, scope, tripId],
   );
   return rows[0] ?? null;
 }
 
 export async function entriesOf(householdId) {
-  const { rows } = await query(`select * from open_entries where household_id = $1 and state = 'active' order by scope, created_at desc`, [householdId]);
+  // A moderator's rejection hides the entry from the pool *and* from the
+  // household's own list, so it is not still sitting there looking live
+  // (migration 147).
+  const { rows } = await query(`select * from open_entries where household_id = $1 and state = 'active' and not hidden order by scope, created_at desc`, [householdId]);
   return rows;
 }
 
@@ -81,7 +84,7 @@ export async function endEntry(id) {
 export async function candidatesFor(entry) {
   const wantScope = entry.scope === 'standing' ? 'trip' : 'standing';
   const { rows } = await query(
-    `select * from open_entries where state = 'active' and scope = $1 and household_id <> $2 and kind = $3
+    `select * from open_entries where state = 'active' and not hidden and scope = $1 and household_id <> $2 and kind = $3
        and (expires_at is null or expires_at > now())`,
     [wantScope, entry.household_id, entry.kind],
   );

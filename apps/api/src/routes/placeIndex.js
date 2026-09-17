@@ -18,7 +18,7 @@
  */
 
 import express from 'express';
-import { requires } from '../access.js';
+import { can, requires } from '../access.js';
 import { query } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import * as reach from '../repositories/reach.js';
@@ -29,6 +29,7 @@ import { writeAudit } from '../repositories/roles.js';
 import { OUR_LABEL, detailFor, blank, lineUp } from '../sources/compare.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
+import { TRIPADVISOR_CAP } from '../repositories/runs.js';
 import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
@@ -726,6 +727,11 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     const { rows: [pi] } = await query('select * from place_index where venue_ref = $1', [ref]);
     if (!pi) return res.status(404).json({ error: 'not_indexed', message: 'Nothing indexed under that ref yet.' });
     const household = await currentHousehold();
+    // Looking is `view_library`; **spending is not**. A live detail call is a
+    // paid call whoever opened the screen, so without `manage_library` the
+    // provider columns read "not asked" rather than quietly billing (Codex,
+    // 17 Sep 2026).
+    const maySpend = can(req, 'manage_library');
     const named = (await index.namesFor([ref])).get(ref) ?? { name: null };
 
     // Ours: the owned record first, because it is the one researched from the
@@ -744,6 +750,7 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     // Google: by identifier when we hold one, else matched by name and distance.
     let google = { key: 'google', label: 'Google', note: null, fields: null, id: null, how: 'none' };
     if (!googleSource.enabled()) google.note = 'not switched on';
+    else if (!maySpend) google.note = 'not asked';
     else {
       let id = ref.startsWith('google:') ? ref.slice(7) : (await matchesFor([ref], 'google')).get(ref) ?? null;
       let how = id ? 'by its Google identifier' : null;
@@ -765,6 +772,7 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     // two billed locations, so it is not made on the off-chance.
     let ta = { key: 'tripadvisor', label: 'Tripadvisor', note: null, fields: null, id: null };
     if (!tripadvisorSource.enabled()) ta.note = 'not switched on';
+    else if (!maySpend) ta.note = 'not asked';
     else {
       const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
       if (!id) ta.note = 'not asked';
@@ -1031,6 +1039,59 @@ async function askThese(refs, householdId) {
   }
 }
 
+/**
+ * The same question, asked of Tripadvisor.
+ *
+ * Kept apart from `askThese` rather than folded into it, because the two are not
+ * interchangeable: Tripadvisor has a hard monthly ceiling counted in calls
+ * (`TRIPADVISOR_CAP`) where Google's is counted in money, and a Tripadvisor view
+ * bills two locations. Choosing Tripadvisor on the Collect drawer used to run
+ * Google instead — the same money, from the wrong provider, silently (Codex,
+ * 17 Sep 2026).
+ */
+async function askTripadvisor(refs, householdId) {
+  const matched = await matchesFor(refs, 'tripadvisor');
+  let asked = 0;
+  const refused = [];
+  const names = [];
+  for (const ref of refs) {
+    const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : matched.get(ref) ?? null;
+    // No join, no call: a view is not spent looking for a place we have never
+    // matched. The ranking run is what makes the join.
+    if (!id) { refused.push({ ref, why: 'no match' }); continue; }
+    try {
+      const detail = await detailFor('tripadvisor', id, householdId);
+      const crowd = crowdBand(detail?.rating, detail?.ratingCount);
+      const count = countBand(detail?.ratingCount);
+      if (crowd || count) {
+        await query(
+          `insert into place_records (venue_ref, crowd_band, count_band, banded_at, updated_at)
+           values ($1,$2,$3, now(), now())
+           on conflict (venue_ref) do update
+              set crowd_band = coalesce(excluded.crowd_band, place_records.crowd_band),
+                  count_band = coalesce(excluded.count_band, place_records.count_band),
+                  banded_at = now(), updated_at = now()`,
+          [ref, crowd, count]);
+      }
+      await index.noteMany([{ ref, sourceId: id }], { source: 'tripadvisor' });
+      if (detail?.name) names.push({ ref, name: detail.name });
+      asked += 1;
+    } catch (err) {
+      if (err?.provider !== 'tripadvisor') throw err;
+      refused.push({ ref, why: whySourceFailed('tripadvisor', err) });
+    }
+  }
+  return { asked, refused, names };
+}
+
+/** How many Tripadvisor calls this month has left, before one is made. */
+async function tripadvisorRoom() {
+  const { rows } = await query(
+    `select count(*)::int as calls from provider_calls
+      where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
+  return Math.max(0, TRIPADVISOR_CAP - (rows[0]?.calls ?? 0));
+}
+
 router.post('/ask', requires('manage_library'), async (req, res, next) => {
   try {
     const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
@@ -1122,22 +1183,38 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
         limit $${args.length}`, args);
 
     const free = chosen.has('own') || chosen.has('osm') || chosen.has('atlas') ? rows.map((r) => r.venue_ref) : [];
-    const wantsPaid = (chosen.has('google') || chosen.has('tripadvisor')) && googleSource.enabled();
     // Only a place we hold nothing of our own about is worth a paid call.
-    const paid = wantsPaid ? rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref) : [];
-    const want = Math.round(paid.length * 1.4);
+    const worthPaying = rows.filter((r) => r.ownership === 'identified').map((r) => r.venue_ref);
+
+    // Each paid source is asked on its own terms, and only if it was chosen and
+    // is switched on. One shared `paid` list run through Google was how asking
+    // Tripadvisor spent Google's money (Codex, 17 Sep 2026).
+    const google = chosen.has('google') && googleSource.enabled() ? worthPaying : [];
+    let tripadvisor = chosen.has('tripadvisor') && tripadvisorSource.enabled() ? worthPaying : [];
+    // Tripadvisor's ceiling is counted in calls, not in money, so it is enforced
+    // here rather than by `roomToSpend`.
+    const taLeft = tripadvisor.length ? await tripadvisorRoom() : 0;
+    const taCapped = Math.max(0, tripadvisor.length - taLeft);
+    tripadvisor = tripadvisor.slice(0, taLeft);
+
+    const want = Math.round(google.length * 1.4);
     const room = await roomToSpend(want);
     if (!room.ok) return overTheCeiling(res, want, room);
 
     const household = await currentHousehold();
     res.json({
       started: true, places: rows.length, sources: [...chosen],
-      free: free.length, paid: paid.length, spendPence: want, leftPence: room.leftPence,
+      free: free.length, paid: google.length + tripadvisor.length,
+      google: google.length, tripadvisor: tripadvisor.length,
+      // Said out loud rather than swallowed: the ones the monthly ceiling left out.
+      tripadvisorCapped: taCapped, tripadvisorLeft: taLeft,
+      spendPence: want, leftPence: room.leftPence,
     });
     void (async () => {
       try {
         if (free.length) await curateThese(free, household.id);
-        if (paid.length) await askThese(paid, household.id);
+        if (google.length) await askThese(google, household.id);
+        if (tripadvisor.length) await askTripadvisor(tripadvisor, household.id);
         await index.rescore();
         await index.refreshStats();
       } catch (err) { console.warn(`collect: ${err.message}`); }

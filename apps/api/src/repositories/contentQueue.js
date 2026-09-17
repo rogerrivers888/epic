@@ -136,14 +136,14 @@ export async function sync() {
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, made_at)
     select 'message', 'chat_topic', t.id::text, m.household_id, coalesce(m.name, 'Somebody'), t.created_at
       from chat_topics t left join members m on m.id = t.author_member_id
-     where t.state <> 'hidden'
+     where not t.hidden
     on conflict (subject_type, subject_id) do nothing`);
 
   await query(`
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, made_at)
     select 'offer', 'open_entry', e.id::text, e.household_id, coalesce(h.name, 'A household'), e.created_at
       from open_entries e left join households h on h.id = e.household_id
-     where e.state = 'active'
+     where e.state = 'active' and not e.hidden
     on conflict (subject_type, subject_id) do nothing`);
 
   // Where a picture or a review is about a place, say which area it is in, so
@@ -257,8 +257,16 @@ export async function approve(ids, who) {
     `update content_queue set state = 'approved', reason = null, decided_by = $2, decided_at = now()
       where id = any($1::uuid[]) and state <> 'approved' returning id, kind, subject_type, subject_id`,
     [ids, who ?? null]);
+  // Approving is the undo of rejecting, so it has to reach as far: a thing
+  // suppressed by mistake comes back, rather than staying invisible for ever
+  // because the queue row now says "approved".
   for (const r of rows) {
-    if (r.subject_type === 'image') await query(`update image_assets set moderation = 'approved', moderated_by = $2, moderated_at = now() where id = $1::uuid`, [r.subject_id, who ?? null]);
+    if (r.subject_type === 'image') {
+      await query(`update image_assets set moderation = 'approved', moderated_by = $2, moderated_at = now() where id = $1::uuid`, [r.subject_id, who ?? null]);
+      continue;
+    }
+    const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', open_entry: 'open_entries' }[r.subject_type];
+    if (table) await query(`update ${table} set hidden = false where id = $1::uuid`, [r.subject_id]);
   }
   return rows;
 }
@@ -312,15 +320,50 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
       where id = $1 returning *`,
     [id, reason, body, told, who ?? null]);
   if (out) out.why = why;
-  if (out.subject_type === 'image') {
-    await query(`update image_assets set moderation = 'rejected', moderation_note = $2, moderated_by = $3, moderated_at = now() where id = $1::uuid`,
-      [out.subject_id, reason, who ?? null]);
-  }
+  // A rejection has to reach the thing itself.
+  //
+  // Marking the queue row and stopping there left an abusive review public the
+  // moment its hold expired, because nothing that reads it knows the queue
+  // exists (Codex, 17 Sep 2026). Each kind is suppressed where it lives, in the
+  // way that table already understands.
+  if (out) await suppress(out.subject_type, out.subject_id, { reason, who });
   await query(
     `insert into rejection_counts (kind, reason, used, last_at) values ($1,$2,1, now())
      on conflict (kind, reason) do update set used = rejection_counts.used + 1, last_at = now()`,
     [q.kind, reason]);
   return out;
+}
+
+/**
+ * Take one rejected thing out of circulation, wherever it lives.
+ *
+ * Nothing a household wrote is deleted — this is a moderation decision, not an
+ * erasure, and the words stay where they are so the decision can be looked at
+ * again. What changes is whether anybody else is shown them.
+ */
+async function suppress(subjectType, subjectId, { reason, who }) {
+  if (subjectType === 'image') {
+    await query(
+      `update image_assets set moderation = 'rejected', moderation_note = $2, moderated_by = $3, moderated_at = now()
+        where id = $1::uuid`, [subjectId, reason, who ?? null]);
+    // And it stops being anybody's picture of anywhere.
+    await query(`delete from image_links where image_id = $1::uuid`, [subjectId]).catch(() => null);
+    return;
+  }
+  // One flag, one meaning, three tables: `hidden` (migration 147). Not a state
+  // flip and not a date pushed out of reach, because both of those lose what
+  // the row used to say and cannot be undone honestly.
+  const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', open_entry: 'open_entries' }[subjectType];
+  if (table) {
+    // Not swallowed. A rejection that failed to reach the content but told the
+    // screen it had is the exact shape of the bug this fixes.
+    await query(`update ${table} set hidden = true where id = $1::uuid`, [subjectId]);
+    return;
+  }
+  // A visit's note, a rating's comment and a flagged fact are not published to
+  // anybody outside the household that made them — every read of them is scoped
+  // to that household. So for those a rejection is the queue row and the
+  // message, and there is nothing to take down.
 }
 
 /** Reported content jumps the queue. */
