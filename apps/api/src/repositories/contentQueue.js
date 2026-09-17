@@ -475,6 +475,17 @@ async function suppress(subjectType, subjectId, { reason, who }) {
     // 2026). Ending it is what makes "write it again" possible.
     if (subjectType === 'open_entry') {
       await query(`update open_entries set state = 'ended', updated_at = now() where id = $1::uuid`, [subjectId]);
+      // And the introductions it is already part of.
+      //
+      // Hiding the entry took it out of the pool and left the matches alone, so
+      // a moderator could reject an abusive or over-personal offer while the
+      // people already introduced to it went on seeing it, swapping videos and
+      // talking (Codex, 17 Sep 2026). The match ends; nothing is deleted, so
+      // the counterpart's own entry and words are untouched.
+      await query(
+        `update open_matches set stage = 'ended', updated_at = now()
+          where (host_entry_id = $1::uuid or guest_entry_id = $1::uuid)
+            and stage not in ('ended', 'lapsed')`, [subjectId]);
     }
     return;
   }

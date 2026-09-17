@@ -91,6 +91,15 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
  * for a list that would do it forty times on load — which is why this is its own
  * request with its cost on the button.
  */
+/** This month's Google spend so far, in pence, read off the ledger. */
+async function googleSpentPence() {
+  const { rows: [r] } = await query(
+    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
+       from provider_calls where provider = 'google' and created_at > date_trunc('month', now())`);
+  // The ledger is in dollars; everything on these screens is in pence.
+  return Number(r?.usd ?? 0) * 100 * 0.79;
+}
+
 router.get('/search', requires('view_reporting'), async (req, res, next) => {
   try {
     const id = String(req.query.id ?? '').trim();
@@ -116,6 +125,8 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
      */
     const nameless = refs.filter((r) => !names.get(r)?.name && String(r).startsWith('google:'));
     let asked = 0;
+    let named = 0;
+    let spentPence = 0;
     let why = null;
     if (!nameless.length) why = null;
     else if (String(req.query.names ?? '') !== '1') why = 'not asked';
@@ -123,13 +134,22 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
     else if (!googleSource.enabled()) why = 'Google is not switched on here';
     else {
       const household = await currentHousehold();
+      // What it cost is read off the ledger, not counted from the answers.
+      //
+      // `detailFor` keeps its last three hundred responses, so a name that came
+      // out of that cache cost nothing — and a call that went out and came back
+      // without a name still did. Counting the names reported a charge for the
+      // first and nothing for the second (Codex, 17 Sep 2026).
+      const spentBefore = await googleSpentPence();
       for (const ref of nameless) {
         try {
           const detail = await detailFor('google', ref.slice(7), household.id);
-          if (detail?.name) { names.set(ref, { name: detail.name, from: 'google' }); asked += 1; }
+          if (detail?.name) { names.set(ref, { name: detail.name, from: 'google' }); named += 1; }
         } catch { /* one that will not answer is one bare row, not a failed replay */ }
       }
-      if (!asked) why = 'asked, and none of them answered';
+      spentPence = Math.max(0, Math.round(((await googleSpentPence()) - spentBefore) * 10) / 10);
+      asked = nameless.length;
+      if (!named) why = 'asked, and none of them answered';
     }
     const { rows: scored } = await query(
       'select venue_ref, data_score, subcategory from place_index where venue_ref = any($1)', [refs]);
@@ -205,10 +225,11 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       sourcesQueried: (search.sources_queried ?? []).map((k) => SOURCE_WORD[k] ?? k),
       degraded: search.degraded ?? [],
       rows,
-      // What this replay actually cost, and what is still bare. A figure that
-      // counts what was *not* fetched is a bill for nothing.
-      refetched: asked,
-      refetchedPence: Math.round(asked * 1.4 * 10) / 10,
+      // What this replay actually cost, from the ledger, and what is still
+      // bare. A figure that counts what was *not* fetched is a bill for nothing.
+      refetched: named,
+      asked,
+      refetchedPence: spentPence,
       nameless: rows.filter((r) => !r.name).length,
       // Why a row is still an identifier — never left to be guessed at.
       namelessWhy: why,

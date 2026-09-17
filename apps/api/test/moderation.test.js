@@ -209,3 +209,31 @@ test('a decision made on the Library screen reaches the queue row', async () => 
   await queue.sync();
   assert.equal(await state(), 'approved');
 });
+
+test('rejecting an offer ends the introductions it is already part of', async () => {
+  const mine = await aHousehold(query);
+  const theirs = await aHousehold(query);
+  const entry = async (h) => (await query(
+    `insert into open_entries (household_id, scope, kind, state) values ($1, 'standing', 'adult', 'active') returning *`,
+    [h.household.id])).rows[0];
+  const a = await entry(mine);
+  const b = await entry(theirs);
+  const { rows: [match] } = await query(
+    `insert into open_matches (host_entry_id, guest_entry_id, kind, stage)
+     values ($1,$2,'adult','videos') returning *`, [a.id, b.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'open_entry' and subject_id = $1`, [a.id]);
+
+  // Hiding the entry took it out of the pool and left the match alone, so the
+  // people already introduced to an abusive offer went on seeing it, swapping
+  // videos and talking (Codex, 17 Sep 2026).
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+  const { rows: [after] } = await query('select stage from open_matches where id = $1', [match.id]);
+  assert.equal(after.stage, 'ended');
+
+  // The counterpart's own entry is untouched: it was not their offer.
+  const { rows: [other] } = await query('select state, hidden from open_entries where id = $1', [b.id]);
+  assert.equal(other.state, 'active');
+  assert.equal(other.hidden, false);
+});

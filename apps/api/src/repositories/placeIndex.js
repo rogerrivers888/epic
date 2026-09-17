@@ -17,7 +17,7 @@
  * selecting a country must not become a count over every row at page load.
  */
 
-import { query, withTransaction } from '../db.js';
+import { pool, query, withTransaction } from '../db.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
 import { rules as shelfRules } from './shelfRules.js';
@@ -332,12 +332,43 @@ export async function buildIfEmpty() {
            (select count(*) from place_records)   +
            (select count(*) from household_places) as n`);
   if (!Number(any.n)) return { built: false, places: 0 };
-  // The bars first. Scoring against an empty `ready_bars` marks every place
-  // "not set" and not ready, which is a worse answer than no answer — it reads
-  // as a finding rather than as a job that has not run (Codex, 17 Sep 2026).
-  await seedBars();
-  return { built: true, ...await reindex() };
+
+  // One instance, not all of them.
+  //
+  // A rebuild deletes and refills `place_areas`, the labels and `area_stats`
+  // wholesale, and those inserts are not conflict-safe — so two instances
+  // booting together could both find the index empty, both start, and leave
+  // half a set of rollups between them (Codex, 17 Sep 2026).
+  //
+  // An advisory lock is held by a *connection*, so it is taken on a client of
+  // our own and released on the same one. Through the pool it could be taken on
+  // one connection and unlocked on another, which fails quietly and leaks the
+  // lock until that connection is recycled (`reach.js` does the same thing for
+  // the same reason).
+  const client = await pool.connect();
+  try {
+    const { rows: [got] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as mine', [BUILD_LOCK]);
+    if (!got.mine) return { built: false, places: 0, why: 'another instance is building it' };
+    try {
+      // The second look, now that nobody else can be in here: whoever lost the
+      // race may have finished the whole thing while we waited.
+      const { rows: [again] } = await client.query('select count(*)::int as n from place_index');
+      if (again.n > 0) return { built: false, places: again.n };
+      // The bars first. Scoring against an empty `ready_bars` marks every place
+      // "not set" and not ready, which is a worse answer than no answer — it
+      // reads as a finding rather than as a job that has not run.
+      await seedBars();
+      return { built: true, ...await reindex() };
+    } finally {
+      await client.query('select pg_advisory_unlock(hashtext($1))', [BUILD_LOCK]).catch(() => null);
+    }
+  } finally {
+    client.release();
+  }
 }
+
+/** What the first build is claimed under. */
+const BUILD_LOCK = 'epic.placeIndex.firstBuild';
 
 /**
  * Place the ones nobody has placed yet.
