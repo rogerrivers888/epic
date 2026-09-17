@@ -140,8 +140,9 @@ export async function finishSweep(code, { state, why = null, seen = 0, chains = 
 export async function putPlace(areaCode, p, run = query) {
   // The index is written to by the paths that keep a place, so Places is
   // current between rebuilds rather than as stale as the last one (Codex,
-  // 17 Sep 2026). Identifiers and a position only; never a name.
-  void noteMany([{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null }], { source: 'sweep' });
+  // 17 Sep 2026). Identifiers and a position only; never a name — and through
+  // whichever handle the sweep is writing on, so it commits with the place.
+  await noteMany([{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null }], { source: 'sweep', run });
   await run(
     `insert into scout_places (area_code, venue_ref, name, rank, epic_score, owned_score, crowd_band, count_band,
                                accolades, cuisines, chain, website, lat, lng, chain_scale, sites, cuisine_group, category, from_sources, secondary, last_seen, scored_at)

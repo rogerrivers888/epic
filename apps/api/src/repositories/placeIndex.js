@@ -456,12 +456,16 @@ export async function shelveAll() {
  * index is a derived thing, and a place must never fail to be *kept* because it
  * could not be *counted*.
  */
-export async function noteMany(places = [], { source = null, countryCode = 'GB' } = {}) {
+export async function noteMany(places = [], { source = null, countryCode = 'GB', run = null } = {}) {
   const rows = places.map((p) => (typeof p === 'string' ? { ref: p } : p)).filter((p) => p?.ref);
   if (!rows.length) return { noted: 0 };
-  try {
-    const values = rows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2}::double precision,$${i * 4 + 3}::double precision,$${i * 4 + 4})`).join(',');
-    await query(
+  const write = async (exec) => {
+    // `now()` is in the tuple, not implied by the column list. Without it the
+    // statement had five targets and four expressions and threw every time —
+    // which the swallow on the pool path hid completely, so the index was never
+    // actually written to (found by the sweep's own tests, 17 Sep 2026).
+    const values = rows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2}::double precision,$${i * 4 + 3}::double precision,$${i * 4 + 4}, now())`).join(',');
+    await exec(
       `insert into place_index (venue_ref, lat, lng, country_code, last_seen)
        values ${values}
        on conflict (venue_ref) do update
@@ -471,14 +475,27 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB' 
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode]));
     if (source) {
       const src = rows.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
-      await query(
+      await exec(
         `insert into place_index_sources (venue_ref, source, source_place_id)
          values ${src}
          on conflict (venue_ref, source) do update set last_seen = now()`,
         rows.flatMap((p) => [p.ref, p.source ?? source, p.sourceId ?? null]));
     }
     return { noted: rows.length };
-  } catch { return { noted: 0 }; }
+  };
+  // Inside the write that owns it, when one is open.
+  //
+  // Two things go wrong otherwise, and Codex found both (17 Sep 2026): a read
+  // straight after a save can miss the place, and a transaction that rolls back
+  // leaves an index row for something that was never kept. So a caller with a
+  // client hands it over, and the index is part of the same commit.
+  //
+  // And **no catch on that path**: an error inside a transaction has already
+  // aborted it, so swallowing one here would hide the failure without saving
+  // anything. On the pool it is swallowed, because a derived count is never a
+  // reason for a place not to be kept.
+  if (run) return write((text, params) => run(text, params));
+  try { return await write(query); } catch { return { noted: 0 }; }
 }
 
 // ---------------------------------------------------------------------------
@@ -1066,7 +1083,7 @@ export async function places(areaSlug, {
     if (typeof av === 'string') return desc ? String(bv).localeCompare(av) : av.localeCompare(String(bv));
     return desc ? bv - av : av - bv;
   });
-  return { rows: out, all: all.n };
+  return out;
 }
 
 /**

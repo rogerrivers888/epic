@@ -746,7 +746,9 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     // A column-wide note printed on every row said "ours" against values that
     // were OpenStreetMap's (Codex, 17 Sep 2026).
     const prov = rec?.provenance ?? {};
-    const factOf = (field) => facts.find((f) => f.field === field) ?? null;
+    const { rows: held } = await query(
+      'select field, source, fetched_at from place_facts where venue_ref = $1', [ref]);
+    const factOf = (field) => held.find((f) => f.field === field) ?? null;
     res.json({
       ref, name: named.name, columns,
       rows: rows.map((r) => {

@@ -18,9 +18,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { aHousehold, testDatabase } from './helpers/db.js';
 
-const { query, pool } = await testDatabase();
+const { query, withTransaction, pool } = await testDatabase();
 const log = await import('../src/repositories/searches.js');
 const queue = await import('../src/repositories/contentQueue.js');
+const index = await import('../src/repositories/placeIndex.js');
 const { defaultBars } = await import('../src/domain/placeIndex.js');
 
 test.after(() => pool.end());
@@ -119,6 +120,45 @@ test('a photograph may be approved in a batch; a person’s review may not', () 
   assert.equal(batch.get('review'), false, 'a person’s review is never rejected in a batch');
   assert.equal(batch.get('rating'), false);
   assert.equal(batch.get('note'), false);
+});
+
+test('a place that is kept is indexed, and the write is not silently swallowed', async () => {
+  // The index used to be filled only by a full rebuild, so a place first seen
+  // after the last one was invisible. Worse: the first attempt at fixing that
+  // had five target columns and four expressions, and the `catch` around it hid
+  // the failure completely — so the index was never written to at all and
+  // nothing said so (17 Sep 2026). This asserts the write, not the absence of a
+  // throw.
+  const ref = `osm:node/${Math.floor(Math.random() * 1e9)}`;
+  const out = await index.noteMany([{ ref, lat: 51.48, lng: -0.61 }], { source: 'osm' });
+  assert.equal(out.noted, 1);
+  const { rows } = await query('select venue_ref, lat, country_code from place_index where venue_ref = $1', [ref]);
+  assert.equal(rows.length, 1, 'the place must actually be in the index');
+  assert.equal(Number(rows[0].lat).toFixed(2), '51.48');
+  assert.equal((await query('select source from place_index_sources where venue_ref = $1', [ref])).rows[0].source, 'osm');
+
+  // Idempotent, and a second sighting never loses a position we already had.
+  await index.noteMany([{ ref }], { source: 'osm' });
+  assert.equal((await query('select count(*)::int as n from place_index where venue_ref = $1', [ref])).rows[0].n, 1);
+  assert.ok((await query('select lat from place_index where venue_ref = $1', [ref])).rows[0].lat != null);
+
+  // Nothing to note is not an error, and never a write.
+  assert.deepEqual(await index.noteMany([]), { noted: 0 });
+});
+
+test('the index write joins the transaction that owns it', async () => {
+  // A fire-and-forget write outside the caller's transaction leaves a row for a
+  // place that was rolled back. Given a client, it commits or rolls back with
+  // the thing it is about (Codex, 17 Sep 2026).
+  const ref = `osm:node/${Math.floor(Math.random() * 1e9)}`;
+  await withTransaction(async (client) => {
+    await index.noteMany([{ ref }], { run: (text, params) => client.query(text, params) });
+    assert.equal((await client.query('select count(*)::int as n from place_index where venue_ref = $1', [ref])).rows[0].n, 1,
+      'the place is readable inside the transaction that wrote it');
+    throw new Error('rolled back on purpose');
+  }).catch((e) => { if (!/on purpose/.test(e.message)) throw e; });
+  assert.equal((await query('select count(*)::int as n from place_index where venue_ref = $1', [ref])).rows[0].n, 0,
+    'and it is gone with the transaction, rather than left behind');
 });
 
 test('every subcategory the taxonomy ships with has a bar to be judged on', async () => {

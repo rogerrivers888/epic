@@ -235,11 +235,14 @@ export async function bumpKindsSeen(qids) {
  */
 export async function upsertAttractions(regionSlug, rows) {
   if (!rows.length) return 0;
-  // Everything the harvest keeps is a place Epic has seen, so the index learns
-  // it now rather than at the next rebuild (Codex, 17 Sep 2026).
-  void noteMany(rows.filter((a) => a.venueRef).map((a) => ({ ref: a.venueRef, lat: a.lat ?? null, lng: a.lng ?? null })), { source: 'atlas' });
   let written = 0;
   await withTransaction(async (client) => {
+    // Everything the harvest keeps is a place Epic has seen, and the index
+    // learns it inside the same transaction — so a run that fails halfway does
+    // not leave index rows for attractions that were never written (Codex,
+    // 17 Sep 2026).
+    await noteMany(rows.filter((a) => a.venueRef).map((a) => ({ ref: a.venueRef, lat: a.lat ?? null, lng: a.lng ?? null })),
+      { source: 'atlas', run: (text, params) => client.query(text, params) });
     for (const a of rows) {
       await client.query(
         `insert into attractions

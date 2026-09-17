@@ -62,8 +62,9 @@ export async function discardExpiredFacts() {
 export async function ensureRecord(venueRef) {
   await query('insert into place_records (venue_ref) values ($1) on conflict do nothing', [venueRef]);
   // A place we hold our own research on is owned, and the index has to know the
-  // moment it becomes one (Codex, 17 Sep 2026).
-  void noteMany([{ ref: venueRef }], { source: 'own' });
+  // moment it becomes one (Codex, 17 Sep 2026). Awaited: the next read on this
+  // path is often the screen that just asked for it.
+  await noteMany([{ ref: venueRef }], { source: 'own' });
 }
 
 export async function recordFor(venueRef) {
