@@ -707,6 +707,26 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
     void api.taxonomyTry(labels.map((l) => l.label)).then(setPreview).catch(() => setPreview(null));
   }, [labels]);
 
+  /**
+   * And which of our own places this rule would move, before it exists.
+   *
+   * The owner, 17 Sep 2026: "If I add another label... I should then be able to
+   * see what new locations would be displayed." One label at a time, because
+   * the question is about one rule; nothing is written and no provider is
+   * called -- it resolves our library twice and reports the difference.
+   */
+  const [would, setWould] = useState<Awaited<ReturnType<typeof api.taxonomyWould>> | null>(null);
+  const [counting, setCounting] = useState(false);
+  useEffect(() => {
+    if (labels.length !== 1 || !sub) { setWould(null); return undefined; }
+    let live = true;
+    setCounting(true);
+    void api.taxonomyWould(labels[0].label, sub)
+      .then((d) => { if (live) { setWould(d); setCounting(false); } })
+      .catch(() => { if (live) { setWould(null); setCounting(false); } });
+    return () => { live = false; };
+  }, [labels, sub]);
+
   const chosen = new Set(labels.map((l) => l.label));
   const catOf = (key: string | null) => tax.subcategories.find((s) => s.key === key)?.category_key ?? null;
   const catLabel = (key: string | null | undefined) => tax.categories.find((c) => c.key === key)?.label ?? key ?? '—';
@@ -773,6 +793,35 @@ function RuleEditor({ tax, start, startSubcategory, fixedSubcategory, canManage,
       )}
 
       <Text style={[type.small, styles.landing, preview && sub && preview.subcategory === sub && { color: colors.accent }]}>{landing}</Text>
+
+      {/* What it would actually do to the places we hold. */}
+      {labels.length === 1 && sub ? (
+        <View style={{ gap: 6, paddingTop: 4 }}>
+          <View style={[styles.line, { gap: spacing.md, flexWrap: 'wrap' }]}>
+            <Text style={[styles.bandKicker, { flex: 1, minWidth: 0 }]}>What this would move</Text>
+            <Text style={type.tiny}>
+              {counting ? 'Counting…'
+                : !would ? '—'
+                  : `${would.count} would move in · ${would.already} already here`}
+            </Text>
+          </View>
+          {would && would.moving.length ? (
+            <View>
+              {would.moving.slice(0, 12).map((pl) => (
+                <View key={pl.ref} style={styles.egRow}>
+                  <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={1}>{pl.name}</Text>
+                  <Text style={type.tiny} numberOfLines={1}>
+                    {pl.region ? `${pl.region} · ` : ''}{pl.fromLabel ? `now in ${pl.fromLabel}` : 'nowhere yet'}
+                  </Text>
+                </View>
+              ))}
+              {would.count > 12 ? <Text style={type.tiny}>and {would.count - 12} more</Text> : null}
+            </View>
+          ) : would && !would.count ? (
+            <Text style={type.tiny}>Nothing we hold would move.</Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <Field value={reason} onChangeText={setReason} placeholder="Why — kept on the rule so it can be argued with later" />
       {err ? <Text style={[type.small, { color: colors.overrun }]}>{err}</Text> : null}

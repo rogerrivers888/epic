@@ -503,7 +503,22 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
   if (!state) return null;
   const { counts, waiting, refused } = state;
   const exact = waiting.filter((w) => w.proposed_exact);
+  /**
+   * The close ones, split by the only thing that decides how long they take to
+   * read.
+   *
+   * The owner, 17 Sep 2026: "Skill tag matches are close but not exact. Tell me
+   * where to go and what to look at." 217 of them is a day's reading; 174 carry
+   * the tag's own name and a description that fits, and are close only because
+   * more than one Wikidata item shares the word. The 43 whose name is
+   * *different* are where every bad match is — a fantasy novel for Bookshops, a
+   * climate-change paper for Coastal foraging. So they are two lists, and the
+   * short one is first.
+   */
+  const norm = (t: string | null | undefined) => String(t ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const close = waiting.filter((w) => !w.proposed_exact);
+  const sameName = close.filter((w) => norm(w.label) === norm(w.proposed_label));
+  const otherName = close.filter((w) => norm(w.label) !== norm(w.proposed_label));
   // Every active tag, refusals included: a refused tag is still a tag, and
   // leaving it out made ten of fifteen read as ten of ten (Codex, 14 Sep 2026).
   const all = counts.named + counts.nothing + counts.exact + counts.close + counts.refused + counts.empty;
@@ -514,7 +529,8 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
         <Text style={[type.small, { flex: 1, minWidth: 0 }]}>
           {counts.named} of {all} tags are named
           {counts.exact ? ` · ${counts.exact} matched letter for letter` : ''}
-          {counts.close ? ` · ${counts.close} are close` : ''}
+          {otherName.length ? ` · ${otherName.length} are worth reading` : ''}
+          {sameName.length ? ` · ${sameName.length} carry the same name` : ''}
           {counts.refused ? ` · ${counts.refused} have none on purpose` : ''}
           {counts.empty ? ` · ${counts.empty} have no Wikidata entry` : ''}
           {counts.nothing ? ` · ${counts.nothing} have not been looked up` : ''}
@@ -574,13 +590,25 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
               <Text style={s.identActText}>Take all {exact.length} where one thing only is called that</Text>
             </Press>
           ) : null}
-          {[...exact, ...close].map((w) => (
+          {sameName.length ? (
+            <Press onPress={() => void settle(sameName.map((w) => w.key), true)} accessibilityRole="button" style={s.identTakeAll}>
+              <Text style={s.identActText}>Take all {sameName.length} that carry the tag&apos;s own name</Text>
+            </Press>
+          ) : null}
+          {([
+            ['Different name — read these', otherName],
+            ['Matched letter for letter', exact],
+            ['Same name, more than one thing called it', sameName],
+          ] as const).filter(([, list]) => list.length).map(([heading, list]) => (
+          <View key={heading}>
+          <Text style={[type.tiny, { fontWeight: '700', paddingTop: spacing.md }]}>{heading} · {list.length}</Text>
+          {list.map((w) => (
             <View key={w.key} style={s.identRow}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.rowLabel} numberOfLines={1}>{w.label}</Text>
                 <Text style={type.small} numberOfLines={2}>
                   {w.proposed_label} · {w.proposed_id}
-                  {w.proposed_exact ? '' : ' — either the wording differs or more than one thing is called that'}
+                  {w.proposed_exact || norm(w.label) === norm(w.proposed_label) ? '' : ' — Wikidata calls it something else'}
                   {w.proposed_note ? ` · ${w.proposed_note}` : ''}
                 </Text>
               </View>
@@ -591,6 +619,8 @@ function Identifiers({ onChanged }: { onChanged: () => void }) {
                 <Text style={s.identActText}>Not this</Text>
               </Press>
             </View>
+          ))}
+          </View>
           ))}
           <Text style={type.tiny}>
             A tag with no identifier is a legitimate answer — Not this writes that down, so no later run proposes the same thing again. It reads as unmapped and nothing a host or a guest sees changes.

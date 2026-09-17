@@ -487,6 +487,70 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
 });
 
 /**
+ * GET /would?add=<label>&subcategory=<key> — what a rule would move, before it exists.
+ *
+ * The owner, 17 Sep 2026: "When I go into a label, I can see the items and the
+ * locations that are part of that label. If I add another label... I should
+ * then be able to see what new locations would be displayed."
+ *
+ * So: resolve every place we hold twice -- once against the rules as they are,
+ * once against the same rules plus the one being considered -- and answer with
+ * the places that move, and where each is now. No provider call, nothing
+ * written, and it counts our own library rather than a sample of somebody
+ * else's.
+ */
+taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) => {
+  try {
+    const add = String(req.query.add || '').trim();
+    const subcategory = String(req.query.subcategory || '').trim();
+    if (!add || !subcategory) throw bad('Which word, into which drawer?');
+    const [tax, rules] = await Promise.all([taxonomy.taxonomy(), shelfRules.rules()]);
+    if (!tax.subByKey.has(subcategory)) throw bad(`${subcategory} is not a subcategory`);
+
+    // A copy with the rule in it. The scope is the one the label belongs to, so
+    // a provider word goes in `labels` and one of ours in `ours` -- the same
+    // choice `PUT /rules` makes, made the same way.
+    const scope = scopeFor(add);
+    const after = {};
+    for (const [k, v] of Object.entries(rules)) after[k] = new Map(v);
+    if (!after[scope]) throw bad(`${add} is not a label we can write a rule in`);
+    after[scope].set(add, {
+      scope, subject: add, subject_label: add, subcategory, labels: [add], weights: {}, taught_by: null,
+    });
+
+    const state = req.query.state === 'all' ? null : 'published';
+    const all = [];
+    for (let offset = 0; ; offset += 1000) {
+      const page = await library.listAttractions({ limit: 1000, offset, ...(state ? { state } : {}) });
+      all.push(...page);
+      if (page.length < 1000) break;
+    }
+    const refOf = (a) => a.venue_ref
+      ?? (a.wikidata_id ? `wikidata:${a.wikidata_id}` : null)
+      ?? (a.external_ref ? String(a.external_ref) : null)
+      ?? (a.slug ? `atlas:${a.slug}` : null);
+
+    const moving = [];
+    let already = 0;
+    for (const a of all) {
+      const ref = refOf(a);
+      if (!ref) continue;
+      const at = { ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] };
+      const was = shelvesForAtlas(at, rules, tax.vocab).subcategory;
+      if (was === subcategory) { already += 1; continue; }
+      const now = shelvesForAtlas(at, after, tax.vocab).subcategory;
+      if (now !== subcategory) continue;
+      moving.push({
+        ref, name: a.name, region: a.region_name ?? a.region_slug ?? null,
+        from: was, fromLabel: was ? (tax.subByKey.get(was)?.label ?? was) : null,
+      });
+    }
+    moving.sort((x, y) => String(x.name).localeCompare(String(y.name)));
+    res.json({ add, subcategory, already, moving: moving.slice(0, 200), count: moving.length });
+  } catch (err) { next(err); }
+});
+
+/**
  * PUT /drawer — one secondary label, set on many places at once.
  *
  * "…where I can change stuff on the fly or bulk it."

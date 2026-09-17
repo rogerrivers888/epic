@@ -2451,6 +2451,15 @@ export const api = {
       said: { primary: string | null; secondary: { key: string; label: string; choice: string | null }[]; because: string; source: string } | null;
     }>('/api/admin/taxonomy/word', body),
   /** Every place the labels file into one drawer, with its secondary labels. */
+  /**
+   * What a rule would move, before it exists: our own places, resolved twice.
+   * Nothing written, no provider call.
+   */
+  taxonomyWould: (add: string, subcategory: string, state?: 'published' | 'all') =>
+    request<{
+      add: string; subcategory: string; already: number; count: number;
+      moving: { ref: string; name: string; region: string | null; from: string | null; fromLabel: string | null }[];
+    }>(`/api/admin/taxonomy/would${qs({ add, subcategory, state })}`),
   /** A drawer's places, or the places carrying one provider word. */
   taxonomyDrawer: (subcategory: string, state?: 'published' | 'candidate' | 'all', word?: string) =>
     request<{
