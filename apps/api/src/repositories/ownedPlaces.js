@@ -64,7 +64,7 @@ export async function ensureRecord(venueRef) {
   // A place we hold our own research on is owned, and the index has to know the
   // moment it becomes one (Codex, 17 Sep 2026). Awaited: the next read on this
   // path is often the screen that just asked for it.
-  await noteMany([{ ref: venueRef }], { source: 'own' });
+  await noteMany([{ ref: venueRef, ownership: 'owned' }], { source: 'own' });
 }
 
 export async function recordFor(venueRef) {

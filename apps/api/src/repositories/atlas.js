@@ -44,7 +44,9 @@ export async function upsertHouseholdPlace(client, householdId, p) {
   // name and everything else stay where they already legitimately live — and it
   // is written through the same client, so it commits or rolls back with the
   // claim rather than beside it.
-  await noteMany([{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null }], { run: on(client) });
+  await noteMany(
+    [{ ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null, countryCode: p.countryCode ?? 'GB', ownership: 'claimed' }],
+    { client });
   await on(client)(
     `insert into household_places (household_id, venue_ref, label, kind, category, lat, lng, country, country_code, locality, venue, note)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

@@ -146,13 +146,48 @@ test('a place that is kept is indexed, and the write is not silently swallowed',
   assert.deepEqual(await index.noteMany([]), { noted: 0 });
 });
 
+test('the live write carries the country and the ownership, and only ever upward', async () => {
+  // A place saved in Portugal is filed in Portugal, and a household claiming a
+  // place we already research does not un-own it (Codex, 17 Sep 2026).
+  const ref = `google:${Math.random().toString(36).slice(2)}`;
+  await index.noteMany([{ ref, countryCode: 'PT', ownership: 'claimed' }]);
+  let row = (await query('select country_code, ownership from place_index where venue_ref = $1', [ref])).rows[0];
+  assert.equal(row.country_code, 'PT');
+  assert.equal(row.ownership, 'claimed');
+
+  await index.noteMany([{ ref, ownership: 'owned' }]);
+  row = (await query('select country_code, ownership from place_index where venue_ref = $1', [ref])).rows[0];
+  assert.equal(row.ownership, 'owned');
+  assert.equal(row.country_code, 'PT', 'and the country it was filed under is not overwritten by a default');
+
+  await index.noteMany([{ ref, ownership: 'identified' }]);
+  assert.equal((await query('select ownership from place_index where venue_ref = $1', [ref])).rows[0].ownership, 'owned',
+    'ownership never goes backwards');
+});
+
+test('a failure on the pool is swallowed; a failure in a transaction is not', async () => {
+  // A derived count is never a reason for a place not to be kept — but inside a
+  // transaction the error has already aborted it, and swallowing one would hide
+  // a failure while saving nothing (Codex, 17 Sep 2026).
+  assert.deepEqual(await index.noteMany([{ ref: null }]), { noted: 0 }, 'nothing to note is not an error');
+  // A position that is not a number is the cheapest real failure: the column is
+  // cast, so Postgres refuses the row rather than coercing it.
+  const bad = [{ ref: `osm:node/${Math.floor(Math.random() * 1e9)}`, lat: 'not a number' }];
+  assert.deepEqual(await index.noteMany(bad), { noted: 0 }, 'the pool path answers rather than throwing');
+  await assert.rejects(
+    () => withTransaction(async (client) => { await index.noteMany(bad, { client }); }),
+    /invalid input syntax|double precision/,
+    'the transactional path lets its caller see the failure rather than hiding it',
+  );
+});
+
 test('the index write joins the transaction that owns it', async () => {
   // A fire-and-forget write outside the caller's transaction leaves a row for a
   // place that was rolled back. Given a client, it commits or rolls back with
   // the thing it is about (Codex, 17 Sep 2026).
   const ref = `osm:node/${Math.floor(Math.random() * 1e9)}`;
   await withTransaction(async (client) => {
-    await index.noteMany([{ ref }], { run: (text, params) => client.query(text, params) });
+    await index.noteMany([{ ref }], { client });
     assert.equal((await client.query('select count(*)::int as n from place_index where venue_ref = $1', [ref])).rows[0].n, 1,
       'the place is readable inside the transaction that wrote it');
     throw new Error('rolled back on purpose');

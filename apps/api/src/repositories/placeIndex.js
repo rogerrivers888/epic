@@ -456,7 +456,7 @@ export async function shelveAll() {
  * index is a derived thing, and a place must never fail to be *kept* because it
  * could not be *counted*.
  */
-export async function noteMany(places = [], { source = null, countryCode = 'GB', run = null } = {}) {
+export async function noteMany(places = [], { source = null, countryCode = 'GB', ownership = null, client = null } = {}) {
   const rows = places.map((p) => (typeof p === 'string' ? { ref: p } : p)).filter((p) => p?.ref);
   if (!rows.length) return { noted: 0 };
   const write = async (exec) => {
@@ -464,15 +464,26 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
     // statement had five targets and four expressions and threw every time —
     // which the swallow on the pool path hid completely, so the index was never
     // actually written to (found by the sweep's own tests, 17 Sep 2026).
-    const values = rows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2}::double precision,$${i * 4 + 3}::double precision,$${i * 4 + 4}, now())`).join(',');
+    const values = rows.map((_, i) => `($${i * 5 + 1},$${i * 5 + 2}::double precision,$${i * 5 + 3}::double precision,$${i * 5 + 4},$${i * 5 + 5}, now())`).join(',');
     await exec(
-      `insert into place_index (venue_ref, lat, lng, country_code, last_seen)
+      `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen)
        values ${values}
        on conflict (venue_ref) do update
           set lat = coalesce(place_index.lat, excluded.lat),
               lng = coalesce(place_index.lng, excluded.lng),
+              -- A place saved abroad is filed abroad, and a later note that
+              -- says nothing does not drag it back to the default (Codex,
+              -- 17 Sep 2026). GB is that default, so it never overwrites —
+              -- which is right anyway: a place does not change country.
+              country_code = case when excluded.country_code = 'GB' then place_index.country_code
+                                  else excluded.country_code end,
+              -- identified < claimed < owned, and only ever upward: a household
+              -- claiming a place we already research does not un-own it.
+              ownership = case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'
+                               when place_index.ownership = 'claimed' or excluded.ownership = 'claimed' then 'claimed'
+                               else 'identified' end,
               last_seen = now()`,
-      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode]));
+      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified']));
     if (source) {
       const src = rows.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
       await exec(
@@ -487,14 +498,16 @@ export async function noteMany(places = [], { source = null, countryCode = 'GB',
   //
   // Two things go wrong otherwise, and Codex found both (17 Sep 2026): a read
   // straight after a save can miss the place, and a transaction that rolls back
-  // leaves an index row for something that was never kept. So a caller with a
-  // client hands it over, and the index is part of the same commit.
+  // leaves an index row for something that was never kept. So a caller in a
+  // transaction hands its **client** over — not a runner function, because a
+  // runner might be the pool and the two need telling apart — and the index is
+  // part of the same commit.
   //
-  // And **no catch on that path**: an error inside a transaction has already
-  // aborted it, so swallowing one here would hide the failure without saving
-  // anything. On the pool it is swallowed, because a derived count is never a
-  // reason for a place not to be kept.
-  if (run) return write((text, params) => run(text, params));
+  // And no catch on that path: an error inside a transaction has already aborted
+  // it, so swallowing one would hide the failure while saving nothing. On the
+  // pool it *is* swallowed, because a derived count is never a reason for a
+  // place not to be kept.
+  if (client) return write((text, params) => client.query(text, params));
   try { return await write(query); } catch { return { noted: 0 }; }
 }
 
