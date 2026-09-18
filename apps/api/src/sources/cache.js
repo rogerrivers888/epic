@@ -80,6 +80,18 @@ export function searchKept(params) {
 }
 
 /**
+ * Whether this exact search is already going out, so a second caller will join
+ * it rather than ask anybody.
+ *
+ * It costs nothing, the same as a cache hit. The ceiling was asked anyway, and
+ * near the limit the second caller could be told Google was unaffordable and
+ * drop it from its sources — so two people pressing at once got different
+ * answers, and the second got a worse one for money nobody was going to spend
+ * (Codex, 18 Sep 2026).
+ */
+export const searchOnItsWay = (params) => inFlight.has(searchKey(params));
+
+/**
  * Search through the cache. `fetched` is true only for the caller whose request
  * actually asked the sources — that caller logs the provider call; a hit or a
  * joined search logs nothing. `refresh` asks the sources again regardless.

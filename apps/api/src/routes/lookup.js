@@ -51,7 +51,7 @@ import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold } from './household.js';
 import { roomToSpend, releaseSpend, tripadvisorRoom } from './placeIndex.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
-import { searchKept } from '../sources/cache.js';
+import { searchKept, searchOnItsWay } from '../sources/cache.js';
 import { detailHeld } from '../sources/compare.js';
 
 export const router = express.Router();
@@ -263,7 +263,9 @@ async function runLookup({ q, minutes, mode }, household, { afford = null, place
   // cache is consulted first, and only a fetch has to be afforded.
   let purse = { without: [], release: async () => {} };
   // The claim knows which sources this search will actually ask.
-  if (afford && !searchKept(params)) {
+  // A search already going out is as free as one already held: this caller will
+  // join it (searchCached), not ask anybody.
+  if (afford && !searchKept(params) && !searchOnItsWay(params)) {
     purse = await afford(undefined, { withTripadvisor: params.sources.includes('tripadvisor') });
   }
   // The claim is let go *after* the ledger has the spend, not after the call.
@@ -394,9 +396,19 @@ async function runLookup({ q, minutes, mode }, household, { afford = null, place
 const RING_CALLS = 2;
 
 async function affordable(n = RING_CALLS, { withTripadvisor = false } = {}) {
+  // Every claim made so far, so a failure half way through this function gives
+  // back what it already took. Without it, a throw in `tripadvisorRoom` left
+  // Google's reservation standing and a throw in the second `roomToSpend` left
+  // both — a bite of the month's budget and of a contractual allowance held for
+  // half an hour by a request that never asked anybody anything (Codex, 18 Sep
+  // 2026).
+  const taken = [];
+  const giveBack = async () => { for (const id of taken) await releaseSpend(id); taken.length = 0; };
+  try {
   const google = googleSource.enabled()
     ? await roomToSpend(Math.round(PRICE_PER_UNIT_USD.google * n * 100 * USD_TO_GBP), { holder: 'lookup' })
     : { ok: false, reservation: null, leftPence: 0 };
+  if (google.reservation) taken.push(google.reservation);
   // Tripadvisor has two limits, and both are asked.
   //
   // The money is one; the monthly count of locations is the other, and it is
@@ -410,19 +422,20 @@ async function affordable(n = RING_CALLS, { withTripadvisor = false } = {}) {
   // Sep 2026).
   const wantsTa = tripadvisorSource.enabled() && withTripadvisor;
   const taUnits = wantsTa ? await tripadvisorRoom(2) : { granted: 0, reservation: null, left: 0 };
+  if (taUnits.reservation) taken.push(taUnits.reservation);
   const tripadvisor = wantsTa && taUnits.granted >= 2
     ? await roomToSpend(Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP), { holder: 'lookup.ta' })
     : { ok: false, reservation: null, leftPence: 0 };
+  if (tripadvisor.reservation) taken.push(tripadvisor.reservation);
   const without = [
     ...(googleSource.enabled() && !google.ok ? ['google'] : []),
     ...(wantsTa && !tripadvisor.ok ? ['tripadvisor'] : []),
   ];
-  const release = async () => {
-    await releaseSpend(google.reservation);
-    await releaseSpend(tripadvisor.reservation);
-    await releaseSpend(taUnits.reservation);
-  };
-  return { google, tripadvisor, without, release };
+  return { google, tripadvisor, without, release: giveBack };
+  } catch (err) {
+    await giveBack();
+    throw err;
+  }
 }
 
 /** The list: everything within reach, and which sources carry each place. Records stay behind. */

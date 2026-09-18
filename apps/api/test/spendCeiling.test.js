@@ -121,3 +121,27 @@ test('Claude planning and speech come out of a different purse', async () => {
   assert.equal(after.spentPence, Math.round(16 * 100 * 0.79));
   await query("delete from provider_calls where purpose = 'a-test-of-the-purse'");
 });
+
+test('a claim half way through is given back, not held for half an hour', async () => {
+  await query('delete from spend_reservations');
+  await ceiling(100000);
+
+  // What `affordable()` does: take, take, take — and if any of them throws, give
+  // back what was already taken. Before this, a throw in the second or third
+  // left the first standing until it expired, holding budget for a request that
+  // never asked anybody anything (Codex, 18 Sep 2026).
+  const taken = [];
+  const giveBack = async () => { for (const id of taken) await releaseSpend(id); taken.length = 0; };
+  const held = async () => (await query('select count(*)::int as n from spend_reservations')).rows[0].n;
+  try {
+    const one = await roomToSpend(50, { holder: 'lookup' });
+    if (one.reservation) taken.push(one.reservation);
+    const two = await roomToSpend(50, { holder: 'lookup.ta' });
+    if (two.reservation) taken.push(two.reservation);
+    assert.equal(await held(), 2);
+    throw new Error('the third call fell over');
+  } catch {
+    await giveBack();
+  }
+  assert.equal(await held(), 0, 'both are back');
+});

@@ -105,21 +105,37 @@ export async function allCells({ scheme = 'sector', country = 'GB' } = {}) {
 async function unstamped(limit) {
   const { rows } = await query(
     `select ref, lat, lng from (
-        select coalesce(a.venue_ref, 'atlas:' || a.id::text) as ref, a.lat, a.lng
-          from attractions a where a.lat is not null
-       union all
-        select s.venue_ref as ref, s.lat, s.lng
-          from scout_places s where s.lat is not null
-       union all
-        select r.venue_ref as ref, r.lat, r.lng
-          from place_records r where r.lat is not null
-       union all
-        -- And the index itself, which is where a corrected position lands: a
-        -- place whose coordinates are put right by a later source may be in
-        -- none of the three stores above (Codex, 18 Sep 2026).
-        select pi.venue_ref as ref, pi.lat, pi.lng
-          from place_index pi where pi.lat is not null
+       select distinct on (ref) ref, lat, lng from (
+          select coalesce(a.venue_ref, 'atlas:' || a.id::text) as ref, a.lat, a.lng, 2 as rank
+            from attractions a where a.lat is not null
+         union all
+          select s.venue_ref as ref, s.lat, s.lng, 3 as rank
+            from scout_places s where s.lat is not null
+         union all
+          select r.venue_ref as ref, r.lat, r.lng, 1 as rank
+            from place_records r where r.lat is not null
+         union all
+          -- And the index itself, which is where a corrected position lands: a
+          -- place whose coordinates are put right by a later source may be in
+          -- none of the three stores above (Codex, 18 Sep 2026).
+          select pi.venue_ref as ref, pi.lat, pi.lng, 0 as rank
+            from place_index pi where pi.lat is not null
+       ) all_of_them
+       order by ref, rank
      ) p
+     -- One position per place, and the index's is the one that counts.
+     --
+     -- The four stores disagree by design: the index is where a corrected
+     -- position lands, and the attraction or the sweep row it came from still
+     -- holds the old one. Left as two candidates, stamping either one left the
+     -- other still "unstamped from somewhere else", so a run took them in turn
+     -- and overwrote the cell with the old point and the new point over and
+     -- over — buying a postcode lookup each time and leaving the final answer
+     -- to whichever happened to be last (Codex, 18 Sep 2026).
+     --
+     -- One per ref, ranked: the index first, then the owned record, the
+     -- attraction, the sweep.
+     --
      -- Unstamped, or stamped from somewhere else.
      --
      -- The row remembers the point it was stamped from, and this only asked
