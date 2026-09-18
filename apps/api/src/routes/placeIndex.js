@@ -178,7 +178,11 @@ async function alreadyHeld(refs) {
  * counted against this run as well as their own (Codex, 18 Sep 2026). So the
  * asking counts its own calls and this prices them.
  */
-const spentOn = (calls) => Math.round(calls * pencePerCall() * 100) / 100;
+// Whole pence, because that is what a run's own total is stored as — a
+// fractional value went into an integer column and Postgres refused it, which
+// left an already-paid chunk sitting in `asking` and failed the whole
+// collection (Codex, 18 Sep 2026).
+const spentOn = (calls) => Math.round(calls * pencePerCall());
 
 /**
  * How many locations one Tripadvisor view bills.

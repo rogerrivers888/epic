@@ -1337,10 +1337,24 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
   const { rows } = await query(`
     with mine as (select venue_ref from place_areas where area_slug = $1),
          rows_ as (
-           select pa.area_slug, pi.venue_ref, pi.ready, pi.score_parts
+           -- The website is read off the place, not off the score.
+           --
+           -- score_parts holds judged, held, missing and notCounted and has
+           -- never held a top-level website, so the column this board
+           -- prints was false for every row in the country — a hole the first
+           -- audit read as "no websites in Kent" (Codex, 18 Sep 2026). A website
+           -- is ours from three places: the record, the venue's own page on the
+           -- attraction, or the sweep.
+           select pa.area_slug, pi.venue_ref, pi.ready, pi.score_parts,
+                  (coalesce(pr.website, att.website, sp.website) is not null) as has_website
              from mine m
              join place_areas pa on pa.venue_ref = m.venue_ref
              join place_index pi on pi.venue_ref = m.venue_ref
+             left join place_records pr on pr.venue_ref = m.venue_ref
+             left join attractions att
+               on (att.venue_ref = m.venue_ref or 'atlas:' || att.id::text = m.venue_ref)
+               and att.state <> 'hidden'
+             left join scout_places sp on sp.venue_ref = m.venue_ref
             where pa.area_slug <> $1
          )
     select l.slug, l.name, l.kind,
@@ -1356,12 +1370,17 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
            count(*) filter (where pi.ownership = 'owned')::int as owned,
            count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where r.ready)::int as ready_count,
-           count(*) filter (where (r.score_parts->'held') ? 'picture')::int    as picture,
+           -- A picture a subcategory does not require is still a picture: it
+           -- lands in notCounted, and counting only held made coverage fall
+           -- when somebody changed the bar (Codex, 18 Sep 2026). The three
+           -- columns beside this one already read both.
+           count(*) filter (where (r.score_parts->'held') ? 'picture'
+                               or (r.score_parts->'notCounted') ? 'picture')::int as picture,
            count(*) filter (where (r.score_parts->'held') ? 'what_it_is'
                                or (r.score_parts->'notCounted') ? 'what_it_is')::int as description,
            count(*) filter (where (r.score_parts->'held') ? 'hours'
                                or (r.score_parts->'notCounted') ? 'hours')::int      as hours,
-           count(*) filter (where (r.score_parts->>'website') = 'true')::int          as website,
+           count(*) filter (where r.has_website)::int                                as website,
            count(*) filter (where (r.score_parts->'held') ? 'menu'
                                or (r.score_parts->'notCounted') ? 'menu')::int       as menu,
            count(*) filter (where pi.subcategory is not null)::int                   as shelf
