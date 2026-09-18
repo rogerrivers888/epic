@@ -396,21 +396,79 @@ export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}
   if (!searchId) return false;
   try {
     const kept = [...new Set(refs.filter(Boolean))];
-    // By shelf, the same shape `logSearch` writes, and read off the index so
-    // the two agree about what a place is filed under.
-    const { rows: shown } = kept.length
+    // Whose search it is, and whether it is still the one in front of them.
+    //
+    // Half an hour is longer than anybody looks at one answer and short enough
+    // that a stale id cannot rewrite last week (Codex, 18 Sep 2026).
+    const { rows: [mine] } = await query(
+      `select 1 from searches
+        where id = $1::uuid and ($2::uuid is null or household_id = $2)
+          and at > now() - interval '30 minutes'`, [searchId, householdId]);
+    if (!mine) return false;
+
+    // A row for anything on screen the log has none for.
+    //
+    // The pool the answer wrote down can be short of what the screen drew — a
+    // surface that adds its own rows, or one whose answer was cut — and without
+    // a row there is nothing to mark, so the place would be forgotten the moment
+    // the next list arrived (Codex, 18 Sep 2026).
+    if (kept.length) {
+      await query(
+        `insert into search_events (search_id, kind, venue_ref, position, meta)
+         select $1::uuid, 'shown', d.ref, d.at, '{"drawn": true}'::jsonb
+           from (select ref, ordinality::int as at from unnest($2::text[]) with ordinality as t(ref, ordinality)) d
+          where not exists (
+            select 1 from search_events e
+             where e.search_id = $1::uuid and e.kind = 'shown' and e.venue_ref = d.ref)`,
+        [searchId, kept]);
+    }
+
+    // Drawn once is drawn.
+    //
+    // A filter change reports a new list, and marking everything outside it as
+    // not drawn took away rows the household had already seen — and where they
+    // had opened one, the replay reported an open with no row to hang it on
+    // (Codex, 18 Sep 2026). The position is the screen's, not the answer's: the
+    // list arrives in the order it was displayed in.
+    await query(
+      `update search_events e
+          set meta = jsonb_set(coalesce(e.meta, '{}'::jsonb), '{drawn}', 'true'::jsonb),
+              position = d.at
+         from (select ref, ordinality::int as at from unnest($2::text[]) with ordinality as t(ref, ordinality)) d
+        where e.search_id = $1::uuid and e.kind = 'shown' and e.venue_ref = d.ref`, [searchId, kept]);
+    await query(
+      `update search_events
+          set meta = jsonb_set(coalesce(meta, '{}'::jsonb), '{drawn}', 'false'::jsonb)
+        where search_id = $1::uuid and kind = 'shown'
+          and not (venue_ref = any($2))
+          and coalesce(meta->>'drawn', 'false') <> 'true'`, [searchId, kept]);
+
+    // And the summary counts what the replay holds, so the two cannot disagree:
+    // everything drawn on this search, not only the latest list (Codex, 18 Sep
+    // 2026). A ref the log never held a `shown` row for — the pool was cut, or
+    // the surface reports more than it recorded — still counts, because they
+    // saw it.
+    const { rows: [seen] } = await query(
+      `select coalesce(array_agg(venue_ref), '{}') as refs from search_events
+        where search_id = $1::uuid and kind = 'shown' and meta->>'drawn' = 'true'`, [searchId]);
+    const drawn = [...new Set([...(seen?.refs ?? []), ...kept])];
+
+    // By shelf, the same shape `logSearch` writes, and read off the index so the
+    // two agree about what a place is filed under.
+    const { rows: byShelf } = drawn.length
       ? await query(
         `select coalesce(subcategory, 'unshelved') as subcategory, count(*)::int as n
-           from place_index where venue_ref = any($1) group by 1`, [kept])
+           from place_index where venue_ref = any($1) group by 1`, [drawn])
       : { rows: [] };
     // A place the index has never heard of is unshelved too, and it goes in the
     // same entry as the ones it has: two rows with one name is a shape nothing
     // downstream expects.
-    const short = kept.length - shown.reduce((n, r) => n + r.n, 0);
+    const short = drawn.length - byShelf.reduce((n, r) => n + r.n, 0);
     if (short > 0) {
-      const had = shown.find((r) => r.subcategory === 'unshelved');
-      if (had) had.n += short; else shown.push({ subcategory: 'unshelved', n: short });
+      const had = byShelf.find((r) => r.subcategory === 'unshelved');
+      if (had) had.n += short; else byShelf.push({ subcategory: 'unshelved', n: short });
     }
+
     const { rowCount } = await query(
       `update searches
           set shown_total = $2, shown = $3::jsonb,
@@ -418,50 +476,9 @@ export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}
               -- have opened a place on a screen with nothing on it, so a filter
               -- that empties the list afterwards is not a coverage hole.
               empty = ($2 = 0 and outcome = 'none')
-        where id = $1::uuid
-          and ($4::uuid is null or household_id = $4)
-          -- Still the search in front of them. This used to require that
-          -- nothing had been counted against it yet, which lost the race: the
-          -- report reads place_index first and a tap is one short insert, so an
-          -- open that landed in between left the server's whole pool standing as
-          -- the count of what was shown (Codex, 18 Sep 2026). Half an hour is
-          -- longer than anybody looks at one answer and short enough that a
-          -- stale id cannot rewrite last week.
-          and at > now() - interval '30 minutes'`,
-      [searchId, kept.length, JSON.stringify(shown.map((r) => ({ subcategory: r.subcategory, n: r.n }))), householdId]);
-    // And the rows themselves say which of them were drawn.
-    //
-    // The `shown` events are deliberately every place the answer held — a card
-    // one tap away is a card the household could reach, and the replay has to be
-    // able to explain a tap on one. But the replay was then printing rows nobody
-    // saw and disagreeing with its own "shown" figure (Codex, 18 Sep 2026). So
-    // each row is marked, and the replay leads with what was actually on screen.
-    if (rowCount) {
-      // Drawn once is drawn.
-      //
-      // A filter change reports a new list, and marking everything outside it
-      // as not drawn took away rows the household had already seen — and, where
-      // they had opened one, the replay reported an open with no row to hang it
-      // on (Codex, 18 Sep 2026). A row is marked drawn and stays drawn.
-      //
-      // The position is the screen's, not the answer's: the list arrives in the
-      // order it was displayed in, and keeping the API's order made a card that
-      // was first appear far down and its neighbours read as "scrolled past".
-      await query(
-        `update search_events e
-            set meta = jsonb_set(coalesce(e.meta, '{}'::jsonb), '{drawn}', 'true'::jsonb),
-                position = d.at
-           from (select ref, ordinality::int as at from unnest($2::text[]) with ordinality as t(ref, ordinality)) d
-          where e.search_id = $1::uuid and e.kind = 'shown' and e.venue_ref = d.ref`, [searchId, kept]);
-      // And anything never drawn says so, unless it was drawn by an earlier
-      // list on this same search.
-      await query(
-        `update search_events
-            set meta = jsonb_set(coalesce(meta, '{}'::jsonb), '{drawn}', 'false'::jsonb)
-          where search_id = $1::uuid and kind = 'shown'
-            and not (venue_ref = any($2))
-            and coalesce(meta->>'drawn', 'false') <> 'true'`, [searchId, kept]);
-    }
+        where id = $1::uuid`,
+      [searchId, drawn.length, JSON.stringify(byShelf.map((r) => ({ subcategory: r.subcategory, n: r.n })))]);
     return rowCount > 0;
   } catch { return false; }
 }
+

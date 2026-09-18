@@ -677,7 +677,7 @@ test('a degraded source is written down by name, not as a lump of JSON', async (
  * "wrong places", owned by Categories, when the truth was "came back empty",
  * owned by Collect (Codex, 18 Sep 2026).
  */
-test('the screen says what it drew, and an emptied screen is an empty search', async () => {
+test('the screen says what it drew, and everything they saw stays counted', async () => {
   const { household } = await aHousehold(query);
   await index.noteMany([
     { ref: 'test:drawn-1' }, { ref: 'test:drawn-2' }, { ref: 'test:drawn-3' },
@@ -717,21 +717,38 @@ test('the screen says what it drew, and an emptied screen is an empty search', a
   // And the position is the one the screen put it in.
   assert.equal(both.find((r) => r.venue_ref === 'test:drawn-2').position, 1);
 
-  // A place the index has never heard of shares the unshelved entry rather than
-  // making a second one with the same name.
+  // The figure counts everything they have seen on this search, so it can never
+  // disagree with the rows the replay holds (Codex, 18 Sep 2026). A place the
+  // index has never heard of shares the unshelved entry rather than making a
+  // second one with the same name.
   await log.noteDrawn({ searchId: id, householdId: household.id, refs: ['test:drawn-3', 'test:never-indexed'] });
-  assert.deepEqual((await said()).shown, [{ subcategory: 'unshelved', n: 2 }]);
+  row = await said();
+  assert.equal(row.shown_total, 4, 'two museums, one unshelved place and one nobody has heard of');
+  assert.deepEqual(
+    [...row.shown].sort((a, b) => a.subcategory.localeCompare(b.subcategory)),
+    [{ subcategory: 'museums', n: 2 }, { subcategory: 'unshelved', n: 2 }],
+  );
 
-  // Nothing survived the filters: that is an empty search, not a wrong one.
+  // A filter that leaves nothing on screen is not an empty search: they have
+  // already seen four places. Empty means we showed them nothing at all.
   await log.noteDrawn({ searchId: id, householdId: household.id, refs: [] });
   row = await said();
-  assert.equal(row.shown_total, 0);
-  assert.equal(row.empty, true);
+  assert.equal(row.shown_total, 4);
+  assert.equal(row.empty, false);
+
+  // A search that never drew anything is the empty one.
+  const none = await log.noteSearch({ householdId: household.id, surface: 'inspire', shownTotal: 3, shown: [] });
+  await log.noteShown(none, [{ ref: 'test:drawn-1', position: 1 }]);
+  await log.noteDrawn({ searchId: none, householdId: household.id, refs: [] });
+  const { rows: [blank] } = await query('select shown_total, empty from searches where id = $1', [none]);
+  assert.equal(blank.shown_total, 0);
+  assert.equal(blank.empty, true);
 
   // And it is only ever the household's own search.
   const other = await aHousehold(query);
+  const before = (await said()).shown_total;
   assert.equal(await log.noteDrawn({ searchId: id, householdId: other.household.id, refs: ['test:drawn-2'] }), false);
-  assert.equal((await said()).shown_total, 0);
+  assert.equal((await said()).shown_total, before, 'somebody else cannot rewrite what this household saw');
 });
 
 /**

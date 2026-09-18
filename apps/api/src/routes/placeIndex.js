@@ -2002,11 +2002,25 @@ async function planCollect(where) {
     })()
     : [];
   let tripadvisor = take(taEligible);
+  // A view already in hand costs nothing and bills no locations.
+  //
+  // The Google path has said so since the ceiling was built; here the cached
+  // ones were capped against the allowance and priced with the rest, so near
+  // either limit free work was refused or ate the grant ahead of work that
+  // would actually have been billed (Codex, 18 Sep 2026).
+  const taHeldFor = async (ref) => {
+    const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : (await matchesFor([ref], 'tripadvisor')).get(ref);
+    return Boolean(id) && detailHeld('tripadvisor', id);
+  };
+  const taCachedSet = new Set();
+  for (const ref of tripadvisor) if (await taHeldFor(ref)) taCachedSet.add(ref);
+  const taWouldBill = tripadvisor.filter((ref) => !taCachedSet.has(ref));
   // Tripadvisor's ceiling is counted in their locations, and a view is two.
-  const taLeft = tripadvisor.length
+  const taLeft = taWouldBill.length
     ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;
-  const taCapped = Math.max(0, tripadvisor.length - taLeft);
-  tripadvisor = tripadvisor.slice(0, taLeft);
+  const taCapped = Math.max(0, taWouldBill.length - taLeft);
+  const taBilled = taWouldBill.slice(0, taLeft);
+  tripadvisor = [...taCachedSet, ...taBilled];
 
   // What the whole run would spend, both providers. Tripadvisor's locations are
   // priced as well as counted, and `roomToSpend` bounds *total* provider spend —
@@ -2017,7 +2031,7 @@ async function planCollect(where) {
   // be eligible for collection and still be cached — Compare and the replay both
   // fill that cache without writing a source row (Codex, 18 Sep 2026).
   const want = askingCost(google, await alreadyMatched(google), await alreadyHeld(google))
-    + taCost(tripadvisor.length);
+    + taCost(taBilled.length);
   return {
     scope, chosen, limit,
     // How many this run will actually touch, which is what the board prints.
@@ -2157,9 +2171,19 @@ async function work(runId, householdId) {
         // Claimed twice, because there are two limits: the monthly count of
         // locations, and the month's money. Both are Tripadvisor's, and only
         // the first was being asked (Codex, 17 Sep 2026).
-        const room = await tripadvisorRoom(batch.length * TA_UNITS_PER_VIEW);
-        const may = batch.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
-        const cost = taCost(may.length);
+        // The cached ones cost nothing and bill nothing, so they are neither
+        // claimed against the allowance nor priced — the same rule the plan
+        // above uses (Codex, 18 Sep 2026).
+        const taIds = await matchesFor(batch, 'tripadvisor');
+        const cached = batch.filter((ref) => {
+          const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : taIds.get(ref);
+          return Boolean(id) && detailHeld('tripadvisor', id);
+        });
+        const wouldBill = batch.filter((ref) => !cached.includes(ref));
+        const room = await tripadvisorRoom(wouldBill.length * TA_UNITS_PER_VIEW);
+        const billed = wouldBill.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
+        const may = [...cached, ...billed];
+        const cost = taCost(billed.length);
         const purse = await roomToSpend(cost, { holder: `collect:${runId}` });
         try {
           const go = purse.ok ? may : [];
@@ -2174,7 +2198,7 @@ async function work(runId, householdId) {
             refused: [
               ...out.refused,
               ...(purse.ok ? [] : may.map((ref) => ({ ref, why: 'over this month\u2019s ceiling' }))),
-              ...batch.slice(may.length).map((ref) => ({ ref, why: 'over the monthly allowance of locations' })),
+              ...wouldBill.slice(billed.length).map((ref) => ({ ref, why: 'over the monthly allowance of locations' })),
             ],
           });
         } finally {
