@@ -761,6 +761,23 @@ test('a hidden attraction leaves the index, unless something else holds the plac
   const { rows: [own] } = await query('select ownership from place_index where venue_ref = $1', [refOf(claimed)]);
   assert.equal(own.ownership, 'claimed');
 
+  // A sweep row keeps the place; it does not keep it owned. The rebuild files a
+  // swept place as identified, so a name in `scout_places` must not hold the
+  // ownership up (Codex, 18 Sep 2026).
+  const swept = await make('Retired, and swept');
+  const { rows: [swArea] } = await query(
+    `insert into scout_areas (code, label, state, lat, lng) values ('ZZ1', 'A swept area', 'done', 51.5, -0.1)
+     on conflict (code) do update set label = excluded.label returning code`);
+  await query(
+    `insert into scout_places (area_code, venue_ref, name, rank, first_seen, last_seen)
+     values ($2, $1, 'Retired, and swept', 1, now(), now())
+     on conflict do nothing`, [refOf(swept), swArea.code]);
+  await index.reindex();
+  await query(`update attractions set state = 'hidden' where id = $1`, [swept.id]);
+  await index.retire();
+  const { rows: [after2] } = await query('select ownership from place_index where venue_ref = $1', [refOf(swept)]);
+  assert.equal(after2.ownership, 'identified', 'the place stays, the research does not');
+
   // The retired attraction stops being one of its sources.
   const atlasRows = async () => (await query(
     `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'atlas'`,

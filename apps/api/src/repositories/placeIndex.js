@@ -226,7 +226,12 @@ export async function retire() {
   // Removing the atlas source left `ownership` where it was, so a place whose
   // only research *was* the retired attraction went on being counted as owned —
   // which is the one state that tells Collect to leave it alone (Codex, 18 Sep
-  // 2026). The same three questions the rebuild asks, asked again for these.
+  // 2026). The same questions the rebuild asks, asked again for these.
+  //
+  // A sweep row keeps the *place*; it does not keep it owned. The rebuild files
+  // a swept place as identified, so letting a name in `scout_places` block this
+  // left a place whose only owned fact was the retired summary still reading as
+  // researched (Codex, 18 Sep 2026, the round after).
   await query(`
     update place_index pi
        set ownership = case
@@ -246,10 +251,7 @@ export async function retire() {
             and a.state <> 'hidden'
             and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
        and not exists (
-         select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
-       and not exists (
-         select 1 from scout_places sp
-          where sp.venue_ref = pi.venue_ref and coalesce(sp.website, sp.name) is not null)`);
+         select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})`);
 
   // The rows hung off it go with it, or they are counted against a place that
   // is no longer in the index.
