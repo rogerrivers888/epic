@@ -496,14 +496,25 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
     // the moment its hold expired, because nothing that reads it knows the
     // queue exists. Each kind is suppressed where it lives, in the way that
     // table already understands.
-    if (row) await suppress(row.subject_type, row.subject_id, { reason, who, run });
+    // Only the write that actually won counts.
+    //
+    // Two identical requests can both pass the check above; the guarded update
+    // then gives one of them no row, and counting anyway inflated the reason
+    // report — the one number the closed list exists to produce (Codex, 18 Sep
+    // 2026).
+    if (!row) return null;
+    await suppress(row.subject_type, row.subject_id, { reason, who, run });
     await run(
       `insert into rejection_counts (kind, reason, used, last_at) values ($1,$2,1, now())
        on conflict (kind, reason) do update set used = rejection_counts.used + 1, last_at = now()`,
       [q.kind, reason]);
-    return row ?? null;
+    return row;
   });
-  if (!out) return null;
+  if (!out) {
+    // The other request won. The decision stands, and that is the answer.
+    const { rows: [already] } = await query('select * from content_queue where id = $1', [id]);
+    return already ? { ...already, why: 'it was already rejected for that reason' } : null;
+  }
 
   // A picture is one of the six facts the ready bar is judged on, and only an
   // approved one counts — so a decision about a photograph changes the place's

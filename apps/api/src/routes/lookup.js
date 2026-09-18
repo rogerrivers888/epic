@@ -52,6 +52,7 @@ import { currentHousehold } from './household.js';
 import { roomToSpend, releaseSpend, tripadvisorRoom } from './placeIndex.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import { searchKept } from '../sources/cache.js';
+import { detailHeld } from '../sources/compare.js';
 
 export const router = express.Router();
 
@@ -214,6 +215,24 @@ function itemOfRecord(r, taught, tax) {
  * and the fence. Both endpoints run it; the second is a cache hit on the
  * search and a few milliseconds on our own tables.
  */
+/**
+ * The parameters a ring search is keyed on.
+ *
+ * Pulled out so the comparison can ask whether that search is already held
+ * before it claims the money for one (Codex, 18 Sep 2026). It resolves the
+ * place, which is a free lookup of our own.
+ */
+export async function ringParams({ q, minutes, mode }, household) {
+  const place = await whereIs(q, household);
+  if (!place) return null;
+  const centre = { lat: place.lat, lng: place.lng };
+  return {
+    center: centre, radiusKm: reachKm(mode, minutes, { at: centre }),
+    categories: [], query: '', includeEvents: false,
+    sources: rentedSources().filter(asked).map((s) => s.key), deadlineMs: null,
+  };
+}
+
 async function runLookup({ q, minutes, mode }, household, { afford = null } = {}) {
   const started = Date.now();
   const place = await whereIs(q, household);
@@ -459,17 +478,30 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     // 2026). The ring is two requests — `googleSource.search` expands an empty
     // category list into food and things to do — and the match is counted only
     // where we hold no identifier.
-    const heldId = ref.startsWith('google:') || Boolean((await matchesFor([ref], 'google')).get(ref));
-    const calls = googleSource.enabled() ? RING_CALLS + (heldId ? 1 : 2) : 0;
+    const googleId = ref.startsWith('google:') ? ref.slice('google:'.length) : (await matchesFor([ref], 'google')).get(ref) ?? null;
+    // What is already in hand costs nothing to show, so it is not claimed for:
+    // the ring the last look ran, and a detail fetched within the six hours it
+    // is kept. Claiming regardless hid a column that had cost nothing minutes
+    // earlier (Codex, 18 Sep 2026).
+    const ringKey = await ringParams(settingsOf(req.query), household);
+    const ringHeld = Boolean(ringKey && searchKept(ringKey));
+    const googleHeld = googleId ? detailHeld('google', googleId) : false;
+    const calls = googleSource.enabled()
+      ? (ringHeld ? 0 : RING_CALLS) + (googleHeld ? 0 : (googleId ? 1 : 2))
+      : 0;
     const wants = Math.round(PRICE_PER_UNIT_USD.google * calls * 100 * USD_TO_GBP);
     const room = await roomToSpend(wants, { holder: 'lookup.compare' });
-    const taWants = tripadvisorSource.enabled()
+    const taId = ref.startsWith('tripadvisor:') ? ref.slice('tripadvisor:'.length) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
+    const taHeld = taId ? detailHeld('tripadvisor', taId) : false;
+    const taWants = tripadvisorSource.enabled() && !taHeld
       ? Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP)
       : 0;
     const taPurse = await roomToSpend(taWants, { holder: 'lookup.compare.ta' });
-    const taRoom = tripadvisorSource.enabled() && taPurse.ok
-      ? await tripadvisorRoom(2)
-      : { granted: 0, left: 0, reservation: null };
+    const taRoom = taHeld
+      ? { granted: 2, left: 0, reservation: null }
+      : tripadvisorSource.enabled() && taPurse.ok
+        ? await tripadvisorRoom(2)
+        : { granted: 0, left: 0, reservation: null };
     try {
     // Whatever the month cannot afford is left out of the search as well: the
     // search is itself a billed call, and its cost is inside the same claim.
