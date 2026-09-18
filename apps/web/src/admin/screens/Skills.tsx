@@ -159,6 +159,7 @@ function Queue({ canManage, onChanged, categories, kinds }: { canManage: boolean
   return (
     <Section
       title="Pending words"
+      tip="skillsPendingWords"
       right={
         <View style={{ flexDirection: 'row', gap: 2 }}>
           {(['open', 'approved', 'merged', 'rejected'] as QueueState[]).map((k) => (

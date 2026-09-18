@@ -132,6 +132,7 @@ export const TIPS = {
   sourcesServices: ['Services', 'Things we run rather than data we fetch \u2014 a Claude read of a council page, a browser opening a menu. They cost money without being a source.'],
   sourcesCorrectness: ['Correctness', 'The bench: we ask a provider about places we already know, and count how often their answer agrees with ours. Their verdicts are kept, their values never are.'],
   sourcesRunsSoFar: ['Runs so far', 'Every correctness run to date, newest first, with what each one found.'],
+  skillsPendingWords: ['Pending words', 'Words hosts have written that are not yet in the vocabulary. Approve one and it joins the list; merge it into an existing word and every host who typed it moves with it.'],
   notAsked: ['Not asked', 'We have never spent a call asking this source about this place, so we hold no id for it there. Different from asking and finding nothing.'],
   notCounted: ['Not counted', 'A playground is not judged on this, so it never counts against the score. The bar is set per kind of place.'],
   nothingToCount: ['Nothing to count', 'No source that carries review counts has returned this place, so there is no figure — not a figure of zero.'],

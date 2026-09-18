@@ -192,7 +192,11 @@ export function Sources() {
 
         {grouped.map(({ domain: d, rows: here }) => (
           <View key={d.key}>
-            {domain === 'all' ? <Text style={styles.domainText}>{d.label} <Text style={{ fontWeight: '400', color: colors.inkMuted }}>· {d.what}</Text></Text> : null}
+            {domain === 'all' ? (
+              <Explain tip={[d.label, d.what]} style={{ paddingTop: spacing.md, paddingBottom: 4 }}>
+                <Text style={[styles.domainText, { paddingTop: 0, paddingBottom: 0 }]}>{d.label} <Text style={{ fontWeight: '400', color: colors.inkMuted }}>· {d.what}</Text></Text>
+              </Explain>
+            ) : null}
             {here.map((f) => (
               <View key={f.key}>
                 <Press
