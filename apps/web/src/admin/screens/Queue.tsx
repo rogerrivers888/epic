@@ -28,7 +28,7 @@ import { useViewport } from '../../hooks/useViewport';
 import { asOneOf, asText, useQueryState } from '../../router';
 import { api, type QueueList, type QueueItem, type RejectReason } from '../../api';
 import { AdminPage, ago, day, pounds, since } from '../kit';
-import { Explain } from '../explain';
+import { Explain, type Tip, type TipKey } from '../explain';
 import { Word, Blank, Act, Footer, Kicker, Stat } from '../table';
 
 /**
@@ -43,6 +43,22 @@ const SAID: Record<string, string> = {
   note: 'note on a dish', offer: 'offer', message: 'message', data: 'flag',
 };
 const said = (kind: string) => SAID[kind] ?? kind;
+
+/**
+ * The word the *row* uses, which is the word the filter chip uses.
+ *
+ * "Photograph" in the row beside "Photo" in the chip was one kind with two
+ * names on one screen (18 Sep 2026, the separate audit). BO5a's own rows read
+ * "Photo · Dinton Pastures" and "Note on a dish · Bhel Puri House", so the note
+ * is the one that says more than its chip.
+ */
+const ROW_WORD: Record<string, string> = {
+  photo: 'Photo', review: 'Review', rating: 'Rating',
+  note: 'Note on a dish', offer: 'Offer', message: 'Message', data: 'Flag',
+};
+const kindWord = (kind: string, kinds: { key: string; label: string }[]) =>
+  ROW_WORD[kind] ?? kinds.find((k) => k.key === kind)?.label
+  ?? `${said(kind)[0].toUpperCase()}${said(kind).slice(1)}`;
 
 /**
  * A value, said rather than serialised.
@@ -161,7 +177,8 @@ export function Queue({ canManage }: { canManage: boolean }) {
           <View style={styles.words}>
             <Word2 label="All" on={kind === 'all'} onPress={() => setKind('all')} />
             {data.kinds.map((k) => (
-              <Word2 key={k.key} label={k.label} n={data.counts.kind[k.key] ?? 0} on={kind === k.key} onPress={() => setKind(k.key)} />
+              <Word2 key={k.key} label={k.label} n={data.counts.kind[k.key] ?? 0} on={kind === k.key} onPress={() => setKind(k.key)}
+                     tip={[k.label, `${data.counts.kind[k.key] ?? 0} ${said(k.key)}${(data.counts.kind[k.key] ?? 0) === 1 ? '' : 's'} ${state}. A ${said(k.key)} is ${k.batch ? 'one of the things that can be decided in a batch' : 'decided on its own, never in a batch'}.`]} />
             ))}
           </View>
         </View>
@@ -182,7 +199,8 @@ export function Queue({ canManage }: { canManage: boolean }) {
 
       {data.counts.reported > 0 && state !== 'reported' ? (
         <View style={styles.reported}>
-          <Icon name="flag" size={15} strokeWidth={2} color={colors.ink} />
+          {/* The design's mark is the warning triangle, not a flag. */}
+          <Icon name="alert" size={15} strokeWidth={2} color={colors.ink} />
           <Text style={styles.reportedWord}>{`${data.counts.reported} reported`}</Text>
           <View style={{ flex: 1 }} />
           <Act label="Deal with those first" tone="solid" onPress={() => setState('reported')} />
@@ -191,9 +209,20 @@ export function Queue({ canManage }: { canManage: boolean }) {
 
       <View style={[styles.split, width < 1100 && { flexDirection: 'column' }]}>
         <View style={[styles.list, width < 1100 && { width: '100%' }]}>
-          {data.rows.length === 0 ? <View style={{ padding: 14 }}><Word muted>Nothing waiting.</Word></View> : null}
+          {/* What is empty, in its own words — "Nothing waiting" under STATE:
+              Approved was the wrong sentence (18 Sep 2026, the separate audit).
+              And an area nobody has heard of says so rather than reading as an
+              empty queue. */}
+          {data.rows.length === 0 ? (
+            <View style={{ padding: 14 }}>
+              <Word muted>{where && !data.where ? `We hold no area called ${where}.` : `Nothing ${state}.`}</Word>
+            </View>
+          ) : null}
+          {/* Opening one is a move, not a filter, so it pushes: Back closes the
+              layer rather than leaving the back office (CLAUDE.md, "a move
+              pushes, a filter replaces"; 18 Sep 2026, the separate audit). */}
           {data.rows.map((r) => (
-            <Press key={r.id} effect="none" onPress={() => setOpen(r.id)} accessibilityRole="button"
+            <Press key={r.id} effect="none" onPress={() => setOpen(r.id, { replace: false })} accessibilityRole="button"
                    accessibilityLabel={`${r.kind} from ${r.maker ?? 'a household'}`}
                    style={[styles.listRow, open === r.id && styles.listRowOn, r.reported && styles.listRowReported]}>
               <Press effect="none" accessibilityRole="checkbox" accessibilityState={{ checked: picked.has(r.id) }}
@@ -211,11 +240,11 @@ export function Queue({ canManage }: { canManage: boolean }) {
                 <Text style={[styles.listName, open === r.id && styles.strong]} numberOfLines={1}>
                   {r.kind === 'data'
                     ? `Three sources disagree${r.field ? ` on the ${FIELD_WORD[r.field] ?? r.field}` : ''}`
-                    : `${said(r.kind)[0].toUpperCase()}${said(r.kind).slice(1)}${r.place ? ` · ${r.place}` : r.ref ? ` · ${r.ref}` : ''}${(r.of ?? 1) > 1 ? `, ${r.of} of them` : ''}`}
+                    : `${kindWord(r.kind, data.kinds)}${r.place ? ` · ${r.place}` : r.ref ? ' · a place we hold no name for' : ''}${(r.of ?? 1) > 1 ? `, ${r.of} of them` : ''}`}
                 </Text>
                 <Text style={styles.listNote} numberOfLines={1}>
                   {r.kind === 'data'
-                    ? [r.place ?? r.ref, 'flagged by us', since(r.madeAt)].filter(Boolean).join(' · ')
+                    ? [r.place ?? 'a place we hold no name for', 'flagged by us', since(r.madeAt)].filter(Boolean).join(' · ')
                     : [
                       // "4 households" where a batch came from several of them.
                       (r.makers?.length ?? 0) > 1 ? `${r.makers.length} households` : (r.maker ?? 'flagged by us'),
@@ -228,7 +257,11 @@ export function Queue({ canManage }: { canManage: boolean }) {
           ))}
           <View style={styles.listFoot}>
             <Text style={styles.listNote}>
-              {picked.size ? `${picked.size} selected${notBatchable ? ` · ${notBatchable} cannot be done together` : ' · all photographs'}` : 'Nothing selected'}
+              {/* The same arithmetic the button does. It counted rows beside a
+                  button that counts photographs, so one selected batch of
+                  twelve read "1 selected" next to "Approve the 12" (18 Sep
+                  2026, the separate audit; README law 4). */}
+              {picked.size ? `${batchable + notBatchable} selected${notBatchable ? ` · ${notBatchable} cannot be done together` : ' · all photographs'}` : 'Nothing selected'}
             </Text>
             <View style={{ flex: 1 }} />
             {/* Batch approval where it is safe. Never a batch rejection, and
@@ -243,14 +276,18 @@ export function Queue({ canManage }: { canManage: boolean }) {
         </View>
 
         <View style={[styles.detail, width < 1100 && { width: '100%', borderLeftWidth: 0, paddingLeft: 0 }]}>
-          {!item ? <Waiting /> : (
+          {/* Nothing to decide is not something still loading: an empty queue
+              drew a spinner that never stopped (18 Sep 2026, the separate
+              audit). */}
+          {!item && !data.rows.length ? <View style={{ padding: 14 }}><Word muted>Nothing to decide.</Word></View>
+            : !item ? <Waiting /> : (
             <ItemPane item={item} canManage={canManage} busy={busy}
                       onApprove={() => approve([item.item.id])}
-                      onReject={(tell) => setRejecting(tell ? 'tell' : 'quiet')}
+                      onReject={(tell) => setRejecting(tell ? 'tell' : 'quiet', { replace: false })}
                       onReport={() => report(item.item.id)}
                       next={data.rows[data.rows.findIndex((r) => r.id === open) + 1] ?? null}
                       onApproveNext={(id) => approve([id])}
-                      onOpenNext={(id) => { setOpen(id); setRejecting('tell'); }} />
+                      onOpenNext={(id) => { setOpen(id, { replace: false }); setRejecting('tell', { replace: false }); }} />
           )}
         </View>
       </View>
@@ -331,17 +368,17 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, onReport, next, 
       <View>
         <Kicker tip="sectionAboutIt">About it</Kicker>
         {/* BO5a: "The Hartleys · 4 photographs before, all kept". */}
-        <Fact label="Made by" value={item.made
+        <Fact tip="madeBy" label="Made by" value={item.made
           ? `${item.made.name}${item.made.kept ? ` · ${item.made.kept} ${item.made.kept === 1 ? 'thing' : 'things'} before, all kept` : ' · nothing before this'}`
           : it.maker ?? '—'} />
-        <Fact label={item.picture ? 'Taken' : 'Made'} value={day(it.madeAt)} />
+        <Fact tip="whenItWasMade" label={item.picture ? 'Taken' : 'Made'} value={day(it.madeAt)} />
         {/* One of the five rejection reasons is "somebody's face is in it", so
             the screen has to say whether anything has looked. Nothing does yet,
             and saying so is the honest answer rather than "none found". */}
-        {item.picture ? <Fact label="Faces" value={item.faces} /> : null}
-        {item.picture ? <Fact label="Size" value={item.picture.width && item.picture.height ? `${item.picture.width} × ${item.picture.height}` : '—'} /> : null}
-        {item.picture ? <Fact label="Licence" value={item.picture.licence ?? 'the household’s own'} /> : null}
-        <Fact label="Earned so far" value={item.made ? `${pounds(item.made.points)} of credit` : '—'} last />
+        {item.picture ? <Fact tip="facesInIt" label="Faces" value={item.faces} /> : null}
+        {item.picture ? <Fact tip="pictureSize" label="Size" value={item.picture.width && item.picture.height ? `${item.picture.width} × ${item.picture.height}` : '—'} /> : null}
+        {item.picture ? <Fact tip="pictureLicence" label="Licence" value={item.picture.licence ?? 'the household’s own'} /> : null}
+        <Fact tip="earnedSoFar" label="Earned so far" value={item.made ? `${pounds(item.made.points)} of credit` : '—'} last />
       </View>
 
       {it.state === 'waiting' ? (
@@ -489,18 +526,27 @@ function RejectSheet({ item, tell, onClose, onDone }: {
   );
 }
 
-const Word2 = ({ label, n, on, onPress }: { label: string; n?: number; on: boolean; onPress: () => void }) => (
-  <Press effect="none" onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={label}
-         style={[styles.word2, on && styles.word2On]}>
-    <Text style={[styles.word2Text, on && styles.word2TextOn]}>{n == null ? label : `${label} ${n || '—'}`}</Text>
-  </Press>
+const Word2 = ({ label, n, on, onPress, tip }: { label: string; n?: number; on: boolean; onPress: () => void; tip?: Tip }) => (
+  <Explain tip={tip ?? null} cursor="pointer">
+    <Press effect="none" onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={label}
+           style={[styles.word2, on && styles.word2On]}>
+      <Text style={[styles.word2Text, on && styles.word2TextOn]}>{n == null ? label : `${label} ${n || '—'}`}</Text>
+    </Press>
+  </Explain>
 );
 
-const Fact = ({ label, value, last }: { label: string; value: string; last?: boolean }) => (
-  <View style={[styles.factRow, last && { borderBottomWidth: 0 }]}>
+/**
+ * One fact about the thing being decided — and it explains itself.
+ *
+ * Six of these were the only labels on the board with no hover, which is the
+ * one law the owner names by hand: "when I hover over any one of the headers it
+ * should tell me what it is" (18 Sep 2026, the separate audit).
+ */
+const Fact = ({ label, value, last, tip }: { label: string; value: string; last?: boolean; tip?: TipKey | Tip }) => (
+  <Explain tip={tip ?? null} style={[styles.factRow, last && { borderBottomWidth: 0 }]}>
     <Text style={styles.factLabel}>{label}</Text>
     <Text style={styles.factValue}>{value}</Text>
-  </View>
+  </Explain>
 );
 
 const toggle = (set: Set<string>, key: string) => {

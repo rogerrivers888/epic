@@ -41,7 +41,7 @@ import { api, type PlaceLevel, type PlaceStats, type PlaceCountry, type PlaceAre
   type PlaceRing, type PlaceRow, type PlaceDetail, type PictureIndex, type ReadyBars, type BarEffect, type BarFact,
   type CompareColumn, type CompareRow, type RawSource, type PlaceHistoryRow, type FactDef, type PlaceLabel } from '../../api';
 import { AdminPage, ago, day, pounds, since } from '../kit';
-import { Explain } from '../explain';
+import { Explain, type TipKey } from '../explain';
 import { Ladder, Num, Word, Blank, NotAsked, NoMatch, Na, Tick, Pct, ScoreCell, Bar, Progress, Act, Footer, Kicker, Stat, type Col } from '../table';
 
 /** How a required fact is said in a sentence, rather than as a column header. */
@@ -51,6 +51,11 @@ const NEEDS_WORD: Record<string, string> = {
 };
 
 const LENSES = ['coverage', 'category', 'source', 'quality', 'demand', 'collect'] as const;
+/** What each way of cutting the same places is for. */
+const LENS_TIP: Record<string, TipKey> = {
+  coverage: 'lensCoverage', category: 'lensCategory', source: 'lensSource',
+  quality: 'lensQuality', demand: 'lensDemand', collect: 'collect',
+};
 type Lens = typeof LENSES[number];
 const LENS_LABEL: Record<Lens, string> = {
   coverage: 'Coverage', category: 'Category', source: 'Source', quality: 'Quality', demand: 'Demand', collect: 'Collect',
@@ -114,7 +119,7 @@ export function Places({ canManage }: { canManage: boolean }) {
   if (readyFor) return <ReadyBarBoard sub={readyFor} canManage={canManage} onClose={() => setReadyFor('')} onPick={setReadyFor} />;
   if (place) {
     return (
-      <PlaceBoard refId={place} canManage={canManage} phone={phone}
+      <PlaceBoard refId={place} canManage={canManage}
                   tab={tab} onTab={setTab}
                   onClose={() => { setPlace(''); setTab('record'); }} />
     );
@@ -468,8 +473,11 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
       <View style={styles.lensLeft}>
         <Kicker tip="sectionCutBy">Cut by</Kicker>
         <View style={styles.lenses}>
+          {/* All six, not one: the lens words are this board's main control and
+              five of them said nothing on hover (18 Sep 2026, the separate
+              audit). */}
           {LENSES.map((l) => (
-            <Explain key={l} tip={l === 'collect' ? 'collect' : null} cursor="pointer">
+            <Explain key={l} tip={LENS_TIP[l]} cursor="pointer">
               <Press effect="none" onPress={() => onLens(l)} accessibilityRole="tab"
                      accessibilityState={{ selected: lens === l }} accessibilityLabel={LENS_LABEL[l]}
                      style={[styles.lens, lens === l && styles.lensOn]}>
@@ -1641,9 +1649,17 @@ const PLACE_TAB_LABEL: Record<PlaceTab, string> = {
   record: 'The record', compare: 'Ours beside theirs', score: 'How it scored',
   pictures: 'Pictures', raw: 'What each source returned', history: 'History',
 };
+const PLACE_TAB_TIP: Record<PlaceTab, TipKey> = {
+  record: 'tabTheRecord', compare: 'tabOursBesideTheirs', score: 'tabHowItScored',
+  pictures: 'tabPictures', raw: 'tabWhatEachSourceReturned', history: 'tabHistory',
+};
 
-function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
-  refId: string; canManage: boolean; onClose: () => void; phone: boolean;
+// `phone` used to be handed in here and never read: the drawer's own narrow
+// layout comes from `useViewport` inside each tab, which is the rule (CLAUDE.md
+// — never read the window directly), so the prop was a claim the component did
+// not honour (18 Sep 2026, the separate audit).
+function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
+  refId: string; canManage: boolean; onClose: () => void;
   /** Held by the screen above, so closing the drawer takes `?tab=` with it. */
   tab: PlaceTab; onTab: (t: PlaceTab) => void;
 }) {
@@ -1651,6 +1667,7 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
   const [place, setPlace] = useState<PlaceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [curating, setCurating] = useState(false);
+  const [asking, setAsking] = useState(false);
   const load = useCallback(() => {
     setPlace(null); setError(null);
     api.adminPlace(refId).then(setPlace).catch((e: any) => setError(e?.body?.message ?? 'Nothing indexed under that ref yet.'));
@@ -1705,12 +1722,17 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
         <View style={styles.lensLeft}>
           <Kicker tip="sectionLookingAt">Looking at</Kicker>
           <View style={styles.lenses}>
+            {/* Six words, six hovers: they are the headings of this drawer, and
+                they were the last labels on it that explained nothing (18 Sep
+                2026, the separate audit). */}
             {PLACE_TABS.map((t) => (
-              <Press key={t} effect="none" onPress={() => setTab(t)} accessibilityRole="tab"
-                     accessibilityState={{ selected: tab === t }} accessibilityLabel={PLACE_TAB_LABEL[t]}
-                     style={[styles.lens, tab === t && styles.lensOn]}>
-                <Text style={[styles.lensWord, tab === t && styles.lensWordOn]}>{PLACE_TAB_LABEL[t]}</Text>
-              </Press>
+              <Explain key={t} tip={PLACE_TAB_TIP[t]} cursor="pointer">
+                <Press effect="none" onPress={() => setTab(t)} accessibilityRole="tab"
+                       accessibilityState={{ selected: tab === t }} accessibilityLabel={PLACE_TAB_LABEL[t]}
+                       style={[styles.lens, tab === t && styles.lensOn]}>
+                  <Text style={[styles.lensWord, tab === t && styles.lensWordOn]}>{PLACE_TAB_LABEL[t]}</Text>
+                </Press>
+              </Explain>
             ))}
           </View>
         </View>
@@ -1720,7 +1742,13 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
           {/* What it would actually spend, from the API rather than a figure
               typed on the screen (Codex, 17 Sep 2026). */}
           <Act label={`Compare all three · ${place.comparePence ? pounds(Math.round(place.comparePence)) : 'free'}`}
-               disabled={!canManage} onPress={() => setTab('compare')} />
+               tone="secondary" disabled={!canManage} onPress={() => setTab('compare')} />
+          {/* BO2r's own primary action, which was not built: asking Google about
+              this one place, at what the API says it costs (18 Sep 2026, the
+              separate audit). */}
+          <Act label={asking ? 'Asking…' : `Ask Google about it · ${place.askPence ? pounds(Math.round(place.askPence)) : 'free'}`}
+               disabled={!canManage || asking}
+               onPress={() => { setAsking(true); api.adminAskAboutPlaces([refId]).finally(() => { setAsking(false); load(); }); }} />
         </View>
       </View>
 
@@ -1736,6 +1764,7 @@ function PlaceBoard({ refId, canManage, onClose, phone, tab, onTab }: {
 
 /** BO2r — every field with its source, and Edit on the ones that are ours. */
 function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManage: boolean; onSaved: () => void }) {
+  const { navigate } = useRouter();
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -1878,6 +1907,13 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
               the owner's to add — so it says so rather than doing nothing. */}
           <Act label={busy === 'commons' ? 'Looking…' : 'Look on Commons · free'} small tone="secondary" disabled={!canManage || busy != null}
                onPress={() => { setBusy('commons'); api.adminFindPictures([place.ref]).finally(() => { setBusy(null); onSaved(); }); }} />
+          {/* The door into the queue. Every cell that stands for a row of work
+              opens the queue at its own address (README law 8) — and until this
+              there was no link into it from anywhere in the back office, so the
+              address it prints on its own board could only be typed (18 Sep
+              2026, the separate audit). */}
+          <Act label="What households have sent" small tone="secondary" icon="preview"
+               onPress={() => navigate(`/admin/queue?kind=photo${place.areas[0]?.slug ? `&where=${encodeURIComponent(place.areas[0].slug)}` : ''}`)} />
           <Act label="Ask a household · needs a sender" small tone="secondary" disabled onPress={() => {}} />
         </View>
 
@@ -1899,7 +1935,11 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
                 <View style={{ flex: 1 }} />
                 <Icon name={openSources === which ? 'collapse' : 'expand'} size={15} strokeWidth={2} color={colors.inkMuted} />
               </Press>
-              <Act label={which === 'free' ? 'Run them' : `${pounds(Math.round(list.length * 1.4))} · ask`} small tone="secondary"
+              {/* Each source's own price, added up — it multiplied the count by
+                  Google's old 1.4p, so it charged Tripadvisor at Google's rate
+                  and both at the wrong one (18 Sep 2026, the separate audit). */}
+              <Act label={which === 'free' ? 'Run them'
+                : `${pounds(Math.round(list.reduce((n, u) => n + (u.pence ?? 0), 0)))} · ask`} small tone="secondary"
                    disabled={!canManage || !list.length || busy != null}
                    onPress={() => { setBusy(which); (which === 'free' ? api.adminCuratePlaces([place.ref]) : api.adminAskAboutPlaces([place.ref])).finally(() => { setBusy(null); onSaved(); }); }} />
             </Explain>
@@ -1919,26 +1959,61 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
 
         <View style={{ height: spacing.lg }} />
         <Kicker tip="sectionOtherSystems">This place in other systems</Kicker>
+        {/* The label hovers as well as the state: an identifier is the thing
+            that makes the next question free, and the row said nothing about
+            itself (18 Sep 2026, the separate audit). */}
         {place.ids.map((id, i) => (
-          <View key={id.key} style={[styles.idRow, i === place.ids.length - 1 && { borderBottomWidth: 0 }]}>
+          <Explain key={id.key} tip={[id.label, id.value
+            ? `The identifier ${id.label === 'Ours' ? 'we filed it under' : `${id.label} knows it by`}. Holding it is what makes the next question about this place a single call rather than a search and a call.`
+            : `We hold no ${id.label} identifier for this place, so asking ${id.label === 'Ours' ? 'about it' : id.label} means matching it by name and position first.`]}
+            style={[styles.idRow, i === place.ids.length - 1 && { borderBottomWidth: 0 }]}>
             <Text style={styles.idLabel}>{id.label}</Text>
             {id.value
               ? <Text style={styles.idValue} numberOfLines={1}>{id.value}</Text>
               : id.state === 'no-match' ? <Explain tip="noMatch"><NoMatch /></Explain>
               : <Explain tip="notAsked"><NotAsked /></Explain>}
-          </View>
+          </Explain>
         ))}
       </View>
     </View>
   );
 }
 
+const DETAIL_TIP: Record<string, TipKey> = {
+  Reference: 'detailReference', 'Raw value': 'detailRawValue', 'Set by': 'detailSetBy',
+  'Counts towards ready': 'detailCountsTowardsReady',
+};
 const Detail = ({ label, value }: { label: string; value: string }) => (
-  <View style={styles.detailRow}>
+  <Explain tip={DETAIL_TIP[label] ?? null} style={styles.detailRow}>
     <Text style={styles.detailLabel}>{label}</Text>
     <Text style={styles.detailValue}>{value}</Text>
-  </View>
+  </Explain>
 );
+
+/**
+ * A value, said rather than serialised.
+ *
+ * An empty object is a blank, not `{}`; an object of facts is its facts in
+ * words; and nothing is ever printed as JSON, which is a database's own output
+ * and not a thing anybody reads (Codex, 17 Sep 2026). Module-level, because the
+ * comparison and the raw record both print provider values and only one of them
+ * had this — the raw tab was calling JSON.stringify (18 Sep 2026, the separate
+ * audit).
+ */
+function saidValue(v: unknown): string {
+  if (v == null || v === '') return '';
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => (x && typeof x === 'object' ? (x as any).label ?? (x as any).key ?? (x as any).name ?? '' : String(x))).filter(Boolean);
+    return parts.join(', ');
+  }
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (typeof v === 'object') {
+    const held = Object.entries(v as Record<string, unknown>).filter(([, x]) => x != null && x !== '' && x !== false);
+    if (!held.length) return '';
+    return held.map(([k, x]) => (x === true ? fieldWord(k).toLowerCase() : `${fieldWord(k).toLowerCase()} ${saidValue(x)}`)).join(', ');
+  }
+  return String(v);
+}
 
 /** BO2h — ours beside each provider's, field by field. Only ours is editable. */
 function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: boolean; onEdit: (field: string) => void }) {
@@ -1957,20 +2032,7 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
    * words; and nothing is ever printed as JSON, which is a database's own
    * output and not a thing anybody reads (Codex, 17 Sep 2026).
    */
-  const say = (v: unknown): string => {
-    if (v == null || v === '') return '';
-    if (Array.isArray(v)) {
-      const parts = v.map((x) => (x && typeof x === 'object' ? (x as any).label ?? (x as any).key ?? (x as any).name ?? '' : String(x))).filter(Boolean);
-      return parts.join(', ');
-    }
-    if (typeof v === 'boolean') return v ? 'yes' : 'no';
-    if (typeof v === 'object') {
-      const held = Object.entries(v as Record<string, unknown>).filter(([, x]) => x != null && x !== '' && x !== false);
-      if (!held.length) return '';
-      return held.map(([k, x]) => (x === true ? fieldWord(k).toLowerCase() : `${fieldWord(k).toLowerCase()} ${say(x)}`)).join(', ');
-    }
-    return String(v);
-  };
+  const say = saidValue;
   /** Four facts, kept apart: we hold it, we never asked, no such place, off here. */
   const missing = (c: CompareColumn) =>
     (c.state === 'off' ? <Explain tip={['Not switched on', `${c.label} is not switched on in this environment, so there was nothing to ask.`]}><Word muted>not switched on</Word></Explain>
@@ -2277,6 +2339,15 @@ function RawTab({ refId }: { refId: string }) {
   if (!data) return <Waiting />;
   return (
     <View>
+      {/* Four columns with no names on them: the one board in the drawer with
+          no header row at all (18 Sep 2026, the separate audit). */}
+      <View style={styles.recordHead}>
+        <Explain tip="rawSource" style={{ width: 180 }}><Text style={styles.headLabelSmall}>Source</Text></Explain>
+        <Explain tip="rawWhatItReturned" style={{ flex: 1 }}><Text style={styles.headLabelSmall}>What it returned</Text></Explain>
+        <Explain tip="rawTheirIdentifier" style={{ width: 140 }}><Text style={styles.headLabelSmall}>Their identifier</Text></Explain>
+        <Explain tip="rawLastAnswered" style={{ width: 110 }}><Text style={styles.headLabelSmall}>Last answered</Text></Explain>
+        <View style={{ width: 15 }} />
+      </View>
       {data.sources.map((s) => (
         <React.Fragment key={s.key}>
           <Press effect="none" onPress={() => setOpen(open === s.key ? null : s.key)} accessibilityRole="button"
@@ -2296,7 +2367,7 @@ function RawTab({ refId }: { refId: string }) {
               {s.fields.length === 0 ? <Word muted>Nothing held from this source.</Word> : s.fields.map((f) => (
                 <View key={f.field} style={styles.detailRow}>
                   <Text style={styles.detailLabel}>{f.field}</Text>
-                  <Text style={styles.detailValue}>{typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value)}</Text>
+                  <Text style={styles.detailValue}>{saidValue(f.value) || '—'}</Text>
                   <Text style={styles.fieldMeta}>{`${f.licence} · ${f.retention}`}</Text>
                 </View>
               ))}
@@ -2316,6 +2387,12 @@ function HistoryTab({ refId }: { refId: string }) {
   if (!rows.length) return <Word muted>Nothing has changed this place yet.</Word>;
   return (
     <View>
+      <View style={styles.recordHead}>
+        <Explain tip="historyWhen" style={{ width: 150 }}><Text style={styles.headLabelSmall}>When</Text></Explain>
+        <Explain tip="historyWhatChanged" style={{ flex: 1 }}><Text style={styles.headLabelSmall}>What changed</Text></Explain>
+        <Explain tip="historyWho" style={{ width: 180 }}><Text style={styles.headLabelSmall}>Who or what did it</Text></Explain>
+        <Explain tip="historyCost" style={{ width: 90, alignItems: 'flex-end' }}><Text style={styles.headLabelSmall}>What it cost</Text></Explain>
+      </View>
       {rows.map((r, i) => (
         <View key={`${r.at}-${i}`} style={styles.recordRow}>
           <Text style={[styles.fieldMeta, { width: 150 }]}>{day(r.at)}</Text>
@@ -2373,12 +2450,15 @@ function PicturesBoard({ onClose }: { onClose: () => void }) {
         </View>
         <View style={styles.facets}>
           {(data?.facets ?? []).map((f) => (
-            <Press key={f.key} effect="none" onPress={() => setFacet(facet === f.key ? '' : f.key)}
-                   accessibilityRole="button" accessibilityState={{ selected: facet === f.key }} accessibilityLabel={f.label}
-                   style={[styles.facet, facet === f.key && styles.facetOn]}>
-              <Text style={[styles.facetWord, facet === f.key && styles.facetWordOn]}>{f.label}</Text>
-              <Text style={[styles.facetN, facet === f.key && { color: colors.onLime }]}>{f.n ? f.n.toLocaleString() : '—'}</Text>
-            </Press>
+            <Explain key={f.key} cursor="pointer"
+                     tip={[f.label, `${(f.n ?? 0).toLocaleString()} of the pictures we hold came from ${f.label.toLowerCase()}. Tap to see only those.`]}>
+              <Press effect="none" onPress={() => setFacet(facet === f.key ? '' : f.key)}
+                     accessibilityRole="button" accessibilityState={{ selected: facet === f.key }} accessibilityLabel={f.label}
+                     style={[styles.facet, facet === f.key && styles.facetOn]}>
+                <Text style={[styles.facetWord, facet === f.key && styles.facetWordOn]}>{f.label}</Text>
+                <Text style={[styles.facetN, facet === f.key && { color: colors.onLime }]}>{f.n ? f.n.toLocaleString() : '—'}</Text>
+              </Press>
+            </Explain>
           ))}
         </View>
       </View>
@@ -2437,15 +2517,22 @@ function PictureFacts({ p }: { p: any }) {
   );
 }
 
+/** Every licence field explains itself; eight of them explained nothing. */
+const PICTURE_FACT_TIP: Record<string, TipKey> = {
+  'Where it came from': 'pictureWhereFrom', 'On the place': 'pictureOnThePlace',
+  Licence: 'pictureLicence', Photographer: 'picturePhotographer', 'Credit as': 'pictureCreditAs',
+  'Attribution page': 'pictureAttributionPage', 'Licence page': 'pictureLicencePage',
+  Size: 'pictureSize', Fetched: 'pictureFetched',
+};
 const Fact = ({ label, value, strong, link, onPress, last }: { label: string; value: string; strong?: boolean; link?: string | null; onPress?: () => void; last?: boolean }) => (
-  <View style={[styles.factRow, last && { borderBottomWidth: 0 }]}>
+  <Explain tip={PICTURE_FACT_TIP[label] ?? null} style={[styles.factRow, last && { borderBottomWidth: 0 }]}>
     <Text style={styles.factLabel}>{label}</Text>
     {link
       ? <Press effect="none" onPress={onPress} accessibilityRole="link" accessibilityLabel={label} style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.factValue, { color: colors.accent }]} numberOfLines={1}>{value}</Text>
         </Press>
       : <Text style={[styles.factValue, strong && styles.strong]} numberOfLines={2}>{value}</Text>}
-  </View>
+  </Explain>
 );
 
 // ---------------------------------------------------------------------------
@@ -2617,11 +2704,13 @@ function PlacesPhone({ level, q, lens, onLens, onWhere, onUp }: {
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.segment}>
           {LENSES.map((l) => (
-            <Press key={l} effect="none" onPress={() => onLens(l)} accessibilityRole="tab"
-                   accessibilityState={{ selected: lens === l }} accessibilityLabel={LENS_LABEL[l]}
-                   style={[styles.segItem, lens === l && styles.segItemOn]}>
-              <Text style={[styles.segWord, lens === l && styles.segWordOn]}>{LENS_LABEL[l]}</Text>
-            </Press>
+            <Explain key={l} tip={LENS_TIP[l]} cursor="pointer">
+              <Press effect="none" onPress={() => onLens(l)} accessibilityRole="tab"
+                     accessibilityState={{ selected: lens === l }} accessibilityLabel={LENS_LABEL[l]}
+                     style={[styles.segItem, lens === l && styles.segItemOn]}>
+                <Text style={[styles.segWord, lens === l && styles.segWordOn]}>{LENS_LABEL[l]}</Text>
+              </Press>
+            </Explain>
           ))}
         </View>
       </ScrollView>

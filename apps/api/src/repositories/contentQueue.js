@@ -52,8 +52,14 @@ export const REASONS = {
   photo: [
     { key: 'unclear',   label: 'You cannot tell what the place is',
       message: 'We are not going to put this one up — it is hard to tell what it is a picture of.' },
+    // BO5b's own message, all three sentences of it. Only the first was built,
+    // and the two that were missing are the two that matter to the person
+    // reading it: that nothing else of theirs has been touched, and that we
+    // would like another (18 Sep 2026, the separate audit).
     { key: 'dark',      label: 'It is too dark or too blurred to use',
-      message: 'We are not going to put this one up — it came out too dark to show the place properly.' },
+      message: 'We are not going to put this one up — it came out too dark to show the place properly. '
+        + 'Your other photographs are all still there, and your credit is unaffected. '
+        + 'If you are there again on a brighter day, we would love another.' },
     { key: 'faces',     label: 'Somebody’s face is in it',
       message: 'We are not going to put this one up — somebody’s face is in it, and we only publish pictures of the place itself.' },
     { key: 'elsewhere', label: 'It is of a different place',
@@ -322,7 +328,12 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null } =
       where ($1::text is null or q.kind = $1)
         and ($2::text = 'reported' and q.reported or $2::text <> 'reported' and q.state = $2)
         and ($3::text is null or q.area_slug = $3)
-      order by q.reported desc, q.made_at asc`, [kind, state, areaSlug]);
+      -- Reported first, because it is on a different clock; then what
+      -- households sent us, oldest first; then the facts we flagged ourselves,
+      -- which BO5a puts in their own section at the end. They were interleaved
+      -- by age, so a run of flags sat in the middle of a queue of people's
+      -- words (18 Sep 2026, the separate audit).
+      order by q.reported desc, (q.kind = 'data'), q.made_at asc`, [kind, state, areaSlug]);
   return rows;
 }
 

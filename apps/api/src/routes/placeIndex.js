@@ -328,8 +328,11 @@ router.get('/breakdown', requires('view_library'), async (req, res, next) => {
     const where = lower(req.query.where) || 'gb';
     const out = await index.breakdown(where, {
       by: req.query.by ?? 'county',
-      sort: req.query.sort ?? 'searches',
-      desc: req.query.desc !== '0',
+      // `?sort=empty.desc` is how the design spells it, and it fell through the
+      // order list and silently sorted by searches — a link printed on the
+      // board that did not do what it said (18 Sep 2026, the separate audit).
+      sort: String(req.query.sort ?? 'searches').split('.')[0],
+      desc: String(req.query.sort ?? '').endsWith('.asc') ? false : req.query.desc !== '0',
       since: Number(req.query.since) || 30,
     });
     // `all` is how many there are at all, so a list that is a slice says so.
@@ -707,9 +710,9 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
     const { rows: [atlasDetail] } = await query(
       `select d.visit->>'openingHours' as hours
          from attractions a join attraction_details d on d.attraction_id = a.id
-        where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'rejected' limit 1`, [ref]);
+        where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden' limit 1`, [ref]);
     const { rows: [att] } = await query(
-      `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'rejected' limit 1`, [ref]);
+      `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'hidden' limit 1`, [ref]);
     const { rows: [sweep] } = await query('select * from scout_places where venue_ref = $1 order by last_seen desc limit 1', [ref]);
     const { rows: seen } = await query('select source, source_place_id, first_seen, last_seen from place_index_sources where venue_ref = $1 order by source', [ref]);
     const { rows: facts } = await query('select field, source, value, licence, retention, fetched_at, expires_at from place_facts where venue_ref = $1 order by field', [ref]);
@@ -771,6 +774,9 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       'ours', 'own', 'curate', 'hand', 'claim',
       'atlas', 'wikipedia', 'wikidata', 'osm', 'openstreetmap', 'commons', 'their site', 'site',
     ]);
+    // When anything last answered about this place at all: the moment a hole
+    // was last confirmed to be a hole.
+    const lastLookedAt = seen.reduce((at, r) => (r.last_seen && (!at || r.last_seen > at) ? r.last_seen : at), null);
     const field = (key, label, value, source, checked, fact = null, editable = false, action = null, note = null, reference = null) => {
       const from = value == null ? null : asWord(source);
       const held = value != null;
@@ -780,9 +786,18 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
         // Nothing held, nothing to say about where it came from: a source beside
         // a dash reads as though we hold something we do not.
         source: from,
+        // Three different answers, and they used to be two.
+        //
         // A fact this kind of place is not judged on has not been "never
         // checked" — there was never anything to check (Codex, 17 Sep 2026).
-        checked: held ? checked ?? null : counted === false ? null : 'never',
+        // And a field we hold nothing for on a place a source *has* answered
+        // about was looked for and not found, which BO2r prints as a date. It
+        // read "never" beside a field nobody had ever asked about, so the board
+        // could not tell a hole from an absence (18 Sep 2026, the separate
+        // audit).
+        checked: held ? checked ?? null
+          : counted === false ? null
+            : lastLookedAt ?? 'never',
         note, reference,
         counted,
         notCounted: fact ? !judged.has(fact) : false,
@@ -872,12 +887,21 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
         ? DETAIL_PENCE + (ref.startsWith('google:') || asked.has('google') ? 0 : MATCH_PENCE)
         : 0)
         + (tripadvisorSource.enabled() ? taCost(1) : 0),
+      // And what asking Google alone would spend, which is BO2r's own action.
+      askPence: googleSource.enabled()
+        ? DETAIL_PENCE + (ref.startsWith('google:') || asked.has('google') ? 0 : MATCH_PENCE)
+        : 0,
       unseenFree: unseen.filter((s) => !s.paid).length,
       unseenPaid: unseen.filter((s) => s.paid).length,
       record,
       facts: facts.map((f) => ({ field: f.field, source: f.source, value: f.value, licence: f.licence, retention: f.retention, fetchedAt: f.fetched_at, expiresAt: f.expires_at })),
       pictures: pictures.map((p) => ({
-        id: p.id, source: p.source, licence: p.licence, licenceUrl: p.licence_url, creator: p.creator,
+        // Said, not the column value: the cards printed "wikimedia", "logo" and
+        // "household" where the facet chips above them already said "Commons",
+        // "The venue's own logo" and "A household" (18 Sep 2026, the separate
+        // audit). `sourceKey` is kept for anything that needs to match.
+        id: p.id, source: SOURCE_WORD[p.source] ?? p.source, sourceKey: p.source,
+        licence: p.licence, licenceUrl: p.licence_url, creator: p.creator,
         credit: p.credit_line, title: p.title, page: p.source_page_url, width: p.width, height: p.height,
         bytes: p.bytes, fetchedAt: p.fetched_at, owned: p.may_store, role: p.role,
         // Which place it is attached to, so the drawer's Pictures tab can print
@@ -1143,9 +1167,9 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     const { rows: [atlasDetail] } = await query(
       `select d.visit->>'openingHours' as hours
          from attractions a join attraction_details d on d.attraction_id = a.id
-        where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'rejected' limit 1`, [ref]);
+        where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden' limit 1`, [ref]);
     const { rows: [att] } = await query(
-      `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'rejected' limit 1`, [ref]);
+      `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'hidden' limit 1`, [ref]);
     const { rows: [sweep] } = await query('select * from scout_places where venue_ref = $1 order by last_seen desc limit 1', [ref]);
     // An empty `place_records` row does not count as ours.
     //
@@ -1314,6 +1338,19 @@ const OUR_SOURCE = { own: 'ours', atlas: 'the atlas', sweep: 'the sweep' };
 const RENTED_FROM = new Set(['google', 'tripadvisor', 'yelp']);
 
 /**
+ * Where a picture came from, said the way the board says it.
+ *
+ * One map, read by the Pictures board's facets, its cards and the place
+ * drawer's own strip — the cards were printing the column value (18 Sep 2026,
+ * the separate audit).
+ */
+const SOURCE_WORD = {
+  wikimedia: 'Commons', commons: 'Commons', geograph: 'Geograph',
+  site: 'The venue’s own', logo: 'The venue’s own logo', street: 'Street level',
+  household: 'A household',
+};
+
+/**
  * A field said the way a household would say it.
  *
  * The board's Fact column is "one field a household would expect to see on the
@@ -1406,7 +1443,7 @@ async function curateThese(refs, householdId) {
                where pa.venue_ref = pi.venue_ref and l.kind = 'town' limit 1) as locality
         from place_index pi
         left join place_records r on r.venue_ref = pi.venue_ref
-        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
         left join lateral (select website from scout_places s where s.venue_ref = pi.venue_ref limit 1) sp on true
        where pi.venue_ref = any($1)`, [refs]);
     const seedOf = new Map(known.map((k) => [k.venue_ref, k]));
@@ -1667,7 +1704,7 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
              coalesce(r.wikipedia_url, a.wikipedia_url) as wikipedia_url
         from place_index pi
         left join place_records r on r.venue_ref = pi.venue_ref
-        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
        where pi.venue_ref = any($1)`, [refs]);
     const out = [];
     // Deliberately asked, so it looks again — a logo we found once should be
@@ -2077,7 +2114,6 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
     // The words the boards use for a source, rather than the key the harvester
     // wrote. `household` is the same set as the "A household" facet, so it is
     // named once and not listed twice.
-    const SOURCE_WORD = { wikimedia: 'Commons', commons: 'Commons', geograph: 'Geograph', site: 'The venue’s own', logo: 'The venue’s own logo', street: 'Street level', household: 'A household' };
     // How many match, not how many were sent: the heading reads as the size of
     // the answer.
     const { rows: [matching] } = await query(
@@ -2088,7 +2124,12 @@ router.get('/pictures', requires('view_library'), async (req, res, next) => {
     res.json({
       matching: matching.n,
       pictures: rows.map((p) => ({
-        id: p.id, source: p.source, licence: p.licence, licenceUrl: p.licence_url,
+        // Said, not the column value: the cards printed "wikimedia", "logo" and
+        // "household" where the facet chips above them already said "Commons",
+        // "The venue's own logo" and "A household" (18 Sep 2026, the separate
+        // audit). `sourceKey` is kept for anything that needs to match.
+        id: p.id, source: SOURCE_WORD[p.source] ?? p.source, sourceKey: p.source,
+        licence: p.licence, licenceUrl: p.licence_url,
         creator: p.creator, creatorUrl: p.creator_url, credit: p.credit_line,
         title: p.title, caption: p.caption, page: p.source_page_url,
         width: p.width, height: p.height, bytes: p.bytes, fetchedAt: p.fetched_at,

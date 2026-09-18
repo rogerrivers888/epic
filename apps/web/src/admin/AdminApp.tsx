@@ -129,8 +129,12 @@ function Lights() {
 }
 
 /** Which written explanation each rail group carries. */
-const GROUP_TIP: Record<string, 'railData' | 'railAdmin' | 'railMain'> = {
-  Data: 'railData', Admin: 'railAdmin', Main: 'railMain',
+// The rail's two headings. The first group has none, here and on the design's
+// own sidebar, so there is no third entry — one was carried for a group nothing
+// belongs to, which is a tooltip that could never be shown (18 Sep 2026, the
+// separate audit).
+const GROUP_TIP: Record<string, 'railData' | 'railAdmin'> = {
+  Data: 'railData', Admin: 'railAdmin',
 };
 
 export function AdminApp({ access, screen, onScreen, onLeave }: {

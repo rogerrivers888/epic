@@ -1503,6 +1503,8 @@ export type PlaceDetail = {
    * which was the old figure and roughly a fifth of the real one.
    */
   comparePence: number;
+  /** What asking Google about this one place would spend, in pence. */
+  askPence: number;
   record: PlaceField[];
   facts: { field: string; source: string; value: unknown; licence: string; retention: string; fetchedAt: string; expiresAt: string | null }[];
   pictures: {

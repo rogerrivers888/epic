@@ -117,7 +117,7 @@ export async function settleOwnership(venueRef) {
          when exists (
            select 1 from attractions a
             where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
-              and a.state <> 'rejected'
+              and a.state <> 'hidden'
               and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
            then 'owned'
          when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)

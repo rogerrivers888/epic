@@ -144,7 +144,7 @@ const HELD_SQL = `
         -- summary, a website, opening hours and pictures belonging to an
         -- attraction somebody had thrown out (Codex, 17 Sep 2026).
         left join attractions  a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
-                                and a.state <> 'rejected'
+                                and a.state <> 'hidden'
         left join attraction_details d on d.attraction_id = a.id
         left join lateral (select sp.website from scout_places sp where sp.venue_ref = pi.venue_ref limit 1) s on true
     ) x`;
@@ -182,7 +182,11 @@ async function reindexWhileLocked({ onProgress }) {
            case when coalesce(a.summary, a.website, a.wikipedia_url) is not null then 'owned' else 'identified' end,
            a.first_seen, a.last_seen
       from attractions a left join regions reg on reg.slug = a.region_slug
-     where a.state <> 'rejected'
+     -- hidden is the state the library actually sets (repositories/library.js);
+     -- there is no rejected, so the guard that named it excluded nothing and a
+     -- hidden attraction went on being counted, scored, owned and collected
+     -- (Codex, 18 Sep 2026).
+     where a.state <> 'hidden'
     on conflict (venue_ref) do update
        set lat = coalesce(excluded.lat, place_index.lat),
            lng = coalesce(excluded.lng, place_index.lng),
@@ -270,7 +274,7 @@ async function reindexWhileLocked({ onProgress }) {
   await query(`
     insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), 'atlas', a.id::text, a.first_seen, a.last_seen
-      from attractions a where a.state <> 'rejected'
+      from attractions a where a.state <> 'hidden'
     on conflict (venue_ref, source) do update set last_seen = greatest(place_index_sources.last_seen, excluded.last_seen)`);
   await query(`
     insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
@@ -314,17 +318,17 @@ async function reindexWhileLocked({ onProgress }) {
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), a.region_slug
-      from attractions a where a.state <> 'rejected' and a.region_slug is not null
+      from attractions a where a.state <> 'hidden' and a.region_slug is not null
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), a.locality_slug
-      from attractions a where a.state <> 'rejected' and a.locality_slug is not null
+      from attractions a where a.state <> 'hidden' and a.locality_slug is not null
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), lower(a.outcode)
-      from attractions a where a.state <> 'rejected' and a.outcode is not null
+      from attractions a where a.state <> 'hidden' and a.outcode is not null
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
@@ -566,7 +570,7 @@ async function settleWhileLocked(limit) {
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), x.slug
       from attractions a
       cross join lateral (values (a.region_slug), (a.locality_slug), (lower(a.outcode))) as x(slug)
-     where a.state <> 'rejected' and x.slug is not null
+     where a.state <> 'hidden' and x.slug is not null
        and coalesce(a.venue_ref, 'atlas:' || a.id::text) = any($1)
     on conflict do nothing`, [refs]);
   await query(`
@@ -722,7 +726,7 @@ export async function shelveAll({ refs = null } = {}) {
            sp.category as sweep_category, sp.cuisine_group,
            r.category as own_category, r.experiences
       from place_index pi
-      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
       left join lateral (select category, cuisine_group from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
       left join place_records r on r.venue_ref = pi.venue_ref
      where pi.derived_by is distinct from 'hand'
@@ -1615,7 +1619,7 @@ export async function places(areaSlug, {
              where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode
       from place_index pi
       left join place_records r on r.venue_ref = pi.venue_ref
-      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
       left join lateral (select name from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
      where ${where.join(' and ')}
      order by ${ORDER}
@@ -1661,7 +1665,7 @@ export async function namesFor(refs) {
            case when pi.venue_ref like 'google:%' then null else sp.name end as osm_name
       from place_index pi
       left join place_records r on r.venue_ref = pi.venue_ref
-      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'rejected'
+      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
       left join lateral (select name from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
      where pi.venue_ref = any($1)`, [refs]);
   for (const r of rows) {

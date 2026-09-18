@@ -312,7 +312,13 @@ export async function scoringInputsFor(venueRef) {
   const { rows } = await query(
     `select p.venue_ref, p.area_code, p.name as sweep_name, p.crowd_band, p.count_band, p.accolades,
             p.cuisines as sweep_cuisines, p.chain, p.chain_scale, p.sites,
-            p.epic_score, p.owned_score, p.scored_at,
+            -- A place with no sweep row has its stored score on its own record:
+            -- reading it only off the sweep meant a recalculation of a
+            -- claimed-but-never-swept place answered "saved" and then read back
+            -- as never done (Codex, 18 Sep 2026).
+            coalesce(p.epic_score, r.epic_score) as epic_score,
+            coalesce(p.owned_score, r.owned_score) as owned_score,
+            coalesce(p.scored_at, r.scored_at) as scored_at,
             p.website as sweep_website,
             r.name as record_name, r.website as record_website, r.summary, r.opening_hours,
             r.cuisines as record_cuisines,
@@ -733,8 +739,10 @@ export async function rescoreOne(venueRef, epicScore, ownedScore) {
     'update scout_places set epic_score = $2, owned_score = $3 where venue_ref = $1',
     [venueRef, epicScore, ownedScore]);
   await query(
-    'update place_records set epic_score = $2, updated_at = now() where venue_ref = $1',
-    [venueRef, epicScore]);
+    `update place_records
+        set epic_score = $2, owned_score = $3, scored_at = now(), updated_at = now()
+      where venue_ref = $1`,
+    [venueRef, epicScore, ownedScore]);
   await query(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score)
      select area_code, venue_ref, $2, $3 from scout_places where venue_ref = $1`,
