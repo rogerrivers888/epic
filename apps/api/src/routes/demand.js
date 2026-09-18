@@ -155,7 +155,18 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
     if (!found) return res.status(404).json({ error: 'not_found', message: 'No search by that id.' });
     const { search, events } = found;
 
-    const shown = events.filter((e) => e.kind === 'shown');
+    // What was on the screen, where the screen has said so.
+    //
+    // The pool is kept whole in the log — a card one tap away is a card they
+    // could reach — but the replay is a picture of what they saw, and listing
+    // the lot contradicted its own "Shown" figure and called places they were
+    // never offered "scrolled past" (Codex, 18 Sep 2026). A search from before
+    // the screens reported, or from one that does not, has no mark on any row
+    // and keeps all of them.
+    const everyShown = events.filter((e) => e.kind === 'shown');
+    const drawn = everyShown.filter((e) => e.meta?.drawn === true);
+    const marked = everyShown.some((e) => e.meta?.drawn !== undefined);
+    const shown = marked ? drawn : everyShown;
     const refs = [...new Set(events.map((e) => e.venue_ref).filter(Boolean))];
     const names = await index.namesFor(refs);
 
