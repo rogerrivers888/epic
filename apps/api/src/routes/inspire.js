@@ -580,7 +580,15 @@ inspire.get('/near', async (req, res, next) => {
     // down from the first day, because none of it can be backfilled and an
     // Inspire that showed nothing for a town is the coverage hole that matters
     // most — it is the first thing anybody sees.
-    const searchId = await searchLog.noteSearch({
+    //
+    // But a *count* is not a search. Setting up voice asks this endpoint only
+    // to say "about 240 places within an hour's drive", and draws none of them;
+    // every change of range or mode asked again, and each one was going into
+    // the log as a search where everything was shown and nothing was clicked —
+    // which is exactly the shape of a failure (Codex, 18 Sep 2026). A caller
+    // that is not going to draw the answer says so.
+    const counting = String(req.query.count ?? '') === '1';
+    const searchId = counting ? null : await searchLog.noteSearch({
       householdId: household.id, accountId: req.account?.id ?? null, surface: 'inspire',
       ...(await searchLog.whereOf({ lat: centre.lat, lng: centre.lng, areaSlug: locality })),
       lat: centre.lat, lng: centre.lng, mode,
@@ -593,7 +601,7 @@ inspire.get('/near', async (req, res, next) => {
     });
     // All of them, not the first sixty: the replay is built from these rows,
     // and a card the household could tap has to be in it (Codex, 17 Sep 2026).
-    await searchLog.noteShown(searchId, items.map((i, n) => ({ ref: i.venueRef, position: n + 1 })));
+    if (searchId) await searchLog.noteShown(searchId, items.map((i, n) => ({ ref: i.venueRef, position: n + 1 })));
 
     res.json({
       queryId: searchId,

@@ -153,6 +153,10 @@ export async function putPlace(areaCode, p, run = query) {
       // away here made every combined place look single-source on the index's
       // own sources lens (Codex, 17 Sep 2026).
       sources: ['sweep', ...(Array.isArray(p.from) ? p.from : [])],
+      // Each source's own identifier where the sweep learned one — a twinned
+      // venue is keyed on OSM and Google's reference would otherwise be lost
+      // (Codex, 18 Sep 2026).
+      sourceIds: p.sourceIds ?? null,
     }],
     { source: 'sweep', client: run === query ? null : { query: run } });
   await run(

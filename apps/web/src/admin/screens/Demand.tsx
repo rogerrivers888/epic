@@ -321,7 +321,14 @@ const styles = StyleSheet.create({
   },
   title: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
   alt: { ...type.tiny, fontSize: 11, fontWeight: '700', letterSpacing: 0.44, textTransform: 'uppercase', color: colors.accent },
-  five: { flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' },
+  // `flexBasis` with `minWidth: 0` so the row wraps *inside* itself on a phone
+  // rather than being sized to its content and pushed off the frame — three
+  // figures at a 30px gap are 450px wide and 390 is the frame (CLAUDE.md;
+  // found in the live phone audit, 18 Sep 2026).
+  five: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap',
+    flexGrow: 1, flexBasis: 240, minWidth: 0,
+  },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, flexWrap: 'wrap' },
 
   trail: { flexDirection: 'row', alignItems: 'center', gap: 11 },

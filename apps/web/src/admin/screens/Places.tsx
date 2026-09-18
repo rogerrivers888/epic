@@ -2810,7 +2810,12 @@ const styles = StyleSheet.create({
   },
   title: { ...type.title, fontSize: 31, letterSpacing: -1.08, lineHeight: 33 },
   titlePhone: { fontSize: 25, letterSpacing: -0.9, lineHeight: 27 },
-  five: { flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' },
+  // Wraps inside itself on a phone rather than being sized to its content and
+  // pushed off the 390px frame (live phone audit, 18 Sep 2026).
+  five: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap',
+    flexGrow: 1, flexBasis: 240, minWidth: 0,
+  },
 
   // the way back
   trail: { flexDirection: 'row', alignItems: 'center', gap: 11, flexWrap: 'wrap' },

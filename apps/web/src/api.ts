@@ -3159,7 +3159,13 @@ export const api = {
    * The home screen's one read: everything around a point, already sorted into
    * the six moods, with the journey and the stay worked out per place.
    */
-  inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; live?: 1; refresh?: 1 }) =>
+  /**
+   * `count: 1` for a caller that only wants the number and will draw none of
+   * it — the voice set-up's "about 240 places". It keeps the request out of the
+   * search log, where it would read as a search that showed everything and led
+   * to nothing (Codex, 18 Sep 2026).
+   */
+  inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; live?: 1; refresh?: 1; count?: 1 }) =>
     request<InspireNear>(`/api/inspire/near${qs(q)}`),
 
   /** A library picture's bytes. Given the row rather than the id, a pending household upload's signed link comes with it. */

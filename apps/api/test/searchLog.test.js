@@ -1254,3 +1254,35 @@ test('a source that was asked and found nothing is not coverage', async () => {
   assert.equal(await found(saved), 1, 'a Google ref carries its identifier in the ref');
   assert.equal(await found(ref), 1, 'and the miss still does not count');
 });
+
+test('a count is not a search, and one identifier belongs to one source', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+
+  // A twinned venue: OSM keyed it, Google also returned it, and Google's own
+  // reference has to travel with it. Handing `sourceId` to every source named
+  // would file Google's identifier under OSM; handing it to none left a Google
+  // row that reads exactly like "asked, never heard of it" (Codex, 18 Sep).
+  const ref = 'osm:node/twinned-venue';
+  await index.noteMany([{
+    ref, lat: 51.4, lng: -0.9, countryCode: 'GB',
+    sources: ['sweep', 'osm', 'google'],
+    sourceId: 'node/twinned-venue',
+    sourceIds: { google: 'ChIJ-twinned' },
+  }], { source: 'sweep' });
+
+  const ids = Object.fromEntries((await query(
+    'select source, source_place_id from place_index_sources where venue_ref = $1', [ref])).rows
+    .map((r) => [r.source, r.source_place_id]));
+  assert.equal(ids.google, 'ChIJ-twinned', 'Google keeps its own reference');
+  assert.equal(ids.sweep, 'node/twinned-venue', 'and the writing source keeps the one it was given');
+  assert.equal(ids.osm, null, 'nothing is invented for a source that handed none over');
+
+  // And so the paid column counts it, where before it read as a miss.
+  const found = (await query(
+    `select count(*)::int as n from place_index_sources src
+      where src.venue_ref = $1 and src.source = 'google'
+        and (src.source_place_id is not null
+             or src.source not in ('google','tripadvisor')
+             or src.venue_ref like src.source || ':%')`, [ref])).rows[0].n;
+  assert.equal(found, 1);
+});

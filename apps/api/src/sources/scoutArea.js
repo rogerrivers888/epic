@@ -187,6 +187,13 @@ async function runSweep(area, code, { dryRun = false, householdId = null, lease 
         // dining (Codex, 14 Sep 2026).
         twin.labels = [...new Set([...(twin.labels ?? []), ...(g.labels ?? [])])];
         twin.from.push('google');
+        // And Google's own reference for it. The merged place is keyed on OSM,
+        // so without this the index held a Google row with no identifier — a
+        // row that reads exactly like "we asked and Google has never heard of
+        // it", and undercounted paid coverage for every twinned venue (Codex,
+        // 18 Sep 2026). It is also the identifier that stops us paying to match
+        // the place again.
+        twin.sourceIds = { ...(twin.sourceIds ?? {}), google: String(g.sourcePlaceId) };
         continue;
       }
       candidates.push({

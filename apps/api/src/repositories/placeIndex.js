@@ -1205,7 +1205,20 @@ export async function noteMany(places = [], { source = null, countryCode = null,
       const said = Array.isArray(p.sources) && p.sources.length ? p.sources : [p.source ?? source];
       return said
         .filter(Boolean)
-        .map((sc) => [p.ref, String(sc), p.sourceId ?? null])
+        // One identifier belongs to one source. `sourceId` is the identifier at
+        // the source the caller is writing *as*, so handing it to every source a
+        // place names would file Google's reference under OSM (Codex, 18 Sep
+        // 2026). `sourceIds` is the map for a caller that knows several.
+        .map((sc) => {
+          const key = String(sc);
+          const named = p.sourceIds?.[key];
+          const mine = key === String(p.source ?? source ?? '') ? p.sourceId ?? null : null;
+          // Nothing is invented for a source that did not hand one over: a
+          // merged place whose Google identifier we do not hold reads as
+          // "asked, no identifier", and coverage reads the ref for that case
+          // (FOUND_IT) rather than this column guessing.
+          return [p.ref, key, named ?? mine ?? null];
+        })
         .filter(([ref, sc]) => {
           const pair = `${ref}\u0000${sc}`;
           if (seenPair.has(pair)) return false;

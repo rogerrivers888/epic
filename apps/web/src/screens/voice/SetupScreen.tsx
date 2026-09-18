@@ -117,7 +117,7 @@ function RangeStep({ household, refresh, onNext, onBack, error, setError }: Step
     if (!home) { setCount(null); return; }
     let live = true;
     const km = Math.min(100, Math.max(2, Math.round(range * KM_PER_MIN[mode])));
-    api.inspireNear({ lat: home.lat, lng: home.lng, label: home.label, mode: mode === 'driving' ? 'drive' : mode === 'transit' ? 'transit' : 'walk', km }).then((r) => { if (live) setCount(r.items.length); }).catch(() => { if (live) setCount(null); });
+    api.inspireNear({ lat: home.lat, lng: home.lng, label: home.label, mode: mode === 'driving' ? 'drive' : mode === 'transit' ? 'transit' : 'walk', km, count: 1 }).then((r) => { if (live) setCount(r.items.length); }).catch(() => { if (live) setCount(null); });
     return () => { live = false; };
   }, [home, mode, range]);
   const next = async () => {

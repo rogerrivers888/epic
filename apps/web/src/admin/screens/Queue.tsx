@@ -593,8 +593,10 @@ const styles = StyleSheet.create({
   five: { flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' },
 
   filters: { flexDirection: 'row', alignItems: 'center', gap: spacing.xl, flexWrap: 'wrap' },
-  filterGroup: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  words: { flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap' },
+  // The filter groups wrap and shrink: seven kind chips at a 16px gap do not fit
+  // 390 on one line (live phone audit, 18 Sep 2026).
+  filterGroup: { flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap', flexShrink: 1, minWidth: 0 },
+  words: { flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap', flexShrink: 1, minWidth: 0 },
   word2: { paddingBottom: 3, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
   word2On: { borderBottomColor: colors.selected },
   word2Text: { ...type.small, fontSize: 13.5, color: colors.inkMuted },
