@@ -27,7 +27,7 @@ import { colors, spacing, type, BORDER, CREAM, INK, MOSS } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
 import { asOneOf, asText, useQueryState } from '../../router';
 import { api, type QueueList, type QueueItem, type RejectReason } from '../../api';
-import { AdminPage, ago, day, pounds, since } from '../kit';
+import { AdminPage, Aside, ago, day, pounds, since } from '../kit';
 import { Explain, type Tip, type TipKey } from '../explain';
 import { Word, Blank, Act, Footer, Kicker, Stat } from '../table';
 
@@ -129,6 +129,8 @@ export function Queue({ canManage }: { canManage: boolean }) {
   // not done until it has one (CLAUDE.md; Codex, 17 Sep 2026).
   const [rejecting, setRejecting] = useQueryState<'tell' | 'quiet' | ''>('reject', '', asOneOf(['tell', 'quiet'] as const, ''));
   const [busy, setBusy] = useState(false);
+  /** What just happened, where it is not what was asked for. */
+  const [note, setNote] = useState<string | null>(null);
   /** Every id a row stands for — a grouped photograph row is one decision. */
   const batchOf = useCallback(
     (id: string) => data?.rows.find((r) => r.id === id)?.batch ?? [id],
@@ -171,14 +173,29 @@ export function Queue({ canManage }: { canManage: boolean }) {
 
   const approve = useCallback(async (ids: string[]) => {
     setBusy(true);
-    try { await api.adminQueueApprove(ids); setPicked(new Set()); load(); if (open && ids.includes(open)) setOpen(''); }
-    finally { setBusy(false); }
+    try {
+      const out = await api.adminQueueApprove(ids);
+      setPicked(new Set());
+      load();
+      // What was held back stays open and says why. A household can rewrite
+      // something after the row was raised, and approving it would be a
+      // decision about words nobody has read — closing the drawer over that
+      // said the opposite of what happened (Codex, 18 Sep 2026).
+      const held = out.stale ?? [];
+      setNote(held.length ? `${held.length === 1 ? 'That was' : `${held.length} were`} ${out.why ?? 'rewritten while you were reading, so still waiting'}.` : null);
+      if (open && ids.includes(open) && !held.includes(open)) setOpen('');
+    } finally { setBusy(false); }
   }, [load, open, setOpen]);
 
   if (!data) return <AdminPage><Waiting /></AdminPage>;
 
   return (
     <AdminPage>
+      {/* One line, where what happened is not what was asked for. */}
+      {note ? (
+        <Aside says={note}
+               more="A household can change what they wrote while it is sitting here. Approving would be a decision about words nobody has read, so the row stays where it is and waits to be read again." />
+      ) : null}
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
           <Kicker tip="sectionFromHouseholds">From households</Kicker>

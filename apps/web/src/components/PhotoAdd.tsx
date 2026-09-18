@@ -92,7 +92,12 @@ export function PhotoAdd({ household, onDone, onSearchInstead }: {
         // picking one of its answers is the whole point of it. Throwing the id
         // away meant every photograph that found its place was reported as a
         // search nobody clicked (Codex, 18 Sep 2026).
-        heldSearch('places', r.queryId, found.map((v) => v.venueRef));
+        //
+        // Only if this screen is still here. The unmount lets go of the Places
+        // surface, and an answer arriving after that put an invisible search
+        // back in its place — so the next thing done on Places was counted
+        // against a photo picker nobody could see (Codex, 18 Sep 2026).
+        if (alive.current) heldSearch('places', r.queryId, found.map((v) => v.venueRef));
       } catch { found = []; }
       if (!alive.current) return;
       setCandidates(found);

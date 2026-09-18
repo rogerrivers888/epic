@@ -2672,7 +2672,12 @@ export const api = {
   /** BO5a — one queue with a filter, not a queue per kind. */
   adminQueue: (p: { kind?: string; state?: string; where?: string | null } = {}) => request<QueueList>(`/api/admin/queue${qs(p)}`),
   adminQueueItem: (id: string) => request<QueueItem>(`/api/admin/queue/${id}`),
-  adminQueueApprove: (ids: string[]) => post<{ approved: number; ids: string[] }>('/api/admin/queue/approve', { ids }),
+  /**
+   * `stale` is what was *not* approved: a household rewrote it after the row
+   * was raised, so nobody has read those words and it is still waiting.
+   */
+  adminQueueApprove: (ids: string[]) =>
+    post<{ approved: number; ids: string[]; stale?: string[]; why?: string }>('/api/admin/queue/approve', { ids }),
   /** BO5b — the rejection, beside the message it sends. */
   adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean }) =>
     post<{ ok: true; id: string; reason: string; told: boolean; message: string | null; why: string | null }>(`/api/admin/queue/${id}/reject`, body),

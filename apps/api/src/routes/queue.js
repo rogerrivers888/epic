@@ -138,7 +138,17 @@ router.post('/approve', requires('manage_library'), async (req, res, next) => {
     }
     const done = await queue.approve(ids, actor(req).actorLabel);
     await writeAudit({ ...actor(req), action: 'queue.approve', subjectType: 'content', subjectId: ids.join(','), subjectLabel: `${done.length} approved`, after: { ids } });
-    res.json({ approved: done.length, ids: done.map((d) => d.id) });
+    // What was not approved, and why. `approve` holds back a row whose words
+    // were rewritten after it was raised, because nobody has read those words
+    // — and dropping that from the answer left the screen closing the drawer
+    // over a decision that never happened (Codex, 18 Sep 2026).
+    res.json({
+      approved: done.length,
+      ids: done.map((d) => d.id),
+      ...(done.stale?.length
+        ? { stale: done.stale, why: 'rewritten while you were reading them, so they are still waiting' }
+        : {}),
+    });
   } catch (err) { next(err); }
 });
 
