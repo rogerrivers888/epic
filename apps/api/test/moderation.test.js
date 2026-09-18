@@ -702,3 +702,46 @@ test('reporting an approved photograph keeps it in the queue through the next sy
   assert.equal(after.state, 'waiting', 'still in front of somebody');
   assert.equal(after.reported, true);
 });
+
+/**
+ * A report is answered once.
+ *
+ * `reported` meant "somebody complained" and "this is urgent" at the same time,
+ * so deciding a reported thing left the flag standing — and a later edit, which
+ * rightly sends the words back to be read again, carried the old answered
+ * report into the urgent lane with them (Codex, 18 Sep 2026).
+ */
+test('a report that has been dealt with does not come back with the next edit', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [member] } = await query(
+    `insert into members (household_id, name) values ($1, 'An asker') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, author_member_id, title, body, tag_kind)
+     values ('trip', $1, $2, 'Where for lunch?', 'Near the park.', 'none') returning *`,
+    [household.id, member.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+
+  // Counted as a difference, because other things in the queue are reported too.
+  const urgent = async () => (await queue.counts({ state: 'reported' })).reported;
+  const before = await urgent();
+  await queue.report({ id: q.id, reason: 'abusive', by: null });
+  assert.equal(await urgent(), before + 1, 'somebody complained, and it is urgent');
+
+  // Looked at and approved: the complaint is answered.
+  await queue.approve([q.id], 'the owner (passcode)');
+  assert.equal(await urgent(), before, 'and it stops being urgent');
+
+  // The author rewrites it. The words go back to be read; the answered
+  // complaint does not come with them.
+  await chat.updateTopic(topic.id, { body: 'Something else entirely.' });
+  await queue.sync();
+  const { rows: [after] } = await query('select state, reported from content_queue where id = $1', [q.id]);
+  assert.equal(after.state, 'waiting', 'new words, so somebody reads them');
+  assert.equal(await urgent(), before, 'but the old report was already dealt with');
+
+  // A fresh complaint is urgent again.
+  await queue.report({ id: q.id, reason: 'abusive', by: null });
+  assert.equal(await urgent(), before + 1);
+});

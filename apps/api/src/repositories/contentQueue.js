@@ -311,7 +311,11 @@ export async function syncFlagged() {
            state = case when q.state = 'approved' then 'waiting' else q.state end,
            reason = case when q.state = 'approved' then null else q.reason end,
            decided_at = case when q.state = 'approved' then null else q.decided_at end,
-           decided_by = case when q.state = 'approved' then null else q.decided_by end
+           decided_by = case when q.state = 'approved' then null else q.decided_by end,
+           -- A report nobody has answered yet, whatever was answered before it
+           -- (migration 170).
+           reported_at = coalesce(q.reported_at, now()),
+           report_cleared_at = null
       from (
         -- A reply's report carries its topic's id too, because the column is
         -- mandatory. Reading it as a report of the topic promoted an otherwise
@@ -323,7 +327,8 @@ export async function syncFlagged() {
         select 'chat_reply', reply_id::text, min(reason)
           from chat_reports where reply_id is not null group by reply_id
       ) r
-     where q.subject_type = r.kind and q.subject_id = r.id and not q.reported`);
+     where q.subject_type = r.kind and q.subject_id = r.id
+       and (not q.reported or q.report_cleared_at is not null)`);
 }
 
 /**
@@ -337,7 +342,9 @@ export async function syncFlagged() {
  */
 export async function counts({ areaSlug = null, state: forState = 'waiting' } = {}) {
   const { rows } = await query(
-    `select kind, state, reported, count(*)::int as n from content_queue
+    `select kind, state,
+            (reported and (report_cleared_at is null or reported_at > report_cleared_at)) as reported,
+            count(*)::int as n from content_queue
       where ($1::text is null or area_slug = $1) group by 1,2,3`, [areaSlug]);
   const kind = Object.fromEntries(KINDS.map((k) => [k.key, 0]));
   const state = Object.fromEntries(STATES.map((s) => [s, 0]));
@@ -382,7 +389,13 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null } =
         -- in Approved or Rejected like any other, and leaving it here kept
         -- finished work in the urgent lane for ever — where approving it again
         -- changed nothing at all (Codex, 18 Sep 2026).
-        and ($2::text = 'reported' and q.reported and q.state = 'waiting'
+        and ($2::text = 'reported'
+               and q.reported and q.state = 'waiting'
+               -- Not one that has already been answered: a report is dealt with
+               -- once, and a later edit sends the *words* back to be read
+               -- without dragging the old complaint into the urgent lane with
+               -- them (Codex, 18 Sep 2026).
+               and (q.report_cleared_at is null or q.reported_at > q.report_cleared_at)
              or $2::text <> 'reported' and q.state = $2)
         and ($3::text is null or q.area_slug = $3)
       -- Reported first, because it is on a different clock; then what
@@ -518,7 +531,11 @@ export async function approve(ids, who) {
     const touched = new Set();
 
     const { rows } = await run(
-      `update content_queue set state = 'approved', reason = null, decided_by = $2, decided_at = now()
+      `update content_queue
+          set state = 'approved', reason = null, decided_by = $2, decided_at = now(),
+              -- The report has been answered. It is kept — who raised it, why
+              -- and when — and it stops being urgent (migration 170).
+              report_cleared_at = case when reported then now() else report_cleared_at end
         where id = any($1::uuid[]) and state <> 'approved' returning id, kind, subject_type, subject_id`,
       [ids, who ?? null]);
     // Approving is the undo of rejecting, so it has to reach as far: a thing
@@ -606,7 +623,9 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
     const run = (text, params) => client.query(text, params);
     const { rows: [row] } = await run(
       `update content_queue
-          set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now()
+          set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now(),
+              -- Answered, and kept (migration 170).
+              report_cleared_at = case when reported then now() else report_cleared_at end
         where id = $1 and not (state = 'rejected' and reason = $2)
         returning *`,
       [id, reason, body, who ?? null]);
@@ -799,7 +818,10 @@ export async function report({ id, reason, by }) {
             state = case when state = 'approved' then 'waiting' else state end,
             reason = case when state = 'approved' then null else reason end,
             decided_at = case when state = 'approved' then null else decided_at end,
-            decided_by = case when state = 'approved' then null else decided_by end
+            decided_by = case when state = 'approved' then null else decided_by end,
+            -- A new report is a new thing to answer, whatever was answered
+            -- before (migration 170).
+            report_cleared_at = null
       where id = $1 returning *`, [id, by ?? null, reason ?? null]);
   return out ?? null;
 }
