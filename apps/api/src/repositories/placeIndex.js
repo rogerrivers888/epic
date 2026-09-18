@@ -363,8 +363,11 @@ async function reindexWhileLocked({ onProgress }) {
            r.first_owned, r.updated_at
       from place_records r
     on conflict (venue_ref) do update
-       set lat = coalesce(place_index.lat, excluded.lat),
-           lng = coalesce(place_index.lng, excluded.lng),
+       -- Our own record's position wins where it has one, the same rule the
+       -- live write follows: the rebuild kept whatever was there first, so a
+       -- corrected coordinate never survived a rebuild (Codex, 18 Sep 2026).
+       set lat = coalesce(excluded.lat, place_index.lat),
+           lng = coalesce(excluded.lng, place_index.lng),
            ownership = case when excluded.ownership = 'owned' then 'owned' else place_index.ownership end,
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
 
@@ -418,7 +421,18 @@ async function reindexWhileLocked({ onProgress }) {
                 when pi.venue_ref like 'osm:%'    then 'osm'
                 when pi.venue_ref like 'atlas:%'  then 'atlas'
                 else split_part(pi.venue_ref, ':', 1) end,
-           split_part(pi.venue_ref, ':', 2), pi.first_seen, pi.last_seen
+           split_part(pi.venue_ref, ':', 2), pi.first_seen,
+           -- Not the place's clock.
+           --
+           -- On the very first build there is no row to protect, so this wrote
+           -- the place's own last_seen — which a household claim or an empty
+           -- owned record moves — into the source's. Google could look freshly
+           -- asked about a place nobody had asked it about for years, and
+           -- Collect's twelve-month rule then kept away from it (Codex, 18 Sep
+           -- 2026). The reference says the source knows the place; it says
+           -- nothing about when we last asked, so the row starts at the
+           -- beginning and the first real ask moves it.
+           pi.first_seen
       from place_index pi where position(':' in pi.venue_ref) > 0
     -- The source's own clock is not touched on a rebuild.
     --
