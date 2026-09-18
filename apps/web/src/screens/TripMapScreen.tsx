@@ -31,7 +31,7 @@ import { Animated, Easing, Linking, Modal, Platform, ScrollView, StyleSheet, Tex
 import { Press, Pulse } from '../components/press';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
-import { heldSearch, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
+import { forgetSearch, heldSearch, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
@@ -333,6 +333,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     // The band on the map goes with it: it is drawn from this screen's reading
     // of the corridor until the answer says how wide it really was.
     setAlong((a) => ({ ...a, places: [], beyond: 0, corridorKm: null, hasRoute: trip.destination?.lat != null, loading: true, error: null }));
+    // Let go of the last one *before* asking, not only when the next one
+    // arrives. Between the two — and for ever if the request fails — the old
+    // search was still held, so a shortlist or a day-stop on a saved place
+    // could be counted against a search that had nothing to do with it (Codex,
+    // 18 Sep 2026).
+    forgetSearch('trip');
     api.tripAlong(trip.id, { kind: pill === 'food' ? 'food' : 'things', maxDetourMin, around: around ?? undefined, aroundName: aroundName ?? undefined, q: q || undefined })
       .then((r) => {
         // The map's search, held so that opening a pin or adding it to a day is
@@ -348,6 +354,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       })
       .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] }));
   }, [alongKey, trip.id, pill, around, aroundName, maxDetourMin, q]);
+  // And when the screen goes, as every other surface does.
+  useEffect(() => () => forgetSearch('trip'), []);
 
   /**
    * The type, applied once. The map and the list are two views of the same

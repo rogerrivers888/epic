@@ -710,7 +710,10 @@ const BUILT_KEY = 'placeIndex.builtAt';
  * queues behind this lock; this was the one that did not.
  */
 export async function retire() {
-  return underTheBuildLock(() => retireWhileLocked(), { retired: 0, why: 'a rebuild is going on' });
+  // Waiting, not trying: a retirement is a decision somebody made, and a
+  // rebuild that is already past its own retirement step will not do it for us
+  // (Codex, 18 Sep 2026).
+  return underTheBuildLock(() => retireWhileLocked(), { retired: 0, why: 'a rebuild is going on' }, { wait: true });
 }
 
 export async function buildIfEmpty() {
@@ -787,10 +790,25 @@ export async function buildIfEmpty() {
  *
  * Whoever does not get it does not queue: the pass already going is about to do
  * the same work.
+ *
+ * `wait` is for the one caller that is not about to be done for it. Retiring an
+ * attraction is a *decision somebody made*, and the rebuild going on beside it
+ * may already be past its own retirement step — so treating contention as
+ * success left the hidden attraction in the index and its rollups until the
+ * next full rebuild (Codex, 18 Sep 2026). It waits its turn rather than
+ * pretending it had one, and gives up after half a minute rather than holding a
+ * request open for ever.
  */
-async function underTheBuildLock(fn, ifBusy) {
+async function underTheBuildLock(fn, ifBusy, { wait = false } = {}) {
   const client = await pool.connect();
   try {
+    if (wait) {
+      await client.query("set local lock_timeout = '30s'").catch(() => null);
+      try { await client.query('select pg_advisory_lock(hashtext($1))', [BUILD_LOCK]); }
+      catch { return ifBusy; }
+      try { return await fn(); }
+      finally { await client.query('select pg_advisory_unlock(hashtext($1))', [BUILD_LOCK]).catch(() => null); }
+    }
     const { rows: [got] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as mine', [BUILD_LOCK]);
     if (!got.mine) return ifBusy;
     try { return await fn(); }
