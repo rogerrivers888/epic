@@ -368,6 +368,13 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       askedAbout: asked,
       refetchedPence: spentPence,
       nameless: rows.filter((r) => !r.name).length,
+      // How many of those anybody could ask about. Only a Google reference can
+      // be turned back into a name — an OSM or atlas row we hold no name for is
+      // a gap in our own research, not a call we have not made. The two counts
+      // shared one word, so a replay of 126 bare atlas rows offered to buy
+      // names for them and priced it at nothing (found in the live audit,
+      // 18 Sep 2026).
+      askable: nameless.length,
       // What asking for them would cost, from the one price table — the screen
       // used to work it out at the old 1.4p and show about half (Codex, 17 Sep
       // 2026).
@@ -375,7 +382,7 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // quoting for names we already hold would price work nobody would do.
       namelessPence: Math.round(wouldFetch.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP),
       // Why a row is still an identifier — never left to be guessed at.
-      namelessWhy: why,
+      namelessWhy: why ?? (rows.some((r) => !r.name) ? 'not a provider we can ask' : null),
     });
   } catch (err) { next(err); }
 });

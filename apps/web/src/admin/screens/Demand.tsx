@@ -287,9 +287,13 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
         {data.nameless ? <Fact tip="stillAnIdentifier" label="Still an identifier" value={`${data.nameless}${data.namelessWhy ? ` · ${data.namelessWhy}` : ''}`} /> : null}
         <Fact tip="heldAgainst" label="Held against" value={data.heldAgainst} />
       </View>
-      {data.nameless && data.namelessWhy === 'not asked' ? (
-        <Footer left={<Word muted>{`${data.nameless} of these are identifiers we hold no name for. Asking Google costs a call each.`}</Word>}>
-          <Act label={asking ? 'Asking…' : `Ask for the ${data.nameless} missing names · ${pounds(Math.round(data.namelessPence))}`}
+      {/* Only the rows somebody could actually ask about. An OSM or atlas row we
+          hold no name for is a gap in our own research, not a call we have not
+          made — offering to buy names for it, at nothing, was an offer that
+          would have done nothing (live audit, 18 Sep 2026). */}
+      {data.askable && data.namelessWhy === 'not asked' ? (
+        <Footer left={<Word muted>{`${data.askable} of these are identifiers we hold no name for. Asking Google costs a call each.`}</Word>}>
+          <Act label={asking ? 'Asking…' : `Ask for the ${data.askable} missing names · ${pounds(Math.round(data.namelessPence))}`}
                icon="search" disabled={!canManage || asking} onPress={askNames} />
         </Footer>
       ) : null}

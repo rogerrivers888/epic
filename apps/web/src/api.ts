@@ -1648,7 +1648,8 @@ export type SearchReplay = {
    */
   refetched: number; askedAbout: number; refetchedPence: number;
   /** Rows that are still bare identifiers, and why they still are. */
-  nameless: number; namelessWhy: string | null;
+  /** Rows with no name; `askable` is how many of those are a provider we can ask. */
+  nameless: number; askable: number; namelessWhy: string | null;
   /** What asking for the missing names would cost, in pence, from the price table. */
   namelessPence: number;
   /** How many searches the area this one was in has had, for the way back. */
