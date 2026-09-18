@@ -737,6 +737,17 @@ test('the screen says what it drew, and everything they saw stays counted', asyn
   // And the position is the one the screen put it in.
   assert.equal(both.find((r) => r.venue_ref === 'test:drawn-2').position, 1);
 
+  // But only the first time. A filter reports a different list, and a card the
+  // household found at number two must not be replayed as though it had been at
+  // the top — the replay is ordered by this field and calls it what was shown
+  // first (Codex, 18 Sep 2026).
+  await log.noteDrawn({ searchId: id, householdId: household.id, refs: ['test:drawn-2', 'test:drawn-1'] });
+  const { rows: after } = await query(
+    `select venue_ref, position from search_events
+      where search_id = $1 and kind = 'shown' and venue_ref = any($2)`, [id, ['test:drawn-1', 'test:drawn-2']]);
+  assert.equal(after.find((r) => r.venue_ref === 'test:drawn-2').position, 1, 'where the screen first drew it');
+  assert.equal(after.find((r) => r.venue_ref === 'test:drawn-1').position, 1, 'and this one keeps its own first place');
+
   // The figure counts everything they have seen on this search, so it can never
   // disagree with the rows the replay holds (Codex, 18 Sep 2026). A place the
   // index has never heard of shares the unshelved entry rather than making a

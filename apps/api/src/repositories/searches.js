@@ -490,7 +490,18 @@ export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}
     await query(
       `update search_events e
           set meta = jsonb_set(coalesce(e.meta, '{}'::jsonb), '{drawn}', 'true'::jsonb),
-              position = d.at
+              -- Where the screen put it the *first* time it drew it.
+              --
+              -- The row already carries a position from noteShown — the pool's
+              -- order, which is the answer's rather than the screen's — so the
+              -- screen's order has to overwrite it once. After that it stands:
+              -- a filter or a sort reports a different list, and rewriting every
+              -- position to the latest one replayed a card the household found
+              -- at number ten as though it had been at the top all along, on a
+              -- board that orders by this field and calls it what was shown
+              -- first (Codex, 18 Sep 2026). The second list is a different list,
+              -- not a correction of the first.
+              position = case when coalesce(e.meta->>'drawn', '') = 'true' then e.position else d.at end
          from (select ref, ordinality::int as at from unnest($2::text[]) with ordinality as t(ref, ordinality)) d
         where e.search_id = $1::uuid and e.kind = 'shown' and e.venue_ref = d.ref`, [searchId, kept]);
     await query(
