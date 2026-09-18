@@ -73,11 +73,18 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     ]);
     // "Anything" and "things to do" are every place, and every place that is not
     // food: broad subjects the log records and no shelf is called.
-    const everything = [...known.values()].length
-      ? (await query(areaSlug
-        ? `select places from area_stats where area_slug = $1 and category = '' and subcategory = '' and source = '' and ownership = ''`
-        : `select count(*)::int as places from place_index`, areaSlug ? [areaSlug] : [])).rows[0]?.places ?? 0
-      : 0;
+    //
+    // Asked whatever the shelves hold. Guarded on there being category counts,
+    // a scope whose places have all yet to be filed read as having none at all
+    // — so "Anything" said "no places" over an area full of unshelved ones and
+    // pointed at Collect (Codex, 18 Sep 2026).
+    const everything = (await query(areaSlug
+      ? `select coalesce((select places from area_stats
+                           where area_slug = $1 and category = '' and subcategory = ''
+                             and source = '' and ownership = ''),
+                         (select count(*)::int from place_areas where area_slug = $1)) as places`
+      : `select count(*)::int as places from place_index`,
+    areaSlug ? [areaSlug] : [])).rows[0]?.places ?? 0;
     if (everything) {
       known.set('', everything);
       known.set('things', Math.max(0, everything - (known.get('food') ?? 0)));
