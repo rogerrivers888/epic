@@ -31,7 +31,7 @@ import { Animated, Easing, Linking, Modal, Platform, ScrollView, StyleSheet, Tex
 import { Press, Pulse } from '../components/press';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
-import { heldSearch } from '../search';
+import { heldSearch, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
@@ -287,7 +287,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
    * this place?") and the drawer is the same drawer Places uses.
    */
   const [drawer, setDrawer] = useState<BrowseItem | null>(null);
-  const openPlace = (p: TripAlongPlace) => setDrawer(alongToItem(p));
+  // Opening a pin is the click the board counts. Holding the search does
+  // nothing on its own: every map browse stayed at "clicked nothing" however
+  // much the household did with it (Codex, 18 Sep 2026).
+  const openPlace = (p: TripAlongPlace) => { noteSearchEvent('trip', 'open', p.venueRef); setDrawer(alongToItem(p)); };
   const [error, setError] = useState<string | null>(null);
 
   // Every place this trip has touched, for the Places view and for the pins.
@@ -420,6 +423,19 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     };
     return [...ordered].sort((a, b) => rank(a) - rank(b));
   }, [along.places, kindNow, cuisineNow, minRating, priceBand, sort, voiceIntake, pill]);
+
+  // What is actually on the screen, after the type, cuisine, price and rating
+  // filters have had their say.
+  //
+  // The API writes down what it answered with; the filters then take some of
+  // that away, and this surface was the only one never saying so — a replay
+  // held cards the household never saw, and a screen filtered down to nothing
+  // still counted as having shown sixty, which is the wrong fault on the board
+  // (Codex, 18 Sep 2026). `noteDrawn` is idempotent per list.
+  useEffect(() => {
+    if (along.loading) return;
+    noteDrawn('trip', shownAlong.map((p) => p.venueRef));
+  }, [shownAlong, along.loading]);
 
   /**
    * Start reading the menus of the first few restaurants, before anybody asks.
@@ -813,9 +829,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const addToDay = useCallback(async (p: TripAlongPlace, leg: 'out' | 'back' | null, startTime: string | null) => {
     if (!day) return;
     try {
+      // Named where it is already on the shortlist, so the API can count the
+      // placement against the search that found it — the item remembers, the
+      // screen does not (migration 177).
+      const onList = shortlist.find((x) => x.venueRef === p.venueRef);
       await api.addStopToDay(trip.id, day.id, {
         venueRef: p.venueRef, name: p.name, lat: p.lat, lng: p.lng, category: p.category,
         startTime, slot: leg === 'back' ? 'evening' : undefined,
+        ...(onList ? { shortlistId: onList.id } : {}),
       });
       /**
        * A shortlist is a list of maybes, so something on the day has left it
@@ -824,8 +845,15 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
        * selected"). Otherwise the count never goes down and the same place is
        * offered back for adding a second time.
        */
-      const saved = shortlist.find((x) => x.venueRef === p.venueRef);
-      if (saved) await api.removeFromShortlist(trip.id, saved.id).catch(() => {});
+      if (onList) await api.removeFromShortlist(trip.id, onList.id).catch(() => {});
+      // Reaching the itinerary is the outcome the board is built around, and
+      // this path was not reporting it — so a genuine conversion read as
+      // "clicked, never tripped" (Codex, 18 Sep 2026).
+      //
+      // Only where it was *not* on the shortlist: when it was, the API has
+      // already counted it against the search the item remembers, and saying it
+      // twice would put two placements on the board for one.
+      if (!onList) noteSearchEvent('trip', 'add_to_trip', p.venueRef);
       setAdding(null); setPill(null); await onChanged();
     } catch (e: any) { setError(e.message); }
   }, [day, trip.id, onChanged, setPill, shortlist]);
@@ -887,7 +915,10 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
           Nothing waits on it and nothing on screen changes if it fails.
         */
         startMenu(p);
-        await api.addToShortlist(trip.id, { venueRef: p.venueRef, venueLabel: p.name, category: p.category, lat: p.lat, lng: p.lng });
+        // The search that found it travels with the item, so placing it into a
+        // day later is counted against that search (migration 177).
+        await api.addToShortlist(trip.id, { venueRef: p.venueRef, venueLabel: p.name, category: p.category, lat: p.lat, lng: p.lng, queryId: searchIdOf('trip') });
+        noteSearchEvent('trip', 'shortlist', p.venueRef);
       }
       await onChanged();
     } catch (e: any) {

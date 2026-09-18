@@ -2057,7 +2057,12 @@ export const api = {
     request<{ queryId?: string | null; origin: Place; destination: Place | null; mode: string; kind: string; maxDetourMin: number; hasRoute: boolean; around: { lat: number; lng: number; label: string | null } | null; moods?: { key: string; label: string }[]; places: TripAlongPlace[]; counts: { route: number }; beyond: number; corridorKm: number | null; estimated: boolean; degradedSources: { source: string; error: string }[] }>(`/api/trips/${id}/along${qs(p as any)}`),
   /** Who is coming. Tickets, table sizes and the car all follow this (handoff §12). */
   setTripAttendees: (tripId: string, memberIds: string[]) => put<TripDetail>(`/api/trips/${tripId}/attendees`, { memberIds }),
-  addStopToDay: (tripId: string, dayId: string, body: { venueRef: string; name: string; lat?: number | null; lng?: number | null; category?: string | null; startTime?: string | null; slot?: string; dwellMinutes?: number }) =>
+  /**
+   * `shortlistId` where the place is already on the shortlist: the item knows
+   * which search found it, and that is how the placement is counted against
+   * that search (migration 177).
+   */
+  addStopToDay: (tripId: string, dayId: string, body: { venueRef: string; name: string; lat?: number | null; lng?: number | null; category?: string | null; startTime?: string | null; slot?: string; dwellMinutes?: number; shortlistId?: string }) =>
     post<TripDetail>(`/api/trips/${tripId}/days/${dayId}/stops`, body),
   createTrip: (body: { title?: string; notes?: string; origin?: Place; originText?: string; destination?: Place; destinationText?: string; departAt: string; returnAt: string; travelMode?: Trip['travelMode']; intensity?: Trip['intensity']; attendingMemberIds?: string[] }) =>
     post<TripDetail>('/api/trips', body),
