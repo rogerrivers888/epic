@@ -688,23 +688,16 @@ async function flushScores(chunk) {
  * would put an insert storm behind somebody's spinner to record places nothing
  * ever asked about again. A place that is kept is a place worth indexing.
  */
-export async function note({ ref, lat = null, lng = null, source = null, sourceId = null, countryCode = 'GB' }) {
+export async function note({ ref, lat = null, lng = null, source = null, sourceId = null, countryCode = null, ownership = null }) {
   if (!ref) return;
-  await query(
-    `insert into place_index (venue_ref, lat, lng, country_code, last_seen)
-     values ($1,$2,$3,$4, now())
-     on conflict (venue_ref) do update
-        set lat = coalesce(place_index.lat, excluded.lat),
-            lng = coalesce(place_index.lng, excluded.lng),
-            last_seen = now()`, [ref, lat, lng, countryCode]);
-  if (source) {
-    await query(
-      `insert into place_index_sources (venue_ref, source, source_place_id)
-       values ($1,$2,$3)
-       on conflict (venue_ref, source) do update
-          set last_seen = now(), source_place_id = coalesce(place_index_sources.source_place_id, excluded.source_place_id)`,
-      [ref, source, sourceId]);
-  }
+  // One row is a batch of one.
+  //
+  // This had its own insert, and the two drifted: the country defaulted to GB
+  // where the batch leaves it null, and the conflict clause could not fill a
+  // country in afterwards or send the row back to be settled — so a place noted
+  // this way was filed under Great Britain for good (Codex, 18 Sep 2026). There
+  // is one statement now, and it is the one the sweep uses.
+  await noteMany([{ ref, lat, lng, sourceId, sources: source ? [source] : [] }], { countryCode, ownership });
 }
 
 /**

@@ -139,15 +139,48 @@ export const STALE_MONTHS = 12;
 const pencePerCall = () => Math.round(PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP * 100) / 100;
 const DETAIL_PENCE = pencePerCall();
 const MATCH_PENCE = pencePerCall();
-const askingCost = (refs, matched) =>
+// `held` is the places whose detail is already in hand: those cost nothing,
+// because nothing goes out for them. Charging for them reserved money that was
+// never going to be spent, and near the ceiling that refused a request that
+// would have made no calls at all (Codex, 18 Sep 2026).
+const askingCost = (refs, matched, held = new Set()) =>
   Math.round(refs.reduce((p, ref) =>
-    p + DETAIL_PENCE + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE), 0));
+    p + (held.has(ref) ? 0 : DETAIL_PENCE)
+      + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE), 0));
 
 /** Which of these we already hold a Google id for, so no search is needed. */
 async function alreadyMatched(refs) {
   if (!refs.length) return new Set();
   const held = await matchesFor(refs, 'google');
   return new Set([...held.entries()].filter(([, id]) => id).map(([ref]) => ref));
+}
+
+/** Which of these the detail cache will answer, so no call goes out for them. */
+async function alreadyHeld(refs) {
+  if (!refs.length) return new Set();
+  const matched = await matchesFor(refs, 'google');
+  const out = new Set();
+  for (const ref of refs) {
+    const id = ref.startsWith('google:') ? ref.slice(7) : matched.get(ref);
+    if (id && detailHeld('google', id)) out.add(ref);
+  }
+  return out;
+}
+
+/**
+ * What actually left the building, read off the ledger rather than the claim.
+ *
+ * The reservation is a ceiling on the request, not a bill: a ref answered out of
+ * the cache, and a ref with no Google place at all, both cost nothing. Reporting
+ * the reservation as the spend overstated it on every repeat (Codex, 18 Sep
+ * 2026).
+ */
+async function spentSince(from, householdId) {
+  const { rows: [r] } = await query(
+    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
+       from provider_calls
+      where provider = 'google' and created_at >= $1 and household_id = $2`, [from, householdId]);
+  return Math.round(Number(r?.usd ?? 0) * 100 * USD_TO_GBP * 100) / 100;
 }
 
 /**
@@ -1553,14 +1586,15 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     }
     // Before a penny of it: what one Place Details call costs, times the number
     // of them, against what is left of this month's ceiling.
-    const want = askingCost(refs, await alreadyMatched(refs));
+    const want = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs));
     const room = await roomToSpend(want, { holder: 'ask' });
     if (!room.ok) return overTheCeiling(res, want, room);
     try {
       const household = await currentHousehold();
+      const from = new Date();
       const out = await askThese(refs, household.id);
       if (out.asked) { await index.rescore(); await index.refreshStats(); }
-      res.json({ ...out, spentPence: want });
+      res.json({ ...out, spentPence: await spentSince(from, household.id) });
     } finally {
       // The claim is let go whether it went well or not: by now every call it
       // covered is in `provider_calls`, which is what the next one counts.

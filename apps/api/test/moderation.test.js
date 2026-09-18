@@ -485,3 +485,44 @@ test('a rejected review written again comes back to be looked at', async () => {
   assert.equal((await hosting.publishedReviews(host.id)).length, 1, 'and no longer hidden');
   assert.ok(booking);
 });
+
+/**
+ * A rating and a note on a dish are the same row wearing two hats.
+ *
+ * A rating of the place comes in whether or not anybody wrote anything — both
+ * its reasons are about the score, so a wordless one that could not be queued
+ * could never be taken down either. A rating of one dish comes in only when
+ * there are words, and comes in as BO5a's own kind (Codex, 18 Sep 2026).
+ */
+test('a wordless rating of a place is decidable, and a dish with words is a note', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [member] } = await query(
+    `insert into members (household_id, name) values ($1, 'A rater') returning *`, [household.id]);
+  const { rows: [visit] } = await query(
+    `insert into visits (household_id, venue_ref, venue_label, visited_on)
+     values ($1, 'test:rating-kinds', 'The Chip Shop', current_date) returning *`, [household.id]);
+  const { rows: [plain] } = await query(
+    `insert into ratings (visit_id, member_id, subject, take, score)
+     values ($1,$2,'visit','loved',5) returning *`, [visit.id, member.id]);
+  const { rows: [dish] } = await query(
+    `insert into ratings (visit_id, member_id, subject, take, concept_key, comment)
+     values ($1,$2,'visit','fine','bhel-puri','The batter was heavy') returning *`, [visit.id, member.id]);
+  const { rows: [quiet] } = await query(
+    `insert into ratings (visit_id, member_id, subject, take, concept_key)
+     values ($1,$2,'visit','fine','onion-bhaji') returning *`, [visit.id, member.id]);
+
+  await queue.sync();
+  const kindOf = async (id) => (await query(
+    'select kind from content_queue where subject_type = $1 and subject_id = $2', ['rating', id])).rows[0]?.kind ?? null;
+
+  assert.equal(await kindOf(plain.id), 'rating', 'a wordless rating of the place is still a decision');
+  assert.equal(await kindOf(dish.id), 'note', 'a dish with words is a note on a dish');
+  assert.equal(await kindOf(quiet.id), null, 'a star on a plate with nothing written is not content');
+
+  // And what the reviewer is shown is the verdict, not an empty quotation.
+  const item = await queue.one((await query(
+    'select id from content_queue where subject_id = $1', [plain.id])).rows[0].id);
+  assert.equal(item.detail.take, 'loved');
+  assert.equal(Number(item.detail.score), 5);
+  assert.equal(item.detail.dish, null);
+});

@@ -125,16 +125,31 @@ export async function sync() {
      where coalesce(v.note, '') <> ''
     on conflict (subject_type, subject_id) do nothing`);
 
+  // A rating, and a note on a dish, which are the same row wearing two hats.
+  //
+  // A rating of the *place* comes in whether or not anybody wrote anything: its
+  // two reasons — "they have not been" and "it is a duplicate" — are about the
+  // score, so a wordless rating that could not be queued could never be taken
+  // down either (Codex, 18 Sep 2026). A rating of one *dish* only comes in when
+  // there are words to read, because both of its reasons are about the words;
+  // and it comes in as BO5a's own kind, "Note on a dish", which was declared
+  // and then never filled by anything.
   await query(`
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, venue_ref, place_label, made_at)
-    select 'rating', 'rating', r.id::text, v.household_id, coalesce(m.name, h.name, 'A household'),
+    select case when coalesce(r.concept_key, r.concept_id::text) is not null then 'note' else 'rating' end,
+           'rating', r.id::text, v.household_id, coalesce(m.name, h.name, 'A household'),
            v.venue_ref, v.venue_label, r.created_at
       from ratings r
       join visits v on v.id = r.visit_id
       left join members m on m.id = r.member_id
       left join households h on h.id = v.household_id
-     where coalesce(r.comment, '') <> ''
-    on conflict (subject_type, subject_id) do nothing`);
+     where coalesce(r.concept_key, r.concept_id::text) is null
+        or coalesce(r.comment, '') <> ''
+    -- The kind is a view of the rating, not a decision somebody made, so a row
+    -- filed under the old rule is moved rather than left saying the wrong word.
+    on conflict (subject_type, subject_id) do update
+       set kind = excluded.kind
+     where content_queue.kind <> excluded.kind`);
 
   await query(`
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, made_at)
@@ -353,8 +368,11 @@ export async function one(id) {
     out.detail = v ? { text: v.note, place: v.venue_label, on: v.visited_on } : null;
   }
   if (q.subject_type === 'rating') {
-    const { rows: [r] } = await query('select comment, take, score, subject from ratings where id = $1::uuid', [q.subject_id]);
-    out.detail = r ? { text: r.comment, take: r.take, score: r.score, subject: r.subject } : null;
+    const { rows: [r] } = await query(
+      'select comment, take, score, subject, concept_key from ratings where id = $1::uuid', [q.subject_id]);
+    // Which dish, where it is a dish: "Note on a dish" without the dish is a
+    // decision made on half the thing.
+    out.detail = r ? { text: r.comment, take: r.take, score: r.score, subject: r.subject, dish: r.concept_key ?? null } : null;
   }
   if (q.subject_type === 'host_review') {
     const { rows: [r] } = await query('select text, stars, chips from host_reviews where id = $1::uuid', [q.subject_id]);

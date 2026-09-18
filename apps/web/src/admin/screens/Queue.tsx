@@ -284,6 +284,16 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, onReport, next, 
               </Text>
             ) : null}
             {item.detail?.title ? <Text style={styles.previewCredit}>{item.detail.title}</Text> : null}
+            {/* A rating is a verdict and sometimes a dish, and often no words at
+                all — a wordless one showed the reviewer a place name and
+                nothing else to decide about (Codex, 18 Sep 2026). */}
+            {item.detail?.take ? (
+              <Text style={styles.previewCredit}>
+                {[item.detail.dish,
+                  item.detail.take === 'loved' ? 'loved it' : item.detail.take === 'fine' ? 'fine' : 'not for me',
+                  item.detail.score ? `${item.detail.score} out of 5` : null].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
             {item.detail?.text ? <Text style={styles.previewText}>{`“${item.detail.text}”`}</Text> : null}
             {/* An open entry is often chips rather than a sentence, and a
                 reviewer cannot decide about a thing they cannot see. */}
