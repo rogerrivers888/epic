@@ -311,15 +311,20 @@ export async function shortlistAnchors(tripId) {
  */
 export async function upsertShortlistItem(tripId, item) {
   await query(
-    `insert into trip_shortlist (trip_id, venue_ref, venue_label, kind, category, lat, lng, venue, note, must_do, preferred_day_id, status, position)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, case when $5 in ('attraction','cafe') or $4 = 'other' then 'no_booking' else 'to_call' end,
+    `insert into trip_shortlist (trip_id, venue_ref, venue_label, kind, category, lat, lng, venue, note, must_do, preferred_day_id, search_id, status, position)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, case when $5 in ('attraction','cafe') or $4 = 'other' then 'no_booking' else 'to_call' end,
              (select coalesce(max(position), 0) + 1 from trip_shortlist where trip_id = $1))
      on conflict (trip_id, venue_ref) do update
         set note = coalesce(excluded.note, trip_shortlist.note),
             must_do = excluded.must_do,
-            preferred_day_id = coalesce(excluded.preferred_day_id, trip_shortlist.preferred_day_id)`,
+            preferred_day_id = coalesce(excluded.preferred_day_id, trip_shortlist.preferred_day_id),
+            -- Which search found it, kept the first time it is known. A second
+            -- shortlisting of the same place does not rewrite whose search it
+            -- was (migration 177).
+            search_id = coalesce(trip_shortlist.search_id, excluded.search_id)`,
     [tripId, item.venueRef, item.venueLabel, item.kind, item.category ?? null, item.lat ?? null, item.lng ?? null,
-      item.venue ? JSON.stringify(item.venue) : null, item.note ?? null, Boolean(item.mustDo), item.preferredDayId ?? null],
+      item.venue ? JSON.stringify(item.venue) : null, item.note ?? null, Boolean(item.mustDo), item.preferredDayId ?? null,
+      item.searchId ?? null],
   );
 }
 

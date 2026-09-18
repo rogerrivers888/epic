@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from './press';
 import { useViewport } from '../hooks/useViewport';
-import { heldSearch, noteDrawn, noteSearchEvent } from '../search';
+import { heldSearch, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
 import { api, AtlasPlace, BrowseItem, HouseholdResponse, SketchEvent, TripDetail, Venue } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Chip, Row, StatusLine, Wrap, minutes as fmtMinutes } from './ui';
@@ -266,6 +266,10 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
     await api.addToShortlist(trip.id, {
       venueRef: v.venueRef, venueLabel: v.name, category: v.category, lat: v.lat, lng: v.lng,
       venue: { name: v.name, category: v.category, cuisines: v.cuisines, experiences: v.experiences, rating: v.rating, ratingCount: v.ratingCount, priceLevel: v.priceLevel, lat: v.lat, lng: v.lng, photos: v.photos, address: v.address, website: v.website, openingHours: v.openingHours } as Partial<Venue>,
+      // Which search found it. Placing it into a day happens long after this,
+      // and by then the screen has forgotten — so the item remembers instead
+      // (migration 177).
+      queryId: searchIdOf('trip'),
     });
     // Counted once it is saved, not once it is pressed: a shortlist that failed
     // is not an outcome (Codex, 18 Sep 2026).

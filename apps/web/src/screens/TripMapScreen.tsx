@@ -31,6 +31,7 @@ import { Animated, Easing, Linking, Modal, Platform, ScrollView, StyleSheet, Tex
 import { Press, Pulse } from '../components/press';
 import { api, BrowseDefaultsPatch, BrowseItem, HouseholdResponse, Stay, StayPlacement, StayPricing, TripAlongPlace, TripDay, TripDetail, TripPlace } from '../api';
 import { useViewport } from '../hooks/useViewport';
+import { heldSearch } from '../search';
 import { colors, fonts, radius, spacing, CREAM, INK, LIME, ON_LIME, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip as UiChip, Row, Segmented, StatusLine, Wrap } from '../components/ui';
 import { RangeSlider } from '../components/RangeSlider';
@@ -330,7 +331,13 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     // of the corridor until the answer says how wide it really was.
     setAlong((a) => ({ ...a, places: [], beyond: 0, corridorKm: null, hasRoute: trip.destination?.lat != null, loading: true, error: null }));
     api.tripAlong(trip.id, { kind: pill === 'food' ? 'food' : 'things', maxDetourMin, around: around ?? undefined, aroundName: aroundName ?? undefined, q: q || undefined })
-      .then((r) => setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null, moods: r.moods ?? [] }))
+      .then((r) => {
+        // The map's search, held so that opening a pin or adding it to a day is
+        // counted against it. This surface was searching and never saying so
+        // (Codex, 18 Sep 2026).
+        if (r.queryId) heldSearch('trip', r.queryId, r.places.map((v) => v.venueRef));
+        setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null, moods: r.moods ?? [] });
+      })
       .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] }));
   }, [alongKey, trip.id, pill, around, aroundName, maxDetourMin, q]);
 

@@ -1461,3 +1461,34 @@ test('a cell nothing points at any more is set to nought', async () => {
   await reach.refreshCellCounts();
   assert.equal((await query(`select places from geo_cells where code = 'sector:EMPTY 1'`)).rows[0].places, 0);
 });
+
+test('a place that reaches an itinerary is counted as having got there', async () => {
+  const trips = await import('../src/repositories/trips.js');
+  const { household } = await aHousehold(query);
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Windsor', 51.48, -0.61, now(), now() + interval '2 days') returning *`, [household.id]);
+
+  const id = await log.noteSearch({ householdId: household.id, surface: 'trip', areaSlug: 'berkshire' });
+  await log.noteShown(id, [{ ref: 'test:became-a-stop', position: 1 }]);
+  await log.logEvent({ searchId: id, kind: 'open', venueRef: 'test:became-a-stop', householdId: household.id });
+  await log.logEvent({ searchId: id, kind: 'shortlist', venueRef: 'test:became-a-stop', householdId: household.id });
+
+  const outcomeOf = async () => (await query('select outcome from searches where id = $1', [id])).rows[0].outcome;
+  assert.equal(await outcomeOf(), 'saved', 'shortlisted, and no further');
+
+  // The item remembers which search found it, because placing it into a day
+  // happens long after — often on another visit, by which time the screen has
+  // forgotten. Without that, every trip Find could reach "saved" and no
+  // further, and the board filed the lot under "clicked, never tripped"
+  // (Codex, 18 Sep 2026; migration 177).
+  await trips.upsertShortlistItem(trip.id, {
+    venueRef: 'test:became-a-stop', venueLabel: 'Somewhere', kind: 'do', searchId: id,
+  });
+  const { rows: [item] } = await query(
+    'select id, search_id from trip_shortlist where trip_id = $1 and venue_ref = $2', [trip.id, 'test:became-a-stop']);
+  assert.equal(item.search_id, id, 'the item knows whose search it was');
+
+  await log.logEvent({ searchId: item.search_id, kind: 'add_to_trip', venueRef: 'test:became-a-stop', householdId: household.id });
+  assert.equal(await outcomeOf(), 'tripped', 'and the search is credited with getting somebody there');
+});

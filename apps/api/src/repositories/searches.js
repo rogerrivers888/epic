@@ -376,7 +376,17 @@ export async function forgetAccount(accountId) {
  * places fall in — so "Berkshire, last 30 days" is one indexed read rather than
  * a geometry question asked at report time.
  */
-export async function whereOf({ lat = null, lng = null, areaSlug = null } = {}) {
+export async function whereOf(args = {}) {
+  // Fails open, like `noteSearch` does, because it is part of the same thing:
+  // working out where a search was, so the log can be read by area. Six callers
+  // spread it into the row they are about to write, and none of them was
+  // guarded — so a hiccup working out an area turned a search that had already
+  // found forty places into a 500 and threw the answer away (Codex, 18 Sep
+  // 2026). The log is worth having and never worth a household's search.
+  try { return await whereOfOrThrow(args); } catch { return { areaSlug: null, cell: null }; }
+}
+
+async function whereOfOrThrow({ lat = null, lng = null, areaSlug = null } = {}) {
   if (areaSlug) {
     const { rows: [l] } = await query('select slug, parent_slug, kind from localities where slug = $1', [String(areaSlug).toLowerCase()]);
     if (l) return { areaSlug: l.kind === 'town' && l.parent_slug ? l.parent_slug : l.slug, cell: null };

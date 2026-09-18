@@ -1211,7 +1211,31 @@ router.get('/:id/along', async (req, res, next) => {
         || (judged(a) ? standing(b) - standing(a) : 0)
         || (a.detourMinutes ?? 999) - (b.detourMinutes ?? 999));
 
+    // The map's own search, written down like every other one.
+    //
+    // The trip surface was logging the shortlist search and not this — and this
+    // is the one somebody makes while looking at the map, filter after filter.
+    // So a whole half of trip planning was missing from Demand while the board
+    // claimed to cover it (Codex, 18 Sep 2026). Best-effort, like the rest of
+    // the logging: it never costs the household their results.
+    const drawn = within.slice(0, 60).map(({ _t, _off, _inside, ...p }) => p);
+    const queryId = await searchLog.noteSearch({
+      householdId: household.id, accountId: req.account?.id ?? null,
+      sessionId: req.session?.id ?? null, surface: 'trip',
+      ...(await searchLog.whereOf({ lat: origin.lat, lng: origin.lng })),
+      lat: origin.lat, lng: origin.lng, mode, minutes: maxDetourMin,
+      // Counts and our own words: never the free text somebody typed.
+      asked: { kind, around: Boolean(around), typed: Boolean(q), maxDetourMin },
+      subject: kind === 'food' ? 'food' : 'things',
+      shownTotal: drawn.length,
+      shown: [],
+      sourcesQueried, degraded: degraded.map((d) => d.source ?? d),
+    });
+    if (queryId) {
+      await searchLog.noteShown(queryId, drawn.map((p, n) => ({ ref: p.venueRef, position: n + 1 })));
+    }
     res.json({
+      queryId,
       origin, destination, mode, kind, maxDetourMin,
       /** What was tapped, echoed back so the screen can name it on a chip. */
       around: around ? { lat: around.lat, lng: around.lng, label: around.label } : null,
@@ -1223,7 +1247,7 @@ router.get('/:id/along', async (req, res, next) => {
       hasRoute: !!destination,
       /** The shelves, in the order and words the back office keeps them, so the lanes match Inspire's (Codex, 9 Sep 2026). */
       moods: (tax?.active?.categories ?? []).map((c) => ({ key: c.key, label: c.label ?? c.key })),
-      places: within.slice(0, 60).map(({ _t, _off, _inside, ...p }) => p),
+      places: drawn,
       counts: { route: within.length },
       /** How many were found and left out, so the screen can offer a wider detour honestly. */
       beyond: rows.length - within.length,
@@ -1799,6 +1823,10 @@ export async function addShortlistItem(trip, household, b) {
     venueRef: b.venueRef, venueLabel: b.venueLabel, kind, category: b.category ?? null,
     lat: b.lat ?? null, lng: b.lng ?? null, venue: snapshot, note: b.note?.trim() || null,
     mustDo: b.mustDo, preferredDayId: b.preferredDayId ?? null,
+    // Which search put it here, so that placing it into a day later can be
+    // counted against that search — by then the screen has long forgotten
+    // (migration 177).
+    searchId: typeof b.queryId === 'string' && b.queryId ? b.queryId : null,
   });
   // The atlas is what the household chose, not what Epic proposed (owner,
   // 4 Sep 2026: "you have added stuff that I did not add… I want to see stuff
@@ -1867,6 +1895,20 @@ router.post('/:id/days/:dayId/stops', async (req, res, next) => {
       slot, startTime: b.startTime ?? null, position,
       venueRef: stop.venueRef, name: stop.name, lat: stop.lat ?? null, lng: stop.lng ?? null, dwellMinutes: dwell,
     });
+    // A shortlisted place becoming a stop is the outcome the Demand board is
+    // built around, and it happens long after the search — often on another
+    // visit, by which time the screen has forgotten which one it was. The item
+    // remembers (migration 177), so it is counted here rather than not at all:
+    // without it, every trip Find could reach "saved" and no further, and the
+    // board filed the lot under "clicked, never tripped" (Codex, 18 Sep 2026).
+    if (b.shortlistId) {
+      const item = await trips.shortlistItem(b.shortlistId, trip.id);
+      if (item?.search_id) {
+        await searchLog.logEvent({
+          searchId: item.search_id, kind: 'add_to_trip', venueRef: item.venue_ref, householdId: household.id,
+        }).catch(() => null);
+      }
+    }
     res.status(201).json(await tripPayload(trip.id));
   } catch (err) { next(err); }
 });

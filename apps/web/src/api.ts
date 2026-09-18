@@ -2035,7 +2035,12 @@ export const api = {
       return api.shortlistSearch(tripId, p);
     }
   },
-  addToShortlist: (tripId: string, body: { venueRef: string; venueLabel: string; kind?: string; category?: string | null; lat?: number | null; lng?: number | null; venue?: Partial<Venue>; note?: string; mustDo?: boolean; preferredDayId?: string | null }) => post<TripDetail>(`/api/trips/${tripId}/shortlist`, body),
+  /**
+   * `queryId` is which search found it, kept with the item so that placing it
+   * into a day later — often on another visit — can be counted against that
+   * search (migration 177).
+   */
+  addToShortlist: (tripId: string, body: { venueRef: string; venueLabel: string; kind?: string; category?: string | null; lat?: number | null; lng?: number | null; venue?: Partial<Venue>; note?: string; mustDo?: boolean; preferredDayId?: string | null; queryId?: string | null }) => post<TripDetail>(`/api/trips/${tripId}/shortlist`, body),
   updateShortlist: (tripId: string, itemId: string, body: { note?: string; mustDo?: boolean; preferredDayId?: string | null; kind?: string; status?: ShortlistStatus; bookedTime?: string | null; partySize?: string | null; bookingRef?: string | null; statusNote?: string | null; statusOn?: string | null; dwellMinutes?: number | null; legMode?: LegMode | '' | null; dayId?: string | null }) => patch<TripDetail>(`/api/trips/${tripId}/shortlist/${itemId}`, body),
   reorderShortlist: (tripId: string, itemIds: string[]) => post<TripDetail>(`/api/trips/${tripId}/shortlist/reorder`, { itemIds }),
   journey: (tripId: string, p: { dayId?: string; source?: 'shortlist' | 'day' } = {}) => request<Journey>(`/api/trips/${tripId}/journey${qs(p)}`),
@@ -2049,7 +2054,7 @@ export const api = {
   tripPlaces: (id: string) => request<{ places: TripPlace[]; counts: { all: number; do: number; eat: number; stay: number } }>(`/api/trips/${id}/places`),
   /** Everywhere you could stop along the way. Nothing is routed: see TripAlongPlace. */
   tripAlong: (id: string, p: { kind: 'food' | 'things'; maxDetourMin?: number; around?: string; aroundName?: string; q?: string }) =>
-    request<{ origin: Place; destination: Place | null; mode: string; kind: string; maxDetourMin: number; hasRoute: boolean; around: { lat: number; lng: number; label: string | null } | null; moods?: { key: string; label: string }[]; places: TripAlongPlace[]; counts: { route: number }; beyond: number; corridorKm: number | null; estimated: boolean; degradedSources: { source: string; error: string }[] }>(`/api/trips/${id}/along${qs(p as any)}`),
+    request<{ queryId?: string | null; origin: Place; destination: Place | null; mode: string; kind: string; maxDetourMin: number; hasRoute: boolean; around: { lat: number; lng: number; label: string | null } | null; moods?: { key: string; label: string }[]; places: TripAlongPlace[]; counts: { route: number }; beyond: number; corridorKm: number | null; estimated: boolean; degradedSources: { source: string; error: string }[] }>(`/api/trips/${id}/along${qs(p as any)}`),
   /** Who is coming. Tickets, table sizes and the car all follow this (handoff §12). */
   setTripAttendees: (tripId: string, memberIds: string[]) => put<TripDetail>(`/api/trips/${tripId}/attendees`, { memberIds }),
   addStopToDay: (tripId: string, dayId: string, body: { venueRef: string; name: string; lat?: number | null; lng?: number | null; category?: string | null; startTime?: string | null; slot?: string; dwellMinutes?: number }) =>
