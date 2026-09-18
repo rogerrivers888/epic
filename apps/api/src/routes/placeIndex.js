@@ -1674,10 +1674,18 @@ export async function tripadvisorRoom(want = 0) {
     // two billed locations, so counting rows let sixty views spend a hundred
     // and twenty of an allowance the board said was a hundred and twenty
     // (Codex, 17 Sep 2026).
+    // Counted off the meter, not the label.
+    //
+    // A search that asks several sources together records one row whose
+    // `provider` is all of their names joined — "fixtures+osm+google" and the
+    // like — while the units it billed sit under each source's own key. Filtering
+    // on the label therefore missed every Tripadvisor location spent from a
+    // browse, and the one ceiling that is contractual rather than budgetary
+    // could be walked straight through (Codex, 18 Sep 2026).
     const { rows: [made] } = await client.query(
       `select coalesce(sum(greatest(coalesce((units->>'tripadvisor')::int, 1), 1)), 0)::int as calls
          from provider_calls
-        where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
+        where units ? 'tripadvisor' and created_at > date_trunc('month', now())`);
     const { rows: [held] } = await client.query(
       `select coalesce(sum(calls), 0)::int as calls from spend_reservations where provider = 'tripadvisor'`);
     const left = Math.max(0, TRIPADVISOR_CAP - made.calls - held.calls);

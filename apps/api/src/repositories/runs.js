@@ -101,10 +101,12 @@ export async function list() {
         and created_at > now() - interval '90 days'`);
   // Their billable units, not our rows: one view is two locations (Codex,
   // 17 Sep 2026).
+  // Off the meter rather than the label: a browse that asks several sources
+  // together is one row named after all of them (Codex, 18 Sep 2026).
   const ta = await one(
     `select coalesce(sum(greatest(coalesce((units->>'tripadvisor')::int, 1), 1)), 0)::int as calls,
             max(created_at) as last
-       from provider_calls where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
+       from provider_calls where units ? 'tripadvisor' and created_at > date_trunc('month', now())`);
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);
   const bench = await one(
     `select count(*)::int as n, max(ran_at) as last,

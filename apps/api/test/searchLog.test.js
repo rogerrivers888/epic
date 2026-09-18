@@ -791,3 +791,23 @@ test('a later source corrects a position, and a claim with none cannot erase it'
   now = await row();
   assert.equal(Math.round(now.lat * 100) / 100, 51.52, 'a caller with nothing to say says nothing');
 });
+
+/**
+ * The contractual ceiling is counted off the meter, not off the label.
+ *
+ * A browse that asks several sources together records one row whose `provider`
+ * is all of their names joined, while the units it billed sit under each
+ * source's own key. Filtering on the label missed every Tripadvisor location
+ * spent from a search (Codex, 18 Sep 2026).
+ */
+test('a Tripadvisor location billed inside a mixed call still counts against the cap', async () => {
+  const { household } = await aHousehold(query);
+  const room = await import('../src/routes/placeIndex.js');
+  const before = await room.tripadvisorRoom(0);
+  await query(
+    `insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd)
+     values ($1, 'fixtures+osm+google+tripadvisor', 'places.search', '{"google":1,"tripadvisor":4}'::jsonb, 0.075)`,
+    [household.id]);
+  const after = await room.tripadvisorRoom(0);
+  assert.equal(before.left - after.left, 4, 'four locations, whatever the row was called');
+});
