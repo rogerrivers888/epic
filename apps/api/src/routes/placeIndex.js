@@ -286,6 +286,12 @@ const head = async (scope) => ({
   fromKind: scope.kind === 'ring' ? (scope.area?.kind ?? 'postcode') : null,
   minutes: scope.minutes ?? null, mode: scope.mode ?? null,
   cells: scope.cells ?? null,
+  // Whether the matrix has ever heard of this cell.
+  //
+  // A postcode whose sector is not in `geo_cells` answered as an ordinary empty
+  // ring, so "we have no travel times here" and "there is nothing here" read
+  // exactly the same on the board (Codex, 18 Sep 2026).
+  cellKnown: scope.kind === 'ring' ? Boolean(scope.cellKnown) : null,
   trail: await trail(scope),
 });
 
@@ -1836,23 +1842,44 @@ async function planCollect(where) {
   const FREE_KEY = 'own';
   const SOURCES_ASKED = ['google', 'tripadvisor', ...(freeChosen.length ? [FREE_KEY] : [])];
   const mayAsk = SOURCES_ASKED.filter((k) => (k === FREE_KEY ? freeChosen.length : chosen.has(k)));
-  if (mayAsk.length) {
-    args.push(mayAsk);
-    const srcArg = args.length;
-    args.push(String(STALE_MONTHS));
-    wh.push(`exists (
-      select 1 from unnest($${srcArg}::text[]) as src(name)
-       where not exists (
-         select 1 from place_index_sources s
-          where s.venue_ref = pi.venue_ref and s.source = src.name
-            and s.last_seen > now() - ($${args.length} || ' months')::interval))`);
+
+  // A pool per source, not one pool for all of them.
+  //
+  // "Eligible for any of the chosen sources" and then one shared cut meant that
+  // if the worst rows in a scope were stale for the free pass and fresh for
+  // Google, Google got no work at all while Google-stale places sat below the
+  // cut — the same starvation the query-side rule was added to end, one level
+  // up (Codex, 18 Sep 2026). Each source asks for its own worst places, and the
+  // union of those is what the run considers.
+  const poolFor = async (source) => {
+    const a = [...args, source, String(STALE_MONTHS), limit * 20];
+    const { rows } = await query(
+      `select pi.venue_ref, pi.ownership from place_index pi
+        where ${wh.join(' and ')}
+          and not exists (
+            select 1 from place_index_sources s
+             where s.venue_ref = pi.venue_ref and s.source = $${args.length + 1}
+               and s.last_seen > now() - ($${args.length + 2} || ' months')::interval)
+        order by pi.ready asc, pi.data_score asc nulls first
+        limit $${args.length + 3}`, a);
+    return rows;
+  };
+  const pools = new Map();
+  for (const source of mayAsk) pools.set(source, await poolFor(source));
+  // Nothing chosen at all still answers with the worst of the scope, so the
+  // board can say what a run *would* do before anything is ticked.
+  if (!mayAsk.length) {
+    const { rows } = await query(
+      `select pi.venue_ref, pi.ownership from place_index pi
+        where ${wh.join(' and ')}
+        order by pi.ready asc, pi.data_score asc nulls first
+        limit $${args.length + 1}`, [...args, limit * 20]);
+    pools.set('none', rows);
   }
-  args.push(limit * 20);
-  const { rows: candidates } = await query(
-    `select pi.venue_ref, pi.ownership from place_index pi
-      where ${wh.join(' and ')}
-      order by pi.ready asc, pi.data_score asc nulls first
-      limit $${args.length}`, args);
+  const byRef = new Map();
+  for (const rows of pools.values()) for (const r of rows) byRef.set(r.venue_ref, r);
+  const candidates = [...byRef.values()];
+  const eligibleFor = (source) => new Set((pools.get(source) ?? []).map((r) => r.venue_ref));
 
   const everything = candidates.map((r) => r.venue_ref);
   // Only a place we hold nothing of our own about is worth a paid call — which
@@ -1876,8 +1903,8 @@ async function planCollect(where) {
    * writes is an `own` row, so that is the window's key; keying it on the three
    * names separately meant choosing Atlas alone offered work for ever.
    */
-  // Still asked per source afterwards, because the query's rule is "any of
-  // them" and each list below is "this one".
+  // Still asked per source afterwards, because the pools are a union and each
+  // list below is one source's own.
   const { rows: lately } = everything.length ? await query(
     `select source, venue_ref from place_index_sources
       where venue_ref = any($1) and source = any($2)
@@ -1885,7 +1912,12 @@ async function planCollect(where) {
     [everything, SOURCES_ASKED, String(STALE_MONTHS)]) : { rows: [] };
   const askedLately = new Map(SOURCES_ASKED.map((k) => [k, new Set()]));
   for (const r of lately) askedLately.get(r.source)?.add(r.venue_ref);
-  const notLately = (src, from) => from.filter((ref) => !askedLately.get(src)?.has(ref));
+  const notLately = (src, from) => {
+    // A source that has a pool of its own is asked from it, so a place that is
+    // stale for it cannot be crowded out by places stale for something else.
+    const own = eligibleFor(src);
+    return from.filter((ref) => !askedLately.get(src)?.has(ref) && (!own.size || own.has(ref)));
+  };
 
   // Cut to the run's size here, where "eligible" is finally known. Each list
   // is cut on its own, because a source with nothing fresh in front of it

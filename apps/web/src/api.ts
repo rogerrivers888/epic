@@ -1366,6 +1366,13 @@ export type PlaceStats = {
 };
 
 export type PlaceLevel = {
+  /**
+   * For a ring: whether we hold travel times for this cell at all.
+   *
+   * `false` means the matrix has never heard of it — which is a different fact
+   * from "nothing is within reach", and the board says which.
+   */
+  cellKnown?: boolean | null;
   kind: 'area' | 'ring' | 'none';
   slug: string; name: string; areaKind: string;
   /** What a ring was drawn round — a town, a postcode district — or null on a level. */

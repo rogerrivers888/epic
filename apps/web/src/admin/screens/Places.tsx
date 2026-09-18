@@ -1257,7 +1257,14 @@ function RingBoard({ q, onSub, onLens, onWithin }: {
       <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.key}
               onRow={(r) => (r.known > 0 ? onSub(r.key) : undefined)}
               highlight={(r) => r.known === 0 && r.searches > 0}
-              empty={<Word muted>Nothing in reach yet.</Word>} />
+              empty={(
+                // Two different facts, and they used to read the same: a
+                // postcode the travel-time matrix has never heard of answered as
+                // an ordinary empty ring (Codex, 18 Sep 2026).
+                <Word muted>{data.cellKnown === false
+                  ? 'We hold no travel times for this postcode yet, so nothing can be worked out from it.'
+                  : 'Nothing in reach yet.'}</Word>
+              )} />
       <View style={styles.ringFacts}>
         <Kicker tip="sectionThisRing">This ring</Kicker>
         <View style={styles.ringRow}>
