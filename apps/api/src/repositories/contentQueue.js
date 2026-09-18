@@ -239,19 +239,27 @@ export async function syncFlagged() {
 
   // Something rejected that has since been written again comes back.
   //
-  // A host review rewritten after a rejection is a new thing to look at, so the
-  // queue row goes back to waiting — and the words stay hidden until somebody
-  // approves them. Without the requeue the corrected words could never be looked
-  // at or published; without the hiding, changing them was a way round the
-  // decision (Codex, 18 Sep 2026, two rounds).
-  await query(`
-    update content_queue q
-       set state = 'waiting', reason = null, message = null, told = false,
-           decided_by = null, decided_at = null
-      from host_reviews hr
-     where q.subject_type = 'host_review' and q.subject_id = hr.id::text
-       and q.state = 'rejected' and hr.rewritten_at is not null
-       and (q.decided_at is null or hr.rewritten_at > q.decided_at)`);
+  // A decision is about the words that were in front of whoever made it.
+  //
+  // Anything a household can rewrite after it has been decided goes back to
+  // waiting: a host review, a question, an offer's own sentence. Three rounds on
+  // this one (Codex, 18 Sep 2026) — the first left corrected words unlookable
+  // for ever, the second published a rejected review the moment it was edited,
+  // and the third only caught the rejected ones, so an *approved* row went on
+  // saying approved about text nobody had read. A rejection's `hidden` is not
+  // lifted by any of this; only approving lifts it.
+  for (const [type, table] of [
+    ['host_review', 'host_reviews'], ['chat_topic', 'chat_topics'], ['open_entry', 'open_entries'],
+  ]) {
+    await query(`
+      update content_queue q
+         set state = 'waiting', reason = null, message = null, told = false,
+             decided_by = null, decided_at = null
+        from ${table} src
+       where q.subject_type = $1 and q.subject_id = src.id::text
+         and q.state <> 'waiting' and src.rewritten_at is not null
+         and (q.decided_at is null or src.rewritten_at > q.decided_at)`, [type]);
+  }
 
   // Somebody reported it, so it jumps the queue.
   //

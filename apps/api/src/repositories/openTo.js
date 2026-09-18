@@ -66,6 +66,9 @@ export async function insertEntry(householdId, fields = {}, client) {
 
 export async function updateEntry(id, patch, client) {
   const sets = ['updated_at = now()'];
+  // Saying it again is editing it, and an edited sentence is a new thing to
+  // look at — which a change of preferences is not (migration 166).
+  if (patch.transcript !== undefined) sets.push('rewritten_at = now()');
   const params = [id];
   for (const [key, column] of Object.entries(COLUMNS)) {
     if (patch[key] === undefined) continue;

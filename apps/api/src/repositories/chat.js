@@ -82,6 +82,9 @@ export async function updateTopic(id, patch, client) {
   const sets = [];
   const params = [id];
   const set = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };
+  // The words changing is what sends it back to be looked at; pinning it is not
+  // (migration 166).
+  if (patch.title !== undefined || patch.body !== undefined) sets.push('rewritten_at = now()');
   if (patch.title !== undefined) set('title', patch.title);
   if (patch.body !== undefined) set('body', patch.body);
   if (patch.tagKind !== undefined) set('tag_kind', patch.tagKind);

@@ -582,3 +582,39 @@ test('a disagreement that has gone away goes away, and a decided one stays', asy
   await queue.syncFlagged();
   assert.equal((await row())?.state, 'rejected', 'a decision is not undone by the facts settling');
 });
+
+/**
+ * A decision is about the words that were in front of whoever made it.
+ *
+ * Anything a household can rewrite after it has been decided goes back to
+ * waiting. Three rounds on this: the first left corrected words unlookable for
+ * ever, the second published a rejected review the moment it was edited, and
+ * the third caught only the rejected ones — so an approved row went on saying
+ * approved about text nobody had read (Codex, 18 Sep 2026).
+ */
+test('an approved thing that is rewritten goes back to be looked at', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [member] } = await query(
+    `insert into members (household_id, name) values ($1, 'An asker') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, author_member_id, title, body, tag_kind)
+     values ('trip', $1, $2, 'Where for lunch?', 'Somewhere near the park.', 'none') returning *`,
+    [household.id, member.id]);
+  await queue.sync();
+  const row = async () => (await query(
+    `select state from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id])).rows[0];
+  const q = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+  await queue.approve([q.rows[0].id], 'the owner (passcode)');
+  assert.equal((await row()).state, 'approved');
+
+  // Pinning it is not rewriting it.
+  await chat.updateTopic(topic.id, { pinned: true });
+  await queue.sync();
+  assert.equal((await row()).state, 'approved', 'a decision stands over a change that is not the words');
+
+  // Changing the words is.
+  await chat.updateTopic(topic.id, { body: 'Actually, something abusive.' });
+  await queue.sync();
+  assert.equal((await row()).state, 'waiting', 'and it goes back in front of somebody');
+});

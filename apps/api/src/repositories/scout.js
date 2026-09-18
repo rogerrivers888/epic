@@ -8,6 +8,7 @@
 import { query, withTransaction } from '../db.js';
 import { noteMany } from './placeIndex.js';
 import { causeOf, CAUSES } from '../domain/menuCauses.js';
+import { bandOf } from '../domain/scoring.js';
 
 export async function upsertArea(a) {
   const { rows } = await query(
@@ -684,39 +685,23 @@ export async function placeForMenu(venueRef) {
       limit 1`,
     [venueRef],
   );
-  // A row with nothing in it is not evidence.
+  // A row with no address in it is not an address.
   //
   // `ensureRecord` makes an empty `place_records` row the moment a household
   // touches a place, and the full join then returns a row of nulls — which was
-  // truthy, so the fallback below was never reached for the very case it exists
-  // for: an atlas place somebody has saved (Codex, 18 Sep 2026).
-  const substance = rows[0] && (rows[0].sweep_name || rows[0].record_name || rows[0].sweep_website
-    || rows[0].record_website || rows[0].summary || rows[0].crowd_band || rows[0].count_band
-    || rows[0].opening_hours || rows[0].area_code);
-  if (substance) return rows[0];
-  // A harvested place has neither row, and there are more of those in the index
-  // than of anything else: the board that exists to explain a score said "not
-  // scored" over a place the index scores a hundred (18 Sep 2026, the separate
-  // audit). Its evidence is on the attraction and its detail row, which is what
-  // the index scored it from.
+  // truthy, so a harvested place somebody had saved reported "no website" while
+  // its attraction held one (Codex, 18 Sep 2026). Its own page is on the
+  // attraction, in this function's own shape rather than the scoring one.
+  if (rows[0]?.website) return rows[0];
   const { rows: atlas } = await query(
-    `select coalesce(a.venue_ref, 'atlas:' || a.id::text) as venue_ref, null as area_code,
-            a.name as sweep_name, a.crowd_band, a.count_band,
-            coalesce(a.accolades, '[]'::jsonb) as accolades,
-            null as sweep_cuisines, false as chain, null as chain_scale, 1 as sites,
-            a.epic_score, null as owned_score, null as scored_at,
-            a.website as sweep_website,
-            a.name as record_name, a.website as record_website, a.summary,
-            d.visit->>'openingHours' as opening_hours,
-            null as record_cuisines, null as enrich_state, null as item_count, null as menu_state
+    `select a.name, a.website, null as address, null as postcode
        from attractions a
-       left join attraction_details d on d.attraction_id = a.id
       where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden'
+        and a.website is not null
       limit 1`, [venueRef]);
-  // The empty row, if that is genuinely all there is — the caller can tell an
-  // empty record from no record at all.
   return atlas[0] ?? rows[0] ?? null;
 }
+
 
 /**
  * How the menus we hold were actually opened.
@@ -800,6 +785,13 @@ export async function rescoreOne(venueRef, epicScore, ownedScore) {
   await query(
     'update scout_places set epic_score = $2, owned_score = $3 where venue_ref = $1',
     [venueRef, epicScore, ownedScore]);
+  // And the attraction, for a harvested place that has neither of the other two
+  // rows. The recalculation answered "saved" and wrote nothing at all, so the
+  // next read showed the old figure (Codex, 18 Sep 2026).
+  await query(
+    `update attractions set epic_score = $2, band = $3
+      where (venue_ref = $1 or 'atlas:' || id::text = $1)`,
+    [venueRef, epicScore, bandOf(epicScore)]);
   await query(
     `update place_records
         set epic_score = $2, owned_score = $3, scored_at = now(), updated_at = now()
