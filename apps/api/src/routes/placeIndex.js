@@ -168,20 +168,17 @@ async function alreadyHeld(refs) {
 }
 
 /**
- * What actually left the building, read off the ledger rather than the claim.
+ * What a run actually spent: the calls it made itself, at the one price.
  *
- * The reservation is a ceiling on the request, not a bill: a ref answered out of
- * the cache, and a ref with no Google place at all, both cost nothing. Reporting
- * the reservation as the spend overstated it on every repeat (Codex, 18 Sep
- * 2026).
+ * The reservation is a ceiling on the request, not a bill — a ref answered out
+ * of the cache, and a ref with no Google place at all, both cost nothing
+ * (Codex, 18 Sep 2026). Reading it back off the ledger by household and clock
+ * was the first attempt and it was wrong in the other direction: another tab,
+ * or a second run, made calls inside the same window and their money was
+ * counted against this run as well as their own (Codex, 18 Sep 2026). So the
+ * asking counts its own calls and this prices them.
  */
-async function spentSince(from, householdId) {
-  const { rows: [r] } = await query(
-    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
-       from provider_calls
-      where provider = 'google' and created_at >= $1 and household_id = $2`, [from, householdId]);
-  return Math.round(Number(r?.usd ?? 0) * 100 * USD_TO_GBP * 100) / 100;
-}
+const spentOn = (calls) => Math.round(calls * pencePerCall() * 100) / 100;
 
 /**
  * How many locations one Tripadvisor view bills.
@@ -1506,6 +1503,10 @@ async function askThese(refs, householdId) {
     const { rows: pos } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [refs]);
     const at = new Map(pos.map((p) => [p.venue_ref, p]));
     let asked = 0;
+    // The calls this asking actually makes, which is what it costs. A match
+    // search where we hold no identifier is one; a detail the cache answers is
+    // none (Codex, 18 Sep 2026).
+    let calls = 0;
     const refused = [];
     /**
      * The names, for this screen and no longer.
@@ -1519,7 +1520,9 @@ async function askThese(refs, householdId) {
     const names = [];
     for (const ref of refs) {
       try {
-        const id = ref.startsWith('google:') ? ref.slice(7) : (await googleMatchFor({
+        const held = ref.startsWith('google:') ? ref.slice(7) : (await matchesFor([ref], 'google')).get(ref) ?? null;
+        if (!held && !ref.startsWith('google:')) calls += 1;
+        const id = held ?? (await googleMatchFor({
           venueRef: ref, name: named.get(ref)?.name ?? null,
           lat: at.get(ref)?.lat ?? null, lng: at.get(ref)?.lng ?? null,
           householdId: household.id, strict: true,
@@ -1535,6 +1538,7 @@ async function askThese(refs, householdId) {
           refused.push({ ref, why: 'no match' });
           continue;
         }
+        if (!detailHeld('google', id)) calls += 1;
         const detail = await detailFor('google', id, household.id);
         // Banded here, and the figures go no further: `crowdBand` and
         // `countBand` are the only things that leave this block, and the rating
@@ -1561,7 +1565,7 @@ async function askThese(refs, householdId) {
         refused.push({ ref, why: whySourceFailed('google', err) });
       }
     }
-    return { asked, refused, names };
+    return { asked, refused, names, calls };
   }
 }
 
@@ -1671,10 +1675,9 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     if (!room.ok) return overTheCeiling(res, want, room);
     try {
       const household = await currentHousehold();
-      const from = new Date();
       const out = await askThese(refs, household.id);
       if (out.asked) { await index.rescore(); await index.refreshStats(); }
-      res.json({ ...out, spentPence: await spentSince(from, household.id) });
+      res.json({ ...out, spentPence: spentOn(out.calls) });
     } finally {
       // The claim is let go whether it went well or not: by now every call it
       // covered is in `provider_calls`, which is what the next one counts.
@@ -1977,14 +1980,14 @@ async function work(runId, householdId) {
         const cost = askingCost(batch, await alreadyMatched(batch), await alreadyHeld(batch));
         const room = await roomToSpend(cost, { holder: `collect:${runId}` });
         if (!room.ok) { await collectRuns.done(runId, 'google', { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
-        const from = new Date();
         try {
           const out = await askThese(batch, householdId);
-          // What it spent, off the ledger — not what was claimed for it. The
-          // claim is a ceiling on the chunk; a cached detail and a place with no
-          // Google entry at all both cost less than it (Codex, 18 Sep 2026).
+          // What it spent, which is the calls it made — not what was claimed for
+          // it. The claim is a ceiling on the chunk; a cached detail and a place
+          // with no Google entry at all both cost less than it (Codex, 18 Sep
+          // 2026).
           await collectRuns.done(runId, 'google', {
-            done: out.asked, refused: out.refused, spentPence: await spentSince(from, householdId),
+            done: out.asked, refused: out.refused, spentPence: spentOn(out.calls),
           });
         } finally { await releaseSpend(room.reservation); }
       } else {

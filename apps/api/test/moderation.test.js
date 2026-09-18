@@ -14,10 +14,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { aHousehold, testDatabase } from './helpers/db.js';
 
-const { query, pool } = await testDatabase();
+const { query, withTransaction, pool } = await testDatabase();
 const queue = await import('../src/repositories/contentQueue.js');
 const hosting = await import('../src/repositories/hosting.js');
 const chat = await import('../src/repositories/chat.js');
+const openTo = await import('../src/repositories/openTo.js');
 
 test.after(() => pool.end());
 
@@ -236,6 +237,17 @@ test('rejecting an offer ends the introductions it is already part of', async ()
   const { rows: [other] } = await query('select state, hidden from open_entries where id = $1', [b.id]);
   assert.equal(other.state, 'active');
   assert.equal(other.hidden, false);
+
+  // And it stays ended. Every path that changes a match takes a lock on it, and
+  // the lock used to hand back an ended one — so whoever still had the URL
+  // could answer it and the stage moved back to a live one (Codex, 18 Sep
+  // 2026). Reading it for the person who ended it still works.
+  const held = await withTransaction(async (client) => ({
+    open: await openTo.lockMatch(match.id, client),
+    ended: await openTo.lockMatch(match.id, client, { withEnded: true }),
+  }));
+  assert.equal(held.open, null, 'an ended introduction cannot be taken for changing');
+  assert.equal(held.ended?.stage, 'ended', 'and it can still be read by the paths that end it');
 });
 
 test('forty photographs of one beach are one decision', async () => {

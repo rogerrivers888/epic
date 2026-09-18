@@ -743,7 +743,9 @@ export async function decideIdCheck(id, { pass, note, by }) {
     if (!before) throw refuse(404, 'not_found', 'There is no check at that address.');
     if (before.state !== 'pending') throw refuse(409, 'decided', 'That one has already been decided.');
     const check = await repo.decideIdCheck(id, { state: pass ? 'passed' : 'failed', note: pass ? null : note, by }, client);
-    if (!pass) return { check, match: await repo.lockMatch(before.match_id, client) };
+    // A failed check ends the match, so it has to be able to see one that is
+    // already ended.
+    if (!pass) return { check, match: await repo.lockMatch(before.match_id, client, { withEnded: true }) };
     const match = await repo.lockMatch(before.match_id, client);
     const when = new Date();
     const patch = before.side === 'host' ? { hostVerifiedAt: when } : { guestVerifiedAt: when };

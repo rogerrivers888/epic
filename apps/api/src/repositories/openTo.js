@@ -114,9 +114,24 @@ export async function matchById(id, client, { withEnded = false } = {}) {
   return rows[0] ?? null;
 }
 
-/** Locked, because two answers can land together and the stage is decided from both. */
-export async function lockMatch(id, client) {
-  const { rows } = await client.query('select * from open_matches where id = $1 for update', [id]);
+/**
+ * Locked, because two answers can land together and the stage is decided from
+ * both — and an ended introduction is not one of the things that can be
+ * answered.
+ *
+ * `matchById` has always refused an ended or lapsed match; this did not, and
+ * every path that *changes* a match goes through here. So a rejected offer's
+ * introduction could be brought back to life by whoever still had the URL:
+ * answering it moved the stage from `ended` to `guest_asked`, and the two of
+ * them went on swapping videos (Codex, 18 Sep 2026).
+ *
+ * `withEnded` is for the paths that have to see one to act on it — reading its
+ * state for the person who ended it, or failing an identity check on it.
+ */
+export async function lockMatch(id, client, { withEnded = false } = {}) {
+  const { rows } = await client.query(
+    `select * from open_matches
+      where id = $1 and ($2 or stage not in ('ended', 'lapsed')) for update`, [id, withEnded]);
   return rows[0] ?? null;
 }
 
