@@ -1517,3 +1517,41 @@ test('a place a household saved is filed under the town they saved it in', async
   assert.ok(areas.includes('savedton'), `filed under the town: ${areas.join(', ')}`);
   assert.ok(areas.includes('townshire'), 'and therefore under its county');
 });
+
+test('a conversion that arrives after the roll-up still counts', async () => {
+  const slug = 'lateshire';
+  await query(`insert into localities (slug, name, kind, country_code) values ($1,'Lateshire','county','GB') on conflict (slug) do nothing`, [slug]);
+  await query('delete from searches where area_slug = $1', [slug]);
+  await query('delete from search_rollups where area_slug = $1', [slug]);
+  const { household } = await aHousehold(query);
+
+  const id = await log.noteSearch({ householdId: household.id, surface: 'trip', areaSlug: slug, subject: 'museums' });
+  await log.noteShown(id, [{ ref: 'test:late-conversion', position: 1 }]);
+  await log.logEvent({ searchId: id, kind: 'shortlist', venueRef: 'test:late-conversion', householdId: household.id });
+  await query(`update searches set at = now() - interval '200 days' where id = $1`, [id]);
+
+  // A shortlist item points at it, which is what makes a later conversion
+  // possible at all (migration 177).
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Somewhere', 51.4, -0.9, now(), now() + interval '2 days') returning *`, [household.id]);
+  await query(
+    `insert into trip_shortlist (trip_id, venue_ref, venue_label, kind, search_id)
+     values ($1,'test:late-conversion','Somewhere','do',$2)`, [trip.id, id]);
+
+  // Rolled up and dropped, as a month that has long finished would be.
+  await log.rollUp({ before: new Date(Date.now() - 150 * 86400_000), drop: true });
+  assert.equal((await query('select count(*)::int as n from searches where id = $1', [id])).rows[0].n, 1,
+    'a search something can still convert is never dropped');
+  const bucket = async () => (await query(
+    'select searches, no_trip, tripped from search_rollups where area_slug = $1', [slug])).rows[0];
+  assert.deepEqual(await bucket(), { searches: 1, no_trip: 1, tripped: 0 });
+
+  // Months later somebody puts that shortlisted place on a day. The row was
+  // updated and the bucket was not, so the one outcome the whole board is built
+  // around read as "clicked, never tripped" for ever — and where the row had
+  // been dropped it was lost outright (Codex, 18 Sep 2026).
+  await log.logEvent({ searchId: id, kind: 'add_to_trip', venueRef: 'test:late-conversion', householdId: household.id });
+  assert.deepEqual(await bucket(), { searches: 1, no_trip: 0, tripped: 1 },
+    'the conversion moves from one column of its bucket to the other');
+});

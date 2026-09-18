@@ -91,12 +91,56 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
     [searchId, kind, venueRef, position, dwellMs, JSON.stringify(meta ?? {})]);
   const outcome = kind === 'add_to_trip' ? 'tripped' : kind === 'save' || kind === 'shortlist' ? 'saved' : kind === 'open' ? 'clicked' : null;
   if (outcome) {
-    await query(
-      `update searches set outcome = $2, outcome_at = now()
-        where id = $1 and (case outcome when 'tripped' then 3 when 'saved' then 2 when 'clicked' then 1 else 0 end) < $3`,
+    // The move, and what it moved from — a rolled search has to take its
+    // outcome with it into the bucket it was folded into.
+    //
+    // A shortlisted place reaches an itinerary on a later visit, sometimes much
+    // later, so a search can receive the outcome the whole board is built
+    // around long after it was rolled up. The row was updated and the bucket
+    // was not, so the conversion read as "clicked, never tripped" for ever —
+    // and with dropping on, the row is gone and it is lost outright (Codex,
+    // 18 Sep 2026; migration 177 is what made a late conversion possible).
+    const { rows: [moved] } = await query(
+      `with was as (
+         select id, outcome as before, empty, rolled_at, area_slug, subject, at
+           from searches where id = $1::uuid)
+       update searches s set outcome = $2, outcome_at = now()
+         from was w
+        where s.id = w.id
+          and (case w.before when 'tripped' then 3 when 'saved' then 2 when 'clicked' then 1 else 0 end) < $3
+       returning w.before, w.empty, w.rolled_at, w.area_slug, w.subject, w.at`,
       [searchId, outcome, ORDER[outcome]]);
+    if (moved?.rolled_at) await moveInTheRollup(moved, outcome);
   }
   return true;
+}
+
+
+/**
+ * A rolled search whose outcome has since risen, moved from one column of its
+ * bucket to another.
+ *
+ * The bucket holds counts, not rows, so the only honest correction is to take
+ * one off the column the search used to be in and add one to the column it is
+ * in now. `empty` never moves — it is a property of the answer, not of what
+ * anybody did with it.
+ */
+const BUCKET = (outcome, empty) => (outcome === 'tripped' ? 'tripped'
+  : outcome === 'saved' || outcome === 'clicked' ? 'no_trip'
+    : empty ? null : 'no_click');
+
+async function moveInTheRollup(was, outcome) {
+  const from = BUCKET(was.before, was.empty);
+  const to = BUCKET(outcome, was.empty);
+  if (!to || from === to) return;
+  const bump = (col, by) => `${col} = greatest(0, ${col} + ${by})`;
+  await query(
+    `update search_rollups
+        set ${to ? bump(to, 1) : ''}${to && from ? ', ' : ''}${from ? bump(from, -1) : ''}
+      where month = date_trunc('month', $1::timestamptz)::date
+        and area_slug = coalesce($2, '') and subject = coalesce($3, '')`,
+    [was.at, was.area_slug, was.subject],
+  ).catch(() => null);
 }
 
 /** The three numbers, never one rate. */
@@ -350,7 +394,19 @@ export async function rollUp({ before, drop = false } = {}) {
       new Date().getUTCFullYear(), new Date().getUTCMonth() - KEEP_MONTHS, 1, 0, 0, 0, 0));
     const safe = cutoff < floor ? cutoff : floor;
     if (safe < cutoff) keptBack = safe.toISOString().slice(0, 10);
-    const { rowCount } = await query('delete from searches where at < $1', [safe]);
+    // And never a search that can still be converted.
+    //
+    // A shortlisted place reaches an itinerary on a later visit, and the item
+    // remembers which search found it (migration 177). Dropping that search
+    // throws the conversion away before it happens: the event arrives, finds no
+    // row, and the one outcome the board is built around is lost outright
+    // (Codex, 18 Sep 2026). A rolled search that is still here can have its
+    // bucket corrected; a dropped one cannot.
+    const { rowCount } = await query(
+      `delete from searches s
+        where s.at < $1
+          and s.outcome is distinct from 'tripped'
+          and not exists (select 1 from trip_shortlist t where t.search_id = s.id)`, [safe]);
     dropped = rowCount;
   }
   // `keptBack` is not a failure: it is the answer saying the deletion stopped
