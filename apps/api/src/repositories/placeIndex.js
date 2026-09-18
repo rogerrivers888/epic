@@ -220,7 +220,8 @@ export async function retire() {
             and coalesce(live.venue_ref, 'atlas:' || live.id::text) = pi.venue_ref)
        and not exists (select 1 from place_index_sources s where s.venue_ref = pi.venue_ref)
        and not exists (select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
-       and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)`);
+       and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)
+       and not exists (select 1 from place_claims pc where pc.venue_ref = pi.venue_ref)`);
   // And a place that survives the retirement is re-asked what it is.
   //
   // Removing the atlas source left `ownership` where it was, so a place whose
@@ -235,7 +236,8 @@ export async function retire() {
   await query(`
     update place_index pi
        set ownership = case
-             when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref) then 'claimed'
+             when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)
+               or exists (select 1 from place_claims pc where pc.venue_ref = pi.venue_ref) then 'claimed'
              else 'identified' end,
            placed_at = null
      where pi.ownership = 'owned'
@@ -368,10 +370,21 @@ async function reindexWhileLocked({ onProgress }) {
 
   // A household claiming a place is the third kind of ownership: we may hold
   // nothing of our own about it, but somebody has said it matters.
+  //
+  //     Both ways a household can claim one. Saving it writes
+  //     `household_places`; a suggested shortlist item and a trip's own base
+  //     write only `place_claims`, and reading the first alone left exactly the
+  //     places somebody asked for filed as identified — so Collect's claimed
+  //     lane, which exists to answer those, could not see them (Codex, 18 Sep
+  //     2026).
   await query(`
     insert into place_index (venue_ref, derived_by, ownership, first_seen, last_seen)
-    select hp.venue_ref, 'claim', 'claimed', min(hp.first_seen), max(hp.last_seen)
-      from household_places hp where hp.venue_ref is not null group by hp.venue_ref
+    select venue_ref, 'claim', 'claimed', min(first_seen), max(last_seen) from (
+      select hp.venue_ref, hp.first_seen, hp.last_seen
+        from household_places hp where hp.venue_ref is not null
+      union all
+      select pc.venue_ref, pc.claimed_at, pc.claimed_at from place_claims pc
+    ) claims group by venue_ref
     on conflict (venue_ref) do update
        set ownership = case when place_index.ownership = 'identified' then 'claimed' else place_index.ownership end`);
 

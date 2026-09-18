@@ -234,6 +234,12 @@ export async function seedFromShortlist(venueRef) {
 export async function claim(householdId, venueRef, reason) {
   await query('insert into place_claims (household_id, venue_ref, reason) values ($1,$2,$3) on conflict do nothing', [householdId, venueRef, reason]);
   await ensureRecord(venueRef);
+  // And the index hears about it now, not at the next rebuild. A suggested
+  // shortlist item and a trip's base come through here and nowhere else, so
+  // without this the places somebody actually asked for sat in the index as
+  // "identified" and Collect's claimed lane could not see them (Codex, 18 Sep
+  // 2026). Never a failed claim on somebody's screen.
+  await noteMany([{ ref: venueRef }], { ownership: 'claimed' }).catch(() => null);
 }
 
 /** Has any household actually asked for this place, or is it only swept? */

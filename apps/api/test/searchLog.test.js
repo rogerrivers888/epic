@@ -1039,3 +1039,24 @@ test('the settling pass takes the longest-waiting first, so nothing holds the fr
     'select settle_tried_at is not null as tried from place_index where venue_ref = $1', [behind]);
   assert.equal(tried.tried, true, 'and it is marked as tried, so the next hand moves on');
 });
+
+/**
+ * Both ways a household claims a place.
+ *
+ * Saving one writes `household_places`; a suggested shortlist item and a trip's
+ * own base write only `place_claims`. Reading the first alone left exactly the
+ * places somebody asked for filed as identified, where Collect's claimed lane
+ * could not see them (Codex, 18 Sep 2026).
+ */
+test('a place claimed only through place_claims is claimed, live and after a rebuild', async () => {
+  const { household } = await aHousehold(query);
+  const ref = 'test:claimed-by-claim-only';
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  await owned.claim(household.id, ref, 'shortlist');
+
+  const owner = async () => (await query('select ownership from place_index where venue_ref = $1', [ref])).rows[0]?.ownership;
+  assert.equal(await owner(), 'claimed', 'the moment they ask for it');
+
+  await index.reindex();
+  assert.equal(await owner(), 'claimed', 'and after the index is rebuilt from scratch');
+});
