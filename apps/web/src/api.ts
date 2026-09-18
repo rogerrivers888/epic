@@ -1454,6 +1454,8 @@ export type PlaceQuality = {
   stale: { key: string; label: string; n: number }[];
   worth: {
     ref: string; name: string | null; subcategory: string | null; outcode: string | null;
+    /** The name is the search term that found it, not the place's own (namesFor). */
+    standIn?: boolean;
     sources: string[];
     /** A word, never a figure: the rating is banded at the call and the number dropped. */
     rating: string | null; been: string | null; score: number | null;
@@ -1484,6 +1486,8 @@ export type PlaceRing = {
 
 export type PlaceRow = {
   ref: string; name: string | null; nameFrom: string | null;
+  /** The name is the search term that found it, not the place's own (namesFor). */
+  standIn?: boolean;
   category: string | null; subcategory: string | null; outcode: string | null;
   score: number | null; ready: boolean; ownership: string; oldestFact: string | null;
   /** `yes` held, `no` a hole, `n/a` not judged on it, `yes-uncounted` held but not counted. */
@@ -1502,7 +1506,7 @@ export type PlaceField = {
 };
 
 export type PlaceDetail = {
-  ref: string; name: string | null; nameFrom: string | null;
+  ref: string; name: string | null; nameFrom: string | null; standIn?: boolean;
   category: string | null; subcategory: string | null; ownership: string;
   score: number | null; ready: boolean; scoreParts: Record<string, any>;
   oldestFact: string | null; seenBy: number; lat: number | null; lng: number | null; cell: string | null;

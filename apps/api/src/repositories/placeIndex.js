@@ -2018,6 +2018,7 @@ export async function quality(areaSlug, { refs = null, limit = 12 } = {}) {
     ],
     worth: worth.map((w) => ({
       ref: w.venue_ref, name: named.get(w.venue_ref)?.name ?? null,
+      standIn: named.get(w.venue_ref)?.standIn ?? false,
       subcategory: labels.get(w.subcategory) ?? null, outcode: w.outcode ? w.outcode.toUpperCase() : null,
       sources: (w.srcs ?? '').split(',').filter(Boolean),
       // A word, not a figure — and a place nothing rating-bearing has returned
@@ -2093,6 +2094,10 @@ export async function places(areaSlug, {
     const unseen = all.filter((s) => !seen.has(s));
     return {
       ref: r.venue_ref, name: named.get(r.venue_ref)?.name ?? null, nameFrom: named.get(r.venue_ref)?.from ?? null,
+      // True where the name is the search term that found it, not the place's
+      // own — the sweep may not keep a provider's name and is waiting for an
+      // open one (namesFor).
+      standIn: named.get(r.venue_ref)?.standIn ?? false,
       category: r.category, subcategory: r.subcategory, outcode: r.outcode ?? null,
       score: r.data_score, ready: r.ready, ownership: r.ownership, oldestFact: r.oldest_fact,
       facts: Object.fromEntries(FACT_KEYS.map((f) => [f,
@@ -2123,6 +2128,7 @@ export async function namesFor(refs) {
     select pi.venue_ref,
            r.name as own_name,
            a.name as atlas_name,
+           a.display_source,
            -- Named only where the reference itself is an open one.
            --
            -- The sweep keeps a name because OpenStreetMap's is ours to keep;
@@ -2149,7 +2155,15 @@ export async function namesFor(refs) {
   for (const r of rows) {
     const name = r.own_name ?? r.atlas_name ?? r.osm_name ?? null;
     const from = r.own_name ? 'ours' : r.atlas_name ? 'atlas' : r.osm_name ? 'osm' : null;
-    out.set(r.venue_ref, { name, from });
+    // Whether that name is a stand-in rather than the place's own.
+    //
+    // The activity sweep finds a place through Google and may not keep Google's
+    // name, so it writes the search term that found it — "(wildlife park)" —
+    // and waits for an OpenStreetMap match to give it a name we may keep
+    // (activitySweep.js, display_source = 'google'). On screen that read as a
+    // place actually called "(wildlife park)", and a board full of them reads
+    // as broken data rather than as work waiting (owner, 18 Sep 2026).
+    out.set(r.venue_ref, { name, from, standIn: from === 'atlas' && r.display_source === 'google' });
   }
   return out;
 }

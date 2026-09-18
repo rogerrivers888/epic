@@ -142,6 +142,7 @@ export const TIPS = {
   coverageBand: ['Coverage', 'How much of what we could know about our places we actually hold, measured place by place against the nine facts.'],
   howBand: ['How it works', 'A written account of every part of Epic and how the pieces fit, kept beside the code rather than in a folder somewhere.'],
   matchedHeldElsewhere: ['Matched · held elsewhere', 'We know which place this is at that source, and what it gave us is kept in its own place — the atlas keeps its descriptions and pictures with the attraction, not as fields on this record.'],
+  standInName: ['Unnamed yet', 'The sweep found this place through Google, and a provider’s name is rented — so we hold where it is and what we searched for to find it, and not what it is called. It gets a name the day OpenStreetMap is matched to the same point, and that name is ours to keep.'],
   notAsked: ['Not asked', 'We have never spent a call asking this source about this place, so we hold no id for it there. Different from asking and finding nothing.'],
   notCounted: ['Not counted', 'A playground is not judged on this, so it never counts against the score. The bar is set per kind of place.'],
   nothingToCount: ['Nothing to count', 'No source that carries review counts has returned this place, so there is no figure — not a figure of zero.'],

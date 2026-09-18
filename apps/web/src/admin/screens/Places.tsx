@@ -192,7 +192,8 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
     { key: 'ident', label: 'Identified only', tip: 'identifiedOnly', width: 150, align: 'right', sort: 'identified', cell: (c) => <Num n={c.identified || null} /> },
     { key: 'ready', label: 'Ready', tip: 'ready', width: 110, align: 'right', sort: 'ready', cell: (c) => <Pct v={c.ready} strong min={52} /> },
     { key: 'score', label: 'Avg score', tip: 'avgScore', width: 120, align: 'right', sort: 'score', cell: (c) => <Num n={c.avgScore} /> },
-    { key: 'searches', label: 'Searches', note: '30 days', tip: 'searches', width: 140, align: 'right', sort: 'searches',
+    // BO2m's Searches heading is one line (audit, 18 Sep 2026).
+    { key: 'searches', label: 'Searches', tip: 'searches', width: 140, align: 'right', sort: 'searches',
       cell: (c) => <Num n={c.searches || null} /> },
     { key: 'travel', label: 'Travel times', tip: 'travelTimes', width: 160, align: 'right', sort: 'travel', stops: true,
       cell: (c) => (c.travel === 'ready'
@@ -693,7 +694,11 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
   }, [q, by, sort, desc]);
 
   const columns: Col<PlaceAreaRow>[] = [
-    { key: 'name', label: BY_LABEL[by], note: data ? `${data.rows.length.toLocaleString()} of ${data.all.toLocaleString()}` : undefined,
+    // The note belongs to the board, not to the component. BO2a's *County*
+    // heading is bare; BO2n's *City or town* carries "8 of 1,204", because that
+    // is the one that is a slice of something much longer (audit, 18 Sep 2026).
+    { key: 'name', label: BY_LABEL[by],
+      note: by !== 'county' && data ? `${data.rows.length.toLocaleString()} of ${data.all.toLocaleString()}` : undefined,
       tip: by === 'county' ? 'county' : by === 'city' ? 'cityOrTown' : 'whereRow',
       grow: true, sort: 'name',
       cell: (r) => (
@@ -707,7 +712,9 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
     { key: 'ident', label: 'Identified only', tip: 'identifiedOnly', width: 150, align: 'right', sort: 'identified', cell: (r) => <Num n={r.identified || null} /> },
     { key: 'ready', label: 'Ready', tip: 'ready', width: 110, align: 'right', sort: 'ready', cell: (r) => <Pct v={r.ready} strong min={52} /> },
     { key: 'score', label: 'Avg score', tip: 'avgScore', width: 120, align: 'right', sort: 'score', cell: (r) => <Num n={r.avgScore} /> },
-    { key: 'searches', label: 'Searches', note: '30 days', tip: 'searches', width: 130, align: 'right', sort: 'searches', cell: (r) => <Num n={r.searches || null} /> },
+    // BO2a prints "30 days" under Searches and BO2n does not — the same
+    // component, two boards, one note (audit, 18 Sep 2026).
+    { key: 'searches', label: 'Searches', note: by === 'county' ? '30 days' : undefined, tip: 'searches', width: 130, align: 'right', sort: 'searches', cell: (r) => <Num n={r.searches || null} /> },
     { key: 'empty', label: 'Came back empty', note: 'of those searches', tip: 'empty', width: 160, align: 'right', sort: 'empty',
       cell: (r) => <Num n={r.empty || null} accent={r.empty > 0 && r.searches > 0 && r.empty / r.searches > 0.2} strong={r.empty > 0} /> },
   ];
@@ -742,8 +749,12 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
         <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug}
                 onRow={(r) => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)}
                 highlight={(r) => r.slug === worst?.slug}
-                sort={sort} desc={desc}
-                onSort={(k) => { if (k === sort) setDesc(!desc); else { setSort(k); setDesc(true); } }}
+                /* The address writes `sort=empty.desc` and the column is keyed
+                   `empty`, so the header compared the two and never matched —
+                   the rows sorted correctly and nothing said which column they
+                   were sorted by (audit, 18 Sep 2026). */
+                sort={sort.split('.')[0]} desc={desc}
+                onSort={(k) => { if (k === sort.split('.')[0]) setDesc(!desc); else { setSort(k); setDesc(true); } }}
                 /* BO2l's stacked row: the county, what we know there, and the
                    figures as chips. */
                 phoneRow={(r) => ({
@@ -1031,7 +1042,9 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
   );
 
   const columns: Col<any>[] = [
-    { key: 'label', label: 'Our subcategory', note: of ? `${rows.length} of ${of}` : undefined, tip: 'ourSubcategory', grow: true,
+    // BO2p, inside a ring, carries "9 of 9"; BO2c, a county's subcategories,
+    // has a bare heading. One component, two boards (audit, 18 Sep 2026).
+    { key: 'label', label: 'Our subcategory', note: inRing && of ? `${rows.length} of ${of}` : undefined, tip: 'ourSubcategory', grow: true,
       cell: (s) => <Text style={[styles.rowName, s.known === 0 && styles.rowNameEmpty]}>{s.label}</Text> },
     { key: 'known', label: 'Known', tip: 'known', width: 96, align: 'right', cell: (s) => <Num n={s.known || null} /> },
     { key: 'owned', label: 'Owned', tip: 'owned', width: 88, align: 'right', cell: (s) => <Num n={s.owned || null} /> },
@@ -1228,7 +1241,18 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
     { key: 'name', label: 'Place', tip: 'placeWorth', grow: true,
       cell: (r) => (
         <View style={styles.nameCell}>
-          <Text style={[styles.rowName, !r.name && styles.refName]}>{r.name ?? r.ref}</Text>
+          {/* A stand-in is not a name. The sweep finds a place through Google,
+              may not keep Google's name, and writes the words that found it —
+              "(wildlife park)" — until an OpenStreetMap match gives it one we
+              may keep. Drawn as a name it read as broken data; drawn as what it
+              is, it reads as work waiting (owner, 18 Sep 2026). */}
+          {r.standIn ? (
+            <Explain tip="standInName" cursor="help">
+              <Text style={[styles.rowName, styles.refName]}>{`Unnamed ${String(r.name ?? '').replace(/^\(|\)$/g, '')}`}</Text>
+            </Explain>
+          ) : (
+            <Text style={[styles.rowName, !r.name && styles.refName]}>{r.name ?? r.ref}</Text>
+          )}
           {/* Why it is on this list. A place a household has saved is the
               shortest route to something worth doing, so it says so (Codex,
               17 Sep 2026). */}
