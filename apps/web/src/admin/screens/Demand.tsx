@@ -23,8 +23,8 @@ import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { asNumber, asText, useQueryState, useRouter } from '../../router';
 import { api, type DemandReport, type DemandRow, type SearchReplay } from '../../api';
-import { AdminPage, ago, duration, pounds, since as howLongAgo } from '../kit';
-import { Explain } from '../explain';
+import { AdminPage, ago, duration, plural, pounds, since as howLongAgo } from '../kit';
+import { Explain, type Tip, type TipKey } from '../explain';
 import { Ladder, Num, Word, Blank, Bar, Act, Footer, Kicker, Stat, type Col } from '../table';
 
 export function Demand({ canManage }: { canManage: boolean }) {
@@ -87,7 +87,7 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
     <AdminPage>
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 280, minWidth: 0, gap: 5 }}>
-          <Kicker tip="sectionOver">{`${data.area ? data.area.name : 'Everywhere'} · last ${since} days`}</Kicker>
+          <Kicker tip="sectionOver">{`${data.area ? data.area.name : 'Everywhere'} · last ${plural(since, 'day')}`}</Kicker>
           <Text style={styles.title}>{`${data.totals.searches.toLocaleString()} searches`}</Text>
           {/* The second title: the name this screen would have if the owner
               prefers a thing you do to a report. Both are shown so he can see
@@ -255,14 +255,14 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
               empty={<Word muted>Nothing was shown for this search — which is the finding.</Word>} />
 
       <View style={styles.facts}>
-        <Fact label="Sources asked" value={data.sourcesQueried.length ? data.sourcesQueried.join(', ') : '—'} />
-        <Fact label="Any degraded" value={data.degraded.length ? data.degraded.join(', ') : 'no'} />
-        <Fact label="Names re-fetched for this replay" value={data.refetched ? `${data.refetched} · ${pounds(Math.round(data.refetchedPence))}` : 'none'} />
+        <Fact tip="sourcesAsked" label="Sources asked" value={data.sourcesQueried.length ? data.sourcesQueried.join(', ') : '—'} />
+        <Fact tip="anyDegraded" label="Any degraded" value={data.degraded.length ? data.degraded.join(', ') : 'no'} />
+        <Fact tip="namesRefetched" label="Names re-fetched for this replay" value={data.refetched ? `${data.refetched} · ${pounds(Math.round(data.refetchedPence))}` : 'none'} />
         {/* A row we hold no name for stays an identifier, and the reason it
             does is said out loud rather than read as a bill (Codex, 17 Sep
             2026: the count used to price names nothing had fetched). */}
-        {data.nameless ? <Fact label="Still an identifier" value={`${data.nameless}${data.namelessWhy ? ` · ${data.namelessWhy}` : ''}`} /> : null}
-        <Fact label="Held against" value={data.heldAgainst} />
+        {data.nameless ? <Fact tip="stillAnIdentifier" label="Still an identifier" value={`${data.nameless}${data.namelessWhy ? ` · ${data.namelessWhy}` : ''}`} /> : null}
+        <Fact tip="heldAgainst" label="Held against" value={data.heldAgainst} />
       </View>
       {data.nameless && data.namelessWhy === 'not asked' ? (
         <Footer left={<Word muted>{`${data.nameless} of these are identifiers we hold no name for. Asking Google costs a call each.`}</Word>}>
@@ -293,11 +293,16 @@ function askedWords(asked: Record<string, unknown> | null | undefined): string |
   return out.length ? out.join(' · ') : null;
 }
 
-const Fact = ({ label, value }: { label: string; value: string }) => (
-  <View style={{ gap: 2 }}>
+/**
+ * One fact under a replay — and it explains itself, like every other figure on
+ * these screens. The design's own markup leaves these four bare, and the law
+ * above it says every stat label hovers (18 Sep 2026, the separate audit).
+ */
+const Fact = ({ label, value, tip }: { label: string; value: string; tip?: TipKey | Tip }) => (
+  <Explain tip={tip ?? null} style={{ gap: 2 }}>
     <Text style={styles.factLabel}>{label}</Text>
     <Text style={styles.factValue}>{value}</Text>
-  </View>
+  </Explain>
 );
 
 const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityIndicator color={colors.accent} /></View>;

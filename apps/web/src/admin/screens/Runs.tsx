@@ -85,6 +85,15 @@ function RunsBoard({ canManage, canSetCeiling, onFailures }: {
    * every one of these used to silently reload the page).
    */
   const run = useCallback(async (r: Run) => {
+    // A running row's button watches. It used to be wired to the row's own
+    // start action, so pressing "Watch it" on the harvest started a second
+    // harvest (18 Sep 2026, the separate audit). The board *is* the watch — the
+    // state cell draws where it has got to — so this reads it again.
+    if (r.state === 'running') {
+      if (r.key === 'menus') { onFailures('menus'); return; }
+      await load();
+      return;
+    }
     if (r.key === 'menus') { onFailures('menus'); return; }
     if (r.key === 'bench') { navigate('/admin/sources'); return; }
     // These three are asked of a selection of places, not of Britain.
@@ -171,15 +180,19 @@ function RunsBoard({ canManage, canSetCeiling, onFailures }: {
       <Ladder columns={columns} rows={data.runs} keyOf={(r) => r.key}
               highlight={(r) => r.state === 'running'} />
 
-      <Footer>
-        {stranded ? (
+      {/* A rule with nothing under it is a rule for no reason: the footer draws
+          only when there is something in it (18 Sep 2026, the separate audit). */}
+      {stranded ? (
+        <Footer>
+          {(
           // A deploy killed it mid-flight; the harvest is resumable, so picking
           // it up is asking for the regions it never reached.
           <Act label={busy === 'pickup' ? 'Picking it up…' : `Pick up the ${new Date(stranded.started_at).toLocaleDateString([], { day: 'numeric', month: 'long' })} run`}
                tone="solid" disabled={!canManage || busy != null}
                onPress={() => { setBusy('pickup'); api.libraryHarvest({ scope: 'failed' }).finally(() => { setBusy(null); load(); }); }} />
-        ) : null}
-      </Footer>
+          )}
+        </Footer>
+      ) : null}
     </AdminPage>
   );
 }

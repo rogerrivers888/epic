@@ -1281,7 +1281,7 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
           // that way; two tabs with two answers is worse than either (Codex,
           // 17 Sep 2026).
           editable: Boolean(key && OURS_FIELDS.includes(key) && !blank(r.cells.ours)
-            && OUR_HANDS.has(String(from ?? '').toLowerCase())),
+            && !RENTED_FROM.has(String(prov[key]?.source ?? f?.source ?? '').toLowerCase())),
         };
       }),
       ours: OURS_FIELDS,
@@ -1299,8 +1299,19 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
 /** Which of the compared rows are ours, and therefore the only editable ones. */
 const OURS_FIELDS = ['address', 'website', 'summary', 'opening_hours', 'price_range', 'phone', 'curation', 'crowd_band', 'count_band'];
 const OUR_SOURCE = { own: 'ours', atlas: 'the atlas', sweep: 'the sweep' };
-/** Where a value has to have come from for us to be allowed to change it. */
-const OUR_HANDS = new Set(['ours', 'own', 'curate', 'hand', 'claim']);
+/**
+ * What we may not change, because it is not ours.
+ *
+ * A licensed provider's value is rented: editing it would mean writing over
+ * somebody else's record and keeping the result. Everything else in the "ours"
+ * column *is* ours — the open encyclopedias, OpenStreetMap, the venue's own
+ * page, our harvest and our own words — and the design offers Edit on exactly
+ * those (its Website row is sourced "OSM · 11 mo ago" and carries one). Naming
+ * our own hands instead of the rented ones was the same rule inverted, and it
+ * took Edit off every row of every place we have not hand-curated (18 Sep 2026,
+ * the separate audit).
+ */
+const RENTED_FROM = new Set(['google', 'tripadvisor', 'yelp']);
 
 /**
  * A field said the way a household would say it.
@@ -1310,7 +1321,9 @@ const OUR_HANDS = new Set(['ours', 'own', 'curate', 'hand', 'claim']);
  * tables happen to use (Codex, 17 Sep 2026).
  */
 const FACT_WORD = {
-  name: 'Name', address: 'Address', lat: 'Position', lng: 'Position', postcode: 'Postcode',
+  // Two rows both called "Position" was the same word twice for two different
+  // figures (18 Sep 2026, the separate audit).
+  name: 'Name', address: 'Address', lat: 'Latitude', lng: 'Longitude', postcode: 'Postcode',
   opening_hours: 'Opening hours', website: 'Website', phone: 'Telephone', email: 'E-mail',
   summary: 'What it is', image_url: 'Picture we own', photos: 'Pictures they hold',
   crowd_band: 'How well thought of', count_band: 'How busy', rating: 'How well thought of', ratingCount: 'How busy',
@@ -1319,6 +1332,7 @@ const FACT_WORD = {
   menu_url: 'Menu', menu_label: 'Menu', booking_url: 'Booking', socials: 'Where else they are',
   osm_ref: 'OpenStreetMap', wikidata_id: 'Wikidata', wikipedia_url: 'Wikipedia',
   curation: 'What we wrote', epic_score: 'Our score', category: 'Shelf', reviews: 'Reviews',
+  ta_awards: 'Accolades', ta_description: 'What it is', ta_phone: 'Telephone', ta_email: 'E-mail',
   openNow: 'Open now', mapsUrl: 'On their map', aiSummary: 'Their summary', reviewSummary: 'Their summary of reviews',
 };
 

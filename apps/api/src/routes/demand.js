@@ -117,8 +117,13 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
         identified: Boolean(r.account_id),
         asked: r.asked,
       })),
-      // What a replay costs, said before the button is pressed.
-      replayPence: 1,
+      // What a replay costs, said before the button is pressed — from the one
+      // price table, not typed. A penny was the old figure, and the same call
+      // was priced at two and a half on the board beside it (18 Sep 2026, the
+      // separate audit).
+      // One Google name lookup, which is what a replay pays for per place it
+      // holds only an identifier for.
+      replayPence: Math.round(PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP * 100) / 100,
     });
   } catch (err) { next(err); }
 });

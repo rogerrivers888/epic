@@ -51,12 +51,20 @@ export const count = (n: number | null | undefined) => (n == null ? '—' : n.to
  */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-/** "2h 14m", "6m", "48s" — time on site, in the units a person would say. */
+/**
+ * "2h 14m", "6m 30s", "48s" — time, in the units a person would say.
+ *
+ * Under an hour the seconds are kept. Rounding a seventy-two-second dwell to
+ * "1m" threw away the part that tells you whether somebody read the place or
+ * bounced off it, which on a replay is the whole point of the column (18 Sep
+ * 2026, the separate audit).
+ */
 export function duration(seconds: number | null | undefined): string {
   if (!seconds) return '—';
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const mins = Math.round(seconds / 60);
-  if (mins < 60) return `${mins}m`;
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole}s`;
+  const mins = Math.floor(whole / 60);
+  if (mins < 60) return `${mins}m${whole % 60 ? ` ${whole % 60}s` : ''}`;
   const hours = Math.floor(mins / 60);
   return `${hours}h ${mins % 60 ? `${mins % 60}m` : ''}`.trim();
 }

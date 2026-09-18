@@ -15,17 +15,32 @@ import { googleSource } from './google.js';
 import { tripadvisorSource } from './tripadvisor.js';
 import * as visitsRepo from '../repositories/visits.js';
 
+// The nine the board always draws, in BO2h's own order, then everything else.
+//
+// A hole is a finding. Drawing a row only where somebody held the fact meant
+// the four facts the design shows *missing* — an address nobody has, hours
+// nobody has, the picture we do not own, the shelf nothing has filed it under —
+// simply were not on the screen, so the board could not be read for what is
+// absent, which is the one thing it is for (18 Sep 2026, the separate audit).
 export const PAIRS = [
-  ['name', 'name', 'name'], ['category', 'category', 'category'], ['address', 'address', 'address'], ['lat', 'lat', 'lat'], ['lng', 'lng', 'lng'],
-  ['website', 'website', 'website'], ['phone', 'phone', 'ta_phone'], ['opening_hours', 'openingHours', 'openingHours'], ['price_range', 'priceLevel', 'priceLevel'],
+  ['name', 'name', 'name'], ['address', 'address', 'address'], ['opening_hours', 'openingHours', 'openingHours'],
+  ['website', 'website', 'website'], ['summary', 'summary', 'ta_description'], ['image_url', 'photos', null],
+  ['count_band', 'ratingCount', 'ratingCount'], [null, null, 'ta_awards'], ['category', 'category', 'category'],
+  ['lat', 'lat', 'lat'], ['lng', 'lng', 'lng'],
+  ['phone', 'phone', 'ta_phone'], ['price_range', 'priceLevel', 'priceLevel'],
   ['cuisines', 'cuisines', 'cuisines'], ['experiences', 'experiences', 'experiences'], ['dietary_options', 'dietaryOptions', null],
-  ['good_for_children', 'goodForChildren', 'goodForChildren'], ['summary', 'summary', 'ta_description'], ['image_url', 'photos', null],
+  ['good_for_children', 'goodForChildren', 'goodForChildren'],
   ['booking_url', 'reservable', null], ['menu_url', null, null], ['menu_label', null, null], ['email', null, 'ta_email'], ['socials', null, null],
   ['accessibility', null, null], ['postcode', null, null], ['osm_ref', null, null], ['wikidata_id', null, null], ['wikipedia_url', null, null],
-  ['curation', null, null], ['crowd_band', 'rating', 'rating'], ['count_band', 'ratingCount', 'ratingCount'], ['epic_score', null, 'ta_ranking_data'],
+  ['curation', null, null], ['crowd_band', 'rating', 'rating'], ['epic_score', null, 'ta_ranking_data'],
   [null, 'aiSummary', null], [null, 'reviewSummary', null], [null, 'reviews', 'reviews'], [null, 'openNow', null], [null, 'mapsUrl', 'externalUrl'], [null, 'menuForChildren', null],
-  [null, null, 'ta_awards'], [null, null, 'ta_subratings'], [null, null, 'ta_trip_types'], [null, null, 'ta_review_rating_count'], [null, null, 'labels'],
+  [null, null, 'ta_subratings'], [null, null, 'ta_trip_types'], [null, null, 'ta_review_rating_count'], [null, null, 'labels'],
 ];
+
+/** The rows drawn whether or not anybody holds them (BO2h's nine facts). */
+export const ALWAYS = new Set([
+  'name', 'address', 'opening_hours', 'website', 'summary', 'image_url', 'count_band', 'ta_awards', 'category',
+]);
 export const COLS = ['ours', 'google', 'tripadvisor'];
 export const OUR_LABEL = { own: 'Owned record', atlas: 'The atlas', sweep: 'The sweep' };
 const details = new Map();
@@ -82,7 +97,8 @@ export function lineUp(fields) {
   const used = { ours: new Set(), google: new Set(), tripadvisor: new Set() };
   for (const trio of PAIRS) {
     const keys = Object.fromEntries(COLS.map((c, n) => [c, trio[n]]));
-    const present = COLS.some((c) => keys[c] && fields[c] && keys[c] in fields[c]);
+    const present = COLS.some((c) => keys[c] && fields[c] && keys[c] in fields[c])
+      || trio.some((k) => k && ALWAYS.has(k));
     if (!present) continue;
     const cells = {};
     for (const c of COLS) { if (keys[c] && fields[c] && keys[c] in fields[c]) cells[c] = fields[c][keys[c]]; if (keys[c]) used[c].add(keys[c]); }

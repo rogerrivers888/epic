@@ -217,7 +217,7 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
             places in it, so adding one is the owner's to do in the back office's
             own data screens rather than a button that guesses. Said plainly
             rather than drawn as a control that does nothing. */}
-        <Act label="Add a country" tone="secondary" disabled onPress={() => {}} />
+        <Explain tip="addACountry"><Act label="Add a country" tone="secondary" disabled onPress={() => {}} /></Explain>
       </Footer>
       {busy ? <Waiting /> : null}
     </AdminPage>
@@ -663,7 +663,7 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
                 empty={<Word muted>Nothing indexed here yet.</Word>} />
       ) : <Waiting />}
       <Footer>
-        <Act label="Add a country" tone="secondary" disabled onPress={() => {}} />
+        <Explain tip="addACountry"><Act label="Add a country" tone="secondary" disabled onPress={() => {}} /></Explain>
         {/* Where the gap is, on the Collect lens — the same door every other
             board's Collect opens (Codex, 17 Sep 2026). */}
         {worst ? <Act label={`Collect in ${worst.name}`} icon="download" disabled={!canManage} onPress={() => onCollectIn(worst.slug)} /> : null}
@@ -1122,7 +1122,14 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
 const beenWord = (band: string) => ({ thousands: 'thousands', many: 'many', hundreds: 'hundreds', few: 'a few' } as Record<string, string>)[band] ?? band;
 const sourcesSentence = (s: string[]) =>
   (s.length === 0 ? null : s.length === 1 ? `${sourceWord(s[0])} only` : s.length === 2 ? `${sourceWord(s[0])} and ${sourceWord(s[1])}` : s.map(sourceWord).join(', '));
-const sourceWord = (k: string) => ({ google: 'Google', osm: 'OSM', atlas: 'Atlas', sweep: 'the sweep', tripadvisor: 'Tripadvisor', own: 'ours' } as Record<string, string>)[k] ?? k;
+// Every source that can reach the index, said the way the board says it. A key
+// with no word printed itself — a row read "wikidata only" (18 Sep 2026, the
+// separate audit).
+const sourceWord = (k: string) => ({
+  google: 'Google', osm: 'OSM', atlas: 'Atlas', sweep: 'the sweep', tripadvisor: 'Tripadvisor',
+  own: 'ours', wikidata: 'Wikidata', wikipedia: 'Wikipedia', commons: 'Commons',
+  photo: 'a household photograph', council: 'the council', mapillary: 'Mapillary',
+} as Record<string, string>)[k] ?? k;
 
 const toggle = (set: Set<string>, key: string) => {
   const next = new Set(set);
@@ -1192,9 +1199,14 @@ function DemandLens({ q, canManage, onCollect }: { q: any; canManage: boolean; o
       {/* Whose figures these are, where they are not this area's own: a point
           search is recorded against a county, so a town with no cells of its
           own reads its county's (17 Sep 2026). Said once, above the ladder. */}
+      {/* Whose figures these are, in three words with the reason behind a hover:
+          a sentence on a board is prose, and there is none on these screens
+          (README law 1; 18 Sep 2026, the separate audit). */}
       {data.figuresFrom ? (
         <View style={styles.subRow}>
-          <Word muted>{`${data.figuresFrom.name}'s figures — ${data.figuresFrom.why}.`}</Word>
+          <Explain tip={['Whose figures', `These are ${data.figuresFrom.name}'s, because ${data.figuresFrom.why}.`]}>
+            <Kicker>{`${data.figuresFrom.name}'s figures`}</Kicker>
+          </Explain>
         </View>
       ) : null}
       <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.subject ?? 'anything'}
@@ -1969,7 +1981,14 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
       <View style={styles.recordHead}>
         <Explain tip="fact" style={{ width: 180 }}><Text style={styles.headLabelSmall}>Fact</Text></Explain>
         {data.columns.map((c) => (
-          <Explain key={c.key} tip={c.key === 'ours' ? 'ours' : c.key === 'google' ? 'google' : 'sourceTripadvisor'} style={{ flex: 1 }}>
+          <Explain key={c.key}
+                   tip={c.key !== 'ours' ? (c.key === 'google' ? 'google' : 'sourceTripadvisor')
+                     // The header prints which of ours it is — "The atlas", "The
+                     // sweep", "Owned record" — so the hover has to say the same
+                     // thing the header says (18 Sep 2026, the separate audit).
+                     : c.label === 'Ours' ? 'ours'
+                       : ['Ours', `What we hold ourselves on this place, and it came from ${c.label.toLowerCase()}. Every value here is ours to keep; a provider's never lands in it.`]}
+                   style={{ flex: 1 }}>
             <Text style={[styles.headLabelSmall, c.key === 'ours' && { color: colors.accent }]}>{c.label}</Text>
           </Explain>
         ))}
@@ -1987,6 +2006,11 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
                     (Codex, 17 Sep 2026). */}
                 {c.state !== 'held' ? missing(c)
                   : v ? <Text style={styles.fieldValue} numberOfLines={2}>{v}</Text>
+                  /* Our own hole is said in words, not as a dash: the board is
+                     read for what is absent, and "we hold none" is the finding
+                     (18 Sep 2026, the separate audit). A provider's blank cell
+                     stays a dash — they answered, they just hold nothing. */
+                  : c.key === 'ours' ? <Explain tip="weHoldNoneOfThis"><Word muted>we hold none</Word></Explain>
                   : <Blank />}
                 {c.key === 'ours' && v && r.editable && canManage ? (
                   <Explain tip="editableColumn">
@@ -2024,7 +2048,11 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
         </View>
       ) : null}
 
-      <Footer left={<Text style={styles.rowNote}>{data.columns.map((c) => `${c.label}: ${c.filled ?? 0} of ${c.of ?? 0}`).join('  ·  ')}</Text>}>
+      <Footer left={(
+        <Explain tip="howMuchEachColumnFilled">
+          <Text style={styles.rowNote}>{data.columns.map((c) => `${c.label}: ${c.filled ?? 0} of ${c.of ?? 0}`).join('  ·  ')}</Text>
+        </Explain>
+      )}>
         {/* The price comes from the API. It was written into the bundle as
             £0.014 — the old figure, about half the real one (Codex, 18 Sep
             2026) — and a price a screen holds itself goes stale the day it
