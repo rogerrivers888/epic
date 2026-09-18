@@ -575,6 +575,19 @@ export async function approve(ids, who) {
       }
       const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', chat_reply: 'chat_replies' }[r.subject_type];
       if (table) await run(`update ${table} set hidden = false where id = $1::uuid`, [r.subject_id]);
+      // And the copy the rejection withdrew. Approving from the Rejected lane is
+      // undoing a decision, and undoing half of it left the queue saying
+      // approved while the offer's FAQ stayed blank (Codex, 18 Sep 2026).
+      //
+      // Only moderation's own withdrawals. A host can take a question off their
+      // own offer, and putting that back would be overruling them with no trace
+      // (migration 175).
+      if (r.subject_type === 'chat_topic' || r.subject_type === 'chat_reply') {
+        const column = r.subject_type === 'chat_topic' ? 'source_topic_id' : 'source_reply_id';
+        await run(
+          `update chat_faq_entries set withdrawn_at = null, withdrawn_by = null
+            where ${column} = $1::uuid and withdrawn_by = 'moderation'`, [r.subject_id]);
+      }
     }
     return { rows, touched: [...touched] };
   });
@@ -801,7 +814,7 @@ async function suppress(subjectType, subjectId, { reason, who, run = query }) {
     if (subjectType === 'chat_topic' || subjectType === 'chat_reply') {
       const column = subjectType === 'chat_topic' ? 'source_topic_id' : 'source_reply_id';
       await run(
-        `update chat_faq_entries set withdrawn_at = now()
+        `update chat_faq_entries set withdrawn_at = now(), withdrawn_by = 'moderation'
           where ${column} = $1::uuid and withdrawn_at is null`, [subjectId]);
     }
     // An open entry is ended as well as hidden. There is a unique index over

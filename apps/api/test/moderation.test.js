@@ -821,4 +821,17 @@ test('rejecting a topic withdraws the FAQ it was published into', async () => {
   assert.equal((await chat.faqOf(offer.id)).length, 0, 'the copy goes with the original');
   assert.equal((await chat.faqOf(offer.id, { includeWithdrawn: true })).length, 1,
     'withdrawn, not erased: a decision has to stay reviewable');
+
+  // Reversing the decision puts it back. Undoing half of it left the queue
+  // saying approved while the offer's FAQ stayed blank (Codex, 18 Sep 2026).
+  await queue.approve([q.id], null);
+  assert.equal((await chat.faqOf(offer.id)).length, 1, 'approving from the rejected lane restores it');
+
+  // But a question the host took down themselves is theirs. Moderation putting
+  // that back would overrule them with no trace (migration 175).
+  const [entry] = await chat.faqOf(offer.id);
+  await chat.withdrawFaq(entry.id);
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+  await queue.approve([q.id], null);
+  assert.equal((await chat.faqOf(offer.id)).length, 0, 'the host’s own withdrawal stands');
 });

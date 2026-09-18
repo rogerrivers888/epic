@@ -407,7 +407,11 @@ export async function bumpFaqAskCount(id, client) {
 }
 
 export async function withdrawFaq(id) {
-  const { rows } = await query('update chat_faq_entries set withdrawn_at = now() where id = $1 and withdrawn_at is null returning *', [id]);
+  // The host's own doing, said so — a rejection reversed puts back what
+  // moderation withdrew and never what the host did (migration 175).
+  const { rows } = await query(
+    `update chat_faq_entries set withdrawn_at = now(), withdrawn_by = 'host'
+      where id = $1 and withdrawn_at is null returning *`, [id]);
   return rows[0] ?? null;
 }
 
