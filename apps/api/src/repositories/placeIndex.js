@@ -681,10 +681,22 @@ async function settleWhileLocked(limit) {
   // Same reason as `buildIfEmpty`: a first sweep on a fresh installation must
   // not score its places against a bar nobody has set.
   await seedBars();
+  // Oldest attempt first, never-tried first of all.
+  //
+  // In no order, a row that cannot be placed — the postcode service down, a
+  // point nobody answers about — held the front of the queue for ever, and past
+  // five thousand waiting the places behind it were never reached at all
+  // (Codex, 18 Sep 2026; migration 171).
   const { rows: waiting } = await query(
-    'select venue_ref from place_index where placed_at is null limit $1', [limit]);
+    `select venue_ref from place_index
+      where placed_at is null
+      order by settle_tried_at nulls first
+      limit $1`, [limit]);
   if (!waiting.length) return { settled: 0 };
   const refs = waiting.map((r) => r.venue_ref);
+  // Marked as tried before the work, so a hand that throws still goes to the
+  // back rather than being taken again immediately.
+  await query('update place_index set settle_tried_at = now() where venue_ref = any($1)', [refs]);
 
   // 0 — the country, where something knows it and the row does not.
   //

@@ -987,3 +987,30 @@ test('a place saved abroad makes its country reachable', async () => {
   const { rows: [again] } = await query(`select name from localities where slug = 'pt'`);
   assert.equal(again?.name, 'Portugal', 'the rebuild knows the whole index and asks for all of them');
 });
+
+/**
+ * A place that cannot be settled lets the next one through.
+ *
+ * The hourly pass took a hand of rows in no order at all, so one that could not
+ * be placed held the front of the queue for ever — and past the hand's size the
+ * places behind it were never reached, never shelved, never scored and never
+ * counted (Codex, 18 Sep 2026).
+ */
+test('the settling pass takes the longest-waiting first, so nothing holds the front', async () => {
+  const stuck = 'test:cannot-be-placed';
+  const behind = 'test:waiting-behind-it';
+  await index.noteMany([{ ref: stuck }, { ref: behind }], { source: 'own' });
+  await query('update place_index set placed_at = null, settle_tried_at = null where venue_ref = any($1)', [[stuck, behind]]);
+  // The one in front has been tried already; the other never has.
+  await query(`update place_index set settle_tried_at = now() where venue_ref = $1`, [stuck]);
+
+  const { rows: order } = await query(
+    `select venue_ref from place_index where venue_ref = any($1)
+      order by settle_tried_at nulls first`, [[stuck, behind]]);
+  assert.equal(order[0].venue_ref, behind, 'the one nobody has tried goes first');
+
+  await index.settleNew({ limit: 5000 });
+  const { rows: [tried] } = await query(
+    'select settle_tried_at is not null as tried from place_index where venue_ref = $1', [behind]);
+  assert.equal(tried.tried, true, 'and it is marked as tried, so the next hand moves on');
+});
