@@ -406,7 +406,12 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null } =
       -- which BO5a puts in their own section at the end. They were interleaved
       -- by age, so a run of flags sat in the middle of a queue of people's
       -- words (18 Sep 2026, the separate audit).
-      order by q.reported desc, (q.kind = 'data'), q.made_at asc`, [kind, state, areaSlug]);
+      -- Urgent means a complaint nobody has answered — the same pair the lane
+      -- and the figure above it read. The flag alone put an edited-after-being-
+      -- decided row ahead of everything, about a report that had already been
+      -- dealt with (Codex, 18 Sep 2026).
+      order by (q.reported and (q.report_cleared_at is null or q.reported_at > q.report_cleared_at)) desc,
+               (q.kind = 'data'), q.made_at asc`, [kind, state, areaSlug]);
   return rows;
 }
 
