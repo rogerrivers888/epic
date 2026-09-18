@@ -250,12 +250,13 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
     source: v.source, contributingSources: v.contributingSources, ratingSource: v.source, shortlisted: shortlisted.has(v.venueRef),
   });
   const add = async (v: FindResult) => {
-    // Shortlisting from Find is the outcome this surface is measured by.
-    noteSearchEvent('trip', 'shortlist', v.venueRef);
     await api.addToShortlist(trip.id, {
       venueRef: v.venueRef, venueLabel: v.name, category: v.category, lat: v.lat, lng: v.lng,
       venue: { name: v.name, category: v.category, cuisines: v.cuisines, experiences: v.experiences, rating: v.rating, ratingCount: v.ratingCount, priceLevel: v.priceLevel, lat: v.lat, lng: v.lng, photos: v.photos, address: v.address, website: v.website, openingHours: v.openingHours } as Partial<Venue>,
     });
+    // Counted once it is saved, not once it is pressed: a shortlist that failed
+    // is not an outcome (Codex, 18 Sep 2026).
+    noteSearchEvent('trip', 'shortlist', v.venueRef);
     await onChanged();
   };
   const setCat = (cat: FindCat) => { setFind((cur) => ({ ...cur, cat, kinds: [], picked: true })); setShown(20); setSheet(null); };

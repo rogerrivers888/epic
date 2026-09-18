@@ -843,8 +843,13 @@ async function runShortlistSearch(req, { onProgress = null } = {}) {
     householdId: household.id, accountId: req.account?.id ?? null, surface: 'trip',
     ...(await searchLog.whereOf({ lat: center.lat, lng: center.lng })),
     lat: center.lat, lng: center.lng, radiusKm, tripId: trip.id,
-    asked: { q: q || null, categories, radiusKm },
-    subject: categories[0] ?? (q || null),
+    // That text was typed, never the text itself.
+    //
+    // The log holds our own vocabulary and no free words — a household's own
+    // sentence is theirs, and a report is not a reason to keep it for ever
+    // (Codex, 18 Sep 2026). Every other surface already said it this way.
+    asked: { typed: Boolean(q), categories, radiusKm },
+    subject: categories[0] ?? null,
     shownTotal: kept.length,
     shown: Object.entries(kept.reduce((acc, v) => {
       const k = v.category ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc;

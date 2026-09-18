@@ -375,6 +375,24 @@ async function reindexWhileLocked({ onProgress }) {
 
   await retire();
 
+  // Every country the index holds places in gets a row you can point at.
+  //
+  // `settleNew()` makes one as a place arrives, which does not help a place that
+  // was already there when the level was built: on an upgrade the index is empty
+  // when migration 169 runs, and the first build then marks everything placed —
+  // so a Portuguese place saved months ago would never have got its country
+  // (Codex, 18 Sep 2026). The rebuild knows the whole index, so it asks here.
+  await query(
+    `insert into localities (slug, name, kind, country_code, nation)
+     select distinct lower(pi.country_code),
+            coalesce(n.name, upper(pi.country_code)), 'country', upper(pi.country_code), null
+       from place_index pi
+       left join (select * from unnest($1::text[], $2::text[]) as t(code, name)) n
+              on n.code = upper(pi.country_code)
+      where pi.country_code is not null
+     on conflict (slug) do nothing`,
+    [Object.keys(COUNTRY_NAMES), Object.values(COUNTRY_NAMES)]);
+
   onProgress?.({ stage: 'places' });
 
   // 2 — who has ever returned each of them.

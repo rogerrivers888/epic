@@ -979,4 +979,11 @@ test('a place saved abroad makes its country reachable', async () => {
   const { rows: [area] } = await query(
     `select count(*)::int as n from place_areas where venue_ref = $1 and area_slug = 'pt'`, [ref]);
   assert.equal(area.n, 1, 'and the place is filed under it');
+
+  // And a place that was already in the index when the level was built — the
+  // upgrade case, where nothing is arriving and `settleNew` has nothing to do.
+  await query(`delete from localities where slug = 'pt'`);
+  await index.reindex();
+  const { rows: [again] } = await query(`select name from localities where slug = 'pt'`);
+  assert.equal(again?.name, 'Portugal', 'the rebuild knows the whole index and asks for all of them');
 });
