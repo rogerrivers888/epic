@@ -959,12 +959,25 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
                   const c = groupOfCategory(s.category);
                   if (!c) return null;
                   return (
+                    // A heading is a thing you hover: these eight were the only
+                    // headings on the board that explained nothing (18 Sep 2026,
+                    // the heading census).
                     <View style={styles.groupRow}>
-                      <Text style={[styles.group, { flex: 1 }]}>{`${c.label.toUpperCase()} · ${c.subcategories.length} subcategories`}</Text>
-                      <Text style={[styles.groupNum, { width: 96 }]}>{c.known ? c.known.toLocaleString() : '—'}</Text>
-                      <Text style={[styles.groupNum, { width: 88 }]}>{c.owned ? c.owned.toLocaleString() : '—'}</Text>
-                      <Text style={[styles.groupNum, { width: 96 }]}>{c.ready == null ? '—' : `${c.ready}%`}</Text>
-                      <Text style={[styles.groupNum, { width: 104 }]}>{c.avgScore ?? '—'}</Text>
+                      <Explain tip="ourCategory" style={{ flex: 1 }}>
+                        <Text style={styles.group}>{`${c.label.toUpperCase()} · ${c.subcategories.length} subcategories`}</Text>
+                      </Explain>
+                      <Explain tip="known" style={{ width: 96, alignItems: 'flex-end' }}>
+                        <Text style={styles.groupNum}>{c.known ? c.known.toLocaleString() : '—'}</Text>
+                      </Explain>
+                      <Explain tip="owned" style={{ width: 88, alignItems: 'flex-end' }}>
+                        <Text style={styles.groupNum}>{c.owned ? c.owned.toLocaleString() : '—'}</Text>
+                      </Explain>
+                      <Explain tip="readyShort" style={{ width: 96, alignItems: 'flex-end' }}>
+                        <Text style={styles.groupNum}>{c.ready == null ? '—' : `${c.ready}%`}</Text>
+                      </Explain>
+                      <Explain tip="avgScoreCategory" style={{ width: 104, alignItems: 'flex-end' }}>
+                        <Text style={styles.groupNum}>{c.avgScore ?? '—'}</Text>
+                      </Explain>
                       <View style={{ width: 300 }} />
                     </View>
                   );
