@@ -508,14 +508,14 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
   const narrow = width < PHONE;
   return (
     <View style={styles.lensRow}>
-      <View style={[styles.lensLeft, narrow && styles.lensLeftPhone]}>
+      <View style={[styles.lensLeft, narrow && styles.lensLeftPhone, narrow && styles.lensLeftPhoneWidth]}>
         <Kicker tip="sectionCutBy">Cut by</Kicker>
         {/* BO2l draws this row clipped, ending in "Qua…" — six words will not
             fit 390 and must not be allowed to wrap into a block either. A
             sideways scroller keeps every lens reachable and the row one line. */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.lenses}
-                    style={narrow ? styles.lensScrollPhone : { flexShrink: 1, minWidth: 0 }}>
+                    style={narrow ? [styles.lensScrollPhone, { width: '100%' }] : { flexShrink: 1, minWidth: 0 }}>
           {/* All six, not one: the lens words are this board's main control and
               five of them said nothing on hover (18 Sep 2026, the separate
               audit). */}
@@ -711,6 +711,18 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
                 onRow={(r) => onWhere(r.slug)} highlight={(r) => r.slug === worst?.slug}
                 sort={sort} desc={desc}
                 onSort={(k) => { if (k === sort) setDesc(!desc); else { setSort(k); setDesc(true); } }}
+                /* BO2l's stacked row: the county, what we know there, and the
+                   figures as chips. */
+                phoneRow={(r) => ({
+                  name: r.name,
+                  note: `${BY_LABEL[by].toLowerCase()} · ${r.known.toLocaleString()} known`,
+                  chips: [
+                    { key: 'ready', word: `ready ${r.ready == null ? '—' : `${r.ready}%`}`, tip: 'ready', lead: true },
+                    { key: 'owned', word: `owned ${r.owned.toLocaleString()}`, tip: 'owned' },
+                    { key: 'ident', word: `identified only ${r.identified.toLocaleString()}`, tip: 'identifiedOnly' },
+                    ...(r.searches ? [{ key: 'searches', word: `${r.searches.toLocaleString()} searches`, tip: 'searches' as const }] : []),
+                  ],
+                })}
                 empty={<Word muted>Nothing indexed here yet.</Word>} />
       ) : <Waiting />}
       <Footer>
@@ -2887,6 +2899,10 @@ const styles = StyleSheet.create({
 
   // the lens row
   lensRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap' },
+  // The label-above-lenses column has to be told it may be narrower than its
+  // content, or it takes the width of six lenses and carries the row off the
+  // frame with it (measured at 390, 18 Sep 2026).
+  lensLeftPhoneWidth: { width: '100%', maxWidth: '100%' },
   lensLeft: { flexDirection: 'row', alignItems: 'center', gap: 20, flexWrap: 'wrap' },
   // A phone stacks them: the label, then the lenses on one scrolling line.
   lensLeftPhone: { flexDirection: 'column', alignItems: 'stretch', gap: 8, alignSelf: 'stretch', minWidth: 0 },
