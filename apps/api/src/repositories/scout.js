@@ -801,9 +801,15 @@ export async function rescoreOne(venueRef, epicScore, ownedScore) {
   // were reported as saved (Codex, 18 Sep 2026). Scores are not among the facts
   // that make a record *ours* (domain/placeIndex.js), so a row holding only
   // these is still an identified place rather than an owned one.
+  // `enrich_state` is said out loud, because the column's default is `pending`
+  // and the owned-place loop picks every pending row up and goes off to
+  // OpenStreetMap, Nominatim and the encyclopedias. A recalculation is
+  // arithmetic — it says "free" on the button — and creating a row to hold its
+  // answer must not book somebody else's network work (Codex, 18 Sep 2026). A
+  // row that already exists keeps whatever state it has.
   await query(
-    `insert into place_records (venue_ref, epic_score, owned_score, scored_at, updated_at)
-     values ($1, $2, $3, now(), now())
+    `insert into place_records (venue_ref, epic_score, owned_score, scored_at, enrich_state, updated_at)
+     values ($1, $2, $3, now(), 'scored', now())
      on conflict (venue_ref) do update
         set epic_score = excluded.epic_score, owned_score = excluded.owned_score,
             scored_at = now(), updated_at = now()`,

@@ -828,3 +828,26 @@ test('two refreshes at once both finish, and the figures are whole', async () =>
          from area_stats group by 1,2,3,4,5 having count(*) > 1) d`);
   assert.equal(dupes.n, 0, 'and nothing is in there twice');
 });
+
+/**
+ * A recalculation is arithmetic, and must not book somebody else's network work.
+ *
+ * `place_records.enrich_state` defaults to `pending`, and the owned-place loop
+ * picks up every pending row and goes off to OpenStreetMap, Nominatim and the
+ * encyclopedias. Writing a row to hold a score therefore scheduled research
+ * from a button that says "free" (Codex, 18 Sep 2026).
+ */
+test('a row written to hold a score is not a research job, until somebody claims the place', async () => {
+  const ref = 'test:scored-only';
+  const scout = await import('../src/repositories/scout.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  await scout.rescoreOne(ref, 4.2, 4.2);
+  const state = async () => (await query('select enrich_state from place_records where venue_ref = $1', [ref])).rows[0]?.enrich_state;
+  assert.equal(await state(), 'scored');
+  const due = await owned.dueForResearch(200);
+  assert.ok(!due.some((r) => r.venue_ref === ref), 'and nothing is queued to go and look');
+
+  // A household touching it is a reason to research it.
+  await owned.ensureRecord(ref);
+  assert.equal(await state(), 'pending');
+});

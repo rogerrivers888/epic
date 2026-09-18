@@ -257,11 +257,22 @@ async function runLookup({ q, minutes, mode }, household, { afford = null } = {}
   // cache is consulted first, and only a fetch has to be afforded.
   let purse = { without: [], release: async () => {} };
   if (afford && !searchKept(params)) purse = await afford();
-  const r = await searchCached({
-    ...params,
-    sources: params.sources.filter((k) => !purse.without.includes(k)),
-  }).finally(() => purse.release());
-  if (r.fetched) await visitsRepo.recordProviderCall(household.id, r.sourcesQueried.join('+') || 'none', 'admin.lookup', r.units);
+  // The claim is let go *after* the ledger has the spend, not after the call.
+  //
+  // Released in a `finally` on the search, there was a gap in which a second
+  // lookup saw neither the reservation nor the cost — so both were admitted and
+  // the month's ceiling could be walked past by two people pressing at once
+  // (Codex, 18 Sep 2026). The reservation exists precisely to cover that gap.
+  let r;
+  try {
+    r = await searchCached({
+      ...params,
+      sources: params.sources.filter((k) => !purse.without.includes(k)),
+    });
+    if (r.fetched) await visitsRepo.recordProviderCall(household.id, r.sourcesQueried.join('+') || 'none', 'admin.lookup', r.units);
+  } finally {
+    await purse.release();
+  }
 
   // Our own pools are read whole, up to a ceiling no ring in Britain reaches
   // today — and if one ever does, the answer says the pool was cut rather

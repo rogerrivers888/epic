@@ -61,7 +61,17 @@ export async function discardExpiredFacts() {
 // ---------------------------------------------------------------------------
 
 export async function ensureRecord(venueRef) {
-  await query('insert into place_records (venue_ref) values ($1) on conflict do nothing', [venueRef]);
+  // `scored` is a row that exists only to hold an arithmetic result — the score
+  // tab writes one for a harvested place so a recalculation can be read back,
+  // and deliberately keeps it out of the research queue (repositories/scout.js).
+  // A household touching the place *is* a reason to research it, so that is the
+  // moment it joins the queue (Codex, 18 Sep 2026).
+  await query(
+    `insert into place_records (venue_ref) values ($1)
+     on conflict (venue_ref) do update
+        set enrich_state = case when place_records.enrich_state = 'scored' then 'pending'
+                                else place_records.enrich_state end`,
+    [venueRef]);
   // The row, not the claim.
   //
   // `ensureRecord` runs *before* the research does, so calling the place owned
