@@ -213,6 +213,24 @@ export async function syncFlagged() {
     having count(distinct f.value::text) > 2
     on conflict (subject_type, subject_id) do nothing`);
 
+  // And a disagreement that has gone away goes away.
+  //
+  // A flag is a view of the facts, not a decision somebody made: once the
+  // sources agree — because one was corrected, or a stale value expired — there
+  // is nothing left to look at. Only adding rows meant the queue went on
+  // offering a discrepancy that no longer existed, and there was no way to clear
+  // it except to decide a thing that was not there (Codex, 18 Sep 2026).
+  // A row somebody has already decided is left alone; that is their record.
+  await query(`
+    delete from content_queue q
+     where q.kind = 'data' and q.state = 'waiting' and not q.reported
+       and not exists (
+         select 1 from place_facts f
+          where f.venue_ref = split_part(q.subject_id, '#', 1)
+            and f.field = split_part(q.subject_id, '#', 2)
+          group by f.venue_ref, f.field
+         having count(distinct f.value::text) > 2)`);
+
   // Something rejected that has since been written again comes back.
   //
   // `hidden` is the moderation state on the content itself, and a host review

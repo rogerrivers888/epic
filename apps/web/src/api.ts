@@ -2509,7 +2509,9 @@ export const api = {
   adminPlace: (ref: string) => request<PlaceDetail>(`/api/admin/place-index/place${qs({ ref })}`),
   /** BO2h — ours beside each provider's. Spends: one detail call per place. */
   adminPlaceCompare: (ref: string, match = false) =>
-    request<{ ref: string; name: string | null; columns: CompareColumn[]; rows: CompareRow[]; ours: string[] }>(`/api/admin/place-index/place/compare${qs({ ref, match: match ? 1 : undefined })}`),
+    request<{ ref: string; name: string | null; columns: CompareColumn[]; rows: CompareRow[]; ours: string[];
+      /** What matching it by name and distance costs, in pence, from the API's own price table. */
+      matchPence?: number }>(`/api/admin/place-index/place/compare${qs({ ref, match: match ? 1 : undefined })}`),
   /** BO2r — literally the fields each source returned, and which were never asked. */
   adminPlaceRaw: (ref: string) => request<{ ref: string; sources: RawSource[] }>(`/api/admin/place-index/place/raw${qs({ ref })}`),
   /** BO2r's History: which run changed what. */

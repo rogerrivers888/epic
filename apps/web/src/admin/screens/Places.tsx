@@ -1877,7 +1877,7 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
           <React.Fragment key={which}>
             <Explain tip={which === 'free'
               ? ['Free sources', `${list.map((u) => u.label).join(', ') || 'Nothing'} ${list.length === 1 ? 'has' : 'have'} never been asked about this place. Nothing to spend.`]
-              : ['Paid sources', `${list.map((u) => u.label).join(', ') || 'Nothing'} ${list.length === 1 ? 'has' : 'have'} never been asked. Google is £0.014 a place; Tripadvisor comes out of this month's allowance.`]}
+              : ['Paid sources', `${list.map((u) => `${u.label}${u.pence ? ` (${pounds(Math.round(u.pence))} a place)` : ''}`).join(', ') || 'Nothing'} ${list.length === 1 ? 'has' : 'have'} never been asked. Tripadvisor also comes out of this month's allowance.`]}
                      style={[styles.notChecked, i === 1 && { borderBottomWidth: 0 }]}>
               <Press effect="none" onPress={() => setOpenSources(openSources === which ? null : which)}
                      accessibilityRole="button" accessibilityLabel={`The ${which} sources nobody has asked`}
@@ -2025,7 +2025,14 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
       ) : null}
 
       <Footer left={<Text style={styles.rowNote}>{data.columns.map((c) => `${c.label}: ${c.filled ?? 0} of ${c.of ?? 0}`).join('  ·  ')}</Text>}>
-        {!match ? <Act label="Match it by name and distance · £0.014" disabled={!canManage} onPress={() => setMatch(true)} /> : null}
+        {/* The price comes from the API. It was written into the bundle as
+            £0.014 — the old figure, about half the real one (Codex, 18 Sep
+            2026) — and a price a screen holds itself goes stale the day it
+            moves. */}
+        {!match ? (
+          <Act label={`Match it by name and distance · ${data.matchPence ? pounds(Math.round(data.matchPence)) : 'free'}`}
+               disabled={!canManage} onPress={() => setMatch(true)} />
+        ) : null}
       </Footer>
     </>
   );

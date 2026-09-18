@@ -526,3 +526,40 @@ test('a wordless rating of a place is decidable, and a dish with words is a note
   assert.equal(Number(item.detail.score), 5);
   assert.equal(item.detail.dish, null);
 });
+
+/**
+ * A flag is a view of the facts, not a decision somebody made.
+ *
+ * Once three sources stop disagreeing there is nothing left to look at, and a
+ * queue that only ever adds rows went on offering a discrepancy that no longer
+ * existed (Codex, 18 Sep 2026).
+ */
+test('a disagreement that has gone away goes away, and a decided one stays', async () => {
+  const ref = 'test:disagree';
+  const fact = async (source, value) => query(
+    `insert into place_facts (venue_ref, field, source, value, licence, retention, fetched_at)
+     values ($1, 'phone', $2, to_jsonb($3::text), 'provider', 'session', now())`, [ref, source, value]);
+  await fact('google', '01 111');
+  await fact('osm', '02 222');
+  await fact('atlas', '03 333');
+  await queue.syncFlagged();
+  const row = async () => (await query(
+    `select state from content_queue where subject_type = 'place' and subject_id = $1`, [`${ref}#phone`])).rows[0] ?? null;
+  assert.equal((await row())?.state, 'waiting', 'three values that disagree are a thing to look at');
+
+  // Two of them corrected to the same number: the sources agree now.
+  await query(`update place_facts set value = to_jsonb('01 111'::text) where venue_ref = $1`, [ref]);
+  await queue.syncFlagged();
+  assert.equal(await row(), null, 'and nothing is left to decide');
+
+  // But a flag somebody has already decided is their record, and stays.
+  await fact('tripadvisor', '04 444');
+  await fact('wikidata', '05 555');
+  await queue.syncFlagged();
+  await query(
+    `update content_queue set state = 'rejected', reason = 'theirs'
+      where subject_type = 'place' and subject_id = $1`, [`${ref}#phone`]);
+  await query(`update place_facts set value = to_jsonb('01 111'::text) where venue_ref = $1`, [ref]);
+  await queue.syncFlagged();
+  assert.equal((await row())?.state, 'rejected', 'a decision is not undone by the facts settling');
+});

@@ -1285,6 +1285,11 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         };
       }),
       ours: OURS_FIELDS,
+      // What matching this place by name and distance would cost, from the one
+      // price table. The button said £0.014 in the bundle — the old figure, and
+      // about half the real one (Codex, 18 Sep 2026). A price is the API's to
+      // say; a screen that hard-codes one goes stale the day the price moves.
+      matchPence: googleSource.enabled() && !ref.startsWith('google:') ? MATCH_PENCE : 0,
       // How far a change to the shelf would travel, said on this board too.
       shelf: { subcategory: pi.subcategory, category: pi.category, derivedBy: pi.derived_by },
     });

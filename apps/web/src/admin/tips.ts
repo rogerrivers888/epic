@@ -107,7 +107,7 @@ export const TIPS = {
   field: ['Field', 'Every field a place can carry, whether or not we hold it.'],
   fromHouseholds: ['From households', 'Photographs a household sent us. Ours to keep, unlike a provider\'s.'],
   google: ['Google', 'Rented: identifiers and counts only, with nothing stored.'],
-  googleOnlyNoName: ['Google only, no name', 'Of those, the ones only Google has returned, so we hold no name for them. Fetching a name costs £0.014 each.'],
+  googleOnlyNoName: ['Google only, no name', 'Of those, the ones only Google has returned, so we hold no name for them. Fetching a name is a paid Google request; the board says what the run would cost before it runs.'],
   hours: ['Hours', 'Opening hours, and when they were last checked.'],
   howWeGotToHigh: ['How we got to this word', 'The rating every provider returned, pulled towards 4.15 in proportion to how few reviews there are, then banded: 4.55 and above is top, 4.3 to 4.54 high, 4.0 to 4.29 good, below that mixed. Only the word is kept — the rating and the counts are never written down.'],
   howWeGotToVeryBusy: ['How we got to this word', 'How many people have left a review, added across every provider that returned this place, banded at the moment of the call: two thousand and over is thousands, five hundred is many, a hundred is hundreds, below that a few. The figure itself is not stored.'],
