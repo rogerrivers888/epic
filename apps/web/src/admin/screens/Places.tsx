@@ -469,10 +469,17 @@ function Five({ stats, ring, kind = null, needs = null }: {
   if (width < PHONE) {
     return (
       <View style={styles.fourGrid}>
-        <View style={styles.fourCell}><Stat label="Known" value={said(stats.known)} tip="known" /></View>
-        <View style={styles.fourCell}><Stat label="Owned" value={said(stats.owned)} tip="owned" /></View>
-        <View style={styles.fourCell}><Stat label="Identified only" value={said(stats.identified)} tip="identifiedOnly" accent /></View>
-        <View style={styles.fourCell}><Stat label="Ready" value={stats.ready == null ? '—' : `${stats.ready}%`} tip={readyTip} mark /></View>
+        {/* Two rows of two rather than a wrapping row: a percentage flexBasis
+            does not hold here, and the design's `1fr 1fr` is a grid, not a
+            wrap (BO2l). */}
+        <View style={styles.fourRow}>
+          <View style={styles.fourCell}><Stat label="Known" value={said(stats.known)} tip="known" /></View>
+          <View style={styles.fourCell}><Stat label="Owned" value={said(stats.owned)} tip="owned" /></View>
+        </View>
+        <View style={styles.fourRow}>
+          <View style={styles.fourCell}><Stat label="Identified only" value={said(stats.identified)} tip="identifiedOnly" accent /></View>
+          <View style={styles.fourCell}><Stat label="Ready" value={stats.ready == null ? '—' : `${stats.ready}%`} tip={readyTip} mark /></View>
+        </View>
       </View>
     );
   }
@@ -494,15 +501,21 @@ function Five({ stats, ring, kind = null, needs = null }: {
 
 /** CUT BY — the six lenses, the chosen one a flat lime word with a rule under it. */
 function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => void; right?: React.ReactNode }) {
+  // On a phone the label goes above the words rather than beside them: "Cut by"
+  // plus six lenses is wider than the frame however the six are drawn, and the
+  // row must stay one line of lenses (BO2l draws it clipped, ending "Qua…").
+  const { width } = useViewport();
+  const narrow = width < PHONE;
   return (
     <View style={styles.lensRow}>
-      <View style={styles.lensLeft}>
+      <View style={[styles.lensLeft, narrow && styles.lensLeftPhone]}>
         <Kicker tip="sectionCutBy">Cut by</Kicker>
         {/* BO2l draws this row clipped, ending in "Qua…" — six words will not
             fit 390 and must not be allowed to wrap into a block either. A
             sideways scroller keeps every lens reachable and the row one line. */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.lenses} style={{ flexShrink: 1 }}>
+                    contentContainerStyle={styles.lenses}
+                    style={narrow ? styles.lensScrollPhone : { flexShrink: 1, minWidth: 0 }}>
           {/* All six, not one: the lens words are this board's main control and
               five of them said nothing on hover (18 Sep 2026, the separate
               audit). */}
@@ -2857,8 +2870,9 @@ const styles = StyleSheet.create({
   // Wraps inside itself on a phone rather than being sized to its content and
   // pushed off the 390px frame (live phone audit, 18 Sep 2026).
   // BO2l: `grid-template-columns:1fr 1fr;gap:12px 14px`.
-  fourGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 12, columnGap: 14, flexGrow: 1, flexBasis: 240, minWidth: 0 },
-  fourCell: { flexBasis: '46%', flexGrow: 1, minWidth: 0 },
+  fourGrid: { rowGap: 12, flexGrow: 1, flexBasis: 240, minWidth: 0, alignSelf: 'stretch' },
+  fourRow: { flexDirection: 'row', columnGap: 14 },
+  fourCell: { flex: 1, minWidth: 0 },
 
   five: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap',
@@ -2874,6 +2888,9 @@ const styles = StyleSheet.create({
   // the lens row
   lensRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap' },
   lensLeft: { flexDirection: 'row', alignItems: 'center', gap: 20, flexWrap: 'wrap' },
+  // A phone stacks them: the label, then the lenses on one scrolling line.
+  lensLeftPhone: { flexDirection: 'column', alignItems: 'stretch', gap: 8, alignSelf: 'stretch', minWidth: 0 },
+  lensScrollPhone: { alignSelf: 'stretch', minWidth: 0 },
   lenses: { flexDirection: 'row', alignItems: 'center', gap: 20, flexWrap: 'wrap' },
   lens: { paddingBottom: 3, borderBottomWidth: BORDER, borderBottomColor: 'transparent' },
   lensOn: { borderBottomColor: colors.selected },
