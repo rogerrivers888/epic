@@ -130,7 +130,15 @@ export function Places({ canManage }: { canManage: boolean }) {
     <Level
       where={where} within={within} mode={mode} ring={ring} breakdownBy={breakdownBy}
       lens={lens} cat={cat} sub={sub} phone={phone} canManage={canManage}
-      onWhere={(slug, opts) => { setWhere(slug); setWithin(opts?.within ?? null); setBy(opts?.by ?? ''); setCat(''); setSub(''); }}
+      onWhere={(slug, opts) => {
+        setWhere(slug); setWithin(opts?.within ?? null); setBy(opts?.by ?? ''); setCat(''); setSub('');
+        // An outcode lands on its categories, and the address says so —
+        // BO2o is `/admin/places?where=sl4-1qn&within=30&by=drive&lens=category`.
+        // Nothing is filed *under* an outcode, so the board that lists what is
+        // underneath an area had nothing to draw and said "nothing indexed"
+        // over a hundred and eighty-seven places (owner, 18 Sep 2026).
+        if (opts?.lens) setLens(opts.lens);
+      }}
       onLens={(l) => { setLens(l); setSub(''); }}
       onBy={setBy} onWithin={setWithin}
       onCat={setCat} onSub={setSub} onPlace={setPlace}
@@ -248,7 +256,7 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
 function Level(props: {
   where: string; within: number | null; mode: string; ring: boolean; breakdownBy: By;
   lens: Lens; cat: string; sub: string; phone: boolean; canManage: boolean;
-  onWhere: (slug: string, opts?: { within?: number | null; by?: string }) => void;
+  onWhere: (slug: string, opts?: { within?: number | null; by?: string; lens?: Lens }) => void;
   onLens: (l: Lens) => void; onBy: (b: string) => void; onWithin: (m: number | null) => void;
   onCat: (c: string) => void; onSub: (s: string) => void; onPlace: (ref: string) => void;
   onPictures: () => void; onBar: (sub: string) => void; onUp: () => void;
@@ -318,16 +326,6 @@ function Level(props: {
     if (ring) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
                                                              onCollectIn={(slug) => { props.onWhere(slug); props.onLens('collect'); }} />;
-    // An outcode is the bottom of the map: nothing is filed *under* SL5, so the
-    // board that lists what is underneath an area had nothing to show and said
-    // "nothing indexed" over eighty-three places (owner, 18 Sep 2026: "when I
-    // search under SL5, it returns no results when we're supposed to have got
-    // them"). At the bottom the places themselves are the board.
-    if (level.areaKind === 'postcode') {
-      return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage}
-                          missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames}
-                          onWiden={props.onWithin} within={within} />;
-    }
     return <CoverageBoard q={q} onWhere={props.onWhere} onCollect={() => props.onLens('collect')} />;
   })();
 
@@ -384,7 +382,7 @@ const kickerOf = (l: PlaceLevel) => {
  * of rather than something you leave by a footer link (Codex, 17 Sep 2026).
  */
 function Trail({ level, onUp, onWhere, onSelf, extra = [] }: {
-  level: PlaceLevel; onUp: () => void; onWhere: (slug: string) => void;
+  level: PlaceLevel; onUp: () => void; onWhere: (slug: string, opts?: { lens?: Lens }) => void;
   /** Back to the level itself, out of whatever is open over it. */
   onSelf?: () => void;
   /** The steps below the level itself — the ring, the category, the subcategory. */
@@ -591,7 +589,7 @@ function RingChooser({ minutes, mode, onMinutes, onMode, cells, modesBuilt }: {
 
 /** A county, a town or a postcode. A full postcode opens the ring chooser. */
 function AreaSearch({ onWhere, onPlace }: {
-  onWhere: (slug: string, opts?: { within?: number | null; by?: string }) => void;
+  onWhere: (slug: string, opts?: { within?: number | null; by?: string; lens?: Lens }) => void;
   /** A place found by name opens straight into its drawer. */
   onPlace: (ref: string) => void;
 }) {
@@ -651,7 +649,7 @@ function AreaSearch({ onWhere, onPlace }: {
           ) : null}
           {out.areas.map((a) => (
             <Press key={a.slug} effect="none" accessibilityRole="button" accessibilityLabel={a.name}
-                   onPress={() => { setQ(''); setOut(null); onWhere(a.slug); }} style={styles.suggestRow}>
+                   onPress={() => { setQ(''); setOut(null); onWhere(a.slug, a.kind === 'postcode' ? { lens: 'category' } : undefined); }} style={styles.suggestRow}>
               <Text style={styles.suggestName}>{a.name}</Text>
               <Text style={styles.suggestKind}>
                 {[a.parent ? `${a.kind} · ${a.parent}` : a.kind,
@@ -681,7 +679,7 @@ const Waiting = () => <View style={{ paddingVertical: spacing.xl, alignItems: 'f
 
 function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
   q: any; by: By; onBy: (b: string) => void; canManage: boolean;
-  onWhere: (slug: string, opts?: { within?: number | null; by?: string }) => void;
+  onWhere: (slug: string, opts?: { within?: number | null; by?: string; lens?: Lens }) => void;
   onCollectIn: (slug: string) => void;
 }) {
   const [data, setData] = useState<{ rows: PlaceAreaRow[]; all: number; totals: PlaceStats } | null>(null);
@@ -742,7 +740,8 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
       </View>
       {data ? (
         <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug}
-                onRow={(r) => onWhere(r.slug)} highlight={(r) => r.slug === worst?.slug}
+                onRow={(r) => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)}
+                highlight={(r) => r.slug === worst?.slug}
                 sort={sort} desc={desc}
                 onSort={(k) => { if (k === sort) setDesc(!desc); else { setSort(k); setDesc(true); } }}
                 /* BO2l's stacked row: the county, what we know there, and the
@@ -774,7 +773,7 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
 // ---------------------------------------------------------------------------
 
 function CoverageBoard({ q, onWhere, onCollect }: {
-  q: any; onWhere: (slug: string) => void; onCollect: () => void;
+  q: any; onWhere: (slug: string, opts?: { lens?: Lens }) => void; onCollect: () => void;
 }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCoverage>> | null>(null);
   const load = useCallback(() => { setData(null); api.adminPlaceCoverage(q).then(setData).catch(() => setData(null)); }, [q]);
@@ -811,7 +810,8 @@ function CoverageBoard({ q, onWhere, onCollect }: {
         <View style={{ flex: 1 }} />
       </View>
       {data ? (
-        <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug} onRow={(r) => onWhere(r.slug)}
+        <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug}
+                onRow={(r) => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)}
                 /* "County" was printed whatever the level was, so an outcode
                    was told nothing was indexed under a county (owner, 18 Sep
                    2026: "SL5 is not a county, it is a postcode"). */
@@ -2929,7 +2929,7 @@ const EffectFact = ({ label, big, small, tip }: { label: string; big: string; sm
  */
 function PlacesPhone({ level, q, lens, onLens, onWhere, onUp }: {
   level: PlaceLevel; q: any; lens: Lens;
-  onLens: (l: Lens) => void; onWhere: (slug: string) => void; onUp: () => void;
+  onLens: (l: Lens) => void; onWhere: (slug: string, opts?: { lens?: Lens }) => void; onUp: () => void;
 }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCoverage>> | null>(null);
   useEffect(() => { setData(null); api.adminPlaceCoverage(q).then(setData).catch(() => setData(null)); }, [q]);
@@ -2970,7 +2970,7 @@ function PlacesPhone({ level, q, lens, onLens, onWhere, onUp }: {
       </ScrollView>
 
       {!data ? <Waiting /> : data.rows.map((r, i) => (
-        <Press key={r.slug} effect="none" onPress={() => onWhere(r.slug)} accessibilityRole="button"
+        <Press key={r.slug} effect="none" onPress={() => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)} accessibilityRole="button"
                accessibilityLabel={r.name} style={[styles.phoneRow, i === data.rows.length - 1 && { borderBottomWidth: 0 }]}>
           <View style={{ gap: 2 }}>
             <Text style={styles.rowName}>{r.name}</Text>
