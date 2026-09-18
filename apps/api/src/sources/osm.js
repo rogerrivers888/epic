@@ -115,16 +115,33 @@ function buildQuery({ center, radiusM, categories, query, limit }) {
  * layer (sources/own.js) matches a rented place to its OpenStreetMap element
  * and needs exactly this mapping, without asking Overpass a second time.
  */
-export function venueFromOsmElement(el) {
-  const t = el.tags || {};
-  const lat = el.lat ?? el.center?.lat;
-  const lng = el.lon ?? el.center?.lon;
-  if (lat == null || !t.name) return null;
-  // Street furniture someone tagged as an attraction (a lamp, a plaque, a
-  // bollard) is not a stop; nor is a sight with no name worth planning around.
-  if (t.man_made || ['plaque', 'boundary_stone', 'milestone', 'wayside_cross'].includes(t.historic) || /\b(lamp|plaque|bollard|post box|manhole|drinking fountain)\b/i.test(t.name)) return null;
+/** The street furniture nobody plans a day around. Name-independent half. */
+const FURNITURE_HISTORIC = ['plaque', 'boundary_stone', 'milestone', 'wayside_cross'];
+const FURNITURE_NAME = /\b(lamp|plaque|bollard|post box|manhole|drinking fountain)\b/i;
 
-  let category = 'attraction';
+/**
+ * What kind of place the tags say this is — and nothing about whether it is one
+ * worth drawing.
+ *
+ * Separate from `venueFromOsmElement` because the two questions are separate
+ * and were answered together. That function refuses an element with no name,
+ * which is right for a card on a screen and wrong for a *shelf*: a place we
+ * matched to an unnamed OpenStreetMap node tagged `amenity=restaurant` is a
+ * restaurant, whatever the node is called. Answering both at once meant such a
+ * place took the open map's reference, left the identify queue, and was never
+ * given a category by anything — invisible on every category board for good
+ * (19 Sep 2026, watching the backlog fall while the boards did not move).
+ *
+ * Null where no tag actually decided. The `attraction` default belongs to a
+ * venue being drawn, not to a filing decision: applying it here would shelve
+ * every unnamed node in the country as somewhere to visit.
+ */
+export function kindFromOsmTags(tags) {
+  const t = tags || {};
+  if (t.man_made || FURNITURE_HISTORIC.includes(t.historic)) return null;
+  if (t.name && FURNITURE_NAME.test(t.name)) return null;
+
+  let category = null;
   const experiences = [];
   if (t.shop && SHOP_TO_CATEGORY[t.shop]) category = SHOP_TO_CATEGORY[t.shop];
   if (t.amenity && AMENITY_TO_CATEGORY[t.amenity]) {
@@ -143,6 +160,24 @@ export function venueFromOsmElement(el) {
     experiences.push('history');
     if (['castle', 'fort', 'palace', 'manor'].includes(t.historic)) experiences.push('castle');
   }
+  return category || experiences.length ? { category, experiences } : null;
+}
+
+export function venueFromOsmElement(el) {
+  const t = el.tags || {};
+  const lat = el.lat ?? el.center?.lat;
+  const lng = el.lon ?? el.center?.lon;
+  if (lat == null || !t.name) return null;
+  // Street furniture someone tagged as an attraction (a lamp, a plaque, a
+  // bollard) is not a stop; nor is a sight with no name worth planning around.
+  const kind = kindFromOsmTags(t);
+  if (!kind) {
+    if (t.man_made || FURNITURE_HISTORIC.includes(t.historic) || FURNITURE_NAME.test(t.name)) return null;
+  }
+  // `attraction` where nothing decided: a named thing on the map that is not
+  // furniture is somewhere you could go, even if its tags say no more than that.
+  const category = kind?.category ?? 'attraction';
+  const experiences = [...(kind?.experiences ?? [])];
 
   const cuisines = (t.cuisine || '').split(';').map((c) => c.trim().toLowerCase().replace(/_/g, ' ')).filter(Boolean);
   const dietaryOptions = [];

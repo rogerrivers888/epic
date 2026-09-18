@@ -1818,3 +1818,25 @@ test('a place two providers found is a place two providers found', async () => {
   // cross-provider matches that prove the opposite.
   assert.equal(google.source_place_id, 'ChIJduck', 'with the id that makes it count as coverage');
 });
+
+test('an unnamed node still says what kind of place it is', async () => {
+  const { kindFromOsmTags, venueFromOsmElement } = await import('../src/sources/osm.js');
+  // The case that was silently losing places: matched to the open map, which
+  // holds no name for it — so no card can be drawn — but the tags are perfectly
+  // clear about what it is. A shelf and a card are two different questions.
+  const nameless = { amenity: 'restaurant', cuisine: 'italian' };
+  assert.equal(venueFromOsmElement({ type: 'node', id: '1', lat: 51.4, lon: -0.6, tags: nameless }), null,
+    'nothing to draw without a name');
+  assert.equal(kindFromOsmTags(nameless).category, 'restaurant', 'but the tags still file it');
+
+  // And the default must not leak into a filing decision: `attraction` is what
+  // a named thing on the map gets when nothing else decided, not what every
+  // unnamed node in the country gets.
+  assert.equal(kindFromOsmTags({ barrier: 'gate' }), null, 'nothing decided means nothing filed');
+  assert.equal(venueFromOsmElement({ type: 'node', id: '2', lat: 51.4, lon: -0.6, tags: { name: 'The Long Walk', barrier: 'gate' } })?.category,
+    'attraction', 'a named thing that is not furniture is still somewhere you could go');
+
+  // Street furniture stays out either way, with or without a name.
+  assert.equal(kindFromOsmTags({ man_made: 'street_lamp', amenity: 'cafe' }), null);
+  assert.equal(kindFromOsmTags({ historic: 'plaque', tourism: 'attraction' }), null);
+});

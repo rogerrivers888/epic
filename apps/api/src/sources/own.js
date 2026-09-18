@@ -32,7 +32,7 @@
 import * as owned from '../repositories/ownedPlaces.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { matchOsm } from './openMatch.js';
-import { venueFromOsmElement, OSM_ATTRIBUTION } from './osm.js';
+import { venueFromOsmElement, kindFromOsmTags, OSM_ATTRIBUTION } from './osm.js';
 import { encyclopediaFor } from './encyclopedia.js';
 import { siteFacts } from './site.js';
 import { reverseGeocode } from './geocode.js';
@@ -458,12 +458,19 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
     if (osm) {
       const v = venueFromOsmElement({ type: osm.ref.split('/')[0], id: osm.ref.split('/')[1], lat: osm.lat, lon: osm.lng, tags: osm.tags });
       const t = osm.tags;
+      // What the tags say it is, separately from whether the open map holds a
+      // place worth drawing. `venueFromOsmElement` refuses an element with no
+      // name — right for a card, wrong for a shelf — so a place matched to an
+      // unnamed node tagged `amenity=restaurant` took the reference, left the
+      // identify queue and was never given a category by anything: invisible on
+      // every category board for good (19 Sep 2026).
+      const kind = v ? null : kindFromOsmTags(t);
       matched.osm = { ref: osm.ref, distanceM: osm.distanceM, confidence: osm.confidence, how: osm.how };
       const put = (field, value) => putFact(venueRef, field, 'osm', value, osm.confidence);
       await Promise.all([
         put('osm_ref', osm.ref),
         put('name', v?.name ?? t.name),
-        put('category', v?.category ?? null),
+        put('category', v?.category ?? kind?.category ?? null),
         put('lat', osm.lat), put('lng', osm.lng),
         put('address', v?.address ?? null),
         put('postcode', t['addr:postcode'] ?? null),
@@ -472,7 +479,7 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
         put('email', t.email ?? t['contact:email'] ?? null),
         put('opening_hours', v?.openingHours ?? null),
         put('cuisines', v?.cuisines ?? []),
-        put('experiences', v?.experiences ?? []),
+        put('experiences', v?.experiences ?? kind?.experiences ?? []),
         put('dietary_options', v?.dietaryOptions ?? []),
         put('good_for_children', v?.goodForChildren),
         put('accessibility', {
