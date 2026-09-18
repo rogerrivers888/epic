@@ -270,6 +270,20 @@ export async function syncFlagged() {
      where q.subject_type = 'visit' and q.subject_id = v.id::text
        and coalesce(v.note, '') = '' and not q.reported`);
 
+  // Nor is a row whose subject has gone altogether.
+  //
+  // Re-rating a visit deletes its ratings and writes new ones with new ids, and
+  // deleting a visit takes its note and its ratings with it — leaving queue rows
+  // pointing at nothing, with no words to read and a decision still to make
+  // (Codex, 18 Sep 2026). A reported row stays: somebody asked about it, and
+  // that is a record of its own.
+  for (const [type, table] of [['visit', 'visits'], ['rating', 'ratings'], ['host_review', 'host_reviews']]) {
+    await query(`
+      delete from content_queue q
+       where q.subject_type = $1 and not q.reported
+         and not exists (select 1 from ${table} src where src.id::text = q.subject_id)`, [type]);
+  }
+
   // Somebody reported it, so it jumps the queue.
   //
   // A household reporting a topic or a reply writes `chat_reports` and nothing

@@ -256,7 +256,10 @@ async function runLookup({ q, minutes, mode }, household, { afford = null } = {}
   // dropped results that were sitting in memory (Codex, 17 Sep 2026). So the
   // cache is consulted first, and only a fetch has to be afforded.
   let purse = { without: [], release: async () => {} };
-  if (afford && !searchKept(params)) purse = await afford();
+  // The claim knows which sources this search will actually ask.
+  if (afford && !searchKept(params)) {
+    purse = await afford(undefined, { withTripadvisor: params.sources.includes('tripadvisor') });
+  }
   // The claim is let go *after* the ledger has the spend, not after the call.
   //
   // Released in a `finally` on the search, there was a gap in which a second
@@ -384,7 +387,7 @@ async function runLookup({ q, minutes, mode }, household, { afford = null } = {}
  */
 const RING_CALLS = 2;
 
-async function affordable(n = RING_CALLS) {
+async function affordable(n = RING_CALLS, { withTripadvisor = false } = {}) {
   const google = googleSource.enabled()
     ? await roomToSpend(Math.round(PRICE_PER_UNIT_USD.google * n * 100 * USD_TO_GBP), { holder: 'lookup' })
     : { ok: false, reservation: null, leftPence: 0 };
@@ -394,13 +397,19 @@ async function affordable(n = RING_CALLS) {
   // contractual rather than budgetary — so a search that only asked the budget
   // could go on spending locations after the allowance was gone (Codex, 18 Sep
   // 2026). Two locations, because one view bills two.
-  const taUnits = tripadvisorSource.enabled() ? await tripadvisorRoom(2) : { granted: 0, reservation: null, left: 0 };
-  const tripadvisor = tripadvisorSource.enabled() && taUnits.granted >= 2
+  // Only when it is actually in the search. An ordinary lookup asks Google and
+  // the open sources — `asked` leaves the opt-in ones out — so claiming two
+  // locations and their money for every one of those held a bite of a
+  // contractual allowance that the request was never going to touch (Codex, 18
+  // Sep 2026).
+  const wantsTa = tripadvisorSource.enabled() && withTripadvisor;
+  const taUnits = wantsTa ? await tripadvisorRoom(2) : { granted: 0, reservation: null, left: 0 };
+  const tripadvisor = wantsTa && taUnits.granted >= 2
     ? await roomToSpend(Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP), { holder: 'lookup.ta' })
     : { ok: false, reservation: null, leftPence: 0 };
   const without = [
     ...(googleSource.enabled() && !google.ok ? ['google'] : []),
-    ...(tripadvisorSource.enabled() && !tripadvisor.ok ? ['tripadvisor'] : []),
+    ...(wantsTa && !tripadvisor.ok ? ['tripadvisor'] : []),
   ];
   const release = async () => {
     await releaseSpend(google.reservation);

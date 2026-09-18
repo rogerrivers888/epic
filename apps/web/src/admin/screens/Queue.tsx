@@ -391,7 +391,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, onReport, next, 
               unreachable, so the lane was permanently empty (17 Sep 2026, the
               verification audit). */}
           {!it.reported ? (
-            <Act label="Report it" tone="secondary" disabled={busy} onPress={onReport} />
+            <Act label="Report it" tone="secondary" disabled={!canManage || busy} onPress={onReport} />
           ) : null}
           <Act label="Reject" tone="secondary" disabled={!canManage || busy} onPress={() => onReject(false)} />
           <Act label="Reject, and tell them why" tone="secondary" disabled={!canManage || busy} onPress={() => onReject(true)} />

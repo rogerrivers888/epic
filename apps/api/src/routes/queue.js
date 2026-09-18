@@ -149,7 +149,10 @@ router.post('/:id/reject', requires('manage_library'), async (req, res, next) =>
 });
 
 /** Reported content jumps the queue: a different job on a different clock. */
-router.post('/:id/report', requires('view_library'), async (req, res, next) => {
+// Reporting moves a thing into the lane that is worked first, which is a change
+// to what somebody else has to do — so it takes the capability the other two
+// changes take, not the one for looking (Codex, 18 Sep 2026).
+router.post('/:id/report', requires('manage_library'), async (req, res, next) => {
   try {
     const out = await queue.report({ id: String(req.params.id), reason: req.body?.reason ?? null, by: req.account?.id ?? null });
     if (!out) return res.status(404).json({ error: 'not_found', message: 'Nothing in the queue by that id.' });
