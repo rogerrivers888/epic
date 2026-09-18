@@ -473,17 +473,48 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
           : `select slug from localities where ($2::text = $2::text) and (slug = $1 or parent_slug = $1)`,
         [scope.area.slug, scope.area.country_code ?? ''])).rows.map((r) => r.slug)
       : null;
+    // Live rows and folded months together, the way the Demand board itself
+    // reads them (repositories/searches.js).
+    //
+    // This lens read `searches` alone and did not exclude the rows a roll-up had
+    // already folded. Without dropping, every rolled search was counted twice
+    // here and once there; with dropping, the older demand simply vanished off
+    // this board while the other one still had it (Codex, 18 Sep 2026). A rolled
+    // month is counted whole, because a month cannot be cut into days. A rollup
+    // is filed by area, so a ring — which has no area of its own — takes the
+    // live rows only, and says nothing it cannot support.
     const { rows: everything } = await query(`
-      select coalesce(s.subject, '') as subject,
-             count(*)::int                                          as searches,
-             count(*) filter (where s.empty)::int                    as empty,
-             count(*) filter (where not s.empty and s.outcome = 'none')::int as no_click,
-             count(*) filter (where s.outcome in ('clicked','saved'))::int   as no_trip
-        from searches s
-       where s.at > now() - ($1 || ' days')::interval
-         and ($2::text[] is null or s.area_slug = any($2))
-         and ($3::text[] is null or s.cell = any($3))
-       group by 1 order by count(*) desc`,
+      with live as (
+        select coalesce(s.subject, '') as subject,
+               count(*)::int                                          as searches,
+               count(*) filter (where s.empty)::int                    as empty,
+               count(*) filter (where not s.empty and s.outcome = 'none')::int as no_click,
+               count(*) filter (where s.outcome in ('clicked','saved'))::int   as no_trip
+          from searches s
+         where s.at > now() - ($1 || ' days')::interval
+           and s.rolled_at is null
+           and ($2::text[] is null or s.area_slug = any($2))
+           and ($3::text[] is null or s.cell = any($3))
+         group by 1
+      ), folded as (
+        select coalesce(r.subject, '') as subject,
+               coalesce(sum(r.searches), 0)::int as searches,
+               coalesce(sum(r.empty), 0)::int as empty,
+               coalesce(sum(r.no_click), 0)::int as no_click,
+               coalesce(sum(r.no_trip), 0)::int as no_trip
+          from search_rollups r
+         where $3::text[] is null
+           and ($2::text[] is null or r.area_slug = any($2))
+           and r.month >= date_trunc('month', now() - ($1 || ' days')::interval)
+                        + (case when date_trunc('month', now() - ($1 || ' days')::interval)
+                                     >= (now() - ($1 || ' days')::interval)
+                                then interval '0 month' else interval '1 month' end)
+         group by 1
+      )
+      select subject, sum(searches)::int as searches, sum(empty)::int as empty,
+             sum(no_click)::int as no_click, sum(no_trip)::int as no_trip
+        from (select * from live union all select * from folded) both_
+       group by subject order by sum(searches) desc`,
     [String(since), asCounty ? [asCounty.slug] : slugs, asCounty ? null : cells]);
     // The four headline figures are of every subject, not of the forty the list
     // has room for.

@@ -248,8 +248,9 @@ export async function syncFlagged() {
   // and the third only caught the rejected ones, so an *approved* row went on
   // saying approved about text nobody had read. A rejection's `hidden` is not
   // lifted by any of this; only approving lifts it.
-  for (const [type, table] of [
-    ['host_review', 'host_reviews'], ['chat_topic', 'chat_topics'], ['open_entry', 'open_entries'],
+  for (const [type, table, column] of [
+    ['host_review', 'host_reviews', 'rewritten_at'], ['chat_topic', 'chat_topics', 'rewritten_at'],
+    ['open_entry', 'open_entries', 'rewritten_at'], ['visit', 'visits', 'note_rewritten_at'],
   ]) {
     await query(`
       update content_queue q
@@ -257,9 +258,17 @@ export async function syncFlagged() {
              decided_by = null, decided_at = null
         from ${table} src
        where q.subject_type = $1 and q.subject_id = src.id::text
-         and q.state <> 'waiting' and src.rewritten_at is not null
-         and (q.decided_at is null or src.rewritten_at > q.decided_at)`, [type]);
+         and q.state <> 'waiting' and src.${column} is not null
+         and (q.decided_at is null or src.${column} > q.decided_at)`, [type]);
   }
+  // And a note that has been cleared is not a thing to decide at all: the row
+  // would sit in the queue for ever asking about words nobody can read (Codex,
+  // 18 Sep 2026).
+  await query(`
+    delete from content_queue q
+     using visits v
+     where q.subject_type = 'visit' and q.subject_id = v.id::text
+       and coalesce(v.note, '') = '' and not q.reported`);
 
   // Somebody reported it, so it jumps the queue.
   //

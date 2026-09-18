@@ -62,7 +62,15 @@ export async function addAttendee(visitId, memberId, client) {
 
 export async function updateVisit(id, { note, visitedOn, venueLabel }) {
   await query(
-    'update visits set note = coalesce($2, note), visited_on = coalesce($3, visited_on), venue_label = coalesce($4, venue_label) where id = $1',
+    `update visits
+        set note = coalesce($2, note), visited_on = coalesce($3, visited_on),
+            venue_label = coalesce($4, venue_label),
+            -- The words changing is what sends it back to be read again; the
+            -- date and the label are not words anybody moderates (migration
+            -- 168).
+            note_rewritten_at = case when $2::text is not null and $2 is distinct from note
+                                     then now() else note_rewritten_at end
+      where id = $1`,
     [id, note ?? null, visitedOn ?? null, venueLabel ?? null],
   );
 }
