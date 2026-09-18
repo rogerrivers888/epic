@@ -29,6 +29,8 @@ import { Row, SectionTitle, StatusLine, Wrap, Meter, FoldLine } from '../compone
 // frames, because this screen is only ever drawn inside /admin (AdminApp) and
 // the v2 brief for those screens is hairlines and nothing boxed.
 import { Banner, Button, Card, Chip } from '../admin/kit';
+import { Explain } from '../admin/explain';
+import type { TipKey } from '../admin/tips';
 import { Icon } from '../components/Icon';
 import { useViewport } from '../hooks/useViewport';
 
@@ -120,9 +122,11 @@ export function AccountsScreen() {
           one 2px muted rule, with what it counts said in the kicker. */}
       <Row style={styles.head}>
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={styles.kicker}>
-            {data ? `${data.accounts.length} ${data.accounts.length === 1 ? 'HOUSEHOLD' : 'HOUSEHOLDS'} · ${data.accounts.filter((a) => a.liveDevices > 0).length} SIGNED IN NOW` : 'THE ESTATE'}
-          </Text>
+          <Explain tip="accountsBand">
+            <Text style={styles.kicker}>
+              {data ? `${data.accounts.length} ${data.accounts.length === 1 ? 'HOUSEHOLD' : 'HOUSEHOLDS'} · ${data.accounts.filter((a) => a.liveDevices > 0).length} SIGNED IN NOW` : 'THE ESTATE'}
+            </Text>
+          </Explain>
           <Text style={[wide ? styles.title : styles.titlePhone]}>Accounts</Text>
         </View>
         <Button label="Refresh" icon="refresh" kind="secondary" onPress={() => void load()} disabled={busy} />
@@ -135,11 +139,11 @@ export function AccountsScreen() {
       {data ? (
         <Card>
           <Row style={{ rowGap: spacing.md, columnGap: spacing.xl, flexWrap: 'wrap' }}>
-            <Figure label="Households" value={String(data.accounts.length)} />
-            <Figure label="Signed in now" value={String(data.accounts.filter((a) => a.liveDevices > 0).length)} />
-            <Figure label="Calls this month" value={data.totals.callsMonth.toLocaleString()} />
-            <Figure label="Cost this month" value={money(data.totals.costMonth)} />
-            <Figure label="Cost ever" value={money(data.totals.costEver)} />
+            <Figure tip="accountsHouseholds" label="Households" value={String(data.accounts.length)} />
+            <Figure tip="accountsSignedIn" label="Signed in now" value={String(data.accounts.filter((a) => a.liveDevices > 0).length)} />
+            <Figure tip="accountsCallsMonth" label="Calls this month" value={data.totals.callsMonth.toLocaleString()} />
+            <Figure tip="accountsCostMonth" label="Cost this month" value={money(data.totals.costMonth)} />
+            <Figure tip="accountsCostEver" label="Cost ever" value={money(data.totals.costEver)} />
           </Row>
         </Card>
       ) : null}
@@ -234,10 +238,12 @@ export function AccountsScreen() {
 // --- pieces -----------------------------------------------------------------
 
 /** One figure, in the back office's own grammar: a left rule, a kicker, a number. */
-function Figure({ label, value }: { label: string; value: string }) {
+function Figure({ label, value, tip }: { label: string; value: string; tip?: TipKey }) {
   return (
     <View style={styles.figure}>
-      <Text style={styles.kicker}>{label}</Text>
+      {/* Every heading explains itself on hover (owner, 17 Sep 2026). */}
+      {tip ? <Explain tip={tip}><Text style={styles.kicker}>{label}</Text></Explain>
+        : <Text style={styles.kicker}>{label}</Text>}
       <Text style={[type.h2, { color: colors.ink, fontVariant: ['tabular-nums'] }]}>{value}</Text>
     </View>
   );

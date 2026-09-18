@@ -450,46 +450,15 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
     // A ring is scoped by the cells inside it, not by an area slug it has not
     // got: `null` made the predicate true for every search in the database, so a
     // thirty-minute ring showed the whole estate's demand under its own heading
-    // (Codex, 17 Sep 2026).
-    const cells = scope.kind === 'ring'
+    // (Codex, 17 Sep 2026). Everything else goes through the one resolver both
+    // demand boards share — `repositories/placeIndex.js` demandScope.
+    const ring = scope.kind === 'ring'
       ? (await reach.reachableCells(scope.cell, { minutes: scope.minutes, mode: travelMode(scope.mode) })).map((c) => c.to_cell)
-      : scope.kind === 'area' && scope.area.kind === 'town'
-        // A town's searches are not filed under the town. `whereOf` normalises
-        // a town to its parent county on purpose — the county is the honest
-        // grain for a point search — so a town lens asking for its own slug got
-        // nothing at all (Codex, 17 Sep 2026). Its own cells are the answer.
-        ? (await query(
-          `select distinct pi.cell from place_index pi
-             join place_areas pa on pa.venue_ref = pi.venue_ref
-            where pa.area_slug = $1 and pi.cell is not null`, [scope.area.slug])).rows.map((r) => r.cell)
-        : null;
-    // A town whose places have no cell yet cannot be told apart from its county
-    // at all, and zeros would read as "nobody asked". It reads the county's
-    // figures and says whose they are (17 Sep 2026).
-    const asCounty = scope.kind === 'area' && scope.area.kind === 'town' && !(cells ?? []).length
-      ? (await index.areaBySlug(scope.area.parent_slug ?? '')) ?? null
       : null;
-    // Everything under this area, not only this area.
-    //
-    // Searches are filed against a county, so Great Britain asking for
-    // `area_slug = 'gb'` found only the handful nobody could place — its
-    // counties' searches were all missing (Codex, 17 Sep 2026).
-    // A country's counties do not carry `parent_slug` — the country was added
-    // later (migration 145) and the hierarchy was left as it stood — so a
-    // country's descendants are "every locality with this country code", and a
-    // county's are itself plus the towns that name it.
-    const slugs = scope.kind === 'area' && scope.area.kind !== 'town'
-      ? (await query(
-        scope.area.kind === 'country'
-          ? `select slug from localities where country_code = upper($2) or slug = $1`
-          // `$2` is unused here and still bound, because both branches take the
-          // same two parameters and Postgres refuses a statement given more
-          // than it names. Cast, because a parameter compared only with itself
-          // has no inferable type and preparing it can fail outright — which
-          // would be a 500 on the county board (Codex, 18 Sep 2026).
-          : `select slug from localities where ($2::text = $2::text) and (slug = $1 or parent_slug = $1)`,
-        [scope.area.slug, scope.area.country_code ?? ''])).rows.map((r) => r.slug)
-      : null;
+    const area = scope.kind === 'area' ? await index.demandScope(scope.area) : { slugs: null, cells: null, asCounty: null };
+    const cells = ring ?? area.cells;
+    const slugs = area.slugs;
+    const asCounty = area.asCounty;
     // Live rows and folded months together, the way the Demand board itself
     // reads them (repositories/searches.js).
     //
@@ -532,7 +501,7 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
              sum(no_click)::int as no_click, sum(no_trip)::int as no_trip
         from (select * from live union all select * from folded) both_
        group by subject order by sum(searches) desc`,
-    [String(since), asCounty ? [asCounty.slug] : slugs, asCounty ? null : cells]);
+    [String(since), slugs, cells]);
     // The four headline figures are of every subject, not of the forty the list
     // has room for.
     const totals = everything.reduce((t, r) => ({

@@ -126,12 +126,14 @@ export const monthLabel = (key: string) => {
  * `sub` is kept because a sentence under the name is often the honest thing to
  * say; `stats` is the new part, and is what the kicker is counting.
  */
-export function PageHead({ title, sub, kicker, stats, right }: {
+export function PageHead({ title, sub, kicker, kickerTip, stats, right }: {
   /** Absent where the page already has a heading and this is a band inside it. */
   title?: string;
   sub?: string;
   /** The uppercase line over the name — "465 OF 485 ANSWERED". */
   kicker?: string;
+  /** What that line means, on hover. Every heading explains itself (owner, 17 Sep 2026). */
+  kickerTip?: TipKey | [string, string];
   /** Figures to the right of the name, in the band rather than in tiles. */
   stats?: { label: string; value: React.ReactNode }[];
   right?: React.ReactNode;
@@ -142,7 +144,10 @@ export function PageHead({ title, sub, kicker, stats, right }: {
   return (
     <View style={styles.band}>
       <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 4 }}>
-        {kicker ? <Text style={styles.bandKicker}>{kicker}</Text> : null}
+        {kicker ? (
+          kickerTip ? <Explain tip={kickerTip}><Text style={styles.bandKicker}>{kicker}</Text></Explain>
+            : <Text style={styles.bandKicker}>{kicker}</Text>
+        ) : null}
         {title ? <Text style={[styles.bandTitle, width < 900 && styles.bandTitlePhone]}>{title}</Text> : null}
         {sub ? <Text style={type.small}>{sub}</Text> : null}
       </View>

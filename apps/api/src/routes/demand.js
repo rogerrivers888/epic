@@ -37,8 +37,16 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     const areaSlug = req.query.where ? String(req.query.where).toLowerCase() : null;
     const since = Number(String(req.query.since ?? '30').replace(/[^0-9]/g, '')) || 30;
     const area = areaSlug ? await index.areaBySlug(areaSlug) : null;
-    const totals = await searches.totals({ areaSlug, since });
-    const subjects = await searches.bySubject({ areaSlug, since });
+    // What the area means to the *log*, which is not its slug. A search is
+    // filed against a county, so Great Britain asking for `area_slug = 'gb'`
+    // found nothing and a town asking for its own slug found nothing either —
+    // this board reported zero everywhere above and below county level while
+    // the same question inside Places answered (Codex, 18 Sep 2026). One
+    // resolver, used by both.
+    const scope = await index.demandScope(area);
+    const { slugs: areaSlugs, cells } = scope;
+    const totals = await searches.totals({ areaSlugs, cells, since });
+    const subjects = await searches.bySubject({ areaSlugs, cells, since });
     const labels = new Map((await query('select key, label from shelf_subcategories')).rows.map((r) => [r.key, r.label]));
     const catLabels = new Map((await query('select key, label from shelf_categories')).rows.map((r) => [r.key, r.label]));
     // How many places there are per subject, which decides the fault.
@@ -90,7 +98,7 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
       known.set('things', Math.max(0, everything - (known.get('food') ?? 0)));
     }
 
-    const log = await searches.recent({ areaSlug, since });
+    const log = await searches.recent({ areaSlugs, cells, since });
     // The area's own name, not its slug: a screen that prints `berkshire` is a
     // screen showing the database rather than the place.
     const names = new Map((await query(
@@ -98,6 +106,12 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
       [[...new Set(log.map((r) => r.area_slug).filter(Boolean))]])).rows.map((r) => [r.slug, r.name]));
     res.json({
       area: area ? { slug: area.slug, name: area.name, kind: area.kind } : null,
+      // Whose figures these are, when they are not this town's. A town with no
+      // cells yet cannot be told apart from its county, and zeros would read as
+      // "nobody asked" — so it shows the county's and says so.
+      figuresFrom: scope.asCounty
+        ? { slug: scope.asCounty.slug, name: scope.asCounty.name, why: 'a search is recorded against a county' }
+        : null,
       since, totals,
       rows: subjects.map((s) => {
         // "Anything" is every place in the scope, and the map holds that under

@@ -96,6 +96,12 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
               design offers it as the alternative and nobody has picked (17 Sep
               2026). */}
           <Explain tip="askedForName" cursor="help"><Text style={styles.alt}>Asked for</Text></Explain>
+          {/* Whose figures these are, when they are not this town's. */}
+          {data.figuresFrom ? (
+            <Explain tip={['Figures from ' + data.figuresFrom.name, `We hold no cell for anywhere in ${data.area?.name ?? 'this town'} yet, and ${data.figuresFrom.why} — so these are ${data.figuresFrom.name}'s figures, not this town's.`]} cursor="help">
+              <Text style={styles.alt}>{`Figures from ${data.figuresFrom.name}`}</Text>
+            </Explain>
+          ) : null}
         </View>
         <View style={styles.five}>
           <Stat label="Came back empty" value={data.totals.empty.toLocaleString()} tip="emptyTotal" big mark />

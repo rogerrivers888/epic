@@ -1615,6 +1615,8 @@ export type RunFailures = {
 
 export type DemandReport = {
   area: { slug: string; name: string; kind: string } | null;
+  /** Set when a town has no cells of its own and is reading its county's figures. */
+  figuresFrom: { slug: string; name: string; why: string } | null;
   since: number; totals: DemandTotals; rows: DemandRow[];
   log: {
     id: string; at: string; surface: string; subject: string | null; label: string;

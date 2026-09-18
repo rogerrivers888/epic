@@ -112,6 +112,7 @@ export function Coverage() {
     <AdminPage>
       <PageHead
         kicker={`${rows.length} ${rows.length === 1 ? 'PLACE' : 'PLACES'} MEASURED · ${count(totals.gaps)} FACTS MISSING`}
+        kickerTip="coverageBand"
         title="Coverage"
         sub="Where the holes are. Every cell is how much we hold — and a way into the ones we do not."
       />

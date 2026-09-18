@@ -52,7 +52,7 @@ test('a search that came back empty is written down as loudly as one that did no
   assert.equal(rows[1].empty, false);
   assert.ok(empty && full);
 
-  const totals = await log.totals({ areaSlug: 'berkshire', since: 30 });
+  const totals = await log.totals({ areaSlugs: ['berkshire'], since: 30 });
   assert.equal(totals.searches, 2);
   assert.equal(totals.empty, 1);
 });
@@ -628,7 +628,7 @@ test('a month folded up and dropped is still in the headline figures', async () 
   const id = await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'keepshire' });
   await log.logEvent({ searchId: id, kind: 'add_to_trip', householdId: household.id });
 
-  const before = await log.totals({ areaSlug: 'keepshire', since: 3650 });
+  const before = await log.totals({ areaSlugs: ['keepshire'], since: 3650 });
   assert.equal(before.searches, 1);
   assert.equal(before.tripped, 1);
 
@@ -637,7 +637,7 @@ test('a month folded up and dropped is still in the headline figures', async () 
   // it lost every search in it — and the log cannot be backfilled (Codex,
   // 17 Sep 2026).
   await log.rollUp({ before: new Date(Date.now() + 86_400_000), drop: true });
-  const after = await log.totals({ areaSlug: 'keepshire', since: 3650 });
+  const after = await log.totals({ areaSlugs: ['keepshire'], since: 3650 });
   assert.equal(after.searches, 1, 'the search survives as an aggregate');
   assert.equal(after.tripped, 1, 'and so does the conversion');
 });
@@ -653,10 +653,10 @@ test('a rolled month counts only when the whole of it is inside the window', asy
   // A thirty-day window starts partway through last month. Truncating that edge
   // to the first of the month pulled a whole month of history into it (Codex,
   // 17 Sep 2026), and a rolled month is one number that cannot be cut.
-  const near = await log.totals({ areaSlug: 'windowshire', since: 30 });
+  const near = await log.totals({ areaSlugs: ['windowshire'], since: 30 });
   assert.equal(near.searches, 0, 'a month that is only partly inside the window is left out');
 
-  const far = await log.totals({ areaSlug: 'windowshire', since: 3650 });
+  const far = await log.totals({ areaSlugs: ['windowshire'], since: 3650 });
   assert.equal(far.searches, 1, 'and a window that covers it whole counts it');
 });
 
@@ -668,8 +668,8 @@ test('the board’s two halves are both answerable, and both add up', async () =
   for (const subject of ['museums', 'museums', 'parks']) {
     await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'sumshire', subject });
   }
-  const totals = await log.totals({ areaSlug: 'sumshire', since: 30 });
-  const rows = await log.bySubject({ areaSlug: 'sumshire', since: 30 });
+  const totals = await log.totals({ areaSlugs: ['sumshire'], since: 30 });
+  const rows = await log.bySubject({ areaSlugs: ['sumshire'], since: 30 });
   assert.equal(totals.searches, 3);
   assert.equal(rows.reduce((n, r) => n + r.searches, 0), totals.searches, 'the rows add up to the headline');
   assert.equal(rows.find((r) => r.subject === 'museums')?.searches, 2);
@@ -1148,4 +1148,34 @@ test('removing a save demotes the place; a shortlist on it holds it', async () =
   });
   assert.equal(await owner(a), 'identified', 'nobody holds it any more');
   assert.equal(await owner(b), 'claimed', 'the shortlist is its own hold');
+});
+
+test('a country reads its counties, and a town reads its own cells', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  await query(
+    `insert into localities (slug, name, kind, country_code, parent_slug)
+     values ('zz', 'Zedland', 'country', 'ZZ', null),
+            ('zedshire', 'Zedshire', 'county', 'ZZ', null),
+            ('zedtown', 'Zedtown', 'town', 'ZZ', 'zedshire')
+     on conflict (slug) do nothing`);
+
+  // A search in Zedtown is filed against Zedshire, because that is the grain
+  // `whereOf` records at.
+  const where = await log.whereOf({ areaSlug: 'zedtown' });
+  assert.equal(where.areaSlug, 'zedshire');
+  const id = await log.noteSearch({ surface: 'places', areaSlug: where.areaSlug, subject: 'museums' });
+  assert.ok(id);
+
+  // The country resolves to its counties, so asking for 'zz' finds it. Asking
+  // for the slug itself found nothing at all, which is what the standalone
+  // board did (Codex, 18 Sep 2026).
+  const country = await index.demandScope(await index.areaBySlug('zz'));
+  assert.ok(country.slugs.includes('zedshire'), 'a country is its localities, not its own slug');
+  assert.ok((await log.totals({ areaSlugs: country.slugs, since: 30 })).searches >= 1);
+  assert.equal((await log.totals({ areaSlugs: ['zz'], since: 30 })).searches, 0, 'nothing is filed under the country itself');
+
+  // A town with no cells of its own reads its county's figures and says so.
+  const town = await index.demandScope(await index.areaBySlug('zedtown'));
+  assert.equal(town.asCounty?.slug, 'zedshire');
+  assert.ok((await log.totals({ areaSlugs: town.slugs, cells: town.cells, since: 30 })).searches >= 1);
 });

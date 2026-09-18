@@ -1439,6 +1439,53 @@ export const areaBySlug = async (slug) => (await query(
     where l.slug = $1`, [lower(slug)])).rows[0] ?? null;
 
 /**
+ * What an area means to the search log, which is not what it means to the index.
+ *
+ * `whereOf()` files a point search against a *county*, because that is the
+ * honest grain for "somebody looked here": a town boundary is not where a
+ * search stops. So three things have to be translated before the log can be
+ * read by area —
+ *
+ *   - a country: its counties do not carry `parent_slug` (the country was added
+ *     later, migration 145), so its descendants are every locality sharing its
+ *     country code;
+ *   - a county: itself, plus the towns that name it as parent;
+ *   - a town: not its own slug, which nothing is filed under — its cells.
+ *
+ * A town whose places have no cell yet cannot be told apart from its county at
+ * all. It reads the county's figures and says whose they are, rather than
+ * showing zeros that would read as "nobody asked" (`asCounty`).
+ *
+ * Both demand boards resolve through this one function. The lens inside Places
+ * had it and the standalone board did not, so `/admin/demand?where=gb` reported
+ * nothing at all while the same question inside Places answered (Codex, 18 Sep
+ * 2026).
+ */
+export async function demandScope(area) {
+  if (!area) return { slugs: null, cells: null, asCounty: null };
+  if (area.kind === 'town') {
+    const { rows } = await query(
+      `select distinct pi.cell from place_index pi
+         join place_areas pa on pa.venue_ref = pi.venue_ref
+        where pa.area_slug = $1 and pi.cell is not null`, [area.slug]);
+    const cells = rows.map((r) => r.cell);
+    if (cells.length) return { slugs: null, cells, asCounty: null };
+    const county = area.parent_slug ? await areaBySlug(area.parent_slug) : null;
+    return { slugs: [county?.slug ?? area.slug], cells: null, asCounty: county };
+  }
+  const { rows } = await query(
+    area.kind === 'country'
+      ? `select slug from localities where country_code = upper($2) or slug = $1`
+      // `$2` is unused here and still bound, because both branches take the
+      // same two parameters and Postgres refuses a statement given more than it
+      // names. Cast, because a parameter compared only with itself has no
+      // inferable type and preparing it can fail outright.
+      : `select slug from localities where ($2::text = $2::text) and (slug = $1 or parent_slug = $1)`,
+    [area.slug, area.country_code ?? '']);
+  return { slugs: rows.map((r) => r.slug), cells: null, asCounty: null };
+}
+
+/**
  * BO2a / BO2n — the level broken down by county, by town or by postcode district.
  *
  * `by` is how the same level is cut, never a different level: the country's
@@ -2016,6 +2063,6 @@ export async function namesFor(refs) {
 
 export default {
   SOURCES, bars, seedBars, setBar, reindex, rescore, note, noteMany, refreshStats, statsAge,
-  statsFor, statsForRefs, countries, areaBySlug, breakdown, coverage, categories, shelveAll,
+  statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll,
   sources, quality, places, namesFor, labels,
 };

@@ -687,7 +687,7 @@ function WhatWeOwe() {
     <View style={owedStyles.block}>
       <View style={owedStyles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
-          <Text style={owedStyles.kicker}>/admin/how</Text>
+          <Explain tip={['/admin/how', 'This page. What is built, what is half-built and what is owed — kept beside the code so it cannot drift from it.']}><Text style={owedStyles.kicker}>/admin/how</Text></Explain>
           <Text style={owedStyles.title}>What we owe</Text>
         </View>
         <View style={owedStyles.stats}>

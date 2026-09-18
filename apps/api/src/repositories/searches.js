@@ -93,7 +93,7 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
 }
 
 /** The three numbers, never one rate. */
-export async function totals({ areaSlug = null, since = 30 } = {}) {
+export async function totals({ areaSlugs = null, cells = null, since = 30 } = {}) {
   // The rows we still hold, plus the months we have folded up and dropped.
   //
   // Retention is switched off by default, so today these two are the first term
@@ -110,7 +110,9 @@ export async function totals({ areaSlug = null, since = 30 } = {}) {
               count(*) filter (where outcome in ('clicked','saved'))::int as no_trip,
               count(*) filter (where outcome = 'tripped')::int as tripped
          from searches
-        where at > now() - ($1 || ' days')::interval and ($2::text is null or area_slug = $2)
+        where at > now() - ($1 || ' days')::interval
+          and ($2::text[] is null or area_slug = any($2))
+          and ($3::text[] is null or cell = any($3))
           -- Not the ones already folded up. A roll-up without dropping leaves
           -- the rows in place *and* writes the aggregate, so counting both
           -- doubled every rolled search for ever (Codex, 17 Sep 2026).
@@ -128,18 +130,22 @@ export async function totals({ areaSlug = null, since = 30 } = {}) {
                      + (case when date_trunc('month', now() - ($1 || ' days')::interval)
                                   >= (now() - ($1 || ' days')::interval)
                              then interval '0 month' else interval '1 month' end)
-          and ($2::text is null or area_slug = $2)
+          and ($2::text[] is null or area_slug = any($2))
+          -- A roll-up is filed by area and has no cell, so a town scoped by its
+          -- own cells takes the live rows only rather than claiming a month it
+          -- cannot support.
+          and $3::text[] is null
      )
      select live.searches + folded.searches as searches, live.empty + folded.empty as empty,
             live.no_click + folded.no_click as no_click, live.no_trip + folded.no_trip as no_trip,
             live.tripped + folded.tripped as tripped
        from live, folded`,
-    [String(since), areaSlug]);
+    [String(since), areaSlugs, cells]);
   return { searches: r.searches, empty: r.empty, noClick: r.no_click, noTrip: r.no_trip, tripped: r.tripped };
 }
 
 /** What was asked for, and how each subject is failing. */
-export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}) {
+export async function bySubject({ areaSlugs = null, cells = null, since = 30, limit = 40 } = {}) {
   // The rows we still hold *and* the months folded up, the same two terms the
   // headline figures add. Reading only the live rows meant the totals would
   // include a rolled month and every subject row would leave it out, which is a
@@ -153,7 +159,8 @@ export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}
               (case when outcome in ('clicked','saved') then 1 else 0 end) as no_trip
          from searches
         where at > now() - ($1 || ' days')::interval
-          and ($2::text is null or area_slug = $2)
+          and ($2::text[] is null or area_slug = any($2))
+          and ($4::text[] is null or cell = any($4))
           and rolled_at is null
        union all
        select subject, searches, empty, no_click, no_trip
@@ -165,30 +172,33 @@ export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}
                      + (case when date_trunc('month', now() - ($1 || ' days')::interval)
                                   >= (now() - ($1 || ' days')::interval)
                              then interval '0 month' else interval '1 month' end)
-          and ($2::text is null or area_slug = $2)
+          and ($2::text[] is null or area_slug = any($2))
+          and $4::text[] is null
      )
      select subject,
             sum(searches)::int as searches, sum(empty)::int as empty,
             sum(no_click)::int as no_click, sum(no_trip)::int as no_trip
        from counted
       group by 1 order by sum(searches) desc limit $3`,
-    [String(since), areaSlug, limit]);
+    [String(since), areaSlugs, limit, cells]);
   return rows.map((r) => ({
     subject: r.subject || null, searches: r.searches, empty: r.empty, noClick: r.no_click, noTrip: r.no_trip,
   }));
 }
 
 /** The log itself, most recent first. */
-export async function recent({ areaSlug = null, since = 30, limit = 40 } = {}) {
+export async function recent({ areaSlugs = null, cells = null, since = 30, limit = 40 } = {}) {
   const { rows } = await query(
     `select s.id, s.at, s.surface, s.subject, s.area_slug, s.cell, s.minutes, s.mode,
             s.shown_total, s.empty, s.outcome, s.account_id, s.asked,
             (select count(*)::int from search_events e where e.search_id = s.id and e.kind = 'open') as opened,
             (select count(*)::int from search_events e where e.search_id = s.id and e.kind = 'add_to_trip') as tripped
        from searches s
-      where s.at > now() - ($1 || ' days')::interval and ($2::text is null or s.area_slug = $2)
+      where s.at > now() - ($1 || ' days')::interval
+        and ($2::text[] is null or s.area_slug = any($2))
+        and ($4::text[] is null or s.cell = any($4))
       order by s.at desc limit $3`,
-    [String(since), areaSlug, limit]);
+    [String(since), areaSlugs, limit, cells]);
   return rows;
 }
 
