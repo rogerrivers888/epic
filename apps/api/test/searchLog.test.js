@@ -900,3 +900,34 @@ test('a place harvested in two regions rebuilds, and is scored once', async () =
     'select count(*)::int as n from place_index where venue_ref = $1 and data_score is not null', [ref]);
   assert.equal(scored.n, 1);
 });
+
+/**
+ * Retiring one of two attractions that share a reference.
+ *
+ * "This one is hidden" does not mean "this place is retired": the other one is
+ * live, and deleting on the hidden one took the place out of the index — and
+ * inside a rebuild it removed a row the very next insert needs, which is a
+ * foreign key failure that aborts the whole build (Codex, 18 Sep 2026).
+ */
+test('a place one hidden and one live attraction share survives the rebuild', async () => {
+  const ref = 'osm:way/shared-and-retired';
+  const { rows: [region] } = await query('select slug from regions limit 1');
+  const make = async (state) => (await query(
+    `insert into attractions (name, slug, region_slug, venue_ref, state, lat, lng, summary, first_seen, last_seen)
+     values ('Shared and retired', $1, $2, $3, $4, 51.5, -0.1, 'A sentence of ours', now(), now()) returning *`,
+    [`shared-${Math.random().toString(36).slice(2, 10)}`, region.slug, ref, state])).rows[0];
+  await make('published');
+  await make('hidden');
+
+  await index.reindex();
+  const { rows: [held] } = await query('select count(*)::int as n from place_index where venue_ref = $1', [ref]);
+  assert.equal(held.n, 1, 'the live attraction keeps the place');
+  const { rows: [src] } = await query(
+    `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'atlas'`, [ref]);
+  assert.equal(src.n, 1, 'and the atlas is still one of its sources');
+
+  // And retiring it outside a rebuild does not take it either.
+  await index.retire();
+  const { rows: [after] } = await query('select count(*)::int as n from place_index where venue_ref = $1', [ref]);
+  assert.equal(after.n, 1);
+});
