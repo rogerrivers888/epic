@@ -759,3 +759,29 @@ test('a hidden attraction leaves the index, unless something else holds the plac
             (select count(*) from place_cells where venue_ref = $1)::int as cells`, [refOf(alone)]);
   assert.deepEqual(orphans.rows[0], { areas: 0, cells: 0 });
 });
+
+/**
+ * A corrected position reaches the index, and sends the place back to be placed.
+ *
+ * Holding the first coordinate for ever meant a place kept whatever the first
+ * thing to mention it thought, and its cell, its ring and every distance off it
+ * stayed wrong until somebody rebuilt the index by hand (Codex, 18 Sep 2026).
+ */
+test('a later source corrects a position, and a claim with none cannot erase it', async () => {
+  const ref = 'test:moved';
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.1 }], { source: 'atlas' });
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+
+  // Fifty metres or so: enough to change the cell it sits in.
+  await index.noteMany([{ ref, lat: 51.52, lng: -0.12 }], { source: 'osm' });
+  const row = async () => (await query('select lat, lng, placed_at from place_index where venue_ref = $1', [ref])).rows[0];
+  let now = await row();
+  assert.equal(Math.round(now.lat * 100) / 100, 51.52, 'the newer position is the one held');
+  assert.equal(now.placed_at, null, 'and it goes back to be placed');
+
+  // A household claiming it carries no position, and must not erase one.
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+  await index.noteMany([{ ref }], { ownership: 'claimed' });
+  now = await row();
+  assert.equal(Math.round(now.lat * 100) / 100, 51.52, 'a caller with nothing to say says nothing');
+});

@@ -872,8 +872,16 @@ export async function noteMany(places = [], { source = null, countryCode = null,
       `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen)
        values ${values}
        on conflict (venue_ref) do update
-          set lat = coalesce(place_index.lat, excluded.lat),
-              lng = coalesce(place_index.lng, excluded.lng),
+          -- A later source's position wins, where it has one.
+          --
+          -- Holding the first one for ever meant a corrected coordinate never
+          -- reached the index: the place kept whatever the first thing to
+          -- mention it thought, and its cell, its ring and every distance off it
+          -- stayed wrong until somebody rebuilt the whole index by hand (Codex,
+          -- 18 Sep 2026). A caller with no position still cannot erase one — a
+          -- household claim carries none.
+          set lat = coalesce(excluded.lat, place_index.lat),
+              lng = coalesce(excluded.lng, place_index.lng),
               -- The first source that knows fills it, and nothing overwrites
               -- it afterwards (Codex, 17 Sep 2026, four rounds on this one
               -- line). Two earlier rules leaked — a default that could be
@@ -907,6 +915,11 @@ export async function noteMany(places = [], { source = null, countryCode = null,
                   -- be placed — so it never got a cell and never appeared in a
                   -- ring (Codex, 18 Sep 2026).
                   or (place_index.lng is null and excluded.lng is not null)
+                  -- Or the position moved: about fifty metres is more than a
+                  -- rounding and enough to change the cell it sits in.
+                  or (excluded.lat is not null and place_index.lat is not null
+                      and (abs(place_index.lat - excluded.lat) > 0.0005
+                           or abs(coalesce(place_index.lng, 0) - coalesce(excluded.lng, 0)) > 0.0005))
                 then null else place_index.placed_at end,
               last_seen = now()`,
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified']));

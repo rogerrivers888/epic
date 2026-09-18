@@ -330,7 +330,16 @@ export async function scoringInputsFor(venueRef) {
       limit 1`,
     [venueRef],
   );
-  if (rows[0]) return rows[0];
+  // A row with nothing in it is not evidence.
+  //
+  // `ensureRecord` makes an empty `place_records` row the moment a household
+  // touches a place, and the full join then returns a row of nulls — which was
+  // truthy, so the fallback below was never reached for the very case it exists
+  // for: an atlas place somebody has saved (Codex, 18 Sep 2026).
+  const substance = rows[0] && (rows[0].sweep_name || rows[0].record_name || rows[0].sweep_website
+    || rows[0].record_website || rows[0].summary || rows[0].crowd_band || rows[0].count_band
+    || rows[0].opening_hours || rows[0].area_code);
+  if (substance) return rows[0];
   // A harvested place has neither row, and there are more of those in the index
   // than of anything else: the board that exists to explain a score said "not
   // scored" over a place the index scores a hundred (18 Sep 2026, the separate
@@ -350,7 +359,9 @@ export async function scoringInputsFor(venueRef) {
        left join attraction_details d on d.attraction_id = a.id
       where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden'
       limit 1`, [venueRef]);
-  return atlas[0] ?? null;
+  // The empty row, if that is genuinely all there is — the caller can tell an
+  // empty record from no record at all.
+  return atlas[0] ?? rows[0] ?? null;
 }
 
 /** How the sweep is doing, per area — the owner's figure for the dataset. */
@@ -673,7 +684,16 @@ export async function placeForMenu(venueRef) {
       limit 1`,
     [venueRef],
   );
-  if (rows[0]) return rows[0];
+  // A row with nothing in it is not evidence.
+  //
+  // `ensureRecord` makes an empty `place_records` row the moment a household
+  // touches a place, and the full join then returns a row of nulls — which was
+  // truthy, so the fallback below was never reached for the very case it exists
+  // for: an atlas place somebody has saved (Codex, 18 Sep 2026).
+  const substance = rows[0] && (rows[0].sweep_name || rows[0].record_name || rows[0].sweep_website
+    || rows[0].record_website || rows[0].summary || rows[0].crowd_band || rows[0].count_band
+    || rows[0].opening_hours || rows[0].area_code);
+  if (substance) return rows[0];
   // A harvested place has neither row, and there are more of those in the index
   // than of anything else: the board that exists to explain a score said "not
   // scored" over a place the index scores a hundred (18 Sep 2026, the separate
@@ -693,7 +713,9 @@ export async function placeForMenu(venueRef) {
        left join attraction_details d on d.attraction_id = a.id
       where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden'
       limit 1`, [venueRef]);
-  return atlas[0] ?? null;
+  // The empty row, if that is genuinely all there is — the caller can tell an
+  // empty record from no record at all.
+  return atlas[0] ?? rows[0] ?? null;
 }
 
 /**
