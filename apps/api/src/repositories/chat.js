@@ -83,8 +83,17 @@ export async function updateTopic(id, patch, client) {
   const params = [id];
   const set = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };
   // The words changing is what sends it back to be looked at; pinning it is not
-  // (migration 166).
-  if (patch.title !== undefined || patch.body !== undefined) sets.push('rewritten_at = now()');
+  // (migration 166). And where somebody had already decided about the old
+  // words, the new ones wait out of sight — otherwise the way to publish
+  // something abusive is to publish something else and edit it (Codex, 18 Sep
+  // 2026).
+  if (patch.title !== undefined || patch.body !== undefined) {
+    sets.push('rewritten_at = now()');
+    sets.push(`hidden = case when exists (
+      select 1 from content_queue q
+       where q.subject_type = 'chat_topic' and q.subject_id = chat_topics.id::text and q.state <> 'waiting')
+      then true else chat_topics.hidden end`);
+  }
   if (patch.title !== undefined) set('title', patch.title);
   if (patch.body !== undefined) set('body', patch.body);
   if (patch.tagKind !== undefined) set('tag_kind', patch.tagKind);

@@ -613,8 +613,19 @@ test('an approved thing that is rewritten goes back to be looked at', async () =
   await queue.sync();
   assert.equal((await row()).state, 'approved', 'a decision stands over a change that is not the words');
 
-  // Changing the words is.
+  // Changing the words is — and the new ones wait out of sight, because the way
+  // to publish something abusive would otherwise be to publish something else
+  // and then edit it (Codex, 18 Sep 2026).
   await chat.updateTopic(topic.id, { body: 'Actually, something abusive.' });
   await queue.sync();
   assert.equal((await row()).state, 'waiting', 'and it goes back in front of somebody');
+  const { rows: [after] } = await query('select hidden from chat_topics where id = $1', [topic.id]);
+  assert.equal(after.hidden, true, 'and it is not public while it waits');
+
+  // Approving it puts it back up.
+  const q2 = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+  await queue.approve([q2.rows[0].id], 'the owner (passcode)');
+  const { rows: [up] } = await query('select hidden from chat_topics where id = $1', [topic.id]);
+  assert.equal(up.hidden, false);
 });

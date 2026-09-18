@@ -441,7 +441,24 @@ export async function insertReview(r) {
      -- hidden, rewritten_at says there is something new, and sync() puts it
      -- back in front of somebody. Approving is what publishes it.
      on conflict (booking_id, side) do update set stars = excluded.stars, chips = excluded.chips, text = excluded.text, photo_id = excluded.photo_id, publish_on = excluded.publish_on,
-       rewritten_at = case when excluded.text is distinct from host_reviews.text then now() else host_reviews.rewritten_at end
+       rewritten_at = case when excluded.text is distinct from host_reviews.text then now() else host_reviews.rewritten_at end,
+       -- And out of sight until somebody has read the new words, where the old
+       -- ones had already been read.
+       --
+       -- A decision covers the text that was in front of whoever made it. Leave
+       -- an approved review visible through an edit and the way to get abusive
+       -- words published is to submit something innocuous, wait for the tick,
+       -- and then change it (Codex, 18 Sep 2026, three rounds on this). A review
+       -- nobody has decided yet is not touched: it is held for fourteen days like
+       -- any other, and an edit inside that window is just the household getting
+       -- it right.
+       hidden = case
+         when excluded.text is distinct from host_reviews.text
+           and exists (
+             select 1 from content_queue q
+              where q.subject_type = 'host_review' and q.subject_id = host_reviews.id::text
+                and q.state <> 'waiting')
+         then true else host_reviews.hidden end
      returning *`,
     [r.bookingId, r.offerId, r.hostId, r.householdId, r.side ?? 'guest', r.stars, JSON.stringify(r.chips ?? []), r.text ?? null, r.photoId ?? null, r.publishOn],
   );

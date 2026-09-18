@@ -67,8 +67,16 @@ export async function insertEntry(householdId, fields = {}, client) {
 export async function updateEntry(id, patch, client) {
   const sets = ['updated_at = now()'];
   // Saying it again is editing it, and an edited sentence is a new thing to
-  // look at — which a change of preferences is not (migration 166).
-  if (patch.transcript !== undefined) sets.push('rewritten_at = now()');
+  // look at — which a change of preferences is not (migration 166). Where the
+  // old words had been decided, the new ones wait out of sight (Codex, 18 Sep
+  // 2026).
+  if (patch.transcript !== undefined) {
+    sets.push('rewritten_at = now()');
+    sets.push(`hidden = case when exists (
+      select 1 from content_queue q
+       where q.subject_type = 'open_entry' and q.subject_id = open_entries.id::text and q.state <> 'waiting')
+      then true else open_entries.hidden end`);
+  }
   const params = [id];
   for (const [key, column] of Object.entries(COLUMNS)) {
     if (patch[key] === undefined) continue;
