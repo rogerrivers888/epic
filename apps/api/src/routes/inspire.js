@@ -52,6 +52,7 @@
 
 import { Router } from 'express';
 import * as searchLog from '../repositories/searches.js';
+import * as placeIndex from '../repositories/placeIndex.js';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
@@ -602,6 +603,9 @@ inspire.get('/near', async (req, res, next) => {
     // All of them, not the first sixty: the replay is built from these rows,
     // and a card the household could tap has to be in it (Codex, 17 Sep 2026).
     if (searchId) await searchLog.noteShown(searchId, items.map((i, n) => ({ ref: i.venueRef, position: n + 1 })));
+    // And into the index: every place any source has ever seen. Even a count-only
+    // request, because seeing a place is seeing it (placeIndex.noteSeen).
+    await placeIndex.noteSeen(items);
 
     res.json({
       queryId: searchId,

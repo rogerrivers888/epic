@@ -114,30 +114,9 @@ router.post('/', async (req, res, next) => {
       ref: `${c.source}:${c.sourcePlaceId}`, position: i + 1, source: c.source,
     })));
 
-    // And into the index, which is defined as every place any source has ever
-    // seen — the words on the board are "however little we hold about it".
-    //
-    // A place a provider returned and we put in front of a household is one a
-    // source has seen. It was recorded only as an impression and a log row,
-    // neither of which the rebuild reads, so it stayed out of Places until
-    // somebody happened to save it — and coverage, the source counts and
-    // Collect all under-reported exactly the identified places the index exists
-    // to hold (Codex, 18 Sep 2026).
-    //
-    // The reference, where it is, and who returned it. Never a name: that is
-    // rented, and `noteMany` has nowhere to put one anyway (CLAUDE.md).
-    // Best-effort, like the log: a household's search is never worth failing
-    // over bookkeeping.
-    const seen = candidates
-      .filter((c) => c.sourcePlaceId && c.lat != null && c.lng != null)
-      .map((c) => ({
-        ref: `${c.source}:${c.sourcePlaceId}`,
-        lat: c.lat, lng: c.lng,
-        sourceId: String(c.sourcePlaceId),
-        countryCode: c.countryCode ?? null,
-        sources: [...new Set([c.source, ...(c.contributingSources ?? [])])].filter(Boolean),
-      }));
-    if (seen.length) await placeIndex.noteMany(seen, { source: 'live' }).catch(() => null);
+    // And into the index, which is every place any source has ever seen — one
+    // rule, in `placeIndex.noteSeen`, because four routes do this.
+    await placeIndex.noteSeen(candidates);
 
     res.json({
       queryId,

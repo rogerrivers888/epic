@@ -1561,16 +1561,16 @@ test('a place a live search showed is a place the index has seen', async () => {
   const ref = 'google:SHOWN-BY-A-SEARCH';
   await query('delete from place_index where venue_ref = $1', [ref]);
 
-  // What the discover route does with what it drew: the reference, where it is
-  // and who returned it. The board's own words for Known are "every place any
+  // What every live search now does with what it drew, through one function:
+  // the reference, where it is and who returned it. The board's own words for Known are "every place any
   // source has ever seen here, however little we hold about it" — and a place a
   // provider returned and we put in front of a household is one of those. It
   // was recorded only as an impression and a log row, neither of which the
   // rebuild reads (Codex, 18 Sep 2026).
-  await index.noteMany([{
-    ref, lat: 51.48, lng: -0.61, sourceId: 'SHOWN-BY-A-SEARCH', countryCode: 'GB',
-    sources: ['google', 'osm'],
-  }], { source: 'live' });
+  await index.noteSeen([{
+    source: 'google', sourcePlaceId: 'SHOWN-BY-A-SEARCH',
+    lat: 51.48, lng: -0.61, countryCode: 'GB', contributingSources: ['google', 'osm'],
+  }]);
 
   const { rows } = await query(
     'select ownership, lat, country_code from place_index where venue_ref = $1', [ref]);
@@ -1584,4 +1584,13 @@ test('a place a live search showed is a place the index has seen', async () => {
   assert.deepEqual(sources, ['google', 'osm']);
   const named = await index.namesFor([ref]);
   assert.equal(named.get(ref)?.name ?? null, null, 'and it has no name we may hold');
+
+  // Each source keeps its own identifier: Google's belongs to Google's row and
+  // nothing is invented for the others, which genuinely have not told us theirs
+  // (Codex, 18 Sep 2026).
+  const ids = Object.fromEntries((await query(
+    'select source, source_place_id from place_index_sources where venue_ref = $1', [ref])).rows
+    .map((r) => [r.source, r.source_place_id]));
+  assert.equal(ids.google, 'SHOWN-BY-A-SEARCH');
+  assert.equal(ids.osm, null);
 });

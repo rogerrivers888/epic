@@ -26,6 +26,7 @@ import { kmBetween } from '../domain/travel.js';
 import { contentsOf, groundsRadiusKm, researchInside } from '../sources/inside.js';
 import { researchRestrictions, restrictionsEnabled } from '../sources/restrictions.js';
 import * as searchLog from '../repositories/searches.js';
+import * as placeIndex from '../repositories/placeIndex.js';
 import { currentHousehold, loadMembers } from './household.js';
 import { fileWhere, upsertHouseholdPlace } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
@@ -452,6 +453,8 @@ places.get('/search', async (req, res, next) => {
       sourcesQueried, degraded,
     });
     await searchLog.noteShown(searchId, drawn.map((v, i) => ({ ref: v.venueRef, position: i + 1, source: v.source })));
+    // And into the index: every place any source has ever seen (placeIndex.noteSeen).
+    await placeIndex.noteSeen(drawn);
 
     res.json({
       queryId: searchId,

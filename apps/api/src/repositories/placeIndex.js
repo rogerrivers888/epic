@@ -2225,6 +2225,48 @@ export async function places(areaSlug, {
  * ref, because that name is Google's. A Google-only place therefore has no name
  * here, which is the finding rather than a gap.
  */
+/**
+ * Places a live search returned, into the index.
+ *
+ * The board's own words for Known are "every place any source has ever seen
+ * here, however little we hold about it", and a place a provider returned and
+ * we put in front of a household is one of those — recorded as an impression
+ * and a log row, neither of which the rebuild reads, it stayed out of Places
+ * until somebody happened to save it (Codex, 18 Sep 2026).
+ *
+ * The reference, where it is, and who returned it. Never a name: that is rented
+ * and there is nowhere here to put one (CLAUDE.md).
+ *
+ * Each source keeps its own identifier. A place found through Google is
+ * `google:ChIJ…`, and that id belongs to Google's row and to no other — handing
+ * one source's identifier to every source a place names would file Google's
+ * reference under OSM (Codex, 18 Sep 2026, twice).
+ *
+ * One function because four routes do this — discover, places, the trip map and
+ * Inspire — and the last four times a rule lived in more than one place, the
+ * copies drifted.
+ */
+export async function noteSeen(venues = []) {
+  const rows = (venues ?? [])
+    .filter((v) => v?.source && v?.sourcePlaceId && v.lat != null && v.lng != null)
+    .map((v) => {
+      const sources = [...new Set([v.source, ...(v.contributingSources ?? [])])].filter(Boolean);
+      return {
+        ref: `${v.source}:${v.sourcePlaceId}`,
+        lat: v.lat, lng: v.lng,
+        countryCode: v.countryCode ?? null,
+        sources,
+        // Its own id for the source that found it, and nothing invented for the
+        // others — a merged place's other sources genuinely have not told us
+        // their reference.
+        sourceIds: { [v.source]: String(v.sourcePlaceId) },
+      };
+    });
+  if (!rows.length) return { noted: 0 };
+  // Best-effort: a household's search is never worth failing over bookkeeping.
+  return noteMany(rows, { source: null }).catch(() => ({ noted: 0 }));
+}
+
 export async function namesFor(refs) {
   const out = new Map();
   if (!refs?.length) return out;
@@ -2275,5 +2317,5 @@ export async function namesFor(refs) {
 export default {
   SOURCES, bars, seedBars, setBar, reindex, rescore, note, noteMany, refreshStats, statsAge,
   statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll, settleClaims,
-  sources, quality, places, namesFor, labels,
+  sources, quality, places, namesFor, labels, noteSeen,
 };

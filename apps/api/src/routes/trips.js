@@ -23,6 +23,7 @@ import { occupanciesFor, liteapiEnabled, liteapiKeyKind } from '../sources/litea
 import { kmBetween, detourMinutes, estimateTravelMinutes, reachRadiusKm } from '../domain/travel.js';
 import { currentHousehold } from './household.js';
 import * as searchLog from '../repositories/searches.js';
+import * as placeIndex from '../repositories/placeIndex.js';
 import { visitPayload, householdStatus } from './places.js';
 import { upsertHouseholdPlace, ownedImage } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
@@ -857,6 +858,8 @@ async function runShortlistSearch(req, { onProgress = null } = {}) {
     sourcesQueried, degraded: degraded.map((d) => d.source ?? d),
   });
   await searchLog.noteShown(queryId, kept.map((v, n) => ({ ref: v.venueRef, position: n + 1 })));
+  // And into the index: every place any source has ever seen (placeIndex.noteSeen).
+  await placeIndex.noteSeen(kept);
   return { queryId, near: center, radiusKm, results: kept, storedCount: stored.length, degradedSources: degraded, sourcesQueried, cached, fetchedAt, tookMs: Date.now() - started };
 }
 
@@ -1233,6 +1236,7 @@ router.get('/:id/along', async (req, res, next) => {
     });
     if (queryId) {
       await searchLog.noteShown(queryId, drawn.map((p, n) => ({ ref: p.venueRef, position: n + 1 })));
+      await placeIndex.noteSeen(drawn);
     }
     res.json({
       queryId,
