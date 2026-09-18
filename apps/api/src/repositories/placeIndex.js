@@ -597,8 +597,14 @@ async function settleWhileLocked(limit) {
        and coalesce(sa.country_code, reg.country_code) is not null`, [refs]);
 
   // 1 — where they are. The same four sources the rebuild reads, and the same
-  //     rule that a town carries its county. Nothing is deleted first: these
-  //     places have no area rows yet, by definition.
+  //     rule that a town carries its county.
+  //
+  //     The old rows go first. "These places have no area rows yet, by
+  //     definition" was true when the only way into this hand was being new; a
+  //     place is now sent back here when its *position* is corrected too, and
+  //     inserting without deleting left it counted in the county it used to be
+  //     in as well as the one it is in (Codex, 18 Sep 2026).
+  await query('delete from place_areas where venue_ref = any($1)', [refs]);
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select pi.venue_ref, lower(pi.country_code) from place_index pi

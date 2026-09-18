@@ -44,6 +44,8 @@ export function heldSearch(surface: Surface, queryId: string | null | undefined,
 
 /** The places each search has already had an `open` counted for. */
 const openedOnce = new Set<string>();
+/** And the ones whose open is still in the air, so a double tap is one open. */
+const openingNow = new Set<string>();
 
 /** What the household did to one of the results. */
 export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string | null) {
@@ -58,12 +60,17 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
   // their mind (Codex, 17 Sep 2026). The dwell on the later look is still
   // measured; it is the count that must not double.
   if (kind === 'open') {
-    if (openedOnce.has(key)) { opened.set(key, Date.now()); return; }
-    // Counted once it has actually landed, not once it has been attempted. The
-    // key went in before the post, the post is fire-and-forget, and this
-    // endpoint is not in the offline policy — so an open made on a train was
+    if (openedOnce.has(key) || openingNow.has(key)) { opened.set(key, Date.now()); return; }
+    // Two states, and both are needed.
+    //
+    // `openedOnce` is only set once the post has actually landed: it went in
+    // before the post, the post is fire-and-forget, and this endpoint is
+    // deliberately not in the offline policy — so an open made on a train was
     // dropped and could never be sent again, and the search read as one nobody
-    // clicked (Codex, 18 Sep 2026).
+    // clicked. `openingNow` covers the other end of it: a double tap, or an
+    // effect that fires twice, wrote two opens while the first was still in the
+    // air (Codex, 18 Sep 2026, two rounds).
+    openingNow.add(key);
   }
   // How long they stayed on the place before leaving — the dwell on a replay.
   let dwellMs: number | null = null;
@@ -73,7 +80,9 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
     queryId, kind, venueRef: venueRef ?? null,
     position: positions.get(key) ?? null,
     dwellMs,
-  }).then(() => { if (kind === 'open') openedOnce.add(key); }).catch(() => null);
+  }).then(() => { if (kind === 'open') openedOnce.add(key); })
+    .catch(() => null)
+    .finally(() => { if (kind === 'open') openingNow.delete(key); });
 }
 
 /** What each surface last told the log it had drawn, so it is said once. */

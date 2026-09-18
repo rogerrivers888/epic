@@ -463,8 +463,10 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
           ? `select slug from localities where country_code = upper($2) or slug = $1`
           // `$2` is unused here and still bound, because both branches take the
           // same two parameters and Postgres refuses a statement given more
-          // than it names.
-          : `select slug from localities where ($2 = $2) and (slug = $1 or parent_slug = $1)`,
+          // than it names. Cast, because a parameter compared only with itself
+          // has no inferable type and preparing it can fail outright — which
+          // would be a 500 on the county board (Codex, 18 Sep 2026).
+          : `select slug from localities where ($2::text = $2::text) and (slug = $1 or parent_slug = $1)`,
         [scope.area.slug, scope.area.country_code ?? ''])).rows.map((r) => r.slug)
       : null;
     const { rows: everything } = await query(`
