@@ -712,7 +712,7 @@ export async function reject({ id, reason, message = null, tell = false, who, se
     const now = await versionOf(q.subject_type, q.subject_id);
     if ((seen ?? null) !== now) {
       const { rows: [row] } = await query('select * from content_queue where id = $1', [id]);
-      return row ? { ...row, stale: true, why: 'it was rewritten while you were reading it, so it is still waiting' } : null;
+      return row ? { ...row, decided: false, stale: true, why: 'it was rewritten while you were reading it, so it is still waiting' } : null;
     }
   }
   // Already decided, and decided this way: nothing to do.
@@ -731,7 +731,9 @@ export async function reject({ id, reason, message = null, tell = false, who, se
   const onlyTheTelling = q.state === 'rejected' && q.reason === reason && tell && !q.told;
   if (q.state === 'rejected' && q.reason === reason && !onlyTheTelling) {
     const { rows: [already] } = await query('select * from content_queue where id = $1', [id]);
-    return already ? { ...already, why: 'it was already rejected for that reason' } : null;
+    // `decided` is false: nothing happened, and the audit must not say one did
+    // (Codex, 18 Sep 2026).
+    return already ? { ...already, decided: false, why: 'it was already rejected for that reason' } : null;
   }
   const body = tell ? (message ?? r.message) : null;
   // A retry of the telling alone does not count the reason again, does not
@@ -744,7 +746,8 @@ export async function reject({ id, reason, message = null, tell = false, who, se
     // what changed, if anything, is that the message has now gone.
     const why = ['it was already rejected for that reason',
       sent.told ? 'the message has now been sent' : sent.why].filter(Boolean).join('; ');
-    return { ...row, told: sent.told, why };
+    // The decision was made before; this was the message alone.
+    return { ...row, decided: false, told: sent.told, why };
   }
 
   /**
@@ -811,6 +814,7 @@ export async function reject({ id, reason, message = null, tell = false, who, se
   // key — which is the owner's to add in Doppler — the rejection still stands
   // and the screen is told plainly that the message did not go.
   const sent = tell && body ? await tellThem(id, q, body) : { told: false, why: null };
+  out.decided = true;
   out.told = sent.told;
   out.why = sent.why;
   return out;

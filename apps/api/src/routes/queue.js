@@ -144,7 +144,15 @@ router.post('/approve', requires('manage_library'), async (req, res, next) => {
     // the screen drew (Codex, 18 Sep 2026).
     const seen = req.body?.seen && typeof req.body.seen === 'object' ? req.body.seen : null;
     const done = await queue.approve(ids, actor(req).actorLabel, { seen });
-    await writeAudit({ ...actor(req), action: 'queue.approve', subjectType: 'content', subjectId: ids.join(','), subjectLabel: `${done.length} approved`, after: { ids } });
+    // Only what actually changed. A request can carry a row that was rewritten
+    // while somebody was reading it, one already approved, or an id that is not
+    // there — and an audit that names all of them says decisions were made that
+    // were not (Codex, 18 Sep 2026). An audit is the one record that has to be
+    // exactly true.
+    const changed = done.map((d) => d.id);
+    if (changed.length) {
+      await writeAudit({ ...actor(req), action: 'queue.approve', subjectType: 'content', subjectId: changed.join(','), subjectLabel: `${changed.length} approved`, after: { ids: changed } });
+    }
     // What was not approved, and why. `approve` holds back a row whose words
     // were rewritten after it was raised, because nobody has read those words
     // — and dropping that from the answer left the screen closing the drawer
@@ -189,7 +197,13 @@ router.post('/:id/reject', requires('manage_library'), async (req, res, next) =>
     if (out.stale) {
       return res.json({ ok: true, id: out.id, stale: true, told: false, message: null, reason: out.reason ?? null, why: out.why ?? null });
     }
-    await writeAudit({ ...actor(req), action: 'queue.reject', subjectType: 'content', subjectId: out.id, subjectLabel: out.reason, after: { reason: out.reason, told: out.told } });
+    // Only a decision that was actually made. A double tap, a client that
+    // resends, or a retry of the message alone changes nothing — and writing an
+    // audit row for each of them turns one rejection into three in the record
+    // (Codex, 18 Sep 2026).
+    if (out.decided) {
+      await writeAudit({ ...actor(req), action: 'queue.reject', subjectType: 'content', subjectId: out.id, subjectLabel: out.reason, after: { reason: out.reason, told: out.told } });
+    }
     // `told` is what actually happened, not what was asked for; `why` says so
     // in one sentence where nothing went out.
     res.json({ ok: true, id: out.id, reason: out.reason, told: out.told, message: out.message, why: out.why ?? null });

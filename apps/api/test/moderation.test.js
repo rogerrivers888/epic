@@ -947,3 +947,25 @@ test('a rejection is about the words the reviewer read, too', async () => {
   assert.equal(done.stale, undefined);
   assert.equal((await query('select hidden from chat_topics where id = $1', [topic.id])).rows[0].hidden, true);
 });
+
+test('the audit records the decisions that were made, and no others', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, 'household') returning *`,
+    [`audit-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+
+  // A rejection is one decision however many times the button is pressed. Each
+  // retry used to write another audit row, turning one rejection into three in
+  // the record — and an audit is the one thing that has to be exactly true
+  // (Codex, 18 Sep 2026).
+  const first = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(first.decided, true);
+  const again = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(again.decided, false, 'the retry decided nothing');
+  const third = await queue.reject({ id: q.id, reason: 'dark', tell: false, who: null });
+  assert.equal(third.decided, false);
+});
