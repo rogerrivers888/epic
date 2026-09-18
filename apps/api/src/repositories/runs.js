@@ -16,7 +16,14 @@ import * as collectRuns from './collectRuns.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 
 /** Pounds, to the nearest tenth of a penny, the way the board writes money. */
-const pounds = (gbp) => `£${gbp.toFixed(3).replace(/0$/, '')}`;
+/**
+ * A price, in as many places as it needs and no more.
+ *
+ * Under a penny a unit wants three; a whole run's cost wants two, because
+ * "£0.758 a run" is a figure nobody says out loud (18 Sep 2026, the separate
+ * audit).
+ */
+const pounds = (gbp) => `£${(gbp >= 0.1 ? gbp.toFixed(2) : gbp.toFixed(3).replace(/0$/, ''))}`;
 
 /**
  * The eight ways of getting more data.
@@ -33,10 +40,12 @@ export const RUNS = [
     explain: 'One outcode’s food census. Chains are dropped and ratings banded at the call.',
     // What the button does, so a label never promises something it does not.
     // These three are asked of a *selection*, and choosing one is on Places.
-    costs: '£1.40 each', free: false, action: 'Choose where' },
+    // The figure is worked out in `list()` from what our own sweeps have
+    // actually cost, because a price typed on a screen is a price that stops
+    // being true (18 Sep 2026, the separate audit).
+    costs: null, free: false, action: 'Choose where' },
   { key: 'menus', label: 'Read the menus',
-    explain: 'Reads a venue’s own menu, from their site and never from a provider.',
-    costs: 'free', free: true, action: 'See failures' },
+    explain: null, costs: 'free', free: true, action: 'See failures' },
   { key: 'rate', label: 'Ask Google what people think',
     explain: 'Banded into a word at the call; the figure is never written down.',
     // From the one price table, never retyped: it said £0.014 while the ledger
@@ -51,7 +60,7 @@ export const RUNS = [
     costs: 'free', free: true, action: 'Choose where' },
   { key: 'bench', label: 'Check our ordering against theirs',
     explain: 'Our order beside the licensed one. Verdicts are kept and the figures dropped.',
-    costs: '£0.42 a run', free: false, action: 'Open it' },
+    costs: null, free: false, action: 'Open it' },
   { key: 'rescore', label: 'Work out the scores again',
     explain: 'No network and nothing spent. Run it after any change to the ready bar.',
     costs: 'free', free: true, action: 'Run it' },
@@ -77,7 +86,8 @@ export async function list() {
     `select count(*)::int as areas, max(swept_at) as last, count(*) filter (where sweeping_since is not null)::int as going
        from scout_areas`);
   const sweepSpend = await one(
-    `select coalesce(sum(cost_cents), 0)::int as pence, max(finished_at) as last from sweep_runs`);
+    `select coalesce(sum(cost_cents), 0)::int as pence, count(*) filter (where cost_cents > 0)::int as runs,
+            max(finished_at) as last from sweep_runs`);
   const menus = await one(
     `select count(*) filter (where state = 'read')::int as read,
             count(*) filter (where state <> 'read' and cause is not null)::int as failed,
@@ -96,7 +106,11 @@ export async function list() {
             max(created_at) as last
        from provider_calls where provider = 'tripadvisor' and created_at > date_trunc('month', now())`);
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);
-  const bench = await one('select count(*)::int as n, max(ran_at) as last from source_bench_runs').catch(() => null);
+  const bench = await one(
+    `select count(*)::int as n, max(ran_at) as last,
+            coalesce(sum(cost_cents), 0)::int as pence, count(*) filter (where cost_cents > 0)::int as paid,
+            coalesce(sum(calls), 0)::int as calls
+       from source_bench_runs`).catch(() => null);
   const rescore = await one('select max(indexed_at) as last, count(*)::int as n from place_index');
   const collect = await collectRuns.latest();
 
@@ -121,6 +135,13 @@ export async function list() {
       state: sweep?.going ? 'running' : 'idle',
       where: `Done · ${sweep?.areas ?? 0} outcode${(sweep?.areas ?? 0) === 1 ? '' : 's'}`,
       cap: 'you set it', lastAt: sweep?.last ?? sweepSpend?.last ?? null, spentPence: sweepSpend?.pence ?? 0,
+      // What one has cost, on average, out of the ledger we keep of them. With
+      // none to average, the unit price is the honest thing to print: a sweep's
+      // bill is one Places request a place, and how many places there are in an
+      // outcode is not knowable in advance.
+      costs: sweepSpend?.runs
+        ? `${pounds((sweepSpend.pence / sweepSpend.runs) / 100)} a sweep`
+        : `${pounds(PRICE_PER_UNIT_USD.google * USD_TO_GBP)} a place`,
     },
     {
       ...RUNS[2],
@@ -128,6 +149,13 @@ export async function list() {
       where: (menus?.failed ?? 0) > 0 ? 'Done, with failures' : 'Done',
       cap: 'none', lastAt: menus?.last ?? null,
       tried: menus?.tried ?? 0, read: menus?.read ?? 0, failed: menus?.failed ?? 0, ours: oursFailed?.n ?? 0,
+      // BO3a's own hover, which says how many of the failures are ours — the
+      // sentence the board is for, and it had been replaced by a general
+      // description of the run (18 Sep 2026, the separate audit).
+      explain: 'Reads a venue’s own menu, from their site and never from a provider.'
+        + ((menus?.failed ?? 0)
+          ? ` ${oursFailed?.n ?? 0} of the ${menus.failed} failures ${(oursFailed?.n ?? 0) === 1 ? 'was' : 'were'} ours.`
+          : ''),
     },
     { ...RUNS[3], state: 'idle', where: 'Idle', cap: 'you set the spend', lastAt: rate?.last ?? null, calls: rate?.calls ?? 0 },
     {
@@ -139,7 +167,15 @@ export async function list() {
       lastAt: ta?.last ?? null,
     },
     { ...RUNS[5], state: 'idle', where: 'Idle', cap: 'none', lastAt: curate?.last ?? null, done: curate?.n ?? 0 },
-    { ...RUNS[6], state: 'idle', where: 'Idle', cap: '30 places', lastAt: bench?.last ?? null },
+    {
+      ...RUNS[6], state: 'idle', where: 'Idle', cap: '30 places', lastAt: bench?.last ?? null,
+      // The same rule as the sweep: what one has cost us, or the unit price of
+      // the calls it makes. The bench compares thirty places, so thirty
+      // requests is the shape of its bill.
+      costs: bench?.paid
+        ? `${pounds((bench.pence / bench.paid) / 100)} a run`
+        : `${pounds(30 * PRICE_PER_UNIT_USD.google * USD_TO_GBP)} a run of 30`,
+    },
     { ...RUNS[7], state: 'idle', where: 'Idle', cap: 'none', lastAt: rescore?.last ?? null, places: rescore?.n ?? 0 },
     {
       ...RUNS[8],

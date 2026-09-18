@@ -2196,15 +2196,25 @@ function ScoreTab({ refId, canManage }: { refId: string; canManage: boolean }) {
                   ? <Text style={styles.fieldStrong}>{sayInput(i.value, i.kind)}</Text>
                   : <Word muted>{noneWord(i.key)}</Word>}
               </Explain>
-              <View style={{ width: 130, alignItems: 'flex-end' }}>
+              {/* These two cells are hand-rolled, so they do not inherit their
+                  column's hover the way a Ladder's do — and they were the only
+                  figures on the tab that explained nothing (18 Sep 2026, the
+                  separate audit). */}
+              <Explain tip={i.worth
+                ? [`Worth ${i.worth}`, `Of the ${out} this place scores, ${i.worth} ${i.worth === 1 ? 'point comes' : 'points come'} from ${i.label.toLowerCase()}. Its weight is ${weights[i.key] ?? '—'}.`]
+                : ['Worth nothing yet', `We hold nothing for ${i.label.toLowerCase()}, so it adds nothing. Filling it is worth up to ${weights[i.key] ?? '—'}.`]}
+                style={{ width: 130, alignItems: 'flex-end' }}>
                 {/* Law 3: nothing held is a dash, never a nought. */}
                 {i.worth ? <Num n={i.worth} /> : <Blank />}
-              </View>
-              <View style={{ width: 150, alignItems: 'flex-end' }}>
+              </Explain>
+              <Explain tip={i.owned
+                ? [i.held ? 'Ours' : 'Would be ours', 'This input comes from something we may keep for good, so it counts towards the score without the licensed bit.']
+                : ['Rented', 'This input comes from a licensed provider. It counts towards our score and not towards the one beside it, which is what we would still have if they went.']}
+                style={{ width: 150, alignItems: 'flex-end' }}>
                 <Text style={[styles.fieldMeta, i.owned && { color: colors.accent, fontWeight: '700' }]}>
                   {i.owned ? (i.held ? 'yes, ours' : 'would be') : 'no'}
                 </Text>
-              </View>
+              </Explain>
             </View>
           ))}
           {chained ? (
@@ -2585,16 +2595,27 @@ function ReadyBarBoard({ sub, canManage, onClose, onPick }: {
         <View style={[{ width: 260 }, width < 1100 && { width: '100%' }]}>
           <Kicker tip="sectionSubcategoriesHere">{`${data.subcategories.length} subcategories`}</Kicker>
           <ScrollView style={{ maxHeight: 520 }}>
-            {data.subcategories.map((s) => (
-              <Press key={s.key} effect="none" onPress={() => setPick(s.key)} accessibilityRole="button"
-                     accessibilityState={{ selected: pick === s.key }} accessibilityLabel={s.label}
-                     style={[styles.pickRow, pick === s.key && styles.pickRowOn, !s.set && { opacity: 0.6 }]}>
-                <Text style={[styles.pickName, pick === s.key && { color: colors.selectedFg, fontWeight: '700' }]} numberOfLines={1}>{s.label}</Text>
-                <Text style={[styles.pickN, pick === s.key && { color: colors.onLime }]}>
-                  {s.set ? `${s.facts.filter((f) => f.required).length} fact${s.facts.filter((f) => f.required).length === 1 ? '' : 's'}` : 'not set'}
-                </Text>
-              </Press>
-            ))}
+            {/* Each row says what its own bar is, on hover: fifty-one rows of
+                "N facts" with no explanation of which (18 Sep 2026, the
+                separate audit). */}
+            {data.subcategories.map((s) => {
+              const need = s.facts.filter((f) => f.required);
+              return (
+                <Explain key={s.key} cursor="pointer"
+                         tip={[s.label, s.set
+                           ? `${(s.places ?? 0).toLocaleString()} in Britain. Ready here means ${need.map((f) => (data.facts.find((x) => x.key === f.fact)?.label ?? f.fact).toLowerCase()).join(', ') || 'nothing yet'}.`
+                           : `${(s.places ?? 0).toLocaleString()} in Britain, and nobody has said what ready means for them yet — so none of them can be ready.`]}>
+                  <Press effect="none" onPress={() => setPick(s.key)} accessibilityRole="button"
+                         accessibilityState={{ selected: pick === s.key }} accessibilityLabel={s.label}
+                         style={[styles.pickRow, pick === s.key && styles.pickRowOn, !s.set && { opacity: 0.6 }]}>
+                    <Text style={[styles.pickName, pick === s.key && { color: colors.selectedFg, fontWeight: '700' }]} numberOfLines={1}>{s.label}</Text>
+                    <Text style={[styles.pickN, pick === s.key && { color: colors.onLime }]}>
+                      {s.set ? `${need.length} fact${need.length === 1 ? '' : 's'}` : 'not set'}
+                    </Text>
+                  </Press>
+                </Explain>
+              );
+            })}
           </ScrollView>
         </View>
 
@@ -2620,7 +2641,12 @@ function ReadyBarBoard({ sub, canManage, onClose, onPick }: {
                     {d.required && n != null ? `${n.toLocaleString()} of ${(row?.places ?? 0).toLocaleString()} have one` : d.required ? f.short : f.label}
                   </Text>
                 </Explain>
-                <Text style={[styles.fieldMeta, { width: 150, textAlign: 'right' }]}>{d.required ? `weight ${d.weight}` : '—'}</Text>
+                <Explain tip={d.required
+                  ? ['Weight', `What this fact is worth in the data score for a ${singular(row?.label ?? pick)} — out of a hundred, before the group multiplier. Requiring a fact and weighting it are two different decisions: the bar says whether a place is ready, the weight says how much the record is worth.`]
+                  : ['Not required', 'A place here is ready without it. It can still carry weight in the score.']}
+                  style={{ width: 150, alignItems: 'flex-end' }}>
+                  <Text style={[styles.fieldMeta, { textAlign: 'right' }]}>{d.required ? `weight ${d.weight}` : '—'}</Text>
+                </Explain>
               </View>
             );
           })}
