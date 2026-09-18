@@ -548,18 +548,34 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
       ? (ringHeld ? 0 : RING_CALLS) + (googleHeld ? 0 : (googleId ? 1 : 2))
       : 0;
     const wants = Math.round(PRICE_PER_UNIT_USD.google * calls * 100 * USD_TO_GBP);
+    // Every claim, from the first one, so a throw part way through setting the
+    // rest up gives back what has already been taken. Three claims were made
+    // before the protected region began, and a failure in the matcher or in
+    // either of the later two left the earlier ones standing for half an hour —
+    // refusing unrelated work for money nobody had spent (Codex, 18 Sep 2026,
+    // the third of this shape and the last of them).
     const room = await roomToSpend(wants, { holder: 'lookup.compare' });
-    const taId = ref.startsWith('tripadvisor:') ? ref.slice('tripadvisor:'.length) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
-    const taHeld = taId ? detailHeld('tripadvisor', taId) : false;
-    const taWants = tripadvisorSource.enabled() && !taHeld
-      ? Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP)
-      : 0;
-    const taPurse = await roomToSpend(taWants, { holder: 'lookup.compare.ta' });
-    const taRoom = taHeld
-      ? { granted: 2, left: 0, reservation: null }
-      : tripadvisorSource.enabled() && taPurse.ok
-        ? await tripadvisorRoom(2)
-        : { granted: 0, left: 0, reservation: null };
+    let taPurse = { ok: true, reservation: null, leftPence: 0 };
+    let taRoom = { granted: 0, left: 0, reservation: null };
+    let taId = null;
+    let taHeld = false;
+    try {
+      taId = ref.startsWith('tripadvisor:') ? ref.slice('tripadvisor:'.length) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
+      taHeld = taId ? detailHeld('tripadvisor', taId) : false;
+      const taWants = tripadvisorSource.enabled() && !taHeld
+        ? Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP)
+        : 0;
+      taPurse = await roomToSpend(taWants, { holder: 'lookup.compare.ta' });
+      taRoom = taHeld
+        ? { granted: 2, left: 0, reservation: null }
+        : tripadvisorSource.enabled() && taPurse.ok
+          ? await tripadvisorRoom(2)
+          : { granted: 0, left: 0, reservation: null };
+    } catch (err) {
+      await releaseSpend(room.reservation);
+      await releaseSpend(taPurse.reservation);
+      throw err;
+    }
     try {
     // Whatever the month cannot afford is left out of the search as well: the
     // search is itself a billed call, and its cost is inside the same claim.
@@ -756,7 +772,6 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     // (Codex, 17 Sep 2026); the ring's two billed Google searches were outside
     // the claim as well, so the two together could cross the ceiling (Codex,
     // 18 Sep 2026).
-    const taPence = 2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP;
     const ringPence = googleSource.enabled() ? RING_CALLS * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP : 0;
     // The locations as well as the money, through the same claim Collect takes.
     //
@@ -765,20 +780,31 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     // could put the contractual allowance past its cap between them (Codex, 18
     // Sep 2026).
     const taUnits = await tripadvisorRoom(2 * limit);
-    if (taUnits.granted < 2 * limit) {
+    // Whatever fits, rather than nothing.
+    //
+    // The claim is deliberately a partial grant — take what is left — and this
+    // turned that into a refusal: ten locations left and five places to look at
+    // was answered "over the allowance" while there was room for all five
+    // (Codex, 18 Sep 2026). Only a grant of nothing is a refusal, and then the
+    // sentence is about the allowance rather than about this page.
+    const canDo = Math.floor(taUnits.granted / 2);
+    if (canDo < 1) {
       await releaseSpend(taUnits.reservation);
       return res.status(422).json({
         error: 'over_the_allowance',
-        message: `That would spend ${2 * limit} of Tripadvisor's monthly locations and there are ${taUnits.left} left.`,
+        message: `Tripadvisor's monthly allowance of locations is spent — ${taUnits.left} left, and one look bills two.`,
         left: taUnits.left,
       });
     }
-    const purse = await roomToSpend(Math.round(taPence + ringPence), { holder: 'lookup.tripadvisor' });
+    // The money follows the locations: what this page will actually do, not
+    // what was asked for.
+    const taPenceNow = 2 * canDo * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP;
+    const purse = await roomToSpend(Math.round(taPenceNow + ringPence), { holder: 'lookup.tripadvisor' });
     if (!purse.ok) {
       await releaseSpend(taUnits.reservation);
       return res.status(422).json({
         error: 'over_the_ceiling',
-        message: `That would spend up to £${((taPence + ringPence) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        message: `That would spend up to £${((taPenceNow + ringPence) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
         leftPence: purse.leftPence, ceilingPence: purse.ceilingPence,
       });
     }
@@ -791,7 +817,8 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     if (req.body?.retryMissed === true) await forgetMisses(pool.map((i) => i.ref), 'tripadvisor');
     const tried = await triedFor(pool.map((i) => i.ref), 'tripadvisor');
     const wanting = pool.filter((i) => !tried.has(i.ref) && !i.sources.includes('tripadvisor')).sort((a, b) => b.priority - a.priority);
-    const page = wanting.slice(0, limit);
+    // Capped by what the allowance actually granted, not by what was asked for.
+    const page = wanting.slice(0, Math.min(limit, canDo));
     let matched = 0; let missed = 0; let looked = 0; let stopped = false;
     for (const i of page) {
       // A lookup may return two locations; never start one the cap cannot pay for.
