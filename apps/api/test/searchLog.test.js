@@ -706,6 +706,17 @@ test('the screen says what it drew, and an emptied screen is an empty search', a
       where search_id = $1 and kind = 'shown' order by position`, [id]);
   assert.deepEqual(marked.map((r) => r.drawn), ['true', 'false', 'false']);
 
+  // Drawn once is drawn: a filter change reports a different list and must not
+  // take away a row they have already seen (Codex, 18 Sep 2026).
+  await log.noteDrawn({ searchId: id, householdId: household.id, refs: ['test:drawn-2'] });
+  const { rows: both } = await query(
+    `select venue_ref, meta->>'drawn' as drawn, position from search_events
+      where search_id = $1 and kind = 'shown' order by venue_ref`, [id]);
+  assert.deepEqual(both.filter((r) => r.drawn === 'true').map((r) => r.venue_ref).sort(),
+    ['test:drawn-1', 'test:drawn-2']);
+  // And the position is the one the screen put it in.
+  assert.equal(both.find((r) => r.venue_ref === 'test:drawn-2').position, 1);
+
   // A place the index has never heard of shares the unshelved entry rather than
   // making a second one with the same name.
   await log.noteDrawn({ searchId: id, householdId: household.id, refs: ['test:drawn-3', 'test:never-indexed'] });

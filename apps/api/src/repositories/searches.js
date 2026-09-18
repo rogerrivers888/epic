@@ -437,10 +437,30 @@ export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}
     // saw and disagreeing with its own "shown" figure (Codex, 18 Sep 2026). So
     // each row is marked, and the replay leads with what was actually on screen.
     if (rowCount) {
+      // Drawn once is drawn.
+      //
+      // A filter change reports a new list, and marking everything outside it
+      // as not drawn took away rows the household had already seen — and, where
+      // they had opened one, the replay reported an open with no row to hang it
+      // on (Codex, 18 Sep 2026). A row is marked drawn and stays drawn.
+      //
+      // The position is the screen's, not the answer's: the list arrives in the
+      // order it was displayed in, and keeping the API's order made a card that
+      // was first appear far down and its neighbours read as "scrolled past".
+      await query(
+        `update search_events e
+            set meta = jsonb_set(coalesce(e.meta, '{}'::jsonb), '{drawn}', 'true'::jsonb),
+                position = d.at
+           from (select ref, ordinality::int as at from unnest($2::text[]) with ordinality as t(ref, ordinality)) d
+          where e.search_id = $1::uuid and e.kind = 'shown' and e.venue_ref = d.ref`, [searchId, kept]);
+      // And anything never drawn says so, unless it was drawn by an earlier
+      // list on this same search.
       await query(
         `update search_events
-            set meta = jsonb_set(coalesce(meta, '{}'::jsonb), '{drawn}', to_jsonb(venue_ref = any($2)))
-          where search_id = $1::uuid and kind = 'shown'`, [searchId, kept]);
+            set meta = jsonb_set(coalesce(meta, '{}'::jsonb), '{drawn}', 'false'::jsonb)
+          where search_id = $1::uuid and kind = 'shown'
+            and not (venue_ref = any($2))
+            and coalesce(meta->>'drawn', 'false') <> 'true'`, [searchId, kept]);
     }
     return rowCount > 0;
   } catch { return false; }

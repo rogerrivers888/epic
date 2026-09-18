@@ -381,11 +381,17 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
           if (!v) return null;
           const w = countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {};
           const known = newVenue ? !!newVenue.household?.visits || !!newVenue.household?.ledger : !!open;
-          return <CapturePanel venue={v} household={household} ctx={w} been={!!(newVenue ? newVenue.household?.visits : open?.visits)} saved={known} onChanged={refreshAll}
+          return <CapturePanel venue={v} household={household} ctx={w} been={!!(newVenue ? newVenue.household?.visits : open?.visits)} saved={known}
+            // Saving or marking a visit from inside the drawer is the same
+            // outcome as the row's own buttons, and only the row's were
+            // counted — so a search that ended in a save through the drawer
+            // read as "clicked, never tripped" (Codex, 18 Sep 2026).
+            onChanged={() => { if (newVenue?.venueRef) noteSearchEvent('places', 'save', newVenue.venueRef); return refreshAll(); }}
             onLanded={land} />;
         })()}
         ours={newVenue
-          ? <NewPlacePanel venue={newVenue} household={household} ctx={countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {}} onChanged={refreshAll} />
+          ? <NewPlacePanel venue={newVenue} household={household} ctx={countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {}}
+              onChanged={() => { if (newVenue?.venueRef) noteSearchEvent('places', 'save', newVenue.venueRef); return refreshAll(); }} />
           : open ? <OursPanel place={open} household={household} ctx={countryRow && city ? { country: countryRow.name, countryCode: countryRow.code, locality: city.name } : {}} viewer={viewer} onChanged={refreshAll} onRemoved={() => setOpen(null)} /> : null}
         gettingThere={open ? <GettingThere place={open} /> : null}
       />
