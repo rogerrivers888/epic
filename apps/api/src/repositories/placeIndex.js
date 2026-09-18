@@ -599,10 +599,23 @@ async function settleWhileLocked(limit) {
   // 3 — our shelf, and 4 — the score, which is what clears `indexed_at`.
   await shelveAll({ refs });
   const scored = await rescore({ refs });
-  // Placed. Whether or not any of it found anything — an outcode nobody has
-  // swept yet has no area to be in, and retrying it every hour for ever would
-  // starve the ones that do. The next full rebuild picks it up.
-  await query('update place_index set placed_at = now() where venue_ref = any($1)', [refs]);
+  // Placed — except where something we are still waiting for would change the
+  // answer.
+  //
+  // A place whose cell has not been stamped yet is one the reach build has not
+  // reached: ONS timed out, or there were more points than that pass takes. The
+  // stamp arrives on a later hour, and marking the place placed meant nothing
+  // ever copied it into the index — so it stayed out of every ring view until
+  // somebody ran a full rebuild (Codex, 18 Sep 2026).
+  //
+  // Everything else is placed whether or not it found anything: an outcode
+  // nobody has swept has no area to be in, and retrying that every hour for
+  // ever would starve the places that do have work to do.
+  await query(
+    `update place_index set placed_at = now()
+      where venue_ref = any($1)
+        and (cell is not null
+             or not exists (select 1 from geo_cells limit 1))`, [refs]);
   // The boards read `area_stats`, so a place placed but not counted is still
   // missing from every headline.
   await refreshStats();
