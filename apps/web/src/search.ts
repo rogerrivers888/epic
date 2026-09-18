@@ -79,9 +79,17 @@ const openingNow = new Set<string>();
 
 /** What the household did to one of the results. */
 export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string | null) {
-  // The search this card came from, where the surface is holding more than one
-  // — otherwise whatever the surface is standing on.
-  const queryId = (venueRef ? came.get(`${surface}:${venueRef}`) : null) ?? current.get(surface);
+  // The search this card came from — and only that one.
+  //
+  // Falling back to whatever the surface was standing on was right for an event
+  // about the search itself and wrong for an event about a *place*: Places lets
+  // somebody type again and pick a suggestion from the autocomplete, which opens
+  // a drawer on a place that was in no result list at all. Saving it moved the
+  // earlier search to "saved" and closing it recorded a close against it, so a
+  // search that had shown forty places and been ignored read as one that worked
+  // (Codex, 18 Sep 2026). A place nothing showed us belongs to no search, and
+  // nothing is the honest answer.
+  const queryId = venueRef ? came.get(`${surface}:${venueRef}`) : current.get(surface);
   if (!queryId) return;
   const key = `${queryId}:${venueRef ?? ''}`;
   // An open is counted once per place per search.
