@@ -248,9 +248,10 @@ export async function claimStranded() {
 /**
  * What the Runs board prints: whatever is going, and the last one that finished.
  *
- * The row is the newest run, whatever state it is in: a failed one has to stay
- * on the board until somebody looks at it, which is the whole point of the
- * failed state.
+ * The row is whatever is happening: a run that is going, then one that failed
+ * and needs somebody, then the last one to finish. A failed run still reaches
+ * somebody through `needsLooking`, which counts every failure whether or not
+ * this row is the one drawing it.
  *
  * But two collections over disjoint sets of places are allowed at once
  * (`startIfClear`), and reading that one row alone hid the other — a worker
@@ -259,7 +260,19 @@ export async function claimStranded() {
  * and the headline figures are the truth even where the row draws one.
  */
 export async function latest() {
-  const { rows } = await query('select * from collect_runs order by started_at desc limit 1');
+  // What is happening first, then what needs looking at, then what last
+  // happened.
+  //
+  // The newest row alone was wrong in both directions. Two collections are
+  // allowed at once, and if the newer one finishes while the older is still
+  // going the board drew "Done" over a worker that was still spending (Codex,
+  // 18 Sep 2026). A failed run still has to reach somebody — that is what
+  // `needsLooking` counts, and it counts every failure whether or not this row
+  // is drawing it.
+  const { rows } = await query(
+    `select * from collect_runs
+      order by (state = 'running') desc, (state = 'failed') desc, started_at desc
+      limit 1`);
   const r = rows[0];
   if (!r) return null;
   // How many others are going beside this one, so the board's count is the

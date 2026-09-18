@@ -63,7 +63,11 @@ test('the board reads the last run, and counts what is left', async () => {
   assert.equal(latest.state, 'running');
 
   await runs.fail(run.id, 'Google fell over');
-  assert.equal((await runs.latest()).state, 'failed');
+  // The run itself, not whichever row the board happens to draw: another test's
+  // collection may be going beside this one, and a run that is *going* comes
+  // first on that row (Codex, 18 Sep 2026 — "Done" over a worker that is still
+  // spending is the worse of the two mistakes).
+  assert.equal((await runs.one(run.id)).state, 'failed');
   // A failed run is not silently retried: the board asks somebody to look.
   assert.equal(await runs.finish(run.id), null);
 });
@@ -189,4 +193,30 @@ test('a chunk in the air when a run falls over is abandoned in as many words', a
   assert.deepEqual(after.asking, {}, 'nothing is left claiming to be in the air');
   assert.deepEqual(after.refused.map((r) => r.ref).sort(), ['a', 'b']);
   assert.match(after.refused[0].why, /not asked again, to avoid paying twice/);
+});
+
+test('a finished run does not draw over one that is still going', async () => {
+  await query('delete from collect_runs');
+  const older = await runs.start({ whereLabel: 'Still going', scope: {}, sources: ['google'], todo: { google: ['a'] } });
+  const newer = await runs.start({ whereLabel: 'Finished first', scope: {}, sources: ['google'], todo: { google: ['b'] } });
+
+  // The newer one finishes first. Reading the newest row alone drew "Done" over
+  // a worker that was still going and still spending — and its progress, its
+  // area and whether it had been stranded were all hidden behind that word
+  // (Codex, 18 Sep 2026).
+  await runs.finish(newer.id);
+  const board = await runs.latest();
+  assert.equal(board.id, older.id, 'what is happening comes first');
+  assert.equal(board.state, 'running');
+
+  // And once nothing is going, the board shows the last thing that happened.
+  await runs.finish(older.id);
+  assert.equal((await runs.latest()).id, newer.id);
+
+  // A failure outranks a finish, because somebody has to look at it.
+  const bad = await runs.start({ whereLabel: 'Fell over', scope: {}, sources: [], todo: { free: ['c'] } });
+  await runs.fail(bad.id, 'it fell over');
+  const after = await runs.start({ whereLabel: 'Fine', scope: {}, sources: [], todo: { free: ['d'] } });
+  await runs.finish(after.id);
+  assert.equal((await runs.latest()).id, bad.id, 'the one that needs somebody');
 });
