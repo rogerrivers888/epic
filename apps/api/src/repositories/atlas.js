@@ -118,8 +118,15 @@ export async function removePlace(client, householdId, venueRef) {
   // somebody had, and even a rebuild kept the value because its conflict clause
   // only ever promotes (Codex, 17 Sep 2026). In the same transaction as the
   // removal, so the two agree.
+  // Both ways a household holds one: saving it writes `household_places`, and a
+  // suggested shortlist item or a trip's base writes only `place_claims`. Asking
+  // the first alone demoted a place somebody had still asked for (Codex, 18 Sep
+  // 2026).
   const { rows } = await on(client)(
-    'select 1 from household_places where venue_ref = $1 limit 1', [venueRef]);
+    `select 1 from household_places where venue_ref = $1
+      union all
+     select 1 from place_claims where venue_ref = $1
+      limit 1`, [venueRef]);
   if (!rows.length) {
     await on(client)(
       // `placed_at` goes too, so the hourly pass recounts it. Without that the

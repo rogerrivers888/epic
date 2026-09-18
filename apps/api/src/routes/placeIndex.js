@@ -1552,7 +1552,8 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     if (!refs.length) throw bad('Nothing selected.');
     const household = await currentHousehold();
     const out = await curateThese(refs, household.id);
-    await index.rescore();
+    // The ones curated, not the estate (Codex, 18 Sep 2026).
+    await index.rescore({ refs });
     await index.refreshStats();
     res.json({ ...out, spentPence: 0 });
   } catch (err) { next(err); }
@@ -1783,7 +1784,10 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     try {
       const household = await currentHousehold();
       const out = await askThese(refs, household.id);
-      if (out.asked) { await index.rescore(); await index.refreshStats(); }
+      // The places that were asked about, not the whole of Britain. Unscoped,
+      // a selection of fifty rescored twenty-seven thousand — and grows into a
+      // timeout as the index does (Codex, 18 Sep 2026).
+      if (out.asked) { await index.rescore({ refs }); await index.refreshStats(); }
       res.json({ ...out, spentPence: spentOn(out.calls) });
     } finally {
       // The claim is let go whether it went well or not: by now every call it
@@ -1829,7 +1833,7 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
     // house took, and that guard lives in `pictureFor` where every caller gets
     // it (Codex, 17 Sep 2026).
     for (const place of rows) out.push({ ref: place.venue_ref, ...(await pictureFor(place, { force: true })) });
-    await index.rescore();
+    await index.rescore({ refs });
     await index.refreshStats();
     res.json({ found: out.filter((o) => o.state === 'found').length, results: out, spentPence: 0 });
   } catch (err) { next(err); }
