@@ -126,7 +126,17 @@ export function faultOf({ searches = 0, empty = 0, noClick = 0, noTrip = 0, know
   const share = (n) => n / searches;
   // Nothing held at all, and everything came back empty: a coverage hole, and
   // Collect is the only thing that fixes it.
-  if (empty >= searches) return { key: 'empty-always', label: 'Came back empty, every time', owner: 'Collect', act: 'collect' };
+  //
+  // `known` is what tells that apart from the other reason a search comes back
+  // empty — the sources fell over, or the search itself was wrong. Ignoring it
+  // labelled that "No places" and sent somebody to spend a collection budget on
+  // an area that already has the places (Codex, 18 Sep 2026).
+  if (empty >= searches && !known) {
+    return { key: 'empty-always', label: 'Came back empty, every time', owner: 'Collect', act: 'collect' };
+  }
+  if (empty >= searches) {
+    return { key: 'empty-but-held', label: 'Came back empty, and we hold some', owner: 'The sources', act: 'sources' };
+  }
   const worst = Math.max(share(empty), share(noClick), share(noTrip));
   const bad = [share(empty), share(noClick), share(noTrip)].filter((s) => s >= 0.2).length;
   if (worst < 0.2) return { key: 'working', label: 'Working', owner: null };
@@ -150,6 +160,7 @@ export const SHORT_FAULT = {
   'no-places': 'No places', 'empty-always': 'No places',
   'wrong-places': 'Wrong places', 'thin-places': 'Thin places',
   'all-three': 'All three', working: 'Working', none: '—',
+  'empty-but-held': 'Empty, not missing',
 };
 
 /**

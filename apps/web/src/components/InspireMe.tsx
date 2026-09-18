@@ -710,7 +710,15 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
 
       {restoring && !ideas ? <Text style={type.tiny}>Putting back what you were looking at…</Text> : null}
 
-      <VenueDrawer item={drawer} onClose={() => setDrawer(null)} />
+      {/* Closing the drawer is what ends the look, and the close is what
+          carries the dwell: the timer is only read on the next event for that
+          place, so an open-and-close — the ordinary way somebody reads an idea
+          and moves on — measured nothing at all and left the timer standing
+          (Codex, 18 Sep 2026). */}
+      <VenueDrawer item={drawer} onClose={() => {
+        if (drawer) noteSearchEvent('plan', 'close', drawer.venueRef || drawer.id);
+        setDrawer(null);
+      }} />
 
       {ideas ? (
         <Card>

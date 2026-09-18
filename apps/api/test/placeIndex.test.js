@@ -108,6 +108,15 @@ test('the three faults are told apart, and never averaged into one rate', () => 
   assert.equal(none.act, 'collect');
   assert.equal(SHORT_FAULT[none.key], 'No places');
 
+  // Empty every time in an area that is full of them is not a coverage hole:
+  // the sources fell over, or the search asked for the wrong thing. Sending
+  // somebody to Collect would spend a budget on places already held.
+  const held = faultOf({ searches: 214, empty: 214, known: 380 });
+  assert.equal(held.key, 'empty-but-held');
+  assert.equal(held.owner, 'The sources');
+  assert.notEqual(held.act, 'collect');
+  assert.equal(SHORT_FAULT[held.key], 'Empty, not missing');
+
   // Shown things and opened none: the wrong things were shown.
   const wrong = faultOf({ searches: 1106, empty: 0, noClick: 604, noTrip: 188, known: 512 });
   assert.equal(wrong.key, 'wrong-places');
@@ -132,7 +141,7 @@ test('the three faults are told apart, and never averaged into one rate', () => 
 });
 
 test('every fault has a short word, and the two ladders never share one', () => {
-  for (const key of ['no-places', 'empty-always', 'wrong-places', 'thin-places', 'all-three', 'working', 'none']) {
+  for (const key of ['no-places', 'empty-always', 'empty-but-held', 'wrong-places', 'thin-places', 'all-three', 'working', 'none']) {
     assert.ok(SHORT_FAULT[key], `${key} has no short word`);
   }
   // "One word, one meaning": the fault words and the rating bands are disjoint.

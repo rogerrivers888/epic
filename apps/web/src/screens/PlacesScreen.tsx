@@ -366,7 +366,15 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
       <VenueDrawer
         item={newVenue ? venueToBrowseItem(newVenue) : open ? atlasToBrowseItem(open) : null}
         baseLabel={city?.name ?? (home ? 'home' : null)}
-        onClose={() => { setOpen(null); setNewVenue(null); }}
+        // The close carries the dwell — see InspireMe. Without it a place
+        // that was opened and closed reported the open and nothing else.
+        onClose={() => {
+          // Only the searched result: the atlas rows below are not part of a
+          // search, and posting a close for one would file a click against
+          // whatever was looked up before it.
+          if (newVenue?.venueRef) noteSearchEvent('places', 'close', newVenue.venueRef);
+          setOpen(null); setNewVenue(null);
+        }}
         onVenue={async (v) => { if (open?.unnamed && v.name) { try { await api.nameAtlasPlace(open.venueRef, v.name); await loadPlaces(); } catch { /* the drawer still shows the fetched name */ } } }}
         capture={(() => {
           const v = newVenue ?? (open ? atlasToVenue(open) : null);
