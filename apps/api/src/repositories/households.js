@@ -7,6 +7,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { settleClaims } from './placeIndex.js';
 
 // ---------------------------------------------------------------------------
 // the household
@@ -78,8 +79,19 @@ export async function updateHousehold(id, f) {
  */
 export function deleteHouseholdAndCalls(householdId) {
   return withTransaction(async (client) => {
+    // What this household had claimed, read before the cascade takes it. The
+    // index row is derived and does not cascade, so a deleted household's
+    // claims went on counting in coverage and in Collect's claimed lane for
+    // good (Codex, 18 Sep 2026).
+    const { rows } = await client.query(
+      `select venue_ref from household_places where household_id = $1 and venue_ref is not null
+       union
+       select venue_ref from place_claims where household_id = $1`, [householdId]);
     await client.query('delete from provider_calls where household_id = $1', [householdId]);
     await client.query('delete from households where id = $1', [householdId]);
+    // After the delete: another household may still be claiming the same place,
+    // and settleClaims asks that rather than assuming.
+    if (rows.length) await settleClaims(rows.map((r) => r.venue_ref), client);
   });
 }
 

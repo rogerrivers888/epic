@@ -35,6 +35,18 @@ export const SOURCES = [
   { key: 'own',         label: 'Ours',          explain: 'Places here we hold our own research on.', optIn: false, paid: false },
 ];
 
+/**
+ * A source row is "we asked"; a source row with an identifier is "and it is
+ * there". `askThese` writes a Google row with no identifier on purpose when
+ * Google has never heard of a place — that is the second of the two states the
+ * board keeps apart, and counting it as coverage inflated Google's column and
+ * moved every "only one source" figure with it (Codex, 18 Sep 2026).
+ *
+ * "Ours" is exempt because it has no identifier to give: our own research is
+ * counted by ownership, above.
+ */
+const FOUND_IT = (t) => `${t}.source_place_id is not null or ${t}.source = 'own'`;
+
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
 /**
@@ -183,6 +195,30 @@ export async function reindex({ onProgress = null } = {}) {
  * pass only looks at rows waiting to be placed and would never reach it
  * otherwise (Codex, 18 Sep 2026, the round after).
  */
+/**
+ * A claim nobody is making any more is not a claim.
+ *
+ * Ownership only ever rises on its own, which is right for research — a fact we
+ * hold we go on holding. A *claim* is different: it is somebody's live interest,
+ * and when the household is erased (Epic 1 C10, "delete means delete") the rows
+ * behind it cascade away while the derived index row stays "claimed" for good.
+ * Coverage then counts a household that no longer exists, and Collect goes on
+ * prioritising a place nobody asked for (Codex, 18 Sep 2026).
+ *
+ * Both claim paths, as everything else here reads them. Pass refs to settle a
+ * few; pass nothing to settle the estate, which is what a rebuild does.
+ */
+export async function settleClaims(refs = null, client = null) {
+  const run = client ? (sql, args) => client.query(sql, args) : (sql, args) => query(sql, args);
+  const { rowCount } = await run(
+    `update place_index pi set ownership = 'identified'
+      where pi.ownership = 'claimed'
+        and ($1::text[] is null or pi.venue_ref = any($1))
+        and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)
+        and not exists (select 1 from place_claims pc where pc.venue_ref = pi.venue_ref)`, [refs]);
+  return rowCount;
+}
+
 export async function retire() {
   // Hiding an attraction in the library took it out of the harvest's insert and
   // left the row it had already made: a rebuild stopped refreshing it and went
@@ -390,6 +426,11 @@ async function reindexWhileLocked({ onProgress }) {
     ) claims group by venue_ref
     on conflict (venue_ref) do update
        set ownership = case when place_index.ownership = 'identified' then 'claimed' else place_index.ownership end`);
+
+  // The other direction: a claim whose household has been erased. The clause
+  // above only ever promotes, so without this a deleted household's claims sat
+  // in the index for good (Codex, 18 Sep 2026).
+  await settleClaims();
 
   await retire();
 
@@ -1263,7 +1304,7 @@ export async function refreshStats() {
       select pa.area_slug, '', '', src.source, '', ${shared}
         from place_areas pa
         join place_index pi on pi.venue_ref = pa.venue_ref
-        join place_index_sources src on src.venue_ref = pi.venue_ref
+        join place_index_sources src on src.venue_ref = pi.venue_ref and (${FOUND_IT('src')})
        group by pa.area_slug, src.source`);
     const { rows } = await client.query('select count(*)::int as n, max(refreshed_at) as at from area_stats');
     return rows[0];
@@ -1812,7 +1853,7 @@ export async function sources(areaSlug, { refs = null, limit = 60 } = {}) {
     : { sql: 'exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $1)', args: [lower(areaSlug)] };
   const { rows } = await query(`
     with scoped as (select pi.venue_ref, pi.subcategory, pi.ownership from place_index pi where ${scope.sql}),
-         n as (select s.venue_ref, count(*)::int as sources from scoped s join place_index_sources src on src.venue_ref = s.venue_ref group by s.venue_ref)
+         n as (select s.venue_ref, count(*)::int as sources from scoped s join place_index_sources src on src.venue_ref = s.venue_ref where ${FOUND_IT('src')} group by s.venue_ref)
     select s.subcategory,
            count(*)::int as known,
            ${SOURCES.map((x, i) => (x.key === 'own'
@@ -1820,7 +1861,7 @@ export async function sources(areaSlug, { refs = null, limit = 60 } = {}) {
              // counted the same way. Counting the `own` *source* instead made
              // one screen say 58 owned over a column of dashes (Codex, 17 Sep).
              ? `count(*) filter (where s.ownership = 'owned')::int as src_${i}`
-             : `count(*) filter (where exists (select 1 from place_index_sources q where q.venue_ref = s.venue_ref and q.source = '${x.key}'))::int as src_${i}`)).join(',\n           ')},
+             : `count(*) filter (where exists (select 1 from place_index_sources q where q.venue_ref = s.venue_ref and q.source = '${x.key}' and (${FOUND_IT('q')})))::int as src_${i}`)).join(',\n           ')},
            count(*) filter (where coalesce(n.sources, 0) = 1)::int as one_only,
            count(*) filter (where coalesce(n.sources, 0) = 1 and s.venue_ref like 'google:%')::int as google_only
       from scoped s left join n on n.venue_ref = s.venue_ref
@@ -1887,7 +1928,7 @@ export async function quality(areaSlug, { refs = null, limit = 12 } = {}) {
     select pi.venue_ref, pi.subcategory, pi.data_score, pi.ownership,
            coalesce(sp.count_band, r.count_band) as count_band,
            coalesce(sp.crowd_band, r.crowd_band) as crowd_band,
-           (select string_agg(src.source, ',' order by src.source) from place_index_sources src where src.venue_ref = pi.venue_ref) as srcs,
+           (select string_agg(src.source, ',' order by src.source) from place_index_sources src where src.venue_ref = pi.venue_ref and (${FOUND_IT('src')})) as srcs,
            (select lower(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
              where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode
       from place_index pi
@@ -1964,7 +2005,7 @@ export async function places(areaSlug, {
   const NAME = `coalesce(r.name, a.name, case when pi.venue_ref like 'google:%' then null else sp.name end, pi.venue_ref)`;
   if (q) { args.push(`%${q}%`); where.push(`${NAME} ilike $${args.length}`); }
   const MISSING = `jsonb_array_length(coalesce(pi.score_parts->'missing', '[]'::jsonb))`;
-  const UNSEEN = `(select count(*)::int from place_index_sources src where src.venue_ref = pi.venue_ref)`;
+  const UNSEEN = `(select count(*)::int from place_index_sources src where src.venue_ref = pi.venue_ref and (${FOUND_IT('src')}))`;
   const ORDER = {
     missing: `${MISSING} ${desc ? 'desc' : 'asc'}, pi.data_score asc nulls first`,
     score: `pi.data_score ${desc ? 'desc' : 'asc'} nulls last`,
@@ -1974,8 +2015,8 @@ export async function places(areaSlug, {
   args.push(limit);
   const { rows } = await query(`
     select pi.venue_ref, pi.subcategory, pi.category, pi.data_score, pi.ready, pi.score_parts, pi.ownership, pi.oldest_fact,
-           (select count(*)::int from place_index_sources src where src.venue_ref = pi.venue_ref) as seen_by,
-           (select string_agg(src.source, ',' order by src.source) from place_index_sources src where src.venue_ref = pi.venue_ref) as srcs,
+           (select count(*)::int from place_index_sources src where src.venue_ref = pi.venue_ref and (${FOUND_IT('src')})) as seen_by,
+           (select string_agg(src.source, ',' order by src.source) from place_index_sources src where src.venue_ref = pi.venue_ref and (${FOUND_IT('src')})) as srcs,
            (select upper(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
              where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode
       from place_index pi
@@ -2063,6 +2104,6 @@ export async function namesFor(refs) {
 
 export default {
   SOURCES, bars, seedBars, setBar, reindex, rescore, note, noteMany, refreshStats, statsAge,
-  statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll,
+  statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll, settleClaims,
   sources, quality, places, namesFor, labels,
 };

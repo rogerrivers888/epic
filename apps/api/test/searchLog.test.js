@@ -1190,3 +1190,49 @@ test('an area we do not know is not "everywhere"', async () => {
   const scope = await index.demandScope(null);
   assert.deepEqual(scope, { slugs: null, cells: null, asCounty: null });
 });
+
+test('deleting a household takes its claims out of the index', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const households = await import('../src/repositories/households.js');
+  const one = await aHousehold(query);
+  const two = await aHousehold(query);
+  const shared = 'google:CLAIMED-BY-TWO';
+  const only = 'google:CLAIMED-BY-ONE';
+
+  await owned.claim(one.household.id, shared, 'shortlist');
+  await owned.claim(two.household.id, shared, 'shortlist');
+  await owned.claim(one.household.id, only, 'trip base');
+  const ownershipOf = async (ref) => (await query(
+    'select ownership from place_index where venue_ref = $1', [ref])).rows[0].ownership;
+  assert.equal(await ownershipOf(shared), 'claimed');
+  assert.equal(await ownershipOf(only), 'claimed');
+
+  // Delete means delete (Epic 1 C10). The rows cascade; the derived index row
+  // does not, so it stayed "claimed" for a household that no longer exists —
+  // counted in coverage and prioritised by Collect for good (Codex, 18 Sep).
+  await households.deleteHouseholdAndCalls(one.household.id);
+  assert.equal(await ownershipOf(only), 'identified', 'nobody is asking for it now');
+  assert.equal(await ownershipOf(shared), 'claimed', 'the other household still is');
+
+  // And the estate-wide pass a rebuild runs finds the same thing.
+  await query('delete from place_claims where venue_ref = $1', [shared]);
+  assert.equal(await index.settleClaims([shared]), 1);
+  assert.equal(await ownershipOf(shared), 'identified');
+});
+
+test('a source that was asked and found nothing is not coverage', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const ref = 'osm:node/asked-and-missing';
+  await index.noteMany([{ ref, lat: 51.4, lng: -0.9, countryCode: 'GB', subcategory: 'museums', sourceId: 'node/asked-and-missing' }], { source: 'osm' });
+  // What askThese writes when Google has never heard of a place: asked, no id.
+  await index.noteMany([{ ref }], { source: 'google' });
+
+  const seen = (await query(
+    `select count(*)::int as n from place_index_sources
+      where venue_ref = $1 and source_place_id is not null`, [ref])).rows[0].n;
+  assert.equal(seen, 1, 'OSM found it; Google was asked and did not');
+  assert.equal((await query(
+    'select count(*)::int as n from place_index_sources where venue_ref = $1', [ref])).rows[0].n, 2,
+  'and both rows are kept, because "asked and missing" is a fact worth holding');
+});
