@@ -1492,3 +1492,28 @@ test('a place that reaches an itinerary is counted as having got there', async (
   await log.logEvent({ searchId: item.search_id, kind: 'add_to_trip', venueRef: 'test:became-a-stop', householdId: household.id });
   assert.equal(await outcomeOf(), 'tripped', 'and the search is credited with getting somebody there');
 });
+
+test('a place a household saved is filed under the town they saved it in', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const { household } = await aHousehold(query);
+  await query(
+    `insert into localities (slug, name, kind, country_code, parent_slug)
+     values ('townshire','Townshire','county','GB',null), ('savedton','Savedton','town','GB','townshire')
+     on conflict (slug) do nothing`);
+  const ref = 'google:SAVED-IN-A-TOWN';
+  await query(
+    `insert into household_places (household_id, venue_ref, label, kind, lat, lng, country_code, locality)
+     values ($1,$2,'Somewhere','saved',51.4,-0.9,'GB','Savedton')
+     on conflict (household_id, venue_ref) do update set locality = excluded.locality`, [household.id, ref]);
+  await index.noteMany([{ ref, lat: 51.4, lng: -0.9, countryCode: 'GB' }], { source: 'google' });
+
+  // The geocoder told us the town when the household saved it, and nothing read
+  // it — so a saved place with no postcode and no sweep row behind it got its
+  // country and stopped there, missing from every county and town board
+  // although we had been told where it was (Codex, 18 Sep 2026).
+  await index.settleNew(50);
+  const areas = (await query(
+    'select area_slug from place_areas where venue_ref = $1 order by 1', [ref])).rows.map((r) => r.area_slug);
+  assert.ok(areas.includes('savedton'), `filed under the town: ${areas.join(', ')}`);
+  assert.ok(areas.includes('townshire'), 'and therefore under its county');
+});

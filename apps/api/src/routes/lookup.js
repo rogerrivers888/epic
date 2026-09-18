@@ -50,6 +50,7 @@ import { recordsNear } from '../repositories/ownedPlaces.js';
 import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold } from './household.js';
 import { roomToSpend, releaseSpend, tripadvisorRoom } from './placeIndex.js';
+import { TRIPADVISOR_CAP } from '../repositories/runs.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import { searchKept, searchOnItsWay } from '../sources/cache.js';
 import { detailHeld } from '../sources/compare.js';
@@ -84,7 +85,12 @@ const holdFigures = (ref, f) => { if (f) figures.set(ref, { rating: f.rating ?? 
 const heldFigures = (ref) => { const f = figures.get(ref); return f && Date.now() - f.at < FIGURES_TTL_MS ? f : null; };
 
 /** The owner's ceiling for Tripadvisor on this screen: locations billed, this month, for populating a ring. */
-const TRIPADVISOR_CAP = Number(process.env.EPIC_LOOKUP_TRIPADVISOR_CAP || 120);
+// One cap, from the one place it is read.
+//
+// This file had its own copy that knew only the EPIC name, while the claim in
+// `repositories/runs.js` reads the older ROAM one as well — so an installation
+// still configured the old way could be granted work under its real cap and
+// then stopped early at 120 by this line (Codex, 18 Sep 2026).
 const tripadvisorUsed = (householdId) => providerCalls.unitsOfPurpose(householdId, 'tripadvisor', 'admin.lookup.%', 'tripadvisor');
 
 /**

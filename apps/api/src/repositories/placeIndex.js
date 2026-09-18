@@ -608,6 +608,18 @@ async function reindexWhileLocked({ onProgress }) {
      where r.postcode is not null
        and substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?') is not null
     on conflict do nothing`);
+  // And where the household said it was — the same source the hourly pass reads
+  // (Codex, 18 Sep 2026). Matched by name, because the column is a word rather
+  // than a slug, and only where we hold a locality by that name.
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select hp.venue_ref, l.slug
+      from household_places hp
+      join localities l
+        on lower(l.name) = lower(hp.locality)
+       and (hp.country_code is null or l.country_code = upper(hp.country_code))
+     where hp.locality is not null
+    on conflict do nothing`);
   // A town knows its county, so anything in the town is in the county too.
   await query(`
     insert into place_areas (venue_ref, area_slug)
@@ -895,6 +907,24 @@ async function settleWhileLocked(limit) {
      where r.venue_ref = any($1) and r.postcode is not null
        and substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?') is not null
     on conflict do nothing`, [refs]);
+  // And where the household said it was.
+  //
+  // A place somebody saves carries the locality the geocoder gave it, and
+  // nothing read it — so a saved place with no postcode and no sweep row behind
+  // it got its country and stopped there, missing from every county and town
+  // board although the household had told us where it was (Codex, 18 Sep 2026).
+  // Matched by name, because `household_places.locality` is a word rather than
+  // a slug, and only where we already hold a locality by that name.
+  await query(`
+    insert into place_areas (venue_ref, area_slug)
+    select hp.venue_ref, l.slug
+      from household_places hp
+      join localities l
+        on lower(l.name) = lower(hp.locality)
+       and (hp.country_code is null or l.country_code = upper(hp.country_code))
+     where hp.venue_ref = any($1) and hp.locality is not null
+    on conflict do nothing`, [refs]);
+
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select pa.venue_ref, l.parent_slug
