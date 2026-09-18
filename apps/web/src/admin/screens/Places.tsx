@@ -957,6 +957,17 @@ function LabelLadder({ rows }: { rows: PlaceLabel[] }) {
     { key: 'score', label: 'Avg score', tip: 'avgScore', width: 104, align: 'right', cell: (l) => <Num n={l.avgScore} /> },
   ];
   return <Ladder columns={columns} rows={rows} keyOf={(l) => l.key} highlight={(l) => l.known === 0}
+                 phoneRow={(l) => ({
+                   name: l.label,
+                   note: l.known ? `${l.known.toLocaleString()} known` : 'nothing lands on it',
+                   chips: [
+                     ...(l.pointsAt ? [{ key: 'points', word: l.pointsAt, tip: 'pointsAt' as const, lead: true }] : []),
+                     ...(l.known ? [
+                       { key: 'owned', word: `owned ${(l.owned ?? 0).toLocaleString()}`, tip: 'owned' as const },
+                       { key: 'ready', word: `ready ${l.ready == null ? '—' : `${l.ready}%`}`, tip: 'ready' as const },
+                     ] : []),
+                   ],
+                 })}
                  empty={<Word muted>No words have been taught yet.</Word>} />;
 }
 
@@ -1027,6 +1038,18 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
     <Ladder columns={columns} rows={rows} keyOf={(s) => s.key}
             onRow={(s) => (s.known > 0 ? onSub(s.key) : undefined)}
             highlight={(s) => s.known === 0}
+            /* BO2l's stacked row. "What it needs" is left off: it is a list of
+               words per row, and on a phone it belongs to the subcategory's own
+               page rather than to a glance down a list. */
+            phoneRow={(s: any) => ({
+              name: s.label,
+              note: s.known ? `${s.known.toLocaleString()} known` : 'we hold none',
+              chips: s.known ? [
+                { key: 'ready', word: `ready ${s.ready == null ? '—' : `${s.ready}%`}`, tip: 'ready', lead: true },
+                { key: 'owned', word: `owned ${(s.owned ?? 0).toLocaleString()}`, tip: 'owned' },
+                { key: 'score', word: `score ${s.avgScore == null ? '—' : s.avgScore}`, tip: 'avgScore' },
+              ] : [],
+            })}
             // The heading row carries the category's own totals in the same
             // columns the rows under it use — the board prints them, and a
             // heading with no figures is a heading you cannot read a table by.
@@ -1093,6 +1116,23 @@ function SourceBoard({ q, onSub }: { q: any; onSub: (s: string) => void }) {
   ];
   return (
     <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.key} onRow={(r) => onSub(r.key)}
+            /* One chip per source that has anything, plus the two figures this
+               board exists for: how many places rest on a single source, and
+               how many on Google alone. A source never asked is left off
+               rather than drawn as a nought — the distinction the wide table
+               keeps with "not asked". */
+            phoneRow={(r) => ({
+              name: r.label,
+              note: `${r.known.toLocaleString()} known`,
+              chips: [
+                ...data.sources
+                  .map((sc) => ({ sc, n: r.counts[sc.key] }))
+                  .filter((x): x is { sc: typeof data.sources[number]; n: number } => x.n != null && x.n > 0)
+                  .map(({ sc, n }) => ({ key: sc.key, word: `${sc.label.toLowerCase()} ${n.toLocaleString()}`, tip: tipForSource(sc.key) })),
+                ...(r.oneOnly ? [{ key: 'one', word: `one source only ${r.oneOnly.toLocaleString()}`, tip: 'oneSourceOnly' as const, lead: true }] : []),
+                ...(r.googleOnly ? [{ key: 'gonly', word: `Google only ${r.googleOnly.toLocaleString()}`, tip: 'googleOnlyNoName' as const }] : []),
+              ],
+            })}
             empty={<Word muted>Nothing indexed here yet.</Word>} />
   );
 }
