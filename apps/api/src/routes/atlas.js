@@ -97,7 +97,7 @@ export async function upsertHouseholdPlace(client, householdId, p) {
   const snapshot = venue && ['osm', 'fixtures', 'photo'].includes(String(p.venueRef).split(':')[0])
     ? { category: venue.category, cuisines: venue.cuisines, experiences: venue.experiences, dietaryOptions: venue.dietaryOptions, address: venue.address, website: venue.website, openingHours: venue.openingHours }
     : null;
-  await atlasRepo.upsertHouseholdPlace(client, householdId, {
+  const write = (on) => atlasRepo.upsertHouseholdPlace(on, householdId, {
     venueRef: p.venueRef,
     label: p.label ?? venue?.name ?? p.venueRef,
     kind: p.kind ?? kindOfCategory(category),
@@ -105,6 +105,15 @@ export async function upsertHouseholdPlace(client, householdId, p) {
     country: where.country, countryCode: where.countryCode, locality: where.locality,
     venue: snapshot, note: p.note ?? null,
   });
+  // The index claim and the household's own row commit together.
+  //
+  // The repository writes both, and half its callers hand over no transaction —
+  // so the shared index row said "claimed" and the household row that justified
+  // it could still fail, leaving a place nobody had saved marked as saved, with
+  // no removal path to take it back (Codex, 17 Sep 2026). Given a client, the
+  // caller already owns the transaction; given none, one is made here.
+  if (client) return write(client);
+  return withTransaction((own) => write(own));
 }
 
 /**

@@ -833,7 +833,15 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       ids: [
         { key: 'ours', label: 'Ours', value: rec ? ref : att ? `atlas:${att.id}` : null, state: rec || att ? 'held' : 'none' },
         { key: 'osm', label: 'OSM', value: rec?.osm_ref ?? att?.osm_ref ?? (ref.startsWith('osm:') ? ref.slice(4) : null), state: asked.has('osm') ? 'held' : 'not-asked' },
-        { key: 'google', label: 'Google', value: ref.startsWith('google:') ? ref.slice(7) : null, state: ref.startsWith('google:') ? 'held' : asked.has('google') ? 'no-match' : 'not-asked' },
+        // The identifier we hold, whether the reference carries it or a match
+        // found it. Reading only the reference meant a place matched to Google
+        // showed "no match" beside a row that holds its id (Codex, 17 Sep 2026).
+        {
+          key: 'google', label: 'Google',
+          value: ref.startsWith('google:') ? ref.slice(7) : (seen.find((x) => x.source === 'google')?.source_place_id ?? null),
+          state: ref.startsWith('google:') || seen.find((x) => x.source === 'google')?.source_place_id
+            ? 'held' : asked.has('google') ? 'no-match' : 'not-asked',
+        },
         { key: 'wikidata', label: 'Wikidata', value: att?.wikidata_id ?? rec?.wikidata_id ?? null, state: (att?.wikidata_id ?? rec?.wikidata_id) ? 'held' : att ? 'no-match' : 'not-asked' },
         { key: 'tripadvisor', label: 'Tripadvisor', value: seen.find((s) => s.source === 'tripadvisor')?.source_place_id ?? null, state: asked.has('tripadvisor') ? 'held' : 'not-asked' },
         // A council's own reference for the place — BO2r lists it beside the

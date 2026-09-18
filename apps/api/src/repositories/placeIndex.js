@@ -381,7 +381,16 @@ async function reindexWhileLocked({ onProgress }) {
   // it: absent from every area board until the next full rebuild (Codex, 17 Sep
   // 2026). `t0` is when this rebuild started, so anything first seen since is
   // left for the hourly pass, which is exactly what that pass is for.
-  await query('update place_index set placed_at = now() where first_seen <= $1', [new Date(t0)]);
+  //
+  // And only rows nothing has dirtied since. `noteMany` clears `placed_at` when
+  // a place's ownership rises or a new source appears, and a blanket update set
+  // it again — so a place changed *during* the rebuild, after its area pass,
+  // was marked placed without having been (Codex, 17 Sep 2026). Two conditions,
+  // both about this rebuild: first seen before it started, and last written
+  // before it started.
+  await query(
+    `update place_index set placed_at = now()
+      where first_seen <= $1 and coalesce(last_seen, first_seen) <= $1`, [new Date(t0)]);
   const total = (await query('select count(*)::int as n from place_index')).rows[0].n;
   await refreshStats();
   return { places: total, ...scored, ms: Date.now() - t0 };

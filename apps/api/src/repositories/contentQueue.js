@@ -395,8 +395,9 @@ export async function approve(ids, who) {
   // writes, so a failure in between left the queue saying "approved" over
   // something still hidden — and nobody would look at it again, because it is
   // no longer waiting (Codex, 17 Sep 2026).
-  return withTransaction(async (client) => {
+  const { rows, touched } = await withTransaction(async (client) => {
     const run = (text, params) => client.query(text, params);
+    const touched = new Set();
 
     const { rows } = await run(
       `update content_queue set state = 'approved', reason = null, decided_by = $2, decided_at = now()
@@ -430,8 +431,16 @@ export async function approve(ids, who) {
       const table = { host_review: 'host_reviews', chat_topic: 'chat_topics', chat_reply: 'chat_replies' }[r.subject_type];
       if (table) await run(`update ${table} set hidden = false where id = $1::uuid`, [r.subject_id]);
     }
-    return rows;
+    return { rows, touched: [...touched] };
   });
+
+  // After the commit, so the score is worked out from what is actually there.
+  // A picture is one of the six facts the ready bar is judged on, and the
+  // boards read `area_stats` — so a decision that changes a place's readiness
+  // has to reach the totals too (Codex, 17 Sep 2026).
+  for (const ref of touched) await rescorePlace(ref);
+  if (touched.length) await refreshAreaStats();
+  return rows;
 }
 
 /**
@@ -485,7 +494,10 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   // A picture is one of the six facts the ready bar is judged on, and only an
   // approved one counts — so a decision about a photograph changes the place's
   // score. Derived, so outside the transaction that made the decision.
-  if (out.subject_type === 'image' && out.venue_ref) await rescorePlace(out.venue_ref);
+  if (out.subject_type === 'image' && out.venue_ref) {
+    await rescorePlace(out.venue_ref);
+    await refreshAreaStats();
+  }
 
   // "Reject and send this" has to send it.
   //
@@ -568,6 +580,19 @@ async function decideImage(imageId, moderation, { note = null, who = null, run =
 async function rescorePlace(venueRef) {
   const index = await import('./placeIndex.js');
   await index.rescore({ refs: [venueRef] }).catch(() => null);
+}
+
+/**
+ * And the totals, because the boards read them rather than the places.
+ *
+ * A photograph decided one way or the other can change whether a place is
+ * ready, and every readiness figure on every board comes from `area_stats`. The
+ * row was rescored and the totals were not, so a county went on reporting the
+ * old number until somebody pressed Refresh (Codex, 17 Sep 2026).
+ */
+async function refreshAreaStats() {
+  const index = await import('./placeIndex.js');
+  await index.refreshStats().catch(() => null);
 }
 
 /**
