@@ -1086,6 +1086,16 @@ export async function noteMany(places = [], { source = null, countryCode = null,
               -- ownership rises, or that learns where it is, goes back in
               -- settleNew's hands and the boards catch up on the hour rather
               -- than at the next full rebuild (Codex, 17 Sep 2026).
+              -- A cell is an answer about *this* position. When the position
+              -- moves the old cell is not merely stale, it is wrong — and
+              -- leaving it there let the settling pass mark the place settled
+              -- on it, after which nothing ever asked again (Codex, 18 Sep
+              -- 2026).
+              cell = case
+                when excluded.lat is not null and place_index.lat is not null
+                 and (abs(place_index.lat - excluded.lat) > 0.0005
+                      or abs(coalesce(place_index.lng, 0) - coalesce(excluded.lng, 0)) > 0.0005)
+                then null else place_index.cell end,
               placed_at = case
                 when place_index.ownership <> (
                   case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'

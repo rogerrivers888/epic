@@ -906,6 +906,15 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
 
     const asked = new Set(seen.map((s) => s.source));
     const unseen = index.SOURCES.filter((s) => !asked.has(s.key));
+    // Asked is not the same as matched.
+    //
+    // A source row with no `source_place_id` is a place we asked about and did
+    // not find — the second of the two states the board keeps apart — so
+    // counting it as a held identifier quoted one call for work that needs a
+    // match and a detail. And Tripadvisor makes no call at all without an
+    // identifier, so adding its price whenever it is switched on quoted money
+    // nothing was going to spend (Codex, 18 Sep 2026).
+    const matched = new Set(seen.filter((s) => s.source_place_id).map((s) => s.source));
     res.json({
       ref,
       name: name.name, nameFrom: name.from,
@@ -928,12 +937,12 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       // where we hold no identifier, and a Tripadvisor view where it is
       // switched on and joined. Said on the button rather than guessed at.
       comparePence: (googleSource.enabled()
-        ? DETAIL_PENCE + (ref.startsWith('google:') || asked.has('google') ? 0 : MATCH_PENCE)
+        ? DETAIL_PENCE + (ref.startsWith('google:') || matched.has('google') ? 0 : MATCH_PENCE)
         : 0)
-        + (tripadvisorSource.enabled() ? taCost(1) : 0),
+        + (tripadvisorSource.enabled() && (ref.startsWith('tripadvisor:') || matched.has('tripadvisor')) ? taCost(1) : 0),
       // And what asking Google alone would spend, which is BO2r's own action.
       askPence: googleSource.enabled()
-        ? DETAIL_PENCE + (ref.startsWith('google:') || asked.has('google') ? 0 : MATCH_PENCE)
+        ? DETAIL_PENCE + (ref.startsWith('google:') || matched.has('google') ? 0 : MATCH_PENCE)
         : 0,
       unseenFree: unseen.filter((s) => !s.paid).length,
       unseenPaid: unseen.filter((s) => s.paid).length,

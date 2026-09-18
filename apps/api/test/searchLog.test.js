@@ -815,6 +815,11 @@ test('a later source corrects a position, and a claim with none cannot erase it'
   assert.equal(Math.round(now.lat * 100) / 100, 51.52, 'the newer position is the one held');
   assert.equal(now.placed_at, null, 'and it goes back to be placed');
 
+  // And the cell it had is an answer about where it used to be, so it goes with
+  // the position (Codex, 18 Sep 2026).
+  const { rows: [moved] } = await query('select cell from place_index where venue_ref = $1', [ref]);
+  assert.equal(moved.cell, null, 'the old cell is not merely stale, it is wrong');
+
   // A household claiming it carries no position, and must not erase one.
   await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
   await index.noteMany([{ ref }], { ownership: 'claimed' });
