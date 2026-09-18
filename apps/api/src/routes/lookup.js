@@ -731,8 +731,24 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     // 18 Sep 2026).
     const taPence = 2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP;
     const ringPence = googleSource.enabled() ? RING_CALLS * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP : 0;
+    // The locations as well as the money, through the same claim Collect takes.
+    //
+    // The count below only looks at this endpoint's own calls and the lock is
+    // per household and per process, so a lookup running beside a collection
+    // could put the contractual allowance past its cap between them (Codex, 18
+    // Sep 2026).
+    const taUnits = await tripadvisorRoom(2 * limit);
+    if (taUnits.granted < 2 * limit) {
+      await releaseSpend(taUnits.reservation);
+      return res.status(422).json({
+        error: 'over_the_allowance',
+        message: `That would spend ${2 * limit} of Tripadvisor's monthly locations and there are ${taUnits.left} left.`,
+        left: taUnits.left,
+      });
+    }
     const purse = await roomToSpend(Math.round(taPence + ringPence), { holder: 'lookup.tripadvisor' });
     if (!purse.ok) {
+      await releaseSpend(taUnits.reservation);
       return res.status(422).json({
         error: 'over_the_ceiling',
         message: `That would spend up to £${((taPence + ringPence) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
@@ -771,7 +787,10 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
       await sleep(250);
     }
     res.json({ kind, looked, matched, missed, used, cap: TRIPADVISOR_CAP, stopped, remaining: stopped ? 0 : Math.max(0, wanting.length - page.length) });
-    } finally { await releaseSpend(purse.reservation); }
+    } finally {
+      await releaseSpend(purse.reservation);
+      await releaseSpend(taUnits.reservation);
+    }
   }).catch(next).finally(() => { if (tripadvisorRuns.get(household.id) === mine) tripadvisorRuns.delete(household.id); });
   tripadvisorRuns.set(household.id, mine);
 });

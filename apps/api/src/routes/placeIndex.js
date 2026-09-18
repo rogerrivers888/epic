@@ -1730,6 +1730,24 @@ export async function tripadvisorRoom(want = 0) {
   });
 }
 
+/**
+ * What asking Google about these would cost, before anybody presses it.
+ *
+ * The same arithmetic `/ask` reserves with — a detail each, a match where we
+ * hold no identifier, and nothing at all for one already in hand. The board used
+ * to multiply the selection by a figure typed into the bundle (Codex, 18 Sep
+ * 2026).
+ */
+router.get('/ask/quote', requires('view_library'), async (req, res, next) => {
+  try {
+    const refs = String(req.query.refs ?? '').split(',').map((r) => r.trim()).filter(Boolean).slice(0, 50);
+    if (!refs.length) return res.json({ pence: 0, refs: 0 });
+    if (!googleSource.enabled()) return res.json({ pence: 0, refs: refs.length, off: true });
+    const pence = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs));
+    res.json({ pence, refs: refs.length });
+  } catch (err) { next(err); }
+});
+
 router.post('/ask', requires('manage_library'), async (req, res, next) => {
   try {
     const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);

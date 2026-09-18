@@ -2653,6 +2653,10 @@ export const api = {
     post<{ ok: true; id: string }>(`/api/admin/queue/${id}/report`, { reason: reason ?? null }),
   adminQueueReasons: () => request<{ reasons: Record<string, RejectReason[]>; used: { kind: string; reason: string; used: number; last_at: string }[] }>('/api/admin/queue/report/reasons'),
 
+  /** What asking Google about a selection would cost, from the API's own price table. */
+  adminAskQuote: (refs: string[]) =>
+    request<{ pence: number; refs: number; off?: boolean }>(`/api/admin/place-index/ask/quote${qs({ refs: refs.join(',') })}`),
+
   /** What the screen actually drew, which is not the whole of what came back. */
   searchDrawn: (body: { queryId: string; refs: string[] }) => post<{ ok: boolean }>('/api/discover/drawn', body),
 

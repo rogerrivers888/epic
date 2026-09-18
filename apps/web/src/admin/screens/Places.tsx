@@ -1040,6 +1040,16 @@ const tipForSource = (key: string) => ({
 function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string) => void; canManage: boolean }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceQuality>> | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // What asking about the selection would cost, from the API rather than a
+  // figure in the bundle (Codex, 18 Sep 2026).
+  const [askQuote, setAskQuote] = useState<number | null>(null);
+  useEffect(() => {
+    if (!picked.size) { setAskQuote(0); return undefined; }
+    let live = true;
+    setAskQuote(null);
+    api.adminAskQuote([...picked]).then((q) => { if (live) setAskQuote(q.pence); }).catch(() => { if (live) setAskQuote(null); });
+    return () => { live = false; };
+  }, [picked]);
   const [busy, setBusy] = useState<string | null>(null);
   const { width } = useViewport();
   useEffect(() => { setData(null); setPicked(new Set()); api.adminPlaceQuality(q).then(setData).catch(() => setData(null)); }, [q]);
@@ -1119,7 +1129,11 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
         {/* A button that spends says what it costs, and one with nothing chosen
             does not claim a price it cannot know. Asking Google needs a key the
             owner has to add, so it says that rather than doing nothing. */}
-        <Act label={picked.size ? `Ask Google about these ${picked.size} · ${pounds(Math.round(picked.size * 1.4))}` : 'Ask Google about them'}
+        {/* The price is the API's, not a figure in the bundle: 1.4p was the old
+            one, a place we have never matched needs two requests and a cached
+            one costs nothing, so the board was quoting something the ceiling
+            would never charge (Codex, 18 Sep 2026). */}
+        <Act label={picked.size ? `Ask Google about these ${picked.size} · ${askQuote == null ? '…' : pounds(Math.round(askQuote))}` : 'Ask Google about them'}
              disabled={!canManage || !picked.size || busy != null}
              onPress={() => { setBusy('google'); api.adminAskAboutPlaces([...picked]).finally(() => { setBusy(null); setPicked(new Set()); }); }} />
       </Footer>

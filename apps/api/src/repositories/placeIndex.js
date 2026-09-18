@@ -194,15 +194,29 @@ export async function retire() {
   // nobody else has returned the place, we hold no research of our own on it,
   // and no household has claimed it. Anything else is still a real place that
   // happens to have lost one source.
+  // Never a reference another attraction is still using.
+  //
+  // Two attractions can share a venue_ref, so "this one is hidden" does not mean
+  // "this place is retired" — deleting on the hidden one alone took a live place
+  // out of the index, and inside a rebuild it removed a row the next insert
+  // needs (Codex, 18 Sep 2026).
   await query(`
     delete from place_index_sources s
      using attractions a
      where s.source = 'atlas' and a.state = 'hidden'
-       and s.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)`);
+       and s.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)
+       and not exists (
+         select 1 from attractions live
+          where live.state <> 'hidden'
+            and coalesce(live.venue_ref, 'atlas:' || live.id::text) = s.venue_ref)`);
   const { rowCount: retired } = await query(`
     delete from place_index pi
      where pi.venue_ref in (
        select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
+       and not exists (
+         select 1 from attractions live
+          where live.state <> 'hidden'
+            and coalesce(live.venue_ref, 'atlas:' || live.id::text) = pi.venue_ref)
        and not exists (select 1 from place_index_sources s where s.venue_ref = pi.venue_ref)
        and not exists (select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
        and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)`);
@@ -221,6 +235,10 @@ export async function retire() {
      where pi.ownership = 'owned'
        and pi.venue_ref in (
          select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
+       and not exists (
+         select 1 from attractions live
+          where live.state <> 'hidden'
+            and coalesce(live.venue_ref, 'atlas:' || live.id::text) = pi.venue_ref)
        and not exists (
          select 1 from attractions a
           where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
