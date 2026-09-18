@@ -113,10 +113,22 @@ export async function totals({ areaSlugs = null, cells = null, since = 30 } = {}
         where at > now() - ($1 || ' days')::interval
           and ($2::text[] is null or area_slug = any($2))
           and ($3::text[] is null or cell = any($3))
-          -- Not the ones already folded up. A roll-up without dropping leaves
-          -- the rows in place *and* writes the aggregate, so counting both
-          -- doubled every rolled search for ever (Codex, 17 Sep 2026).
-          and rolled_at is null
+          -- Not the ones already folded up — unless the fold cannot claim
+          -- them.
+          --
+          -- A roll-up without dropping leaves the rows in place *and* writes
+          -- the aggregate, so counting both doubled every rolled search for
+          -- ever (Codex, 17 Sep 2026). But the folded term only takes a month
+          -- that lies *wholly* inside the window, so the part of the edge month
+          -- inside it was counted by neither: a thirty-day report made on the
+          -- 18th of September lost the 19th to the 31st of August the moment
+          -- August was rolled (Codex, 18 Sep 2026). A rolled row whose month
+          -- the fold leaves out is still this report's, and it is still here
+          -- unless retention dropped it.
+          and (rolled_at is null or date_trunc('month', at) < date_trunc('month', now() - ($1 || ' days')::interval)
+                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
+                                  >= (now() - ($1 || ' days')::interval)
+                             then interval '0 month' else interval '1 month' end))
      ), folded as (
        select coalesce(sum(searches), 0)::int as searches, coalesce(sum(empty), 0)::int as empty,
               coalesce(sum(no_click), 0)::int as no_click, coalesce(sum(no_trip), 0)::int as no_trip,
@@ -161,7 +173,12 @@ export async function bySubject({ areaSlugs = null, cells = null, since = 30, li
         where at > now() - ($1 || ' days')::interval
           and ($2::text[] is null or area_slug = any($2))
           and ($4::text[] is null or cell = any($4))
-          and rolled_at is null
+          -- The same rule the headline figures use: a rolled row whose month
+          -- the fold leaves out is still this report's (Codex, 18 Sep 2026).
+          and (rolled_at is null or date_trunc('month', at) < date_trunc('month', now() - ($1 || ' days')::interval)
+                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
+                                  >= (now() - ($1 || ' days')::interval)
+                             then interval '0 month' else interval '1 month' end))
        union all
        select subject, searches, empty, no_click, no_trip
          from search_rollups

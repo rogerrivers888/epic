@@ -1286,3 +1286,35 @@ test('a count is not a search, and one identifier belongs to one source', async 
              or src.venue_ref like src.source || ':%')`, [ref])).rows[0].n;
   assert.equal(found, 1);
 });
+
+test('the part of a rolled month inside the window is still counted', async () => {
+  const slug = 'edgeshire';
+  await query(`insert into localities (slug, name, kind, country_code) values ($1,'Edgeshire','county','GB') on conflict (slug) do nothing`, [slug]);
+  await query('delete from search_rollups where area_slug = $1', [slug]);
+  await query('delete from searches where area_slug = $1', [slug]);
+
+  // One search twenty days ago — inside a thirty-day window, and in the month
+  // before this one if the report is made early enough in the month. Rolled up,
+  // as a month that has finished would be.
+  const id = await log.noteSearch({ surface: 'places', areaSlug: slug, subject: 'museums' });
+  await query(`update searches set at = now() - interval '20 days' where id = $1`, [id]);
+  const before = await log.totals({ areaSlugs: [slug], since: 30 });
+  assert.equal(before.searches, 1);
+
+  // The fold takes whole months only, so a thirty-day window whose edge falls
+  // inside the rolled month cannot use its bucket — and the rows were being
+  // excluded as "already folded". Counted by neither, the search vanished from
+  // a report that plainly covers it (Codex, 18 Sep 2026).
+  await query(
+    `update searches set rolled_at = now() where area_slug = $1 and rolled_at is null`, [slug]);
+  await query(
+    `insert into search_rollups (month, area_slug, subject, searches, empty, no_click, no_trip, tripped)
+     select date_trunc('month', at)::date, area_slug, coalesce(subject,''), count(*)::int, 0, 0, 0, 0
+       from searches where area_slug = $1 group by 1,2,3
+     on conflict (month, area_slug, subject) do nothing`, [slug]);
+
+  const after = await log.totals({ areaSlugs: [slug], since: 30 });
+  assert.equal(after.searches, 1, 'rolled or not, a search inside the window is inside the window');
+  const rows = await log.bySubject({ areaSlugs: [slug], since: 30 });
+  assert.equal(rows.reduce((n, r) => n + r.searches, 0), 1, 'and the subject rows add up to the same');
+});

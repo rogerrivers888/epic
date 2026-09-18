@@ -2249,14 +2249,23 @@ async function work(runId, householdId) {
           const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : taIds.get(ref);
           return Boolean(id) && detailHeld('tripadvisor', id);
         });
-        const wouldBill = batch.filter((ref) => !cached.includes(ref));
+        // A place we hold no Tripadvisor identifier for is not a call: the
+        // asker turns it away without asking anybody. Claiming allowance for it
+        // spent the month's remaining locations on refusals and then told the
+        // places that *do* have an identifier they were over the allowance
+        // (Codex, 18 Sep 2026).
+        const known = (ref) => Boolean(ref.startsWith('tripadvisor:') ? ref.slice(12) : taIds.get(ref));
+        const noId = batch.filter((ref) => !cached.includes(ref) && !known(ref));
+        const wouldBill = batch.filter((ref) => !cached.includes(ref) && known(ref));
         const room = await tripadvisorRoom(wouldBill.length * TA_UNITS_PER_VIEW);
         const billed = wouldBill.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
-        const may = [...cached, ...billed];
         const cost = taCost(billed.length);
         const purse = await roomToSpend(cost, { holder: `collect:${runId}` });
         try {
-          const go = purse.ok ? may : [];
+          // The cached ones go whatever the purse says: they cost nothing, and
+          // refusing them for money nobody would spend threw away answers we
+          // already hold (Codex, 18 Sep 2026). Only the paid ones are blocked.
+          const go = [...cached, ...(purse.ok ? billed : []), ...noId];
           const out = go.length ? await askTripadvisor(go, householdId) : { asked: 0, refused: [], calls: 0 };
           await collectRuns.done(runId, 'tripadvisor', {
             done: out.asked,
@@ -2267,7 +2276,7 @@ async function work(runId, householdId) {
             spentPence: taCost(out.calls ?? out.asked),
             refused: [
               ...out.refused,
-              ...(purse.ok ? [] : may.map((ref) => ({ ref, why: 'over this month\u2019s ceiling' }))),
+              ...(purse.ok ? [] : billed.map((ref) => ({ ref, why: 'over this month\u2019s ceiling' }))),
               ...wouldBill.slice(billed.length).map((ref) => ({ ref, why: 'over the monthly allowance of locations' })),
             ],
           });
