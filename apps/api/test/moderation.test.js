@@ -401,3 +401,41 @@ test('the queue’s limit counts decisions, so one place’s photographs cannot 
   const whole = queue.group(await queue.list({ kind: 'photo' }), { limit: 1 });
   assert.equal(whole[0].of, 6, 'never a partial batch');
 });
+
+test('approving a photograph changes the place’s score, after the commit', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  // This file's database has no ready bars of its own — the score is only
+  // meaningful against one.
+  await index.seedBars();
+  const { household } = await aHousehold(query);
+  const ref = 'osm:node/gets-a-picture';
+  await index.noteMany([{ ref }], { countryCode: 'GB' });
+  // A subcategory whose bar actually requires a picture, so the fact counts
+  // rather than being recorded and not counted.
+  await query(
+    `update place_index set subcategory = b.subcategory_key,
+            category = (select category_key from shelf_subcategories s where s.key = b.subcategory_key)
+       from (select subcategory_key from ready_bars where fact = 'picture' and required limit 1) b
+      where venue_ref = $1`, [ref]);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, 'household') returning *`,
+    [`score-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+  await query(
+    `insert into image_links (image_id, subject_type, subject_id, role, position) values ($1,'place',$2,'hero',0)`,
+    [img.id, ref]);
+  await queue.sync();
+  await index.rescore({ refs: [ref] });
+
+  const heldPicture = async () => (await query(
+    `select (score_parts->'held') ? 'picture' as has from place_index where venue_ref = $1`, [ref])).rows[0].has;
+  assert.equal(await heldPicture(), false, 'a waiting photograph is not a fact we hold');
+
+  // The rescore used to run through the pool inside the transaction, so it saw
+  // the photograph as still waiting and the score never changed (Codex, 17 Sep
+  // 2026).
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+  await queue.approve([q.id], null);
+  assert.equal(await heldPicture(), true, 'and an approved one is');
+});

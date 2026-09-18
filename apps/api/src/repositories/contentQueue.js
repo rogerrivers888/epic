@@ -409,8 +409,10 @@ export async function approve(ids, who) {
     for (const r of rows) {
       if (r.subject_type === 'image') {
         await decideImage(r.subject_id, 'approved', { who, run });
+        // Noted, not rescored here: the score is worked out from what is
+        // committed, and this is not yet (Codex, 17 Sep 2026).
         const { rows: [q] } = await run('select venue_ref from content_queue where id = $1', [r.id]);
-        if (q?.venue_ref) await rescorePlace(q.venue_ref);
+        if (q?.venue_ref) touched.add(q.venue_ref);
         continue;
       }
       if (r.subject_type === 'open_entry') {
