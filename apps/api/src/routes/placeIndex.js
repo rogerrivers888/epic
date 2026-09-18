@@ -34,7 +34,7 @@ import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import { OTHER_PURSE } from '../constants.js';
 import * as collectRuns from '../repositories/collectRuns.js';
 import * as ownedPlaces from '../repositories/ownedPlaces.js';
-import { googleMatchFor, matchesFor, forgetMisses } from '../sources/providerMatch.js';
+import { googleMatchFor, matchesFor, forgetMisses, triedFor, missesKept } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
@@ -150,10 +150,14 @@ const MATCH_PENCE = pencePerCall();
 // because nothing goes out for them. Charging for them reserved money that was
 // never going to be spent, and near the ceiling that refused a request that
 // would have made no calls at all (Codex, 18 Sep 2026).
-const askingCost = (refs, matched, held = new Set()) =>
+const askingCost = (refs, matched, held = new Set(), missed = new Set()) =>
   Math.round(refs.reduce((p, ref) =>
-    p + (held.has(ref) ? 0 : DETAIL_PENCE)
-      + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE), 0));
+    // A remembered miss costs nothing: there is no match call, because we
+    // already know the answer, and no detail call, because there is no id to
+    // ask about (Codex, 18 Sep 2026).
+    (missed.has(ref) ? p
+      : p + (held.has(ref) ? 0 : DETAIL_PENCE)
+        + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE)), 0));
 
 /** Which of these we already hold a Google id for, so no search is needed. */
 async function alreadyMatched(refs) {
@@ -1580,11 +1584,24 @@ async function askThese(refs, householdId) {
      * at the moment of the call, and the identifier, so the next question does
      * not have to be matched again.
      */
+    // Which of these a call would actually go out for.
+    //
+    // A verdict we already hold — a match *or* a remembered miss — is answered
+    // from our own table, and a place with no name or no position is never
+    // asked about at all: `googleMatchFor` declines before it reaches Google.
+    // Counting either as a call reported spend that did not happen, and the
+    // refusal below then stamped Google's clock, putting a real question off
+    // for another twelve months (Codex, 18 Sep 2026). After `forgetMisses`, so
+    // a miss past the window is askable again.
+    const tried = await triedFor(refs, 'google');
+    const wouldAsk = (ref) => !ref.startsWith('google:') && !tried.has(ref)
+      && Boolean(named.get(ref)?.name) && at.get(ref)?.lat != null && at.get(ref)?.lng != null;
     const names = [];
     for (const ref of refs) {
       try {
         const held = ref.startsWith('google:') ? ref.slice(7) : (await matchesFor([ref], 'google')).get(ref) ?? null;
-        if (!held && !ref.startsWith('google:')) calls += 1;
+        const asking = !held && wouldAsk(ref);
+        if (asking) calls += 1;
         const id = held ?? (await googleMatchFor({
           venueRef: ref, name: named.get(ref)?.name ?? null,
           lat: at.get(ref)?.lat ?? null, lng: at.get(ref)?.lng ?? null,
@@ -1597,8 +1614,14 @@ async function askThese(refs, householdId) {
           // — while `googleMatchFor` was answering out of its remembered miss
           // (Codex, 17 Sep 2026). A row with no identifier is exactly the
           // second of the two states the board keeps apart.
-          await index.noteMany([{ ref }], { source: 'google' });
-          refused.push({ ref, why: 'no match' });
+          // Only a question we actually put to Google stamps Google's clock.
+          if (asking) await index.noteMany([{ ref }], { source: 'google' });
+          refused.push({
+            ref,
+            why: asking ? 'no match'
+              : tried.has(ref) ? 'no match, from the last time we asked'
+                : 'we hold no name or position to go looking with',
+          });
           continue;
         }
         if (!detailHeld('google', id)) calls += 1;
@@ -1753,7 +1776,8 @@ router.get('/ask/quote', requires('view_library'), async (req, res, next) => {
     const refs = String(req.query.refs ?? '').split(',').map((r) => r.trim()).filter(Boolean).slice(0, 50);
     if (!refs.length) return res.json({ pence: 0, refs: 0 });
     if (!googleSource.enabled()) return res.json({ pence: 0, refs: refs.length, off: true });
-    const pence = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs));
+    const pence = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs),
+      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }));
     res.json({ pence, refs: refs.length });
   } catch (err) { next(err); }
 });
@@ -1770,7 +1794,8 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     }
     // Before a penny of it: what one Place Details call costs, times the number
     // of them, against what is left of this month's ceiling.
-    const want = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs));
+    const want = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs),
+      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }));
     const room = await roomToSpend(want, { holder: 'ask' });
     if (!room.ok) return overTheCeiling(res, want, room);
     try {
@@ -2022,7 +2047,8 @@ async function planCollect(where) {
   // A detail already in hand costs nothing, and the quote says so: a place can
   // be eligible for collection and still be cached — Compare and the replay both
   // fill that cache without writing a source row (Codex, 18 Sep 2026).
-  const want = askingCost(google, await alreadyMatched(google), await alreadyHeld(google))
+  const want = askingCost(google, await alreadyMatched(google), await alreadyHeld(google),
+    await missesKept(google, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }))
     + taCost(taBilled.length);
   return {
     scope, chosen, limit,
@@ -2146,7 +2172,8 @@ async function work(runId, householdId) {
       } else if (source === 'google') {
         // The ceiling is asked again per chunk, not once at the start: a run
         // that outlives a deploy must not outlive the month's budget either.
-        const cost = askingCost(batch, await alreadyMatched(batch), await alreadyHeld(batch));
+        const cost = askingCost(batch, await alreadyMatched(batch), await alreadyHeld(batch),
+          await missesKept(batch, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }));
         const room = await roomToSpend(cost, { holder: `collect:${runId}` });
         if (!room.ok) { await collectRuns.done(runId, 'google', { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
         try {

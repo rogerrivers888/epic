@@ -84,6 +84,21 @@ export async function triedFor(refs, source = 'google') {
   return new Set(rows.map((r) => r.venue_ref));
 }
 
+/**
+ * Places whose remembered miss is still inside the window, so no call will go
+ * out for them. The quote and the run have to agree about this or the board
+ * prices work that never happens (Codex, 18 Sep 2026).
+ */
+export async function missesKept(refs, source = 'google', { withinMinutes = null } = {}) {
+  if (!refs?.length) return new Set();
+  const { rows } = await query(
+    `select venue_ref from provider_matches
+      where source = $2 and missing = true and venue_ref = any($1)
+        and ($3::text is null or matched_at >= now() - ($3 || ' minutes')::interval)`,
+    [refs, source, withinMinutes == null ? null : String(withinMinutes)]);
+  return new Set(rows.map((r) => r.venue_ref));
+}
+
 /** Forget one provider's remembered misses for these places, so a run can ask again — after a search that was asked wrongly, for instance. */
 export async function forgetMisses(refs, source, { olderThanMinutes = 60 } = {}) {
   if (!refs?.length) return 0;
