@@ -803,11 +803,24 @@ async function underTheBuildLock(fn, ifBusy, { wait = false } = {}) {
   const client = await pool.connect();
   try {
     if (wait) {
-      await client.query("set local lock_timeout = '30s'").catch(() => null);
-      try { await client.query('select pg_advisory_lock(hashtext($1))', [BUILD_LOCK]); }
-      catch { return ifBusy; }
-      try { return await fn(); }
-      finally { await client.query('select pg_advisory_unlock(hashtext($1))', [BUILD_LOCK]).catch(() => null); }
+      // `set local` outside a transaction is discarded at the end of its own
+      // statement, so the timeout was not there at all and the wait was
+      // unbounded — a stalled rebuild would have held this request and a pool
+      // connection for ever (Codex, 18 Sep 2026). On the session, and put back
+      // afterwards because the connection goes back to the pool.
+      await client.query("set lock_timeout = '30s'").catch(() => null);
+      let mine = false;
+      try {
+        await client.query('select pg_advisory_lock(hashtext($1))', [BUILD_LOCK]);
+        mine = true;
+      } catch { /* the thirty seconds ran out */ }
+      try {
+        if (!mine) return ifBusy;
+        return await fn();
+      } finally {
+        if (mine) await client.query('select pg_advisory_unlock(hashtext($1))', [BUILD_LOCK]).catch(() => null);
+        await client.query('set lock_timeout = default').catch(() => null);
+      }
     }
     const { rows: [got] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as mine', [BUILD_LOCK]);
     if (!got.mine) return ifBusy;
