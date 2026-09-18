@@ -1179,3 +1179,14 @@ test('a country reads its counties, and a town reads its own cells', async () =>
   assert.equal(town.asCounty?.slug, 'zedshire');
   assert.ok((await log.totals({ areaSlugs: town.slugs, cells: town.cells, since: 30 })).searches >= 1);
 });
+
+test('an area we do not know is not "everywhere"', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  // The board's scope comes from resolving the slug, and a slug nobody knows
+  // resolved to null — which skipped every predicate and answered with the
+  // whole estate under the heading somebody had asked for. The route refuses
+  // it; this is the resolver half of that rule (18 Sep 2026).
+  assert.equal(await index.areaBySlug('nowhere-at-all'), null);
+  const scope = await index.demandScope(null);
+  assert.deepEqual(scope, { slugs: null, cells: null, asCounty: null });
+});

@@ -37,6 +37,11 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     const areaSlug = req.query.where ? String(req.query.where).toLowerCase() : null;
     const since = Number(String(req.query.since ?? '30').replace(/[^0-9]/g, '')) || 30;
     const area = areaSlug ? await index.areaBySlug(areaSlug) : null;
+    // An area we do not know is not "everywhere". Without this the scope was
+    // null, every predicate was skipped, and the board answered with the whole
+    // estate under the heading somebody had asked for — the most misleading
+    // answer available (found in the live check of the scope fix, 18 Sep 2026).
+    if (areaSlug && !area) throw bad(`We hold no area called “${areaSlug}”.`, 'no_such_area');
     // What the area means to the *log*, which is not its slug. A search is
     // filed against a county, so Great Britain asking for `area_slug = 'gb'`
     // found nothing and a town asking for its own slug found nothing either —
