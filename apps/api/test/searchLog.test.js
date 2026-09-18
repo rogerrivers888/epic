@@ -1065,3 +1065,39 @@ test('a place claimed only through place_claims is claimed, live and after a reb
   await index.reindex();
   assert.equal(await owner(), 'claimed', 'and after the index is rebuilt from scratch');
 });
+
+/**
+ * Removing a saved place revokes that save, and nothing else.
+ *
+ * `place_claims` is append-only and saving writes one, so asking whether any
+ * claim survives would always have said yes and a removed place would have
+ * stayed "claimed" for ever (Codex, 18 Sep 2026).
+ */
+test('removing a save demotes the place; a shortlist on it holds it', async () => {
+  const atlas = await import('../src/repositories/atlas.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const gone = await aHousehold(query);
+  const kept = await aHousehold(query);
+  const save = async (h, ref) => {
+    await query(
+      `insert into household_places (household_id, venue_ref, label, kind, first_seen, last_seen)
+       values ($1, $2, 'Somewhere', 'loved', now(), now())`, [h.household.id, ref]);
+    await owned.claim(h.household.id, ref, 'saved');
+  };
+  const a = 'test:saved-then-removed';
+  const b = 'test:saved-and-shortlisted';
+  await save(gone, a);
+  await save(kept, b);
+  await owned.claim(kept.household.id, b, 'shortlisted');
+
+  const owner = async (ref) => (await query('select ownership from place_index where venue_ref = $1', [ref])).rows[0]?.ownership;
+  assert.equal(await owner(a), 'claimed');
+  assert.equal(await owner(b), 'claimed');
+
+  await withTransaction(async (client) => {
+    await atlas.removePlace(client, gone.household.id, a);
+    await atlas.removePlace(client, kept.household.id, b);
+  });
+  assert.equal(await owner(a), 'identified', 'nobody holds it any more');
+  assert.equal(await owner(b), 'claimed', 'the shortlist is its own hold');
+});

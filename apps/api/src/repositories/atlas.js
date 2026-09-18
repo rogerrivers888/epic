@@ -118,10 +118,17 @@ export async function removePlace(client, householdId, venueRef) {
   // somebody had, and even a rebuild kept the value because its conflict clause
   // only ever promotes (Codex, 17 Sep 2026). In the same transaction as the
   // removal, so the two agree.
-  // Both ways a household holds one: saving it writes `household_places`, and a
-  // suggested shortlist item or a trip's base writes only `place_claims`. Asking
-  // the first alone demoted a place somebody had still asked for (Codex, 18 Sep
-  // 2026).
+  // The claim this removal revokes goes with it.
+  //
+  // `place_claims` is append-only and saving writes one, so asking whether any
+  // claim survives would always have said yes and the demotion would never have
+  // run (Codex, 18 Sep 2026, correcting the round before). A household removing
+  // a saved place revokes *its own save*; a shortlist, a trip's base, a stay or
+  // a visit are separate holds and are left standing, which is why the two are
+  // asked separately below.
+  await on(client)(
+    `delete from place_claims where household_id = $1 and venue_ref = $2 and reason in ('saved', 'special')`,
+    [householdId, venueRef]);
   const { rows } = await on(client)(
     `select 1 from household_places where venue_ref = $1
       union all
