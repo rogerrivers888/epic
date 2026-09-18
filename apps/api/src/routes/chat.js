@@ -447,11 +447,19 @@ const pickPrefs = (p) => ({ started: p.started, anchors: p.anchors, from_host: p
 /** One topic, open (E1, C2). Opening it marks every reply in it seen. */
 export async function topicPayload(ctx, topicId) {
   const me = ctx.me;
-  const t = await chat.topicById(topicId);
+  // Hidden, and then refused to everyone but the person who wrote it.
+  //
+  // Somebody asked to rewrite a moderated question has to be able to read it
+  // first, and the correction flow was unreachable without this: the editor
+  // opens the topic before it patches it, and the open answered 404 (Codex, 18
+  // Sep 2026). Everybody else still gets the 404 — a link to a moderated
+  // conversation does not open it.
+  const t = await chat.topicById(topicId, { withHidden: true });
   if (!t || t.context_type !== ctx.type || t.context_id !== ctx.id) throw refuse(404, 'topic_not_found', 'That question is not here.');
+  if (t.hidden && !samePerson(authorOf(t), me)) throw refuse(404, 'topic_not_found', 'That question is not here.');
   if (!visibleTopics([t], ctx).length) throw refuse(404, 'topic_not_found', 'That question is not here.');
   if (me) await chat.markTopicRead(t.id, me);
-  const fresh = await chat.topicById(t.id);
+  const fresh = await chat.topicById(t.id, { withHidden: true });
   const [replies, requests, follows, mostUsed] = await Promise.all([
     chat.repliesOf(t.id), chat.publishRequestsOf(t.id), chat.followsIn([t.id], me ?? {}), me ? chat.mostUsedBy(me) : [],
   ]);
@@ -462,6 +470,14 @@ export async function topicPayload(ctx, topicId) {
   return {
     context: publicContext(ctx),
     topic,
+    /**
+     * Their own words, waiting to be read again.
+     *
+     * Said out loud so the screen can tell them rather than leaving them
+     * wondering why nobody has answered: a question hidden while it waits is
+     * theirs to see and nobody else's (Codex, 18 Sep 2026).
+     */
+    waiting: Boolean(fresh?.hidden || t.hidden),
     replies: replies.map((r) => publicReply(r, ctx, me, { all: replies, reactions: on(r.id), request: requests.find((q) => q.reply_id === r.id) ?? null })),
     /** The asker's decision to make (D2), when the host has asked. */
     publishRequests: requests.filter((q) => !q.decision).map((q) => ({
@@ -789,11 +805,10 @@ router.patch('/:type/:id/topics/:topicId', async (req, res, next) => {
   try {
     const ctx = await ctxOf(req);
       await editTopic(ctx, req.params.topicId, req.body);
-    // The reply is what they can see. A question hidden while it waits to be
-    // read again is not readable, so the answer says that rather than 404ing on
-    // the edit that has just been saved (Codex, 18 Sep 2026).
-    const after = await chat.topicById(req.params.topicId, { withHidden: true });
-    if (after?.hidden) return res.json({ saved: true, waiting: 'Somebody will read it before it goes back up.' });
+    // The same shape as every other answer from this route, with `waiting` on
+    // it where the edit sent the question back to be read. Answering something
+    // else broke the editor, which reads the topic straight out of the reply
+    // (Codex, 18 Sep 2026).
     res.json(await topicPayload(ctx, req.params.topicId));
   } catch (err) { next(err); }
 });

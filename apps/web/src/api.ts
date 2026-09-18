@@ -872,6 +872,14 @@ export type ChatTopicView = {
   askCount: number | null; suggestPublishAt: number;
   picker: { quick: string[]; mostUsed: string[]; yours: boolean };
   faq?: { id: string } | null;
+  /**
+   * Their own question, waiting to be read again.
+   *
+   * A question whose words changed after somebody had already decided about
+   * them goes back in front of a person, and is out of sight while it waits —
+   * to its author, who can still see it, the screen says so.
+   */
+  waiting?: boolean;
 };
 export type ChatInbox = {
   host: { id: string; name: string } | null;

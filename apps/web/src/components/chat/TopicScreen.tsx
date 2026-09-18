@@ -173,6 +173,13 @@ export function TopicScreen({ door, topicId, onBack, onEdit, shareHref, insetBot
           </Text>
         </View>
       ) : null}
+      {/* Their own words, waiting to be read again. Said out loud rather than
+          leaving them wondering why nobody has answered (18 Sep 2026). */}
+      {view?.waiting ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 6 }}>
+          <StatusLine tone="warn">Only you can see this while somebody reads it again. It goes back up when they do.</StatusLine>
+        </View>
+      ) : null}
       {said ? <View style={{ paddingHorizontal: 20, paddingTop: 6 }}><StatusLine tone="good">{said}</StatusLine></View> : null}
       {error ? <View style={{ paddingHorizontal: 20, paddingTop: 6 }}><StatusLine tone="warn">{error}</StatusLine></View> : null}
 
