@@ -313,17 +313,26 @@ function Level(props: {
 
   // BO2l — Places at 390. The one number you would check on a train is ready %,
   // so the phone draws its own board rather than a squeeze of the desk one.
-  if (phone && lens === 'coverage' && !ring && level.areaKind !== 'country') {
+  if (phone && lens === 'coverage' && !ring && level.areaKind !== 'country' && level.areaKind !== 'postcode') {
     return <PlacesPhone level={level} q={q} lens={lens} onLens={props.onLens} onWhere={props.onWhere} onUp={props.onUp} />;
   }
 
+  // An outcode has no coverage board, because nothing is filed under it — so
+  // the lens it defaults to has to be the one that has something to draw. The
+  // navigation writes `lens=category` into the address when you pick one, and
+  // this covers arriving any other way: a typed address, a shared link, the
+  // back button (owner, 18 Sep 2026 — SL5 pasted in showed an empty board).
+  // The same shape as the rule above, where naming a category *is* choosing the
+  // category lens.
+  const lensHere: Lens = lens === 'coverage' && level?.areaKind === 'postcode' ? 'category' : lens;
+
   const body = (() => {
-    if (lens === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
-    if (lens === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} areaKind={level.areaKind} />;
-    if (lens === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
-    if (lens === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
-    if (lens === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
-    if (lens === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} cat={cat} sub={sub} />;
+    if (lensHere === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
+    if (lensHere === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} areaKind={level.areaKind} />;
+    if (lensHere === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
+    if (lensHere === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
+    if (lensHere === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
+    if (lensHere === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} cat={cat} sub={sub} />;
     if (ring) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
                                                              onCollectIn={(slug) => { props.onWhere(slug); props.onLens('collect'); }} />;
@@ -351,7 +360,10 @@ function Level(props: {
              onSelf={() => { props.onCat(''); props.onSub(''); props.onLens('coverage'); }} />
       <Band kicker={kicker} title={title}
             stats={lens === 'demand' ? null : <Five stats={level.stats} ring={ring} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
-      <LensRow lens={lens} onLens={props.onLens}
+      {/* The word that is underlined is the board you are on, not the word in
+          the address — otherwise an outcode drew its categories under a lit
+          "Coverage" (18 Sep 2026). */}
+      <LensRow lens={lensHere} onLens={props.onLens}
                right={ring
                  ? <RingChooser minutes={within ?? 30} mode={mode} onMinutes={props.onWithin} onMode={props.onBy}
                                 cells={level.cells} modesBuilt={level.modesBuilt} />
