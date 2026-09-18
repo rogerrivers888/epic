@@ -1658,3 +1658,31 @@ test('a licensed fact past its expiry reaches nobody', async () => {
   assert.equal((await query(
     'select count(*)::int as n from place_facts where venue_ref = $1', [ref])).rows[0].n, 2);
 });
+
+test('a postcode written in full is filed under its outcode, not a made-up one', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  await query(`insert into localities (slug, name, kind, country_code) values ('zz9','ZZ9','postcode','GB') on conflict (slug) do nothing`);
+  const spaced = 'osm:node/postcode-with-a-space';
+  const tight = 'osm:node/postcode-without-one';
+  for (const [ref, postcode] of [[spaced, 'ZZ9 1AB'], [tight, 'ZZ91AB']]) {
+    await index.noteMany([{ ref, lat: 51.4, lng: -0.9, countryCode: 'GB' }], { source: 'osm' });
+    await owned.ensureRecord(ref);
+    await query('update place_records set postcode = $2 where venue_ref = $1', [ref, postcode]);
+  }
+
+  // The outward code is everything before the space. Stripping the space and
+  // then matching let the pattern eat the incode's first digit, so "ZZ9 1AB"
+  // was filed under "ZZ91" — an outcode that does not exist — and the place was
+  // missing from the board for the one it is actually in (18 Sep 2026).
+  await index.settleNew(50);
+  for (const ref of [spaced, tight]) {
+    const areas = (await query(
+      `select pa.area_slug from place_areas pa join localities l on l.slug = pa.area_slug
+        where pa.venue_ref = $1 and l.kind = 'postcode'`, [ref])).rows.map((r) => r.area_slug);
+    assert.deepEqual(areas, ['zz9'], `${ref}: ${areas.join(', ')}`);
+  }
+  assert.equal((await query(
+    `select count(*)::int as n from place_areas where area_slug = 'zz91'`)).rows[0].n, 0,
+  'and nothing is filed under an outcode nobody has');
+});

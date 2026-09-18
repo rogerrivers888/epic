@@ -603,10 +603,32 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select r.venue_ref, lower(substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?'))
+    select r.venue_ref, lower(case
+             -- The outward code is everything before the space. Stripping the
+             -- space first and then matching let the pattern eat the incode's
+             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
+             -- that does not exist, and the place went missing from the board
+             -- for the one it is actually in (found in the invariant check,
+             -- 18 Sep 2026).
+             when position(' ' in btrim(r.postcode)) > 0
+               then split_part(btrim(upper(r.postcode)), ' ', 1)
+             -- Written without one, the incode is always the last three.
+             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
+           end)
       from place_records r
      where r.postcode is not null
-       and substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?') is not null
+       and lower(case
+             -- The outward code is everything before the space. Stripping the
+             -- space first and then matching let the pattern eat the incode's
+             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
+             -- that does not exist, and the place went missing from the board
+             -- for the one it is actually in (found in the invariant check,
+             -- 18 Sep 2026).
+             when position(' ' in btrim(r.postcode)) > 0
+               then split_part(btrim(upper(r.postcode)), ' ', 1)
+             -- Written without one, the incode is always the last three.
+             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
+           end) ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
     on conflict do nothing`);
   // And where the household said it was — the same source the hourly pass reads
   // (Codex, 18 Sep 2026). Matched by name, because the column is a word rather
@@ -947,10 +969,32 @@ async function settleWhileLocked(limit) {
     on conflict do nothing`, [refs]);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select r.venue_ref, lower(substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?'))
+    select r.venue_ref, lower(case
+             -- The outward code is everything before the space. Stripping the
+             -- space first and then matching let the pattern eat the incode's
+             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
+             -- that does not exist, and the place went missing from the board
+             -- for the one it is actually in (found in the invariant check,
+             -- 18 Sep 2026).
+             when position(' ' in btrim(r.postcode)) > 0
+               then split_part(btrim(upper(r.postcode)), ' ', 1)
+             -- Written without one, the incode is always the last three.
+             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
+           end)
       from place_records r
      where r.venue_ref = any($1) and r.postcode is not null
-       and substring(replace(upper(r.postcode), ' ', '') from '^[A-Z]{1,2}[0-9][0-9A-Z]?') is not null
+       and lower(case
+             -- The outward code is everything before the space. Stripping the
+             -- space first and then matching let the pattern eat the incode's
+             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
+             -- that does not exist, and the place went missing from the board
+             -- for the one it is actually in (found in the invariant check,
+             -- 18 Sep 2026).
+             when position(' ' in btrim(r.postcode)) > 0
+               then split_part(btrim(upper(r.postcode)), ' ', 1)
+             -- Written without one, the incode is always the last three.
+             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
+           end) ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
     on conflict do nothing`, [refs]);
   // And where the household said it was.
   //
