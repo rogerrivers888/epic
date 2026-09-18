@@ -166,6 +166,24 @@ router.post('/event', async (req, res, next) => {
 });
 
 /**
+ * What the screen actually drew.
+ *
+ * The answer is a pool; the screen filters it and draws part of it. Only the
+ * screen knows which part, so it says so — and until it does the log holds the
+ * pool, which is the safe direction: an over-count is a search we thought we
+ * answered, an under-count is a coverage hole that does not exist.
+ */
+router.post('/drawn', async (req, res, next) => {
+  try {
+    const { queryId, refs = [] } = req.body || {};
+    if (!queryId) return res.status(400).json({ error: 'query_id_required', message: 'Which search.' });
+    const kept = (Array.isArray(refs) ? refs : []).map(String).filter(Boolean).slice(0, 500);
+    const household = await currentHousehold();
+    res.json({ ok: await searchLog.noteDrawn({ searchId: queryId, householdId: household.id, refs: kept }) });
+  } catch (err) { next(err); }
+});
+
+/**
  * Record that the household chose a candidate (Epic 2 C6). This is the other
  * half of source attribution — without a recorded selection there is never
  * evidence that a source influenced a real decision, and no grounds to drop it.

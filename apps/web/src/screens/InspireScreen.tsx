@@ -8,7 +8,7 @@ import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { heldSearch, holdConversion, noteSearchEvent, searchIdOf } from '../search';
+import { heldSearch, holdConversion, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
@@ -611,6 +611,20 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     // The answer to a spoken request draws every row it has, so every row is asked about.
     askAbout(pick ? listed : answer?.length ? answer : shelves.flatMap((sh) => sh.items.slice(0, ACROSS)));
   }, [pick, listed, shelves, rating, inMode, askAbout, answer]);
+
+  /**
+   * And the same list is what the log is told was shown.
+   *
+   * The pool that came back is not what the household saw: the other mode is
+   * gone, the filters have run, and a shelf draws twelve. Counted from the pool,
+   * a screen the filters emptied read as forty places shown and nothing clicked
+   * — the wrong fault, with the wrong owner (Codex, 18 Sep 2026).
+   */
+  useEffect(() => {
+    if (loading || !pool) return;
+    const on = pick ? listed : answer?.length ? answer : shelves.flatMap((sh) => sh.items.slice(0, ACROSS));
+    noteDrawn('inspire', on.map((i) => i.venueRef));
+  }, [loading, pool, pick, listed, shelves, answer]);
 
   /** The place, opened — `?place=…` over whichever list is showing. */
   const asDrawerItem = (item: InspireItem) => ({

@@ -72,6 +72,29 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
   }).catch(() => null);
 }
 
+/** What each surface last told the log it had drawn, so it is said once. */
+const drawn = new Map<Surface, string>();
+
+/**
+ * What the screen actually drew.
+ *
+ * The answer to an Inspire is a pool: the screen drops the other mode, applies
+ * the filters and draws twelve to a shelf. Only the screen knows what came out
+ * of that, so it says so — otherwise the log counts forty shown where the
+ * household saw nine, and where the filters left nothing it counts forty shown
+ * against an empty screen, which is the wrong one of the three faults (Codex,
+ * 18 Sep 2026).
+ */
+export function noteDrawn(surface: Surface, refs: (string | null | undefined)[]) {
+  const queryId = current.get(surface);
+  if (!queryId) return;
+  const kept = refs.filter(Boolean) as string[];
+  const key = `${queryId}:${kept.length}:${kept.slice(0, 40).join(',')}`;
+  if (drawn.get(surface) === key) return;
+  drawn.set(surface, key);
+  void api.searchDrawn({ queryId, refs: kept }).catch(() => null);
+}
+
 /** Which search a surface is standing on, where a screen needs to say so. */
 export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
 

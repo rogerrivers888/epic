@@ -2634,6 +2634,9 @@ export const api = {
     post<{ ok: true; id: string }>(`/api/admin/queue/${id}/report`, { reason: reason ?? null }),
   adminQueueReasons: () => request<{ reasons: Record<string, RejectReason[]>; used: { kind: string; reason: string; used: number; last_at: string }[] }>('/api/admin/queue/report/reasons'),
 
+  /** What the screen actually drew, which is not the whole of what came back. */
+  searchDrawn: (body: { queryId: string; refs: string[] }) => post<{ ok: boolean }>('/api/discover/drawn', body),
+
   /** What the household did to one of the results — the click stream Demand counts. */
   searchEvent: (body: { queryId: string; kind: 'open' | 'dismiss' | 'save' | 'shortlist' | 'add_to_trip' | 'refine' | 'close'; venueRef?: string | null; position?: number | null; dwellMs?: number | null }) =>
     post<{ ok: true }>('/api/discover/event', body),

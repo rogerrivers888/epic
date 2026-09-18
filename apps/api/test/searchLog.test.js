@@ -668,3 +668,51 @@ test('a degraded source is written down by name, not as a lump of JSON', async (
   const { rows: [row] } = await query('select degraded from searches where id = $1', [id]);
   assert.deepEqual(row.degraded, ['osm', 'google']);
 });
+
+/**
+ * What the screen drew, not what came back.
+ *
+ * Inspire answers with a pool and the screen filters it. Counted from the pool,
+ * a screen the filters emptied read as forty places shown and nothing clicked —
+ * "wrong places", owned by Categories, when the truth was "came back empty",
+ * owned by Collect (Codex, 18 Sep 2026).
+ */
+test('the screen says what it drew, and an emptied screen is an empty search', async () => {
+  const { household } = await aHousehold(query);
+  await index.noteMany([
+    { ref: 'test:drawn-1' }, { ref: 'test:drawn-2' }, { ref: 'test:drawn-3' },
+  ], { source: 'atlas' });
+  await query(`update place_index set subcategory = 'museums' where venue_ref in ('test:drawn-1','test:drawn-2')`);
+  const id = await log.noteSearch({
+    householdId: household.id, surface: 'inspire', shownTotal: 3,
+    shown: [{ subcategory: 'museums', n: 2 }, { subcategory: 'unshelved', n: 1 }],
+  });
+  // The replay's rows are all three, because a card one tap away is reachable.
+  await log.noteShown(id, ['test:drawn-1', 'test:drawn-2', 'test:drawn-3'].map((ref, i) => ({ ref, position: i + 1 })));
+
+  assert.equal(await log.noteDrawn({ searchId: id, householdId: household.id, refs: ['test:drawn-1'] }), true);
+  const said = async () => (await query('select shown_total, shown, empty from searches where id = $1', [id])).rows[0];
+  let row = await said();
+  assert.equal(row.shown_total, 1, 'one was drawn, whatever came back');
+  assert.deepEqual(row.shown, [{ subcategory: 'museums', n: 1 }], 'and it is filed under its own shelf');
+  assert.equal(row.empty, false);
+  const { rows: still } = await query(
+    `select count(*)::int as n from search_events where search_id = $1 and kind = 'shown'`, [id]);
+  assert.equal(still[0].n, 3, 'the replay still holds everything they could reach');
+
+  // A place the index has never heard of shares the unshelved entry rather than
+  // making a second one with the same name.
+  await log.noteDrawn({ searchId: id, householdId: household.id, refs: ['test:drawn-3', 'test:never-indexed'] });
+  assert.deepEqual((await said()).shown, [{ subcategory: 'unshelved', n: 2 }]);
+
+  // Nothing survived the filters: that is an empty search, not a wrong one.
+  await log.noteDrawn({ searchId: id, householdId: household.id, refs: [] });
+  row = await said();
+  assert.equal(row.shown_total, 0);
+  assert.equal(row.empty, true);
+
+  // And it is only ever the household's own search.
+  const other = await aHousehold(query);
+  assert.equal(await log.noteDrawn({ searchId: id, householdId: other.household.id, refs: ['test:drawn-2'] }), false);
+  assert.equal((await said()).shown_total, 0);
+});

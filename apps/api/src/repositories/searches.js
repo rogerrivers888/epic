@@ -354,3 +354,49 @@ export async function noteShown(searchId, items = []) {
     }
   } catch { /* the log is not worth a failed search */ }
 }
+
+/**
+ * What the screen actually drew, which is not what the answer contained.
+ *
+ * Inspire hands back a pool and the screen then drops the other mode, applies
+ * the travel, rating, price and category filters, and draws twelve a shelf
+ * until somebody opens "All". So the answer's own count said forty where the
+ * household saw nine — and where every one of them was filtered out it said
+ * forty where they saw nothing at all, which is the difference between "came
+ * back empty" and "clicked nothing": two faults with two different owners
+ * (Codex, 18 Sep 2026).
+ *
+ * The `shown` events are left alone on purpose. They are what the replay hangs
+ * off, and a card one tap away is a card the household could reach.
+ */
+export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}) {
+  if (!searchId) return false;
+  try {
+    const kept = [...new Set(refs.filter(Boolean))];
+    // By shelf, the same shape `logSearch` writes, and read off the index so
+    // the two agree about what a place is filed under.
+    const { rows: shown } = kept.length
+      ? await query(
+        `select coalesce(subcategory, 'unshelved') as subcategory, count(*)::int as n
+           from place_index where venue_ref = any($1) group by 1`, [kept])
+      : { rows: [] };
+    // A place the index has never heard of is unshelved too, and it goes in the
+    // same entry as the ones it has: two rows with one name is a shape nothing
+    // downstream expects.
+    const short = kept.length - shown.reduce((n, r) => n + r.n, 0);
+    if (short > 0) {
+      const had = shown.find((r) => r.subcategory === 'unshelved');
+      if (had) had.n += short; else shown.push({ subcategory: 'unshelved', n: short });
+    }
+    const { rowCount } = await query(
+      `update searches
+          set shown_total = $2, shown = $3::jsonb, empty = ($2 = 0)
+        where id = $1::uuid
+          and ($4::uuid is null or household_id = $4)
+          -- Only while it is still the search in front of them: an outcome has
+          -- already been counted against it by then.
+          and outcome = 'none'`,
+      [searchId, kept.length, JSON.stringify(shown.map((r) => ({ subcategory: r.subcategory, n: r.n }))), householdId]);
+    return rowCount > 0;
+  } catch { return false; }
+}
