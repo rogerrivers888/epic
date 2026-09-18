@@ -2292,6 +2292,17 @@ router.post('/collect', requires('manage_library'), async (req, res, next) => {
  * any chunk takes.
  */
 async function work(runId, householdId) {
+  // While this worker is alive the run is not stranded, whatever a chunk is
+  // waiting on. A chunk of ten can outlast the ten minutes that define a
+  // stranded run — ten curations, each on somebody else's server — and the
+  // hourly recovery would then start a second worker on a run nobody had
+  // abandoned: two of them writing over each other's `todo`, and one `done`
+  // clearing the other's claim, which ends in a place asked for twice and paid
+  // for twice (Codex, 19 Sep 2026). A heartbeat is the only thing that tells a
+  // slow worker from a dead one, and that is exactly the distinction the
+  // recovery is built on.
+  const beat = setInterval(() => { void collectRuns.stillWorking(runId).catch(() => null); }, collectRuns.STRANDED_AFTER_MS / 4);
+  beat.unref?.();
   try {
     for (;;) {
       const run = await collectRuns.one(runId);
@@ -2391,6 +2402,11 @@ async function work(runId, householdId) {
   } catch (err) {
     console.warn(`collect: ${err.message}`);
     await collectRuns.fail(runId, err.message).catch(() => null);
+  } finally {
+    // Stopped on every way out, including the `return` when the run is no longer
+    // running: a heartbeat that outlives its worker would keep a genuinely
+    // stranded run out of the recovery's hands for good.
+    clearInterval(beat);
   }
 }
 

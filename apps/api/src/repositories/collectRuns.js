@@ -139,6 +139,25 @@ export async function advance(id, source, refs, { done = 0, spentPence = 0, refu
  * on the row, so nothing is lost, and no longer on the list, so nothing is
  * asked twice.
  */
+/**
+ * "I am still here."
+ *
+ * `claim` and `done` both move `touched_at`, so between two chunks a run always
+ * looks fresh. Inside one it does not: ten free curations in a row, each waiting
+ * on somebody else's server, can run past the ten minutes that define a stranded
+ * run — and the hourly recovery would then start a *second* worker on a run that
+ * was never stuck. Two workers on one run write over each other's `todo` and
+ * `asking`, and one's `done` clears the other's claim, which ends in the same
+ * place being asked for twice and paid for twice (Codex, 19 Sep 2026).
+ *
+ * A heartbeat is the only thing that tells a slow worker from a dead one, and
+ * that distinction is the whole basis of the recovery. Nothing else is written:
+ * this must never race with the chunk's own bookkeeping.
+ */
+export async function stillWorking(id) {
+  await query(`update collect_runs set touched_at = now() where id = $1 and state = 'running'`, [id]);
+}
+
 export async function claim(id, source, refs) {
   const { rows } = await query(
     `update collect_runs

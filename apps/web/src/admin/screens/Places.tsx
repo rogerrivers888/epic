@@ -686,6 +686,23 @@ function AreaSearch({ onWhere, onPlace }: {
 
 const Waiting = () => <View style={{ paddingVertical: spacing.xl, alignItems: 'flex-start' }}><ActivityIndicator color={colors.accent} /></View>;
 
+/**
+ * A board that could not be read, said so.
+ *
+ * The alternative was worse than useless: a failed request fabricated an empty
+ * dataset with noughts in every column, so a network fault, an expired session
+ * and a county with nothing in it all drew the same board — and a collection
+ * decision made off that is made off a number that was never true (Codex, 19 Sep
+ * 2026). This is the back office, so it says what actually went wrong rather
+ * than the one sentence the app would give a household.
+ */
+const Trouble = ({ why, onRetry }: { why: string; onRetry: () => void }) => (
+  <View style={{ paddingVertical: spacing.xl, alignItems: 'flex-start', gap: spacing.sm }}>
+    <Word muted>{why}</Word>
+    <Act label="Try again" tone="secondary" onPress={onRetry} />
+  </View>
+);
+
 // ---------------------------------------------------------------------------
 // BO2a / BO2n — the level, cut by county, city or postcode district
 // ---------------------------------------------------------------------------
@@ -696,14 +713,18 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
   onCollectIn: (slug: string) => void;
 }) {
   const [data, setData] = useState<{ rows: PlaceAreaRow[]; all: number; totals: PlaceStats } | null>(null);
+  const [why, setWhy] = useState<string | null>(null);
   // In the address: the board's own URL carries `&sort=empty.desc`, and a board
   // you cannot send somebody is half a board (Codex, 17 Sep 2026).
   const [sort, setSort] = useQueryState<string>('sort', 'searches', asText);
   const [desc, setDesc] = useQueryState<boolean>('desc', true, { read: (r) => r !== '0', write: (v) => (v ? null : '0') });
-  useEffect(() => {
-    setData(null);
-    api.adminPlaceBreakdown({ ...q, by, sort, desc: desc ? undefined : '0' }).then(setData).catch(() => setData({ rows: [], all: 0, totals: { known: 0, owned: 0, claimed: 0, identified: 0, readyCount: 0, ready: null, avgScore: null } }));
+  const load = useCallback(() => {
+    setData(null); setWhy(null);
+    api.adminPlaceBreakdown({ ...q, by, sort, desc: desc ? undefined : '0' })
+      .then(setData)
+      .catch((e) => setWhy(e?.message || 'That board could not be read.'));
   }, [q, by, sort, desc]);
+  useEffect(load, [load]);
 
   const columns: Col<PlaceAreaRow>[] = [
     // The note belongs to the board, not to the component. BO2a's *County*
@@ -780,7 +801,7 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
                   ],
                 })}
                 empty={<Word muted>Nothing indexed here yet.</Word>} />
-      ) : <Waiting />}
+      ) : why ? <Trouble why={why} onRetry={load} /> : <Waiting />}
       <Footer>
         <Explain tip="addACountry"><Act label="Add a country" tone="secondary" disabled onPress={() => {}} /></Explain>
         {/* Where the gap is, on the Collect lens — the same door every other
@@ -799,7 +820,14 @@ function CoverageBoard({ q, onWhere, onCollect }: {
   q: any; onWhere: (slug: string, opts?: { lens?: Lens }) => void; onCollect: () => void;
 }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCoverage>> | null>(null);
-  const load = useCallback(() => { setData(null); api.adminPlaceCoverage(q).then(setData).catch(() => setData(null)); }, [q]);
+  const [why, setWhy] = useState<string | null>(null);
+  // The catch used to set the *loading* state, so a board that could not be read
+  // span for ever and never said why (Codex, 19 Sep 2026, the same fault as the
+  // breakdown's noughts wearing the other mask).
+  const load = useCallback(() => {
+    setData(null); setWhy(null);
+    api.adminPlaceCoverage(q).then(setData).catch((e) => setWhy(e?.message || 'That board could not be read.'));
+  }, [q]);
   useEffect(load, [load]);
 
   const columns: Col<PlaceCoverageRow>[] = [
@@ -853,7 +881,7 @@ function CoverageBoard({ q, onWhere, onCollect }: {
                     { key: 'menu', word: `menu ${r.menu == null ? '—' : `${r.menu}%`}`, tip: 'menu' },
                   ],
                 })} />
-      ) : <Waiting />}
+      ) : why ? <Trouble why={why} onRetry={load} /> : <Waiting />}
       <Footer>
         {/* Collect lives inside Places, and this is the door to it: the lens that
             says what could be got here, which sources could supply it, and what

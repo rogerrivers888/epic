@@ -327,6 +327,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   useEffect(() => {
     if (!alongKey || alongKey === lastKey.current) return;
     lastKey.current = alongKey;
+    // Whether this screen is still the one asking.
+    //
+    // Leaving the map while the search was in the air let the answer land
+    // afterwards and put the search back — after the cleanup below had let go
+    // of it — so the next trip surface counted its opens and its day-stops
+    // against a search made on a screen nobody was looking at (Codex, 19 Sep
+    // 2026).
+    let live = true;
     // The list that is on screen is the answer to the last question, so it
     // goes when the question changes: Activities showed the food it had just
     // been showing, for as long as the search took (owner, 6 Sep 2026).
@@ -341,6 +349,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
     forgetSearch('trip');
     api.tripAlong(trip.id, { kind: pill === 'food' ? 'food' : 'things', maxDetourMin, around: around ?? undefined, aroundName: aroundName ?? undefined, q: q || undefined })
       .then((r) => {
+        if (!live) return;
         // The map's search, held so that opening a pin or adding it to a day is
         // counted against it. This surface was searching and never saying so
         // (Codex, 18 Sep 2026).
@@ -352,7 +361,8 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         heldSearch('trip', r.queryId ?? null, r.places.map((v) => v.venueRef));
         setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null, moods: r.moods ?? [] });
       })
-      .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] }));
+      .catch((e) => { if (live) setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] }); });
+    return () => { live = false; };
   }, [alongKey, trip.id, pill, around, aroundName, maxDetourMin, q]);
   // And when the screen goes, as every other surface does.
   useEffect(() => () => forgetSearch('trip'), []);
