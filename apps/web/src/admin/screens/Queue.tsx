@@ -508,7 +508,16 @@ function RejectSheet({ item, tell, onClose, onDone }: {
     if (!reason) return;
     setBusy(true); setWhy(null);
     try {
-      const out = await api.adminQueueReject(item.item.id, { reason: reason.key, message: tell ? message : null, tell });
+      const out = await api.adminQueueReject(item.item.id, {
+        reason: reason.key, message: tell ? message : null, tell,
+        // What this sheet was shown. A rewrite while somebody was reading means
+        // the reason was chosen for words that are no longer there (Codex,
+        // 18 Sep 2026).
+        seen: item.item.version ?? null,
+      });
+      // Nothing was decided, because the words moved. The sheet stays open and
+      // says so, rather than reporting a rejection that did not happen.
+      if (out.stale) { setWhy(out.why ?? 'it was rewritten while you were reading it, so it is still waiting'); return; }
       // The rejection stands either way; whether they were told is a separate
       // fact and the sheet says which happened (Codex, 17 Sep 2026).
       if (tell && !out.told && out.why) { setWhy(out.why); return; }

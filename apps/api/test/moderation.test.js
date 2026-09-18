@@ -916,3 +916,34 @@ test('words written while somebody was reading them are not published', async ()
   assert.equal((await query(
     `select state from content_queue where id = $1`, [q.id])).rows[0].state, 'approved');
 });
+
+test('a rejection is about the words the reviewer read, too', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [member] } = await query(
+    `insert into members (household_id, name) values ($1, 'An asker') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, author_member_id, title, body, tag_kind)
+     values ('trip', $1, $2, 'Where for lunch?', 'Somewhere near the park.', 'none') returning *`,
+    [household.id, member.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+  const seen = (await queue.one(q.id)).version;
+
+  // Rewritten while the sheet was open. Rejecting now would suppress text
+  // nobody read and tell the household a reason chosen for words they no longer
+  // wrote — approve was guarded against this and reject was not (Codex, 18 Sep).
+  await chat.updateTopic(topic.id, { body: 'Something quite different.' });
+  await queue.sync();
+  const out = await queue.reject({ id: q.id, reason: 'abusive', who: null, seen });
+  assert.equal(out.stale, true);
+  assert.equal((await query('select state from content_queue where id = $1', [q.id])).rows[0].state, 'waiting');
+  assert.equal((await query('select hidden from chat_topics where id = $1', [topic.id])).rows[0].hidden, false,
+    'nothing was suppressed');
+
+  // Reading the new words and deciding about those works.
+  const now = (await queue.one(q.id)).version;
+  const done = await queue.reject({ id: q.id, reason: 'abusive', who: null, seen: now });
+  assert.equal(done.stale, undefined);
+  assert.equal((await query('select hidden from chat_topics where id = $1', [topic.id])).rows[0].hidden, true);
+});

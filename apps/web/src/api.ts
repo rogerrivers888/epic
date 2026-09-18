@@ -2685,8 +2685,13 @@ export const api = {
   adminQueueApprove: (ids: string[], seen?: Record<string, string | null>) =>
     post<{ approved: number; ids: string[]; stale?: string[]; why?: string }>('/api/admin/queue/approve', { ids, ...(seen ? { seen } : {}) }),
   /** BO5b — the rejection, beside the message it sends. */
-  adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean }) =>
-    post<{ ok: true; id: string; reason: string; told: boolean; message: string | null; why: string | null }>(`/api/admin/queue/${id}/reject`, body),
+  /**
+   * `seen` is the version of the words the screen drew, as approving carries —
+   * a rejection is a decision about words too, and one made after a rewrite
+   * suppresses text nobody read.
+   */
+  adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean; seen?: string | null }) =>
+    post<{ ok: true; id: string; reason: string; told: boolean; message: string | null; why: string | null; stale?: boolean }>(`/api/admin/queue/${id}/reject`, body),
   /**
    * Somebody has flagged this. Reported content jumps the queue and has a lane
    * of its own; nothing in the app could put anything in it, so the lane was

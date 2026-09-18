@@ -453,8 +453,13 @@ places.get('/search', async (req, res, next) => {
       sourcesQueried, degraded,
     });
     await searchLog.noteShown(searchId, drawn.map((v, i) => ({ ref: v.venueRef, position: i + 1, source: v.source })));
-    // And into the index: every place any source has ever seen (placeIndex.noteSeen).
-    await placeIndex.noteSeen(drawn);
+    // And into the index: every place any source has ever seen — all of them,
+    // not the slice the screen drew. `drawn` is what was put in front of
+    // somebody and is right for the log; `shown` is everything the search
+    // returned, and a place we were told about is one we have seen whether or
+    // not it fitted on the page. Indexing the slice alone left the rest out of
+    // coverage and open to being bought again by Collect (Codex, 18 Sep 2026).
+    await placeIndex.noteSeen(shown);
 
     res.json({
       queryId: searchId,

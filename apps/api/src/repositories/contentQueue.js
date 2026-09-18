@@ -693,12 +693,28 @@ export async function approve(ids, who, { seen = null } = {}) {
  * The reason is from the closed list and the message is stored beside it, so
  * what was actually sent can be read back rather than reconstructed.
  */
-export async function reject({ id, reason, message = null, tell = false, who }) {
+export async function reject({ id, reason, message = null, tell = false, who, seen = undefined }) {
   const { rows: [q] } = await query(
-    'select kind, state, reason, told, message, household_id, account_id, place_label from content_queue where id = $1', [id]);
+    `select kind, state, reason, told, message, household_id, account_id, place_label,
+            subject_type, subject_id
+       from content_queue where id = $1`, [id]);
   if (!q) return null;
   const r = reasonFor(q.kind, reason);
   if (!r) return null;
+  // The words this decision is about.
+  //
+  // A rejection is a decision about words as much as an approval is: turned
+  // down after a rewrite it suppresses text nobody read, and tells the
+  // household a reason chosen for something they no longer wrote (Codex, 18 Sep
+  // 2026). Where the caller says nothing about the version, nothing is held
+  // back — a photograph has no version to speak of.
+  if (seen !== undefined) {
+    const now = await versionOf(q.subject_type, q.subject_id);
+    if ((seen ?? null) !== now) {
+      const { rows: [row] } = await query('select * from content_queue where id = $1', [id]);
+      return row ? { ...row, stale: true, why: 'it was rewritten while you were reading it, so it is still waiting' } : null;
+    }
+  }
   // Already decided, and decided this way: nothing to do.
   //
   // A retried request — a double tap, a client that resends — rejected it

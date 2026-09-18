@@ -173,6 +173,13 @@ router.post('/:id/reject', requires('manage_library'), async (req, res, next) =>
       message: req.body?.message ? String(req.body.message) : null,
       tell: req.body?.tell === true,
       who: actor(req).actorLabel,
+      // The version the screen was shown, as approving already carries.
+      //
+      // A rejection is a decision about words too: turned down after a rewrite,
+      // it suppresses text nobody read and tells the household a reason chosen
+      // for something they no longer wrote (Codex, 18 Sep 2026). Approve was
+      // guarded and this was not.
+      seen: req.body && 'seen' in req.body ? (req.body.seen ?? null) : undefined,
     });
     if (!out) throw bad('That is not one of the reasons for this kind of thing.');
     await writeAudit({ ...actor(req), action: 'queue.reject', subjectType: 'content', subjectId: out.id, subjectLabel: out.reason, after: { reason: out.reason, told: out.told } });
