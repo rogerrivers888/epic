@@ -960,3 +960,23 @@ test('a hand-shelved place keeps its shelf and gets its labels back', async () =
     'select count(*)::int as n from place_index_labels where venue_ref = $1', [ref]);
   assert.ok(labels.n > 0, 'and the words the sources filed it by are back');
 });
+
+/**
+ * A country we hold places in is a place you can point at.
+ *
+ * The index files a place under its country code whatever that code is, and the
+ * country picker lists localities of kind 'country' — so a place saved abroad
+ * got an area row no screen could ever reach (Codex, 18 Sep 2026).
+ */
+test('a place saved abroad makes its country reachable', async () => {
+  const ref = 'test:abroad';
+  await index.noteMany([{ ref, lat: 38.7, lng: -9.1, countryCode: 'PT' }], { source: 'own' });
+  await index.settleNew({ limit: 500 });
+  const { rows: [country] } = await query(
+    `select slug, name, kind from localities where slug = 'pt'`);
+  assert.equal(country?.kind, 'country');
+  assert.equal(country.name, 'Portugal', 'said in words, not left as a code');
+  const { rows: [area] } = await query(
+    `select count(*)::int as n from place_areas where venue_ref = $1 and area_slug = 'pt'`, [ref]);
+  assert.equal(area.n, 1, 'and the place is filed under it');
+});

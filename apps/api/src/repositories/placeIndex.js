@@ -23,6 +23,7 @@ import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
 import { rules as shelfRules } from './shelfRules.js';
 import { taxonomy } from './shelfTaxonomy.js';
 import { FACT_KEYS, FACT_WEIGHTS, defaultBars, scorePlace, readyShare, ownedRecordSql } from '../domain/placeIndex.js';
+import { COUNTRY_NAMES } from '../sources/portraits.js';
 
 /** Sources we can be asked about, in the order the boards print them. */
 export const SOURCES = [
@@ -685,6 +686,24 @@ async function settleWhileLocked(limit) {
          where (a.venue_ref = todo.venue_ref or 'atlas:' || a.id::text = todo.venue_ref) limit 1) reg on true
      where pi.venue_ref = todo.venue_ref
        and coalesce(sa.country_code, reg.country_code) is not null`, [refs]);
+
+  // 0b — and a country we hold places in is a place you can point at.
+  //
+  //      The index files a place under `lower(country_code)` whatever the code
+  //      is, and the country picker lists localities of kind 'country' — so a
+  //      place saved abroad got an area row no screen could reach (Codex, 18 Sep
+  //      2026; migration 169 did the ones already there). The name comes from
+  //      the app's own list, and is the code itself where nothing knows better.
+  await query(
+    `insert into localities (slug, name, kind, country_code, nation)
+     select distinct lower(pi.country_code),
+            coalesce(n.name, upper(pi.country_code)), 'country', upper(pi.country_code), null
+       from place_index pi
+       left join (select * from unnest($2::text[], $3::text[]) as t(code, name)) n
+              on n.code = upper(pi.country_code)
+      where pi.venue_ref = any($1) and pi.country_code is not null
+     on conflict (slug) do nothing`,
+    [refs, Object.keys(COUNTRY_NAMES), Object.values(COUNTRY_NAMES)]);
 
   // 1 — where they are. The same four sources the rebuild reads, and the same
   //     rule that a town carries its county.

@@ -293,7 +293,7 @@ export async function portraitsForApp({ onLine, only, replace = false } = {}) {
  * unknown code falls through to its own letters and simply fails to resolve,
  * which is the honest outcome rather than a wrong portrait.
  */
-const COUNTRY_NAMES = {
+export const COUNTRY_NAMES = {
   GB: 'United Kingdom', IE: 'Ireland', FR: 'France', IT: 'Italy', ES: 'Spain',
   PT: 'Portugal', DE: 'Germany', NL: 'Netherlands', BE: 'Belgium', US: 'United States',
   GR: 'Greece', HR: 'Croatia', AT: 'Austria', CH: 'Switzerland', SE: 'Sweden',

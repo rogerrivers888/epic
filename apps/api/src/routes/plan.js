@@ -1556,7 +1556,13 @@ router.post('/inspire/more', async (req, res, next) => {
     if (state.kind !== 'inspire') return res.status(404).json({ error: 'session_not_found' });
     if (state.running) return res.json({ sessionId: session.id, ref: runRef(session.id), running: true, stage: state.stage ?? 'thinking' });
     const attending = Array.isArray(attendingMemberIds) && attendingMemberIds.length ? members.filter((m) => attendingMemberIds.includes(m.id)) : members;
-    Object.assign(state, { running: true, stage: 'thinking', error: null, runStartedAt: new Date().toISOString() });
+    // The previous run's search id goes with the previous run.
+    //
+    // "Show me five more" publishes its ideas while it is still placing them,
+    // and the screen hands whatever id it is holding to the log — so an open on
+    // one of the *new* ideas was counted against the *old* search until the new
+    // one was written down (Codex, 18 Sep 2026).
+    Object.assign(state, { running: true, stage: 'thinking', error: null, searchId: null, runStartedAt: new Date().toISOString() });
     await saveSession(session.id, state, null);
     res.json({ sessionId: session.id, ref: runRef(session.id), running: true, stage: 'thinking' });
     runInspire({ household, accountId: req.account?.id ?? null, attending, session, state, append: true })
