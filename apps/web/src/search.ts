@@ -102,7 +102,11 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
   const queryId = current.get(surface);
   if (!queryId) return;
   const kept = refs.filter(Boolean) as string[];
-  const key = `${queryId}:${kept.length}:${kept.slice(0, 40).join(',')}`;
+  // Every ref, not the first forty: two lists with the same length and the same
+  // first forty made the same key, so changing a filter that only moved things
+  // past position forty left the log describing the previous list (Codex, 18 Sep
+  // 2026). Cheap and stable — the order is the order they were drawn in.
+  const key = `${queryId}:${kept.length}:${kept.join(',')}`;
   if (drawn.get(surface) === key) return;
   drawn.set(surface, key);
   void api.searchDrawn({ queryId, refs: kept }).catch(() => null);

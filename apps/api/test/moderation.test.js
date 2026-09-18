@@ -629,3 +629,27 @@ test('an approved thing that is rewritten goes back to be looked at', async () =
   const { rows: [up] } = await query('select hidden from chat_topics where id = $1', [topic.id]);
   assert.equal(up.hidden, false);
 });
+
+/**
+ * Hiding an entry keeps it out of the pool, not away from its owner.
+ *
+ * Filtering the owner's own lookup meant the screen said "you have not written
+ * one" the moment moderation hid it — and writing another violated the unique
+ * index on one active entry per scope (Codex, 18 Sep 2026).
+ */
+test('a household can still find its own entry while it waits to be read again', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [entry] } = await query(
+    `insert into open_entries (household_id, scope, kind, state, transcript)
+     values ($1, 'standing', 'adult', 'active', 'Up for a walk') returning *`, [household.id]);
+  assert.equal((await openTo.entryFor(household.id, { scope: 'standing' }))?.id, entry.id);
+
+  await query('update open_entries set hidden = true where id = $1', [entry.id]);
+  const held = await openTo.entryFor(household.id, { scope: 'standing' });
+  assert.equal(held?.id, entry.id, 'their own entry is still theirs to find');
+  // And it is still out of the pool everybody else is matched from.
+  const { rows: pool } = await query(
+    `select id from open_entries where state = 'active' and not hidden and scope = 'standing' and household_id = $1`,
+    [household.id]);
+  assert.equal(pool.length, 0);
+});

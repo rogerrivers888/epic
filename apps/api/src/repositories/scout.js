@@ -795,10 +795,18 @@ export async function rescoreOne(venueRef, epicScore, ownedScore) {
     `update attractions set epic_score = $2, band = $3
       where (venue_ref = $1 or 'atlas:' || id::text = $1)`,
     [venueRef, epicScore, bandOf(epicScore)]);
+  // The record carries the pair of scores, for a place that has no sweep row to
+  // carry them. An `update` touched nothing at all for a harvested place, so the
+  // owned score and the time it was worked out were both lost the moment they
+  // were reported as saved (Codex, 18 Sep 2026). Scores are not among the facts
+  // that make a record *ours* (domain/placeIndex.js), so a row holding only
+  // these is still an identified place rather than an owned one.
   await query(
-    `update place_records
-        set epic_score = $2, owned_score = $3, scored_at = now(), updated_at = now()
-      where venue_ref = $1`,
+    `insert into place_records (venue_ref, epic_score, owned_score, scored_at, updated_at)
+     values ($1, $2, $3, now(), now())
+     on conflict (venue_ref) do update
+        set epic_score = excluded.epic_score, owned_score = excluded.owned_score,
+            scored_at = now(), updated_at = now()`,
     [venueRef, epicScore, ownedScore]);
   await query(
     `insert into scout_score_history (area_code, venue_ref, epic_score, owned_score)

@@ -26,9 +26,19 @@ export async function entryById(id, client) {
 }
 
 /** This household's live entry for a scope: its standing one, or the one for a trip. */
+/**
+ * The household's own entry, hidden or not.
+ *
+ * `hidden` is what keeps an entry out of the pool other people are matched
+ * from; it is not a reason to tell its owner they have not written one. Filtered
+ * here, the screen said "you have no entry" the moment moderation hid it, and
+ * writing another violated the unique index on one active entry per scope
+ * (Codex, 18 Sep 2026). The pool's own query is where hidden belongs, and it has
+ * it.
+ */
 export async function entryFor(householdId, { scope = 'standing', tripId = null } = {}) {
   const { rows } = await query(
-    `select * from open_entries where household_id = $1 and state = 'active' and not hidden and scope = $2 and ($3::uuid is null or trip_id = $3::uuid) limit 1`,
+    `select * from open_entries where household_id = $1 and state = 'active' and scope = $2 and ($3::uuid is null or trip_id = $3::uuid) limit 1`,
     [householdId, scope, tripId],
   );
   return rows[0] ?? null;
