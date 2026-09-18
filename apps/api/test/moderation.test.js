@@ -439,3 +439,28 @@ test('approving a photograph changes the place’s score, after the commit', asy
   await queue.approve([q.id], null);
   assert.equal(await heldPicture(), true, 'and an approved one is');
 });
+
+test('rejecting the same thing twice decides it once', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, 'household') returning *`,
+    [`twice-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+
+  const used = async () => (await query(
+    `select coalesce(sum(used), 0)::int as n from rejection_counts where kind = 'photo' and reason = 'dark'`)).rows[0].n;
+  const before = await used();
+  await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(await used(), before + 1);
+
+  // A retried request — a double tap, a client that resends — used to reject it
+  // again, count the reason again and e-mail the household a second time
+  // (Codex, 18 Sep 2026).
+  const again = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(again.state, 'rejected', 'and still answers with the decision');
+  assert.match(again.why ?? '', /already rejected/);
+  assert.equal(await used(), before + 1, 'counted once');
+});

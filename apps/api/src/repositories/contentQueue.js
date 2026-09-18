@@ -452,10 +452,21 @@ export async function approve(ids, who) {
  * what was actually sent can be read back rather than reconstructed.
  */
 export async function reject({ id, reason, message = null, tell = false, who }) {
-  const { rows: [q] } = await query('select kind, household_id, account_id, place_label from content_queue where id = $1', [id]);
+  const { rows: [q] } = await query(
+    'select kind, state, reason, told, message, household_id, account_id, place_label from content_queue where id = $1', [id]);
   if (!q) return null;
   const r = reasonFor(q.kind, reason);
   if (!r) return null;
+  // Already decided, and decided this way: nothing to do.
+  //
+  // A retried request — a double tap, a client that resends — rejected it
+  // again, counted the reason again and e-mailed the household the same
+  // rejection a second time (Codex, 18 Sep 2026). The decision is the same
+  // decision; saying so is the whole answer.
+  if (q.state === 'rejected' && q.reason === reason) {
+    const { rows: [already] } = await query('select * from content_queue where id = $1', [id]);
+    return already ? { ...already, why: 'it was already rejected for that reason' } : null;
+  }
   const body = tell ? (message ?? r.message) : null;
 
   /**
@@ -478,7 +489,8 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
     const { rows: [row] } = await run(
       `update content_queue
           set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now()
-        where id = $1 returning *`,
+        where id = $1 and not (state = 'rejected' and reason = $2)
+        returning *`,
       [id, reason, body, who ?? null]);
     // Marking the queue row and stopping there left an abusive review public
     // the moment its hold expired, because nothing that reads it knows the

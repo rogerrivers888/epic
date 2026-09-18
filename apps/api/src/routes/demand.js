@@ -41,9 +41,21 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     const subjects = await searches.bySubject({ areaSlug, since });
     const labels = new Map((await query('select key, label from shelf_subcategories')).rows.map((r) => [r.key, r.label]));
     const catLabels = new Map((await query('select key, label from shelf_categories')).rows.map((r) => [r.key, r.label]));
-    const known = new Map((await query(
-      `select subcategory, places from area_stats where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''`,
-      [areaSlug ?? 'gb'])).rows.map((r) => [r.subcategory, r.places]));
+    // How many places there are per subject, which decides the fault.
+    //
+    // "Everywhere" means everywhere: it counted Great Britain's inventory
+    // against the world's searches, so a subject searched for abroad — or in a
+    // place we could not put on the map — was measured against a number that
+    // had nothing to do with it, and could be given the wrong fault and the
+    // wrong thing to do about it (Codex, 18 Sep 2026).
+    const known = new Map((areaSlug
+      ? (await query(
+        `select subcategory, places from area_stats
+          where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''`, [areaSlug])).rows
+      : (await query(
+        `select subcategory, count(*)::int as places from place_index
+          where subcategory is not null group by subcategory`)).rows
+    ).map((r) => [r.subcategory, r.places]));
 
     const log = await searches.recent({ areaSlug, since });
     // The area's own name, not its slug: a screen that prints `berkshire` is a
