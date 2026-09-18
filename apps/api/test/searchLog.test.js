@@ -1318,3 +1318,56 @@ test('the part of a rolled month inside the window is still counted', async () =
   const rows = await log.bySubject({ areaSlugs: [slug], since: 30 });
   assert.equal(rows.reduce((n, r) => n + r.searches, 0), 1, 'and the subject rows add up to the same');
 });
+
+test('a place that moves does not keep the travel cell of where it was', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const ref = 'osm:node/moved-across-town';
+  await query('delete from place_cells where venue_ref = $1', [ref]);
+  await index.noteMany([{ ref, lat: 51.48, lng: -0.61, countryCode: 'GB' }], { source: 'osm' });
+
+  // Two cells that exist, so the foreign key is happy: one where it was and one
+  // where it is put.
+  await query(
+    `insert into geo_cells (code, scheme, label, country_code, lat, lng, points, places, source) values
+       ('sector:TEST 1','sector','TEST 1','GB',51.48,-0.61,1,1,'test'),
+       ('sector:TEST 2','sector','TEST 2','GB',53.48,-2.24,1,1,'test')
+     on conflict (code) do nothing`);
+  // Stamped where it was.
+  await query(
+    `insert into place_cells (venue_ref, cell, lat, lng) values ($1,'sector:TEST 1',51.48,-0.61)
+     on conflict (venue_ref) do update set cell = excluded.cell, lat = excluded.lat, lng = excluded.lng`, [ref]);
+  await index.settleNew(50);
+  const cellOf = async () => (await query('select cell, placed_at from place_index where venue_ref = $1', [ref])).rows[0];
+  assert.equal((await cellOf()).cell, 'sector:TEST 1');
+
+  // Somebody puts the position right. `noteMany` clears the cell on purpose.
+  await index.noteMany([{ ref, lat: 53.48, lng: -2.24, countryCode: 'GB' }], { source: 'own' });
+  const moved = await cellOf();
+  assert.equal(moved.cell, null, 'the cell went with the old position');
+  assert.equal(moved.placed_at, null, 'and it is waiting to be placed again');
+
+  // The stamper has not caught up: `place_cells` still says TEST 1 at the old
+  // point. Copying that back would give the place the travel times of a town it
+  // is no longer in — and marking it placed would make that permanent, because
+  // nothing settles a placed row again (Codex, 18 Sep 2026).
+  await index.settleNew(50);
+  const after = await cellOf();
+  assert.equal(after.cell, null, 'a stamp about where it used to be is not an answer about where it is');
+  assert.equal(after.placed_at, null, 'so it is still waiting, and the next stamp will reach it');
+
+  // And a cell already sitting on the row from an older copy is not an answer
+  // either: holding a cell says nothing about which position it was stamped
+  // for, and accepting it marked the row placed for good.
+  await query(
+    `update place_index set cell = 'sector:TEST 1', placed_at = null where venue_ref = $1`, [ref]);
+  await index.settleNew(50);
+  assert.equal((await cellOf()).placed_at, null, 'a cell is not a stamp about where the place is');
+
+  // And once the stamper answers about the new point, it is placed.
+  await query(
+    `update place_cells set cell = 'sector:TEST 2', lat = 53.48, lng = -2.24 where venue_ref = $1`, [ref]);
+  await index.settleNew(50);
+  const done = await cellOf();
+  assert.equal(done.cell, 'sector:TEST 2');
+  assert.ok(done.placed_at, 'and now it is placed');
+});

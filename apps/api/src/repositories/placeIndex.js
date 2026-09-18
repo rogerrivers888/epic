@@ -72,8 +72,13 @@ const FOUND_IT = (t) => `${t}.source_place_id is not null
  * not been reached — ONS timed out, or the limit ran out before it — was marked
  * placed by the next rebuild and left there (Codex, 18 Sep 2026).
  */
-const PLACED_ENOUGH = `(cell is not null
-   or lat is null or lng is null
+const PLACED_ENOUGH = `(lat is null or lng is null
+   -- A stamp about *this* position. Holding a cell is not enough on its own:
+   -- the cell may have been copied from a stamp of where the place used to be,
+   -- and accepting it marked the row placed for good — so the corrected point
+   -- never got its own stamp copied in, and every ring view kept the old one
+   -- (Codex, 18 Sep 2026). The stamper's answer "outside the postcode
+   -- coverage" is a row with a null cell, and is an answer rather than a wait.
    or exists (
      select 1 from place_cells pc
       where pc.venue_ref = place_index.venue_ref
@@ -618,7 +623,15 @@ async function reindexWhileLocked({ onProgress }) {
   // 4 — the cell, from what the reach build already stamped (migration 139).
   await query(`
     update place_index pi set cell = pc.cell
-      from place_cells pc where pc.venue_ref = pi.venue_ref and pi.cell is distinct from pc.cell`);
+      from place_cells pc
+     where pc.venue_ref = pi.venue_ref and pi.cell is distinct from pc.cell
+       -- Only a stamp made for where the place is *now*. A corrected position
+       -- clears the cell on purpose; copying the old stamp back put it straight
+       -- again and the place kept the travel times of where it used to be
+       -- (Codex, 18 Sep 2026).
+       and (pi.lat is null or pi.lng is null or (pc.lat is not null and pc.lng is not null
+        and abs(pc.lat - pi.lat) <= 0.0005
+        and abs(pc.lng - pi.lng) <= 0.0005))`);
 
   // 5 — our own shelf, asked of the same resolver the app asks.
   //
@@ -893,7 +906,12 @@ async function settleWhileLocked(limit) {
   await query(`
     update place_index pi set cell = pc.cell
       from place_cells pc
-     where pc.venue_ref = pi.venue_ref and pi.venue_ref = any($1) and pi.cell is distinct from pc.cell`, [refs]);
+     where pc.venue_ref = pi.venue_ref and pi.venue_ref = any($1) and pi.cell is distinct from pc.cell
+       -- The same rule the rebuild uses: a stamp about this position, not about
+       -- the one it had before somebody put it right.
+       and (pi.lat is null or pi.lng is null or (pc.lat is not null and pc.lng is not null
+        and abs(pc.lat - pi.lat) <= 0.0005
+        and abs(pc.lng - pi.lng) <= 0.0005))`, [refs]);
 
   // 3 — our shelf, and 4 — the score, which is what clears `indexed_at`.
   await shelveAll({ refs });
