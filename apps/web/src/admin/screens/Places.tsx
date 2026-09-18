@@ -2167,7 +2167,9 @@ function ScoreTab({ refId, canManage }: { refId: string; canManage: boolean }) {
   if (missing) return <Word muted>Not scored — this place has not been swept or claimed.</Word>;
   if (!data) return <Waiting />;
 
-  const out = Math.round(data.epicScore * 10);
+  // The figure the board prints, and the scale the contributions are already on
+  // — said by the API rather than worked out again here (Codex, 18 Sep 2026).
+  const out = data.outOf ?? Math.round(data.epicScore * 10);
   const owned = Math.round(data.ownedScore * 10);
   const weights = data.weights ?? {};
   const chained = (data.chainWeight ?? 1) !== 1;

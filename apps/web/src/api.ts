@@ -1653,6 +1653,11 @@ export type SearchReplay = {
 
 export type ScoreWorkings = {
   ref: string; name: string | null;
+  /**
+   * The scale the contributions are on: the score times ten, which is the
+   * figure the board prints above them. The score itself is 0–10.
+   */
+  outOf?: number;
   inputs: {
     key: string; label: string; value: unknown; kind: string; held: boolean;
     /** What this input contributed, in the same units the score is printed in. */

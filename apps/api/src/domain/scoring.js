@@ -212,6 +212,10 @@ export function workings(input = {}) {
   // Rounded so they add up. Law 4 on the board: "every figure must be derivable
   // from the columns beside it", so the pennies of rounding go on the largest
   // row rather than leaving the column a point short of its own total.
+  // The figures below are in tenths of the score, which is the scale the board
+  // prints — "OUR SCORE 10" over contributions of 6 and 4. `outOf` says so out
+  // loud rather than leaving a reader to divide by ten (Codex raised this three
+  // times reading the module without the screen; this is the answer).
   const target = Math.round(out.epicScore * 10);
   const share = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Math.round(v)]));
   const biggest = Object.entries(share).sort((a, b) => b[1] - a[1])[0];
@@ -235,6 +239,15 @@ export function workings(input = {}) {
   };
 
   return {
+    /**
+     * The scale the worths below are on — the score times ten, which is the
+     * figure the board prints above them.
+     *
+     * Said out loud because a reader of the payload alone cannot tell: the score
+     * is 0–10 and the contributions add to `outOf` (Codex, 18 Sep 2026, three
+     * rounds of reading this module without the screen beside it).
+     */
+    outOf: target,
     // What went in. `band` is our word; the figure it came from is never here,
     // because it was never kept.
     inputs: [

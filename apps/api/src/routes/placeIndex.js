@@ -267,7 +267,11 @@ async function trail(scope) {
     }
   }
   if (scope.kind === 'ring') {
-    const country = await index.areaBySlug('gb');
+    // The ring's own country, not Britain by assumption. There is more than one
+    // country in the index now, and a ring round a Portuguese town was filed
+    // under Great Britain and linked to its figures (Codex, 18 Sep 2026).
+    const code = scope.area?.country_code ? String(scope.area.country_code).toLowerCase() : 'gb';
+    const country = await index.areaBySlug(code) ?? await index.areaBySlug('gb');
     if (country) out.push({ slug: country.slug, label: country.name, ...(await index.statsFor(country.slug)) });
   }
   return out;
