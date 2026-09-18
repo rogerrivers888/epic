@@ -196,8 +196,15 @@ export async function recent({ areaSlug = null, since = 30, limit = 40 } = {}) {
 export async function oneSearch(id) {
   const { rows: [s] } = await query('select * from searches where id = $1', [id]);
   if (!s) return null;
+  // What was on screen first, then what was one tap behind it.
+  //
+  // `drawn` is set by `noteDrawn` where the screen has said what it drew; a
+  // search from before that, or from a surface that does not report, has no
+  // mark on any row and keeps its original order (Codex, 18 Sep 2026).
   const { rows: events } = await query(
-    'select kind, venue_ref, position, dwell_ms, at, meta from search_events where search_id = $1 order by position nulls last, at', [id]);
+    `select kind, venue_ref, position, dwell_ms, at, meta from search_events
+      where search_id = $1
+      order by (meta->>'drawn' = 'false'), position nulls last, at`, [id]);
   return { search: s, events };
 }
 
@@ -422,6 +429,19 @@ export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}
           -- stale id cannot rewrite last week.
           and at > now() - interval '30 minutes'`,
       [searchId, kept.length, JSON.stringify(shown.map((r) => ({ subcategory: r.subcategory, n: r.n }))), householdId]);
+    // And the rows themselves say which of them were drawn.
+    //
+    // The `shown` events are deliberately every place the answer held — a card
+    // one tap away is a card the household could reach, and the replay has to be
+    // able to explain a tap on one. But the replay was then printing rows nobody
+    // saw and disagreeing with its own "shown" figure (Codex, 18 Sep 2026). So
+    // each row is marked, and the replay leads with what was actually on screen.
+    if (rowCount) {
+      await query(
+        `update search_events
+            set meta = jsonb_set(coalesce(meta, '{}'::jsonb), '{drawn}', to_jsonb(venue_ref = any($2)))
+          where search_id = $1::uuid and kind = 'shown'`, [searchId, kept]);
+    }
     return rowCount > 0;
   } catch { return false; }
 }

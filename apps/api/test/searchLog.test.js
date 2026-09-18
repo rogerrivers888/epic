@@ -699,6 +699,12 @@ test('the screen says what it drew, and an emptied screen is an empty search', a
   const { rows: still } = await query(
     `select count(*)::int as n from search_events where search_id = $1 and kind = 'shown'`, [id]);
   assert.equal(still[0].n, 3, 'the replay still holds everything they could reach');
+  // And says which of them was actually on the screen, so the replay leads with
+  // those and its row count can be squared with the figure above it.
+  const { rows: marked } = await query(
+    `select venue_ref, meta->>'drawn' as drawn from search_events
+      where search_id = $1 and kind = 'shown' order by position`, [id]);
+  assert.deepEqual(marked.map((r) => r.drawn), ['true', 'false', 'false']);
 
   // A place the index has never heard of shares the unshelved entry rather than
   // making a second one with the same name.

@@ -838,7 +838,15 @@ export async function shelveAll({ refs = null } = {}) {
            sp.category as sweep_category, sp.cuisine_group,
            r.category as own_category, r.experiences
       from place_index pi
-      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
+      -- One attraction per place, deterministically: the reference index is not
+      -- unique, so a place harvested into two regions was two rows here and the
+      -- update took whichever it reached last — two different categories meant
+      -- a shelf that changed between rebuilds (Codex, 18 Sep 2026).
+      left join lateral (
+        select a2.category, a2.kinds, a2.id from attractions a2
+         where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+           and a2.state <> 'hidden'
+         order by a2.last_seen desc, a2.id limit 1) a on true
       left join lateral (select category, cuisine_group from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
       left join place_records r on r.venue_ref = pi.venue_ref
      where pi.derived_by is distinct from 'hand'
