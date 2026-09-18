@@ -1594,3 +1594,36 @@ test('a place a live search showed is a place the index has seen', async () => {
   assert.equal(ids.google, 'SHOWN-BY-A-SEARCH');
   assert.equal(ids.osm, null);
 });
+
+test('the three shapes a live search hands over all reach the index as themselves', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const refs = ['google:RAW-RECORD', 'osm:node/normalised', 'google:STORED-ALREADY'];
+  await query('delete from place_index where venue_ref = any($1)', [refs]);
+
+  await index.noteSeen([
+    // A raw provider record, as discover and places hand one over.
+    { source: 'google', sourcePlaceId: 'RAW-RECORD', lat: 51.4, lng: -0.9, countryCode: 'GB' },
+    // A normalised item, as Inspire hands one over: it already has its ref and
+    // no `sourcePlaceId` at all. These were being dropped on the floor.
+    { venueRef: 'osm:node/normalised', lat: 51.4, lng: -0.9, countryCode: 'GB' },
+    // A stored result, as the trip search hands one over: `own` is how it
+    // describes itself, and the ref belongs to whoever first found it. Building
+    // a ref from `source` would have written a second, false identity for a
+    // place we already hold (Codex, 18 Sep 2026).
+    { source: 'own', venueRef: 'google:STORED-ALREADY', lat: 51.4, lng: -0.9, countryCode: 'GB' },
+  ]);
+
+  const got = (await query(
+    'select venue_ref from place_index where venue_ref = any($1) order by 1', [refs])).rows.map((r) => r.venue_ref);
+  assert.deepEqual(got, ['google:RAW-RECORD', 'google:STORED-ALREADY', 'osm:node/normalised']);
+  assert.equal((await query(
+    `select count(*)::int as n from place_index where venue_ref like 'own:%RAW%' or venue_ref like 'own:%STORED%'`)).rows[0].n,
+  0, 'and no second identity was invented for any of them');
+
+  // The identifier belongs to the source the reference belongs to.
+  const ids = Object.fromEntries((await query(
+    `select source, source_place_id from place_index_sources where venue_ref = 'google:STORED-ALREADY'`)).rows
+    .map((r) => [r.source, r.source_place_id]));
+  assert.equal(ids.google, 'STORED-ALREADY');
+  assert.equal(ids.own, undefined, 'and "own" is not a source that returns places');
+});

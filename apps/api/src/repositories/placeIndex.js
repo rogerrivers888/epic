@@ -2248,20 +2248,38 @@ export async function places(areaSlug, {
  */
 export async function noteSeen(venues = []) {
   const rows = (venues ?? [])
-    .filter((v) => v?.source && v?.sourcePlaceId && v.lat != null && v.lng != null)
     .map((v) => {
-      const sources = [...new Set([v.source, ...(v.contributingSources ?? [])])].filter(Boolean);
+      // The reference a place already has, before one is built for it.
+      //
+      // The four callers hand over three shapes: a raw provider record with
+      // `source` and `sourcePlaceId`, a normalised item that already carries a
+      // `venueRef`, and a stored result whose `source` says `own` while its ref
+      // belongs to whoever first found it. Building `source:sourcePlaceId` for
+      // all of them dropped the normalised ones on the floor and would have
+      // written `own:ChIJ…` rows for the stored ones — a second, false identity
+      // for a place we already hold (Codex, 18 Sep 2026).
+      const ref = v?.venueRef ?? (v?.source && v?.sourcePlaceId ? `${v.source}:${v.sourcePlaceId}` : null);
+      if (!ref || v.lat == null || v.lng == null) return null;
+      // Who the reference actually belongs to, which is not always `v.source`.
+      const owner = String(ref).split(':')[0];
+      const id = String(ref).slice(owner.length + 1);
+      const sources = [...new Set([owner, v.source, ...(v.contributingSources ?? [])])]
+        .filter(Boolean)
+        // "own" is not a source that returns places; it is how a stored result
+        // describes itself.
+        .filter((x) => x !== 'own' || owner === 'own');
       return {
-        ref: `${v.source}:${v.sourcePlaceId}`,
+        ref,
         lat: v.lat, lng: v.lng,
         countryCode: v.countryCode ?? null,
         sources,
-        // Its own id for the source that found it, and nothing invented for the
-        // others — a merged place's other sources genuinely have not told us
-        // their reference.
-        sourceIds: { [v.source]: String(v.sourcePlaceId) },
+        // Its own id for the source the reference belongs to, and nothing
+        // invented for the others — a merged place's other sources genuinely
+        // have not told us theirs.
+        sourceIds: id ? { [owner]: id } : {},
       };
-    });
+    })
+    .filter(Boolean);
   if (!rows.length) return { noted: 0 };
   // Best-effort: a household's search is never worth failing over bookkeeping.
   return noteMany(rows, { source: null }).catch(() => ({ noted: 0 }));
