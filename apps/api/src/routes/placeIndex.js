@@ -1805,7 +1805,14 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
              coalesce(r.wikipedia_url, a.wikipedia_url) as wikipedia_url
         from place_index pi
         left join place_records r on r.venue_ref = pi.venue_ref
-        left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
+        -- One attraction per place: the reference index is not unique, so a
+        -- place harvested into two regions was looked up twice and its picture
+        -- fetched twice (Codex, 18 Sep 2026).
+        left join lateral (
+          select a2.name, a2.website, a2.wikidata_id, a2.wikipedia_url from attractions a2
+           where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+             and a2.state <> 'hidden'
+           order by a2.last_seen desc, a2.id limit 1) a on true
        where pi.venue_ref = any($1)`, [refs]);
     const out = [];
     // Deliberately asked, so it looks again — a logo we found once should be

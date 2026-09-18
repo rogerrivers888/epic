@@ -87,16 +87,28 @@ export async function updateTopic(id, patch, client) {
   const sets = [];
   const params = [id];
   const set = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };
-  // The words changing is what sends it back to be looked at; pinning it is not
-  // (migration 166). And where somebody had already decided about the old
-  // words, the new ones wait out of sight — otherwise the way to publish
-  // something abusive is to publish something else and edit it (Codex, 18 Sep
-  // 2026).
+  // Different words send it back to be looked at; pinning it does not, and nor
+  // does changing its tag (migration 166). Where somebody had already decided
+  // about the old words, the new ones wait out of sight — otherwise the way to
+  // publish something abusive is to publish something else and edit it.
+  //
+  // The edit form sends the title and the body every time, so testing for their
+  // presence marked a change of tag or audience as a rewrite, and an approved
+  // question vanished without a word of it having changed (Codex, 18 Sep 2026,
+  // two rounds). The comparison reads the row as it was: every SET in one
+  // statement sees the old values.
+  //
   if (patch.title !== undefined || patch.body !== undefined) {
-    sets.push('rewritten_at = now()');
-    sets.push(`hidden = case when exists (
-      select 1 from content_queue q
-       where q.subject_type = 'chat_topic' and q.subject_id = chat_topics.id::text and q.state <> 'waiting')
+    const changed = [];
+    if (patch.title !== undefined) { params.push(patch.title); changed.push(`title is distinct from $${params.length}`); }
+    if (patch.body !== undefined) { params.push(patch.body); changed.push(`body is distinct from $${params.length}`); }
+    const different = `(${changed.join(' or ')})`;
+    sets.push(`rewritten_at = case when ${different} then now() else rewritten_at end`);
+    sets.push(`hidden = case
+      when ${different}
+       and exists (
+         select 1 from content_queue q
+          where q.subject_type = 'chat_topic' and q.subject_id = chat_topics.id::text and q.state <> 'waiting')
       then true else chat_topics.hidden end`);
   }
   if (patch.title !== undefined) set('title', patch.title);

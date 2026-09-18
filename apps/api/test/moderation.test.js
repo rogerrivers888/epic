@@ -613,6 +613,14 @@ test('an approved thing that is rewritten goes back to be looked at', async () =
   await queue.sync();
   assert.equal((await row()).state, 'approved', 'a decision stands over a change that is not the words');
 
+  // Nor is sending the same words again — the edit form always does (Codex,
+  // 18 Sep 2026).
+  await chat.updateTopic(topic.id, { title: 'Where for lunch?', body: 'Somewhere near the park.', audience: 'everyone' });
+  await queue.sync();
+  assert.equal((await row()).state, 'approved', 'the same words are not a rewrite');
+  const { rows: [still] } = await query('select hidden from chat_topics where id = $1', [topic.id]);
+  assert.equal(still.hidden, false, 'and it is still up');
+
   // Changing the words is — and the new ones wait out of sight, because the way
   // to publish something abusive would otherwise be to publish something else
   // and then edit it (Codex, 18 Sep 2026).
