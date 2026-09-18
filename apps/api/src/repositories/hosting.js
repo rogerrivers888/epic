@@ -431,11 +431,17 @@ export async function insertReview(r) {
   const { rows } = await query(
     `insert into host_reviews (booking_id, offer_id, host_id, household_id, side, stars, chips, text, photo_id, publish_on)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-     -- New words are a new thing to look at. A rejected review could be
-     -- written again and stayed hidden for ever, because the queue's decision
-     -- was about text that is no longer there (Codex, 18 Sep 2026).
+     -- New words are a new thing to look at — and a thing to look at is not a
+     -- thing to publish. A rejected review could be written again and stayed
+     -- hidden for ever, because the queue's decision was about text that is no
+     -- longer there (Codex, 18 Sep 2026); clearing hidden here fixed that and
+     -- handed whoever wrote it a way round the decision, because the words go
+     -- public the moment they are changed and the queue only catches up on the
+     -- next sync (Codex, 18 Sep 2026, the round after). So the revision stays
+     -- hidden, rewritten_at says there is something new, and sync() puts it
+     -- back in front of somebody. Approving is what publishes it.
      on conflict (booking_id, side) do update set stars = excluded.stars, chips = excluded.chips, text = excluded.text, photo_id = excluded.photo_id, publish_on = excluded.publish_on,
-       hidden = case when excluded.text is distinct from host_reviews.text then false else host_reviews.hidden end
+       rewritten_at = case when excluded.text is distinct from host_reviews.text then now() else host_reviews.rewritten_at end
      returning *`,
     [r.bookingId, r.offerId, r.hostId, r.householdId, r.side ?? 'guest', r.stars, JSON.stringify(r.chips ?? []), r.text ?? null, r.photoId ?? null, r.publishOn],
   );

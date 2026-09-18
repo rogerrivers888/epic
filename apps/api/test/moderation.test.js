@@ -494,7 +494,14 @@ test('a rejected review written again comes back to be looked at', async () => {
   await queue.sync();
   const { rows: [row] } = await query('select state from content_queue where id = $1', [q.id]);
   assert.equal(row.state, 'waiting', 'back in the queue');
-  assert.equal((await hosting.publishedReviews(host.id)).length, 1, 'and no longer hidden');
+  // And still not published. Changing the words is a reason to look again, not
+  // a way round the decision — the first version of this cleared `hidden` on the
+  // edit, which published it the moment it was rewritten (Codex, 18 Sep 2026).
+  assert.equal((await hosting.publishedReviews(host.id)).length, 0, 'not published by being rewritten');
+
+  // Approving is what publishes it.
+  await queue.approve([q.id], 'the owner (passcode)');
+  assert.equal((await hosting.publishedReviews(host.id)).length, 1, 'approved, and now it is up');
   assert.ok(booking);
 });
 

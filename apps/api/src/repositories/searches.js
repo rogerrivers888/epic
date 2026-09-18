@@ -406,12 +406,21 @@ export async function noteDrawn({ searchId, householdId = null, refs = [] } = {}
     }
     const { rowCount } = await query(
       `update searches
-          set shown_total = $2, shown = $3::jsonb, empty = ($2 = 0)
+          set shown_total = $2, shown = $3::jsonb,
+              -- Never empty once they have done something with it: they cannot
+              -- have opened a place on a screen with nothing on it, so a filter
+              -- that empties the list afterwards is not a coverage hole.
+              empty = ($2 = 0 and outcome = 'none')
         where id = $1::uuid
           and ($4::uuid is null or household_id = $4)
-          -- Only while it is still the search in front of them: an outcome has
-          -- already been counted against it by then.
-          and outcome = 'none'`,
+          -- Still the search in front of them. This used to require that
+          -- nothing had been counted against it yet, which lost the race: the
+          -- report reads place_index first and a tap is one short insert, so an
+          -- open that landed in between left the server's whole pool standing as
+          -- the count of what was shown (Codex, 18 Sep 2026). Half an hour is
+          -- longer than anybody looks at one answer and short enough that a
+          -- stale id cannot rewrite last week.
+          and at > now() - interval '30 minutes'`,
       [searchId, kept.length, JSON.stringify(shown.map((r) => ({ subcategory: r.subcategory, n: r.n }))), householdId]);
     return rowCount > 0;
   } catch { return false; }

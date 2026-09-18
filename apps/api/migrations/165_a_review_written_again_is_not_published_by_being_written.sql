@@ -1,0 +1,11 @@
+-- A rejected review, written again.
+--
+-- The words changing is a reason to look again; it is not a reason to publish.
+-- Clearing `hidden` on an edit meant whoever wrote it could get round a
+-- moderation decision by changing a comma: the review went public immediately
+-- and the queue only caught up on the next sync (Codex, 18 Sep 2026).
+--
+-- So the revision says *that* it is a revision, and the queue reads this to put
+-- it back in front of somebody. Approving is still the only thing that
+-- publishes it.
+alter table host_reviews add column if not exists rewritten_at timestamptz;

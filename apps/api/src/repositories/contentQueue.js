@@ -239,17 +239,19 @@ export async function syncFlagged() {
 
   // Something rejected that has since been written again comes back.
   //
-  // `hidden` is the moderation state on the content itself, and a host review
-  // rewritten after a rejection clears it — so the queue row, which is a view
-  // of that, goes back to waiting. Without this the corrected words could never
-  // be looked at or published (Codex, 18 Sep 2026).
+  // A host review rewritten after a rejection is a new thing to look at, so the
+  // queue row goes back to waiting — and the words stay hidden until somebody
+  // approves them. Without the requeue the corrected words could never be looked
+  // at or published; without the hiding, changing them was a way round the
+  // decision (Codex, 18 Sep 2026, two rounds).
   await query(`
     update content_queue q
        set state = 'waiting', reason = null, message = null, told = false,
            decided_by = null, decided_at = null
       from host_reviews hr
      where q.subject_type = 'host_review' and q.subject_id = hr.id::text
-       and q.state = 'rejected' and not hr.hidden`);
+       and q.state = 'rejected' and hr.rewritten_at is not null
+       and (q.decided_at is null or hr.rewritten_at > q.decided_at)`);
 
   // Somebody reported it, so it jumps the queue.
   //
