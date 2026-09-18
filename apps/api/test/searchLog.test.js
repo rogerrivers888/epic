@@ -1328,6 +1328,16 @@ test('the part of a rolled month inside the window is still counted', async () =
   assert.equal(after.searches, 1, 'rolled or not, a search inside the window is inside the window');
   const rows = await log.bySubject({ areaSlugs: [slug], since: 30 });
   assert.equal(rows.reduce((n, r) => n + r.searches, 0), 1, 'and the subject rows add up to the same');
+
+  // And the third reader of the same rule: the Demand lens inside Places had
+  // its own copy of this query and went on losing the edge month after the two
+  // above stopped (Codex, 18 Sep 2026). One expression, asked three times.
+  const { rows: lens } = await query(
+    `select count(*)::int as n from searches s
+      where s.at > now() - ($1 || ' days')::interval
+        and ${log.LIVE_ROW('s')}
+        and s.area_slug = any($2)`, ['30', [slug]]);
+  assert.equal(lens[0].n, 1, 'the lens counts what the board counts');
 });
 
 test('a place that moves does not keep the travel cell of where it was', async () => {

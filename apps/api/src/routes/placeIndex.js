@@ -22,6 +22,7 @@ import { can, requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import * as reach from '../repositories/reach.js';
+import { LIVE_ROW } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
 import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
@@ -508,7 +509,11 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
                count(*) filter (where s.outcome in ('clicked','saved'))::int   as no_trip
           from searches s
          where s.at > now() - ($1 || ' days')::interval
-           and s.rolled_at is null
+           -- The same rule the Demand board reads by, from the one place it is
+           -- written. This lens had its own copy and went on losing the part of
+           -- a rolled month inside the window after the others stopped (Codex,
+           -- 18 Sep 2026).
+           and ${LIVE_ROW('s')}
            and ($2::text[] is null or s.area_slug = any($2))
            and ($3::text[] is null or s.cell = any($3))
          group by 1

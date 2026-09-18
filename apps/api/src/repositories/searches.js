@@ -100,6 +100,26 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
 }
 
 /** The three numbers, never one rate. */
+/**
+ * The first whole month a window of $1 days can claim from the roll-ups.
+ *
+ * A rolled month is one number and cannot be cut, so the folded term takes only
+ * a month lying wholly inside the window. Everything before that line the live
+ * rows have to answer for — including rows already rolled, which are still here
+ * unless retention dropped them.
+ *
+ * Exported because three queries ask it and they have to agree: the two here
+ * and the Demand lens inside Places, which had its own copy and went on losing
+ * the edge month after the others stopped (Codex, 18 Sep 2026).
+ */
+export const FIRST_WHOLE_MONTH = `date_trunc('month', now() - ($1 || ' days')::interval)
+       + (case when date_trunc('month', now() - ($1 || ' days')::interval)
+                    >= (now() - ($1 || ' days')::interval)
+               then interval '0 month' else interval '1 month' end)`;
+
+/** A live row this window still needs: never rolled, or rolled into a month the fold cannot claim. */
+export const LIVE_ROW = (t) => `(${t}.rolled_at is null or date_trunc('month', ${t}.at) < ${FIRST_WHOLE_MONTH})`;
+
 export async function totals({ areaSlugs = null, cells = null, since = 30 } = {}) {
   // The rows we still hold, plus the months we have folded up and dropped.
   //
@@ -132,10 +152,7 @@ export async function totals({ areaSlugs = null, cells = null, since = 30 } = {}
           -- August was rolled (Codex, 18 Sep 2026). A rolled row whose month
           -- the fold leaves out is still this report's, and it is still here
           -- unless retention dropped it.
-          and (rolled_at is null or date_trunc('month', at) < date_trunc('month', now() - ($1 || ' days')::interval)
-                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
-                                  >= (now() - ($1 || ' days')::interval)
-                             then interval '0 month' else interval '1 month' end))
+          and ${LIVE_ROW('searches')}
      ), folded as (
        select coalesce(sum(searches), 0)::int as searches, coalesce(sum(empty), 0)::int as empty,
               coalesce(sum(no_click), 0)::int as no_click, coalesce(sum(no_trip), 0)::int as no_trip,
@@ -182,10 +199,7 @@ export async function bySubject({ areaSlugs = null, cells = null, since = 30, li
           and ($4::text[] is null or cell = any($4))
           -- The same rule the headline figures use: a rolled row whose month
           -- the fold leaves out is still this report's (Codex, 18 Sep 2026).
-          and (rolled_at is null or date_trunc('month', at) < date_trunc('month', now() - ($1 || ' days')::interval)
-                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
-                                  >= (now() - ($1 || ' days')::interval)
-                             then interval '0 month' else interval '1 month' end))
+          and ${LIVE_ROW('searches')}
        union all
        select subject, searches, empty, no_click, no_trip
          from search_rollups
