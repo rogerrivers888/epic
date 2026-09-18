@@ -1511,8 +1511,14 @@ async function runInspire({ household, accountId = null, attending, session, sta
       minutes: state.input?.maxTravelMinutes ?? null,
       asked: { moods: state.input?.moods ?? [], budget: state.input?.budget ?? 'any', party: attending.length, typed: Boolean(state.input?.brief) },
       subject: (state.input?.moods ?? []).length === 1 ? state.input.moods[0] : null,
-      shownTotal: ideas.length,
-      shown: [{ kind: 'idea', n: ideas.length }],
+      // What *this* ask produced, not the list it was added to.
+      //
+      // "Show me 5 more" keeps the five before them on screen, and counting all
+      // ten against the new ask meant opening one of the older ideas was
+      // credited to a request that did not produce it — while the request that
+      // did could still read as one nobody clicked (Codex, 18 Sep 2026).
+      shownTotal: fresh.length,
+      shown: [{ kind: 'idea', n: fresh.length }],
       sourcesQueried: ['claude'], degraded: [],
     });
     // The ideas as they were given, in order, so a replay prints what was shown.
@@ -1521,7 +1527,7 @@ async function runInspire({ household, accountId = null, attending, session, sta
     // open or a trip to the row it was shown as — and several unplaced ideas
     // were indistinguishable, on a board that promises the exact list (Codex,
     // 17 Sep 2026).
-    await searchLog.noteShown(searchId, ideas.map((idea, i) => ({ ref: idea.place?.ref ?? idea.id, position: i + 1 })));
+    await searchLog.noteShown(searchId, fresh.map((idea, i) => ({ ref: idea.place?.ref ?? idea.id, position: i + 1 })));
     // Published *with* the finish, not after it: a client that polls in between
     // sees `running: false`, stops polling and never learns the id — so every
     // open and every trip made from these ideas would be dropped and the ask

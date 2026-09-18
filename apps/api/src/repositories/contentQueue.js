@@ -504,6 +504,14 @@ const VERSIONED = {
   visit: ['visits', 'note_rewritten_at'],
 };
 
+/** Hold the words still, so reading them and deciding about them are one act. */
+async function lockSubject(subjectType, subjectId, run = query) {
+  const pair = VERSIONED[subjectType];
+  if (!pair) return;
+  const [table] = pair;
+  await run(`select 1 from ${table} where id = $1::uuid for update`, [subjectId]).catch(() => null);
+}
+
 export async function versionOf(subjectType, subjectId, run = query) {
   const pair = VERSIONED[subjectType];
   if (!pair) return null;
@@ -619,6 +627,15 @@ export async function approve(ids, who, { seen = null } = {}) {
       for (const r of subjects) {
         const asked = seen[r.id];
         if (asked === undefined) continue;
+        // Held while we look and while we publish.
+        //
+        // Reading the version and then lifting `hidden` are two moments, and an
+        // author editing between them had their new words published by a
+        // decision about the old ones — the check was there and the gap was
+        // wider than the check (Codex, 18 Sep 2026). Taking the content row
+        // first means an edit either lands before this and is seen, or waits
+        // behind it and requeues the row afterwards.
+        await lockSubject(r.subject_type, r.subject_id, run);
         const now = await versionOf(r.subject_type, r.subject_id, run);
         if ((asked ?? null) !== now) stale.add(r.id);
       }
@@ -712,13 +729,10 @@ export async function reject({ id, reason, message = null, tell = false, who, se
   // household a reason chosen for something they no longer wrote (Codex, 18 Sep
   // 2026). Where the caller says nothing about the version, nothing is held
   // back — a photograph has no version to speak of.
-  if (seen !== undefined) {
-    const now = await versionOf(q.subject_type, q.subject_id);
-    if ((seen ?? null) !== now) {
-      const { rows: [row] } = await query('select * from content_queue where id = $1', [id]);
-      return row ? { ...row, decided: false, stale: true, why: 'it was rewritten while you were reading it, so it is still waiting' } : null;
-    }
-  }
+  // Checked again inside the transaction below, behind a lock on the words —
+  // reading the version and suppressing the text are two moments, and an author
+  // editing between them had their new words suppressed by a decision about the
+  // old ones (Codex, 18 Sep 2026). This early look only saves the work.
   // Already decided, and decided this way: nothing to do.
   //
   // A retried request — a double tap, a client that resends — rejected it
@@ -771,6 +785,17 @@ export async function reject({ id, reason, message = null, tell = false, who, se
    */
   const out = await withTransaction(async (client) => {
     const run = (text, params) => client.query(text, params);
+    // The words held still while this decision is made about them.
+    if (seen !== undefined) {
+      await lockSubject(q.subject_type, q.subject_id, run);
+      const now = await versionOf(q.subject_type, q.subject_id, run);
+      if ((seen ?? null) !== now) {
+        const { rows: [unchanged] } = await run('select * from content_queue where id = $1', [id]);
+        return unchanged
+          ? { ...unchanged, decided: false, stale: true, why: 'it was rewritten while you were reading it, so it is still waiting' }
+          : null;
+      }
+    }
     const { rows: [row] } = await run(
       `update content_queue
           set state = 'rejected', reason = $2, message = $3, told = false, decided_by = $4, decided_at = now(),
