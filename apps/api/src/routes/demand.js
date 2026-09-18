@@ -48,14 +48,40 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     // place we could not put on the map — was measured against a number that
     // had nothing to do with it, and could be given the wrong fault and the
     // wrong thing to do about it (Codex, 18 Sep 2026).
-    const known = new Map((areaSlug
-      ? (await query(
-        `select subcategory, places from area_stats
-          where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''`, [areaSlug])).rows
-      : (await query(
-        `select subcategory, count(*)::int as places from place_index
-          where subcategory is not null group by subcategory`)).rows
-    ).map((r) => [r.subcategory, r.places]));
+    // Subjects come at three widths.
+    //
+    // A subcategory ("museums"), a category ("food"), and the planner's own
+    // moods, which are a category by another name. The map held subcategories
+    // only, so a search for a whole category reported "no places" against an
+    // area full of them — the wrong fault, and the wrong thing to do about it
+    // (Codex, 18 Sep 2026).
+    const known = new Map([
+      ...(areaSlug
+        ? (await query(
+          `select subcategory as key, places from area_stats
+            where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''
+           union all
+           select category, places from area_stats
+            where area_slug = $1 and category <> '' and subcategory = '' and source = '' and ownership = ''`, [areaSlug])).rows
+        : (await query(
+          `select subcategory as key, count(*)::int as places from place_index
+            where subcategory is not null group by subcategory
+           union all
+           select category, count(*)::int from place_index
+            where category is not null group by category`)).rows
+      ).map((r) => [r.key, r.places]),
+    ]);
+    // "Anything" and "things to do" are every place, and every place that is not
+    // food: broad subjects the log records and no shelf is called.
+    const everything = [...known.values()].length
+      ? (await query(areaSlug
+        ? `select places from area_stats where area_slug = $1 and category = '' and subcategory = '' and source = '' and ownership = ''`
+        : `select count(*)::int as places from place_index`, areaSlug ? [areaSlug] : [])).rows[0]?.places ?? 0
+      : 0;
+    if (everything) {
+      known.set('', everything);
+      known.set('things', Math.max(0, everything - (known.get('food') ?? 0)));
+    }
 
     const log = await searches.recent({ areaSlug, since });
     // The area's own name, not its slug: a screen that prints `berkshire` is a
