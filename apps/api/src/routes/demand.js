@@ -208,6 +208,10 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
      * and what comes back is handed to this screen and written down nowhere.
      */
     const nameless = refs.filter((r) => !names.get(r)?.name && String(r).startsWith('google:'));
+    // Of those, the ones a call would actually go out for. `detailFor` holds
+    // its last three hundred answers for six hours, so a name another replay or
+    // a comparison already fetched costs nothing (Codex, 18 Sep 2026).
+    const wouldFetch = nameless.filter((r) => !detailHeld('google', String(r).slice('google:'.length)));
     let asked = 0;
     let named = 0;
     let spentPence = 0;
@@ -229,7 +233,11 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // hard-coded 1.4p was the old figure and the ledger records about 2.5p,
       // so the reservation was a little over half the cost and the replay could
       // pass a ceiling it then went past (Codex, 17 Sep 2026).
-      const want = Math.round(nameless.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP);
+      //
+      // Reserved for what would actually go out, not for every nameless row:
+      // an entirely cached replay near the ceiling was being refused for money
+      // it was never going to spend (Codex, 18 Sep 2026).
+      const want = Math.round(wouldFetch.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP);
       const room = await roomToSpend(want, { holder: 'replay' });
       if (!room.ok) {
         why = `that would spend about £${(want / 100).toFixed(2)} and there is £${(room.leftPence / 100).toFixed(2)} left of this month`;
@@ -357,7 +365,9 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // What asking for them would cost, from the one price table — the screen
       // used to work it out at the old 1.4p and show about half (Codex, 17 Sep
       // 2026).
-      namelessPence: Math.round(nameless.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP),
+      // What asking would cost *now* — the cache is six hours old at most, and
+      // quoting for names we already hold would price work nobody would do.
+      namelessPence: Math.round(wouldFetch.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP),
       // Why a row is still an identifier — never left to be guessed at.
       namelessWhy: why,
     });

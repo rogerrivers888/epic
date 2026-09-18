@@ -24,6 +24,16 @@ import { Press } from '../components/press';
 import { colors, spacing, type, BORDER } from '../theme';
 import { Icon } from '../components/Icon';
 import { Explain, type Tip, type TipKey } from './explain';
+import { useViewport } from '../hooks/useViewport';
+
+/** The frame's width. Under it a board draws BO2l's stacked row, not columns. */
+const PHONE = 900;
+
+/**
+ * One figure on a stacked row — "ready 44%". The strongest reads as the lead,
+ * which is how BO2l tells you at a glance which number the row is about.
+ */
+export type Chip = { key: string; word: string; tip?: TipKey | Tip | null; lead?: boolean };
 
 export type Align = 'left' | 'right' | 'centre';
 
@@ -72,7 +82,7 @@ const alignOf = (a: Align | undefined) =>
 const textAlign = (a: Align | undefined) => (a === 'right' ? 'right' : a === 'centre' ? 'center' : 'left');
 
 export function Ladder<T>({
-  columns, rows, keyOf, onRow, highlight, sort, desc, onSort, empty, dense = false, label, groupOf,
+  columns, rows, keyOf, onRow, highlight, sort, desc, onSort, empty, dense = false, label, groupOf, phoneRow,
 }: {
   columns: Col<T>[];
   rows: T[];
@@ -89,7 +99,15 @@ export function Ladder<T>({
   label?: (row: T) => string;
   /** A heading row above a run of rows — "FAMILY · 9 SUBCATEGORIES". */
   groupOf?: (row: T, prev: T | null) => React.ReactNode;
+  /**
+   * The same row as a phone draws it (BO2l, "Places at 390"): a name with a
+   * note beside it and the figures under as wrapped chips, instead of columns
+   * that cannot fit 390 whatever you do to them. A board without one keeps the
+   * table at every width, which is the behaviour every board had.
+   */
+  phoneRow?: (row: T) => { name: React.ReactNode; note?: React.ReactNode; chips?: Chip[] };
 }) {
+  const { width } = useViewport();
   // The doorway is the middle of the row: everything between the leading cells
   // that hold their own control and the trailing ones that do.
   const first = columns.findIndex((c) => !c.stops);
@@ -97,6 +115,44 @@ export function Ladder<T>({
   const lead = first <= 0 ? [] : columns.slice(0, first);
   const middle = first < 0 ? columns : columns.slice(first, last + 1);
   const tail = first < 0 || last >= columns.length - 1 ? [] : columns.slice(last + 1);
+
+  if (width < PHONE && phoneRow) {
+    return (
+      <View>
+        {rows.length === 0 && empty ? <View style={styles.empty}>{empty}</View> : null}
+        {rows.map((row, i) => {
+          const group = groupOf?.(row, i ? rows[i - 1] : null);
+          const { name, note, chips } = phoneRow(row);
+          const body = (
+            <View style={[styles.stack, i === rows.length - 1 && styles.rowLast]}>
+              {highlight?.(row) ? <View style={[StyleSheet.absoluteFill, styles.wash]} pointerEvents="none" /> : null}
+              <View style={styles.stackTop}>
+                <Text style={styles.stackName}>{name}</Text>
+                {note == null ? null : <Text style={styles.stackNote}>{note}</Text>}
+              </View>
+              {chips?.length ? (
+                <View style={styles.stackChips}>
+                  {chips.map((ch: Chip) => (
+                    <Explain key={ch.key} tip={ch.tip} style={[styles.stackChip, ch.lead && styles.stackChipLead]}>
+                      <Text style={[styles.stackChipWord, ch.lead && styles.stackChipWordLead]}>{ch.word}</Text>
+                    </Explain>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          );
+          return (
+            <React.Fragment key={keyOf(row, i)}>
+              {group ? <View style={styles.group}>{group}</View> : null}
+              {onRow
+                ? <Press effect="none" onPress={() => onRow(row)} accessibilityRole="button" accessibilityLabel={label?.(row)}>{body}</Press>
+                : body}
+            </React.Fragment>
+          );
+        })}
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -339,6 +395,18 @@ export function Stat({ label, value, tip, accent, big, mark = false }: {
 }
 
 const styles = StyleSheet.create({
+  // BO2l, "Places at 390": a name with its note beside it, and the figures
+  // under as wrapped chips. Nothing here is a box — the row is a hairline.
+  stack: { gap: 7, paddingVertical: 12, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
+  stackTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  stackName: { ...type.small, fontSize: 13.5, fontWeight: '700', color: colors.ink, flexShrink: 1, minWidth: 0 },
+  stackNote: { ...type.small, fontSize: 12, color: colors.inkMuted, flexShrink: 1, minWidth: 0 },
+  stackChips: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  stackChip: { paddingVertical: 4, paddingHorizontal: 8, backgroundColor: colors.accentSoft },
+  stackChipLead: { backgroundColor: colors.accent },
+  stackChipWord: { ...type.tiny, fontSize: 11.5, color: colors.ink },
+  stackChipWordLead: { fontWeight: '700', color: colors.ink },
+
   head: {
     flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md,
     paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted,

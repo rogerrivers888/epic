@@ -160,8 +160,14 @@ router.post('/event', async (req, res, next) => {
     }
     // Only against this household's own search (Codex, 17 Sep 2026).
     const household = await currentHousehold();
-    await searchLog.logEvent({ searchId: queryId, kind, venueRef, position, dwellMs, householdId: household.id });
-    res.json({ ok: true });
+    // What actually happened, not that we tried. `logEvent` answers null when
+    // the write failed or the search is not this household's, and saying `ok`
+    // anyway meant the client marked the open as counted and would never send
+    // it again — a transient failure undercounting clicks for good (Codex,
+    // 18 Sep 2026). The log cannot be backfilled, so an unrecorded event is
+    // gone unless the client can try again.
+    const noted = await searchLog.logEvent({ searchId: queryId, kind, venueRef, position, dwellMs, householdId: household.id });
+    res.json({ ok: Boolean(noted) });
   } catch (err) { next(err); }
 });
 

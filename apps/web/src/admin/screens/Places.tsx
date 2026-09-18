@@ -726,7 +726,21 @@ function CoverageBoard({ q, onWhere, onCollect }: {
       </View>
       {data ? (
         <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug} onRow={(r) => onWhere(r.slug)}
-                empty={<Word muted>Nothing indexed under this county yet.</Word>} />
+                empty={<Word muted>Nothing indexed under this county yet.</Word>}
+                /* BO2l, "Places at 390": the name, what kind of place and how
+                   many we know there, then the four facts as chips. The
+                   design's own words — "what it is", not "Description" — and
+                   Ready leads, because Ready is what the row is about. */
+                phoneRow={(r) => ({
+                  name: r.name,
+                  note: `${r.kind === 'postcode' ? 'outcode' : 'town'} · ${r.known.toLocaleString()} known`,
+                  chips: [
+                    { key: 'ready', word: `ready ${r.ready == null ? '—' : `${r.ready}%`}`, tip: 'ready', lead: true },
+                    { key: 'picture', word: `picture ${r.picture == null ? '—' : `${r.picture}%`}`, tip: 'pictureFact' },
+                    { key: 'what', word: `what it is ${r.description == null ? '—' : `${r.description}%`}`, tip: 'whatItIsFact' },
+                    { key: 'menu', word: `menu ${r.menu == null ? '—' : `${r.menu}%`}`, tip: 'menu' },
+                  ],
+                })} />
       ) : <Waiting />}
       <Footer>
         {/* Collect lives inside Places, and this is the door to it: the lens that

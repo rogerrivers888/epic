@@ -80,7 +80,11 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
     queryId, kind, venueRef: venueRef ?? null,
     position: positions.get(key) ?? null,
     dwellMs,
-  }).then(() => { if (kind === 'open') openedOnce.add(key); })
+    // Only when the API says it wrote it. A fulfilled request is not the same
+    // as a recorded event — the write can fail, or the search can belong to
+    // somebody else — and marking it counted on a 200 meant a later tap would
+    // never retry (Codex, 18 Sep 2026).
+  }).then((r) => { if (kind === 'open' && r?.ok) openedOnce.add(key); })
     .catch(() => null)
     .finally(() => { if (kind === 'open') openingNow.delete(key); });
 }

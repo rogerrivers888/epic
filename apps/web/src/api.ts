@@ -2673,7 +2673,9 @@ export const api = {
 
   /** What the household did to one of the results — the click stream Demand counts. */
   searchEvent: (body: { queryId: string; kind: 'open' | 'dismiss' | 'save' | 'shortlist' | 'add_to_trip' | 'refine' | 'close'; venueRef?: string | null; position?: number | null; dwellMs?: number | null }) =>
-    post<{ ok: true }>('/api/discover/event', body),
+    // `ok` is whether the event was *written*, not whether the request landed:
+    // the client only stops retrying an open on a true (Codex, 18 Sep 2026).
+    post<{ ok: boolean }>('/api/discover/event', body),
 
   reportHost: (id: string, reason: string, offerId?: string | null) => post<{ ok: true; message: string }>(`/api/hosts/${id}/report`, { reason, offerId }),
   bookings: () => request<{ bookings: Booking[] }>('/api/bookings'),
