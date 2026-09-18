@@ -790,6 +790,20 @@ async function suppress(subjectType, subjectId, { reason, who, run = query }) {
     // Not swallowed. A rejection that failed to reach the content but told the
     // screen it had is the exact shape of the bug this fixes.
     await run(`update ${table} set hidden = true where id = $1::uuid`, [subjectId]);
+    // And the copies of it that were published elsewhere.
+    //
+    // A topic or a reply can be lifted into an offer's FAQ, and that table is
+    // read on its own — the public list joins nothing back to the source and
+    // asks only `withdrawn_at is null`. So hiding the source left the same
+    // words in front of everybody who opens the offer, which is precisely what
+    // a rejection is for (Codex, 18 Sep 2026). Withdrawn in the same
+    // transaction, because half a rejection is worse than none.
+    if (subjectType === 'chat_topic' || subjectType === 'chat_reply') {
+      const column = subjectType === 'chat_topic' ? 'source_topic_id' : 'source_reply_id';
+      await run(
+        `update chat_faq_entries set withdrawn_at = now()
+          where ${column} = $1::uuid and withdrawn_at is null`, [subjectId]);
+    }
     // An open entry is ended as well as hidden. There is a unique index over
     // *active* standing and per-trip entries, so a hidden-but-active row would
     // block the household from ever submitting a corrected one (Codex, 17 Sep

@@ -789,3 +789,36 @@ test('an approved chat report does not reopen itself on the next sync', async ()
   assert.equal(after.state, 'approved', 'still decided');
   assert.ok(after.report_cleared_at, 'and the complaint is still answered');
 });
+
+test('rejecting a topic withdraws the FAQ it was published into', async () => {
+  const { household, member } = await aHousehold(query);
+  const { rows: [trip] } = await query(
+    `insert into trips (household_id, origin_label, origin_lat, origin_lng, depart_at, return_at)
+     values ($1, 'Windsor', 51.48, -0.61, now(), now() + interval '2 days') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, tag_kind, author_member_id, title, body, state)
+     values ('trip', $1, 'general', $2, 'Is there parking?', 'Something that should not stand', 'open') returning *`,
+    [trip.id, member.id]);
+
+  // The same words, lifted into an offer's FAQ where everybody can read them.
+  const { rows: [host] } = await query(
+    `insert into hosts (household_id, name) values ($1, 'A host') returning *`, [household.id]);
+  const { rows: [offer] } = await query(
+    `insert into host_offers (host_id, shape) values ($1, 'skill') returning *`, [host.id]);
+  await query(
+    `insert into chat_faq_entries (offer_id, question, answer, source_topic_id)
+     values ($1, 'Is there parking?', 'Something that should not stand', $2)`, [offer.id, topic.id]);
+  assert.equal((await chat.faqOf(offer.id)).length, 1);
+
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+
+  // The FAQ list is read on its own and joins nothing back to the source, so
+  // hiding the topic left the same words in front of everybody who opened the
+  // offer — which is exactly what a rejection is for (Codex, 18 Sep 2026).
+  assert.equal((await chat.faqOf(offer.id)).length, 0, 'the copy goes with the original');
+  assert.equal((await chat.faqOf(offer.id, { includeWithdrawn: true })).length, 1,
+    'withdrawn, not erased: a decision has to stay reviewable');
+});

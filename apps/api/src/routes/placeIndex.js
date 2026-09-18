@@ -999,11 +999,21 @@ router.get('/place/history', requires('view_library'), async (req, res, next) =>
     // of the asking that had been done about it (Codex, 18 Sep 2026). A place
     // we hold a Google id for was also asked about under that id, so both
     // references are the same history.
-    const alias = ref.startsWith('google:') ? null : (await matchesFor([ref], 'google')).get(ref) ?? null;
+    // Every reference this place has been asked about under. A comparison
+    // records the call against the provider's own reference, so an atlas or OSM
+    // place compared with Google *and* Tripadvisor has three names in the
+    // ledger and the tab has to ask for all of them — reading the Google alias
+    // alone left every Tripadvisor call off the history (Codex, 18 Sep 2026).
+    const aliases = [];
+    for (const source of ['google', 'tripadvisor']) {
+      if (ref.startsWith(`${source}:`)) continue;
+      const id = (await matchesFor([ref], source)).get(ref);
+      if (id) aliases.push(`${source}:${id}`);
+    }
     const { rows: calls } = await query(
       `select created_at, provider, purpose, estimated_cost_usd from provider_calls
         where venue_ref = any($1) order by created_at desc limit 40`,
-      [[ref, ...(alias ? [`google:${alias}`] : [])]]);
+      [[ref, ...aliases]]);
     res.json({
       rows: [
         ...rows.map((r) => ({ at: r.at, what: r.action, who: r.actor_label, kind: 'edit' })),

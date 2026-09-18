@@ -91,6 +91,8 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
 
 /** What each surface last told the log it had drawn, so it is said once. */
 const drawn = new Map<Surface, string>();
+/** And what is in the air, so a list that renders twice does not send twice. */
+const sending = new Map<Surface, string>();
 
 /**
  * What the screen actually drew.
@@ -112,8 +114,21 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
   // 2026). Cheap and stable — the order is the order they were drawn in.
   const key = `${queryId}:${kept.length}:${kept.join(',')}`;
   if (drawn.get(surface) === key) return;
-  drawn.set(surface, key);
-  void api.searchDrawn({ queryId, refs: kept }).catch(() => null);
+  // Written down only once the API has it.
+  //
+  // Marked before the post, a failure — a train, a flat server — left the key
+  // set, so every later render of the same list returned early and the search
+  // kept the *pool* count the API wrote when it was made. A search that drew
+  // five cards and is recorded as having shown a hundred and fifty is given the
+  // wrong fault on the Demand board (Codex, 18 Sep 2026). `sending` covers the
+  // other end: a list that renders twice while the first post is in the air
+  // must not send twice.
+  if (sending.get(surface) === key) return;
+  sending.set(surface, key);
+  void api.searchDrawn({ queryId, refs: kept })
+    .then(() => { drawn.set(surface, key); })
+    .catch(() => null)
+    .finally(() => { if (sending.get(surface) === key) sending.delete(surface); });
 }
 
 /**
@@ -127,6 +142,7 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
 export function forgetSearch(surface: Surface) {
   current.delete(surface);
   drawn.delete(surface);
+  sending.delete(surface);
 }
 
 /** Which search a surface is standing on, where a screen needs to say so. */
