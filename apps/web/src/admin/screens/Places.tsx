@@ -989,6 +989,7 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
    * `needsStrong` was defined and never used (17 Sep 2026, the verification
    * audit).
    */
+  const { width: ladderWidth } = useViewport();
   const judged = useMemo(() => rows.filter((r: any) => r.barSet && (r.needs ?? []).length), [rows]);
   const setsItApart = useCallback(
     (fact: string) => judged.length >= 2 && !judged.every((r: any) => (r.needs ?? []).includes(fact)),
@@ -1058,6 +1059,25 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
                   if (prev && prev.category === s.category) return null;
                   const c = groupOfCategory(s.category);
                   if (!c) return null;
+                  // A phone has no columns to line up with, so the heading is
+                  // the name and its figures on one wrapped line — the fixed
+                  // widths below add up to 684 and the frame is 390 (measured,
+                  // 18 Sep 2026).
+                  if (ladderWidth < PHONE) {
+                    return (
+                      <View style={styles.groupRowPhone}>
+                        <Explain tip="ourCategory">
+                          <Text style={styles.group}>{`${c.label.toUpperCase()} · ${c.subcategories.length} subcategories`}</Text>
+                        </Explain>
+                        <View style={styles.groupFigures}>
+                          <Explain tip="known"><Text style={styles.groupNum}>{c.known ? `${c.known.toLocaleString()} known` : 'we hold none'}</Text></Explain>
+                          {c.owned ? <Explain tip="owned"><Text style={styles.groupNum}>{`${c.owned.toLocaleString()} owned`}</Text></Explain> : null}
+                          {c.ready == null ? null : <Explain tip="readyShort"><Text style={styles.groupNum}>{`ready ${c.ready}%`}</Text></Explain>}
+                          {c.avgScore == null ? null : <Explain tip="avgScoreCategory"><Text style={styles.groupNum}>{`score ${c.avgScore}`}</Text></Explain>}
+                        </View>
+                      </View>
+                    );
+                  }
                   return (
                     // A heading is a thing you hover: these eight were the only
                     // headings on the board that explained nothing (18 Sep 2026,
@@ -1228,6 +1248,19 @@ function QualityBoard({ q, onPlace, canManage }: { q: any; onPlace: (ref: string
           <Kicker tip="sectionWorthOwningNext">Worth owning next</Kicker>
           <View style={{ height: 9 }} />
           <Ladder columns={columns} rows={data.worth} keyOf={(r) => r.ref}
+                  onRow={(r) => onPlace(r.ref)}
+                  /* Tapping the row is the door on a phone, so "Open it" is not
+                     a chip: a button in a list of figures reads as a figure. */
+                  phoneRow={(r: any) => ({
+                    name: r.name ?? r.ref,
+                    note: [r.ownership === 'claimed' ? 'a household saved it' : null, r.subcategory, r.outcode]
+                      .filter(Boolean).join(' · ') || null,
+                    chips: [
+                      { key: 'score', word: `score ${r.score == null ? '—' : r.score}`, tip: 'scoreWeights', lead: true },
+                      ...(r.been ? [{ key: 'been', word: `been ${r.been.toLocaleString()}`, tip: 'beenThere' as const }] : []),
+                      ...(r.rating != null ? [{ key: 'rating', word: `rating ${r.rating}`, tip: 'rating' as const }] : []),
+                    ],
+                  })}
                   empty={<Word muted>Everything here is already owned.</Word>} />
         </View>
       </View>
@@ -1342,6 +1375,16 @@ function DemandLens({ q, canManage, onCollect }: { q: any; canManage: boolean; o
       ) : null}
       <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.subject ?? 'anything'}
               highlight={(r) => r.fault === 'empty-always'}
+              phoneRow={(r: any) => ({
+                name: r.label,
+                note: `${(r.searches ?? 0).toLocaleString()} ${r.searches === 1 ? 'search' : 'searches'} · we know of ${(r.known ?? 0).toLocaleString()}`,
+                chips: [
+                  ...(r.faultLabel ? [{ key: 'fault', word: r.faultLabel, tip: 'fault' as const, lead: true }] : []),
+                  ...(r.empty ? [{ key: 'empty', word: `empty ${r.empty.toLocaleString()}`, tip: 'empty' as const }] : []),
+                  ...(r.noClick ? [{ key: 'noClick', word: `clicked nothing ${r.noClick.toLocaleString()}`, tip: 'noClick' as const }] : []),
+                  ...(r.noTrip ? [{ key: 'noTrip', word: `never tripped ${r.noTrip.toLocaleString()}`, tip: 'neverTripped' as const }] : []),
+                ],
+              })}
               empty={<Word muted>Nothing has been searched for here yet.</Word>} />
       <Footer>
         <Act label="Open these in Demand" tone="secondary" onPress={() => navigate(`/admin/demand?where=${encodeURIComponent(q.where)}`)} />
@@ -1718,7 +1761,15 @@ function CollectBoard({ q, level, canManage, cat, sub }: {
   return (
     <>
       <View style={styles.subRow}><Kicker tip="sectionWhatWeCouldGet">What we could get here</Kicker></View>
-      <Ladder columns={columns} rows={rows} keyOf={(r) => r.key} />
+      <Ladder columns={columns} rows={rows} keyOf={(r) => r.key}
+              phoneRow={(r: any) => ({
+                name: r.label,
+                note: r.would == null ? 'not asked here' : `${(r.would ?? 0).toLocaleString()} to ask about`,
+                chips: [
+                  { key: 'cost', word: r.free ? 'free' : pounds(Math.round(quote?.spendPence ?? 0)), tip: 'providerSpend', lead: !r.free },
+                  ...(r.held != null ? [{ key: 'held', word: `${r.held.toLocaleString()} already held`, tip: 'known' as const }] : []),
+                ],
+              })} />
       {/* Said once, because the board cannot promise otherwise: the three free
           sources are one research pass. `own.js` reads the venue's own page,
           the open map and the encyclopedias together and cannot be asked for
@@ -2922,6 +2973,9 @@ const styles = StyleSheet.create({
   // Wraps inside itself on a phone rather than being sized to its content and
   // pushed off the 390px frame (live phone audit, 18 Sep 2026).
   // BO2l: `grid-template-columns:1fr 1fr;gap:12px 14px`.
+  groupRowPhone: { gap: 5, paddingTop: 14, paddingBottom: 6 },
+  groupFigures: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2 },
+
   fourGrid: { rowGap: 12, flexGrow: 1, flexBasis: 240, minWidth: 0, alignSelf: 'stretch' },
   fourRow: { flexDirection: 'row', columnGap: 14 },
   fourCell: { flex: 1, minWidth: 0 },
