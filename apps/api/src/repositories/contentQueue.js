@@ -277,6 +277,19 @@ export async function syncFlagged() {
        where q.subject_type = $1 and q.subject_id = src.id::text
          and q.state <> 'waiting' and src.${column} is not null
          and (q.decided_at is null or src.${column} > q.decided_at)`, [type]);
+    // And the row is only as old as the words it is asking about.
+    //
+    // Whatever its state. Approve refuses to publish words written after the
+    // row was raised, so until the row is raised again *about those words* it
+    // cannot be approved at all — and a row that was still waiting when they
+    // were written never changed state, so nothing above would have moved it
+    // (Codex, 18 Sep 2026).
+    await query(`
+      update content_queue q
+         set made_at = src.${column}
+        from ${table} src
+       where q.subject_type = $1 and q.subject_id = src.id::text
+         and src.${column} is not null and src.${column} > q.made_at`, [type]);
   }
   // And a note that has been cleared is not a thing to decide at all: the row
   // would sit in the queue for ever asking about words nobody can read (Codex,
@@ -545,18 +558,40 @@ export async function approve(ids, who) {
   // writes, so a failure in between left the queue saying "approved" over
   // something still hidden — and nobody would look at it again, because it is
   // no longer waiting (Codex, 17 Sep 2026).
-  const { rows, touched } = await withTransaction(async (client) => {
+  const { rows, touched, stale } = await withTransaction(async (client) => {
     const run = (text, params) => client.query(text, params);
     const touched = new Set();
 
-    const { rows } = await run(
+    // Words written after this row was raised have not been read by anybody.
+    //
+    // A household can edit a review, a question or a note while it is sitting
+    // in the queue, and approving lifts `hidden` from whatever the text is
+    // *now* — so a moderator who read one thing could publish another (Codex,
+    // 18 Sep 2026). The rewrite requeues the row a minute later, by which time
+    // it is public. These are left waiting instead, and the answer names them.
+    const stale = new Set();
+    for (const [type, table, column] of [
+      ['host_review', 'host_reviews', 'rewritten_at'], ['chat_topic', 'chat_topics', 'rewritten_at'],
+      ['open_entry', 'open_entries', 'rewritten_at'], ['visit', 'visits', 'note_rewritten_at'],
+    ]) {
+      const { rows: changed } = await run(
+        `select q.id from content_queue q
+           join ${table} src on q.subject_id = src.id::text
+          where q.id = any($1::uuid[]) and q.subject_type = $2
+            and src.${column} is not null and src.${column} > q.made_at`,
+        [ids, type]);
+      for (const c of changed) stale.add(c.id);
+    }
+    const decide = ids.filter((id) => !stale.has(id));
+
+    const { rows } = decide.length ? await run(
       `update content_queue
           set state = 'approved', reason = null, decided_by = $2, decided_at = now(),
               -- The report has been answered. It is kept — who raised it, why
               -- and when — and it stops being urgent (migration 170).
               report_cleared_at = case when reported then now() else report_cleared_at end
         where id = any($1::uuid[]) and state <> 'approved' returning id, kind, subject_type, subject_id`,
-      [ids, who ?? null]);
+      [decide, who ?? null]) : { rows: [] };
     // Approving is the undo of rejecting, so it has to reach as far: a thing
     // suppressed by mistake comes back, rather than staying invisible for ever
     // because the queue row now says "approved".
@@ -600,7 +635,7 @@ export async function approve(ids, who) {
             where ${column} = $1::uuid and withdrawn_by = 'moderation'`, [r.subject_id]);
       }
     }
-    return { rows, touched: [...touched] };
+    return { rows, touched: [...touched], stale: [...stale] };
   });
 
   // After the commit, so the score is worked out from what is actually there.
@@ -609,7 +644,10 @@ export async function approve(ids, who) {
   // has to reach the totals too (Codex, 17 Sep 2026).
   for (const ref of touched) await rescorePlace(ref);
   if (touched.length) await refreshAreaStats();
-  return rows;
+  // The ones held back travel with the answer rather than silently not
+  // happening: the screen has to be able to say "these were rewritten while you
+  // were reading them, look again" (Codex, 18 Sep 2026).
+  return stale.length ? Object.assign(rows, { stale }) : rows;
 }
 
 /**

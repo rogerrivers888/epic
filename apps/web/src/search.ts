@@ -161,7 +161,8 @@ export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
  * outcome (Codex, 17 Sep 2026). So the intent is held, and it is reported by
  * the path that actually makes the trip — or dropped when the form is closed.
  */
-let pending: { surface: Surface; queryId: string | null; ref: string | null; at: number } | null = null;
+type Pending = { surface: Surface; queryId: string | null; ref: string | null; at: number };
+let pending: Pending | null = null;
 
 /**
  * How long an unconverted intent stands.
@@ -192,11 +193,31 @@ export function conversionHappened() {
   // Too old to be this trip: the household went somewhere else and came back.
   if (Date.now() - held.at > PENDING_FOR_MS) return;
   if (!held.queryId) return;
+  send(held, 0);
+}
+
+/**
+ * The conversion, kept until the API says it has it.
+ *
+ * Every other event here has a later act that would send it again — another
+ * tap, another render of the list. This one has none: the trip is made once.
+ * So a request that failed on the way, or came back `ok: false` because the
+ * write fell over, lost the one outcome the whole board is built around and
+ * nothing would ever say so (Codex, 18 Sep 2026). Three goes, backing off, and
+ * then it is genuinely gone — there is nothing further to be done about it, and
+ * a queue that never empties is its own kind of lie.
+ */
+const TRIES = 3;
+function send(held: Pending, attempt: number) {
   const key = `${held.queryId}:${held.ref ?? ''}`;
   void api.searchEvent({
-    queryId: held.queryId, kind: 'add_to_trip', venueRef: held.ref ?? null,
+    queryId: held.queryId as string, kind: 'add_to_trip', venueRef: held.ref ?? null,
     position: positions.get(key) ?? null, dwellMs: null,
-  }).catch(() => null);
+  }).then((r) => {
+    if (!r?.ok && attempt + 1 < TRIES) setTimeout(() => send(held, attempt + 1), 1500 * (attempt + 1));
+  }).catch(() => {
+    if (attempt + 1 < TRIES) setTimeout(() => send(held, attempt + 1), 1500 * (attempt + 1));
+  });
 }
 
 /** They closed the form, or left it. Nothing was made, so nothing is counted. */

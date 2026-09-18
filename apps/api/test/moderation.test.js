@@ -869,3 +869,42 @@ test('a rejection whose message never went can be told again', async () => {
     `select coalesce(sum(used), 0)::int as n from rejection_counts where kind = 'photo' and reason = 'dark'`)).rows[0].n,
   used, 'the reason is not counted again');
 });
+
+test('words written while somebody was reading them are not published', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [member] } = await query(
+    `insert into members (household_id, name) values ($1, 'An asker') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, author_member_id, title, body, tag_kind)
+     values ('trip', $1, $2, 'Where for lunch?', 'Somewhere near the park.', 'none') returning *`,
+    [household.id, member.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+
+  // The household edits it while it is sitting in the queue — after the
+  // moderator opened it and before they pressed the button. Approving lifts
+  // `hidden` from whatever the text is *now*, so somebody who read one thing
+  // would publish another; the rewrite requeues the row a minute later, by
+  // which time it is public (Codex, 18 Sep 2026).
+  await chat.updateTopic(topic.id, { body: 'Actually, something abusive.' });
+  const out = await queue.approve([q.id], 'the owner (passcode)');
+  assert.deepEqual(out.stale, [q.id], 'the answer names what it would not publish');
+  assert.equal((await query(
+    `select state from content_queue where id = $1`, [q.id])).rows[0].state, 'waiting',
+  'and it is still waiting for somebody to read the new words');
+  // A waiting topic is not hidden — only a rejection hides one — so what this
+  // protects is the *decision*: nobody's approval is recorded over words they
+  // did not read, and the row stays in front of somebody.
+  assert.equal((await query(
+    `select decided_at from content_queue where id = $1`, [q.id])).rows[0].decided_at, null,
+  'nothing was decided about the new words');
+
+  // Once the row has been raised again about those words, approving them works
+  // — the guard is about words nobody has read, not about rewriting.
+  await queue.sync();
+  const second = await queue.approve([q.id], 'the owner (passcode)');
+  assert.equal(second.stale, undefined, 'the new words have been read now');
+  assert.equal((await query(
+    `select state from content_queue where id = $1`, [q.id])).rows[0].state, 'approved');
+});
