@@ -747,6 +747,12 @@ test('a hidden attraction leaves the index, unless something else holds the plac
   await index.reindex();
   assert.equal(await held(refOf(alone)), 0, 'retired, and nothing else was holding it');
   assert.equal(await held(refOf(claimed)), 1, 'a household claimed it, so the place stays');
+  // And the place that survived is no longer *owned*: its only research was the
+  // attraction that has been retired, so it is back to being one a household
+  // has claimed (Codex, 18 Sep 2026).
+  const { rows: [own] } = await query('select ownership from place_index where venue_ref = $1', [refOf(claimed)]);
+  assert.equal(own.ownership, 'claimed');
+
   // Its atlas *source* row stands, and deliberately: the reference itself is an
   // atlas reference, so the atlas is still where the place came from. What it no
   // longer is, is a reason to keep the place.

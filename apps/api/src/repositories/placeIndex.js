@@ -283,6 +283,32 @@ async function reindexWhileLocked({ onProgress }) {
        and not exists (select 1 from place_index_sources s where s.venue_ref = pi.venue_ref)
        and not exists (select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
        and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)`);
+  // And a place that survives the retirement is re-asked what it is.
+  //
+  // Removing the atlas source left `ownership` where it was, so a place whose
+  // only research *was* the retired attraction went on being counted as owned —
+  // which is the one state that tells Collect to leave it alone (Codex, 18 Sep
+  // 2026). The same three questions the rebuild asks, asked again for these.
+  await query(`
+    update place_index pi
+       set ownership = case
+             when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref) then 'claimed'
+             else 'identified' end,
+           placed_at = null
+     where pi.ownership = 'owned'
+       and pi.venue_ref in (
+         select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
+       and not exists (
+         select 1 from attractions a
+          where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
+            and a.state <> 'hidden'
+            and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
+       and not exists (
+         select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
+       and not exists (
+         select 1 from scout_places sp
+          where sp.venue_ref = pi.venue_ref and coalesce(sp.website, sp.name) is not null)`);
+
   // The rows hung off it go with it, or they are counted against a place that
   // is no longer in the index.
   if (retired) {
