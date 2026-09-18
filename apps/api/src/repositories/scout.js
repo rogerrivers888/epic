@@ -791,10 +791,13 @@ export async function rescoreOne(venueRef, epicScore, ownedScore) {
   // And the attraction, for a harvested place that has neither of the other two
   // rows. The recalculation answered "saved" and wrote nothing at all, so the
   // next read showed the old figure (Codex, 18 Sep 2026).
+  // `bandOf` reads the harvest's own 0–1 score, and `epicScore` is 0–10: handing
+  // it the latter made almost every place "top", because 4.3 is comfortably past
+  // a threshold of 0.62 (Codex, 18 Sep 2026).
   await query(
     `update attractions set epic_score = $2, band = $3
       where (venue_ref = $1 or 'atlas:' || id::text = $1)`,
-    [venueRef, epicScore, bandOf(epicScore)]);
+    [venueRef, epicScore, bandOf(epicScore / 10)]);
   // The record carries the pair of scores, for a place that has no sweep row to
   // carry them. An `update` touched nothing at all for a harvested place, so the
   // owned score and the time it was worked out were both lost the moment they

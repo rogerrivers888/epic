@@ -19,7 +19,7 @@ import { query } from '../db.js';
 import * as searches from '../repositories/searches.js';
 import * as index from '../repositories/placeIndex.js';
 import { faultOf, SHORT_FAULT } from '../domain/placeIndex.js';
-import { detailFor } from '../sources/compare.js';
+import { detailFor, detailHeld } from '../sources/compare.js';
 import { roomToSpend, releaseSpend } from './placeIndex.js';
 import { googleSource } from '../sources/google.js';
 import { currentHousehold } from './household.js';
@@ -136,15 +136,6 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
  * for a list that would do it forty times on load — which is why this is its own
  * request with its cost on the button.
  */
-/** This month's Google spend so far, in pence, read off the ledger. */
-async function googleSpentPence() {
-  const { rows: [r] } = await query(
-    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
-       from provider_calls where provider = 'google' and created_at > date_trunc('month', now())`);
-  // The ledger is in dollars; everything on these screens is in pence.
-  return Number(r?.usd ?? 0) * 100 * USD_TO_GBP;
-}
-
 router.get('/search', requires('view_reporting'), async (req, res, next) => {
   try {
     const id = String(req.query.id ?? '').trim();
@@ -208,14 +199,21 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       // out of that cache cost nothing — and a call that went out and came back
       // without a name still did. Counting the names reported a charge for the
       // first and nothing for the second (Codex, 17 Sep 2026).
-      const spentBefore = await googleSpentPence();
+      // Its own calls, not the month's total taken twice.
+      //
+      // A before-and-after of the whole ledger swept in anything else that
+      // asked Google while this was running — another tab, a collection — and
+      // reported their money as this replay's (Codex, 18 Sep 2026). The cache
+      // is what decides whether a call goes out, so it is what decides the cost.
+      let calls = 0;
       for (const ref of nameless) {
         try {
+          if (!detailHeld('google', ref.slice(7))) calls += 1;
           const detail = await detailFor('google', ref.slice(7), household.id);
           if (detail?.name) { names.set(ref, { name: detail.name, from: 'google' }); named += 1; }
         } catch { /* one that will not answer is one bare row, not a failed replay */ }
       }
-      spentPence = Math.max(0, Math.round(((await googleSpentPence()) - spentBefore) * 10) / 10);
+      spentPence = Math.round(calls * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP * 10) / 10;
       asked = nameless.length;
       if (!named) why = 'asked, and none of them answered';
       } finally { await releaseSpend(room.reservation); }

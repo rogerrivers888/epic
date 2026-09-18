@@ -253,10 +253,16 @@ export async function isClaimed(venueRef) {
 export async function dueForResearch(limit, maxAttempts, researchVersion) {
   const { rows } = await query(
     `select venue_ref from place_records
-      where enrich_state = 'pending'
+      -- A row written only to hold a score is not a research job, whatever
+      -- version of the researcher last ran: research_version < $3 was picking
+      -- those up regardless of their state and going off to OpenStreetMap,
+      -- Nominatim and the encyclopedias from an operation that says "free"
+      -- (Codex, 18 Sep 2026).
+      where enrich_state <> 'scored'
+        and (enrich_state = 'pending'
          or (enrich_state in ('failed', 'partial') and next_attempt_at is not null and next_attempt_at <= now())
          or (enrich_state = 'done' and provenance = '{}'::jsonb and enrich_attempts < $2)
-         or research_version < $3
+         or research_version < $3)
       order by research_version, enrich_attempts, first_owned limit $1`,
     [limit, maxAttempts, researchVersion],
   );

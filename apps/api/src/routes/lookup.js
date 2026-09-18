@@ -388,7 +388,14 @@ async function affordable(n = RING_CALLS) {
   const google = googleSource.enabled()
     ? await roomToSpend(Math.round(PRICE_PER_UNIT_USD.google * n * 100 * USD_TO_GBP), { holder: 'lookup' })
     : { ok: false, reservation: null, leftPence: 0 };
-  const tripadvisor = tripadvisorSource.enabled()
+  // Tripadvisor has two limits, and both are asked.
+  //
+  // The money is one; the monthly count of locations is the other, and it is
+  // contractual rather than budgetary — so a search that only asked the budget
+  // could go on spending locations after the allowance was gone (Codex, 18 Sep
+  // 2026). Two locations, because one view bills two.
+  const taUnits = tripadvisorSource.enabled() ? await tripadvisorRoom(2) : { granted: 0, reservation: null, left: 0 };
+  const tripadvisor = tripadvisorSource.enabled() && taUnits.granted >= 2
     ? await roomToSpend(Math.round(2 * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP), { holder: 'lookup.ta' })
     : { ok: false, reservation: null, leftPence: 0 };
   const without = [
@@ -398,6 +405,7 @@ async function affordable(n = RING_CALLS) {
   const release = async () => {
     await releaseSpend(google.reservation);
     await releaseSpend(tripadvisor.reservation);
+    await releaseSpend(taUnits.reservation);
   };
   return { google, tripadvisor, without, release };
 }
