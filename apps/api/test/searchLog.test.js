@@ -1769,3 +1769,28 @@ test('a place the sweep never saw can still be told apart', async () => {
   const backlog = await owned.kindBacklog(6);
   assert.ok(backlog.ready >= 1, 'and the backlog counts it as askable rather than reporting nothing to do');
 });
+
+test('a place that learns what kind it is goes back to be shelved', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'osm:node/learns-its-kind';
+  await index.noteMany([{ ref, lat: 51.42, lng: -0.63, countryCode: 'GB' }], { source: 'osm' });
+  await owned.ensureRecord(ref);
+  // Placed by hand: a real one is placed by the hourly settle, which needs the
+  // reach build's cell stamp that a test database has no reason to hold. What
+  // matters here is the *state* — placed, and so out of the shelving pass's
+  // reach, which is where every one of these 600 places actually sits.
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+
+  // The identify pass answers: this is a museum. `shelveAll` only ever runs over
+  // places waiting to be placed, so without this the category would sit on the
+  // record and the place would appear on no category board ever again.
+  await owned.writeRecord(ref, ['category'], ['museum'], {}, {});
+  const after = await query('select placed_at from place_index where venue_ref = $1', [ref]);
+  assert.equal(after.rows[0].placed_at, null, 'learning its kind puts it back in the shelving pass’s hands');
+
+  // And the shelving pass, which the settle runs, now has something to file it by.
+  await index.shelveAll({ refs: [ref] });
+  const shelf = await query('select category from place_index where venue_ref = $1', [ref]);
+  assert.ok(shelf.rows[0].category, `and it lands on a shelf, not ${shelf.rows[0].category}`);
+});

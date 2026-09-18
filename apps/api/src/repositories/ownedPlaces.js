@@ -197,6 +197,18 @@ export async function writeRecord(venueRef, columns, values, attribution, proven
   // it. Before this, the record is an empty row `ensureRecord` made so the
   // research had somewhere to write (Codex, 17 Sep 2026).
   if (rows[0]?.holds_something) await noteOwned(venueRef);
+  // And if what landed was the kind of place it is, it needs shelving again.
+  //
+  // `shelveAll` only ever runs over places waiting to be placed — a full
+  // rebuild, or the hourly settle's list — so a record that learned its
+  // category while already placed kept no shelf at all, and the whole chain
+  // from "identify this place" to "it appears on a category board" stopped one
+  // link from the end: the identify pass ran, the category was written, and
+  // every board went on showing the same gap (19 Sep 2026, watching SL4 not
+  // move). Unplaced is how everything else here asks to be looked at again.
+  if (columns.some((c) => c === 'category' || c === 'experiences')) {
+    await query('update place_index set placed_at = null where venue_ref = $1', [venueRef]);
+  }
 }
 
 export async function recordAttempt(venueRef, a) {
