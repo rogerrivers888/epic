@@ -811,3 +811,20 @@ test('a Tripadvisor location billed inside a mixed call still counts against the
   const after = await room.tripadvisorRoom(0);
   assert.equal(before.left - after.left, 4, 'four locations, whatever the row was called');
 });
+
+/**
+ * Two refreshes of the figures do not collide.
+ *
+ * Both delete the visible rows and then insert the same keys, so the second
+ * failed on a unique violation after its own writes had committed — a 500 on an
+ * operation that had worked (Codex, 18 Sep 2026).
+ */
+test('two refreshes at once both finish, and the figures are whole', async () => {
+  const [a, b] = await Promise.all([index.refreshStats(), index.refreshStats()]);
+  assert.ok(a.n > 0 && b.n > 0, 'both answered with a count');
+  const { rows: [dupes] } = await query(
+    `select count(*)::int as n from (
+       select area_slug, category, subcategory, source, ownership, count(*)
+         from area_stats group by 1,2,3,4,5 having count(*) > 1) d`);
+  assert.equal(dupes.n, 0, 'and nothing is in there twice');
+});

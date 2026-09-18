@@ -2277,7 +2277,7 @@ router.post('/bars/:sub/effect', requires('view_library'), async (req, res, next
               (select string_agg(distinct pa.area_slug, ',') from place_areas pa join localities l on l.slug = pa.area_slug
                 where pa.venue_ref = pi.venue_ref and l.kind = 'county') as counties
          from place_index pi where pi.subcategory = $1`, [sub]);
-    const bar = want.map((f) => ({ fact: f.fact, weight: Number(f.weight) || FACT_WEIGHTS[f.fact] || 0, required: Boolean(f.required) }));
+    const bar = want.map(weighted);
     let readyNow = 0, readyAfter = 0, lost = 0, gained = 0;
     const moved = new Set();
     for (const r of rows) {
@@ -2306,12 +2306,26 @@ router.post('/bars/:sub/effect', requires('view_library'), async (req, res, next
   } catch (err) { next(err); }
 });
 
+/**
+ * A fact, with the weight somebody chose.
+ *
+ * Nought is a weight: a fact can be required and worth nothing towards the
+ * score, which is what "required" and "weight" being two axes means. `||` read
+ * it as "not given" and put the default back, so the one setting the board
+ * cannot otherwise express was silently impossible (Codex, 18 Sep 2026).
+ */
+const weighted = (f) => ({
+  fact: f.fact,
+  weight: Number.isFinite(Number(f.weight)) ? Number(f.weight) : (FACT_WEIGHTS[f.fact] ?? 0),
+  required: Boolean(f.required),
+});
+
 /** Save the bar, and work every affected place out again from scratch. */
 router.put('/bars/:sub', requires('manage_library'), async (req, res, next) => {
   try {
     const sub = String(req.params.sub);
     const want = Array.isArray(req.body?.facts) ? req.body.facts : [];
-    const before = await index.setBar(sub, want.map((f) => ({ fact: f.fact, weight: Number(f.weight) || FACT_WEIGHTS[f.fact] || 0, required: Boolean(f.required) })), actor(req).actorLabel);
+    const before = await index.setBar(sub, want.map(weighted), actor(req).actorLabel);
     const out = await index.rescore({ subcategory: sub });
     await index.refreshStats();
     await writeAudit({ ...actor(req), action: 'ready.bar', subjectType: 'subcategory', subjectId: sub, subjectLabel: sub, before: { facts: before }, after: { facts: want } });

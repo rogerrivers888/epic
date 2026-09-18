@@ -273,6 +273,12 @@ router.delete('/open/:id', async (req, res, next) => {
  * up for.
  */
 export async function findIntroductions(entry) {
+  // Not from something that is waiting to be read.
+  //
+  // Hiding an edited entry kept it out of everybody else's candidate list, and
+  // the *initiating* entry was never checked — so saying an abusive offer again
+  // hid it and then introduced it to people anyway (Codex, 18 Sep 2026).
+  if (entry?.hidden || entry?.state !== 'active') return 0;
   const mine = await sideOf(entry);
   const candidates = await repo.candidatesFor(entry);
   let made = 0;

@@ -1050,6 +1050,16 @@ export async function refreshStats() {
   // (Codex, 17 Sep 2026). In one transaction, a reader holds the previous
   // complete answer until the replacement is ready.
   return withTransaction(async (client) => {
+    // And one at a time, waiting rather than skipping.
+    //
+    // Two refreshes overlapping — a collection finishing while somebody saves a
+    // ready bar — both delete the visible rows and then both insert the same
+    // keys, so the second failed on a unique violation *after* its own writes
+    // had committed: a 500 on an operation that worked (Codex, 18 Sep 2026).
+    // A transaction lock rather than the build lock's try-and-skip, because the
+    // second one has figures of its own to write down and must not be the one
+    // that does not run.
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', ['epic.placeIndex.stats']);
     await client.query('delete from area_stats');
     // Three kinds, counted as three. Owned used to mean "not identified", which
     // put every place a household had merely *claimed* into the figure the screen
