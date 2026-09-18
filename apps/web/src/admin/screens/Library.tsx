@@ -38,7 +38,7 @@ import { colors, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Chip, Row, Wrap } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
-import { AdminPage, Button, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
+import { AdminPage, Aside, Button, Banner, FilterChip, FilterRow, PageHead, Panel, Pill, Tile, TileRow, ago, count, plural } from '../kit';
 import { asOneOf, asText, useQueryState } from '../../router';
 import { Reading } from './Reading';
 
@@ -814,13 +814,9 @@ function Visiting({ canManage, wide }: { canManage: boolean; wide: boolean }) {
         </TileRow>
       ) : null}
 
-      <Banner>
-        A place reaches a screen only when something establishes that the public may visit it.
-        Four sources answer: the Wikidata types, the OpenStreetMap tags on the same feature, the
-        categories on its Wikipedia article, and — for a place already being looked up for its
-        rating — what Google calls it. A dwelling or an access=private tag refuses it outright and
-        nothing can talk that round.
-      </Banner>
+      <Aside says="A place reaches a screen only when something establishes that the public may visit it."
+             title="Who says you may visit"
+             more="Four sources answer: the Wikidata types, the OpenStreetMap tags on the same feature, the categories on its Wikipedia article, and — for a place already being looked up for its rating — what Google calls it. A dwelling, or an access=private tag, refuses it outright and nothing can talk that round." />
 
       {canManage ? (
         <Wrap>

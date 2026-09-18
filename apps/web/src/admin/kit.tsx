@@ -28,6 +28,7 @@ import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from '
 import { Press } from '../components/press';
 import { colors, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
+import { Explain } from './explain';
 import { Button as BaseButton, Row, Wrap } from '../components/ui';
 import { useViewport } from '../hooks/useViewport';
 
@@ -265,6 +266,28 @@ export function Banner({ tone = 'plain', children }: { tone?: Tone; children: Re
     <View style={[styles.banner, { borderLeftColor: RULE[tone], borderLeftWidth: tone === 'crit' ? 1 : BORDER }]}>
       <Text style={[type.small, { flex: 1, color: tone === 'crit' ? colors.overrun : colors.inkMuted }]}>{children}</Text>
     </View>
+  );
+}
+
+/**
+ * One line, and the rest of it behind the mark.
+ *
+ * The standing instruction, asked for repeatedly: the screen tells the story,
+ * the detail goes behind an info icon, and never a paragraph. Four banners in
+ * the back office were paragraphs (18 Sep 2026, the separate audit), so this is
+ * the shape they take instead — the sentence that matters, an info mark, and
+ * everything else on hover.
+ */
+export function Aside({ tone = 'plain', says, more, title }: {
+  tone?: Tone; says: string; more: string; title?: string;
+}) {
+  return (
+    <Explain tip={[title ?? says, more]}>
+      <View style={[styles.banner, { borderLeftColor: RULE[tone], borderLeftWidth: tone === 'crit' ? 1 : BORDER }]}>
+        <Text style={[type.small, { color: tone === 'crit' ? colors.overrun : colors.inkMuted }]}>{says}</Text>
+        <Icon name="info" size={13} strokeWidth={2} color={colors.inkMuted} />
+      </View>
+    </Explain>
   );
 }
 

@@ -45,7 +45,7 @@ import { Icon } from '../../components/Icon';
 import { Button, Row, Stepper } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
 import { asText, useQueryState } from '../../router';
-import { AdminPage, Choice, Dropdown, PageHead, Section, TextAction, ago, count, day } from '../kit';
+import { AdminPage, Aside, Choice, Dropdown, PageHead, Section, TextAction, ago, count, day } from '../kit';
 
 const WIDE = 900;
 
@@ -175,10 +175,12 @@ export function Sources() {
           </View>
         </View>
 
-        {/* The guidance, in words, where the rows start. */}
-        <Text style={[type.tiny, styles.guide]}>
-          Each row is one field. <Text style={styles.k}>Have it</Text> is how many of the providers on screen offer it; <Text style={styles.k}>we read</Text> is how many of those the code takes it from. Open a row to see them: a tick against every provider that has it, in bold where we read it, and beside each the provider's own name for the field. The grey word under a field is the best we may keep it as. {rows.length} of {data?.fields.length ?? 0} fields · {providers.length} of {allProviders.length} providers.
-        </Text>
+        {/* One line, the rest behind the mark: this was four sentences, and the
+            standing instruction is that a screen carries no paragraph (18 Sep
+            2026, the separate audit). */}
+        <Aside says={`${rows.length} of ${data?.fields.length ?? 0} fields · ${providers.length} of ${allProviders.length} providers`}
+               title="How to read this"
+               more={'Each row is one field. "Have it" is how many of the providers on screen offer it; "we read" is how many of those the code takes it from. Open a row to see them: a tick against every provider that has it, in bold where we read it, and beside each the provider\'s own name for the field. The grey word under a field is the best we may keep it as.'} />
 
         <View style={styles.tHead}>
           <Text style={[styles.headText, { flex: 1 }]}>Field</Text>

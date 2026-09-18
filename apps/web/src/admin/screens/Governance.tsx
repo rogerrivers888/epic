@@ -23,7 +23,7 @@ import { Row, Wrap } from '../../components/ui';
 import { Icon } from '../../components/Icon';
 import { SideSheet } from '../../components/SideSheet';
 import {
-  AdminPage, Button, Banner, Column, DataTable, FilterChip, PageHead, Panel, Pill,
+  AdminPage, Aside, Button, Banner, Column, DataTable, FilterChip, PageHead, Panel, Pill,
   ago, count, day, pounds,
 } from '../kit';
 
@@ -58,10 +58,9 @@ export function Roles({ canManage }: { canManage: boolean }) {
       />
       {error ? <Banner tone="crit">{error}</Banner> : null}
 
-      <Banner>
-        Reading and changing are always a separate tick. It is tempting to grant the one that nearly fits — and then
-        whoever may invite a friend may also delete a household.
-      </Banner>
+      <Aside says="Reading and changing are always a separate tick."
+             title="Two ticks, never one"
+             more="It is tempting to grant the one that nearly fits — and then whoever may invite a friend may also delete a household." />
 
       {adding ? <NewRole doors={doors} capabilities={capabilities} onDone={() => { setAdding(false); void load(); }} /> : null}
 
@@ -258,11 +257,8 @@ export function Plans({ canManage }: { canManage: boolean }) {
       <PageHead title="Plans" sub="What a household can be on, and what it is priced at." />
       {error ? <Banner tone="crit">{error}</Banner> : null}
 
-      <Banner tone="warn">
-        <Text style={{ fontWeight: '700' }}>A price here is not a charge. </Text>
-        Epic holds no payment provider, so setting one changes what the revenue report says is contracted — it does not
-        take anybody's money, and nothing in Epic will.
-      </Banner>
+      <Aside tone="warn" says="A price here is not a charge."
+             more="Epic holds no payment provider, so setting one changes what the revenue report says is contracted — it does not take anybody's money, and nothing in Epic will." />
 
       <Panel padded={false}>
         <DataTable
