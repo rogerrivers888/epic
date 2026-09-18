@@ -330,7 +330,27 @@ export async function scoringInputsFor(venueRef) {
       limit 1`,
     [venueRef],
   );
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+  // A harvested place has neither row, and there are more of those in the index
+  // than of anything else: the board that exists to explain a score said "not
+  // scored" over a place the index scores a hundred (18 Sep 2026, the separate
+  // audit). Its evidence is on the attraction and its detail row, which is what
+  // the index scored it from.
+  const { rows: atlas } = await query(
+    `select coalesce(a.venue_ref, 'atlas:' || a.id::text) as venue_ref, null as area_code,
+            a.name as sweep_name, a.crowd_band, a.count_band,
+            coalesce(a.accolades, '[]'::jsonb) as accolades,
+            null as sweep_cuisines, false as chain, null as chain_scale, 1 as sites,
+            a.epic_score, null as owned_score, null as scored_at,
+            a.website as sweep_website,
+            a.name as record_name, a.website as record_website, a.summary,
+            d.visit->>'openingHours' as opening_hours,
+            null as record_cuisines, null as enrich_state, null as item_count, null as menu_state
+       from attractions a
+       left join attraction_details d on d.attraction_id = a.id
+      where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden'
+      limit 1`, [venueRef]);
+  return atlas[0] ?? null;
 }
 
 /** How the sweep is doing, per area — the owner's figure for the dataset. */
@@ -653,7 +673,27 @@ export async function placeForMenu(venueRef) {
       limit 1`,
     [venueRef],
   );
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+  // A harvested place has neither row, and there are more of those in the index
+  // than of anything else: the board that exists to explain a score said "not
+  // scored" over a place the index scores a hundred (18 Sep 2026, the separate
+  // audit). Its evidence is on the attraction and its detail row, which is what
+  // the index scored it from.
+  const { rows: atlas } = await query(
+    `select coalesce(a.venue_ref, 'atlas:' || a.id::text) as venue_ref, null as area_code,
+            a.name as sweep_name, a.crowd_band, a.count_band,
+            coalesce(a.accolades, '[]'::jsonb) as accolades,
+            null as sweep_cuisines, false as chain, null as chain_scale, 1 as sites,
+            a.epic_score, null as owned_score, null as scored_at,
+            a.website as sweep_website,
+            a.name as record_name, a.website as record_website, a.summary,
+            d.visit->>'openingHours' as opening_hours,
+            null as record_cuisines, null as enrich_state, null as item_count, null as menu_state
+       from attractions a
+       left join attraction_details d on d.attraction_id = a.id
+      where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden'
+      limit 1`, [venueRef]);
+  return atlas[0] ?? null;
 }
 
 /**

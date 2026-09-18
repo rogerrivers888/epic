@@ -746,7 +746,13 @@ export async function decideIdCheck(id, { pass, note, by }) {
     // A failed check ends the match, so it has to be able to see one that is
     // already ended.
     if (!pass) return { check, match: await repo.lockMatch(before.match_id, client, { withEnded: true }) };
-    const match = await repo.lockMatch(before.match_id, client);
+    // The match this check belongs to may have ended under it — moderation
+    // rejected the offer while somebody's identity was still being looked at.
+    // The check is still decided, because a person is owed an answer about
+    // their own passport; what it must not do is move an ended match's stage
+    // (Codex, 18 Sep 2026).
+    const match = await repo.lockMatch(before.match_id, client, { withEnded: true });
+    if (!match || match.stage === 'ended' || match.stage === 'lapsed') return { check, match: match ?? null };
     const when = new Date();
     const patch = before.side === 'host' ? { hostVerifiedAt: when } : { guestVerifiedAt: when };
     const stage = nextStage(match, before.side === 'host' ? { hostVerified: when } : { guestVerified: when });

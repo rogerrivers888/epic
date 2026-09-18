@@ -305,12 +305,28 @@ export async function whereOf({ lat = null, lng = null, areaSlug = null } = {}) 
   // 2026). A cell is about 5 km across, so a degree either way is generous and
   // still says "not here" for anywhere we do not cover.
   const NEAR_DEGREES = 1;
+  // And near in kilometres, not in degrees.
+  //
+  // A degree of longitude is 111 km at the equator and 70 in Britain, so the box
+  // alone put Calais inside Kent's — the nearest cell was thirty-odd kilometres
+  // away across the Channel and the search was filed under a county nobody in
+  // it had searched (Codex, 18 Sep 2026). The box is the index-friendly first
+  // cut; this is the answer. Twenty-five kilometres is wider than a cell and
+  // narrower than a sea.
+  const NEAR_KM = 25;
   const { rows: [cell] } = await query(
     `select code, outcode from geo_cells
       where lat between $1::double precision - $3::double precision and $1::double precision + $3::double precision
         and lng between $2::double precision - $3::double precision and $2::double precision + $3::double precision
+        and 111.32 * sqrt(
+              (lat - $1::double precision) * (lat - $1::double precision)
+              + ((lng - $2::double precision) * cos(radians($1::double precision)))
+                * ((lng - $2::double precision) * cos(radians($1::double precision)))
+            ) <= $4::double precision
       order by (lat - $1::double precision) * (lat - $1::double precision)
-             + (lng - $2::double precision) * (lng - $2::double precision) limit 1`, [lat, lng, NEAR_DEGREES]);
+             + ((lng - $2::double precision) * cos(radians($1::double precision)))
+               * ((lng - $2::double precision) * cos(radians($1::double precision)))
+      limit 1`, [lat, lng, NEAR_DEGREES, NEAR_KM]);
   // Outside the coverage: the search is written down with where it was and no
   // area at all, which is the truth and is itself a finding.
   if (!cell) return { areaSlug: null, cell: null };

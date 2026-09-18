@@ -716,3 +716,46 @@ test('the screen says what it drew, and an emptied screen is an empty search', a
   assert.equal(await log.noteDrawn({ searchId: id, householdId: other.household.id, refs: ['test:drawn-2'] }), false);
   assert.equal((await said()).shown_total, 0);
 });
+
+/**
+ * A place that has been retired leaves the index.
+ *
+ * Hiding an attraction in the library took it out of the harvest's insert and
+ * left the row it had already made, so a rebuild went on counting it as known,
+ * as owned, and as somewhere worth collecting (Codex, 18 Sep 2026).
+ */
+test('a hidden attraction leaves the index, unless something else holds the place', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [region] } = await query('select slug from regions limit 1');
+  const make = async (name) => (await query(
+    `insert into attractions (name, slug, region_slug, state, lat, lng, summary, first_seen, last_seen)
+     values ($1, $3, $2, 'published', 51.5, -0.1, 'A sentence of ours', now(), now()) returning *`,
+    [name, region.slug, `retire-${Math.random().toString(36).slice(2, 10)}`])).rows[0];
+  const alone = await make('Retired, and nothing else holds it');
+  const claimed = await make('Retired, but a household saved it');
+  const refOf = (a) => a.venue_ref ?? `atlas:${a.id}`;
+  await query(
+    `insert into household_places (household_id, venue_ref, label, kind, first_seen, last_seen)
+     values ($1, $2, 'Somewhere they saved', 'loved', now(), now())`, [household.id, refOf(claimed)]);
+
+  await index.reindex();
+  const held = async (ref) => (await query('select count(*)::int as n from place_index where venue_ref = $1', [ref])).rows[0].n;
+  assert.equal(await held(refOf(alone)), 1, 'a published attraction is in the index');
+  assert.equal(await held(refOf(claimed)), 1);
+
+  await query(`update attractions set state = 'hidden' where id = any($1::uuid[])`, [[alone.id, claimed.id]]);
+  await index.reindex();
+  assert.equal(await held(refOf(alone)), 0, 'retired, and nothing else was holding it');
+  assert.equal(await held(refOf(claimed)), 1, 'a household claimed it, so the place stays');
+  // Its atlas *source* row stands, and deliberately: the reference itself is an
+  // atlas reference, so the atlas is still where the place came from. What it no
+  // longer is, is a reason to keep the place.
+  const { rows: [src] } = await query(
+    `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'atlas'`, [refOf(claimed)]);
+  assert.equal(src.n, 1);
+  // And the retired one took its area and cell rows with it.
+  const orphans = await query(
+    `select (select count(*) from place_areas where venue_ref = $1)::int as areas,
+            (select count(*) from place_cells where venue_ref = $1)::int as cells`, [refOf(alone)]);
+  assert.deepEqual(orphans.rows[0], { areas: 0, cells: 0 });
+});
