@@ -1721,6 +1721,8 @@ export type QueueItem = {
     id: string; kind: string; subjectType: string; subjectId: string;
     maker: string | null; place: string | null; ref: string | null; area: string | null;
     state: string; reported: boolean; reportReason: string | null; madeAt: string;
+    /** Which version of the words this is — handed back when deciding, so nobody approves text they were not shown. */
+    version?: string | null;
     reason: string | null; message: string | null; told: boolean;
   };
   detail: Record<string, any> | null;
@@ -2676,8 +2678,12 @@ export const api = {
    * `stale` is what was *not* approved: a household rewrote it after the row
    * was raised, so nobody has read those words and it is still waiting.
    */
-  adminQueueApprove: (ids: string[]) =>
-    post<{ approved: number; ids: string[]; stale?: string[]; why?: string }>('/api/admin/queue/approve', { ids }),
+  /**
+   * `seen` is id → the version of the words the screen drew, so a decision is
+   * about what somebody actually read. Without it nothing is held back.
+   */
+  adminQueueApprove: (ids: string[], seen?: Record<string, string | null>) =>
+    post<{ approved: number; ids: string[]; stale?: string[]; why?: string }>('/api/admin/queue/approve', { ids, ...(seen ? { seen } : {}) }),
   /** BO5b — the rejection, beside the message it sends. */
   adminQueueReject: (id: string, body: { reason: string; message?: string | null; tell?: boolean }) =>
     post<{ ok: true; id: string; reason: string; told: boolean; message: string | null; why: string | null }>(`/api/admin/queue/${id}/reject`, body),

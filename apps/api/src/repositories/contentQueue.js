@@ -277,13 +277,13 @@ export async function syncFlagged() {
        where q.subject_type = $1 and q.subject_id = src.id::text
          and q.state <> 'waiting' and src.${column} is not null
          and (q.decided_at is null or src.${column} > q.decided_at)`, [type]);
-    // And the row is only as old as the words it is asking about.
+    // The row's age follows the words it is asking about, so the queue sorts
+    // by when the thing in front of somebody was actually written.
     //
-    // Whatever its state. Approve refuses to publish words written after the
-    // row was raised, so until the row is raised again *about those words* it
-    // cannot be approved at all — and a row that was still waiting when they
-    // were written never changed state, so nothing above would have moved it
-    // (Codex, 18 Sep 2026).
+    // It is *not* a guard against approving unread words — it cannot be, because
+    // this runs on every queue load and would forgive an edit made a second ago
+    // (Codex, 18 Sep 2026). That guard is the version the screen was shown,
+    // handed back with the decision.
     await query(`
       update content_queue q
          set made_at = src.${column}
@@ -483,10 +483,42 @@ export function group(rows = [], { limit = 120 } = {}) {
 }
 
 /** One item, with everything the reviewer needs to decide without leaving. */
+/**
+ * Which version of the words this row is about.
+ *
+ * A household can rewrite a review, a question, an entry or a note while it
+ * sits in the queue, and approving lifts the decision onto whatever the text is
+ * *then* — so a moderator who read one thing would publish another. The row's
+ * own age cannot answer this: `sync()` runs on every queue load and moves it,
+ * and two moderators reading at different moments need different answers. The
+ * only thing that can is the version the screen was actually shown, handed back
+ * when the decision is made (Codex, 18 Sep 2026, twice — the second time
+ * because my first answer moved the row's clock and closed nothing).
+ *
+ * Null for a photograph: there is no rewriting one, only deciding about it.
+ */
+const VERSIONED = {
+  host_review: ['host_reviews', 'rewritten_at'],
+  chat_topic: ['chat_topics', 'rewritten_at'],
+  open_entry: ['open_entries', 'rewritten_at'],
+  visit: ['visits', 'note_rewritten_at'],
+};
+
+export async function versionOf(subjectType, subjectId, run = query) {
+  const pair = VERSIONED[subjectType];
+  if (!pair) return null;
+  const [table, column] = pair;
+  const { rows: [r] } = await run(
+    `select ${column} as v from ${table} where id = $1::uuid`, [subjectId]).catch(() => ({ rows: [] }));
+  return r?.v ? new Date(r.v).toISOString() : null;
+}
+
 export async function one(id) {
   const { rows: [q] } = await query('select * from content_queue where id = $1', [id]);
   if (!q) return null;
   const out = { ...q, detail: null, maker: null, picture: null };
+  // What the screen is about to be shown, so the decision can name it.
+  out.version = await versionOf(q.subject_type, q.subject_id);
   if (q.kind === 'photo') {
     const { rows: [img] } = await query(
       `select ia.id, ia.title, ia.caption, ia.licence, ia.credit_line, ia.width, ia.height, ia.bytes,
@@ -551,7 +583,7 @@ export async function one(id) {
 }
 
 /** Approve — one, or forty photographs together. */
-export async function approve(ids, who) {
+export async function approve(ids, who, { seen = null } = {}) {
   // The decision and its effect commit together.
   //
   // Marking the queue row approved and then restoring the thing were two
@@ -569,18 +601,23 @@ export async function approve(ids, who) {
     // *now* — so a moderator who read one thing could publish another (Codex,
     // 18 Sep 2026). The rewrite requeues the row a minute later, by which time
     // it is public. These are left waiting instead, and the answer names them.
+    // Against the version the screen was shown, not against the row's own clock.
+    //
+    // The row's clock is no guard at all: `sync()` runs on every queue load and
+    // moves it, so an edit made while somebody was reading would be forgiven by
+    // the very next list request (Codex, 18 Sep 2026, correcting my own first
+    // answer). Where the caller says nothing about the version, nothing is held
+    // back — a batch of photographs has no version to speak of.
     const stale = new Set();
-    for (const [type, table, column] of [
-      ['host_review', 'host_reviews', 'rewritten_at'], ['chat_topic', 'chat_topics', 'rewritten_at'],
-      ['open_entry', 'open_entries', 'rewritten_at'], ['visit', 'visits', 'note_rewritten_at'],
-    ]) {
-      const { rows: changed } = await run(
-        `select q.id from content_queue q
-           join ${table} src on q.subject_id = src.id::text
-          where q.id = any($1::uuid[]) and q.subject_type = $2
-            and src.${column} is not null and src.${column} > q.made_at`,
-        [ids, type]);
-      for (const c of changed) stale.add(c.id);
+    if (seen) {
+      const { rows: subjects } = await run(
+        'select id, subject_type, subject_id from content_queue where id = any($1::uuid[])', [ids]);
+      for (const r of subjects) {
+        const asked = seen[r.id];
+        if (asked === undefined) continue;
+        const now = await versionOf(r.subject_type, r.subject_id, run);
+        if ((asked ?? null) !== now) stale.add(r.id);
+      }
     }
     const decide = ids.filter((id) => !stale.has(id));
 

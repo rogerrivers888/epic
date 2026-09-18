@@ -91,6 +91,9 @@ router.get('/:id', requires('view_library'), async (req, res, next) => {
         id: item.id, kind: item.kind, subjectType: item.subject_type, subjectId: item.subject_id,
         maker: item.maker_label, place: item.place_label, ref: item.venue_ref, area: item.area_slug,
         state: item.state, reported: item.reported, reportReason: item.report_reason, madeAt: item.made_at,
+        // Which version of the words this is. Handed back when the decision is
+        // made, so nobody approves text they were not shown.
+        version: item.version ?? null,
         reason: item.reason, message: item.message, told: item.told,
       },
       detail: item.detail,
@@ -136,7 +139,11 @@ router.post('/approve', requires('manage_library'), async (req, res, next) => {
         throw bad(`A ${notBatchable[0].said ?? notBatchable[0].label.toLowerCase()} is decided on its own, never in a batch.`);
       }
     }
-    const done = await queue.approve(ids, actor(req).actorLabel);
+    // What the screen was shown, so a decision is about the words somebody
+    // actually read. `seen` is a map of id → version, straight from the detail
+    // the screen drew (Codex, 18 Sep 2026).
+    const seen = req.body?.seen && typeof req.body.seen === 'object' ? req.body.seen : null;
+    const done = await queue.approve(ids, actor(req).actorLabel, { seen });
     await writeAudit({ ...actor(req), action: 'queue.approve', subjectType: 'content', subjectId: ids.join(','), subjectLabel: `${done.length} approved`, after: { ids } });
     // What was not approved, and why. `approve` holds back a row whose words
     // were rewritten after it was raised, because nobody has read those words

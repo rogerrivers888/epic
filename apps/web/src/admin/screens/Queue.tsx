@@ -174,7 +174,13 @@ export function Queue({ canManage }: { canManage: boolean }) {
   const approve = useCallback(async (ids: string[]) => {
     setBusy(true);
     try {
-      const out = await api.adminQueueApprove(ids);
+      // What this screen was actually shown, where it has it. The drawer holds
+      // the version it drew; a row ticked in the list has not been opened, so
+      // there is nothing to claim about it and nothing is held back for it.
+      const seen = item?.item && ids.includes(item.item.id)
+        ? { [item.item.id]: item.item.version ?? null }
+        : undefined;
+      const out = await api.adminQueueApprove(ids, seen);
       setPicked(new Set());
       load();
       // What was held back stays open and says why. A household can rewrite
@@ -185,7 +191,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
       setNote(held.length ? `${held.length === 1 ? 'That was' : `${held.length} were`} ${out.why ?? 'rewritten while you were reading, so still waiting'}.` : null);
       if (open && ids.includes(open) && !held.includes(open)) setOpen('');
     } finally { setBusy(false); }
-  }, [load, open, setOpen]);
+  }, [load, open, setOpen, item]);
 
   if (!data) return <AdminPage><Waiting /></AdminPage>;
 

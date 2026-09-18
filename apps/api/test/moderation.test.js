@@ -882,13 +882,20 @@ test('words written while somebody was reading them are not published', async ()
   const { rows: [q] } = await query(
     `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
 
+  // What the moderator is shown, which is what the decision has to be about.
+  const seenNow = (await queue.one(q.id)).version;
+
   // The household edits it while it is sitting in the queue — after the
   // moderator opened it and before they pressed the button. Approving lifts
-  // `hidden` from whatever the text is *now*, so somebody who read one thing
-  // would publish another; the rewrite requeues the row a minute later, by
-  // which time it is public (Codex, 18 Sep 2026).
+  // the decision onto whatever the text is *now*, so somebody who read one
+  // thing would publish another (Codex, 18 Sep 2026).
+  //
+  // The row's own clock is no guard: `sync()` runs on every queue load and
+  // would forgive an edit made a second ago. Only the version the screen was
+  // shown can answer it.
   await chat.updateTopic(topic.id, { body: 'Actually, something abusive.' });
-  const out = await queue.approve([q.id], 'the owner (passcode)');
+  await queue.sync();
+  const out = await queue.approve([q.id], 'the owner (passcode)', { seen: { [q.id]: seenNow } });
   assert.deepEqual(out.stale, [q.id], 'the answer names what it would not publish');
   assert.equal((await query(
     `select state from content_queue where id = $1`, [q.id])).rows[0].state, 'waiting',
@@ -900,10 +907,11 @@ test('words written while somebody was reading them are not published', async ()
     `select decided_at from content_queue where id = $1`, [q.id])).rows[0].decided_at, null,
   'nothing was decided about the new words');
 
-  // Once the row has been raised again about those words, approving them works
-  // — the guard is about words nobody has read, not about rewriting.
-  await queue.sync();
-  const second = await queue.approve([q.id], 'the owner (passcode)');
+  // Reading the new words and deciding about *those* works — the guard is about
+  // words nobody has read, not about rewriting.
+  const seenAgain = (await queue.one(q.id)).version;
+  assert.notEqual(seenAgain, seenNow, 'and it is a different version');
+  const second = await queue.approve([q.id], 'the owner (passcode)', { seen: { [q.id]: seenAgain } });
   assert.equal(second.stale, undefined, 'the new words have been read now');
   assert.equal((await query(
     `select state from content_queue where id = $1`, [q.id])).rows[0].state, 'approved');
