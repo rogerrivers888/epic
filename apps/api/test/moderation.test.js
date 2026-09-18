@@ -653,3 +653,22 @@ test('a household can still find its own entry while it waits to be read again',
     [household.id]);
   assert.equal(pool.length, 0);
 });
+
+/**
+ * A report against something already approved is a reason to look again.
+ *
+ * The reported lane is the reports nobody has dealt with, so leaving the row
+ * saying "approved" filed the report where nobody was looking and the content
+ * stayed up (Codex, 18 Sep 2026).
+ */
+test('reporting approved content puts it back in front of somebody', async () => {
+  const { host, q } = await aReview();
+  await queue.approve([q.id], 'the owner (passcode)');
+  assert.equal((await hosting.publishedReviews(host.id)).length, 1);
+
+  await queue.report({ id: q.id, reason: 'abusive', by: null });
+  const { rows: [row] } = await query('select state, reported, reason from content_queue where id = $1', [q.id]);
+  assert.equal(row.state, 'waiting', 'back in the queue');
+  assert.equal(row.reported, true, 'and in the lane that is worked first');
+  assert.equal(row.reason, null, 'the old decision is not still standing');
+});

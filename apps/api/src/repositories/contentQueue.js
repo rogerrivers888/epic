@@ -294,7 +294,18 @@ export async function syncFlagged() {
   await query(`
     update content_queue q
        set reported = true,
-           report_reason = coalesce(q.report_reason, r.reason)
+           report_reason = coalesce(q.report_reason, r.reason),
+           -- And back in front of somebody.
+           --
+           -- A report against something already approved left the row saying
+           -- approved, and the reported lane is the ones still waiting — so the
+           -- report was never shown to anybody and the content stayed up
+           -- (Codex, 18 Sep 2026). A rejected one is left alone: it has already
+           -- been dealt with, more firmly than a report asks for.
+           state = case when q.state = 'approved' then 'waiting' else q.state end,
+           reason = case when q.state = 'approved' then null else q.reason end,
+           decided_at = case when q.state = 'approved' then null else q.decided_at end,
+           decided_by = case when q.state = 'approved' then null else q.decided_by end
       from (
         -- A reply's report carries its topic's id too, because the column is
         -- mandatory. Reading it as a report of the topic promoted an otherwise
@@ -775,7 +786,14 @@ async function suppress(subjectType, subjectId, { reason, who, run = query }) {
 /** Reported content jumps the queue. */
 export async function report({ id, reason, by }) {
   const { rows: [out] } = await query(
-    `update content_queue set reported = true, reported_at = now(), reported_by = $2, report_reason = $3
+    `update content_queue
+        set reported = true, reported_at = now(), reported_by = $2, report_reason = $3,
+            -- Something already approved goes back in front of somebody, or the
+            -- report is filed where nobody is looking (Codex, 18 Sep 2026).
+            state = case when state = 'approved' then 'waiting' else state end,
+            reason = case when state = 'approved' then null else reason end,
+            decided_at = case when state = 'approved' then null else decided_at end,
+            decided_by = case when state = 'approved' then null else decided_by end
       where id = $1 returning *`, [id, by ?? null, reason ?? null]);
   return out ?? null;
 }
