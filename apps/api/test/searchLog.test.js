@@ -1686,3 +1686,29 @@ test('a postcode written in full is filed under its outcode, not a made-up one',
     `select count(*)::int as n from place_areas where area_slug = 'zz91'`)).rows[0].n, 0,
   'and nothing is filed under an outcode nobody has');
 });
+
+test('an outcode is read the same whichever way a postcode is written', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  await query(`insert into localities (slug, name, kind, country_code) values ('zz8','ZZ8','postcode','GB') on conflict (slug) do nothing`);
+
+  // Four shapes reach `place_records.postcode`: the place editor stores a bare
+  // outward code, and the sources give full postcodes with and without a space.
+  // Taking the last three characters off "ZZ8" leaves nothing usable — so a
+  // full reindex deleted the link the editor had just made and never put it
+  // back (Codex, 18 Sep 2026).
+  const shapes = [['osm:node/pc-bare', 'ZZ8'], ['osm:node/pc-spaced', 'ZZ8 1AB'], ['osm:node/pc-tight', 'ZZ81AB']];
+  for (const [ref, postcode] of shapes) {
+    await index.noteMany([{ ref, lat: 51.4, lng: -0.9, countryCode: 'GB' }], { source: 'osm' });
+    await owned.ensureRecord(ref);
+    await query('update place_records set postcode = $2 where venue_ref = $1', [ref, postcode]);
+  }
+  await index.settleNew(50);
+
+  for (const [ref, postcode] of shapes) {
+    const areas = (await query(
+      `select pa.area_slug from place_areas pa join localities l on l.slug = pa.area_slug
+        where pa.venue_ref = $1 and l.kind = 'postcode'`, [ref])).rows.map((r) => r.area_slug);
+    assert.deepEqual(areas, ['zz8'], `${postcode}: ${areas.join(', ') || 'nothing'}`);
+  }
+});

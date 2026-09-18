@@ -604,12 +604,17 @@ async function reindexWhileLocked({ onProgress }) {
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select r.venue_ref, lower(case
+             -- Already an outward code, which is what the place editor stores
+             -- and what half the sources give us. Taking the last three
+             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
+             -- link the editor had just made and never put it back, and the
+             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
+             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
+               then btrim(upper(r.postcode))
              -- The outward code is everything before the space. Stripping the
              -- space first and then matching let the pattern eat the incode's
              -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist, and the place went missing from the board
-             -- for the one it is actually in (found in the invariant check,
-             -- 18 Sep 2026).
+             -- that does not exist (the invariant check, 18 Sep 2026).
              when position(' ' in btrim(r.postcode)) > 0
                then split_part(btrim(upper(r.postcode)), ' ', 1)
              -- Written without one, the incode is always the last three.
@@ -618,12 +623,17 @@ async function reindexWhileLocked({ onProgress }) {
       from place_records r
      where r.postcode is not null
        and lower(case
+             -- Already an outward code, which is what the place editor stores
+             -- and what half the sources give us. Taking the last three
+             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
+             -- link the editor had just made and never put it back, and the
+             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
+             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
+               then btrim(upper(r.postcode))
              -- The outward code is everything before the space. Stripping the
              -- space first and then matching let the pattern eat the incode's
              -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist, and the place went missing from the board
-             -- for the one it is actually in (found in the invariant check,
-             -- 18 Sep 2026).
+             -- that does not exist (the invariant check, 18 Sep 2026).
              when position(' ' in btrim(r.postcode)) > 0
                then split_part(btrim(upper(r.postcode)), ' ', 1)
              -- Written without one, the incode is always the last three.
@@ -970,12 +980,17 @@ async function settleWhileLocked(limit) {
   await query(`
     insert into place_areas (venue_ref, area_slug)
     select r.venue_ref, lower(case
+             -- Already an outward code, which is what the place editor stores
+             -- and what half the sources give us. Taking the last three
+             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
+             -- link the editor had just made and never put it back, and the
+             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
+             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
+               then btrim(upper(r.postcode))
              -- The outward code is everything before the space. Stripping the
              -- space first and then matching let the pattern eat the incode's
              -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist, and the place went missing from the board
-             -- for the one it is actually in (found in the invariant check,
-             -- 18 Sep 2026).
+             -- that does not exist (the invariant check, 18 Sep 2026).
              when position(' ' in btrim(r.postcode)) > 0
                then split_part(btrim(upper(r.postcode)), ' ', 1)
              -- Written without one, the incode is always the last three.
@@ -984,12 +999,17 @@ async function settleWhileLocked(limit) {
       from place_records r
      where r.venue_ref = any($1) and r.postcode is not null
        and lower(case
+             -- Already an outward code, which is what the place editor stores
+             -- and what half the sources give us. Taking the last three
+             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
+             -- link the editor had just made and never put it back, and the
+             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
+             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
+               then btrim(upper(r.postcode))
              -- The outward code is everything before the space. Stripping the
              -- space first and then matching let the pattern eat the incode's
              -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist, and the place went missing from the board
-             -- for the one it is actually in (found in the invariant check,
-             -- 18 Sep 2026).
+             -- that does not exist (the invariant check, 18 Sep 2026).
              when position(' ' in btrim(r.postcode)) > 0
                then split_part(btrim(upper(r.postcode)), ' ', 1)
              -- Written without one, the incode is always the last three.

@@ -39,8 +39,23 @@ const opened = new Map<string, number>();
 export function heldSearch(surface: Surface, queryId: string | null | undefined, refs: (string | null | undefined)[] = []) {
   if (!queryId) { current.delete(surface); return; }
   current.set(surface, queryId);
-  refs.forEach((ref, i) => { if (ref) positions.set(`${queryId}:${ref}`, i + 1); });
+  refs.forEach((ref, i) => {
+    if (!ref) return;
+    positions.set(`${queryId}:${ref}`, i + 1);
+    // Which search this card came from, kept once.
+    //
+    // "Show me 5 more" leaves the earlier five on screen and hands back a new
+    // search — and the API records only what each ask produced (round 122), so
+    // crediting an old card to the new search attaches an event to a row that
+    // search never had, and leaves the one that did produce it reading as
+    // clicked on nothing (Codex, 18 Sep 2026). First claim wins, which is the
+    // same rule the positions keep.
+    if (!came.has(`${surface}:${ref}`)) came.set(`${surface}:${ref}`, queryId);
+  });
 }
+
+/** Which search each card on a surface came from, where more than one is on screen. */
+const came = new Map<string, string>();
 
 /** The places each search has already had an `open` counted for. */
 const openedOnce = new Set<string>();
@@ -49,7 +64,9 @@ const openingNow = new Set<string>();
 
 /** What the household did to one of the results. */
 export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string | null) {
-  const queryId = current.get(surface);
+  // The search this card came from, where the surface is holding more than one
+  // — otherwise whatever the surface is standing on.
+  const queryId = (venueRef ? came.get(`${surface}:${venueRef}`) : null) ?? current.get(surface);
   if (!queryId) return;
   const key = `${queryId}:${venueRef ?? ''}`;
   // An open is counted once per place per search.
@@ -166,6 +183,8 @@ export function forgetSearch(surface: Surface) {
   current.delete(surface);
   drawn.delete(surface);
   sending.delete(surface);
+  // The cards go with the surface they were on.
+  for (const key of [...came.keys()]) if (key.startsWith(`${surface}:`)) came.delete(key);
 }
 
 /** Which search a surface is standing on, where a screen needs to say so. */
