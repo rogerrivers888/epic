@@ -540,7 +540,11 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
          union all
          select category, places from area_stats
            where area_slug = $1 and category <> '' and subcategory = '' and source = '' and ownership = ''`,
-        [slug ?? ''])).rows).map((r) => [r.key, r.places]));
+        // Counted where the *searches* are counted: a town with no cells reads
+        // its county's demand, and counting the town's own places against the
+        // county's searches says "no places" over a county full of them (Codex,
+        // 18 Sep 2026).
+        [asCounty?.slug ?? slug ?? ''])).rows).map((r) => [r.key, r.places]));
     // "Anything" and "things to do" are every place, and every place that is
     // not food: broad subjects the log records and no shelf is called.
     const everyPlace = scope.kind === 'ring'
@@ -548,7 +552,7 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
       : (await query(
         `select places from area_stats
           where area_slug = $1 and category = '' and subcategory = '' and source = '' and ownership = ''`,
-        [slug ?? ''])).rows[0]?.places ?? 0;
+        [asCounty?.slug ?? slug ?? ''])).rows[0]?.places ?? 0;
     if (everyPlace) {
       known.set('', everyPlace);
       known.set('things', Math.max(0, everyPlace - (known.get('food') ?? 0)));
@@ -957,7 +961,16 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
             ? 'held' : asked.has('google') ? 'no-match' : 'not-asked',
         },
         { key: 'wikidata', label: 'Wikidata', value: att?.wikidata_id ?? rec?.wikidata_id ?? null, state: (att?.wikidata_id ?? rec?.wikidata_id) ? 'held' : att ? 'no-match' : 'not-asked' },
-        { key: 'tripadvisor', label: 'Tripadvisor', value: seen.find((s) => s.source === 'tripadvisor')?.source_place_id ?? null, state: asked.has('tripadvisor') ? 'held' : 'not-asked' },
+        // The same three-way answer Google gets. A null identifier on a source
+        // row is "asked, no match" — the state this panel exists to keep apart
+        // — and reading the row's existence alone reported an identifier as
+        // held where there is none (Codex, 18 Sep 2026).
+        {
+          key: 'tripadvisor', label: 'Tripadvisor',
+          value: ref.startsWith('tripadvisor:') ? ref.slice('tripadvisor:'.length) : (seen.find((x) => x.source === 'tripadvisor')?.source_place_id ?? null),
+          state: ref.startsWith('tripadvisor:') || seen.find((x) => x.source === 'tripadvisor')?.source_place_id
+            ? 'held' : asked.has('tripadvisor') ? 'no-match' : 'not-asked',
+        },
         // A council's own reference for the place — BO2r lists it beside the
         // others (`WIN-PLAY-014`). Nothing holds one yet: no local-authority
         // register is switched on, so the row reads "not asked", which is the

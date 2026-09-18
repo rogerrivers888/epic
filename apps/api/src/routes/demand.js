@@ -68,14 +68,20 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     // only, so a search for a whole category reported "no places" against an
     // area full of them — the wrong fault, and the wrong thing to do about it
     // (Codex, 18 Sep 2026).
+    // The inventory has to be counted where the *searches* are counted. A town
+    // with no cells reads its county's demand (demandScope), and counting the
+    // town's own places against the county's searches said "no places" over a
+    // county full of them — and sent somebody to Collect for nothing (Codex,
+    // 18 Sep 2026).
+    const countSlug = scope.asCounty?.slug ?? areaSlug;
     const known = new Map([
-      ...(areaSlug
+      ...(countSlug
         ? (await query(
           `select subcategory as key, places from area_stats
             where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''
            union all
            select category, places from area_stats
-            where area_slug = $1 and category <> '' and subcategory = '' and source = '' and ownership = ''`, [areaSlug])).rows
+            where area_slug = $1 and category <> '' and subcategory = '' and source = '' and ownership = ''`, [countSlug])).rows
         : (await query(
           `select subcategory as key, count(*)::int as places from place_index
             where subcategory is not null group by subcategory
@@ -91,13 +97,13 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
     // a scope whose places have all yet to be filed read as having none at all
     // — so "Anything" said "no places" over an area full of unshelved ones and
     // pointed at Collect (Codex, 18 Sep 2026).
-    const everything = (await query(areaSlug
+    const everything = (await query(countSlug
       ? `select coalesce((select places from area_stats
                            where area_slug = $1 and category = '' and subcategory = ''
                              and source = '' and ownership = ''),
                          (select count(*)::int from place_areas where area_slug = $1)) as places`
       : `select count(*)::int as places from place_index`,
-    areaSlug ? [areaSlug] : [])).rows[0]?.places ?? 0;
+    countSlug ? [countSlug] : [])).rows[0]?.places ?? 0;
     if (everything) {
       known.set('', everything);
       known.set('things', Math.max(0, everything - (known.get('food') ?? 0)));
