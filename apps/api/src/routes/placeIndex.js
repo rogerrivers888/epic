@@ -31,6 +31,7 @@ import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { TRIPADVISOR_CAP } from '../repositories/runs.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
+import { OTHER_PURSE } from '../constants.js';
 import * as collectRuns from '../repositories/collectRuns.js';
 import * as ownedPlaces from '../repositories/ownedPlaces.js';
 import { googleMatchFor, matchesFor, forgetMisses } from '../sources/providerMatch.js';
@@ -76,9 +77,15 @@ export async function roomToSpend(pence, { holder = null, reserve = true } = {})
     // covered is in `provider_calls`, and counting both would refuse spending
     // that is genuinely there.
     await client.query('delete from spend_reservations where expires_at < now()');
+    // Only the money this ceiling governs. Claude planning and OpenAI speech
+    // land in the same ledger and never ask this ceiling before they run, so
+    // counting them here refuses collection for spending Collect did not do
+    // (Codex, 18 Sep 2026) — on production that was $86.85 of the month.
     const { rows: [spend] } = await client.query(
       `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
-         from provider_calls where created_at > date_trunc('month', now())`);
+         from provider_calls
+        where created_at > date_trunc('month', now())
+          and provider <> all ($1::text[])`, [OTHER_PURSE]);
     const { rows: [held] } = await client.query(
       'select coalesce(sum(pence), 0)::int as pence from spend_reservations');
     // The ledger is in dollars; the ceiling is the owner's, in pounds.

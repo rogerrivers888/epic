@@ -585,6 +585,26 @@ test('the last household to un-save a place stops it being claimed', async () =>
   assert.equal(await ownershipOf(), 'identified', 'and now nobody does');
 });
 
+test('a shortlist claim survives an administrator clearing the last fact', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const { household } = await aHousehold(query);
+  const ref = 'google:CLAIMED-BY-A-SHORTLIST';
+  await owned.claim(household.id, ref, 'shortlist');
+  const ownershipOf = async () => (await query(
+    'select ownership from place_index where venue_ref = $1', [ref])).rows[0].ownership;
+  assert.equal(await ownershipOf(), 'claimed');
+
+  await query(`update place_records set summary = 'Ours.' where venue_ref = $1`, [ref]);
+  assert.equal(await owned.settleOwnership(ref), 'owned');
+
+  // A shortlist suggestion, a trip base, a stay and a visit are only ever in
+  // `place_claims`, and settling read `household_places` alone — so clearing
+  // the field dropped a claimed place to identified until the next rebuild
+  // (Codex, 18 Sep 2026).
+  await query(`update place_records set summary = null where venue_ref = $1`, [ref]);
+  assert.equal(await owned.settleOwnership(ref), 'claimed', 'somebody still asked for it');
+});
+
 test('a cleared fact is none, not an empty one', async () => {
   const owned = await import('../src/repositories/ownedPlaces.js');
   const { holdsAnOwnedFact } = await import('../src/domain/placeIndex.js');

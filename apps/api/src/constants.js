@@ -64,3 +64,21 @@ export function canBill(provider) {
   const parts = String(provider ?? '').split('+').map((p) => p.trim()).filter(Boolean);
   return parts.length ? parts.some((p) => !FREE_SOURCES.has(p)) : true;
 }
+
+/**
+ * Providers that keep their own purse.
+ *
+ * The collection ceiling is the owner's bound on *place data* — what Collect
+ * and Compare are allowed to spend buying places. Claude planning and OpenAI
+ * speech are billed to the same ledger, and neither of them asks this ceiling
+ * before it runs, so counting their money here does nothing but shut Collect
+ * down on spending it cannot see and did not do (Codex, 18 Sep 2026).
+ *
+ * A short list of exclusions rather than a list of what counts, because the
+ * safe fallback for a money guard is the other way round from a content rule:
+ * a provider nobody has classified yet should be counted, not waved through.
+ */
+export const OTHER_PURSE = ['anthropic', 'openai'];
+
+/** Does this row's money come out of the collection budget? */
+export const fromCollectPurse = (provider) => !OTHER_PURSE.includes(String(provider ?? '').trim());

@@ -121,6 +121,11 @@ export async function settleOwnership(venueRef) {
     `select ${ownedRecordSql('r')} as ours from place_records r where r.venue_ref = $1`, [venueRef]);
   const oursToo = Boolean(rec?.ours);
 
+  // Both claim paths, as the rebuild reads them. A shortlist suggestion, a trip
+  // base, a stay and a visit are only ever in `place_claims`, so reading
+  // `household_places` alone dropped them back to identified the moment an
+  // administrator cleared the last owned field — and the collection lane then
+  // treated a place somebody had claimed as one nobody had (Codex, 18 Sep 2026).
   const { rows } = await query(
     `update place_index pi set ownership = case
          when $2 then 'owned'
@@ -131,6 +136,7 @@ export async function settleOwnership(venueRef) {
               and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
            then 'owned'
          when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)
+              or exists (select 1 from place_claims pc where pc.venue_ref = pi.venue_ref)
            then 'claimed'
          else 'identified' end
       where pi.venue_ref = $1

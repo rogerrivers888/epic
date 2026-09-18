@@ -98,3 +98,26 @@ test('Tripadvisor is capped in calls, and a claim is what makes it a cap', async
   assert.equal((await roomToSpend(1, { reserve: false })).claimedPence, 0);
   await releaseSpend(held.reservation);
 });
+
+test('Claude planning and speech come out of a different purse', async () => {
+  await query('delete from spend_reservations');
+  await query("delete from provider_calls where purpose = 'a-test-of-the-purse'");
+  await ceiling(1000);
+
+  // A month of ordinary planning and voice. Neither path asks this ceiling
+  // before it runs, so neither may close collection down (Codex, 18 Sep 2026).
+  await query(
+    `insert into provider_calls (provider, purpose, estimated_cost_usd)
+     values ('anthropic', 'a-test-of-the-purse', 40), ('openai', 'a-test-of-the-purse', 40)`);
+  assert.equal((await roomToSpend(900, { reserve: false })).spentPence, 0);
+  assert.equal((await roomToSpend(900, { reserve: false })).ok, true);
+
+  // Buying a place still counts, and so does a source nobody has classified:
+  // the safe fallback for a money guard is to count it.
+  await query(
+    `insert into provider_calls (provider, purpose, estimated_cost_usd)
+     values ('google', 'a-test-of-the-purse', 8), ('some-new-provider', 'a-test-of-the-purse', 8)`);
+  const after = await roomToSpend(0, { reserve: false });
+  assert.equal(after.spentPence, Math.round(16 * 100 * 0.79));
+  await query("delete from provider_calls where purpose = 'a-test-of-the-purse'");
+});
