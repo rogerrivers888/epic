@@ -1535,7 +1535,18 @@ async function runInspire({ household, accountId = null, attending, session, sta
       try { await thingsAround({ household, session, place: idea.place }); } catch { /* the tap will try again */ }
     }
   } catch (err) {
-    Object.assign(state, { running: false, stage: 'error', error: err?.message || String(err) });
+    // The ideas that are still on the screen keep the search they came from.
+    //
+    // "Show me five more" sets the id aside so a tap on a *new* idea is not
+    // counted against the *old* search. When the run fails there are no new
+    // ideas — the old ones are still there — and leaving it null meant taps on
+    // them were counted against nothing at all (Codex, 18 Sep 2026; the first
+    // attempt put this in the caller's `.catch`, which never runs because this
+    // one swallows the error).
+    Object.assign(state, {
+      running: false, stage: 'error', error: err?.message || String(err),
+      searchId: state.searchId ?? state.searchIdBefore ?? null,
+    });
     await saveSession(session.id, state, null);
   }
 }
@@ -1577,15 +1588,7 @@ router.post('/inspire/more', async (req, res, next) => {
     await saveSession(session.id, state, null);
     res.json({ sessionId: session.id, ref: runRef(session.id), running: true, stage: 'thinking' });
     runInspire({ household, accountId: req.account?.id ?? null, attending, session, state, append: true })
-      .catch(async () => {
-        // The ideas that are still on the screen keep the search they came from.
-        try {
-          if (!state.searchId && state.searchIdBefore) {
-            state.searchId = state.searchIdBefore;
-            await saveSession(session.id, state, null);
-          }
-        } catch { /* the session already records the failure */ }
-      });
+      .catch(() => { /* recorded on the session, including the id it fell back to */ });
   } catch (err) {
     next(err);
   }
