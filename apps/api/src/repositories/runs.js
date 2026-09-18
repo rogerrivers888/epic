@@ -108,7 +108,7 @@ export async function list() {
   // Off the meter rather than the label: a browse that asks several sources
   // together is one row named after all of them (Codex, 18 Sep 2026).
   const ta = await one(
-    `select coalesce(sum(greatest(coalesce((units->>'tripadvisor')::int, 1), 1)), 0)::int as calls,
+    `select coalesce(sum(coalesce((units->>'tripadvisor')::int, 1)), 0)::int as calls,
             max(created_at) as last
        from provider_calls where units ? 'tripadvisor' and created_at > date_trunc('month', now())`);
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);

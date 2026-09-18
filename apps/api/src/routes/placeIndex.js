@@ -1714,7 +1714,11 @@ export async function tripadvisorRoom(want = 0) {
     // browse, and the one ceiling that is contractual rather than budgetary
     // could be walked straight through (Codex, 18 Sep 2026).
     const { rows: [made] } = await client.query(
-      `select coalesce(sum(greatest(coalesce((units->>'tripadvisor')::int, 1), 1)), 0)::int as calls
+      // The units they billed, and nought is nought. A search that found nothing
+      // records `{"tripadvisor": 0}` because the billing is per location
+      // returned, and counting it as one let empty searches eat a contractual
+      // allowance they never spent (Codex, 18 Sep 2026).
+      `select coalesce(sum(coalesce((units->>'tripadvisor')::int, 1)), 0)::int as calls
          from provider_calls
         where units ? 'tripadvisor' and created_at > date_trunc('month', now())`);
     const { rows: [held] } = await client.query(

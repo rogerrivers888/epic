@@ -823,6 +823,14 @@ test('a Tripadvisor location billed inside a mixed call still counts against the
     [household.id]);
   const after = await room.tripadvisorRoom(0);
   assert.equal(before.left - after.left, 4, 'four locations, whatever the row was called');
+
+  // And a search that found nothing bills nothing: the meter says nought
+  // because the billing is per location returned (Codex, 18 Sep 2026).
+  await query(
+    `insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd)
+     values ($1, 'tripadvisor', 'places.search', '{"tripadvisor":0}'::jsonb, 0)`, [household.id]);
+  const empty = await room.tripadvisorRoom(0);
+  assert.equal(empty.left, after.left, 'an empty answer does not eat the allowance');
 });
 
 /**

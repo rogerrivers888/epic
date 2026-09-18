@@ -1562,11 +1562,30 @@ router.post('/inspire/more', async (req, res, next) => {
     // and the screen hands whatever id it is holding to the log — so an open on
     // one of the *new* ideas was counted against the *old* search until the new
     // one was written down (Codex, 18 Sep 2026).
-    Object.assign(state, { running: true, stage: 'thinking', error: null, searchId: null, runStartedAt: new Date().toISOString() });
+    // The old id is set aside, not thrown away.
+    //
+    // Clearing it stopped an open on a *new* idea being counted against the
+    // *old* search — but if the run then fails, the old ideas are still on the
+    // screen and taps on them had nothing to be counted against at all (Codex,
+    // 18 Sep 2026). `runInspire` writes the new one; the failure path puts this
+    // one back.
+    Object.assign(state, {
+      running: true, stage: 'thinking', error: null,
+      searchId: null, searchIdBefore: state.searchId ?? null,
+      runStartedAt: new Date().toISOString(),
+    });
     await saveSession(session.id, state, null);
     res.json({ sessionId: session.id, ref: runRef(session.id), running: true, stage: 'thinking' });
     runInspire({ household, accountId: req.account?.id ?? null, attending, session, state, append: true })
-      .catch(() => { /* recorded on the session */ });
+      .catch(async () => {
+        // The ideas that are still on the screen keep the search they came from.
+        try {
+          if (!state.searchId && state.searchIdBefore) {
+            state.searchId = state.searchIdBefore;
+            await saveSession(session.id, state, null);
+          }
+        } catch { /* the session already records the failure */ }
+      });
   } catch (err) {
     next(err);
   }
