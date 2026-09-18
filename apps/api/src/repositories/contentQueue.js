@@ -568,7 +568,11 @@ export async function one(id) {
   }
   if (q.kind === 'data') {
     const [ref, field] = String(q.subject_id).split('#');
-    const { rows } = await query('select source, value, fetched_at from place_facts where venue_ref = $1 and field = $2', [ref, field]);
+    // The same rule the flag itself is built on: an expired licensed fact is
+    // not evidence, because it is not ours to show (Codex, 18 Sep 2026).
+    const { rows } = await query(
+      `select source, value, fetched_at from place_facts
+        where venue_ref = $1 and field = $2 and (expires_at is null or expires_at > now())`, [ref, field]);
     out.detail = { field, disagree: rows };
   }
   if (q.household_id) {

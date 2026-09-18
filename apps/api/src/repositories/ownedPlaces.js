@@ -44,7 +44,11 @@ export function forgetSourceFacts(venueRef, sources) {
 
 export async function liveFacts(venueRef) {
   const { rows } = await query(
-    'select field, source, value, confidence from place_facts where venue_ref = $1 and expires_at is null',
+    // `expires_at is null` is "ours for good"; a licensed fact that has not yet
+    // expired is also ours *now*, and one that has expired is nobody's. Reading
+    // only the first left a live licensed fact out and, worse, let an expired
+    // one through anywhere the predicate was looser (Codex, 18 Sep 2026).
+    `select field, source, value, confidence from place_facts where venue_ref = $1 and (expires_at is null or expires_at > now())`,
     [venueRef],
   );
   return rows;

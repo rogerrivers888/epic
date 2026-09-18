@@ -1635,3 +1635,26 @@ test('the three shapes a live search hands over all reach the index as themselve
   assert.equal(ids.google, 'STORED-ALREADY');
   assert.equal(ids.own, undefined, 'and "own" is not a source that returns places');
 });
+
+test('a licensed fact past its expiry reaches nobody', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'osm:node/expiring-fact';
+  await owned.ensureRecord(ref);
+  await query('delete from place_facts where venue_ref = $1', [ref]);
+  await query(
+    `insert into place_facts (venue_ref, field, source, value, licence, retention, fetched_at, expires_at)
+     values ($1,'opening_hours','google','"9 to 5"'::jsonb,'rented','until it expires', now() - interval '2 days', now() - interval '1 day'),
+            ($1,'website','osm','"https://example.org"'::jsonb,'odbl','for good', now(), null)`, [ref]);
+
+  // A licensed fact is kept until it expires and swept away minutes later, and
+  // between those two moments every read handed it out — content we are no
+  // longer entitled to show anybody (Codex, 18 Sep 2026). An expired fact is
+  // not a stale fact; it is one we do not have.
+  const held = await owned.liveFacts(ref);
+  const fields = (held ?? []).map((f) => f.field).sort();
+  assert.deepEqual(fields, ['website'], `only what is still ours: ${fields.join(', ')}`);
+
+  // And it is still in the table — the sweep removes it, not the read.
+  assert.equal((await query(
+    'select count(*)::int as n from place_facts where venue_ref = $1', [ref])).rows[0].n, 2);
+});

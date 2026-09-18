@@ -774,7 +774,14 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       `select * from attractions where (venue_ref = $1 or 'atlas:' || id::text = $1) and state <> 'hidden' limit 1`, [ref]);
     const { rows: [sweep] } = await query('select * from scout_places where venue_ref = $1 order by last_seen desc limit 1', [ref]);
     const { rows: seen } = await query('select source, source_place_id, first_seen, last_seen from place_index_sources where venue_ref = $1 order by source', [ref]);
-    const { rows: facts } = await query('select field, source, value, licence, retention, fetched_at, expires_at from place_facts where venue_ref = $1 order by field', [ref]);
+    // Only facts we still hold the right to. A licensed one is kept until it
+    // expires and swept away minutes later, and between those two moments this
+    // would have handed a screen content we are no longer entitled to show
+    // anybody (Codex, 18 Sep 2026). An expired fact is not a stale fact; it is
+    // one we do not have.
+    const { rows: facts } = await query(
+      `select field, source, value, licence, retention, fetched_at, expires_at
+         from place_facts where venue_ref = $1 and (expires_at is null or expires_at > now()) order by field`, [ref]);
     const { rows: areas } = await query(
       `select l.slug, l.name, l.kind from place_areas pa join localities l on l.slug = pa.area_slug where pa.venue_ref = $1 order by l.kind`, [ref]);
     const { rows: pictures } = await query(`
@@ -1528,7 +1535,8 @@ router.get('/place/raw', requires('view_library'), async (req, res, next) => {
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.');
     const { rows: facts } = await query(
-      'select field, source, value, licence, retention, fetched_at, expires_at from place_facts where venue_ref = $1 order by source, field', [ref]);
+      `select field, source, value, licence, retention, fetched_at, expires_at
+         from place_facts where venue_ref = $1 and (expires_at is null or expires_at > now()) order by source, field`, [ref]);
     const { rows: seen } = await query('select source, source_place_id, first_seen, last_seen from place_index_sources where venue_ref = $1', [ref]);
     const asked = new Set(seen.map((s) => s.source));
     const bySource = new Map();
