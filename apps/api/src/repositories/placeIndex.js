@@ -1427,45 +1427,38 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
   const { rows } = await query(`
     with mine as (select venue_ref from place_areas where area_slug = $1),
          rows_ as (
-           -- The website is read off the place, not off the score.
+           -- The website comes off the score, which already worked it out.
            --
-           -- score_parts holds judged, held, missing and notCounted and has
-           -- never held a top-level website, so the column this board
-           -- prints was false for every row in the country — a hole the first
-           -- audit read as "no websites in Kent" (Codex, 18 Sep 2026). A website
-           -- is ours from three places: the record, the venue's own page on the
-           -- attraction, or the sweep.
-           -- One row per place, whatever the stores hold.
-           --
-           -- scout_places is keyed on (area_code, venue_ref), so a place swept
-           -- in two areas is two rows, and two attractions can share a
-           -- reference — either of which multiplied the place through this join
-           -- and inflated known, owned, ready and every fact column with it
-           -- (Codex, 18 Sep 2026). Laterals, so each store answers once.
-           select pa.area_slug, pi.venue_ref, pi.ready, pi.score_parts,
-                  (coalesce(pr.website, att.website, sp.website) is not null) as has_website
+           -- rescore() writes website into score_parts for every place it
+           -- touches, from the same three sources — the record, the venue's own
+           -- page on the attraction, the sweep. Asking those three again here,
+           -- once per place, was three lateral lookups across every place in
+           -- Britain: eighty-three seconds for the country board (18 Sep 2026,
+           -- measured on the deployed site). One jsonb read instead.
+           select pa.area_slug, pi.venue_ref, pi.ready, pi.score_parts
              from mine m
              join place_areas pa on pa.venue_ref = m.venue_ref
              join place_index pi on pi.venue_ref = m.venue_ref
-             left join lateral (
-               select r.website from place_records r where r.venue_ref = m.venue_ref limit 1) pr on true
-             left join lateral (
-               select a.website from attractions a
-                where (a.venue_ref = m.venue_ref or 'atlas:' || a.id::text = m.venue_ref)
-                  and a.state <> 'hidden' limit 1) att on true
-             left join lateral (
-               select s.website from scout_places s where s.venue_ref = m.venue_ref limit 1) sp on true
             where pa.area_slug <> $1
+         ),
+         -- Which towns each outcode's own places also sit in, worked out once
+         -- rather than per row. Joined straight on, it multiplied every place by
+         -- the number of areas it belongs to and every count on the board with
+         -- it (18 Sep 2026 — the same duplication the laterals above exist to
+         -- avoid, made by the fix for the slow one).
+         towns_ as (
+           select r.area_slug, string_agg(distinct t.name, ', ') as towns
+             from rows_ r
+             join place_areas pa3 on pa3.venue_ref = r.venue_ref
+             join localities t on t.slug = pa3.area_slug and t.kind = 'town'
+            group by r.area_slug
          )
     select l.slug, l.name, l.kind,
            -- The towns this outcode's own places actually sit in — the way back
            -- across the two ladders, and the only honest thing to print beside
            -- an outcode. Read through the places, not through a parent an
            -- outcode does not have.
-           (select string_agg(distinct t.name, ', ')
-              from place_areas pa3
-              join localities t on t.slug = pa3.area_slug and t.kind = 'town'
-             where pa3.venue_ref in (select venue_ref from place_areas where area_slug = l.slug)) as towns,
+           tw.towns,
            count(*)::int as known,
            count(*) filter (where pi.ownership = 'owned')::int as owned,
            count(*) filter (where pi.ownership = 'claimed')::int as claimed,
@@ -1480,15 +1473,18 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
                                or (r.score_parts->'notCounted') ? 'what_it_is')::int as description,
            count(*) filter (where (r.score_parts->'held') ? 'hours'
                                or (r.score_parts->'notCounted') ? 'hours')::int      as hours,
-           count(*) filter (where r.has_website)::int                                as website,
+           count(*) filter (where (r.score_parts->>'website') = 'true')::int          as website,
            count(*) filter (where (r.score_parts->'held') ? 'menu'
                                or (r.score_parts->'notCounted') ? 'menu')::int       as menu,
            count(*) filter (where pi.subcategory is not null)::int                   as shelf
       from rows_ r
       join localities l on l.slug = r.area_slug
       join place_index pi on pi.venue_ref = r.venue_ref
+      -- The way back across the two ladders, and the only honest thing to print
+      -- beside an outcode, which has no parent of its own.
+      left join towns_ tw on tw.area_slug = l.slug and l.kind = 'postcode'
        where l.kind in ('town', 'postcode')
-     group by l.slug, l.name, l.kind
+     group by l.slug, l.name, l.kind, tw.towns
      order by count(*) desc`, [slug]);
   const pct = (n, d) => (d > 0 ? Math.round((n / d) * 100) : null);
   const towns = rows.filter((r) => r.kind === 'town').slice(0, share);
