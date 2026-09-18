@@ -1187,9 +1187,24 @@ export async function breakdown(areaSlug, { by = 'county', sort = 'searches', de
       join localities l on l.slug = i.area_slug and l.kind = $2
       left join localities par on par.slug = l.parent_slug
       left join area_stats st on st.area_slug = l.slug and st.category = '' and st.subcategory = '' and st.source = '' and st.ownership = ''
+      -- What was asked for here, by cell rather than by slug for a town or an
+      -- outcode.
+      --
+      -- whereOf files a point search against a *county* on purpose — that is
+      -- the honest grain for a point — and rewrites a town's slug to its
+      -- parent. So asking for the town's own slug answered nought on every row,
+      -- and the ladder could not be sorted or read by demand at all (Codex,
+      -- 18 Sep 2026). A county still matches by slug, which is where its
+      -- searches are.
       left join lateral (
         select count(*)::int as searches, count(*) filter (where s.empty)::int as empty
-          from searches s where s.area_slug = l.slug and s.at > now() - ($3 || ' days')::interval
+          from searches s
+         where s.at > now() - ($3 || ' days')::interval
+           and (case when $2 = 'county' then s.area_slug = l.slug
+                     else s.cell in (select pi.cell from place_areas pa
+                                       join place_index pi on pi.venue_ref = pa.venue_ref
+                                      where pa.area_slug = l.slug and pi.cell is not null)
+                end)
       ) d on true
      -- Ordered before it is cut, not after. Great Britain broken down by
      -- postcode is 2,900 outcodes; taking an arbitrary 200 and *then* sorting

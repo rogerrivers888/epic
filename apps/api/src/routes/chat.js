@@ -699,6 +699,16 @@ export async function decidePublish(ctx, topicId, requestId, body) {
   const decision = ['anonymous', 'named', 'declined'].includes(body?.decision) ? body.decision : null;
   if (!decision) throw refuse(400, 'decision', 'Yes anonymously, yes with your name, or no.');
   const reply = await chat.replyById(req.reply_id);
+  // The answer has been taken down since it was asked about.
+  //
+  // A moderated reply is not readable any more, and this used to dereference it
+  // whatever came back — so accepting an old request answered 500 for ever
+  // (Codex, 18 Sep 2026). The request is closed rather than left hanging: there
+  // is nothing to publish, and saying so is the whole answer.
+  if (!reply || reply.topic_id !== t.id) {
+    await chat.decidePublishRequest(req.id, 'declined');
+    throw refuse(409, 'answer_gone', 'That answer has been taken down, so there is nothing to publish.');
+  }
   const result = await withTransaction(async (client) => {
     await chat.decidePublishRequest(req.id, decision, client);
     if (decision === 'declined') return { published: null };
