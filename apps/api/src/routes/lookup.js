@@ -695,14 +695,19 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     const kind = req.body?.kind === 'food' ? 'food' : 'activities';
     const limit = Math.min(40, Math.max(1, Number(req.body?.limit) || 20));
     if (!tripadvisorSource.enabled()) return res.status(409).json({ error: 'tripadvisor_off', message: 'Tripadvisor is not switched on here.' });
-    // The money as well as the locations. The allowance was counted below and
-    // nothing asked what it would cost (Codex, 17 Sep 2026).
-    const purse = await roomToSpend(
-      Math.round(2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP), { holder: 'lookup.tripadvisor' });
+    // The money as well as the locations — and the ring this run does first.
+    //
+    // The allowance was counted below and nothing asked what it would cost
+    // (Codex, 17 Sep 2026); the ring's two billed Google searches were outside
+    // the claim as well, so the two together could cross the ceiling (Codex,
+    // 18 Sep 2026).
+    const taPence = 2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP;
+    const ringPence = googleSource.enabled() ? RING_CALLS * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP : 0;
+    const purse = await roomToSpend(Math.round(taPence + ringPence), { holder: 'lookup.tripadvisor' });
     if (!purse.ok) {
       return res.status(422).json({
         error: 'over_the_ceiling',
-        message: `That would spend up to £${((2 * limit * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        message: `That would spend up to £${((taPence + ringPence) / 100).toFixed(2)} and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
         leftPence: purse.leftPence, ceilingPence: purse.ceilingPence,
       });
     }
@@ -757,9 +762,24 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     const ref = String(req.body?.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.', 'ref_required');
     // The research itself is free — it reads the venue's own page and the open
-    // encyclopedias — but finding the place first is a ring search, and that is
-    // billed at every rented source (Codex, 17 Sep 2026).
-    const out = await runLookup(settings, household, { afford: affordable });
+    // encyclopedias — but finding the place first is a ring search, billed at
+    // every rented source (Codex, 17 Sep 2026), and a place with no rating may
+    // then cost a Google match and a rating call (Codex, 18 Sep 2026). One
+    // claim over the lot, held until the last of them is done.
+    const purse = await roomToSpend(
+      googleSource.enabled()
+        ? Math.round((RING_CALLS + 2) * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP)
+        : 0,
+      { holder: 'lookup.curate' });
+    if (!purse.ok) {
+      return res.status(422).json({
+        error: 'over_the_ceiling',
+        message: `Researching this could spend about £${(((RING_CALLS + 2) * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP) / 100).toFixed(2)} looking it up, and there is £${(purse.leftPence / 100).toFixed(2)} left of this month's ceiling.`,
+        leftPence: purse.leftPence, ceilingPence: purse.ceilingPence,
+      });
+    }
+    try {
+    const out = await runLookup(settings, household);
     const item = out.items.find((i) => i.ref === ref);
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
 
@@ -798,6 +818,7 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     }
     record = await recordFor(ref);
     res.status(why ? 202 : 200).json({ ref, curation, banded: Boolean(f), record, why, detail });
+    } finally { await releaseSpend(purse.reservation); }
   } catch (err) { next(err); }
 });
 
