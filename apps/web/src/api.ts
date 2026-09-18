@@ -2617,7 +2617,8 @@ export const api = {
   /** The area search box: a county, a town or a postcode. */
   adminPlaceSearch: (q: string) =>
     request<{
-      areas: { slug: string; name: string; kind: string; parent: string | null }[];
+      /** `known` is how many places it holds, so two areas of the same name can be told apart. */
+      areas: { slug: string; name: string; kind: string; parent: string | null; known?: number }[];
       /** Places called that — names that are ours to hold, never a provider's. */
       places?: { ref: string; name: string; where: string | null }[];
       postcode: { sector: string; cell: string; label: string; bands: number[]; modes: string[] } | null;

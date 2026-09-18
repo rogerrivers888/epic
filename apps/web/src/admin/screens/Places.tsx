@@ -653,7 +653,11 @@ function AreaSearch({ onWhere, onPlace }: {
             <Press key={a.slug} effect="none" accessibilityRole="button" accessibilityLabel={a.name}
                    onPress={() => { setQ(''); setOut(null); onWhere(a.slug); }} style={styles.suggestRow}>
               <Text style={styles.suggestName}>{a.name}</Text>
-              <Text style={styles.suggestKind}>{a.parent ? `${a.kind} · ${a.parent}` : a.kind}</Text>
+              <Text style={styles.suggestKind}>
+                {[a.parent ? `${a.kind} · ${a.parent}` : a.kind,
+                  a.known == null ? null : a.known ? `${a.known.toLocaleString()} known` : 'we hold none',
+                ].filter(Boolean).join(' · ')}
+              </Text>
             </Press>
           ))}
           {(out.places ?? []).map((pl) => (

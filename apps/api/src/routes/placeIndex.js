@@ -2637,11 +2637,20 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
   try {
     const q = String(req.query.q ?? '').trim();
     if (!q) return res.json({ areas: [], postcode: null });
+    // With how many places each one holds.
+    //
+    // Two areas can share a name — "City of Bristol" the county holds a hundred
+    // and fifty, "Bristol" the town holds one — and a list that shows only the
+    // names sends you to the empty one (owner, 18 Sep 2026). The figure is the
+    // answer to "which of these did I mean", and the fullest comes first.
     const { rows } = await query(
-      `select l.slug, l.name, l.kind, p.name as parent
+      `select l.slug, l.name, l.kind, p.name as parent,
+              coalesce((select s.places from area_stats s
+                         where s.area_slug = l.slug and s.category = '' and s.subcategory = ''
+                           and s.source = '' and s.ownership = ''), 0) as known
          from localities l left join localities p on p.slug = l.parent_slug
         where l.name ilike $1 or l.slug ilike $1
-        order by (l.kind = 'county') desc, (l.kind = 'town') desc, l.name limit 12`, [`%${q}%`]);
+        order by known desc, (l.kind = 'county') desc, (l.kind = 'town') desc, l.name limit 12`, [`%${q}%`]);
     // And the places called that.
     //
     // Sunningdale is not an area we hold — its places are filed under SL5 — so
@@ -2670,7 +2679,7 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
         limit 8`, [`%${q}%`]);
     const sector = sectorOf(q);
     res.json({
-      areas: rows.map((r) => ({ slug: r.slug, name: r.name, kind: r.kind, parent: r.parent })),
+      areas: rows.map((r) => ({ slug: r.slug, name: r.name, kind: r.kind, parent: r.parent, known: r.known })),
       places: named.filter((r) => r.name).map((r) => ({ ref: r.ref, name: r.name, where: r.where_ })),
       // A full postcode is not an area — it is a point, and a point takes a ring.
       postcode: sector ? { sector, cell: `sector:${sector}`, label: q.toUpperCase(), bands: BANDS, modes: MODES } : null,
