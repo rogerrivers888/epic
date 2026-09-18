@@ -615,6 +615,12 @@ async function settleWhileLocked(limit) {
     `update place_index set placed_at = now()
       where venue_ref = any($1)
         and (cell is not null
+             -- Only a place that could *get* a cell waits for one. Without
+             -- coordinates there is nothing to stamp, and leaving those pending
+             -- meant the hourly pass rescored the same unplaceable rows for
+             -- ever and eventually starved the new ones out of its batch
+             -- (Codex, 18 Sep 2026).
+             or lat is null or lng is null
              or not exists (select 1 from geo_cells limit 1))`, [refs]);
   // The boards read `area_stats`, so a place placed but not counted is still
   // missing from every headline.

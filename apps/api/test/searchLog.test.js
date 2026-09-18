@@ -447,43 +447,43 @@ test('a place a household saved is the first thing worth owning, not hidden', as
   assert.equal(q.worth.find((w) => w.ref === claimed)?.ownership, 'claimed', 'and the row says why it is here');
 });
 
-test('a search is rolled up exactly once, whatever order the runs are made in', async () => {
-  // A cutoff in the middle of a month rolled that month's early rows and
-  // dropped them; the next run saw only what was left, and replacing the totals
-  // threw away the part already rolled — permanently, because the rows behind
-  // it were gone. Adding would double-count a run made twice without dropping.
-  // Counting only the rows nobody has counted yet is right in both cases
-  // (Codex, 17 Sep 2026).
+test('a search is rolled up exactly once, and only whole months are rolled', async () => {
+  // Two rules at once. A bucket holds one number for a month, so a cutoff
+  // partway through a month would make one no window could use — and with
+  // `drop` the rest of that month would be gone for good. And a search must be
+  // counted once however many runs are made, in whatever order (Codex, 17 and
+  // 18 Sep 2026).
   const { household } = await aHousehold(query);
-  const month = new Date(Date.UTC(2025, 5, 1));
-  const at = (day) => new Date(Date.UTC(2025, 5, day)).toISOString();
-  for (const day of [2, 3, 20, 21]) {
+  const may = new Date(Date.UTC(2025, 4, 1));
+  const june = new Date(Date.UTC(2025, 5, 1));
+  const at = (month, day) => new Date(Date.UTC(2025, month, day)).toISOString();
+  for (const [month, day] of [[4, 2], [4, 20], [5, 3], [5, 21]]) {
     const id = await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'rollshire', subject: 'museums' });
-    await query('update searches set at = $2 where id = $1', [id, at(day)]);
+    await query('update searches set at = $2 where id = $1', [id, at(month, day)]);
   }
-  const totals = async () => (await query(
-    `select searches from search_rollups where area_slug = 'rollshire' and subject = 'museums' and month = $1`,
-    [month])).rows[0]?.searches ?? 0;
+  const totals = async (month) => (await query(
+    `select searches, tripped from search_rollups
+      where area_slug = 'rollshire' and subject = 'museums' and month = $1`, [month])).rows[0] ?? null;
 
-  // First run: the first half of the month, rolled and dropped.
-  await log.rollUp({ before: new Date(Date.UTC(2025, 5, 10)), drop: true });
-  assert.equal(await totals(), 2);
+  // A cutoff in the middle of June rolls May, and leaves June alone because it
+  // is not over.
+  const first = await log.rollUp({ before: new Date(Date.UTC(2025, 5, 10)), drop: true });
+  assert.equal(first.rolled, 2, 'both of May');
+  assert.equal((await totals(may)).searches, 2);
+  assert.equal(await totals(june), null, 'and June waits until it is complete');
 
-  // Second run over the rest of it. The first half is gone from `searches`, so
-  // a replace would lose it.
-  await log.rollUp({ before: new Date(Date.UTC(2025, 6, 1)), drop: true });
-  assert.equal(await totals(), 4, 'both halves of the month are counted');
+  // The next run, once June is over, takes all of it.
+  const second = await log.rollUp({ before: new Date(Date.UTC(2025, 6, 1)), drop: true });
+  assert.equal(second.rolled, 2, 'both of June');
+  assert.equal((await totals(june)).searches, 2);
 
   // And a third run counts nothing twice.
   await log.rollUp({ before: new Date(Date.UTC(2025, 6, 1)), drop: true });
-  assert.equal(await totals(), 4);
-
-  // The conversions come with them. Dropped, they were gone for good, and this
-  // is the only outcome that says something went right (Codex, 17 Sep 2026).
-  const { rows: [cols] } = await query(
-    `select tripped from search_rollups where area_slug = 'rollshire' and subject = 'museums' and month = $1`,
-    [month]);
-  assert.equal(typeof cols.tripped, 'number');
+  assert.equal((await totals(may)).searches, 2);
+  assert.equal((await totals(june)).searches, 2);
+  // The conversions come with them: the only outcome that says something went
+  // right, and it used to be dropped.
+  assert.equal(typeof (await totals(june)).tripped, 'number');
 });
 
 test('the first build on an upgraded installation actually builds', async () => {

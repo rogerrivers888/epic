@@ -210,6 +210,16 @@ export async function oneSearch(id) {
  * is a setting rather than a migration written under pressure.
  */
 export async function rollUp({ before, drop = false } = {}) {
+  // Whole months only.
+  //
+  // A bucket is labelled with the month it belongs to and holds one number, so
+  // a cutoff partway through a month made a bucket that no window can use: a
+  // report whose edge falls inside it has to leave the whole thing out, and
+  // with `drop` the rest of that month is gone for good (Codex, 18 Sep 2026).
+  // The cutoff is moved back to the first of its own month; what is left of the
+  // month waits for the next run, by which time it is complete.
+  const cutoff = new Date(Date.UTC(
+    new Date(before).getUTCFullYear(), new Date(before).getUTCMonth(), 1, 0, 0, 0, 0));
   // Each search exactly once, whatever order the runs are made in.
   //
   // `rolled_at` is the marker (migration 157). Counting every row before the
@@ -255,10 +265,10 @@ export async function rollUp({ before, drop = false } = {}) {
     -- them reported "1" however many thousands had been rolled (Codex, 17 Sep
     -- 2026).
     select (select count(*)::int from unrolled) as rolled,
-           (select count(*)::int from folded) as groups`, [before]);
+           (select count(*)::int from folded) as groups`, [cutoff]);
   let dropped = 0;
   if (drop) {
-    const { rowCount } = await query('delete from searches where at < $1', [before]);
+    const { rowCount } = await query('delete from searches where at < $1', [cutoff]);
     dropped = rowCount;
   }
   return { rolled: counted?.rolled ?? 0, groups: counted?.groups ?? 0, dropped };
