@@ -2041,9 +2041,17 @@ async function planCollect(where) {
   // union of those is what the run considers.
   const poolFor = async (source) => {
     const a = [...args, source, String(STALE_MONTHS), limit * 20];
+    // A paid source never buys a place we already research ourselves, and that
+    // rule has to be *in* this query rather than applied to its answer: a scope
+    // with more than `limit * 20` low-scoring owned places at the front filled
+    // the whole pool with them, and the filter afterwards left Google nothing
+    // to do while eligible places sat below the cut (Codex, 18 Sep 2026). The
+    // same starvation the staleness rule was moved in here to end.
+    const paid = source === 'google' || source === 'tripadvisor';
     const { rows } = await query(
       `select pi.venue_ref, pi.ownership from place_index pi
         where ${wh.join(' and ')}
+          ${paid ? "and pi.ownership <> 'owned'" : ''}
           and not exists (
             select 1 from place_index_sources s
              where s.venue_ref = pi.venue_ref and s.source = $${args.length + 1}
@@ -2151,8 +2159,11 @@ async function planCollect(where) {
   for (const ref of tripadvisor) if (await taHeldFor(ref)) taCachedSet.add(ref);
   const taWouldBill = tripadvisor.filter((ref) => !taCachedSet.has(ref));
   // Tripadvisor's ceiling is counted in their locations, and a view is two.
-  const taLeft = taWouldBill.length
-    ? Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW) : 0;
+  // Read whether or not this plan would bill: a plan whose every detail is
+  // cached was reporting "0 of 120 left" over an allowance nobody had touched,
+  // which is the one figure on the board somebody would act on (Codex, 18 Sep
+  // 2026). Asking for nothing claims nothing.
+  const taLeft = Math.floor((await tripadvisorRoom(0)).left / TA_UNITS_PER_VIEW);
   const taCapped = Math.max(0, taWouldBill.length - taLeft);
   const taBilled = taWouldBill.slice(0, taLeft);
   tripadvisor = [...taCachedSet, ...taBilled];
