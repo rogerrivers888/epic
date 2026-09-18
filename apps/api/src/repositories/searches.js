@@ -78,9 +78,16 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
       'select 1 from searches where id = $1 and household_id = $2', [searchId, householdId]);
     if (!rows.length) return null;
   }
+  // One open per place per search, held by the database rather than only by the
+  // screen (migration 176). An insert that commits and whose answer is lost
+  // leaves the client thinking it never happened, so the next tap sends it
+  // again — and the count went up twice for one look (Codex, 18 Sep 2026).
+  // Answered `true` either way: the event is recorded, which is what the client
+  // asked and what it needs to know to stop retrying.
   await query(
     `insert into search_events (search_id, kind, venue_ref, position, dwell_ms, meta)
-     values ($1,$2,$3,$4,$5,$6::jsonb)`,
+     values ($1,$2,$3,$4,$5,$6::jsonb)
+     on conflict do nothing`,
     [searchId, kind, venueRef, position, dwellMs, JSON.stringify(meta ?? {})]);
   const outcome = kind === 'add_to_trip' ? 'tripped' : kind === 'save' || kind === 'shortlist' ? 'saved' : kind === 'open' ? 'clicked' : null;
   if (outcome) {

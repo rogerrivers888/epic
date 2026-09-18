@@ -1402,3 +1402,30 @@ test('deletion never takes a month a report can still reach into', async () => {
   assert.equal(still, 1, 'the row a ninety-day report needs is still here');
   assert.equal((await log.totals({ areaSlugs: [slug], since: 90 })).searches, 1);
 });
+
+test('an open is counted once however many times it is sent', async () => {
+  const { household } = await aHousehold(query);
+  const id = await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'berkshire' });
+  await log.noteShown(id, [{ ref: 'test:opened-twice', position: 1 }]);
+
+  // The screen keeps its own guard, but a guard on a device cannot be the whole
+  // of it: an insert that commits and whose answer is lost leaves the client
+  // thinking it never happened, so the next tap sends it again (Codex, 18 Sep
+  // 2026). Both answer true — the event is recorded either way, which is what
+  // the client needs to know to stop retrying.
+  assert.equal(await log.logEvent({ searchId: id, kind: 'open', venueRef: 'test:opened-twice', householdId: household.id }), true);
+  assert.equal(await log.logEvent({ searchId: id, kind: 'open', venueRef: 'test:opened-twice', householdId: household.id }), true);
+
+  const { rows } = await query(
+    `select count(*)::int as n from search_events
+      where search_id = $1 and kind = 'open' and venue_ref = 'test:opened-twice'`, [id]);
+  assert.equal(rows[0].n, 1, 'one look, one open');
+
+  // A save is its own act and can honestly happen more than once.
+  await log.logEvent({ searchId: id, kind: 'save', venueRef: 'test:opened-twice', householdId: household.id });
+  await log.logEvent({ searchId: id, kind: 'save', venueRef: 'test:opened-twice', householdId: household.id });
+  const { rows: saves } = await query(
+    `select count(*)::int as n from search_events
+      where search_id = $1 and kind = 'save' and venue_ref = 'test:opened-twice'`, [id]);
+  assert.equal(saves[0].n, 2);
+});

@@ -150,12 +150,13 @@ const MATCH_PENCE = pencePerCall();
 // because nothing goes out for them. Charging for them reserved money that was
 // never going to be spent, and near the ceiling that refused a request that
 // would have made no calls at all (Codex, 18 Sep 2026).
-const askingCost = (refs, matched, held = new Set(), missed = new Set()) =>
+const askingCost = (refs, matched, held = new Set(), missed = new Set(), blind = new Set()) =>
   Math.round(refs.reduce((p, ref) =>
     // A remembered miss costs nothing: there is no match call, because we
     // already know the answer, and no detail call, because there is no id to
-    // ask about (Codex, 18 Sep 2026).
-    (missed.has(ref) ? p
+    // ask about. Nor does a place we hold no name or position for — the asker
+    // turns it away before it reaches Google (Codex, 18 Sep 2026).
+    (missed.has(ref) || blind.has(ref) ? p
       : p + (held.has(ref) ? 0 : DETAIL_PENCE)
         + (ref.startsWith('google:') || matched.has(ref) ? 0 : MATCH_PENCE)), 0));
 
@@ -164,6 +165,24 @@ async function alreadyMatched(refs) {
   if (!refs.length) return new Set();
   const held = await matchesFor(refs, 'google');
   return new Set([...held.entries()].filter(([, id]) => id).map(([ref]) => ref));
+}
+
+/**
+ * Which of these nobody could ask Google about anyway.
+ *
+ * `googleMatchFor` declines before it reaches the provider when there is no
+ * name or no position to go looking with, so the asker turns the place away
+ * without spending anything. Quoting for it priced work that never happens, and
+ * near the ceiling the reservation refused a run that would have cost nothing
+ * (Codex, 18 Sep 2026). The same test the asker uses, asked once up front.
+ */
+async function nothingToGoOn(refs) {
+  if (!refs.length) return new Set();
+  const named = await index.namesFor(refs);
+  const { rows } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [refs]);
+  const at = new Map(rows.map((r) => [r.venue_ref, r]));
+  return new Set(refs.filter((ref) => !String(ref).startsWith('google:')
+    && (!named.get(ref)?.name || at.get(ref)?.lat == null || at.get(ref)?.lng == null)));
 }
 
 /** Which of these the detail cache will answer, so no call goes out for them. */
@@ -1356,7 +1375,17 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         // locations, and the month's money. A view bills two locations, and one
         // left is not enough for a look — "any grant will do" spent it anyway
         // — and nothing was asking about the money at all (Codex, 17 Sep 2026).
-        const purse = cached ? { ok: true, reservation: null, leftPence: 0 } : await roomToSpend(taCost(1), { holder: 'compare' });
+        // Inside a try from here, because the location claim is already made:
+        // a throw on the way to the money claim left it standing for half an
+        // hour, reading as an allowance nobody has spent but nobody can use
+        // (Codex, 18 Sep 2026 — the same shape as the lookup's, two rounds ago).
+        let purse = { ok: true, reservation: null, leftPence: 0 };
+        try {
+          if (!cached) purse = await roomToSpend(taCost(1), { holder: 'compare' });
+        } catch (err) {
+          await releaseSpend(room.reservation);
+          throw err;
+        }
         if (room.granted < TA_UNITS_PER_VIEW) {
           ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left, and a view bills two`;
         } else if (!purse.ok) {
@@ -1845,7 +1874,8 @@ router.get('/ask/quote', requires('view_library'), async (req, res, next) => {
     if (!refs.length) return res.json({ pence: 0, refs: 0 });
     if (!googleSource.enabled()) return res.json({ pence: 0, refs: refs.length, off: true });
     const pence = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs),
-      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }));
+      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
+      await nothingToGoOn(refs));
     res.json({ pence, refs: refs.length });
   } catch (err) { next(err); }
 });
@@ -1863,7 +1893,8 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
     // Before a penny of it: what one Place Details call costs, times the number
     // of them, against what is left of this month's ceiling.
     const want = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs),
-      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }));
+      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
+      await nothingToGoOn(refs));
     const room = await roomToSpend(want, { holder: 'ask' });
     if (!room.ok) return overTheCeiling(res, want, room);
     try {
@@ -2116,7 +2147,8 @@ async function planCollect(where) {
   // be eligible for collection and still be cached — Compare and the replay both
   // fill that cache without writing a source row (Codex, 18 Sep 2026).
   const want = askingCost(google, await alreadyMatched(google), await alreadyHeld(google),
-    await missesKept(google, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }))
+    await missesKept(google, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
+    await nothingToGoOn(google))
     + taCost(taBilled.length);
   return {
     scope, chosen, limit,
@@ -2241,7 +2273,8 @@ async function work(runId, householdId) {
         // The ceiling is asked again per chunk, not once at the start: a run
         // that outlives a deploy must not outlive the month's budget either.
         const cost = askingCost(batch, await alreadyMatched(batch), await alreadyHeld(batch),
-          await missesKept(batch, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }));
+          await missesKept(batch, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
+          await nothingToGoOn(batch));
         const room = await roomToSpend(cost, { holder: `collect:${runId}` });
         if (!room.ok) { await collectRuns.done(runId, 'google', { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
         try {
