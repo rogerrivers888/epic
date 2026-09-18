@@ -402,11 +402,19 @@ export async function rollUp({ before, drop = false } = {}) {
     // row, and the one outcome the board is built around is lost outright
     // (Codex, 18 Sep 2026). A rolled search that is still here can have its
     // bucket corrected; a dropped one cannot.
+    // Kept only while it can still become something.
+    //
+    // A shortlisted place reaches an itinerary on a later visit, and the item
+    // remembers which search found it (migration 177) — dropping that search
+    // throws the conversion away before it happens. But a search that has
+    // already tripped cannot advance any further and its conversion is in the
+    // bucket, so keeping it kept the log growing for exactly the searches that
+    // went well (Codex, 18 Sep 2026).
     const { rowCount } = await query(
       `delete from searches s
         where s.at < $1
-          and s.outcome is distinct from 'tripped'
-          and not exists (select 1 from trip_shortlist t where t.search_id = s.id)`, [safe]);
+          and (s.outcome = 'tripped'
+               or not exists (select 1 from trip_shortlist t where t.search_id = s.id))`, [safe]);
     dropped = rowCount;
   }
   // `keptBack` is not a failure: it is the answer saying the deletion stopped

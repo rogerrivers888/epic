@@ -1554,6 +1554,14 @@ test('a conversion that arrives after the roll-up still counts', async () => {
   await log.logEvent({ searchId: id, kind: 'add_to_trip', venueRef: 'test:late-conversion', householdId: household.id });
   assert.deepEqual(await bucket(), { searches: 1, no_trip: 0, tripped: 1 },
     'the conversion moves from one column of its bucket to the other');
+
+  // And now it *can* be dropped: it has tripped, which is as far as an outcome
+  // goes, and the conversion is in the bucket. Keeping it kept the log growing
+  // for exactly the searches that went well (Codex, 18 Sep 2026).
+  await log.rollUp({ before: new Date(Date.now() - 150 * 86400_000), drop: true });
+  assert.equal((await query('select count(*)::int as n from searches where id = $1', [id])).rows[0].n, 0,
+    'a search that has tripped is not kept for a conversion it has already had');
+  assert.deepEqual(await bucket(), { searches: 1, no_trip: 0, tripped: 1 }, 'and the figures stand');
 });
 
 test('a place a live search showed is a place the index has seen', async () => {

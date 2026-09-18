@@ -182,6 +182,13 @@ router.post('/:id/reject', requires('manage_library'), async (req, res, next) =>
       seen: req.body && 'seen' in req.body ? (req.body.seen ?? null) : undefined,
     });
     if (!out) throw bad('That is not one of the reasons for this kind of thing.');
+    // Nothing was decided, because the words moved while somebody was reading
+    // them. No audit — there is no decision to record — and the answer says so,
+    // which is what keeps the sheet open (Codex, 18 Sep 2026; the same half of
+    // the same fix I left out of approve two rounds ago).
+    if (out.stale) {
+      return res.json({ ok: true, id: out.id, stale: true, told: false, message: null, reason: out.reason ?? null, why: out.why ?? null });
+    }
     await writeAudit({ ...actor(req), action: 'queue.reject', subjectType: 'content', subjectId: out.id, subjectLabel: out.reason, after: { reason: out.reason, told: out.told } });
     // `told` is what actually happened, not what was asked for; `why` says so
     // in one sentence where nothing went out.
