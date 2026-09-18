@@ -1840,3 +1840,35 @@ test('an unnamed node still says what kind of place it is', async () => {
   assert.equal(kindFromOsmTags({ man_made: 'street_lamp', amenity: 'cafe' }), null);
   assert.equal(kindFromOsmTags({ historic: 'plaque', tourism: 'attraction' }), null);
 });
+
+test('two outcomes on one rolled search never leave it counted twice', async () => {
+  const { household: h } = await aHousehold(query);
+  const id = await log.logSearch({
+    householdId: h.id, surface: 'places', areaSlug: 'zz6', subject: 'food',
+    shownTotal: 4, shown: [],
+  });
+  assert.ok(id, 'the search was written down');
+  // Rolled, which only happens to a whole month that has finished — so the
+  // search is aged into one before the rollup runs. A shortlisted place reaching
+  // an itinerary months later is exactly how a rolled search receives an
+  // outcome, which is what makes this case real rather than theoretical.
+  await query(`update searches set at = date_trunc('month', now()) - interval '20 days' where id = $1`, [id]);
+  await log.rollUp({ before: new Date() });
+  const bucketOf = async () => (await query(
+    `select no_trip, tripped from search_rollups
+      where area_slug = 'zz6' and subject = 'food'`)).rows[0];
+
+  // An open and a trip arriving together. The row lock serialises them; before
+  // the rollup moved under the same lock the two corrections could land in the
+  // opposite order and leave one search counted in `no_trip` *and* in `tripped`.
+  await Promise.all([
+    log.logEvent({ searchId: id, kind: 'open', venueRef: 'osm:node/1', householdId: h.id }),
+    log.logEvent({ searchId: id, kind: 'add_to_trip', venueRef: 'osm:node/1', householdId: h.id }),
+  ]);
+
+  const b = await bucketOf();
+  const { rows: [row] } = await query('select outcome from searches where id = $1', [id]);
+  assert.equal(row.outcome, 'tripped', 'the outcome only ever rises');
+  assert.equal(b.tripped, 1, 'counted once, in the column it ended in');
+  assert.equal(b.no_trip, 0, 'and not also in the one it passed through');
+});

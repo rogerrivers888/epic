@@ -13,7 +13,7 @@
  * that costs.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 
 const ORDER = { none: 0, clicked: 1, saved: 2, tripped: 3 };
 
@@ -100,25 +100,45 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
     // was not, so the conversion read as "clicked, never tripped" for ever —
     // and with dropping on, the row is gone and it is lost outright (Codex,
     // 18 Sep 2026; migration 177 is what made a late conversion possible).
-    const { rows: [moved] } = await query(
-      // `for update` on the row, so two events on one search are serialised.
-      //
-      // Without it both statements could read the same `before` — an open and a
-      // save arriving together — and the later one would compare against a
-      // value that was already out of date, so an open could put a search back
-      // from "saved" to "clicked". On a rolled search both would move the same
-      // count out of the same bucket, twice (Codex, 18 Sep 2026). Outcomes only
-      // ever rise, and that is only true if they are read one at a time.
-      `with was as (
-         select id, outcome as before, empty, rolled_at, area_slug, subject, at
-           from searches where id = $1::uuid for update)
-       update searches s set outcome = $2, outcome_at = now()
-         from was w
-        where s.id = w.id
-          and (case w.before when 'tripped' then 3 when 'saved' then 2 when 'clicked' then 1 else 0 end) < $3
-       returning w.before, w.empty, w.rolled_at, w.area_slug, w.subject, w.at`,
-      [searchId, outcome, ORDER[outcome]]);
-    if (moved?.rolled_at) await moveInTheRollup(moved, outcome);
+    // The row and its bucket move together, under one lock.
+    //
+    // `for update` serialises two events on one search: without it both could
+    // read the same `before` — an open and a save arriving together — and the
+    // later one would compare against a value already out of date, so an open
+    // could put a search back from "saved" to "clicked" (Codex, 18 Sep 2026).
+    // Outcomes only ever rise, and that is only true if they are read one at a
+    // time.
+    //
+    // But the lock is held only for as long as the transaction, and a bare
+    // `query` commits on its own — so the rollup correction ran outside it.
+    // Two events on a rolled search could take the row's lock one after the
+    // other and then adjust the bucket in the opposite order, leaving one
+    // search counted in `tripped` *and* in `no_trip` (Codex, 19 Sep 2026). The
+    // bucket holds counts, not rows, so there is nothing to reconcile it
+    // against afterwards: it has to be right when it is written.
+    // Answered `null` if it could not be done, not swallowed.
+    //
+    // The rollup statement used to swallow its own failures, which inside a
+    // transaction is a lie: Postgres has already aborted it, so the commit fails
+    // anyway. And it is the wrong instinct here — the route turns `null` into
+    // `ok: false` and the client tries again, the event insert is idempotent,
+    // and outcomes only ever rise. Half-applied is the one state there is no
+    // recovering from, and that is what this transaction exists to prevent.
+    let ok = true;
+    await withTransaction(async (client) => {
+      const { rows: [moved] } = await client.query(
+        `with was as (
+           select id, outcome as before, empty, rolled_at, area_slug, subject, at
+             from searches where id = $1::uuid for update)
+         update searches s set outcome = $2, outcome_at = now()
+           from was w
+          where s.id = w.id
+            and (case w.before when 'tripped' then 3 when 'saved' then 2 when 'clicked' then 1 else 0 end) < $3
+         returning w.before, w.empty, w.rolled_at, w.area_slug, w.subject, w.at`,
+        [searchId, outcome, ORDER[outcome]]);
+      if (moved?.rolled_at) await moveInTheRollup(moved, outcome, client);
+    }).catch(() => { ok = false; });
+    if (!ok) return null;
   }
   return true;
 }
@@ -137,18 +157,23 @@ const BUCKET = (outcome, empty) => (outcome === 'tripped' ? 'tripped'
   : outcome === 'saved' || outcome === 'clicked' ? 'no_trip'
     : empty ? null : 'no_click');
 
-async function moveInTheRollup(was, outcome) {
+async function moveInTheRollup(was, outcome, client = null) {
   const from = BUCKET(was.before, was.empty);
   const to = BUCKET(outcome, was.empty);
   if (!to || from === to) return;
   const bump = (col, by) => `${col} = greatest(0, ${col} + ${by})`;
-  await query(
+  // On the caller's connection where there is one, so it is inside the lock that
+  // makes the move safe. It no longer swallows its own failures: the caller owns
+  // that decision now, because the row and the bucket are one fact and either
+  // both move or neither does.
+  const run = client ? (sql, args) => client.query(sql, args) : (sql, args) => query(sql, args);
+  await run(
     `update search_rollups
         set ${to ? bump(to, 1) : ''}${to && from ? ', ' : ''}${from ? bump(from, -1) : ''}
       where month = date_trunc('month', $1::timestamptz)::date
         and area_slug = coalesce($2, '') and subject = coalesce($3, '')`,
     [was.at, was.area_slug, was.subject],
-  ).catch(() => null);
+  );
 }
 
 /** The three numbers, never one rate. */
