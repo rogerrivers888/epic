@@ -338,7 +338,12 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         // The map's search, held so that opening a pin or adding it to a day is
         // counted against it. This surface was searching and never saying so
         // (Codex, 18 Sep 2026).
-        if (r.queryId) heldSearch('trip', r.queryId, r.places.map((v) => v.venueRef));
+        // Unconditionally: `heldSearch` clears the surface when it is given no
+        // id, and guarding the call left the *previous* search held. The log
+        // fails open, so a hiccup writing one answers with the places and no
+        // id — and the next tap would have been counted against the search
+        // before it (Codex, 18 Sep 2026).
+        heldSearch('trip', r.queryId ?? null, r.places.map((v) => v.venueRef));
         setAlong({ loading: false, places: r.places, counts: r.counts, error: null, degraded: r.degradedSources ?? [], hasRoute: r.hasRoute, beyond: r.beyond ?? 0, corridorKm: r.corridorKm ?? null, moods: r.moods ?? [] });
       })
       .catch((e) => setAlong({ loading: false, places: [], counts: { route: 0 }, error: e.message, degraded: [], hasRoute: false, beyond: 0, corridorKm: null, moods: [] }));

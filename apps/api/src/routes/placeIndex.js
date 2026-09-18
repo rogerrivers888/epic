@@ -1948,12 +1948,26 @@ router.post('/pictures/find', requires('manage_library'), async (req, res, next)
              and a2.state <> 'hidden'
            order by a2.last_seen desc, a2.id limit 1) a on true
        where pi.venue_ref = any($1)`, [refs]);
-    const out = [];
     // Deliberately asked, so it looks again — a logo we found once should be
     // improvable. What it may not do is demote a photograph somebody in the
     // house took, and that guard lives in `pictureFor` where every caller gets
     // it (Codex, 17 Sep 2026).
-    for (const place of rows) out.push({ ref: place.venue_ref, ...(await pictureFor(place, { force: true })) });
+    //
+    // A few at a time rather than one after another. Each place asks a logo
+    // service, Wikimedia and a street-level source in turn, and twenty-five of
+    // those end to end can outlast the gateway — the screen then reports a
+    // failure while the work carries on behind it (Codex, 18 Sep 2026). Four,
+    // because these are other people's services and the point is to stop
+    // queueing behind one slow answer, not to hammer them.
+    const out = [];
+    const AT_ONCE = 4;
+    for (let i = 0; i < rows.length; i += AT_ONCE) {
+      const batch = rows.slice(i, i + AT_ONCE);
+      const done = await Promise.all(batch.map(async (place) => ({
+        ref: place.venue_ref, ...(await pictureFor(place, { force: true })),
+      })));
+      out.push(...done);
+    }
     await index.rescore({ refs });
     await index.refreshStats();
     res.json({ found: out.filter((o) => o.state === 'found').length, results: out, spentPence: 0 });
