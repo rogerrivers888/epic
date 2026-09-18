@@ -7,7 +7,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
-import { settleClaims } from './placeIndex.js';
+import { settleClaims, refreshStats } from './placeIndex.js';
 
 // ---------------------------------------------------------------------------
 // the household
@@ -77,8 +77,9 @@ export async function updateHousehold(id, f) {
  * household by design — it is the spend ledger, and it has no cascade. Both in
  * one transaction so a household is never half gone.
  */
-export function deleteHouseholdAndCalls(householdId) {
-  return withTransaction(async (client) => {
+export async function deleteHouseholdAndCalls(householdId) {
+  let demoted = 0;
+  await withTransaction(async (client) => {
     // What this household had claimed, read before the cascade takes it. The
     // index row is derived and does not cascade, so a deleted household's
     // claims went on counting in coverage and in Collect's claimed lane for
@@ -91,8 +92,11 @@ export function deleteHouseholdAndCalls(householdId) {
     await client.query('delete from households where id = $1', [householdId]);
     // After the delete: another household may still be claiming the same place,
     // and settleClaims asks that rather than assuming.
-    if (rows.length) await settleClaims(rows.map((r) => r.venue_ref), client);
+    if (rows.length) demoted = await settleClaims(rows.map((r) => r.venue_ref), client);
   });
+  // Outside the transaction, because it takes its own lock and the boards
+  // should not wait an hour for the hourly settle to notice (Codex, 18 Sep).
+  if (demoted) await refreshStats().catch(() => null);
 }
 
 // ---------------------------------------------------------------------------

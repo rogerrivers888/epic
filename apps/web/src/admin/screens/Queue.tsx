@@ -100,9 +100,25 @@ const FIELD_WORD: Record<string, string> = {
   opening_hours: 'hours', website: 'website', phone: 'telephone number', address: 'address',
 };
 
+/**
+ * The two closed lists this screen filters on, so an address that names
+ * something else falls back to the default *and* stops saying it.
+ *
+ * `asText` kept whatever was in the address: `?state=done` drew the waiting
+ * lane with no chip lit and the address still claiming otherwise, which is the
+ * screen and the address disagreeing — and the address is what decides what is
+ * drawn (CLAUDE.md). Found in the live audit, 18 Sep 2026.
+ */
+// `repositories/contentQueue.js` KINDS and STATES are the source; these mirror
+// them so the address can be read before the first answer arrives.
+const QUEUE_STATES = ['waiting', 'approved', 'rejected', 'reported'] as const;
+const QUEUE_KINDS = ['all', 'photo', 'review', 'rating', 'note', 'offer', 'message', 'data'] as const;
+type QueueState = typeof QUEUE_STATES[number];
+type QueueKind = typeof QUEUE_KINDS[number];
+
 export function Queue({ canManage }: { canManage: boolean }) {
-  const [kind, setKind] = useQueryState<string>('kind', 'all', asText);
-  const [state, setState] = useQueryState<string>('state', 'waiting', asText);
+  const [kind, setKind] = useQueryState<QueueKind>('kind', 'all', asOneOf(QUEUE_KINDS, 'all'));
+  const [state, setState] = useQueryState<QueueState>('state', 'waiting', asOneOf(QUEUE_STATES, 'waiting'));
   const [where, setWhere] = useQueryState<string>('where', '', asText);
   const [open, setOpen] = useQueryState<string>('item', '', asText);
 
@@ -182,7 +198,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
           <View style={styles.words}>
             <Word2 label="All" on={kind === 'all'} onPress={() => setKind('all')} />
             {data.kinds.map((k) => (
-              <Word2 key={k.key} label={k.label} n={data.counts.kind[k.key] ?? 0} on={kind === k.key} onPress={() => setKind(k.key)}
+              <Word2 key={k.key} label={k.label} n={data.counts.kind[k.key] ?? 0} on={kind === k.key} onPress={() => setKind(k.key as QueueKind)}
                      tip={[k.label, `${data.counts.kind[k.key] ?? 0} ${said(k.key)}${(data.counts.kind[k.key] ?? 0) === 1 ? '' : 's'} ${state}. A ${said(k.key)} is ${k.batch ? 'one of the things that can be decided in a batch' : 'decided on its own, never in a batch'}.`]} />
             ))}
           </View>
@@ -191,7 +207,7 @@ export function Queue({ canManage }: { canManage: boolean }) {
           <Kicker tip="sectionState">State</Kicker>
           <View style={styles.words}>
             {data.states.map((s) => (
-              <Word2 key={s} label={s[0].toUpperCase() + s.slice(1)} on={state === s} onPress={() => setState(s)} />
+              <Word2 key={s} label={s[0].toUpperCase() + s.slice(1)} on={state === s} onPress={() => setState(s as QueueState)} />
             ))}
           </View>
         </View>

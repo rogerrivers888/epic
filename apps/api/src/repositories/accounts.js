@@ -13,7 +13,7 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../db.js';
 import { normaliseMobile } from '../sources/sms.js';
-import { settleClaims } from './placeIndex.js';
+import { settleClaims, refreshStats } from './placeIndex.js';
 
 const digest = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
@@ -256,7 +256,9 @@ export async function deleteAccount(id, { withHousehold = false } = {}) {
        union
        select venue_ref from place_claims where household_id = $1`, [account.household_id]);
     await query('delete from households where id = $1', [account.household_id]);
-    if (rows.length) await settleClaims(rows.map((r) => r.venue_ref)).catch(() => null);
+    const demoted = rows.length ? await settleClaims(rows.map((r) => r.venue_ref)).catch(() => 0) : 0;
+    // The boards read `area_stats`, which is derived from the row we just moved.
+    if (demoted) await refreshStats().catch(() => null);
   } else {
     await query('delete from accounts where id = $1', [id]);
   }

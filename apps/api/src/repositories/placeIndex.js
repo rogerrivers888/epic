@@ -36,16 +36,27 @@ export const SOURCES = [
 ];
 
 /**
- * A source row is "we asked"; a source row with an identifier is "and it is
- * there". `askThese` writes a Google row with no identifier on purpose when
- * Google has never heard of a place — that is the second of the two states the
- * board keeps apart, and counting it as coverage inflated Google's column and
- * moved every "only one source" figure with it (Codex, 18 Sep 2026).
+ * A source row is "we asked". A source row that *found* the place is narrower,
+ * and it is what coverage means.
  *
- * "Ours" is exempt because it has no identifier to give: our own research is
- * counted by ownership, above.
+ * `askThese` writes a Google row with no identifier on purpose when Google has
+ * never heard of a place — the second of the two states the board keeps apart —
+ * and counting it as coverage inflated Google's column and moved every "only
+ * one source" figure with it (Codex, 18 Sep 2026).
+ *
+ * The rule is about the paid sources only, because they are the only ones an
+ * identifier proves anything about. Everything free writes a row without one as
+ * a matter of course.
  */
-const FOUND_IT = (t) => `${t}.source_place_id is not null or ${t}.source = 'own'`;
+const FOUND_IT = (t) => `${t}.source_place_id is not null
+   -- Only a source we *pay* proves itself with an identifier. The free ones
+   -- write a row without one all the time and mean it: the sweep and the atlas
+   -- name themselves as they ingest, and "ours" has no identifier to give.
+   or ${t}.source not in ('google', 'tripadvisor')
+   -- And a provider's own reference carries the identifier in the ref itself,
+   -- so saving a Google result is a finding whether or not the column repeats
+   -- it (Codex, 18 Sep 2026 — the first cut of this rule hid them all).
+   or ${t}.venue_ref like ${t}.source || ':%'`;
 
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
@@ -210,8 +221,13 @@ export async function reindex({ onProgress = null } = {}) {
  */
 export async function settleClaims(refs = null, client = null) {
   const run = client ? (sql, args) => client.query(sql, args) : (sql, args) => query(sql, args);
+  // `placed_at = null` with it: the boards read `area_stats`, which is derived,
+  // and a row demoted in place left the rollup counting a claim that was gone
+  // until something unrelated happened to rebuild (Codex, 18 Sep 2026). Unplaced
+  // means the hourly settle picks it up and refreshes the figures, so this heals
+  // on its own even if nobody calls refreshStats.
   const { rowCount } = await run(
-    `update place_index pi set ownership = 'identified'
+    `update place_index pi set ownership = 'identified', placed_at = null
       where pi.ownership = 'claimed'
         and ($1::text[] is null or pi.venue_ref = any($1))
         and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)

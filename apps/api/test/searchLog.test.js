@@ -1235,4 +1235,22 @@ test('a source that was asked and found nothing is not coverage', async () => {
   assert.equal((await query(
     'select count(*)::int as n from place_index_sources where venue_ref = $1', [ref])).rows[0].n, 2,
   'and both rows are kept, because "asked and missing" is a fact worth holding');
+
+  // The rule is about the paid sources only. The first cut of it asked every
+  // source for an identifier, and the free ones write a row without one as a
+  // matter of course — which would have hidden the sweep, the atlas and every
+  // saved Google result from coverage until a rebuild (Codex, 18 Sep 2026).
+  const sweep = 'osm:node/swept-no-id';
+  const saved = 'google:SAVED-FROM-A-SEARCH';
+  await index.noteMany([{ ref: sweep, lat: 51.4, lng: -0.9, countryCode: 'GB' }], { source: 'sweep' });
+  await index.noteMany([{ ref: saved, lat: 51.4, lng: -0.9, countryCode: 'GB' }], { source: 'google' });
+  const found = async (r) => (await query(
+    `select count(*)::int as n from place_index_sources src
+      where src.venue_ref = $1
+        and (src.source_place_id is not null
+             or src.source not in ('google','tripadvisor')
+             or src.venue_ref like src.source || ':%')`, [r])).rows[0].n;
+  assert.equal(await found(sweep), 1, 'the sweep names itself and means it');
+  assert.equal(await found(saved), 1, 'a Google ref carries its identifier in the ref');
+  assert.equal(await found(ref), 1, 'and the miss still does not count');
 });
