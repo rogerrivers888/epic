@@ -50,7 +50,15 @@ export function heldSearch(
    */
   { append = false }: { append?: boolean } = {},
 ) {
-  if (!queryId) { current.delete(surface); return; }
+  // No id is a *replacement* with nothing to attribute to, so the surface is let
+  // go of entirely — the cards as well as the search.
+  //
+  // Dropping only `current` was almost right and stopped being right the moment
+  // an event about a place was resolved from `came` alone (round 127): a search
+  // whose logging failed answers with its places and no id, and the previous
+  // search's cards were still standing there to claim the next tap (Codex, 19
+  // Sep 2026). Nothing is the honest answer; the search before it is not.
+  if (!queryId) { forgetSearch(surface); return; }
   current.set(surface, queryId);
   if (!append) for (const key of [...came.keys()]) if (key.startsWith(`${surface}:`)) came.delete(key);
   refs.forEach((ref, i) => {

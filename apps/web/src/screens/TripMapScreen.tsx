@@ -325,7 +325,14 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
   const alongKey = pill && pill !== 'shortlist' && pill !== 'stay' ? `${pill}|${around ?? ''}|${maxDetourMin}|${q ?? ''}` : null;
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!alongKey || alongKey === lastKey.current) return;
+    // Leaving browse for the shortlist or the beds is leaving the search behind.
+    //
+    // The effect returned here with the screen still mounted, so the browse's
+    // search and its cards were left standing — and opening a shortlisted place
+    // that had also been in the browse added an event to a search the household
+    // had moved on from (Codex, 19 Sep 2026).
+    if (!alongKey) { lastKey.current = null; forgetSearch('trip'); return; }
+    if (alongKey === lastKey.current) return;
     lastKey.current = alongKey;
     // Whether this screen is still the one asking.
     //
