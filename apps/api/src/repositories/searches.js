@@ -82,15 +82,23 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
   // screen (migration 176). An insert that commits and whose answer is lost
   // leaves the client thinking it never happened, so the next tap sends it
   // again — and the count went up twice for one look (Codex, 18 Sep 2026).
-  // Answered `true` either way: the event is recorded, which is what the client
-  // asked and what it needs to know to stop retrying.
-  await query(
+  //
+  // Deliberately only `open`, which migration 176 says out loud: a save, a
+  // shortlist and an add-to-trip are each their own act and can honestly happen
+  // more than once. So a retry of one of those can leave a second row, and that
+  // is a decision already taken rather than a hole — it costs a duplicate line
+  // in a replay and cannot move an outcome, which only ever rises.
+  const outcome = kind === 'add_to_trip' ? 'tripped' : kind === 'save' || kind === 'shortlist' ? 'saved' : kind === 'open' ? 'clicked' : null;
+  const insert = [
     `insert into search_events (search_id, kind, venue_ref, position, dwell_ms, meta)
      values ($1,$2,$3,$4,$5,$6::jsonb)
      on conflict do nothing`,
-    [searchId, kind, venueRef, position, dwellMs, JSON.stringify(meta ?? {})]);
-  const outcome = kind === 'add_to_trip' ? 'tripped' : kind === 'save' || kind === 'shortlist' ? 'saved' : kind === 'open' ? 'clicked' : null;
-  if (outcome) {
+    [searchId, kind, venueRef, position, dwellMs, JSON.stringify(meta ?? {})],
+  ];
+  // An event with no outcome behind it — a dismiss, a refine, a close — is just
+  // the row, and there is nothing for it to be atomic with.
+  if (!outcome) { await query(...insert); return true; }
+  {
     // The move, and what it moved from — a rolled search has to take its
     // outcome with it into the bucket it was folded into.
     //
@@ -126,6 +134,16 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
     // recovering from, and that is what this transaction exists to prevent.
     let ok = true;
     await withTransaction(async (client) => {
+      // The row and the outcome together.
+      //
+      // The insert used to commit on its own, so a failure to advance the
+      // outcome left a replay event behind while Demand went on classifying the
+      // search under the outcome it had before — and the retry the `ok: false`
+      // asks for would insert a second row, because only `open` has a
+      // uniqueness constraint to stop it (Codex, 19 Sep 2026; migration 176 is
+      // the one that gave `open` its). Either the household did this and the
+      // search says so, or neither is true yet.
+      await client.query(...insert);
       const { rows: [moved] } = await client.query(
         `with was as (
            select id, outcome as before, empty, rolled_at, area_slug, subject, at

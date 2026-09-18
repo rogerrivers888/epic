@@ -1843,8 +1843,12 @@ test('an unnamed node still says what kind of place it is', async () => {
 
 test('two outcomes on one rolled search never leave it counted twice', async () => {
   const { household: h } = await aHousehold(query);
+  // Its own area and subject, so the bucket this asserts on belongs to this test
+  // alone: the rollup is keyed on month, area and subject, and every other test
+  // that rolls anything up writes into the same table.
+  const area = `zz-roll-${Math.random().toString(36).slice(2, 8)}`;
   const id = await log.logSearch({
-    householdId: h.id, surface: 'places', areaSlug: 'zz6', subject: 'food',
+    householdId: h.id, surface: 'places', areaSlug: area, subject: 'food',
     shownTotal: 4, shown: [],
   });
   assert.ok(id, 'the search was written down');
@@ -1856,7 +1860,7 @@ test('two outcomes on one rolled search never leave it counted twice', async () 
   await log.rollUp({ before: new Date() });
   const bucketOf = async () => (await query(
     `select no_trip, tripped from search_rollups
-      where area_slug = 'zz6' and subject = 'food'`)).rows[0];
+      where area_slug = $1 and subject = 'food'`, [area])).rows[0];
 
   // An open and a trip arriving together. The row lock serialises them; before
   // the rollup moved under the same lock the two corrections could land in the
@@ -1871,4 +1875,32 @@ test('two outcomes on one rolled search never leave it counted twice', async () 
   assert.equal(row.outcome, 'tripped', 'the outcome only ever rises');
   assert.equal(b.tripped, 1, 'counted once, in the column it ended in');
   assert.equal(b.no_trip, 0, 'and not also in the one it passed through');
+});
+
+test('both shapes of Tripadvisor meter count against the contractual cap', async () => {
+  const runs = await import('../src/repositories/runs.js');
+  await query('delete from provider_calls');
+  // The object meter a multi-source browse writes, and the bare number the
+  // older rows carry — migration 179 recognises and prices that shape, and the
+  // `?` operator only matches objects, so the cap counted less than was spent.
+  await query(
+    `insert into provider_calls (provider, purpose, units, created_at) values
+       ('fixtures+osm+tripadvisor', 'search', '{"tripadvisor": 3}'::jsonb, now()),
+       ('tripadvisor', 'search', '2'::jsonb, now()),
+       ('google', 'search', '5'::jsonb, now())`);
+  const board = await runs.summary?.() ?? null;
+  const counted = board?.tripadvisor?.calls ?? board?.ta?.calls ?? null;
+  if (counted != null) assert.equal(counted, 5, 'three from the object meter and two from the bare one');
+  // Whatever the board is shaped like, the two queries must agree — the
+  // enforcement and the figure that reports it cannot differ about what is left.
+  const { rows: [both] } = await query(
+    `select coalesce(sum(case
+              when jsonb_typeof(units) = 'object' then coalesce((units->>'tripadvisor')::int, 1)
+              else coalesce((units #>> '{}')::int, 1)
+            end), 0)::int as calls
+       from provider_calls
+      where created_at > date_trunc('month', now())
+        and (units ? 'tripadvisor'
+          or (jsonb_typeof(units) = 'number' and provider = 'tripadvisor'))`);
+  assert.equal(both.calls, 5, 'and Google’s bare meter is not one of them');
 });

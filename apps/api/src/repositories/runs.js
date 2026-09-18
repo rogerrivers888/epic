@@ -109,9 +109,18 @@ export async function list() {
   // Off the meter rather than the label: a browse that asks several sources
   // together is one row named after all of them (Codex, 18 Sep 2026).
   const ta = await one(
-    `select coalesce(sum(coalesce((units->>'tripadvisor')::int, 1)), 0)::int as calls,
+    // Both meter shapes, exactly as the ceiling counts them — the board and the
+    // enforcement must not be able to disagree about what is left (Codex, 19
+    // Sep 2026).
+    `select coalesce(sum(case
+              when jsonb_typeof(units) = 'object' then coalesce((units->>'tripadvisor')::int, 1)
+              else coalesce((units #>> '{}')::int, 1)
+            end), 0)::int as calls,
             max(created_at) as last
-       from provider_calls where units ? 'tripadvisor' and created_at > date_trunc('month', now())`);
+       from provider_calls
+      where created_at > date_trunc('month', now())
+        and (units ? 'tripadvisor'
+          or (jsonb_typeof(units) = 'number' and provider = 'tripadvisor'))`);
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);
   const bench = await one(
     `select count(*)::int as n, max(ran_at) as last,
