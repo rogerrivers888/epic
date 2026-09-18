@@ -1797,14 +1797,34 @@ async function planCollect(where) {
   else { args.push(scope.area.slug); wh.push(`exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $${args.length})`); }
   if (where?.cat) { args.push(String(where.cat)); wh.push(`pi.category = $${args.length}`); }
   if (where?.sub) { args.push(String(where.sub)); wh.push(`pi.subcategory = $${args.length}`); }
-  // A wide net, cut to the run's size *after* the freshness rule.
+  // The freshness rule is in the query, not after it.
   //
   // Taking the worst `limit` rows first and then dropping the ones asked about
   // inside twelve months meant a run could do nothing at all — and do nothing
-  // again next time, because the ordering never changes, so the eligible places
-  // below the cut were never reached (Codex, 17 Sep 2026). The net is twenty
-  // times the run, which is enough to find work behind a wall of fresh answers
-  // and still bounded.
+  // again next time, because the ordering never changes (Codex, 17 Sep 2026).
+  // Widening the net to twenty times the run made that less likely and not
+  // impossible: a scope whose first few hundred rows are all fresh still
+  // reported no work while stale places sat below the cut for ever (Codex, 18
+  // Sep 2026). Asked here, every candidate is eligible by construction and the
+  // cap is only a bound on how much work one run looks at.
+  //
+  // A place is eligible when *any* chosen source has not answered about it
+  // inside the window, because each source is asked on its own terms below.
+  const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
+  const FREE_KEY = 'own';
+  const SOURCES_ASKED = ['google', 'tripadvisor', ...(freeChosen.length ? [FREE_KEY] : [])];
+  const mayAsk = SOURCES_ASKED.filter((k) => (k === FREE_KEY ? freeChosen.length : chosen.has(k)));
+  if (mayAsk.length) {
+    args.push(mayAsk);
+    const srcArg = args.length;
+    args.push(String(STALE_MONTHS));
+    wh.push(`exists (
+      select 1 from unnest($${srcArg}::text[]) as src(name)
+       where not exists (
+         select 1 from place_index_sources s
+          where s.venue_ref = pi.venue_ref and s.source = src.name
+            and s.last_seen > now() - ($${args.length} || ' months')::interval))`);
+  }
   args.push(limit * 20);
   const { rows: candidates } = await query(
     `select pi.venue_ref, pi.ownership from place_index pi
@@ -1812,7 +1832,6 @@ async function planCollect(where) {
       order by pi.ready asc, pi.data_score asc nulls first
       limit $${args.length}`, args);
 
-  const freeChosen = ['own', 'osm', 'atlas'].filter((k) => chosen.has(k));
   const everything = candidates.map((r) => r.venue_ref);
   // Only a place we hold nothing of our own about is worth a paid call — which
   // is both the identified ones and the claimed ones. A claimed place is one a
@@ -1835,8 +1854,8 @@ async function planCollect(where) {
    * writes is an `own` row, so that is the window's key; keying it on the three
    * names separately meant choosing Atlas alone offered work for ever.
    */
-  const FREE_KEY = 'own';
-  const SOURCES_ASKED = ['google', 'tripadvisor', ...(freeChosen.length ? [FREE_KEY] : [])];
+  // Still asked per source afterwards, because the query's rule is "any of
+  // them" and each list below is "this one".
   const { rows: lately } = everything.length ? await query(
     `select source, venue_ref from place_index_sources
       where venue_ref = any($1) and source = any($2)

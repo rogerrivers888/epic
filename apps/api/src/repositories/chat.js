@@ -61,9 +61,14 @@ export async function topicsAcross(contextType, contextIds, { limit = 1000 } = {
  * queries, so an existing link to a moderated conversation still opened it
  * (Codex, 17 Sep 2026). The back office reads `chat_topics` directly, so a
  * reviewer can still see what they decided about.
+ *
+ * `withHidden` is for the author's own edit. Hiding it from them as well meant
+ * the correction path could never be reached: they could not fetch the thing
+ * they were being asked to rewrite (Codex, 18 Sep 2026).
  */
-export async function topicById(id) {
-  const { rows } = await query(`${TOPIC_SELECT} where t.id = $1 and not t.hidden`, [id]);
+export async function topicById(id, { withHidden = false } = {}) {
+  const { rows } = await query(
+    `${TOPIC_SELECT} where t.id = $1 and ($2 or not t.hidden)`, [id, withHidden]);
   return rows[0] ?? null;
 }
 

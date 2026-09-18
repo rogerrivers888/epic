@@ -555,7 +555,10 @@ export async function createTopic(ctx, body) {
 /** PATCH a topic: the asker edits the question, its tag and its audience; the host pins it. */
 export async function editTopic(ctx, topicId, body) {
   const me = ctx.me;
-  const t = await chat.topicById(topicId);
+  // Their own, hidden or not: somebody asked to rewrite a moderated question
+  // has to be able to open it. Every other path still refuses a hidden one, and
+  // the ownership check two lines down is what makes this safe.
+  const t = await chat.topicById(topicId, { withHidden: true });
   if (!t || t.context_type !== ctx.type || t.context_id !== ctx.id) throw refuse(404, 'topic_not_found', 'That question is not here.');
   const mine = samePerson(authorOf(t), me);
   const patch = {};
@@ -785,7 +788,12 @@ router.get('/:type/:id/topics/:topicId', async (req, res, next) => {
 router.patch('/:type/:id/topics/:topicId', async (req, res, next) => {
   try {
     const ctx = await ctxOf(req);
-    await editTopic(ctx, req.params.topicId, req.body);
+      await editTopic(ctx, req.params.topicId, req.body);
+    // The reply is what they can see. A question hidden while it waits to be
+    // read again is not readable, so the answer says that rather than 404ing on
+    // the edit that has just been saved (Codex, 18 Sep 2026).
+    const after = await chat.topicById(req.params.topicId, { withHidden: true });
+    if (after?.hidden) return res.json({ saved: true, waiting: 'Somebody will read it before it goes back up.' });
     res.json(await topicPayload(ctx, req.params.topicId));
   } catch (err) { next(err); }
 });
