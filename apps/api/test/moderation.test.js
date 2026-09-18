@@ -745,3 +745,39 @@ test('a report that has been dealt with does not come back with the next edit', 
   await queue.report({ id: q.id, reason: 'abusive', by: null });
   assert.equal(await urgent(), before + 1);
 });
+
+/**
+ * An answered chat report stays answered.
+ *
+ * The household's complaint lives in `chat_reports` for good, and matching the
+ * row alone reopened it on every queue load — so approved reported content went
+ * back into the urgent lane for ever (Codex, 18 Sep 2026).
+ */
+test('an approved chat report does not reopen itself on the next sync', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [member] } = await query(
+    `insert into members (household_id, name) values ($1, 'An asker') returning *`, [household.id]);
+  const { rows: [topic] } = await query(
+    `insert into chat_topics (context_type, context_id, author_member_id, title, body, tag_kind)
+     values ('trip', $1, $2, 'A question', 'Some words.', 'none') returning *`, [household.id, member.id]);
+  await query(
+    `insert into chat_reports (topic_id, member_id, reason) values ($1, $2, 'abusive')`,
+    [topic.id, member.id]);
+  await queue.sync();
+  const row = async () => (await query(
+    `select state, reported, report_cleared_at from content_queue
+      where subject_type = 'chat_topic' and subject_id = $1`, [topic.id])).rows[0];
+  assert.equal((await row()).reported, true, 'the household complained, so it is urgent');
+
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'chat_topic' and subject_id = $1`, [topic.id]);
+  await queue.approve([q.id], 'the owner (passcode)');
+  assert.ok((await row()).report_cleared_at, 'and somebody answered it');
+
+  // Every load syncs. It must not undo the answer.
+  await queue.sync();
+  await queue.sync();
+  const after = await row();
+  assert.equal(after.state, 'approved', 'still decided');
+  assert.ok(after.report_cleared_at, 'and the complaint is still answered');
+});

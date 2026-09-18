@@ -314,21 +314,24 @@ export async function syncFlagged() {
            decided_by = case when q.state = 'approved' then null else q.decided_by end,
            -- A report nobody has answered yet, whatever was answered before it
            -- (migration 170).
-           reported_at = coalesce(q.reported_at, now()),
+           reported_at = greatest(coalesce(q.reported_at, r.at), r.at),
            report_cleared_at = null
       from (
         -- A reply's report carries its topic's id too, because the column is
         -- mandatory. Reading it as a report of the topic promoted an otherwise
         -- unreported conversation every time one reply in it was flagged
         -- (Codex, 17 Sep 2026).
-        select 'chat_topic' as kind, topic_id::text as id, min(reason) as reason
+        -- The newest complaint, and when it was made: a report that has been
+        -- answered is answered, and matching the row alone reopened it on every
+        -- sync for ever (Codex, 18 Sep 2026).
+        select 'chat_topic' as kind, topic_id::text as id, min(reason) as reason, max(created_at) as at
           from chat_reports where topic_id is not null and reply_id is null group by topic_id
         union all
-        select 'chat_reply', reply_id::text, min(reason)
+        select 'chat_reply', reply_id::text, min(reason), max(created_at)
           from chat_reports where reply_id is not null group by reply_id
       ) r
      where q.subject_type = r.kind and q.subject_id = r.id
-       and (not q.reported or q.report_cleared_at is not null)`);
+       and (not q.reported or q.report_cleared_at is null or r.at > q.report_cleared_at)`);
 }
 
 /**

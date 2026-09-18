@@ -93,7 +93,11 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
       area: area ? { slug: area.slug, name: area.name, kind: area.kind } : null,
       since, totals,
       rows: subjects.map((s) => {
-        const k = s.subject ? known.get(s.subject) ?? 0 : null;
+        // "Anything" is every place in the scope, and the map holds that under
+        // the empty key. Reading it as null said "no places" over an area full
+        // of them, and sent somebody to Collect for the commonest search there
+        // is (Codex, 18 Sep 2026).
+        const k = s.subject ? known.get(s.subject) ?? 0 : known.get('') ?? null;
         const f = faultOf({ ...s, known: k ?? 0 });
         return {
           subject: s.subject,
