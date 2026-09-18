@@ -264,7 +264,7 @@ export async function settleClaims(refs = null, client = null) {
   return rowCount;
 }
 
-export async function retire() {
+async function retireWhileLocked() {
   // Hiding an attraction in the library took it out of the harvest's insert and
   // left the row it had already made: a rebuild stopped refreshing it and went
   // on counting it as known, as owned, and as somewhere worth collecting
@@ -477,7 +477,7 @@ async function reindexWhileLocked({ onProgress }) {
   // in the index for good (Codex, 18 Sep 2026).
   await settleClaims();
 
-  await retire();
+  await retireWhileLocked();
 
   // Every country the index holds places in gets a row you can point at.
   //
@@ -698,6 +698,20 @@ async function reindexWhileLocked({ onProgress }) {
  */
 /** What the first build writes down when it finishes, so a failure can retry. */
 const BUILT_KEY = 'placeIndex.builtAt';
+
+/**
+ * Retirement from outside a rebuild, under the same lock as one.
+ *
+ * The library's kinds-refresh calls this directly, and it deletes rows a
+ * rebuild is in the middle of inserting: a retirement landing between the index
+ * insert and the source and area inserts that follow it takes the row out from
+ * under them and the foreign keys fail, leaving the derived index half built
+ * (Codex, 18 Sep 2026). Every other thing that rewrites these tables already
+ * queues behind this lock; this was the one that did not.
+ */
+export async function retire() {
+  return underTheBuildLock(() => retireWhileLocked(), { retired: 0, why: 'a rebuild is going on' });
+}
 
 export async function buildIfEmpty() {
   // "Has a build ever *finished*", not "are there any rows".
@@ -1280,6 +1294,24 @@ export async function noteMany(places = [], { source = null, countryCode = null,
         });
     });
     if (triples.length) {
+      // Which of these have no identifier yet.
+      //
+      // An identifier arriving on a row that had none is the same kind of news
+      // as a new source: it turns "we asked and found nothing" into coverage
+      // (FOUND_IT), and the place has to be settled again or its figures keep
+      // the old answer (Codex, 18 Sep 2026). The upsert cannot tell us — inside
+      // `do update` the table name is the row as it will be — so it is read
+      // first, and only when this batch is actually carrying identifiers.
+      const carrying = triples.filter(([, , id]) => id);
+      const wereBlank = new Set();
+      if (carrying.length) {
+        const { rows } = await exec(
+          `select venue_ref, source from place_index_sources
+            where source_place_id is null
+              and (venue_ref, source) in (${carrying.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(',')})`,
+          carrying.flatMap(([ref, sc]) => [ref, sc]));
+        for (const r of rows) wereBlank.add(`${r.venue_ref}\u0000${r.source}`);
+      }
       const src = triples.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
       const said = await exec(
         `insert into place_index_sources (venue_ref, source, source_place_id)
@@ -1295,8 +1327,12 @@ export async function noteMany(places = [], { source = null, countryCode = null,
          returning venue_ref, (xmax = 0) as first_time`,
         triples.flat());
       // A source nobody had seen before changes the sources lens, so those
-      // places go back in the settling queue too.
-      const fresh = [...new Set(said.rows.filter((r) => r.first_time).map((r) => r.venue_ref))];
+      // places go back in the settling queue too — and so does one that has
+      // just gained an identifier, for the same reason.
+      const filled = carrying
+        .filter(([ref, sc]) => wereBlank.has(`${ref}\u0000${sc}`))
+        .map(([ref]) => ref);
+      const fresh = [...new Set([...said.rows.filter((r) => r.first_time).map((r) => r.venue_ref), ...filled])];
       if (fresh.length) {
         await exec('update place_index set placed_at = null where venue_ref = any($1)', [fresh]);
       }

@@ -630,11 +630,31 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   // again, counted the reason again and e-mailed the household the same
   // rejection a second time (Codex, 18 Sep 2026). The decision is the same
   // decision; saying so is the whole answer.
-  if (q.state === 'rejected' && q.reason === reason) {
+  //
+  // Unless the household was never told. Mail can be unavailable — no sender
+  // key, the service down — and the decision stands either way, with `told`
+  // false. Returning here on the retry meant the message could never be sent
+  // once mail came back: the one thing that had failed was the one thing that
+  // could not be tried again (Codex, 18 Sep 2026). The decision is still not
+  // re-made; only the telling is.
+  const onlyTheTelling = q.state === 'rejected' && q.reason === reason && tell && !q.told;
+  if (q.state === 'rejected' && q.reason === reason && !onlyTheTelling) {
     const { rows: [already] } = await query('select * from content_queue where id = $1', [id]);
     return already ? { ...already, why: 'it was already rejected for that reason' } : null;
   }
   const body = tell ? (message ?? r.message) : null;
+  // A retry of the telling alone does not count the reason again, does not
+  // decide anything again, and does not touch the content: all of that is
+  // already true. It goes straight to the message.
+  if (onlyTheTelling) {
+    const sent = await tellThem(id, q, body);
+    const { rows: [row] } = await query('select * from content_queue where id = $1', [id]);
+    // The decision is still the same decision, and the answer says so first —
+    // what changed, if anything, is that the message has now gone.
+    const why = ['it was already rejected for that reason',
+      sent.told ? 'the message has now been sent' : sent.why].filter(Boolean).join('; ');
+    return { ...row, told: sent.told, why };
+  }
 
   /**
    * The decision, the suppression and the count, in one transaction.
@@ -699,34 +719,47 @@ export async function reject({ id, reason, message = null, tell = false, who }) 
   // once something actually went out. Where there is no address, or no sender
   // key — which is the owner's to add in Doppler — the rejection still stands
   // and the screen is told plainly that the message did not go.
+  const sent = tell && body ? await tellThem(id, q, body) : { told: false, why: null };
+  out.told = sent.told;
+  out.why = sent.why;
+  return out;
+}
+
+/**
+ * Tell the household, and say plainly when it did not go.
+ *
+ * `told` is a claim about what somebody received, so it is only ever set once
+ * something actually went out. Where there is no address, or no sender key —
+ * which is the owner's to add in Doppler — the rejection still stands and the
+ * screen says the message did not go.
+ *
+ * Its own function because a rejection whose message failed can be asked again
+ * for the message alone, once mail is back (Codex, 18 Sep 2026).
+ */
+async function tellThem(id, q, body) {
   let told = false;
   let why = null;
-  if (tell && body) {
-    const { rows: [to] } = await query(
-      `select a.email from accounts a
-        where (a.id = $1 or a.household_id = $2) and a.email is not null
-        order by (a.id = $1) desc, a.created_at limit 1`,
-      [q.account_id, q.household_id]);
-    if (!mailConfigured()) why = 'no sender is configured, so nothing was sent';
-    else if (!to?.email) why = 'this household has no e-mail address on it, so nothing was sent';
-    else {
-      try {
-        await sendMail({
-          to: to.email,
-          // The word, not the key: "photograph", not "photo".
-          subject: `Thanks for the ${KINDS.find((k) => k.key === q.kind)?.said ?? q.kind}${q.place_label ? ` of ${q.place_label}` : ''}`,
-          text: body,
-          purpose: 'content.rejected',
-        });
-        told = true;
-      } catch (err) { why = `the message could not be sent: ${err.message}`; }
-    }
-    if (told) await query('update content_queue set told = true where id = $1', [id]);
+  const { rows: [to] } = await query(
+    `select a.email from accounts a
+      where (a.id = $1 or a.household_id = $2) and a.email is not null
+      order by (a.id = $1) desc, a.created_at limit 1`,
+    [q.account_id, q.household_id]);
+  if (!mailConfigured()) why = 'no sender is configured, so nothing was sent';
+  else if (!to?.email) why = 'this household has no e-mail address on it, so nothing was sent';
+  else {
+    try {
+      await sendMail({
+        to: to.email,
+        // The word, not the key: "photograph", not "photo".
+        subject: `Thanks for the ${KINDS.find((k) => k.key === q.kind)?.said ?? q.kind}${q.place_label ? ` of ${q.place_label}` : ''}`,
+        text: body,
+        purpose: 'content.rejected',
+      });
+      told = true;
+    } catch (err) { why = `the message could not be sent: ${err.message}`; }
   }
-
-  out.told = told;
-  out.why = why;
-  return out;
+  if (told) await query('update content_queue set told = true where id = $1', [id]);
+  return { told, why };
 }
 
 

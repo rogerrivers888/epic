@@ -835,3 +835,37 @@ test('rejecting a topic withdraws the FAQ it was published into', async () => {
   await queue.approve([q.id], null);
   assert.equal((await chat.faqOf(offer.id)).length, 0, 'the host’s own withdrawal stands');
 });
+
+test('a rejection whose message never went can be told again', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, may_store, moderation, contributor_household_id, licence)
+     values ('household', $1, true, 'pending', $2, 'household') returning *`,
+    [`retell-${Math.random().toString(36).slice(2, 8)}`, household.id]);
+  await queue.sync();
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+
+  // Mail is not configured here, so the decision stands and nothing goes out.
+  const first = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(first.told, false);
+  assert.match(first.why ?? '', /no sender is configured/);
+
+  // Asking again used to return early on the "already rejected" guard, so the
+  // one thing that had failed was the one thing that could never be tried
+  // again (Codex, 18 Sep 2026). It reaches the message now, says the decision
+  // was already made, and says what happened to the message.
+  const again = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(again.state, 'rejected');
+  assert.match(again.why ?? '', /already rejected/);
+  assert.match(again.why ?? '', /no sender is configured/);
+
+  // And the decision is still only made once.
+  const used = (await query(
+    `select coalesce(sum(used), 0)::int as n from rejection_counts where kind = 'photo' and reason = 'dark'`)).rows[0].n;
+  const third = await queue.reject({ id: q.id, reason: 'dark', tell: true, who: null });
+  assert.equal(third.state, 'rejected');
+  assert.equal((await query(
+    `select coalesce(sum(used), 0)::int as n from rejection_counts where kind = 'photo' and reason = 'dark'`)).rows[0].n,
+  used, 'the reason is not counted again');
+});
