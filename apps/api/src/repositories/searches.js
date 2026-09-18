@@ -139,7 +139,7 @@ export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}
   // board that does not add up — and the rollup keeps the subject on purpose
   // (Codex, 17 Sep 2026).
   const { rows } = await query(
-    `with both as (
+    `with counted as (
        select coalesce(subject, '') as subject, 1 as searches,
               (case when empty then 1 else 0 end) as empty,
               (case when not empty and outcome = 'none' then 1 else 0 end) as no_click,
@@ -163,7 +163,7 @@ export async function bySubject({ areaSlug = null, since = 30, limit = 40 } = {}
      select subject,
             sum(searches)::int as searches, sum(empty)::int as empty,
             sum(no_click)::int as no_click, sum(no_trip)::int as no_trip
-       from both
+       from counted
       group by 1 order by sum(searches) desc limit $3`,
     [String(since), areaSlug, limit]);
   return rows.map((r) => ({

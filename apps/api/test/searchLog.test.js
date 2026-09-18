@@ -639,3 +639,18 @@ test('a rolled month counts only when the whole of it is inside the window', asy
   const far = await log.totals({ areaSlug: 'windowshire', since: 3650 });
   assert.equal(far.searches, 1, 'and a window that covers it whole counts it');
 });
+
+test('the board’s two halves are both answerable, and both add up', async () => {
+  // `bySubject` had no test, and a CTE named `both` — which is a reserved word
+  // — took the whole Demand screen down with a 500 that only opening it found
+  // (18 Sep 2026). Both halves are exercised here, and against the same rows.
+  const { household } = await aHousehold(query);
+  for (const subject of ['museums', 'museums', 'parks']) {
+    await log.noteSearch({ householdId: household.id, surface: 'places', areaSlug: 'sumshire', subject });
+  }
+  const totals = await log.totals({ areaSlug: 'sumshire', since: 30 });
+  const rows = await log.bySubject({ areaSlug: 'sumshire', since: 30 });
+  assert.equal(totals.searches, 3);
+  assert.equal(rows.reduce((n, r) => n + r.searches, 0), totals.searches, 'the rows add up to the headline');
+  assert.equal(rows.find((r) => r.subject === 'museums')?.searches, 2);
+});
