@@ -355,7 +355,15 @@ async function reindexWhileLocked({ onProgress }) {
                 else split_part(pi.venue_ref, ':', 1) end,
            split_part(pi.venue_ref, ':', 2), pi.first_seen, pi.last_seen
       from place_index pi where position(':' in pi.venue_ref) > 0
-    on conflict (venue_ref, source) do update set last_seen = greatest(place_index_sources.last_seen, excluded.last_seen)`);
+    -- The source's own clock is not touched on a rebuild.
+    --
+    -- place_index.last_seen is the place's, and a household claim or an owned
+    -- record moves it — so copying it onto the source inferred from the
+    -- reference made Google look freshly asked about a place it had not been
+    -- asked about for months, and the twelve-month window then kept Collect
+    -- away from it (Codex, 18 Sep 2026). A source's last_seen only ever moves
+    -- on evidence about that source.
+    on conflict (venue_ref, source) do nothing`);
   await query(`
     insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
     -- One row per reference, for the same reason the place insert has one: two
@@ -1781,7 +1789,14 @@ export async function places(areaSlug, {
              where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode
       from place_index pi
       left join place_records r on r.venue_ref = pi.venue_ref
-      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
+      -- One attraction per place: the reference index is not unique, so a place
+      -- harvested in two regions was two rows in the list — and the duplicates
+      -- ate the page's own limit, hiding places below them (Codex, 18 Sep 2026).
+      left join lateral (
+        select a2.* from attractions a2
+         where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+           and a2.state <> 'hidden'
+         order by a2.last_seen desc, a2.id limit 1) a on true
       left join lateral (select name from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
      where ${where.join(' and ')}
      order by ${ORDER}
@@ -1827,7 +1842,14 @@ export async function namesFor(refs) {
            case when pi.venue_ref like 'google:%' then null else sp.name end as osm_name
       from place_index pi
       left join place_records r on r.venue_ref = pi.venue_ref
-      left join attractions a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref) and a.state <> 'hidden'
+      -- One attraction per place: the reference index is not unique, so a place
+      -- harvested in two regions was two rows in the list — and the duplicates
+      -- ate the page's own limit, hiding places below them (Codex, 18 Sep 2026).
+      left join lateral (
+        select a2.* from attractions a2
+         where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+           and a2.state <> 'hidden'
+         order by a2.last_seen desc, a2.id limit 1) a on true
       left join lateral (select name from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
      where pi.venue_ref = any($1)`, [refs]);
   for (const r of rows) {
