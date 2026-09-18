@@ -222,8 +222,8 @@ function itemOfRecord(r, taught, tax) {
  * before it claims the money for one (Codex, 18 Sep 2026). It resolves the
  * place, which is a free lookup of our own.
  */
-export async function ringParams({ q, minutes, mode }, household) {
-  const place = await whereIs(q, household);
+export async function ringParams({ q, minutes, mode }, household, { place: known = null } = {}) {
+  const place = known ?? await whereIs(q, household);
   if (!place) return null;
   const centre = { lat: place.lat, lng: place.lng };
   return {
@@ -233,9 +233,15 @@ export async function ringParams({ q, minutes, mode }, household) {
   };
 }
 
-async function runLookup({ q, minutes, mode }, household, { afford = null } = {}) {
+async function runLookup({ q, minutes, mode }, household, { afford = null, place: known = null } = {}) {
   const started = Date.now();
-  const place = await whereIs(q, household);
+  // The place, where the caller has already resolved it.
+  //
+  // Opening the comparison worked out what it would cost first, which resolves
+  // the words through the geocoder — and then this resolved them again: two
+  // calls, two ledger rows and two chances to be throttled for one question
+  // (Codex, 18 Sep 2026).
+  const place = known ?? await whereIs(q, household);
   if (!place) throw Object.assign(new Error(`Nowhere called "${q}" could be found.`), { status: 404, code: 'not_found' });
   const centre = { lat: place.lat, lng: place.lng };
   const radiusKm = reachKm(mode, minutes, { at: centre });
@@ -516,7 +522,8 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     // the ring the last look ran, and a detail fetched within the six hours it
     // is kept. Claiming regardless hid a column that had cost nothing minutes
     // earlier (Codex, 18 Sep 2026).
-    const ringKey = await ringParams(settingsOf(req.query), household);
+    const where = await whereIs(settingsOf(req.query).q, household);
+    const ringKey = await ringParams(settingsOf(req.query), household, { place: where });
     const ringHeld = Boolean(ringKey && searchKept(ringKey));
     const googleHeld = googleId ? detailHeld('google', googleId) : false;
     const calls = googleSource.enabled()
@@ -539,6 +546,8 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     // Whatever the month cannot afford is left out of the search as well: the
     // search is itself a billed call, and its cost is inside the same claim.
     const out = await runLookup(settingsOf(req.query), household, {
+      // Resolved once, above, and handed on.
+      place: where,
       // The comparison has already claimed its own calls; the ring is claimed
       // here, and only if it is not already held.
       afford: async () => ({
