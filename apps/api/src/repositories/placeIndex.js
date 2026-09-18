@@ -1633,9 +1633,22 @@ export async function categories(areaSlug, { refs = null, category = null, since
           where s.at > now() - ($1 || ' days')::interval
             and exists (select 1 from place_index pi where pi.venue_ref = any($2) and pi.cell = s.cell)
           group by subject`
+      // An area's own searches *and* its descendants'.
+      //
+      // A point search is filed against a county, so Great Britain's searches
+      // live under its counties and a town's under its own county — and asking
+      // for the slug alone showed no demand at all on the country and town
+      // boards while the Demand lens beside them showed plenty (Codex, 18 Sep
+      // 2026).
       : `select subject, count(*)::int as searches, count(*) filter (where empty)::int as empty
            from searches s
-          where s.at > now() - ($1 || ' days')::interval and s.area_slug = $2
+          where s.at > now() - ($1 || ' days')::interval
+            and (s.area_slug = $2
+                 or s.area_slug in (
+                   select l.slug from localities l
+                    where l.parent_slug = $2
+                       or ($2 in (select slug from localities where kind = 'country')
+                           and l.country_code = (select country_code from localities where slug = $2))))
           group by subject`,
     [String(since), refs ?? slug])).rows.map((r) => [r.subject, r]));
 

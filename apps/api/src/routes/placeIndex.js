@@ -33,7 +33,7 @@ import { TRIPADVISOR_CAP } from '../repositories/runs.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import * as collectRuns from '../repositories/collectRuns.js';
 import * as ownedPlaces from '../repositories/ownedPlaces.js';
-import { googleMatchFor, matchesFor } from '../sources/providerMatch.js';
+import { googleMatchFor, matchesFor, forgetMisses } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
@@ -1579,6 +1579,14 @@ async function askThese(refs, householdId) {
     // none (Codex, 18 Sep 2026).
     let calls = 0;
     const refused = [];
+    // A miss older than the staleness window is asked again.
+    //
+    // `googleMatchFor` answers out of a remembered miss without making a
+    // request, so once the twelve months were up Collect scheduled the place,
+    // stamped the source as freshly asked and put it off for another twelve —
+    // having never actually asked whether Google knows it now (Codex, 18 Sep
+    // 2026). Older than the window, so a run cannot buy the same miss twice.
+    await forgetMisses(refs, 'google', { olderThanMinutes: STALE_MONTHS * 30 * 24 * 60 }).catch(() => null);
     /**
      * The names, for this screen and no longer.
      *
