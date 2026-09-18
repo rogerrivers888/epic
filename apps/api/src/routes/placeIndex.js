@@ -366,6 +366,13 @@ router.get('/breakdown', requires('view_library'), async (req, res, next) => {
 router.get('/coverage', requires('view_library'), async (req, res, next) => {
   try {
     const where = lower(req.query.where) || 'gb';
+    // An area we do not hold is not "everywhere". Without this the country code
+    // fell back to an empty string, the town count matched every town in the
+    // database, and a stale shared link answered "0 of 12,400 towns" about a
+    // place that does not exist here (Codex, 18 Sep 2026 — the same shape as
+    // the Demand board's, found in the live audit).
+    const area = await index.areaBySlug(where);
+    if (!area) throw bad(`We hold no area called “${where}”.`, 'no_such_area');
     const rows = await index.coverage(where);
     res.json({
       rows,
@@ -384,7 +391,7 @@ router.get('/coverage', requires('view_library'), async (req, res, next) => {
                      when exists (select 1 from localities c where c.slug = $1 and c.kind = 'country')
                        then l.country_code = upper($2)
                      else l.parent_slug = $1 end`,
-        [where, (await index.areaBySlug(where))?.country_code ?? ''])).rows[0].n,
+        [where, area.country_code ?? ''])).rows[0].n,
       refreshedAt: await index.statsAge(),
     });
   } catch (err) { next(err); }

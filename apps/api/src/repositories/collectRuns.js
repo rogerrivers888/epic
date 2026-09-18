@@ -195,11 +195,21 @@ export async function finish(id) {
 }
 
 export async function fail(id, problem) {
+  // Whatever was in the air goes first.
+  //
+  // `abandonInFlight` already knows what to do with it — recorded as refused,
+  // with the reason, because we cannot know whether those calls were billed and
+  // the safe direction is not to pay twice. Failing left it in the asking list
+  // instead, where the overlap guard could not see it: that guard only looks at
+  // runs which are *going*, so the next Collect started straight over a chunk
+  // somebody may already have paid for (Codex, 18 Sep 2026).
+  await abandonInFlight(id).catch(() => null);
   const { rows } = await query(
     `update collect_runs set state = 'failed', problem = $2, finished_at = now(), touched_at = now()
       where id = $1 and state = 'running' returning *`, [id, String(problem ?? '').slice(0, 500)]);
   return rows[0] ?? null;
 }
+
 
 /**
  * Runs that were going and have not been touched since — a deploy, usually.

@@ -167,3 +167,26 @@ test('a second collection going at the same time is not hidden', async () => {
   assert.equal(now.id, third.id);
   assert.equal(now.alsoStranded, 1, 'the one a deploy took is counted even though the row is not it');
 });
+
+test('a chunk in the air when a run falls over is abandoned in as many words', async () => {
+  await query('delete from collect_runs');
+  const run = await runs.start({
+    whereLabel: 'Dorset', scope: {}, sources: ['google'], todo: { google: ['a', 'b', 'c'] },
+  });
+  // A chunk is taken off the list before the calls go out, so it sits in the
+  // asking list while they are in the air.
+  await runs.claim(run.id, 'google', ['a', 'b']);
+  const { rows: [mid] } = await query('select asking from collect_runs where id = $1', [run.id]);
+  assert.deepEqual(mid.asking.google, ['a', 'b']);
+
+  await runs.fail(run.id, 'Google fell over');
+  const { rows: [after] } = await query('select asking, refused from collect_runs where id = $1', [run.id]);
+
+  // The overlap guard only looks at runs that are going, so a chunk left in the
+  // asking list by a failure protected nothing: the next Collect started
+  // straight over it, and those calls may already have been paid for (Codex,
+  // 18 Sep 2026).
+  assert.deepEqual(after.asking, {}, 'nothing is left claiming to be in the air');
+  assert.deepEqual(after.refused.map((r) => r.ref).sort(), ['a', 'b']);
+  assert.match(after.refused[0].why, /not asked again, to avoid paying twice/);
+});
