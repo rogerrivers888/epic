@@ -93,6 +93,8 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
 const drawn = new Map<Surface, string>();
 /** And what is in the air, so a list that renders twice does not send twice. */
 const sending = new Map<Surface, string>();
+/** Searches whose positions have been settled by the first list actually drawn. */
+const fixed = new Set<string>();
 
 /**
  * What the screen actually drew.
@@ -130,7 +132,24 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
     // fell over, or a search older than the endpoint's half-hour. Marking it
     // recorded on any answer is the same mistake as marking it before the post
     // (Codex, 18 Sep 2026).
-    .then((r) => { if (r?.ok) drawn.set(surface, key); })
+    .then((r) => {
+      if (!r?.ok) return;
+      drawn.set(surface, key);
+      // And the positions an event will carry, set from the same list and only
+      // once — exactly the rule the API keeps for the rows themselves.
+      //
+      // `heldSearch` seeds them from the *pool*, which is the answer's order,
+      // while what the API writes down is the *screen's*. So a tap carried one
+      // number and the row it belongs to carried another, and the replay — which
+      // compares an event's position against the rows' to work out how far down
+      // somebody read — called rows "Never reached" that they had scrolled
+      // straight past (Codex, 18 Sep 2026). A later filter moves nothing: the
+      // first list is the one both sides recorded.
+      if (!fixed.has(queryId)) {
+        fixed.add(queryId);
+        kept.forEach((ref, i) => positions.set(`${queryId}:${ref}`, i + 1));
+      }
+    })
     .catch(() => null)
     .finally(() => { if (sending.get(surface) === key) sending.delete(surface); });
 }
