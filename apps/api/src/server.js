@@ -521,6 +521,15 @@ app.use((err, _req, res, _next) => {
   if (!err.status && err.code === '22023') {
     return res.status(400).json({ error: 'wrong_shape', message: err.message });
   }
+  // A word where an identifier should be. A truncated or hand-edited link — a
+  // replay address with half a uuid in it — reached the column as text and came
+  // back a 500, which says the server is broken about an address that is simply
+  // wrong (Codex, 18 Sep 2026). Postgres says 22P02; it belongs beside the two
+  // above, and here rather than in one route, because every address that
+  // carries an id can be edited by hand.
+  if (!err.status && err.code === '22P02') {
+    return res.status(400).json({ error: 'not_an_id', message: 'That is not an id we could look anything up by.' });
+  }
   res.status(err.status || 500).json({ error: err.code || 'internal_error', message: err.message });
 });
 
