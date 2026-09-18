@@ -235,11 +235,29 @@ export async function claimStranded() {
   return rows;
 }
 
-/** What the Runs board prints: the one going, and the last one that finished. */
+/**
+ * What the Runs board prints: whatever is going, and the last one that finished.
+ *
+ * The row is the newest run, whatever state it is in: a failed one has to stay
+ * on the board until somebody looks at it, which is the whole point of the
+ * failed state.
+ *
+ * But two collections over disjoint sets of places are allowed at once
+ * (`startIfClear`), and reading that one row alone hid the other — a worker
+ * still going, and still spending, was not on the board and "needs looking at"
+ * did not count it (Codex, 18 Sep 2026). So the others are counted beside it,
+ * and the headline figures are the truth even where the row draws one.
+ */
 export async function latest() {
   const { rows } = await query('select * from collect_runs order by started_at desc limit 1');
   const r = rows[0];
   if (!r) return null;
+  // How many others are going beside this one, so the board's count is the
+  // truth even where it draws one.
+  const { rows: [more] } = await query(
+    `select count(*)::int as n,
+            count(*) filter (where touched_at < now() - ($1 || ' milliseconds')::interval)::int as stranded
+       from collect_runs where state = 'running' and id <> $2`, [String(STRANDED_AFTER_MS), r.id]);
   const count = (o) => Object.values(o ?? {}).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0);
   // What is still to do, and what it is asking about right now.
   const left = count(r.todo) + count(r.asking);
@@ -249,5 +267,9 @@ export async function latest() {
     left, asking: count(r.asking), asked, spentPence: r.spent_pence, problem: r.problem,
     startedAt: r.started_at, touchedAt: r.touched_at, finishedAt: r.finished_at,
     stranded: r.state === 'running' && Date.now() - new Date(r.touched_at).getTime() > STRANDED_AFTER_MS,
+    // The others, if a second collection is going over a different set of
+    // places. Nought nearly always, and never a surprise when it is not.
+    alsoRunning: more?.n ?? 0,
+    alsoStranded: more?.stranded ?? 0,
   };
 }

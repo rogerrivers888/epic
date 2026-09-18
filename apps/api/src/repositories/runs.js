@@ -189,7 +189,10 @@ export async function list() {
       ...RUNS[8],
       state: collect?.state === 'running' ? 'running' : collect?.state === 'failed' ? 'failed' : 'idle',
       where: !collect ? 'Idle'
-        : collect.state === 'running' ? `Running · ${collect.asked} asked, ${collect.left} to go`
+        // Two collections over different places are allowed at once, and the
+        // board draws one row: it says so rather than hiding the other (Codex,
+        // 18 Sep 2026).
+        : collect.state === 'running' ? `Running · ${collect.asked} asked, ${collect.left} to go${collect.alsoRunning ? ` · and ${collect.alsoRunning} more going` : ''}`
         : collect.state === 'failed' ? `Stopped · ${collect.problem ?? 'it fell over'}`
         : `Done · ${collect.asked} place${collect.asked === 1 ? '' : 's'}${collect.where ? ` in ${collect.where}` : ''}`,
       progress: collect && collect.asked + collect.left ? collect.asked / (collect.asked + collect.left) : null,
@@ -218,10 +221,12 @@ export async function list() {
 
   return {
     runs: rows,
-    running: rows.filter((r) => r.state === 'running').length,
+    // Every collection that is going, not only the one the row draws.
+    running: rows.filter((r) => r.state === 'running').length + (collect?.alsoRunning ?? 0),
     // A run that stopped, failed or was never picked up. Two of them is a number
     // somebody has to act on today.
-    needsLooking: rows.filter((r) => r.stranded || r.state === 'failed' || (r.key === 'menus' && r.ours > 0)).length,
+    needsLooking: rows.filter((r) => r.stranded || r.state === 'failed' || (r.key === 'menus' && r.ours > 0)).length
+      + (collect?.alsoStranded ?? 0),
     spentPence: Math.round(Number(spend?.usd ?? 0) * 100 * USD_TO_GBP),
     calls: spend?.calls ?? 0,
     ceilingPence: Number(ceiling?.value ?? 25000),

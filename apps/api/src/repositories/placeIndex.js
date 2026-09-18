@@ -58,6 +58,30 @@ const FOUND_IT = (t) => `${t}.source_place_id is not null
    -- it (Codex, 18 Sep 2026 — the first cut of this rule hid them all).
    or ${t}.venue_ref like ${t}.source || ':%'`;
 
+/**
+ * When a place may be called *placed*.
+ *
+ * It has a cell; or it never could have one (no coordinates); or the stamper
+ * has already answered about *this* position — including the answer "outside
+ * the postcode coverage", which is a `place_cells` row with a null cell and is
+ * an answer rather than a wait; or there is no matrix at all yet.
+ *
+ * Marking anything else placed means nothing ever copies its cell in, and the
+ * place stays out of every ring view until somebody runs a full rebuild. The
+ * hourly pass had this rule and the rebuild did not, so a place whose stamp had
+ * not been reached — ONS timed out, or the limit ran out before it — was marked
+ * placed by the next rebuild and left there (Codex, 18 Sep 2026).
+ */
+const PLACED_ENOUGH = `(cell is not null
+   or lat is null or lng is null
+   or exists (
+     select 1 from place_cells pc
+      where pc.venue_ref = place_index.venue_ref
+        and pc.lat is not null and pc.lng is not null
+        and abs(pc.lat - place_index.lat) <= 0.0005
+        and abs(pc.lng - place_index.lng) <= 0.0005)
+   or not exists (select 1 from geo_cells limit 1))`;
+
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 
 /**
@@ -628,7 +652,8 @@ async function reindexWhileLocked({ onProgress }) {
   // before it started.
   await query(
     `update place_index set placed_at = now()
-      where first_seen <= $1 and coalesce(last_seen, first_seen) <= $1`, [new Date(t0)]);
+      where first_seen <= $1 and coalesce(last_seen, first_seen) <= $1
+        and ${PLACED_ENOUGH}`, [new Date(t0)]);
   const total = (await query('select count(*)::int as n from place_index')).rows[0].n;
   await refreshStats();
   return { places: total, ...scored, ms: Date.now() - t0 };
@@ -887,27 +912,7 @@ async function settleWhileLocked(limit) {
   // ever would starve the places that do have work to do.
   await query(
     `update place_index set placed_at = now()
-      where venue_ref = any($1)
-        and (cell is not null
-             -- Only a place that could *get* a cell waits for one. Without
-             -- coordinates there is nothing to stamp; and a point the stamper
-             -- has already looked at and found to be outside the postcode
-             -- coverage gets a place_cells row with a null cell, which is an
-             -- answer rather than a wait. Leaving either pending meant the
-             -- hourly pass rescored the same unplaceable rows for ever and
-             -- eventually starved the new ones out of its batch (Codex, 18 Sep
-             -- 2026).
-             or lat is null or lng is null
-             -- A terminal answer about *this* position: a row stamped from
-             -- somewhere else is an answer about where it used to be (Codex,
-             -- 18 Sep 2026).
-             or exists (
-               select 1 from place_cells pc
-                where pc.venue_ref = place_index.venue_ref
-                  and pc.lat is not null and pc.lng is not null
-                  and abs(pc.lat - place_index.lat) <= 0.0005
-                  and abs(pc.lng - place_index.lng) <= 0.0005)
-             or not exists (select 1 from geo_cells limit 1))`, [refs]);
+      where venue_ref = any($1) and ${PLACED_ENOUGH}`, [refs]);
   // The boards read `area_stats`, so a place placed but not counted is still
   // missing from every headline.
   await refreshStats();

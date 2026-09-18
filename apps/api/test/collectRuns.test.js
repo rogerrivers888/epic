@@ -143,3 +143,27 @@ test('two people pressing Collect at once do not pay for the same places twice',
   await runs.finish(run.id);
   assert.equal((await runs.alreadyGoing([p, q, r])).length, 0, 'a finished run holds nothing');
 });
+
+test('a second collection going at the same time is not hidden', async () => {
+  await query('delete from collect_runs');
+  const first = await runs.start({ whereLabel: 'Kent', scope: {}, sources: ['google'], todo: { google: ['a'] } });
+  const second = await runs.start({ whereLabel: 'Surrey', scope: {}, sources: ['google'], todo: { google: ['b'] } });
+
+  // The row is the newest — a failed run has to stay on the board until
+  // somebody looks — but the other one is still going and still spending, and
+  // reading one row alone left it off the board entirely (Codex, 18 Sep 2026).
+  const board = await runs.latest();
+  assert.equal(board.id, second.id, 'the row is the newest run');
+  assert.equal(board.alsoRunning, 1, 'and it says the other one is going too');
+
+  await runs.finish(first.id);
+  assert.equal((await runs.latest()).alsoRunning, 0);
+
+  // Stranded counts the same way: untouched for ten minutes while claiming to
+  // be going is somebody's job today, whichever run it is.
+  const third = await runs.start({ whereLabel: 'Devon', scope: {}, sources: [], todo: { free: ['c'] } });
+  await query(`update collect_runs set touched_at = now() - interval '20 minutes' where id = $1`, [second.id]);
+  const now = await runs.latest();
+  assert.equal(now.id, third.id);
+  assert.equal(now.alsoStranded, 1, 'the one a deploy took is counted even though the row is not it');
+});
