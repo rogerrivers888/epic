@@ -851,3 +851,39 @@ test('a row written to hold a score is not a research job, until somebody claims
   await owned.ensureRecord(ref);
   assert.equal(await state(), 'pending');
 });
+
+/**
+ * One place harvested twice is still one place.
+ *
+ * `attractions_venue_idx` is not unique, so a place harvested in two regions is
+ * two rows — and a statement cannot touch one primary key twice, so the whole
+ * rebuild aborted with "ON CONFLICT DO UPDATE command cannot affect row a
+ * second time" (Codex, 18 Sep 2026).
+ */
+test('a place harvested in two regions rebuilds, and is scored once', async () => {
+  const ref = 'osm:way/harvested-twice';
+  const { rows: regions } = await query('select slug from regions limit 2');
+  const make = async (slug, summary) => query(
+    `insert into attractions (name, slug, region_slug, venue_ref, state, lat, lng, summary, first_seen, last_seen)
+     values ($1, $2, $3, $4, 'published', 51.5, -0.1, $5, now(), now())`,
+    [`Harvested twice`, `twice-${slug}-${Math.random().toString(36).slice(2, 8)}`, slug, ref, summary]);
+  await make(regions[0].slug, 'A sentence of ours');
+  await make(regions[1].slug, null);
+
+  await index.reindex();
+  const { rows } = await query('select count(*)::int as n from place_index where venue_ref = $1', [ref]);
+  assert.equal(rows[0].n, 1, 'one row, and the rebuild finished');
+  // And one atlas source row, not two — the same key twice would abort the
+  // sources pass the same way.
+  const { rows: [src] } = await query(
+    `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'atlas'`, [ref]);
+  assert.equal(src.n, 1);
+
+  // Scored once, off one of the two attraction rows rather than whichever the
+  // update happened to land on last.
+  await query(`update place_index set subcategory = 'museums' where venue_ref = $1`, [ref]);
+  await index.rescore({ refs: [ref] });
+  const { rows: [scored] } = await query(
+    'select count(*)::int as n from place_index where venue_ref = $1 and data_score is not null', [ref]);
+  assert.equal(scored.n, 1);
+});

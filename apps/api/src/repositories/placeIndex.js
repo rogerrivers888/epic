@@ -143,9 +143,17 @@ const HELD_SQL = `
         -- them, and this one did not — so a place could be scored ready on a
         -- summary, a website, opening hours and pictures belonging to an
         -- attraction somebody had thrown out (Codex, 17 Sep 2026).
-        left join attractions  a on (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
-                                and a.state <> 'hidden'
-        left join attraction_details d on d.attraction_id = a.id
+        -- One attraction per place, and one detail row with it: the reference
+        -- index is not unique, so a place harvested in two regions produced two
+        -- rows here and the score written for it was whichever one the update
+        -- happened to land on last (Codex, 18 Sep 2026).
+        left join lateral (
+          select a2.* from attractions a2
+           where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+             and a2.state <> 'hidden'
+           order by a2.last_seen desc, a2.id limit 1) a on true
+        left join lateral (
+          select d2.* from attraction_details d2 where d2.attraction_id = a.id limit 1) d on true
         left join lateral (select sp.website from scout_places sp where sp.venue_ref = pi.venue_ref limit 1) s on true
     ) x`;
 
@@ -181,12 +189,24 @@ async function reindexWhileLocked({ onProgress }) {
            -- position is not that: it is a place we have identified.
            case when coalesce(a.summary, a.website, a.wikipedia_url) is not null then 'owned' else 'identified' end,
            a.first_seen, a.last_seen
-      from attractions a left join regions reg on reg.slug = a.region_slug
-     -- hidden is the state the library actually sets (repositories/library.js);
-     -- there is no rejected, so the guard that named it excluded nothing and a
-     -- hidden attraction went on being counted, scored, owned and collected
-     -- (Codex, 18 Sep 2026).
-     where a.state <> 'hidden'
+      from (
+        -- One row per reference, whatever the harvest holds.
+        --
+        -- attractions_venue_idx is not unique, so the same place harvested in
+        -- two regions is two rows — and a statement cannot touch one primary key
+        -- twice: the whole rebuild aborted with "ON CONFLICT DO UPDATE command
+        -- cannot affect row a second time", which is every rebuild, for ever,
+        -- the day a place is harvested twice (Codex, 18 Sep 2026). The newest is
+        -- kept, as it is everywhere else here.
+        select distinct on (coalesce(venue_ref, 'atlas:' || id::text)) *
+          from attractions
+         -- hidden is the state the library actually sets
+         -- (repositories/library.js); there is no rejected, so the guard that
+         -- named it excluded nothing and a hidden attraction went on being
+         -- counted, scored, owned and collected (Codex, 18 Sep 2026).
+         where state <> 'hidden'
+         order by coalesce(venue_ref, 'atlas:' || id::text), last_seen desc, id
+      ) a left join regions reg on reg.slug = a.region_slug
     on conflict (venue_ref) do update
        set lat = coalesce(excluded.lat, place_index.lat),
            lng = coalesce(excluded.lng, place_index.lng),
@@ -338,8 +358,13 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict (venue_ref, source) do update set last_seen = greatest(place_index_sources.last_seen, excluded.last_seen)`);
   await query(`
     insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
-    select coalesce(a.venue_ref, 'atlas:' || a.id::text), 'atlas', a.id::text, a.first_seen, a.last_seen
+    -- One row per reference, for the same reason the place insert has one: two
+    -- harvests of the same place would make the same key twice and abort the
+    -- rebuild (Codex, 18 Sep 2026).
+    select distinct on (coalesce(a.venue_ref, 'atlas:' || a.id::text))
+           coalesce(a.venue_ref, 'atlas:' || a.id::text), 'atlas', a.id::text, a.first_seen, a.last_seen
       from attractions a where a.state <> 'hidden'
+     order by coalesce(a.venue_ref, 'atlas:' || a.id::text), a.last_seen desc, a.id
     on conflict (venue_ref, source) do update set last_seen = greatest(place_index_sources.last_seen, excluded.last_seen)`);
   await query(`
     insert into place_index_sources (venue_ref, source, source_place_id, first_seen, last_seen)
