@@ -38,7 +38,14 @@ export async function logSearch({
      returning id`,
     [id, householdId, accountId, sessionId, surface, areaSlug, lat, lng, cell,
       radiusKm, mode, minutes, JSON.stringify(asked ?? {}), subject, shownTotal, JSON.stringify(shown ?? []),
-      sourcesQueried, degraded, Number(shownTotal) === 0, tripId],
+      sourcesQueried,
+      // Source *names*, because the column is `text[]` and the replay prints
+      // them as words. Two callers hand over `{ source, error, slow }` objects,
+      // which Postgres stringified into the array — so a replay after any
+      // provider timed out printed a lump of JSON where a source should be
+      // (Codex, 18 Sep 2026).
+      (degraded ?? []).map((d) => (typeof d === 'string' ? d : d?.source)).filter(Boolean),
+      Number(shownTotal) === 0, tripId],
   );
   return rows[0].id;
 }

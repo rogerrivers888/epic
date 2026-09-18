@@ -654,3 +654,17 @@ test('the board’s two halves are both answerable, and both add up', async () =
   assert.equal(rows.reduce((n, r) => n + r.searches, 0), totals.searches, 'the rows add up to the headline');
   assert.equal(rows.find((r) => r.subject === 'museums')?.searches, 2);
 });
+
+test('a degraded source is written down by name, not as a lump of JSON', async () => {
+  const { household } = await aHousehold(query);
+  // Two callers hand over `{ source, error, slow }` objects and the column is
+  // `text[]`, so Postgres stringified them — and a replay after any provider
+  // timed out printed JSON where a source name should be (Codex, 18 Sep 2026).
+  const id = await log.noteSearch({
+    householdId: household.id, surface: 'places',
+    sourcesQueried: ['google', 'osm'],
+    degraded: [{ source: 'osm', error: 'timed out', slow: true }, 'google'],
+  });
+  const { rows: [row] } = await query('select degraded from searches where id = $1', [id]);
+  assert.deepEqual(row.degraded, ['osm', 'google']);
+});

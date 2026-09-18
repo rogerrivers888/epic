@@ -320,9 +320,14 @@ async function runLookup({ q, minutes, mode }, household, { afford = null } = {}
         // through the fan-out — so its note says so rather than this
         // figure pretending to be exact.
         const reach = s.maxRadiusKm != null ? Math.min(radiusKm, s.maxRadiusKm) : radiusKm;
+        // A source the month could not afford was not asked. Left to say
+        // `asked: true` with nothing found, it read as a coverage gap that is
+        // really a budget one (Codex, 18 Sep 2026).
+        const skipped = purse.without.includes(s.key);
         return {
-          key: s.key, label: s.label, layer: 'rented', note: null,
-          asked: asked(s), reachKm: reach, capped: reach < radiusKm,
+          key: s.key, label: s.label, layer: 'rented',
+          note: skipped ? 'not asked — over this month\u2019s ceiling' : null,
+          asked: asked(s) && !skipped, reachKm: reach, capped: reach < radiusKm,
           returned: returned[s.key], kept: inReach[s.key],
           failed: failed.has(s.key)
             ? { why: whySourceFailed(s.key, failed.get(s.key).error), error: failed.get(s.key).error, slow: Boolean(failed.get(s.key).slow) }
