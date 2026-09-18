@@ -166,6 +166,29 @@ const NOT_A_SEARCH = new Set(['/event', '/drawn']);
 for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places']) {
   app.use(path, (req, res, next) => (NOT_A_SEARCH.has(req.path) ? next() : spendLimit(req, res, next)));
 }
+/**
+ * The back office's own paid doors.
+ *
+ * A prefix will not do here: the boards make several reads on every load, and
+ * putting all of `/api/admin/place-index` under the spend limiter would stop
+ * somebody browsing coverage long before they had spent a penny. So the paid
+ * operations are named — comparing a place fetches a provider's detail live,
+ * and Ask, Collect and the picture finder all buy — and the replay only when it
+ * is asked for names (Codex, 18 Sep 2026).
+ *
+ * The limiter is per household and these are the owner's own screens, so this
+ * is about a loop or a retry storm rather than about a person: the point is
+ * that a runaway client cannot outspend the ceiling faster than anything else
+ * that bills.
+ */
+const PAID_ADMIN = new Set([
+  '/place/compare', '/ask', '/collect', '/pictures/find',
+]);
+app.use('/api/admin/place-index', (req, res, next) =>
+  (PAID_ADMIN.has(req.path) ? spendLimit(req, res, next) : next()));
+app.use('/api/admin/demand', (req, res, next) =>
+  (req.path === '/search' && String(req.query.names ?? '') === '1' ? spendLimit(req, res, next) : next()));
+
 // Speech is a paid minute per request, held to its own number per household
 // (`voiceLimit`) as well as the monthly minutes in routes/voice.js.
 app.use('/api/voice', voiceLimit);
