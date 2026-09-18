@@ -495,13 +495,37 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
     // one of the three faults, and the one that sends a collection budget
     // somewhere it is not needed (Codex, 17 Sep 2026). A ring counts its own
     // refs, the way the rest of its figures do.
+    // And a subject comes at three widths — a subcategory ("museums"), a
+    // category ("food") and the planner's moods, which are categories by
+    // another name. Holding subcategories only reported "no places" against an
+    // area full of them, which is the same wrong fault by another route (Codex,
+    // 18 Sep 2026; the same fix as routes/demand.js).
     const known = new Map((scope.kind === 'ring'
       ? (await query(
-        `select subcategory, count(*)::int as places from place_index
-          where venue_ref = any($1) and subcategory is not null group by subcategory`, [scope.refs])).rows
+        `select subcategory as key, count(*)::int as places from place_index
+          where venue_ref = any($1) and subcategory is not null group by subcategory
+         union all
+         select category, count(*)::int from place_index
+          where venue_ref = any($1) and category is not null group by category`, [scope.refs])).rows
       : (await query(
-        `select subcategory, places from area_stats where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''`,
-        [slug ?? ''])).rows).map((r) => [r.subcategory, r.places]));
+        `select subcategory as key, places from area_stats
+           where area_slug = $1 and subcategory <> '' and source = '' and ownership = ''
+         union all
+         select category, places from area_stats
+           where area_slug = $1 and category <> '' and subcategory = '' and source = '' and ownership = ''`,
+        [slug ?? ''])).rows).map((r) => [r.key, r.places]));
+    // "Anything" and "things to do" are every place, and every place that is
+    // not food: broad subjects the log records and no shelf is called.
+    const everyPlace = scope.kind === 'ring'
+      ? (await query('select count(*)::int as places from place_index where venue_ref = any($1)', [scope.refs])).rows[0]?.places ?? 0
+      : (await query(
+        `select places from area_stats
+          where area_slug = $1 and category = '' and subcategory = '' and source = '' and ownership = ''`,
+        [slug ?? ''])).rows[0]?.places ?? 0;
+    if (everyPlace) {
+      known.set('', everyPlace);
+      known.set('things', Math.max(0, everyPlace - (known.get('food') ?? 0)));
+    }
     res.json({
       ...(await head(scope)),
       since, totals,
@@ -1767,7 +1791,11 @@ async function planCollect(where) {
   // so leaving them out of `want` admitted runs there was no budget for (Codex,
   // 17 Sep 2026). Its monthly count is the other, stricter limit and is claimed
   // separately.
-  const want = askingCost(google, await alreadyMatched(google)) + taCost(tripadvisor.length);
+  // A detail already in hand costs nothing, and the quote says so: a place can
+  // be eligible for collection and still be cached — Compare and the replay both
+  // fill that cache without writing a source row (Codex, 18 Sep 2026).
+  const want = askingCost(google, await alreadyMatched(google), await alreadyHeld(google))
+    + taCost(tripadvisor.length);
   return {
     scope, chosen, limit,
     // How many this run will actually touch, which is what the board prints.
@@ -1890,14 +1918,18 @@ async function work(runId, householdId) {
       } else if (source === 'google') {
         // The ceiling is asked again per chunk, not once at the start: a run
         // that outlives a deploy must not outlive the month's budget either.
-        const cost = askingCost(batch, await alreadyMatched(batch));
+        const cost = askingCost(batch, await alreadyMatched(batch), await alreadyHeld(batch));
         const room = await roomToSpend(cost, { holder: `collect:${runId}` });
         if (!room.ok) { await collectRuns.done(runId, 'google', { refused: batch.map((ref) => ({ ref, why: 'over the ceiling' })) }); continue; }
+        const from = new Date();
         try {
           const out = await askThese(batch, householdId);
-          // What the whole chunk was claimed at, apportioned to what answered:
-          // a place that did not match still cost the search that found that out.
-          await collectRuns.done(runId, 'google', { done: out.asked, refused: out.refused, spentPence: cost });
+          // What it spent, off the ledger — not what was claimed for it. The
+          // claim is a ceiling on the chunk; a cached detail and a place with no
+          // Google entry at all both cost less than it (Codex, 18 Sep 2026).
+          await collectRuns.done(runId, 'google', {
+            done: out.asked, refused: out.refused, spentPence: await spentSince(from, householdId),
+          });
         } finally { await releaseSpend(room.reservation); }
       } else {
         // Claimed twice, because there are two limits: the monthly count of
