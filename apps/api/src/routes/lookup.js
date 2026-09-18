@@ -805,7 +805,16 @@ router.post('/tripadvisor', requires('manage_library'), async (req, res, next) =
     // The money follows the locations: what this page will actually do, not
     // what was asked for.
     const taPenceNow = 2 * canDo * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP;
-    const purse = await roomToSpend(Math.round(taPenceNow + ringPence), { holder: 'lookup.tripadvisor' });
+    // Guarded, because the location claim is already made: a throw here left a
+    // bite of the contractual allowance held for half an hour by a request that
+    // asked nobody anything (Codex, 18 Sep 2026).
+    let purse;
+    try {
+      purse = await roomToSpend(Math.round(taPenceNow + ringPence), { holder: 'lookup.tripadvisor' });
+    } catch (err) {
+      await releaseSpend(taUnits.reservation);
+      throw err;
+    }
     if (!purse.ok) {
       await releaseSpend(taUnits.reservation);
       return res.status(422).json({

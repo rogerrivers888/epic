@@ -1824,17 +1824,24 @@ export async function categories(areaSlug, { refs = null, category = null, since
       // for the slug alone showed no demand at all on the country and town
       // boards while the Demand lens beside them showed plenty (Codex, 18 Sep
       // 2026).
+      // A town's searches are filed against its county — `whereOf` normalises
+      // to the county because that is the honest grain for a point search — so
+      // a town matching its own slug and its descendants found nothing, while
+      // the Demand lens beside it showed the county's plenty (Codex, 18 Sep
+      // 2026). `demandScope` is the one place that knows this; upward as well
+      // as downward.
       : `select subject, count(*)::int as searches, count(*) filter (where empty)::int as empty
            from searches s
           where s.at > now() - ($1 || ' days')::interval
-            and (s.area_slug = $2
-                 or s.area_slug in (
-                   select l.slug from localities l
-                    where l.parent_slug = $2
-                       or ($2 in (select slug from localities where kind = 'country')
-                           and l.country_code = (select country_code from localities where slug = $2))))
+            and ($2::text[] is null or s.area_slug = any($2))
+            and ($3::text[] is null or s.cell = any($3))
           group by subject`,
-    [String(since), refs ?? slug])).rows.map((r) => [r.subject, r]));
+    refs
+      ? [String(since), refs]
+      : await (async () => {
+        const scope = await demandScope(await areaBySlug(slug ?? ''));
+        return [String(since), scope.slugs ?? (slug ? [slug] : null), scope.cells];
+      })())).rows.map((r) => [r.subject, r]));
 
   const { rows: taxonomy } = await query(`
     select c.key as category_key, c.label as category_label, c.position as cat_pos,

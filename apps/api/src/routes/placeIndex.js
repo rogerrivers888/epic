@@ -2329,7 +2329,17 @@ async function work(runId, householdId) {
         const room = await tripadvisorRoom(wouldBill.length * TA_UNITS_PER_VIEW);
         const billed = wouldBill.slice(0, Math.floor(room.granted / TA_UNITS_PER_VIEW));
         const cost = taCost(billed.length);
-        const purse = await roomToSpend(cost, { holder: `collect:${runId}` });
+        // The money claim inside a guard, because the location claim is already
+        // made: a throw between them left a bite of the contractual allowance
+        // held for half an hour by a run that then failed (Codex, 18 Sep 2026 —
+        // the fourth of this shape, and the last two are these).
+        let purse;
+        try {
+          purse = await roomToSpend(cost, { holder: `collect:${runId}` });
+        } catch (err) {
+          await releaseSpend(room.reservation);
+          throw err;
+        }
         try {
           // The cached ones go whatever the purse says: they cost nothing, and
           // refusing them for money nobody would spend threw away answers we
