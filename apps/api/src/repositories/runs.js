@@ -86,7 +86,11 @@ export async function list() {
     `select count(*)::int as areas, max(swept_at) as last, count(*) filter (where sweeping_since is not null)::int as going
        from scout_areas`);
   const sweepSpend = await one(
-    `select coalesce(sum(cost_cents), 0)::int as pence, count(*) filter (where cost_cents > 0)::int as runs,
+    // `cost_cents` is US cents — `activitySweep.js` writes `calls × USD × 100`.
+    // Aliasing it as pence and printing it as pounds overstated every historical
+    // figure on the board by about a quarter (Codex, 18 Sep 2026).
+    `select round(coalesce(sum(cost_cents), 0) * ${USD_TO_GBP})::int as pence,
+            count(*) filter (where cost_cents > 0)::int as runs,
             max(finished_at) as last from sweep_runs`);
   const menus = await one(
     `select count(*) filter (where state = 'read')::int as read,
@@ -110,7 +114,8 @@ export async function list() {
   const curate = await one(`select count(*)::int as n, max(curated_at) as last from place_records where curated_at is not null`);
   const bench = await one(
     `select count(*)::int as n, max(ran_at) as last,
-            coalesce(sum(cost_cents), 0)::int as pence, count(*) filter (where cost_cents > 0)::int as paid,
+            round(coalesce(sum(cost_cents), 0) * ${USD_TO_GBP})::int as pence,
+            count(*) filter (where cost_cents > 0)::int as paid,
             coalesce(sum(calls), 0)::int as calls
        from source_bench_runs`).catch(() => null);
   const rescore = await one('select max(indexed_at) as last, count(*)::int as n from place_index');

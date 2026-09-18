@@ -699,7 +699,15 @@ async function settleWhileLocked(limit) {
              -- eventually starved the new ones out of its batch (Codex, 18 Sep
              -- 2026).
              or lat is null or lng is null
-             or exists (select 1 from place_cells pc where pc.venue_ref = place_index.venue_ref)
+             -- A terminal answer about *this* position: a row stamped from
+             -- somewhere else is an answer about where it used to be (Codex,
+             -- 18 Sep 2026).
+             or exists (
+               select 1 from place_cells pc
+                where pc.venue_ref = place_index.venue_ref
+                  and pc.lat is not null and pc.lng is not null
+                  and abs(pc.lat - place_index.lat) <= 0.0005
+                  and abs(pc.lng - place_index.lng) <= 0.0005)
              or not exists (select 1 from geo_cells limit 1))`, [refs]);
   // The boards read `area_stats`, so a place placed but not counted is still
   // missing from every headline.

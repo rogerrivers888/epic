@@ -113,8 +113,25 @@ async function unstamped(limit) {
        union all
         select r.venue_ref as ref, r.lat, r.lng
           from place_records r where r.lat is not null
+       union all
+        -- And the index itself, which is where a corrected position lands: a
+        -- place whose coordinates are put right by a later source may be in
+        -- none of the three stores above (Codex, 18 Sep 2026).
+        select pi.venue_ref as ref, pi.lat, pi.lng
+          from place_index pi where pi.lat is not null
      ) p
-     where not exists (select 1 from place_cells c where c.venue_ref = p.ref)
+     -- Unstamped, or stamped from somewhere else.
+     --
+     -- The row remembers the point it was stamped from, and this only asked
+     -- whether a row existed — so a place that moved kept the cell, the
+     -- postcode and every travel-time ring of where it used to be, for ever
+     -- (Codex, 18 Sep 2026). About fifty metres is the same threshold the index
+     -- uses to decide a position has moved at all.
+     where not exists (
+       select 1 from place_cells c
+        where c.venue_ref = p.ref
+          and c.lat is not null and c.lng is not null
+          and abs(c.lat - p.lat) <= 0.0005 and abs(c.lng - p.lng) <= 0.0005)
      limit $1`,
     [limit],
   );
@@ -158,7 +175,11 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
         await query(
           `insert into place_cells (venue_ref, cell, postcode, lat, lng, why)
            values ($1, null, null, $2, $3, $4)
-           on conflict (venue_ref) do nothing`,
+           -- The point it was asked about, so a place that moves is asked again
+           -- rather than keeping an answer about where it used to be.
+           on conflict (venue_ref) do update
+              set cell = null, postcode = null, lat = excluded.lat, lng = excluded.lng,
+                  why = excluded.why, at = now()`,
           [batch[i].ref, batch[i].lat, batch[i].lng, a ? 'no postcode near it' : 'no answer for this point'],
         );
         unplaced += 1;
@@ -172,7 +193,9 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
       await query(
         `insert into place_cells (venue_ref, cell, postcode, lat, lng)
          values ($1, $2, $3, $4, $5)
-         on conflict (venue_ref) do update set cell = excluded.cell, postcode = excluded.postcode, at = now()`,
+         on conflict (venue_ref) do update
+            set cell = excluded.cell, postcode = excluded.postcode,
+                lat = excluded.lat, lng = excluded.lng, at = now()`,
         [batch[i].ref, cell, a.postcode, batch[i].lat, batch[i].lng],
       );
       placed += 1;
