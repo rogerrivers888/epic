@@ -53,7 +53,18 @@ router.get('/:key/history', requires('view_library'), async (req, res, next) => 
  */
 router.put('/ceiling', requires('manage_settings'), async (req, res, next) => {
   try {
-    const pence = Math.max(0, Math.round(Number(req.body?.pence) || 0));
+    // A number, or nothing happens.
+    //
+    // `Number(x) || 0` read a malformed body, a missing field or a negative as
+    // nought — and a ceiling of nought stops every paid collection there is. A
+    // stale client or a typo could have turned the budget off and said "saved"
+    // (Codex, 18 Sep 2026).
+    const asked = Number(req.body?.pence);
+    if (!Number.isFinite(asked) || asked < 0) {
+      throw Object.assign(new Error('A ceiling is a number of pence, and not less than nothing.'),
+        { status: 400, code: 'bad_ceiling' });
+    }
+    const pence = Math.round(asked);
     const before = (await query("select value from app_settings where key = 'collect.ceiling_pence'")).rows[0]?.value ?? null;
     await query(
       `insert into app_settings (key, value, updated_at) values ('collect.ceiling_pence', $1::jsonb, now())
