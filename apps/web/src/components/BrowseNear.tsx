@@ -41,6 +41,15 @@ export type FindState = {
   cat: FindCat; sort: FindSort; kinds: string[]; budget: FindBudget;
   /** How many of the results are the household's own records rather than a live answer. */ stored: number;
   /**
+   * Which search these results came from, kept with them.
+   *
+   * The held search is one per surface, and Find is per trip: searching trip B
+   * and then coming back to trip A's cached results left A's opens and
+   * shortlists counted against B's search. It travels with the results it
+   * belongs to (Codex, 18 Sep 2026).
+   */
+  queryId: string | null;
+  /**
    * Whether the family chose this tile themselves. Until they do, a finished
    * search is allowed to move them off a tile it has nothing for — landing on
    * "Things to do · 0" while "What's on · 75" sits unopened beside it is the
@@ -48,7 +57,7 @@ export type FindState = {
    */
   picked: boolean;
 };
-export const emptyFind = (): FindState => ({ q: '', radiusKm: 3, sources: null, only: null, res: null, fetchedAt: null, cached: false, queried: [], degraded: [], loading: false, error: null, cat: 'things', sort: 'you', kinds: [], budget: 'any', stored: 0, picked: false });
+export const emptyFind = (): FindState => ({ q: '', radiusKm: 3, sources: null, only: null, res: null, fetchedAt: null, cached: false, queried: [], degraded: [], loading: false, error: null, cat: 'things', sort: 'you', kinds: [], budget: 'any', stored: 0, picked: false, queryId: null });
 
 const FOOD = new Set(['restaurant', 'cafe', 'pub', 'bar']);
 const catOf = (v: FindResult): FindCat => (v.category === 'event' ? 'events' : FOOD.has(v.category) ? 'food' : 'things');
@@ -162,7 +171,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
         const n = { things: 0, food: 0, events: 0 };
         for (const v of r.results) n[catOf(v as FindResult)] += 1;
         const cat = cur.picked || n[cur.cat] > 0 ? cur.cat : (['things', 'food', 'events'] as FindCat[]).find((c) => n[c] > 0) ?? cur.cat;
-        return { ...cur, res: r.results, cat, fetchedAt: r.fetchedAt ?? new Date().toISOString(), cached: Boolean(r.cached), queried: r.sourcesQueried ?? [], degraded: r.degradedSources ?? [], stored: r.storedCount ?? 0, loading: false };
+        return { ...cur, res: r.results, cat, fetchedAt: r.fetchedAt ?? new Date().toISOString(), cached: Boolean(r.cached), queried: r.sourcesQueried ?? [], degraded: r.degradedSources ?? [], stored: r.storedCount ?? 0, loading: false, queryId: r.queryId ?? null };
       });
     } catch (e: any) { setFind((cur) => ({ ...cur, loading: false, error: e.message })); setSketching(false); }
   }, [trip.id, find, setFind]);
@@ -172,6 +181,10 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
     if (initialPrices?.some((p) => /free/i.test(p))) setFind((cur) => (cur.budget === 'any' ? { ...cur, budget: 'free' } : cur));
     if (initialCat) setFind((cur) => ({ ...cur, cat: initialCat }));
     if (!find.res && !find.loading && !find.error) run();
+    // Cached results are still somebody's search: standing on them again has to
+    // stand on the search they came from, or the next tap is counted against
+    // whichever trip was searched last (Codex, 18 Sep 2026).
+    else if (find.res && find.queryId) heldSearch('trip', find.queryId, find.res.map((v) => v.venueRef));
   }, []);
   useEffect(() => {
     if (!trip.countryCode) return;
