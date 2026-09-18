@@ -1639,6 +1639,8 @@ async function askThese(refs, householdId) {
 async function askTripadvisor(refs, householdId) {
   const matched = await matchesFor(refs, 'tripadvisor');
   let asked = 0;
+  // The views that actually went out, which is what the allowance is spent in.
+  let calls = 0;
   const refused = [];
   const names = [];
   for (const ref of refs) {
@@ -1647,6 +1649,11 @@ async function askTripadvisor(refs, householdId) {
     // matched. The ranking run is what makes the join.
     if (!id) { refused.push({ ref, why: 'no match' }); continue; }
     try {
+      // A view already in hand costs nothing and bills no locations, so it is
+      // not counted as one — the Google path has said so since the ceiling was
+      // built, and this one was charging the allowance for answers it had in
+      // memory (Codex, 18 Sep 2026).
+      if (!detailHeld('tripadvisor', id)) calls += 1;
       const detail = await detailFor('tripadvisor', id, householdId);
       const crowd = crowdBand(detail?.rating, detail?.ratingCount);
       const count = countBand(detail?.ratingCount);
@@ -1668,7 +1675,7 @@ async function askTripadvisor(refs, householdId) {
       refused.push({ ref, why: whySourceFailed('tripadvisor', err) });
     }
   }
-  return { asked, refused, names };
+  return { asked, refused, names, calls };
 }
 
 /**
@@ -2110,12 +2117,14 @@ async function work(runId, householdId) {
         const purse = await roomToSpend(cost, { holder: `collect:${runId}` });
         try {
           const go = purse.ok ? may : [];
-          const out = go.length ? await askTripadvisor(go, householdId) : { asked: 0, refused: [] };
+          const out = go.length ? await askTripadvisor(go, householdId) : { asked: 0, refused: [], calls: 0 };
           await collectRuns.done(runId, 'tripadvisor', {
             done: out.asked,
             // What it cost, so a run with Tripadvisor work in it does not read
-            // as free on the Runs board.
-            spentPence: taCost(out.asked),
+            // as free on the Runs board — and the views it actually made, not
+            // the places it answered about: one answered out of the cache
+            // billed nothing (Codex, 18 Sep 2026).
+            spentPence: taCost(out.calls ?? out.asked),
             refused: [
               ...out.refused,
               ...(purse.ok ? [] : may.map((ref) => ({ ref, why: 'over this month\u2019s ceiling' }))),

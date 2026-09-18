@@ -337,9 +337,17 @@ export async function scoringInputsFor(venueRef) {
   // touches a place, and the full join then returns a row of nulls — which was
   // truthy, so the fallback below was never reached for the very case it exists
   // for: an atlas place somebody has saved (Codex, 18 Sep 2026).
+  // Everything `workings()` actually scores, not a subset of it.
+  //
+  // A place whose only evidence is a menu we have read, or cuisines of our own,
+  // read as an empty row — so the board said "not scored" and refused to work
+  // out a score it could perfectly well have worked out (Codex, 18 Sep 2026).
   const substance = rows[0] && (rows[0].sweep_name || rows[0].record_name || rows[0].sweep_website
     || rows[0].record_website || rows[0].summary || rows[0].crowd_band || rows[0].count_band
-    || rows[0].opening_hours || rows[0].area_code);
+    || rows[0].opening_hours || rows[0].area_code
+    || rows[0].menu_state === 'read' || (rows[0].item_count ?? 0) > 0
+    || (rows[0].record_cuisines?.length ?? 0) > 0 || (rows[0].sweep_cuisines?.length ?? 0) > 0
+    || (rows[0].accolades?.length ?? 0) > 0);
   if (substance) return rows[0];
   // A harvested place has neither row, and there are more of those in the index
   // than of anything else: the board that exists to explain a score said "not

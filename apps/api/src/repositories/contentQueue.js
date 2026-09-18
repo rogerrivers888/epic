@@ -118,9 +118,15 @@ export async function sync() {
     -- somebody decide it a second time, the other way (Codex, 17 Sep 2026).
     -- image_assets.moderation is the truth about a photograph; the queue row
     -- is a view of it.
+    -- Except where somebody has reported it and nobody has looked yet: the
+    -- report sends the row back to waiting while the asset is still approved,
+    -- and copying the asset's state over the top took the photograph straight
+    -- out of the lane it had just been put in — leaving it public with the
+    -- report filed nowhere (Codex, 18 Sep 2026).
     on conflict (subject_type, subject_id) do update
        set state = excluded.state
-     where content_queue.state <> excluded.state`);
+     where content_queue.state <> excluded.state
+       and not (content_queue.reported and content_queue.state = 'waiting')`);
 
   // A household's own words about a place they went to.
   await query(`

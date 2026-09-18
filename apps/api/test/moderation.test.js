@@ -672,3 +672,33 @@ test('reporting approved content puts it back in front of somebody', async () =>
   assert.equal(row.reported, true, 'and in the lane that is worked first');
   assert.equal(row.reason, null, 'the old decision is not still standing');
 });
+
+/**
+ * A reported photograph stays where somebody will see it.
+ *
+ * `image_assets.moderation` is the truth about a photograph and the queue row is
+ * a view of it — but a report sends the row back to waiting while the asset is
+ * still approved, and copying the asset's state over the top took the
+ * photograph straight out of the lane it had just been put in (Codex, 18 Sep
+ * 2026).
+ */
+test('reporting an approved photograph keeps it in the queue through the next sync', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, licence, may_store, moderation, contributor_household_id, fetched_at)
+     values ('household', 'Household photograph', true, 'approved', $1, now()) returning *`, [household.id]);
+  await queue.sync();
+  const row = async () => (await query(
+    `select state, reported from content_queue where subject_type = 'image' and subject_id = $1`, [img.id])).rows[0];
+  const { rows: [q] } = await query(
+    `select id from content_queue where subject_type = 'image' and subject_id = $1`, [img.id]);
+
+  await queue.report({ id: q.id, reason: 'abusive', by: null });
+  assert.equal((await row()).state, 'waiting');
+
+  // The next load syncs again, and must not undo it.
+  await queue.sync();
+  const after = await row();
+  assert.equal(after.state, 'waiting', 'still in front of somebody');
+  assert.equal(after.reported, true);
+});
