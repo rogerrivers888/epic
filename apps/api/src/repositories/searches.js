@@ -101,9 +101,17 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
     // and with dropping on, the row is gone and it is lost outright (Codex,
     // 18 Sep 2026; migration 177 is what made a late conversion possible).
     const { rows: [moved] } = await query(
+      // `for update` on the row, so two events on one search are serialised.
+      //
+      // Without it both statements could read the same `before` — an open and a
+      // save arriving together — and the later one would compare against a
+      // value that was already out of date, so an open could put a search back
+      // from "saved" to "clicked". On a rolled search both would move the same
+      // count out of the same bucket, twice (Codex, 18 Sep 2026). Outcomes only
+      // ever rise, and that is only true if they are read one at a time.
       `with was as (
          select id, outcome as before, empty, rolled_at, area_slug, subject, at
-           from searches where id = $1::uuid)
+           from searches where id = $1::uuid for update)
        update searches s set outcome = $2, outcome_at = now()
          from was w
         where s.id = w.id

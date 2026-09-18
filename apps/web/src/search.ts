@@ -36,9 +36,23 @@ const opened = new Map<string, number>();
  * was recorded against the *previous* search (Codex, 17 Sep 2026). Attributing
  * it to nothing is a gap; attributing it to the wrong search is a wrong number.
  */
-export function heldSearch(surface: Surface, queryId: string | null | undefined, refs: (string | null | undefined)[] = []) {
+export function heldSearch(
+  surface: Surface,
+  queryId: string | null | undefined,
+  refs: (string | null | undefined)[] = [],
+  /**
+   * `append` where the cards already on screen stay there — the planner's "show
+   * me 5 more" is the only one. Everything else *replaces* what is on the
+   * surface, and keeping the old ownership meant a place that appeared in both
+   * answers — a chain, the same museum after moving the map — went on being
+   * counted against the search before it, leaving the new one falsely unclicked
+   * (Codex, 18 Sep 2026).
+   */
+  { append = false }: { append?: boolean } = {},
+) {
   if (!queryId) { current.delete(surface); return; }
   current.set(surface, queryId);
+  if (!append) for (const key of [...came.keys()]) if (key.startsWith(`${surface}:`)) came.delete(key);
   refs.forEach((ref, i) => {
     if (!ref) return;
     positions.set(`${queryId}:${ref}`, i + 1);
@@ -49,7 +63,8 @@ export function heldSearch(surface: Surface, queryId: string | null | undefined,
     // crediting an old card to the new search attaches an event to a row that
     // search never had, and leaves the one that did produce it reading as
     // clicked on nothing (Codex, 18 Sep 2026). First claim wins, which is the
-    // same rule the positions keep.
+    // same rule the positions keep. On a replacement the surface was cleared
+    // above, so "first" means first in this answer.
     if (!came.has(`${surface}:${ref}`)) came.set(`${surface}:${ref}`, queryId);
   });
 }

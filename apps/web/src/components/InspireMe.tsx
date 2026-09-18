@@ -250,7 +250,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       // What the household does with these ideas is counted against the ask
       // that produced them; without the id every planner ask stayed at "clicked
       // nothing" for ever (Codex, 17 Sep 2026).
-      heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id));
+      heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id), { append: true });
       setStage(s.stage); setPlaced(s.placed ?? 0);
       if (s.error) throw new Error(`${s.error}${ref ? ` (run ${ref})` : ''}`);
       if (!s.running) break;
@@ -306,7 +306,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
         // the old search, and counted the new one as having been clicked on
         // nothing — one of the three demand faults, invented (Codex, 17 Sep
         // 2026).
-        heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id));
+        heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id), { append: true });
         setStage(s.stage); setPlaced(s.placed ?? 0);
         if (s.error) throw new Error(`${s.error} (run ${started.ref})`);
         if (!s.running) { setFoundAt(new Date().toISOString()); break; }
@@ -391,7 +391,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       // restored session has normally finished, and opening one of its ideas
       // was either dropped or counted against an older ask (Codex, 17 Sep
       // 2026).
-      heldSearch('plan', s.searchId, kept.map((i) => i.place?.ref ?? i.id));
+      heldSearch('plan', s.searchId, kept.map((i) => i.place?.ref ?? i.id), { append: true });
       if (s.running) {
         setBusy(true); setStage(s.stage ?? 'thinking');
         const startedAt = s.startedAt ? new Date(s.startedAt).getTime() : Date.now();
