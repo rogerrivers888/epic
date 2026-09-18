@@ -1457,7 +1457,15 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
       <VenueDrawer
         item={drawer}
         baseLabel={trip.locality ?? trip.origin.label.split(',')[0]}
-        onClose={() => setDrawer(null)}
+        /* Closing is what ends the look, and the close is what carries the
+           dwell — opening and closing, which is the ordinary way somebody reads
+           an idea and moves on, measured nothing at all and left the timer
+           standing for whatever they did next (Codex, 18 Sep 2026). The other
+           result drawers have done this since; this one had not. */
+        onClose={() => {
+          if (drawer?.venueRef) noteSearchEvent('trip', 'close', drawer.venueRef);
+          setDrawer(null);
+        }}
         addLabel="Add to trip"
         addIcon="add"
         added={drawerCandidate?.onDay ?? false}
