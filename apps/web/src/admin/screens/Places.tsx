@@ -979,7 +979,20 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
         <LabelLadder rows={data.labels ?? []} />
       ) : ring ? (
         <Ladder columns={catColumns} rows={all} keyOf={(c) => c.key} onRow={(c) => onCat(c.key)}
-                highlight={(c) => c.searches > 0 && c.empty / Math.max(1, c.searches) > 0.2} />
+                highlight={(c) => c.searches > 0 && c.empty / Math.max(1, c.searches) > 0.2}
+                /* BO2l's stacked row. Eight columns of figures will not fit 390
+                   whatever you do to them, and this board is now where an
+                   outcode lands (18 Sep 2026). */
+                phoneRow={(c) => ({
+                  name: c.label,
+                  note: `${c.subcategories.length} subcategories · ${c.known.toLocaleString()} known`,
+                  chips: [
+                    { key: 'ready', word: `ready ${c.ready == null ? '—' : `${c.ready}%`}`, tip: 'readyShort', lead: true },
+                    { key: 'owned', word: `owned ${c.owned.toLocaleString()}`, tip: 'owned' },
+                    { key: 'ident', word: `identified only ${c.identified.toLocaleString()}`, tip: 'identifiedOnly' },
+                    ...(c.searches ? [{ key: 'searches', word: `${c.searches.toLocaleString()} searches`, tip: 'searches' as const }] : []),
+                  ],
+                })} />
       ) : (
         <SubcategoryLadder rows={shown} onSub={onSub} factLabel={factLabel} canManage={canManage} inRing={false}
                            of={data.subcategories} onCollect={onCollect}
