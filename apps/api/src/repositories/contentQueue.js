@@ -221,6 +221,14 @@ export async function syncFlagged() {
     select 'data', 'place', f.venue_ref || '#' || f.field, 'flagged by us', f.venue_ref, max(f.fetched_at)
       from place_facts f
      where f.field in ('opening_hours', 'website', 'phone', 'address')
+       -- Only facts we still hold the right to.
+       --
+       -- A licensed fact is kept until it expires and is then swept away, and
+       -- between the expiry and the sweep this counted it as evidence — so the
+       -- queue could raise a disagreement out of a value we are no longer
+       -- entitled to show anybody, and go on showing it (Codex, 18 Sep 2026).
+       -- An expired fact is not a weaker fact; it is one we do not have.
+       and (f.expires_at is null or f.expires_at > now())
      group by f.venue_ref, f.field
     having count(distinct f.value::text) > 2
     on conflict (subject_type, subject_id) do nothing`);
@@ -240,6 +248,9 @@ export async function syncFlagged() {
          select 1 from place_facts f
           where f.venue_ref = split_part(q.subject_id, '#', 1)
             and f.field = split_part(q.subject_id, '#', 2)
+            -- The same rule as the insert, or a flag raised while a fact was
+            -- live would never be cleared once it expired.
+            and (f.expires_at is null or f.expires_at > now())
           group by f.venue_ref, f.field
          having count(distinct f.value::text) > 2)`);
 
