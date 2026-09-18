@@ -1983,7 +1983,17 @@ export async function namesFor(refs) {
     select pi.venue_ref,
            r.name as own_name,
            a.name as atlas_name,
-           case when pi.venue_ref like 'google:%' then null else sp.name end as osm_name
+           -- Named only where the reference itself is an open one.
+           --
+           -- The sweep keeps a name because OpenStreetMap's is ours to keep;
+           -- a licensed source's is not, and denying google alone would have
+           -- handed back a Tripadvisor name labelled OSM the day a
+           -- tripadvisor reference reached scout_places (Codex, 18 Sep
+           -- 2026). A list of what may be kept, never a list of what may not —
+           -- the fallback has to be silence (CLAUDE.md).
+           case when pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
+                     or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%'
+                then sp.name else null end as osm_name
       from place_index pi
       left join place_records r on r.venue_ref = pi.venue_ref
       -- One attraction per place: the reference index is not unique, so a place

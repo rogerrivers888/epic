@@ -167,7 +167,14 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
     const drawn = everyShown.filter((e) => e.meta?.drawn === true);
     const marked = everyShown.some((e) => e.meta?.drawn !== undefined);
     const shown = marked ? drawn : everyShown;
-    const refs = [...new Set(events.map((e) => e.venue_ref).filter(Boolean))];
+    // The rows the replay will draw, and anything they actually did — not the
+    // whole pool. With `?names=1` the difference is money: a replay of five
+    // cards was buying Google details for every one of a hundred and fifty
+    // (Codex, 18 Sep 2026).
+    const refs = [...new Set([
+      ...shown.map((e) => e.venue_ref),
+      ...events.filter((e) => e.kind !== 'shown').map((e) => e.venue_ref),
+    ].filter(Boolean))];
     const names = await index.namesFor(refs);
 
     /**
