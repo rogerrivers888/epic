@@ -70,6 +70,15 @@ function say(v: unknown): string {
   return String(v);
 }
 
+/**
+ * The thing a note is about, in words.
+ *
+ * A concept is held as `namespace:key` — `cuisine:italian`, `experience:park` —
+ * and a machine string does not belong on a screen somebody reads.
+ */
+const dishWord = (key?: string | null) =>
+  (key ? key.split(':').pop()!.replace(/[-_]/g, ' ') : null);
+
 /** The fact three sources disagree about, in our own words. */
 const FIELD_WORD: Record<string, string> = {
   opening_hours: 'hours', website: 'website', phone: 'telephone number', address: 'address',
@@ -289,7 +298,7 @@ function ItemPane({ item, canManage, busy, onApprove, onReject, onReport, next, 
                 nothing else to decide about (Codex, 18 Sep 2026). */}
             {item.detail?.take ? (
               <Text style={styles.previewCredit}>
-                {[item.detail.dish,
+                {[dishWord(item.detail.dish),
                   item.detail.take === 'loved' ? 'loved it' : item.detail.take === 'fine' ? 'fine' : 'not for me',
                   item.detail.score ? `${item.detail.score} out of 5` : null].filter(Boolean).join(' · ')}
               </Text>
