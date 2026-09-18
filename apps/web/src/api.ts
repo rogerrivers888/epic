@@ -2616,7 +2616,12 @@ export const api = {
   adminRescorePlaces: (subcategory?: string) => post<{ rescored: number }>('/api/admin/place-index/rescore', { subcategory }),
   /** The area search box: a county, a town or a postcode. */
   adminPlaceSearch: (q: string) =>
-    request<{ areas: { slug: string; name: string; kind: string; parent: string | null }[]; postcode: { sector: string; cell: string; label: string; bands: number[]; modes: string[] } | null }>(`/api/admin/place-index/search${qs({ q })}`),
+    request<{
+      areas: { slug: string; name: string; kind: string; parent: string | null }[];
+      /** Places called that — names that are ours to hold, never a provider's. */
+      places?: { ref: string; name: string; where: string | null }[];
+      postcode: { sector: string; cell: string; label: string; bands: number[]; modes: string[] } | null;
+    }>(`/api/admin/place-index/search${qs({ q })}`),
 
 
   /**

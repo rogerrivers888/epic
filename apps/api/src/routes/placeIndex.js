@@ -2642,9 +2642,36 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
          from localities l left join localities p on p.slug = l.parent_slug
         where l.name ilike $1 or l.slug ilike $1
         order by (l.kind = 'county') desc, (l.kind = 'town') desc, l.name limit 12`, [`%${q}%`]);
+    // And the places called that.
+    //
+    // Sunningdale is not an area we hold — its places are filed under SL5 — so
+    // a search for it found nothing at all and the box looked broken (owner,
+    // 18 Sep 2026: "when I search for Sunningdale, nothing happens"). A name is
+    // the obvious thing to type, and it should land somewhere.
+    //
+    // Only names that are ours to hold: OSM's, the atlas's, the encyclopedias'
+    // and our own. A provider's name is rented and never searched, never
+    // returned (CLAUDE.md).
+    const { rows: named } = await query(
+      `select pi.venue_ref as ref, pi.subcategory,
+              coalesce(r.name, a.name,
+                       case when pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
+                                 or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%'
+                            then sp.name else null end) as name,
+              (select l.name from place_areas pa join localities l on l.slug = pa.area_slug
+                where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as where_
+         from place_index pi
+         left join place_records r on r.venue_ref = pi.venue_ref
+         left join attractions a on a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref
+         left join scout_places sp on sp.venue_ref = pi.venue_ref
+        where (r.name ilike $1 or a.name ilike $1
+               or ((pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
+                    or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%') and sp.name ilike $1))
+        limit 8`, [`%${q}%`]);
     const sector = sectorOf(q);
     res.json({
       areas: rows.map((r) => ({ slug: r.slug, name: r.name, kind: r.kind, parent: r.parent })),
+      places: named.filter((r) => r.name).map((r) => ({ ref: r.ref, name: r.name, where: r.where_ })),
       // A full postcode is not an area — it is a point, and a point takes a ring.
       postcode: sector ? { sector, cell: `sector:${sector}`, label: q.toUpperCase(), bands: BANDS, modes: MODES } : null,
     });

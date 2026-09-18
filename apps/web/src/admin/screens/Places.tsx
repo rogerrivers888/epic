@@ -296,7 +296,7 @@ function Level(props: {
         </View>
         <Band kicker="NOT A PLACE WE KNOW" title={where} stats={null} />
         <View style={styles.subRow}><Word muted>{noSuchArea}</Word></View>
-        <View style={[styles.search, { width: 320 }]}><AreaSearch onWhere={props.onWhere} /></View>
+        <View style={[styles.search, { width: 320 }]}><AreaSearch onWhere={props.onWhere} onPlace={props.onPlace} /></View>
       </AdminPage>
     );
   }
@@ -318,6 +318,16 @@ function Level(props: {
     if (ring) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
                                                              onCollectIn={(slug) => { props.onWhere(slug); props.onLens('collect'); }} />;
+    // An outcode is the bottom of the map: nothing is filed *under* SL5, so the
+    // board that lists what is underneath an area had nothing to show and said
+    // "nothing indexed" over eighty-three places (owner, 18 Sep 2026: "when I
+    // search under SL5, it returns no results when we're supposed to have got
+    // them"). At the bottom the places themselves are the board.
+    if (level.areaKind === 'postcode') {
+      return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage}
+                          missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames}
+                          onWiden={props.onWithin} within={within} />;
+    }
     return <CoverageBoard q={q} onWhere={props.onWhere} onCollect={() => props.onLens('collect')} />;
   })();
 
@@ -346,7 +356,7 @@ function Level(props: {
                right={ring
                  ? <RingChooser minutes={within ?? 30} mode={mode} onMinutes={props.onWithin} onMode={props.onBy}
                                 cells={level.cells} modesBuilt={level.modesBuilt} />
-                 : <AreaSearch onWhere={props.onWhere} />} />
+                 : <AreaSearch onWhere={props.onWhere} onPlace={props.onPlace} />} />
       {body}
     </AdminPage>
   );
@@ -580,7 +590,11 @@ function RingChooser({ minutes, mode, onMinutes, onMode, cells, modesBuilt }: {
 }
 
 /** A county, a town or a postcode. A full postcode opens the ring chooser. */
-function AreaSearch({ onWhere }: { onWhere: (slug: string, opts?: { within?: number | null; by?: string }) => void }) {
+function AreaSearch({ onWhere, onPlace }: {
+  onWhere: (slug: string, opts?: { within?: number | null; by?: string }) => void;
+  /** A place found by name opens straight into its drawer. */
+  onPlace: (ref: string) => void;
+}) {
   const [q, setQ] = useState('');
   const [out, setOut] = useState<Awaited<ReturnType<typeof api.adminPlaceSearch>> | null>(null);
   const [band, setBand] = useState(30);
@@ -594,11 +608,20 @@ function AreaSearch({ onWhere }: { onWhere: (slug: string, opts?: { within?: num
     <View style={{ width: 280, flexGrow: 0 }}>
       <View style={styles.search}>
         <Icon name="search" size={15} strokeWidth={2} color={colors.inkMuted} />
-        <TextInput value={q} onChangeText={setQ} placeholder="A county, town or postcode"
+        {/* A name is the obvious thing to type, so the box says it takes one. */}
+        <TextInput value={q} onChangeText={setQ} placeholder="A county, town, postcode or place"
                    placeholderTextColor={colors.inkMuted} style={styles.searchInput}
-                   accessibilityLabel="Search for a county, town or postcode" />
+                   accessibilityLabel="Search for a county, town, postcode or place" />
       </View>
-      {out && (out.areas.length || out.postcode) ? (
+      {out && !out.areas.length && !out.postcode && !(out.places ?? []).length ? (
+        // Never nothing. A box that does nothing when you type into it reads as
+        // broken, and this one did (owner, 18 Sep 2026: "when I search for
+        // Sunningdale, nothing happens").
+        <View style={styles.suggest}>
+          <View style={styles.suggestRow}><Text style={styles.suggestKind}>Nothing here by that name.</Text></View>
+        </View>
+      ) : null}
+      {out && (out.areas.length || out.postcode || (out.places ?? []).length) ? (
         <View style={styles.suggest}>
           {out.postcode ? (
             <View style={styles.suggestPostcode}>
@@ -631,6 +654,13 @@ function AreaSearch({ onWhere }: { onWhere: (slug: string, opts?: { within?: num
                    onPress={() => { setQ(''); setOut(null); onWhere(a.slug); }} style={styles.suggestRow}>
               <Text style={styles.suggestName}>{a.name}</Text>
               <Text style={styles.suggestKind}>{a.parent ? `${a.kind} · ${a.parent}` : a.kind}</Text>
+            </Press>
+          ))}
+          {(out.places ?? []).map((pl) => (
+            <Press key={pl.ref} effect="none" accessibilityRole="button" accessibilityLabel={pl.name}
+                   onPress={() => { setQ(''); setOut(null); onPlace(pl.ref); }} style={styles.suggestRow}>
+              <Text style={styles.suggestName}>{pl.name}</Text>
+              <Text style={styles.suggestKind}>{pl.where ? `place · ${pl.where}` : 'place'}</Text>
             </Press>
           ))}
         </View>
@@ -743,7 +773,6 @@ function CoverageBoard({ q, onWhere, onCollect }: {
   q: any; onWhere: (slug: string) => void; onCollect: () => void;
 }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCoverage>> | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(() => { setData(null); api.adminPlaceCoverage(q).then(setData).catch(() => setData(null)); }, [q]);
   useEffect(load, [load]);
 
@@ -768,20 +797,21 @@ function CoverageBoard({ q, onWhere, onCollect }: {
 
   return (
     <>
+      {/* The counts line and the refresh button are gone (owner, 18 Sep 2026:
+          "remove all of that. I don't want any prose"). The heading names the
+          board; how stale a figure is belongs on the figure, not in a sentence
+          above the table. Refreshing them is on Runs, where the other rebuilds
+          are. */}
       <View style={styles.subRow}>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 9 }}>
-          <Kicker tip="sectionWhere">Where</Kicker>
-          {data ? <Text style={styles.rowNote}>{`${data.towns} of ${data.allTowns || data.towns} towns · ${data.outcodes} outcodes`}</Text> : null}
-        </View>
+        <Kicker tip="sectionWhere">Where</Kicker>
         <View style={{ flex: 1 }} />
-        {/* `ago()` starts at a day, and the one thing this label exists to say
-            is how stale the counts are (Codex, 17 Sep 2026). */}
-        <Act label={`Refresh the counts${data?.refreshedAt ? ` · ${since(data.refreshedAt)}` : ''}`} tone="secondary" disabled={refreshing}
-             onPress={() => { setRefreshing(true); api.adminRefreshPlaceCounts().finally(() => { setRefreshing(false); load(); }); }} />
       </View>
       {data ? (
         <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug} onRow={(r) => onWhere(r.slug)}
-                empty={<Word muted>Nothing indexed under this county yet.</Word>}
+                /* "County" was printed whatever the level was, so an outcode
+                   was told nothing was indexed under a county (owner, 18 Sep
+                   2026: "SL5 is not a county, it is a postcode"). */
+                empty={<Word muted>Nothing indexed here yet.</Word>}
                 /* BO2l, "Places at 390": the name, what kind of place and how
                    many we know there, then the four facts as chips. The
                    design's own words — "what it is", not "Description" — and
