@@ -848,8 +848,12 @@ export async function identifyKinds({ limit = 25, householdId = null } = {}) {
       job; `catchUp` uses it. So this hands the batch over and answers with
       what is left, and the caller watches the backlog fall.
 
-      Seeded from the sweep, because these records are empty — no name, no
-      point — which is why the open map was never asked about them.
+      Seeded from whatever we hold: the record's own name and point where it has
+      them, the sweep's where it does not, the index's position last. These
+      records are usually empty — no name, no point — which is why the open map
+      was never asked about them; but a place the sweep never saw has only its
+      record to be seeded from, and asking for a seed the sweep alone could give
+      meant it was never asked about either (18 Sep 2026).
     */
     queueEnrichment(ref, { householdId, force: true, replace: false, paid: false, seed });
   }

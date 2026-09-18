@@ -311,15 +311,33 @@ export async function needingKind(limit = 25) {
   // `distinct on` has to be ordered by its own key first, so the ranking has to
   // happen outside it — ordered inside, the limit took an arbitrary slice in
   // venue_ref order and the batch was whichever places sorted early by id.
+  //
+  // And not only the sweep's places. The join was an inner one, so a place the
+  // sweep never saw could not reach this list however much we held about it —
+  // "Royal Chapel of All Saints" in SL4 had its name from our own research, a
+  // position, and no kind, and nothing in the system would ever have given it
+  // one. Unshelved means invisible on the category board while still counted in
+  // the header above it, which is a screen that does not add up (18 Sep 2026,
+  // found by opening SL4 on the live site). The seed is the record's own name
+  // and point where it has them, the sweep's where it does not, and the index's
+  // position as the last resort — every one of them ours to keep.
   const { rows } = await query(
     `select venue_ref, name, lat, lng, website from (
        select distinct on (r.venue_ref)
-              r.venue_ref, p.name, p.lat, p.lng, p.website, p.epic_score, r.enrich_attempts
+              r.venue_ref,
+              coalesce(r.name, p.name)                   as name,
+              coalesce(r.lat, p.lat, pi.lat)             as lat,
+              coalesce(r.lng, p.lng, pi.lng)             as lng,
+              coalesce(r.website, p.website)             as website,
+              p.epic_score, r.enrich_attempts
          from place_records r
-         join scout_places p on p.venue_ref = r.venue_ref
+         left join scout_places p on p.venue_ref = r.venue_ref
+         left join place_index pi on pi.venue_ref = r.venue_ref
         where r.category is null
           and r.osm_ref is null
-          and p.name is not null and p.lat is not null and p.lng is not null
+          and coalesce(r.name, p.name) is not null
+          and coalesce(r.lat, p.lat, pi.lat) is not null
+          and coalesce(r.lng, p.lng, pi.lng) is not null
         order by r.venue_ref, p.epic_score desc nulls last
      ) best
       order by enrich_attempts asc, epic_score desc nulls last
@@ -356,13 +374,21 @@ export async function sweepSeeds(refs) {
  */
 export async function kindBacklog(maxAttempts = 6) {
   const { rows } = await query(
+    // The same three seeds `needingKind` uses, and the same left joins — counting
+    // only the sweep's places meant the backlog screen said there was nothing to
+    // do while places it could not see waited (18 Sep 2026).
     `select count(*)::int as unidentified,
-            count(*) filter (where p.name is null or p.lat is null or p.lng is null)::int as nothing_to_ask_with,
+            count(*) filter (where coalesce(r.name, p.name) is null
+                                or coalesce(r.lat, p.lat, pi.lat) is null
+                                or coalesce(r.lng, p.lng, pi.lng) is null)::int as nothing_to_ask_with,
             count(*) filter (where r.enrich_attempts >= $1)::int as tried_enough,
-            count(*) filter (where p.name is not null and p.lat is not null and p.lng is not null
+            count(*) filter (where coalesce(r.name, p.name) is not null
+                               and coalesce(r.lat, p.lat, pi.lat) is not null
+                               and coalesce(r.lng, p.lng, pi.lng) is not null
                                and r.enrich_attempts < $1)::int as ready
        from place_records r
-       join scout_places p on p.venue_ref = r.venue_ref
+       left join scout_places p on p.venue_ref = r.venue_ref
+       left join place_index pi on pi.venue_ref = r.venue_ref
       where r.category is null and r.osm_ref is null`,
     [maxAttempts],
   );

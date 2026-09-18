@@ -1746,3 +1746,26 @@ test('a quiet hour still refreshes the rollup when the index has moved', async (
   const at = await index.statsAge();
   assert.ok(Date.now() - new Date(at).getTime() < 60_000, 'the rollup is current');
 });
+
+test('a place the sweep never saw can still be told apart', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'google:ChIJnever-swept';
+  await index.noteMany([{ ref, lat: 51.41, lng: -0.62, countryCode: 'GB' }], { source: 'google' });
+  await owned.ensureRecord(ref);
+  // Our own research found the name and nothing else. There is no `scout_places`
+  // row, which used to mean the list that identifies a place's kind could not
+  // see it at all — so it stayed unshelved for good, counted in a level's header
+  // and missing from every one of the eight categories under it.
+  await query('update place_records set name = $2, category = null, osm_ref = null where venue_ref = $1',
+    [ref, 'Royal Chapel of All Saints']);
+
+  const waiting = await owned.needingKind(200);
+  assert.ok(waiting.some((r) => r.ref === ref), 'it is on the list to be identified');
+  const seed = waiting.find((r) => r.ref === ref);
+  assert.equal(seed.name, 'Royal Chapel of All Saints', 'seeded with the name we hold');
+  assert.ok(seed.lat != null && seed.lng != null, 'and a point to ask the open map about');
+
+  const backlog = await owned.kindBacklog(6);
+  assert.ok(backlog.ready >= 1, 'and the backlog counts it as askable rather than reporting nothing to do');
+});
