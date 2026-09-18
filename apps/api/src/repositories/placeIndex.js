@@ -2374,10 +2374,17 @@ export async function noteSeen(venues = []) {
         lat: v.lat, lng: v.lng,
         countryCode: v.countryCode ?? null,
         sources,
-        // Its own id for the source the reference belongs to, and nothing
-        // invented for the others — a merged place's other sources genuinely
-        // have not told us theirs.
-        sourceIds: id ? { [owner]: id } : {},
+        // Its own id for the source the reference belongs to, and every other
+        // contributor's where the merge carried one.
+        //
+        // "Nothing invented for the others" was right — but the merge does know
+        // them and was throwing them away, so a Google result merged into an
+        // OpenStreetMap one wrote a Google row with no id and `FOUND_IT` read
+        // Google as having found nothing. Coverage undercounted and "one source
+        // only" was inflated by exactly the cross-provider matches that prove
+        // the opposite (Codex, 19 Sep 2026). The canonical one wins where both
+        // speak: it is the reference the place is actually filed under.
+        sourceIds: { ...(v.sourceIds ?? {}), ...(id ? { [owner]: id } : {}) },
       };
     })
     .filter(Boolean);

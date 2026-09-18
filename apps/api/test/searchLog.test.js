@@ -1794,3 +1794,27 @@ test('a place that learns what kind it is goes back to be shelved', async () => 
   const shelf = await query('select category from place_index where venue_ref = $1', [ref]);
   assert.ok(shelf.rows[0].category, `and it lands on a shelf, not ${shelf.rows[0].category}`);
 });
+
+test('a place two providers found is a place two providers found', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const { resolveVenues } = await import('../src/sources/index.js');
+  // The same place, from the open map and from Google, close enough to merge.
+  const merged = resolveVenues([
+    { source: 'osm', sourcePlaceId: 'node/551', name: 'The Fat Duck', lat: 51.5081, lng: -0.7059, category: 'restaurant' },
+    { source: 'google', sourcePlaceId: 'ChIJduck', name: 'The Fat Duck', lat: 51.5081, lng: -0.7059, category: 'restaurant' },
+  ]);
+  assert.equal(merged.length, 1, 'they are one place');
+  assert.deepEqual(merged[0].contributingSources.sort(), ['google', 'osm']);
+  assert.equal(merged[0].sourceIds.google, 'ChIJduck', 'and Google’s own id travels with the merge');
+
+  await index.noteSeen(merged.map((v) => ({ ...v, venueRef: `${v.source}:${v.sourcePlaceId}` })));
+  const { rows } = await query(
+    `select source, source_place_id from place_index_sources where venue_ref = $1 order by source`,
+    ['osm:node/551']);
+  const google = rows.find((r) => r.source === 'google');
+  assert.ok(google, 'Google is recorded as having seen it');
+  // Without the id `FOUND_IT` reads this as Google having found nothing, so
+  // coverage undercounts and "one source only" is inflated by exactly the
+  // cross-provider matches that prove the opposite.
+  assert.equal(google.source_place_id, 'ChIJduck', 'with the id that makes it count as coverage');
+});

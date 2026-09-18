@@ -200,6 +200,18 @@ export function resolveVenues(rawRecords) {
         ...record,
         ...detectChain(record),
         contributingSources: [record.source],
+        /**
+         * Each contributing source's own id for this place.
+         *
+         * An identifier, which is the one thing about a place we may keep for
+         * good — and the thing coverage is counted from. A Google result merged
+         * into an OpenStreetMap one recorded Google as a contributor and no id
+         * for it, so `FOUND_IT` read Google as having found nothing: coverage
+         * undercounted and the "one source only" figure was inflated by exactly
+         * the cross-provider matches that prove the opposite (Codex, 19 Sep
+         * 2026). Never any of their *content* — only which id each calls it by.
+         */
+        sourceIds: record.sourcePlaceId ? { [record.source]: String(record.sourcePlaceId) } : {},
         // Which source supplied each displayed field, and — once licensed
         // sources are live — when that field must be discarded.
         provenance: Object.fromEntries(
@@ -254,6 +266,12 @@ export function resolveVenues(rawRecords) {
     if (!candidate.contributingSources.includes(record.source)) {
       candidate.contributingSources.push(record.source);
       candidate.attribution.push(record.source);
+    }
+    // Its id travels with it, whether or not the source was already listed: two
+    // records from one provider merging into this place is the same provider
+    // saying the same thing twice, and the first id is the one it was matched on.
+    if (record.sourcePlaceId && !candidate.sourceIds?.[record.source]) {
+      candidate.sourceIds = { ...(candidate.sourceIds ?? {}), [record.source]: String(record.sourcePlaceId) };
     }
   }
 
