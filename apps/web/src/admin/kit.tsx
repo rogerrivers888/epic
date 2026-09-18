@@ -29,6 +29,7 @@ import { Press } from '../components/press';
 import { colors, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Explain } from './explain';
+import type { TipKey } from './tips';
 import { Button as BaseButton, Row, Wrap } from '../components/ui';
 import { useViewport } from '../hooks/useViewport';
 
@@ -530,11 +531,15 @@ const styles = StyleSheet.create({
 // with a chevron and opens a panel under itself. Lifted from Categories.tsx.
 // ---------------------------------------------------------------------------
 
-export function Section({ title, right, children, style }: { title: string; right?: React.ReactNode; children: React.ReactNode; style?: object }) {
+export function Section({ title, tip, right, children, style }: { title: string; tip?: TipKey | [string, string]; right?: React.ReactNode; children: React.ReactNode; style?: object }) {
   return (
     <View style={style}>
       <View style={plain.sectionHead}>
-        <Text style={plain.kicker}>{title}</Text>
+        {/* A heading explains itself on hover like every other one does
+            (owner, 17 Sep 2026: "when I hover over any 1 of the headers, it
+            should give me a tooltip explaining what the header is"). */}
+        {tip ? <Explain tip={tip}><Text style={plain.kicker}>{title}</Text></Explain>
+          : <Text style={plain.kicker}>{title}</Text>}
         <View style={{ flex: 1 }} />
         {right}
       </View>

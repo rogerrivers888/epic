@@ -5,7 +5,7 @@ import { useViewport } from '../hooks/useViewport';
 import { Icon } from '../components/Icon';
 import { api, AtlasCity, AtlasCountry, AtlasHome, AtlasPlace, BrowseItem, HouseholdResponse, PhotoFiled, TripBrief, Venue, Visit } from '../api';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { heldSearch, noteSearchEvent } from '../search';
+import { forgetSearch, heldSearch, noteSearchEvent } from '../search';
 import { CARD_H, CARD_W, VenueThumb } from '../components/VenueThumb';
 import { Flag } from '../components/Flag';
 import { Wordmark } from '../components/Wordmark';
@@ -1054,6 +1054,11 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
   const [rating, setRating] = useState<Venue | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const admin = wide && isAdmin();
+  // The held search goes when the panel does. Without this, closing the panel
+  // and opening it again left the last search standing, and the first save or
+  // open after that was counted against results nobody could still see — a
+  // Demand outcome attributed to the wrong query (Codex, 18 Sep 2026).
+  useEffect(() => () => forgetSearch('places'), []);
   // One session of typing is one billable session at the provider.
   const session = useRef(uuid());
   const typing = useRef<any>(null);

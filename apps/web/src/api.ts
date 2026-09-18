@@ -1548,7 +1548,8 @@ export type CompareRow = {
 };
 export type RawSource = {
   key: string; label: string; explain: string;
-  state: 'held' | 'not-asked' | 'no-match'; id: string | null; lastSeen: string | null;
+  /** matched: we hold their id and nothing else, which is what a rented source is. */
+  state: 'held' | 'not-asked' | 'no-match' | 'matched'; id: string | null; lastSeen: string | null;
   fields: { field: string; value: unknown; licence: string; retention: string; fetchedAt: string; expiresAt: string | null }[];
 };
 export type PlaceHistoryRow = { at: string; what: string; who: string | null; kind: 'edit' | 'call'; usd?: number };

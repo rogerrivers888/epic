@@ -2389,7 +2389,8 @@ function RawTab({ refId }: { refId: string }) {
             <View style={{ flex: 1 }}>
               {s.state === 'not-asked' ? <Explain tip="notAsked"><NotAsked /></Explain>
                 : s.state === 'no-match' ? <Explain tip="noMatch"><NoMatch /></Explain>
-                : <Text style={styles.fieldValue}>{`${s.fields.length} field${s.fields.length === 1 ? '' : 's'}`}</Text>}
+                : s.state === 'matched' ? <Explain tip="matchedNotKept"><Text style={styles.fieldValue}>Matched · nothing kept</Text></Explain>
+                  : <Text style={styles.fieldValue}>{`${s.fields.length} field${s.fields.length === 1 ? '' : 's'}`}</Text>}
             </View>
             <Text style={[styles.fieldMeta, { width: 140 }]}>{s.id ?? '—'}</Text>
             <Text style={[styles.fieldMeta, { width: 110 }]}>{s.lastSeen ? day(s.lastSeen) : '—'}</Text>
@@ -2397,7 +2398,11 @@ function RawTab({ refId }: { refId: string }) {
           </Press>
           {open === s.key ? (
             <View style={styles.expand}>
-              {s.fields.length === 0 ? <Word muted>Nothing held from this source.</Word> : s.fields.map((f) => (
+              {s.fields.length === 0 ? (
+                <Word muted>{s.state === 'matched'
+                  ? 'We hold their identifier and nothing else — this source is rented, and is read live.'
+                  : 'Nothing held from this source.'}</Word>
+              ) : s.fields.map((f) => (
                 <View key={f.field} style={styles.detailRow}>
                   <Text style={styles.detailLabel}>{f.field}</Text>
                   <Text style={styles.detailValue}>{saidValue(f.value) || '—'}</Text>

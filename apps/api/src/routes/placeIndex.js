@@ -1470,7 +1470,15 @@ router.get('/place/raw', requires('view_library'), async (req, res, next) => {
       ref,
       sources: index.SOURCES.map((s) => ({
         key: s.key, label: s.label, explain: s.explain,
-        state: !asked.has(s.key) ? 'not-asked' : (bySource.get(s.key)?.length ? 'held' : 'no-match'),
+        // An identifier is a match. A licensed source stores one and no facts
+        // on purpose — its content is rented and never kept — so reading the
+        // fields alone called every successful Google and Tripadvisor lookup a
+        // no-match while printing its id in the next column (Codex, 18 Sep
+        // 2026). Matched-but-nothing-kept is its own state, and it is the
+        // ordinary one for the sources we pay.
+        state: !asked.has(s.key) ? 'not-asked'
+          : bySource.get(s.key)?.length ? 'held'
+            : seen.find((x) => x.source === s.key)?.source_place_id ? 'matched' : 'no-match',
         id: seen.find((x) => x.source === s.key)?.source_place_id ?? null,
         lastSeen: seen.find((x) => x.source === s.key)?.last_seen ?? null,
         fields: bySource.get(s.key) ?? [],

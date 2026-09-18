@@ -46,6 +46,7 @@ import { Button, Row, Stepper } from '../../components/ui';
 import { useViewport } from '../../hooks/useViewport';
 import { asText, useQueryState } from '../../router';
 import { AdminPage, Aside, Choice, Dropdown, PageHead, Section, TextAction, ago, count, day } from '../kit';
+import { Explain } from '../explain';
 
 const WIDE = 900;
 
@@ -148,7 +149,7 @@ export function Sources() {
       ) : null}
 
       {/* ---- the fields ---------------------------------------------------- */}
-      <Section title="Fields" style={{ zIndex: 20 }}>
+      <Section title="Fields" tip="sourcesFields" style={{ zIndex: 20 }}>
         <View style={styles.controls}>
           <Dropdown
             label="Domain" value={domainLabel} width={240}
@@ -217,14 +218,14 @@ export function Sources() {
       </Section>
 
       {/* ---- what we hold -------------------------------------------------- */}
-      <Section title="What we hold">
+      <Section title="What we hold" tip="sourcesWhatWeHold">
         <Held data={data} byKey={byKey} shown={chosen} />
       </Section>
 
       <Correctness data={data} />
 
       {/* ---- the providers ------------------------------------------------- */}
-      <Section title="Providers">
+      <Section title="Providers" tip="sourcesProviders">
         <Text style={[type.tiny, styles.guide]}>One line each; open one for its terms, its key and what it costs. A key is reported present or absent, never shown.</Text>
         {allProviders.filter((p) => chosen.has(p.key)).map((p) => (
           <View key={p.key}>
@@ -242,7 +243,7 @@ export function Sources() {
       </Section>
 
       {/* ---- services ------------------------------------------------------ */}
-      <Section title="Services">
+      <Section title="Services" tip="sourcesServices">
         <Text style={[type.tiny, styles.guide]}>What we pay for that yields no field about a place.</Text>
         {(data?.services ?? []).map((s) => (
           // A row on a wide screen; on a phone the same three parts stack (Codex, 12 Sep 2026).
@@ -416,7 +417,7 @@ function Correctness({ data }: { data: SourcesReport | null }) {
   };
 
   return (
-    <Section title="Correctness" style={{ zIndex: 10 }}>
+    <Section title="Correctness" tip="sourcesCorrectness" style={{ zIndex: 10 }}>
       <Text style={[type.small, styles.guide]}>
         Is what we kept actually right? Pick an owned source, the fields and how many places; the same places are fetched from Google now and compared field by field. Every place costs one Google Place Details request, through the ledger like any other call. Google's values are shown here for you to read and are not kept: a run stores our value, the verdict and your decision. "Read both" means the rule could not judge it, so it is yours to call.
       </Text>
@@ -444,7 +445,7 @@ function Correctness({ data }: { data: SourcesReport | null }) {
 
       {result ? <BenchTable run={result.run} rows={result.rows} problems={result.problems} live labelOf={labelOf} onDecide={decide} note={`Asked for ${result.asked}; ${result.found} had a Google identifier and facts from ${providerLabel}.`} /> : null}
 
-      <Text style={[styles.kicker, { paddingTop: spacing.md, paddingBottom: 4 }]}>Runs so far</Text>
+      <Explain tip="sourcesRunsSoFar" style={{ paddingTop: spacing.md, paddingBottom: 4 }}><Text style={styles.kicker}>Runs so far</Text></Explain>
       {!index?.runs.length ? <Text style={type.small}>No run yet.</Text> : null}
       {(index?.runs ?? []).map((r) => (
         <Press key={r.id} onPress={() => { setOpenRun(openRun?.id === r.id ? null : r); setResult(null); }} style={({ hovered }: any) => [styles.row, hovered && styles.rowHover, openRun?.id === r.id && styles.rowOpen]} accessibilityRole="button">
