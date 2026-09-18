@@ -70,6 +70,17 @@ const REFRESH_AFTER_DAYS = 180;
 // three requests to three different strangers' servers, and there is nobody
 // waiting on the answer.
 const PICTURE_BATCH = 6;
+/**
+ * How many places to ask the open map to *identify* each tick.
+ *
+ * Five, against `catchUp`'s eight, because both are Overpass queries and
+ * Overpass is somebody else's server being generous. Sixty an hour drains a
+ * backlog in days rather than never, which is what it did before: nothing ran
+ * this pass at all except a button in the back office, so a place with no kind
+ * stayed without one for good — counted in a level's header and missing from
+ * every category beneath it (18 Sep 2026).
+ */
+const KIND_BATCH = 5;
 
 /**
  * What the research can do, as a number.
@@ -898,10 +909,16 @@ export async function ownedSummary(householdId) {
  * the map for the first time, which is exactly what the ladder needs — so it is
  * worth running in the same tick rather than on a clock of its own.
  */
-export function startOwnLoop({ everyMs = 5 * 60_000, pictures = PICTURE_BATCH } = {}) {
+export function startOwnLoop({ everyMs = 5 * 60_000, pictures = PICTURE_BATCH, kinds = KIND_BATCH } = {}) {
   const tick = async () => {
     try { await sweepExpired(); } catch (err) { console.warn(`own: sweep failed: ${err.message}`); }
     try { await catchUp(); } catch (err) { console.warn(`own: catch-up failed: ${err.message}`); }
+    // A place with no kind has no shelf, and a place with no shelf is on no
+    // board. Free — the open map and the venue's own page — so it rides along
+    // rather than waiting for somebody to press something.
+    if (kinds > 0) {
+      try { await identifyKinds({ limit: kinds }); } catch (err) { console.warn(`own: identify failed: ${err.message}`); }
+    }
     if (pictures > 0) {
       try { await sweepPictures({ limit: pictures }); } catch (err) { console.warn(`own: picture sweep failed: ${err.message}`); }
     }
