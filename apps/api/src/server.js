@@ -184,10 +184,14 @@ for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/a
 const PAID_ADMIN = new Set([
   '/place/compare', '/ask', '/collect', '/pictures/find',
 ]);
+// Compared without its trailing slash. Express routes `/collect/` to the same
+// handler, and matching the path as written let a paid door be knocked on with
+// a slash on the end and skip the limiter entirely (Codex, 18 Sep 2026).
+const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '') : req.path);
 app.use('/api/admin/place-index', (req, res, next) =>
-  (PAID_ADMIN.has(req.path) ? spendLimit(req, res, next) : next()));
+  (PAID_ADMIN.has(doorOf(req)) ? spendLimit(req, res, next) : next()));
 app.use('/api/admin/demand', (req, res, next) =>
-  (req.path === '/search' && String(req.query.names ?? '') === '1' ? spendLimit(req, res, next) : next()));
+  (doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? spendLimit(req, res, next) : next()));
 
 // Speech is a paid minute per request, held to its own number per household
 // (`voiceLimit`) as well as the monthly minutes in routes/voice.js.
