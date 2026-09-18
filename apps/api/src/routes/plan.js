@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { z } from 'zod/v4';
 import { withTransaction } from '../db.js';
 import * as searchLog from '../repositories/searches.js';
+import * as placeIndex from '../repositories/placeIndex.js';
 import * as planSessions from '../repositories/planSessions.js';
 import * as tripsRepo from '../repositories/trips.js';
 import * as atlasRepo from '../repositories/atlas.js';
@@ -1419,6 +1420,26 @@ const deadline = (promise, ms, message) => Promise.race([
   new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
 ]);
 
+/**
+ * Is this geocoder hit somewhere you *visit*, or somewhere you go?
+ *
+ * The planner's ideas are free text and the geocoder answers with whatever
+ * Nominatim holds under the words: "Bath" is a city, "the Cotswolds" a region,
+ * "the Roman Baths" a museum. Only the last belongs in the place index — and a
+ * hit that had to fall back to the town name (`approximate`) is a pin on a town
+ * however the idea was worded.
+ */
+const NOT_A_VENUE = new Set([
+  'city', 'town', 'village', 'hamlet', 'municipality', 'borough', 'city_district', 'district', 'suburb', 'quarter',
+  'county', 'state', 'state_district', 'province', 'region', 'country', 'island', 'archipelago',
+  'postcode', 'postal_code', 'administrative', 'boundary', 'place',
+]);
+const aVenue = (hit) =>
+  Boolean(hit?.source && hit?.sourcePlaceId)
+  && hit.lat != null && hit.lng != null
+  && !hit.approximate
+  && !NOT_A_VENUE.has(String(hit.kind ?? '').toLowerCase());
+
 async function runInspire({ household, accountId = null, attending, session, state, append = false }) {
   // Each stage is written to the session as it starts, so the screen can say
   // what is happening instead of spinning, and the ideas themselves are saved
@@ -1481,18 +1502,31 @@ async function runInspire({ household, accountId = null, attending, session, sta
 
     // The map answers about one name a second, so each pin is published as it
     // lands rather than the whole list waiting for the slowest.
+    const found = [];
     for (const idea of fresh) {
       try {
         const [hit] = await geocode(idea.placeText, { limit: 1, near: home });
         if (hit) {
           idea.place = { label: hit.label, lat: hit.lat, lng: hit.lng, locality: hit.locality ?? null, countryCode: hit.countryCode ?? null, ref: `${hit.source}:${hit.sourcePlaceId}` };
           if (home) idea.travelMinutes = estimateTravelMinutes(home, idea.place, 'driving');
+          if (aVenue(hit)) found.push({ venueRef: idea.place.ref, lat: hit.lat, lng: hit.lng, countryCode: idea.place.countryCode, source: hit.source });
         }
       } catch { /* the idea stands without a pin */ }
       idea.placing = false;
       if (home && idea.place) idea.distanceKm = Number(kmBetween(home, idea.place).toFixed(1));
       await publish({ ideas, placed: ideas.filter((x) => !x.placing).length });
     }
+    // An idea the household was shown is a place Epic has seen, and the index is
+    // where that is written down. Without this a place first met through the
+    // planner stayed unknown to the coverage boards until somebody saved it, and
+    // Collect could pay to discover it again (Codex, 18 Sep 2026).
+    //
+    // Only the ones that are a *place*, though. `geocode` answers with whatever
+    // Nominatim has — "Bath" comes back as a town, and a pin placed by falling
+    // back to the town name is not a venue at all — and putting either in the
+    // index would fill the boards with somewhere to go rather than somewhere to
+    // visit, which is what migration 178 spent its time taking out again.
+    await placeIndex.noteSeen(found);
     // The planner's ask, written down. An ask that produced nothing is a demand
     // signal exactly as a browse that showed nothing is, and neither can be
     // backfilled (17 Sep 2026).

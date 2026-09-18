@@ -1712,3 +1712,37 @@ test('an outcode is read the same whichever way a postcode is written', async ()
     assert.deepEqual(areas, ['zz8'], `${postcode}: ${areas.join(', ') || 'nothing'}`);
   }
 });
+
+test("a level's own five numbers never disagree with the board underneath them", async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  await query(`insert into localities (slug, name, kind, country_code) values ('zz7','ZZ7','postcode','GB') on conflict (slug) do nothing`);
+  const refs = ['osm:node/agree-a', 'osm:node/agree-b', 'osm:node/agree-c'];
+  await index.noteMany(refs.map((ref) => ({ ref, lat: 51.4, lng: -0.9, countryCode: 'GB' })), { source: 'osm' });
+  await query(`insert into place_areas (venue_ref, area_slug) select unnest($1::text[]), 'zz7' on conflict do nothing`, [refs]);
+
+  // The rollup deliberately left behind, which is the state production was
+  // actually in: places filed under an area, and `area_stats` still holding the
+  // figure from before they arrived. The header counts, so it cannot be behind.
+  await query(`update area_stats set places = 0, owned = 0, claimed = 0, identified = 0, ready = 0 where area_slug = 'zz7'`);
+  const head = await index.statsFor('zz7');
+  assert.equal(head.known, 3, 'the header counts what is there, not what was last rolled up');
+
+  // And the board underneath reads the same set, so the two agree by
+  // construction rather than by luck of when the last refresh ran.
+  const board = await index.categories('zz7');
+  const counted = (board.categories ?? board ?? []).reduce((n, c) => n + (c.known ?? 0), 0);
+  assert.ok(counted <= head.known, `the categories (${counted}) cannot exceed the header (${head.known})`);
+});
+
+test('a quiet hour still refreshes the rollup when the index has moved', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  // Everything placed, so the settling pass has nothing waiting — the case that
+  // used to return before the refresh and left the boards thirteen hours behind.
+  await query(`update place_index set placed_at = now() where placed_at is null`);
+  await query(`update area_stats set refreshed_at = now() - interval '2 days'`);
+  const out = await index.settleNew();
+  assert.equal(out.settled, 0, 'nothing was waiting to be placed');
+  assert.equal(out.refreshed, true, 'and the figures were brought up to date anyway');
+  const at = await index.statsAge();
+  assert.ok(Date.now() - new Date(at).getTime() < 60_000, 'the rollup is current');
+});

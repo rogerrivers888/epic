@@ -905,7 +905,21 @@ async function settleWhileLocked(limit) {
       where placed_at is null
       order by settle_tried_at nulls first
       limit $1`, [limit]);
-  if (!waiting.length) return { settled: 0 };
+  // Nothing to place is not the same as nothing to count.
+  //
+  // A live search notes places against `place_index` continuously, and that
+  // moves what the rollup should say without necessarily leaving anything
+  // waiting to be placed — so on a quiet hour this returned here and the boards'
+  // lists went on showing whatever the last settle happened to leave. In
+  // production on 18 Sep 2026 they were thirteen hours behind. Refreshed only
+  // when the index has actually moved since the last one, so a genuinely quiet
+  // hour still costs one small query.
+  if (!waiting.length) {
+    const { rows: [behind] } = await query(
+      `select (select max(last_seen) from place_index) > coalesce((select max(refreshed_at) from area_stats), 'epoch') as yes`);
+    if (behind?.yes) await refreshStats();
+    return { settled: 0, refreshed: Boolean(behind?.yes) };
+  }
   const refs = waiting.map((r) => r.venue_ref);
   // Marked as tried before the work, so a hand that throws still goes to the
   // back rather than being taken again immediately.
@@ -1595,10 +1609,33 @@ export async function statsFor(areaSlug, { category = '', subcategory = '' } = {
   // `category = ''` against rows stored under `culture` and every one of its
   // five numbers came back a dash while its own list showed twelve places
   // (found by opening the screen, 17 Sep 2026).
+  // Counted now, not read from the rollup.
+  //
+  // The rollup is what the *lists* read — every country, every town in a county
+  // — and that is the reason it exists: one row each rather than a count over
+  // millions. But the five numbers at the top of a level are one area, and they
+  // sit directly above a board that counts live. Reading them from the rollup
+  // meant the two disagreed whenever the rollup was behind, and on 18 Sep 2026
+  // BS1's header said 53 known while its own eight categories, on the same
+  // screen, added up to 85. Thirteen hours behind, and the owner had asked for
+  // the Refresh button to be taken off the screen — rightly: a number you have
+  // to press a button to believe is not a number.
+  //
+  // One indexed lookup on `place_areas` and a join on the primary key. A
+  // category or a subcategory narrows the same set, exactly as `statsForRefs`
+  // does for a ring — a subcategory decides its own category, so the category
+  // is ignored whenever one is given.
   const { rows } = await query(
-    `select ${FIVE} from area_stats st
-      where st.area_slug = $1 and st.subcategory = $3 and st.source = '' and st.ownership = ''
-        and ($3 <> '' or st.category = $2)`,
+    `select count(*)::int as known,
+            count(*) filter (where pi.ownership = 'owned')::int      as owned,
+            count(*) filter (where pi.ownership = 'claimed')::int    as claimed,
+            count(*) filter (where pi.ownership = 'identified')::int as identified,
+            count(*) filter (where pi.ready)::int as ready_count,
+            avg(pi.data_score)::real as avg_score
+       from place_index pi
+      where exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $1)
+        and ($3::text <> '' or $2::text = '' or pi.category = $2)
+        and ($3::text = '' or pi.subcategory = $3)`,
     [lower(areaSlug), category ?? '', subcategory ?? '']);
   const r = rows[0] ?? { known: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, avg_score: null };
   return {

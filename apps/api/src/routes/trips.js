@@ -1236,8 +1236,15 @@ router.get('/:id/along', async (req, res, next) => {
     });
     if (queryId) {
       await searchLog.noteShown(queryId, drawn.map((p, n) => ({ ref: p.venueRef, position: n + 1 })));
-      await placeIndex.noteSeen(drawn);
     }
+    // The search log records what was *drawn*; the index records what was
+    // *seen*. They are not the same list here — the corridor drops everything
+    // off the road and the screen takes the first sixty — and indexing only the
+    // drawn ones left every other place the provider returned unknown, so the
+    // boards undercounted and Collect could pay for the same place twice
+    // (Codex, 18 Sep 2026). Not conditional on the log: a search worth running
+    // is worth indexing even when the logging failed.
+    await placeIndex.noteSeen(rows);
     res.json({
       queryId,
       origin, destination, mode, kind, maxDetourMin,
