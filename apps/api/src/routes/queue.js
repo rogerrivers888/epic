@@ -23,9 +23,26 @@ const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.acco
 /** BO5a — the queue, its counts, and the filter. */
 router.get('/', requires('view_library'), async (req, res, next) => {
   try {
-    const areaSlug = req.query.where ? String(req.query.where).toLowerCase() : null;
+    // An area we hold, or nothing.
+    //
+    // The screen tells a typo apart from an empty queue by whether the answer
+    // carries the area back, and echoing whatever was typed made a misspelling
+    // look like a real place with nothing in it (Codex, 18 Sep 2026).
+    const asked = req.query.where ? String(req.query.where).toLowerCase() : null;
+    const areaSlug = asked
+      ? ((await query('select slug from localities where slug = $1', [asked])).rows[0]?.slug ?? null)
+      : null;
     const kind = req.query.kind && req.query.kind !== 'all' ? String(req.query.kind) : null;
     const state = queue.STATES.includes(String(req.query.state)) ? String(req.query.state) : 'waiting';
+    // An area nobody has heard of has nothing in it — it does not quietly become
+    // "everywhere", which is what dropping the filter did (Codex, 18 Sep 2026).
+    if (asked && !areaSlug) {
+      return res.json({
+        kinds: queue.KINDS, states: queue.STATES,
+        counts: { kind: {}, state: {}, reported: 0, oldest: null },
+        state, kind: kind ?? 'all', where: null, asked, rows: [],
+      });
+    }
     // Cheap and idempotent, so the queue is never behind what households did.
     await queue.sync().catch(() => null);
     // Grouped: forty photographs of one beach are one decision and one row
@@ -34,7 +51,7 @@ router.get('/', requires('view_library'), async (req, res, next) => {
     res.json({
       kinds: queue.KINDS, states: queue.STATES,
       counts: await queue.counts({ areaSlug, state }),
-      state, kind: kind ?? 'all', where: areaSlug,
+      state, kind: kind ?? 'all', where: areaSlug, asked,
       rows: rows.map((r) => ({
         id: r.id, kind: r.kind, subjectType: r.subject_type, subjectId: r.subject_id,
         maker: r.maker_label, place: r.place_label, ref: r.venue_ref, area: r.area_slug,

@@ -113,6 +113,11 @@ export function Queue({ canManage }: { canManage: boolean }) {
   // not done until it has one (CLAUDE.md; Codex, 17 Sep 2026).
   const [rejecting, setRejecting] = useQueryState<'tell' | 'quiet' | ''>('reject', '', asOneOf(['tell', 'quiet'] as const, ''));
   const [busy, setBusy] = useState(false);
+  /** Every id a row stands for — a grouped photograph row is one decision. */
+  const batchOf = useCallback(
+    (id: string) => data?.rows.find((r) => r.id === id)?.batch ?? [id],
+    [data],
+  );
   const { width } = useViewport();
 
   const load = useCallback(() => {
@@ -282,11 +287,16 @@ export function Queue({ canManage }: { canManage: boolean }) {
           {!item && !data.rows.length ? <View style={{ padding: 14 }}><Word muted>Nothing to decide.</Word></View>
             : !item ? <Waiting /> : (
             <ItemPane item={item} canManage={canManage} busy={busy}
-                      onApprove={() => approve([item.item.id])}
+                      /* Every photograph the row stands for, not the one whose
+                         id it happens to carry: the row says "12 of them" and
+                         pressing Approve left eleven of them waiting (Codex,
+                         18 Sep 2026). The footer's batch button has always
+                         done this; the drawer's had not. */
+                      onApprove={() => approve(batchOf(item.item.id))}
                       onReject={(tell) => setRejecting(tell ? 'tell' : 'quiet', { replace: false })}
                       onReport={() => report(item.item.id)}
                       next={data.rows[data.rows.findIndex((r) => r.id === open) + 1] ?? null}
-                      onApproveNext={(id) => approve([id])}
+                      onApproveNext={(id) => approve(batchOf(id))}
                       onOpenNext={(id) => { setOpen(id, { replace: false }); setRejecting('tell', { replace: false }); }} />
           )}
         </View>
