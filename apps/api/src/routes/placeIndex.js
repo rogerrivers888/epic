@@ -1242,7 +1242,17 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
       // the month is spent hides a column fetched minutes ago (Codex, 17 Sep
       // 2026). `detailFor` keeps its last three hundred for six hours.
       const cached = id ? detailHeld('google', id) : false;
-      const wants = cached ? 0 : (id ? DETAIL_PENCE : DETAIL_PENCE + MATCH_PENCE);
+      // What this request will actually spend.
+      //
+      // Without an identifier and without `?match=1` nothing goes out at all —
+      // the column reads "not asked" — so reserving a match and a detail for it
+      // meant that near the ceiling a free request was refused and the column
+      // said "over this month's ceiling" about a call it was never going to make
+      // (Codex, 18 Sep 2026).
+      const willMatch = !id && req.query.match === '1';
+      const wants = cached ? 0
+        : id ? DETAIL_PENCE
+          : willMatch ? DETAIL_PENCE + MATCH_PENCE : 0;
       const room = await roomToSpend(Math.round(wants), { holder: 'compare' });
       if (!room.ok) {
         google.note = `over this month's ceiling · ${money(room.leftPence)} left`;
@@ -1343,11 +1353,15 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         };
       }),
       ours: OURS_FIELDS,
-      // What matching this place by name and distance would cost, from the one
-      // price table. The button said £0.014 in the bundle — the old figure, and
-      // about half the real one (Codex, 18 Sep 2026). A price is the API's to
-      // say; a screen that hard-codes one goes stale the day the price moves.
-      matchPence: googleSource.enabled() && !ref.startsWith('google:') ? MATCH_PENCE : 0,
+      // What *pressing the button* costs, which is the match and the detail it
+      // then reads — not the match alone. The button said £0.014 in the bundle
+      // (the old figure, and about half of one call), and then said the price of
+      // one call for an action that makes two (Codex, 18 Sep 2026). A price is
+      // the API's to say; a screen that hard-codes one goes stale the day the
+      // price moves.
+      matchPence: googleSource.enabled() && !ref.startsWith('google:')
+        ? MATCH_PENCE + DETAIL_PENCE
+        : 0,
       // How far a change to the shelf would travel, said on this board too.
       shelf: { subcategory: pi.subcategory, category: pi.category, derivedBy: pi.derived_by },
     });

@@ -1363,16 +1363,26 @@ export async function coverage(areaSlug, { limit = 60 } = {}) {
            -- audit read as "no websites in Kent" (Codex, 18 Sep 2026). A website
            -- is ours from three places: the record, the venue's own page on the
            -- attraction, or the sweep.
+           -- One row per place, whatever the stores hold.
+           --
+           -- scout_places is keyed on (area_code, venue_ref), so a place swept
+           -- in two areas is two rows, and two attractions can share a
+           -- reference — either of which multiplied the place through this join
+           -- and inflated known, owned, ready and every fact column with it
+           -- (Codex, 18 Sep 2026). Laterals, so each store answers once.
            select pa.area_slug, pi.venue_ref, pi.ready, pi.score_parts,
                   (coalesce(pr.website, att.website, sp.website) is not null) as has_website
              from mine m
              join place_areas pa on pa.venue_ref = m.venue_ref
              join place_index pi on pi.venue_ref = m.venue_ref
-             left join place_records pr on pr.venue_ref = m.venue_ref
-             left join attractions att
-               on (att.venue_ref = m.venue_ref or 'atlas:' || att.id::text = m.venue_ref)
-               and att.state <> 'hidden'
-             left join scout_places sp on sp.venue_ref = m.venue_ref
+             left join lateral (
+               select r.website from place_records r where r.venue_ref = m.venue_ref limit 1) pr on true
+             left join lateral (
+               select a.website from attractions a
+                where (a.venue_ref = m.venue_ref or 'atlas:' || a.id::text = m.venue_ref)
+                  and a.state <> 'hidden' limit 1) att on true
+             left join lateral (
+               select s.website from scout_places s where s.venue_ref = m.venue_ref limit 1) sp on true
             where pa.area_slug <> $1
          )
     select l.slug, l.name, l.kind,
