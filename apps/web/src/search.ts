@@ -137,7 +137,7 @@ export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
  * outcome (Codex, 17 Sep 2026). So the intent is held, and it is reported by
  * the path that actually makes the trip — or dropped when the form is closed.
  */
-let pending: { surface: Surface; ref: string | null; at: number } | null = null;
+let pending: { surface: Surface; queryId: string | null; ref: string | null; at: number } | null = null;
 
 /**
  * How long an unconverted intent stands.
@@ -151,7 +151,13 @@ let pending: { surface: Surface; ref: string | null; at: number } | null = null;
 const PENDING_FOR_MS = 5 * 60_000;
 
 export function holdConversion(surface: Surface, venueRef?: string | null) {
-  pending = { surface, ref: venueRef ?? null, at: Date.now() };
+  // The search itself is held, not the surface it came from.
+  //
+  // Opening the new-trip form takes the screen down, and a screen that is
+  // leaving lets go of its search — so by the time the trip existed there was no
+  // held id, and the one outcome the whole board is built around was dropped
+  // (Codex, 18 Sep 2026).
+  pending = { surface, queryId: current.get(surface) ?? null, ref: venueRef ?? null, at: Date.now() };
 }
 
 /** The trip exists. Now it counts. */
@@ -161,7 +167,12 @@ export function conversionHappened() {
   if (!held) return;
   // Too old to be this trip: the household went somewhere else and came back.
   if (Date.now() - held.at > PENDING_FOR_MS) return;
-  noteSearchEvent(held.surface, 'add_to_trip', held.ref);
+  if (!held.queryId) return;
+  const key = `${held.queryId}:${held.ref ?? ''}`;
+  void api.searchEvent({
+    queryId: held.queryId, kind: 'add_to_trip', venueRef: held.ref ?? null,
+    position: positions.get(key) ?? null, dwellMs: null,
+  }).catch(() => null);
 }
 
 /** They closed the form, or left it. Nothing was made, so nothing is counted. */
