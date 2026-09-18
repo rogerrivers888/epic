@@ -360,9 +360,12 @@ export async function scoringInputsFor(venueRef) {
        left join attraction_details d on d.attraction_id = a.id
       where (a.venue_ref = $1 or 'atlas:' || a.id::text = $1) and a.state <> 'hidden'
       limit 1`, [venueRef]);
-  // The empty row, if that is genuinely all there is — the caller can tell an
-  // empty record from no record at all.
-  return atlas[0] ?? rows[0] ?? null;
+  // And nothing, where there is nothing. Handing back the empty record meant
+  // both scoring routes — which only ask whether there is a row — reported
+  // "scored", worked out nought, and let that nought be saved over whatever was
+  // there (Codex, 18 Sep 2026). "Not scored" is the honest answer and the one
+  // the screen is written for.
+  return atlas[0] ?? null;
 }
 
 /** How the sweep is doing, per area — the owner's figure for the dataset. */

@@ -59,7 +59,11 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
   // measured; it is the count that must not double.
   if (kind === 'open') {
     if (openedOnce.has(key)) { opened.set(key, Date.now()); return; }
-    openedOnce.add(key);
+    // Counted once it has actually landed, not once it has been attempted. The
+    // key went in before the post, the post is fire-and-forget, and this
+    // endpoint is not in the offline policy — so an open made on a train was
+    // dropped and could never be sent again, and the search read as one nobody
+    // clicked (Codex, 18 Sep 2026).
   }
   // How long they stayed on the place before leaving — the dwell on a replay.
   let dwellMs: number | null = null;
@@ -69,7 +73,7 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
     queryId, kind, venueRef: venueRef ?? null,
     position: positions.get(key) ?? null,
     dwellMs,
-  }).catch(() => null);
+  }).then(() => { if (kind === 'open') openedOnce.add(key); }).catch(() => null);
 }
 
 /** What each surface last told the log it had drawn, so it is said once. */
