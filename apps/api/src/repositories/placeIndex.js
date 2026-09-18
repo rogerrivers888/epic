@@ -172,6 +172,82 @@ export async function reindex({ onProgress = null } = {}) {
   return underTheBuildLock(() => reindexWhileLocked({ onProgress }), { places: 0, skipped: 'a rebuild is already going on' });
 }
 
+/**
+ * A place that has been retired goes.
+ *
+ * Hiding an attraction in the library took it out of the harvest's insert and
+ * left the row it had already made: the index went on counting it as known, as
+ * owned and as somewhere worth collecting (Codex, 18 Sep 2026). This runs inside
+ * every rebuild *and* on the path that retires one, because the hourly settling
+ * pass only looks at rows waiting to be placed and would never reach it
+ * otherwise (Codex, 18 Sep 2026, the round after).
+ */
+export async function retire() {
+  // Hiding an attraction in the library took it out of the harvest's insert and
+  // left the row it had already made: a rebuild stopped refreshing it and went
+  // on counting it as known, as owned, and as somewhere worth collecting
+  // (Codex, 18 Sep 2026). A retired attraction's source row goes with it, though
+  // a place whose *reference* is an atlas one keeps that source on the next
+  // pass and should: the atlas is still where the identifier came from, it is
+  // just no longer a reason to hold the place. The index row goes only when the
+  // attraction was the whole reason for it —
+  // nobody else has returned the place, we hold no research of our own on it,
+  // and no household has claimed it. Anything else is still a real place that
+  // happens to have lost one source.
+  await query(`
+    delete from place_index_sources s
+     using attractions a
+     where s.source = 'atlas' and a.state = 'hidden'
+       and s.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)`);
+  const { rowCount: retired } = await query(`
+    delete from place_index pi
+     where pi.venue_ref in (
+       select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
+       and not exists (select 1 from place_index_sources s where s.venue_ref = pi.venue_ref)
+       and not exists (select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
+       and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)`);
+  // And a place that survives the retirement is re-asked what it is.
+  //
+  // Removing the atlas source left `ownership` where it was, so a place whose
+  // only research *was* the retired attraction went on being counted as owned —
+  // which is the one state that tells Collect to leave it alone (Codex, 18 Sep
+  // 2026). The same three questions the rebuild asks, asked again for these.
+  await query(`
+    update place_index pi
+       set ownership = case
+             when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref) then 'claimed'
+             else 'identified' end,
+           placed_at = null
+     where pi.ownership = 'owned'
+       and pi.venue_ref in (
+         select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
+       and not exists (
+         select 1 from attractions a
+          where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
+            and a.state <> 'hidden'
+            and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
+       and not exists (
+         select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
+       and not exists (
+         select 1 from scout_places sp
+          where sp.venue_ref = pi.venue_ref and coalesce(sp.website, sp.name) is not null)`);
+
+  // The rows hung off it go with it, or they are counted against a place that
+  // is no longer in the index.
+  if (retired) {
+    await query(`
+      delete from place_areas pa
+       where not exists (select 1 from place_index pi where pi.venue_ref = pa.venue_ref)`);
+    await query(`
+      delete from place_cells pc
+       where not exists (select 1 from place_index pi where pi.venue_ref = pc.venue_ref)`);
+    await query(`
+      delete from place_index_labels pl
+       where not exists (select 1 from place_index pi where pi.venue_ref = pl.venue_ref)`);
+  }
+  return { retired };
+}
+
 async function reindexWhileLocked({ onProgress }) {
   const t0 = Date.now();
 
@@ -278,70 +354,7 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict (venue_ref) do update
        set ownership = case when place_index.ownership = 'identified' then 'claimed' else place_index.ownership end`);
 
-  // 1b — and a place that has been retired goes.
-  //
-  // Hiding an attraction in the library took it out of the harvest's insert and
-  // left the row it had already made: a rebuild stopped refreshing it and went
-  // on counting it as known, as owned, and as somewhere worth collecting
-  // (Codex, 18 Sep 2026). A retired attraction's source row goes with it, though
-  // a place whose *reference* is an atlas one keeps that source on the next
-  // pass and should: the atlas is still where the identifier came from, it is
-  // just no longer a reason to hold the place. The index row goes only when the
-  // attraction was the whole reason for it —
-  // nobody else has returned the place, we hold no research of our own on it,
-  // and no household has claimed it. Anything else is still a real place that
-  // happens to have lost one source.
-  await query(`
-    delete from place_index_sources s
-     using attractions a
-     where s.source = 'atlas' and a.state = 'hidden'
-       and s.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)`);
-  const { rowCount: retired } = await query(`
-    delete from place_index pi
-     where pi.venue_ref in (
-       select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
-       and not exists (select 1 from place_index_sources s where s.venue_ref = pi.venue_ref)
-       and not exists (select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
-       and not exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref)`);
-  // And a place that survives the retirement is re-asked what it is.
-  //
-  // Removing the atlas source left `ownership` where it was, so a place whose
-  // only research *was* the retired attraction went on being counted as owned —
-  // which is the one state that tells Collect to leave it alone (Codex, 18 Sep
-  // 2026). The same three questions the rebuild asks, asked again for these.
-  await query(`
-    update place_index pi
-       set ownership = case
-             when exists (select 1 from household_places hp where hp.venue_ref = pi.venue_ref) then 'claimed'
-             else 'identified' end,
-           placed_at = null
-     where pi.ownership = 'owned'
-       and pi.venue_ref in (
-         select coalesce(a.venue_ref, 'atlas:' || a.id::text) from attractions a where a.state = 'hidden')
-       and not exists (
-         select 1 from attractions a
-          where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
-            and a.state <> 'hidden'
-            and coalesce(a.summary, a.website, a.wikipedia_url) is not null)
-       and not exists (
-         select 1 from place_records r where r.venue_ref = pi.venue_ref and ${OWNED_RECORD})
-       and not exists (
-         select 1 from scout_places sp
-          where sp.venue_ref = pi.venue_ref and coalesce(sp.website, sp.name) is not null)`);
-
-  // The rows hung off it go with it, or they are counted against a place that
-  // is no longer in the index.
-  if (retired) {
-    await query(`
-      delete from place_areas pa
-       where not exists (select 1 from place_index pi where pi.venue_ref = pa.venue_ref)`);
-    await query(`
-      delete from place_cells pc
-       where not exists (select 1 from place_index pi where pi.venue_ref = pc.venue_ref)`);
-    await query(`
-      delete from place_index_labels pl
-       where not exists (select 1 from place_index pi where pi.venue_ref = pl.venue_ref)`);
-  }
+  await retire();
 
   onProgress?.({ stage: 'places' });
 

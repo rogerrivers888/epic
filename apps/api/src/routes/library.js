@@ -35,6 +35,7 @@
 import express from 'express';
 import { can, requires } from '../access.js';
 import * as lib from '../repositories/library.js';
+import * as placeIndex from '../repositories/placeIndex.js';
 import { runHarvest, refreshKinds, WIDTHS, researchAttraction, detailPass } from '../sources/harvest.js';
 import { contentsOf } from '../sources/inside.js';
 import { readAttraction, readVenueFromWeb } from '../domain/attractionReading.js';
@@ -749,6 +750,16 @@ adminRouter.post('/kinds/refresh', requires('manage_library'), async (req, res, 
     const types = await refreshKinds({});
     const moved = await lib.reclassifyAttractions();
     const retired = await lib.retireDeniedAttractions();
+    // The index hears about it now, not at the next full rebuild.
+    //
+    // The hourly settling pass only looks at rows waiting to be placed, so a
+    // place retired here went on counting as known and owned — and could be
+    // offered for collection — until somebody rebuilt by hand (Codex, 18 Sep
+    // 2026).
+    if (retired.length) {
+      await placeIndex.retire();
+      await placeIndex.refreshStats().catch(() => null);
+    }
     await query(
       `insert into admin_audit (actor_id, actor_label, action, subject_type, after)
        values ($1,$2,'library.kinds.refresh','kinds',$3)`,

@@ -749,8 +749,10 @@ test('a hidden attraction leaves the index, unless something else holds the plac
   assert.equal(await held(refOf(alone)), 1, 'a published attraction is in the index');
   assert.equal(await held(refOf(claimed)), 1);
 
+  // Retired the way the library retires one, and the index hears about it
+  // without waiting for a rebuild (Codex, 18 Sep 2026).
   await query(`update attractions set state = 'hidden' where id = any($1::uuid[])`, [[alone.id, claimed.id]]);
-  await index.reindex();
+  await index.retire();
   assert.equal(await held(refOf(alone)), 0, 'retired, and nothing else was holding it');
   assert.equal(await held(refOf(claimed)), 1, 'a household claimed it, so the place stays');
   // And the place that survived is no longer *owned*: its only research was the
@@ -759,12 +761,17 @@ test('a hidden attraction leaves the index, unless something else holds the plac
   const { rows: [own] } = await query('select ownership from place_index where venue_ref = $1', [refOf(claimed)]);
   assert.equal(own.ownership, 'claimed');
 
-  // Its atlas *source* row stands, and deliberately: the reference itself is an
-  // atlas reference, so the atlas is still where the place came from. What it no
-  // longer is, is a reason to keep the place.
-  const { rows: [src] } = await query(
-    `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'atlas'`, [refOf(claimed)]);
-  assert.equal(src.n, 1);
+  // The retired attraction stops being one of its sources.
+  const atlasRows = async () => (await query(
+    `select count(*)::int as n from place_index_sources where venue_ref = $1 and source = 'atlas'`,
+    [refOf(claimed)])).rows[0].n;
+  assert.equal(await atlasRows(), 0);
+  // A full rebuild puts that row back, and deliberately: the reference itself is
+  // an atlas reference, so the atlas is still where the identifier came from.
+  // What it no longer is, is a reason to keep the place.
+  await index.reindex();
+  assert.equal(await atlasRows(), 1);
+  assert.equal((await query('select ownership from place_index where venue_ref = $1', [refOf(claimed)])).rows[0].ownership, 'claimed');
   // And the retired one took its area and cell rows with it.
   const orphans = await query(
     `select (select count(*) from place_areas where venue_ref = $1)::int as areas,
