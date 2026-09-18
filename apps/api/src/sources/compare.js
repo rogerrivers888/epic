@@ -61,7 +61,15 @@ const detailsInFlight = new Map();
  * minutes earlier (Codex, 17 Sep 2026).
  */
 export function detailHeld(provider, id) {
-  const held = details.get(`${provider}:${id}`);
+  const key = `${provider}:${id}`;
+  // One already on its way counts as held: `detailFor` joins it rather than
+  // asking again, so no call goes out for the second caller. Left out, two
+  // requests about the same place at once both claimed the money and both
+  // counted a call — and near a ceiling the second was refused for spending
+  // that was never going to happen (Codex, 18 Sep 2026, the same rule the
+  // search cache got two rounds ago).
+  if (detailsInFlight.has(key)) return true;
+  const held = details.get(key);
   return Boolean(held) && Date.now() - held.at < DETAIL_TTL_MS;
 }
 
