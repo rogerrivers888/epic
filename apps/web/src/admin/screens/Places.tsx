@@ -212,6 +212,18 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
         <Ladder columns={columns} rows={rows} keyOf={(c) => c.slug}
                 onRow={(c) => (c.known ? onPick(c.slug) : undefined)}
                 highlight={(c) => c.known > 0 && c.slug === rows[0]?.slug}
+                /* The same stacked row BO2l draws a county's towns with: the
+                   name, how many we know there, and the figures as chips. */
+                phoneRow={(c) => ({
+                  name: c.name,
+                  note: `${c.known.toLocaleString()} known`,
+                  chips: [
+                    { key: 'ready', word: `ready ${c.ready == null ? '—' : `${c.ready}%`}`, tip: 'ready', lead: true },
+                    { key: 'owned', word: `owned ${c.owned.toLocaleString()}`, tip: 'owned' },
+                    { key: 'ident', word: `identified only ${c.identified.toLocaleString()}`, tip: 'identifiedOnly' },
+                    { key: 'score', word: `score ${c.avgScore == null ? '—' : c.avgScore}`, tip: 'avgScore' },
+                  ],
+                })}
                 sort={sort} desc={desc}
                 onSort={(k) => { if (k === sort) setDesc(!desc); else { setSort(k); setDesc(true); } }} />
       ) : <Waiting />}
@@ -450,6 +462,20 @@ function Five({ stats, ring, kind = null, needs = null }: {
   const scoreTip = kind
     ? ([`Average score`, `The mean data score of these ${stats.known.toLocaleString()} places, 0 to 100.`] as const)
     : ('avgScore' as const);
+  // BO2l, "Places at 390": four figures in two columns, not seven in a row that
+  // cannot fit. Claimed and the average score are the two the design leaves off
+  // the phone — they are the finer read, and the phone is the glance.
+  const { width } = useViewport();
+  if (width < PHONE) {
+    return (
+      <View style={styles.fourGrid}>
+        <View style={styles.fourCell}><Stat label="Known" value={said(stats.known)} tip="known" /></View>
+        <View style={styles.fourCell}><Stat label="Owned" value={said(stats.owned)} tip="owned" /></View>
+        <View style={styles.fourCell}><Stat label="Identified only" value={said(stats.identified)} tip="identifiedOnly" accent /></View>
+        <View style={styles.fourCell}><Stat label="Ready" value={stats.ready == null ? '—' : `${stats.ready}%`} tip={readyTip} mark /></View>
+      </View>
+    );
+  }
   return (
     <View style={styles.five}>
       <Stat label="Known" value={said(stats.known)} tip="known" />
@@ -472,7 +498,11 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
     <View style={styles.lensRow}>
       <View style={styles.lensLeft}>
         <Kicker tip="sectionCutBy">Cut by</Kicker>
-        <View style={styles.lenses}>
+        {/* BO2l draws this row clipped, ending in "Qua…" — six words will not
+            fit 390 and must not be allowed to wrap into a block either. A
+            sideways scroller keeps every lens reachable and the row one line. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.lenses} style={{ flexShrink: 1 }}>
           {/* All six, not one: the lens words are this board's main control and
               five of them said nothing on hover (18 Sep 2026, the separate
               audit). */}
@@ -485,7 +515,7 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
               </Press>
             </Explain>
           ))}
-        </View>
+        </ScrollView>
       </View>
       {right}
     </View>
@@ -2826,6 +2856,10 @@ const styles = StyleSheet.create({
   titlePhone: { fontSize: 25, letterSpacing: -0.9, lineHeight: 27 },
   // Wraps inside itself on a phone rather than being sized to its content and
   // pushed off the 390px frame (live phone audit, 18 Sep 2026).
+  // BO2l: `grid-template-columns:1fr 1fr;gap:12px 14px`.
+  fourGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 12, columnGap: 14, flexGrow: 1, flexBasis: 240, minWidth: 0 },
+  fourCell: { flexBasis: '46%', flexGrow: 1, minWidth: 0 },
+
   five: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap',
     flexGrow: 1, flexBasis: 240, minWidth: 0,

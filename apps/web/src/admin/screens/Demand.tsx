@@ -132,6 +132,23 @@ function Report({ where, since, onSince, onWhere, onSearch }: {
 
       <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.subject ?? 'anything'}
               highlight={(r) => r.fault === 'empty-always'}
+              /* The stacked row a phone gets (BO2l's shape): what was asked for,
+                 how often, then the fault and who fixes it as chips. The bar is
+                 left off — it is a comparison between columns, and there are no
+                 columns here. */
+              phoneRow={(r) => ({
+                name: r.label,
+                note: `${r.searches.toLocaleString()} ${r.searches === 1 ? 'search' : 'searches'}`,
+                chips: [
+                  { key: 'fault', word: r.faultLabel, lead: true,
+                    tip: r.fault === 'wrong-places' ? 'noClickShort'
+                      : r.fault === 'thin-places' ? 'neverTripped'
+                        : r.fault === 'no-places' || r.fault === 'empty-always' ? 'emptyTotal' : 'whichFault' },
+                  ...(r.owner ? [{ key: 'owner', word: r.owner, tip: 'whoFixesIt' as const }] : []),
+                  { key: 'empty', word: `empty ${r.empty.toLocaleString()}`, tip: 'emptyTotal' },
+                  { key: 'noClick', word: `clicked nothing ${r.noClick.toLocaleString()}`, tip: 'noClick' },
+                ],
+              })}
               empty={
                 <Explain tip={['Nothing yet', 'The search log is written from the day it was built and none of it can be backfilled, so a new area reads empty until somebody searches it.']}>
                   <Word muted>Nothing searched for here yet</Word>
