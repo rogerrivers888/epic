@@ -25,6 +25,9 @@ import { EMPTY_LIST, LIST_KEYS, LISTS, PLACE_SORTS, PLACE_SORT_KEYS, epicRating,
 import { PhotoAdd, type PhotoLanded } from '../components/PhotoAdd';
 import { useHere } from '../hooks/useHere';
 
+/** How many of the answer this list draws — and so how many were shown. */
+const SHOWS = 40;
+
 // Trips still imports these from here.
 export { VenueRow, VisitForm, VisitSummary } from '../components/Visits';
 export type { VisitCreateBody } from '../components/Visits';
@@ -1075,11 +1078,13 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
       const r = await api.searchPlaces({
         near: `${centre.lat},${centre.lng}`, categories: kind === 'do' ? 'things' : kind === 'eat' ? 'food' : undefined,
         q: q.trim() || undefined, radiusKm, sources: sources?.join(',') || undefined,
+        // As many as this list draws, below.
+        shows: SHOWS,
       });
       setRes(r.results);
       // The search is written down at the API; this holds its id so what the
       // household does next to each row can be counted (search.ts).
-      heldSearch('places', r.queryId, r.results.map((v) => v.venueRef));
+      heldSearch('places', r.queryId, r.results.slice(0, SHOWS).map((v) => v.venueRef));
       if (!r.results.length) setMsg('Nothing found nearby. Try the name of the place.');
     } catch (e: any) { setMsg(e.message); } finally { setBusy(false); }
   };
@@ -1124,7 +1129,7 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
         <VisitForm venue={rating} household={household} onDone={async () => { setRating(null); setMsg(`Added ${rating.name} as somewhere you've been.`); await onAdded(); }} onCancel={() => setRating(null)}
           createVia={async (body) => { await api.createVisit({ venueRef: rating.venueRef, venueLabel: rating.name, category: rating.category, lat: rating.lat, lng: rating.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: body.venue, ...ctx }); }} />
       ) : null}
-      {res?.slice(0, 40).map((v) => (
+      {res?.slice(0, SHOWS).map((v) => (
         <VenueRow key={v.venueRef} venue={v} stack={!wide}
                   onPress={() => { noteSearchEvent('places', 'open', v.venueRef); onOpen(v); }} action={
           <Row>

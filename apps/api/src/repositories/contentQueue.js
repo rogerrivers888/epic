@@ -198,6 +198,20 @@ export async function syncFlagged() {
     having count(distinct f.value::text) > 2
     on conflict (subject_type, subject_id) do nothing`);
 
+  // Something rejected that has since been written again comes back.
+  //
+  // `hidden` is the moderation state on the content itself, and a host review
+  // rewritten after a rejection clears it — so the queue row, which is a view
+  // of that, goes back to waiting. Without this the corrected words could never
+  // be looked at or published (Codex, 18 Sep 2026).
+  await query(`
+    update content_queue q
+       set state = 'waiting', reason = null, message = null, told = false,
+           decided_by = null, decided_at = null
+      from host_reviews hr
+     where q.subject_type = 'host_review' and q.subject_id = hr.id::text
+       and q.state = 'rejected' and not hr.hidden`);
+
   // Somebody reported it, so it jumps the queue.
   //
   // A household reporting a topic or a reply writes `chat_reports` and nothing

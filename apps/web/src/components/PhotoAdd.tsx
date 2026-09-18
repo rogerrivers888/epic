@@ -84,7 +84,8 @@ export function PhotoAdd({ household, onDone, onSearchInstead }: {
       setImage(up.image); setWhere(up.where);
       // What the sources know is at that spot, a few hundred metres round it.
       let found: Venue[] = [];
-      try { found = (await api.searchPlaces({ near: `${at.lat},${at.lng}`, radiusKm: 0.3 })).results.slice(0, 6); } catch { found = []; }
+      try { // Six, and the log is told six (Codex, 18 Sep 2026).
+        found = (await api.searchPlaces({ near: `${at.lat},${at.lng}`, radiusKm: 0.3, shows: 6 })).results.slice(0, 6); } catch { found = []; }
       if (!alive.current) return;
       setCandidates(found);
       setStage('choose');

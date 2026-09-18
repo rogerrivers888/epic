@@ -428,6 +428,17 @@ places.get('/search', async (req, res, next) => {
     // A ride belongs to its park, not to the list beside it.
     markContained(shown);
 
+    // What the caller will actually put on screen.
+    //
+    // The answer carries everything in range and each screen draws as much of it
+    // as it has room for — forty on Add a place, six on the photo one. Writing
+    // all of them down as "shown" put results in the replay the household never
+    // saw, which is the one thing that board promises not to do (Codex, 18 Sep
+    // 2026). `shows` is the caller saying how many it will draw; without it, all
+    // of them, which is true of a screen that lists the lot.
+    const asksFor = Number(req.query.shows);
+    const drawn = Number.isFinite(asksFor) && asksFor > 0 ? shown.slice(0, asksFor) : shown;
+
     // The search, written down. A browse is a search too, and one that showed
     // nothing here is exactly the coverage hole Collect exists to fill.
     const searchId = await searchLog.noteSearch({
@@ -436,11 +447,11 @@ places.get('/search', async (req, res, next) => {
       lat: near.lat, lng: near.lng, radiusKm,
       asked: { categories, typed: Boolean(q) },
       subject: categories.length === 1 ? categories[0] : null,
-      shownTotal: shown.length,
-      shown: Object.entries(shown.reduce((acc, v) => { const k = v.subcategory ?? v.shelf ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([subcategory, n]) => ({ subcategory, n })),
+      shownTotal: drawn.length,
+      shown: Object.entries(drawn.reduce((acc, v) => { const k = v.subcategory ?? v.shelf ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([subcategory, n]) => ({ subcategory, n })),
       sourcesQueried, degraded,
     });
-    await searchLog.noteShown(searchId, shown.map((v, i) => ({ ref: v.venueRef, position: i + 1, source: v.source })));
+    await searchLog.noteShown(searchId, drawn.map((v, i) => ({ ref: v.venueRef, position: i + 1, source: v.source })));
 
     res.json({
       queryId: searchId,

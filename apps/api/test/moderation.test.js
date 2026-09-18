@@ -464,3 +464,24 @@ test('rejecting the same thing twice decides it once', async () => {
   assert.match(again.why ?? '', /already rejected/);
   assert.equal(await used(), before + 1, 'counted once');
 });
+
+test('a rejected review written again comes back to be looked at', async () => {
+  const { host, review, q } = await aReview();
+  await queue.reject({ id: q.id, reason: 'abusive', who: null });
+  assert.equal((await hosting.publishedReviews(host.id)).length, 0);
+
+  // The household writes it again. The queue's decision was about words that
+  // are no longer there, and the corrected ones could never be looked at or
+  // published (Codex, 18 Sep 2026).
+  const { rows: [booking] } = await query('select * from experience_bookings limit 1');
+  await hosting.insertReview({
+    bookingId: review.booking_id, offerId: review.offer_id, hostId: review.host_id,
+    householdId: review.household_id, side: 'guest', stars: 4, chips: [],
+    text: 'Written again, politely.', publishOn: new Date(Date.now() - 86_400_000),
+  });
+  await queue.sync();
+  const { rows: [row] } = await query('select state from content_queue where id = $1', [q.id]);
+  assert.equal(row.state, 'waiting', 'back in the queue');
+  assert.equal((await hosting.publishedReviews(host.id)).length, 1, 'and no longer hidden');
+  assert.ok(booking);
+});

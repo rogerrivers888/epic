@@ -1846,7 +1846,15 @@ export const api = {
     post<TripDetail & { stay: { named: 'open' | 'household'; how: string | null } }>(`/api/trips/${tripId}/stay`, b),
 
   /** `sources` is the exact set of sources for this one search (e.g. 'osm,tripadvisor'); omitted = the default set, which never includes opt-in sources. */
-  searchPlaces: (p: { q?: string; near?: string; categories?: string; radiusKm?: number; sources?: string }) =>
+  /**
+   * `shows` is how many of the answer this screen will actually draw.
+   *
+   * The answer carries everything in range and each screen draws as much as it
+   * has room for — forty on Places, six on the photo one. The search log needs
+   * the drawn number, or the replay claims the household saw rows that were
+   * never on their screen (Codex, 18 Sep 2026).
+   */
+  searchPlaces: (p: { q?: string; near?: string; categories?: string; radiusKm?: number; sources?: string; shows?: number }) =>
     request<{ queryId: string | null; near: Place & { how: string }; radiusKm: number; results: Venue[]; sourcesQueried: string[]; degradedSources: { source: string; error: string }[]; attribution: string[] }>(`/api/places/search${qs(p)}`),
   place: (venueRef: string) =>
     request<{ venueRef: string; venue: Venue | null; household: Venue['household']; visits: Visit[]; menu?: MenuLink | null; ours?: OwnedRecord | null;
