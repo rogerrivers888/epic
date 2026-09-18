@@ -931,3 +931,32 @@ test('a place one hidden and one live attraction share survives the rebuild', as
   const { rows: [after] } = await query('select count(*)::int as n from place_index where venue_ref = $1', [ref]);
   assert.equal(after.n, 1);
 });
+
+/**
+ * A shelf set by hand outlives a rebuild; its labels are rewritten with
+ * everything else's.
+ *
+ * Leaving hand-shelved places out of the shelving pass after the labels had
+ * been deleted meant every rebuild dropped the provider words for exactly the
+ * places somebody had corrected (Codex, 18 Sep 2026).
+ */
+test('a hand-shelved place keeps its shelf and gets its labels back', async () => {
+  const ref = 'test:shelved-by-hand';
+  const { rows: [region] } = await query('select slug from regions limit 1');
+  await query(
+    `insert into attractions (name, slug, region_slug, venue_ref, state, lat, lng, category, kinds, first_seen, last_seen)
+     values ('Shelved by hand', $1, $2, $3, 'published', 51.5, -0.1, 'museum', '{"museum"}', now(), now())`,
+    [`hand-${Math.random().toString(36).slice(2, 10)}`, region.slug, ref]);
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.1 }], { source: 'atlas' });
+  await query(
+    `update place_index set subcategory = 'museums', category = 'culture', derived_by = 'hand' where venue_ref = $1`, [ref]);
+
+  await index.shelveAll({ refs: [ref] });
+  const { rows: [after] } = await query(
+    'select subcategory, derived_by from place_index where venue_ref = $1', [ref]);
+  assert.equal(after.derived_by, 'hand', 'somebody decided this one');
+  assert.equal(after.subcategory, 'museums');
+  const { rows: [labels] } = await query(
+    'select count(*)::int as n from place_index_labels where venue_ref = $1', [ref]);
+  assert.ok(labels.n > 0, 'and the words the sources filed it by are back');
+});

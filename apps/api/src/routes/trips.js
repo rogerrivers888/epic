@@ -22,6 +22,7 @@ import { rankStays, middleOf, partyForStay } from '../domain/stays.js';
 import { occupanciesFor, liteapiEnabled, liteapiKeyKind } from '../sources/liteapi.js';
 import { kmBetween, detourMinutes, estimateTravelMinutes, reachRadiusKm } from '../domain/travel.js';
 import { currentHousehold } from './household.js';
+import * as searchLog from '../repositories/searches.js';
 import { visitPayload, householdStatus } from './places.js';
 import { upsertHouseholdPlace, ownedImage } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
@@ -831,7 +832,27 @@ async function runShortlistSearch(req, { onProgress = null } = {}) {
       stored: true,
     }));
   const results = [...live, ...stored];
-  return { near: center, radiusKm, results: withFlags(results), storedCount: stored.length, degradedSources: degraded, sourcesQueried, cached, fetchedAt, tookMs: Date.now() - started };
+  // The trip's own Find is a search, and the log had never heard of it.
+  //
+  // `trip` has been one of the surfaces since the log was built and nothing ever
+  // wrote one down, so every search made while planning a trip was missing from
+  // Demand — and none of its opens, shortlists or additions could be attributed
+  // to anything (Codex, 18 Sep 2026).
+  const kept = withFlags(results);
+  const queryId = await searchLog.noteSearch({
+    householdId: household.id, accountId: req.account?.id ?? null, surface: 'trip',
+    ...(await searchLog.whereOf({ lat: center.lat, lng: center.lng })),
+    lat: center.lat, lng: center.lng, radiusKm, tripId: trip.id,
+    asked: { q: q || null, categories, radiusKm },
+    subject: categories[0] ?? (q || null),
+    shownTotal: kept.length,
+    shown: Object.entries(kept.reduce((acc, v) => {
+      const k = v.category ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc;
+    }, {})).map(([subcategory, n]) => ({ subcategory, n })),
+    sourcesQueried, degraded: degraded.map((d) => d.source ?? d),
+  });
+  await searchLog.noteShown(queryId, kept.map((v, n) => ({ ref: v.venueRef, position: n + 1 })));
+  return { queryId, near: center, radiusKm, results: kept, storedCount: stored.length, degradedSources: degraded, sourcesQueried, cached, fetchedAt, tookMs: Date.now() - started };
 }
 
 /**

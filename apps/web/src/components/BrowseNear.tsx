@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from './press';
 import { useViewport } from '../hooks/useViewport';
+import { heldSearch, noteDrawn, noteSearchEvent } from '../search';
 import { api, AtlasPlace, BrowseItem, HouseholdResponse, SketchEvent, TripDetail, Venue } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Chip, Row, StatusLine, Wrap, minutes as fmtMinutes } from './ui';
@@ -152,6 +153,9 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
         { q: params.q || undefined, radiusKm: params.radiusKm, sources: params.sources ? params.sources.join(',') : undefined, refresh: refresh ? '1' : undefined },
         (e) => setEvents((cur) => [...cur, e]),
       );
+      // The trip's Find is a search like any other, and what the household does
+      // with these results is counted against it (Codex, 18 Sep 2026).
+      heldSearch('trip', r.queryId, r.results.map((v) => v.venueRef));
       setFind((cur) => {
         // Land on a tile that has something. A search is not "empty" because
         // the tile in front happens to be the one the sources had nothing for.
@@ -222,6 +226,12 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
     };
     return [...l].sort(by[find.sort]);
   }, [inCat, find.kinds, find.only, find.sort, budgetMax]);
+  // What this tile is actually showing, said to the log — the answer holds every
+  // tile at once and the screen draws one (Codex, 18 Sep 2026).
+  useEffect(() => {
+    if (find.loading || !find.res) return;
+    noteDrawn('trip', list.slice(0, shown).map(({ v }) => v.venueRef));
+  }, [list, shown, find.loading, find.res]);
   // Only the sources that were meant to fill this tile. A theatre listings
   // service that fell over has nothing to do with an empty Places to eat.
   const failed = useMemo(() => (find.degraded ?? []).filter((g) => g.source !== 'fixtures'), [find.degraded]);
@@ -240,6 +250,8 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
     source: v.source, contributingSources: v.contributingSources, ratingSource: v.source, shortlisted: shortlisted.has(v.venueRef),
   });
   const add = async (v: FindResult) => {
+    // Shortlisting from Find is the outcome this surface is measured by.
+    noteSearchEvent('trip', 'shortlist', v.venueRef);
     await api.addToShortlist(trip.id, {
       venueRef: v.venueRef, venueLabel: v.name, category: v.category, lat: v.lat, lng: v.lng,
       venue: { name: v.name, category: v.category, cuisines: v.cuisines, experiences: v.experiences, rating: v.rating, ratingCount: v.ratingCount, priceLevel: v.priceLevel, lat: v.lat, lng: v.lng, photos: v.photos, address: v.address, website: v.website, openingHours: v.openingHours } as Partial<Venue>,
@@ -435,7 +447,8 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
           const meta = metaOf(v, find.cat);
           const when = whenOf(v);
           return (
-            <Press key={v.venueRef} onPress={() => setOpen(asItem(v))} style={[styles.card, i === 0 && { borderTopWidth: 0, paddingTop: 4 }]} accessibilityRole="button">
+            <Press key={v.venueRef} onPress={() => { noteSearchEvent('trip', 'open', v.venueRef); setOpen(asItem(v)); }}
+                   style={[styles.card, i === 0 && { borderTopWidth: 0, paddingTop: 4 }]} accessibilityRole="button">
               <View style={[styles.photo, i % 2 === 1 && { backgroundColor: colors.surfaceMuted }]}>
                 <VenuePhoto photos={v.photos} size={132} height={88} credit={false} />
                 {loved ? <View style={styles.heart}><Icon name="keep" size={11} color="#fff" fill /></View> : null}
@@ -464,7 +477,8 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
           that used to sit here is gone — the shortlist has a tab of its own. */}
       <Button label={find.loading ? 'Searching…' : 'Search again'} icon="refresh" kind="secondary" onPress={() => run({}, true)} loading={find.loading} disabled={find.loading} />
 
-      <VenueDrawer item={open} baseLabel={baseLabel} onClose={() => setOpen(null)} onShortlist={async (b) => { const v = (find.res ?? []).find((x) => x.venueRef === b.venueRef); if (v) await add(v); }} shortlisted={open ? shortlisted.has(open.venueRef) : false} />
+      <VenueDrawer item={open} baseLabel={baseLabel}
+                   onClose={() => { if (open) noteSearchEvent('trip', 'close', open.venueRef); setOpen(null); }} onShortlist={async (b) => { const v = (find.res ?? []).find((x) => x.venueRef === b.venueRef); if (v) await add(v); }} shortlisted={open ? shortlisted.has(open.venueRef) : false} />
     </View>
   );
 }

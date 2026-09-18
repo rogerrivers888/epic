@@ -638,6 +638,7 @@ export type SketchEvent =
 
 export type SearchParams = { q?: string; categories?: string; radiusKm?: number; near?: string; sources?: string; refresh?: '1' };
 export type SearchAnswer = { near: Place; radiusKm: number; results: (Venue & { onShortlist: boolean; stored?: boolean })[]; degradedSources: { source: string; error: string; slow?: boolean }[]; sourcesQueried?: string[];
+  /** The search's own id, so what the household does with these results can be counted against it. */ queryId?: string | null;
   /** How many of the results are the household's own records, served because they cannot go down. */ storedCount?: number;
   cached?: boolean; fetchedAt?: string; tookMs?: number };
 

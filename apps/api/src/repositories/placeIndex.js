@@ -880,8 +880,13 @@ export async function shelveAll({ refs = null } = {}) {
          order by a2.last_seen desc, a2.id limit 1) a on true
       left join lateral (select category, cuisine_group from scout_places s where s.venue_ref = pi.venue_ref order by last_seen desc limit 1) sp on true
       left join place_records r on r.venue_ref = pi.venue_ref
-     where pi.derived_by is distinct from 'hand'
-       ${refs ? 'and pi.venue_ref = any($1)' : ''}`, refs ? [refs] : []);
+     -- Hand-shelved places are read too, and their shelf is left alone below.
+     --
+     -- Leaving them out of the query after the labels had been deleted meant
+     -- every rebuild dropped the provider words for exactly the places somebody
+     -- had corrected by hand, so the Labels lens lost them for good (Codex, 18
+     -- Sep 2026). The shelf is somebody's decision; the labels are the sources'.
+     ${refs ? 'where pi.venue_ref = any($1)' : ''}`, refs ? [refs] : []);
 
   const chunk = [];
   // The words each place was filed by, so the labels lens can be driven by the
@@ -934,6 +939,9 @@ export async function shelveAll({ refs = null } = {}) {
       continue;
     }
     for (const w of said) words.push([r.venue_ref, w]);
+    // The words are rewritten; the shelf is not. A shelf set by hand outlives
+    // every rebuild, which is the whole point of setting one.
+    if (r.derived_by === 'hand') { if (words.length >= 500) await flush(); continue; }
     const sub = filed.subcategory && (!live.size || live.has(filed.subcategory)) ? filed.subcategory : null;
     const cat = filed.category ?? filed.shelves?.[0] ?? null;
     // Which rule put it there, so "changes every amusement park" can say how far
