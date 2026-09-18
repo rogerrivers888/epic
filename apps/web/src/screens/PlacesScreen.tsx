@@ -1134,14 +1134,17 @@ function AddPlace({ household, kind, centre, radiusKm, ctx, wide, onAdded, onOpe
       {admin && showSources ? <Card><SourcePicker value={sources} onChange={setSources} /></Card> : null}
       {msg ? <StatusLine tone={msg.startsWith('Added') || msg.startsWith('Saved') ? 'good' : 'warn'}>{msg}</StatusLine> : null}
       {rating && household ? (
-        <VisitForm venue={rating} household={household} onDone={async () => { setRating(null); setMsg(`Added ${rating.name} as somewhere you've been.`); await onAdded(); }} onCancel={() => setRating(null)}
+        <VisitForm venue={rating} household={household} onDone={async () => { noteSearchEvent('places', 'save', rating.venueRef); setRating(null); setMsg(`Added ${rating.name} as somewhere you've been.`); await onAdded(); }} onCancel={() => setRating(null)}
           createVia={async (body) => { await api.createVisit({ venueRef: rating.venueRef, venueLabel: rating.name, category: rating.category, lat: rating.lat, lng: rating.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: body.venue, ...ctx }); }} />
       ) : null}
       {res?.slice(0, SHOWS).map((v) => (
         <VenueRow key={v.venueRef} venue={v} stack={!wide}
                   onPress={() => { noteSearchEvent('places', 'open', v.venueRef); onOpen(v); }} action={
           <Row>
-            <Button label="Been" kind="secondary" onPress={() => setRating(v)} />
+            {/* Been is an open of that result as much as tapping the row is:
+                counting only the row read "clicked nothing" over a search that
+                ended in a visit (Codex, 18 Sep 2026). The open counts once. */}
+            <Button label="Been" kind="secondary" onPress={() => { noteSearchEvent('places', 'open', v.venueRef); setRating(v); }} />
             <Button label="To try" kind="ghost" onPress={() => save(v)} />
           </Row>
         } />

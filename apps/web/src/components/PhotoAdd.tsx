@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { heldSearch, noteSearchEvent } from '../search';
 import { api, HouseholdResponse, OwnedImage, PhotoFiled, PhotoWhere, Venue } from '../api';
 import { useHere, accuracyWords } from '../hooks/useHere';
 import { pickPlacePhoto, type PlacePhoto } from './pickPhoto';
@@ -85,7 +86,14 @@ export function PhotoAdd({ household, onDone, onSearchInstead }: {
       // What the sources know is at that spot, a few hundred metres round it.
       let found: Venue[] = [];
       try { // Six, and the log is told six (Codex, 18 Sep 2026).
-        found = (await api.searchPlaces({ near: `${at.lat},${at.lng}`, radiusKm: 0.3, shows: 6 })).results.slice(0, 6); } catch { found = []; }
+        const r = await api.searchPlaces({ near: `${at.lat},${at.lng}`, radiusKm: 0.3, shows: 6 });
+        found = r.results.slice(0, 6);
+        // This is a real search — "what is at this spot" — and the household
+        // picking one of its answers is the whole point of it. Throwing the id
+        // away meant every photograph that found its place was reported as a
+        // search nobody clicked (Codex, 18 Sep 2026).
+        heldSearch('places', r.queryId, found.map((v) => v.venueRef));
+      } catch { found = []; }
       if (!alive.current) return;
       setCandidates(found);
       setStage('choose');
@@ -101,6 +109,7 @@ export function PhotoAdd({ household, onDone, onSearchInstead }: {
     setStage('saving'); setMsg(null);
     try {
       const r = await api.attachPlacePhoto(image.id, { venueRef: v.venueRef, label: v.name, category: v.category, lat: v.lat, lng: v.lng, venue: v });
+      noteSearchEvent('places', 'save', v.venueRef);
       await onDone({ venueRef: r.venueRef, kind: kindOf(v.category), filed: r.filed });
     } catch (e: any) { if (alive.current) { setMsg(e?.message || 'Could not save it.'); setStage('choose'); } }
   };
