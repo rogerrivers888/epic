@@ -243,6 +243,15 @@ export async function oneSearch(id) {
  * aggregate." So this exists and nothing calls it on a timer — switching it on
  * is a setting rather than a migration written under pressure.
  */
+/**
+ * How many whole months of live rows deletion always leaves behind.
+ *
+ * Ninety days is the longest window the Demand board offers, which can reach
+ * four calendar months back at the start of a month; a rolled month cannot be
+ * cut, so the live rows are the only thing that can answer inside one.
+ */
+const KEEP_MONTHS = 4;
+
 export async function rollUp({ before, drop = false } = {}) {
   // Whole months only.
   //
@@ -301,11 +310,32 @@ export async function rollUp({ before, drop = false } = {}) {
     select (select count(*)::int from unrolled) as rolled,
            (select count(*)::int from folded) as groups`, [cutoff]);
   let dropped = 0;
+  let keptBack = null;
   if (drop) {
-    const { rowCount } = await query('delete from searches where at < $1', [cutoff]);
+    // Never delete a row a report could still ask for.
+    //
+    // A rolled month is one number and cannot be cut, so a window whose edge
+    // falls inside it reads the live rows instead (totals, bySubject). Deleting
+    // them takes that away for good: after August is rolled *and dropped*, a
+    // thirty-day report made on the 18th of September can never again include
+    // the 19th to the 31st of August (Codex, 18 Sep 2026). The log cannot be
+    // backfilled, so this is the one mistake here that cannot be undone.
+    //
+    // The floor is the longest window the boards offer, rounded up to whole
+    // months and with a month's grace: ninety days (Demand's WINDOWS) becomes
+    // four months. Rolling still happens up to the caller's date; only the
+    // deleting waits.
+    const floor = new Date(Date.UTC(
+      new Date().getUTCFullYear(), new Date().getUTCMonth() - KEEP_MONTHS, 1, 0, 0, 0, 0));
+    const safe = cutoff < floor ? cutoff : floor;
+    if (safe < cutoff) keptBack = safe.toISOString().slice(0, 10);
+    const { rowCount } = await query('delete from searches where at < $1', [safe]);
     dropped = rowCount;
   }
-  return { rolled: counted?.rolled ?? 0, groups: counted?.groups ?? 0, dropped };
+  // `keptBack` is not a failure: it is the answer saying the deletion stopped
+  // short of what was asked, and where, so nobody has to work out why the row
+  // count did not fall as far as they expected.
+  return { rolled: counted?.rolled ?? 0, groups: counted?.groups ?? 0, dropped, keptBack };
 }
 
 /** How big the log has got — the trigger to revisit retention is a count, not a date. */

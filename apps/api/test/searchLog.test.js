@@ -1371,3 +1371,23 @@ test('a place that moves does not keep the travel cell of where it was', async (
   assert.equal(done.cell, 'sector:TEST 2');
   assert.ok(done.placed_at, 'and now it is placed');
 });
+
+test('deletion never takes a month a report can still reach into', async () => {
+  const slug = 'floorshire';
+  await query(`insert into localities (slug, name, kind, country_code) values ($1,'Floorshire','county','GB') on conflict (slug) do nothing`, [slug]);
+  await query('delete from searches where area_slug = $1', [slug]);
+  await query('delete from search_rollups where area_slug = $1', [slug]);
+
+  // Last month, inside a ninety-day window.
+  const id = await log.noteSearch({ surface: 'places', areaSlug: slug, subject: 'museums' });
+  await query(`update searches set at = date_trunc('month', now()) - interval '10 days' where id = $1`, [id]);
+
+  // Rolling up to the first of this month and dropping is exactly what would
+  // lose it: the fold cannot answer inside a month, and the rows would be gone.
+  const out = await log.rollUp({ before: new Date(), drop: true });
+  assert.ok(out.keptBack, 'the answer says the deletion stopped short, and where');
+
+  const still = (await query('select count(*)::int as n from searches where area_slug = $1', [slug])).rows[0].n;
+  assert.equal(still, 1, 'the row a ninety-day report needs is still here');
+  assert.equal((await log.totals({ areaSlugs: [slug], since: 90 })).searches, 1);
+});
