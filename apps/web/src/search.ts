@@ -112,6 +112,19 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
   void api.searchDrawn({ queryId, refs: kept }).catch(() => null);
 }
 
+/**
+ * A surface stops standing on a search.
+ *
+ * The held id lived for the life of the tab, so remounting Inspire could report
+ * an open against the *previous* Inspire search before the new one had been
+ * written down — and the photograph picker, which borrows the Places surface,
+ * never gave it back (Codex, 18 Sep 2026). A screen that is leaving says so.
+ */
+export function forgetSearch(surface: Surface) {
+  current.delete(surface);
+  drawn.delete(surface);
+}
+
 /** Which search a surface is standing on, where a screen needs to say so. */
 export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
 

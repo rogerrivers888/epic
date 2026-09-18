@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
-import { heldSearch, noteSearchEvent } from '../search';
+import { forgetSearch, heldSearch, noteSearchEvent } from '../search';
 import { api, HouseholdResponse, OwnedImage, PhotoFiled, PhotoWhere, Venue } from '../api';
 import { useHere, accuracyWords } from '../hooks/useHere';
 import { pickPlacePhoto, type PlacePhoto } from './pickPhoto';
@@ -103,6 +103,11 @@ export function PhotoAdd({ household, onDone, onSearchInstead }: {
       setStage('pick');
     }
   };
+
+  // The picker borrows the Places surface for its own look-around, so it gives
+  // it back rather than leaving the next tap on Places filed against a search
+  // about a photograph (Codex, 18 Sep 2026).
+  useEffect(() => () => forgetSearch('places'), []);
 
   const choose = async (v: Venue) => {
     if (!image) return;

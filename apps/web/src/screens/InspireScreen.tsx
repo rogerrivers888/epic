@@ -8,7 +8,7 @@ import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { heldSearch, holdConversion, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
+import { forgetSearch, heldSearch, holdConversion, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
 import { WhereSearch } from '../components/WhereSearch';
 import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
@@ -625,6 +625,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     const on = pick ? listed : answer?.length ? answer : shelves.flatMap((sh) => sh.items.slice(0, ACROSS));
     noteDrawn('inspire', on.map((i) => i.venueRef));
   }, [loading, pool, pick, listed, shelves, answer]);
+
+  // Leaving the screen lets go of the search it was standing on: coming back
+  // mounts before the new answer arrives, and an open in that moment was counted
+  // against the last one (Codex, 18 Sep 2026).
+  useEffect(() => () => forgetSearch('inspire'), []);
 
   /** The place, opened — `?place=…` over whichever list is showing. */
   const asDrawerItem = (item: InspireItem) => ({
