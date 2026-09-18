@@ -38,6 +38,18 @@ const detailsInFlight = new Map();
  * The ledger is written whether or not the provider answered: a call that
  * timed out after it reached them was still a call (Codex, 12 Sep 2026).
  */
+/**
+ * Is this one already held?
+ *
+ * Asked before the ceiling is, because showing a detail we already have costs
+ * nothing — and refusing it when the month is spent hides a column fetched
+ * minutes earlier (Codex, 17 Sep 2026).
+ */
+export function detailHeld(provider, id) {
+  const held = details.get(`${provider}:${id}`);
+  return Boolean(held) && Date.now() - held.at < DETAIL_TTL_MS;
+}
+
 export async function detailFor(provider, id, householdId) {
   const key = `${provider}:${id}`;
   const held = details.get(key);

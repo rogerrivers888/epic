@@ -10,6 +10,7 @@
  */
 
 import express from 'express';
+import { query } from '../db.js';
 import { requires } from '../access.js';
 import * as queue from '../repositories/contentQueue.js';
 import { writeAudit } from '../repositories/roles.js';
@@ -103,6 +104,21 @@ router.post('/approve', requires('manage_library'), async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
     if (!ids.length) throw bad('Nothing selected.');
+    // The rule the screen obeys, held at the door as well.
+    //
+    // Forty beach photographs are one decision; a person's review never is. The
+    // screen only ever offers a batch of photographs, but the rule belongs on
+    // the API too — a screen is not a permission (Codex, 17 Sep 2026).
+    if (ids.length > 1) {
+      const { rows } = await query(
+        `select distinct kind from content_queue where id = any($1::uuid[])`, [ids]);
+      const notBatchable = rows
+        .map((r) => queue.KINDS.find((k) => k.key === r.kind))
+        .filter((k) => k && !k.batch);
+      if (notBatchable.length) {
+        throw bad(`A ${notBatchable[0].said ?? notBatchable[0].label.toLowerCase()} is decided on its own, never in a batch.`);
+      }
+    }
     const done = await queue.approve(ids, actor(req).actorLabel);
     await writeAudit({ ...actor(req), action: 'queue.approve', subjectType: 'content', subjectId: ids.join(','), subjectLabel: `${done.length} approved`, after: { ids } });
     res.json({ approved: done.length, ids: done.map((d) => d.id) });

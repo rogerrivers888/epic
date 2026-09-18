@@ -283,8 +283,14 @@ export async function upsertAttractions(regionSlug, rows) {
          JSON.stringify(a.scoreParts ?? {}), JSON.stringify(a.attribution ?? [])]);
       const put = got.rows[0];
       if (put) {
+        const ref = put.venue_ref ?? `atlas:${put.id}`;
         kept.push({
-          ref: put.venue_ref ?? `atlas:${put.id}`, lat: a.lat ?? null, lng: a.lng ?? null,
+          ref, lat: a.lat ?? null, lng: a.lng ?? null,
+          // The atlas found it, and the reference says who returned it. The
+          // rebuild reads the prefix and the live path did not, so a harvested
+          // `google:` or `osm:` place was never attributed to them (Codex,
+          // 17 Sep 2026).
+          sources: ['atlas', ...(['google', 'osm', 'tripadvisor'].filter((k) => ref.startsWith(`${k}:`)))],
           // Owned only where the harvest actually kept something of ours to read.
           ownership: (a.summary ?? a.website ?? a.wikipediaUrl) ? 'owned' : 'identified',
         });

@@ -830,14 +830,18 @@ export async function noteMany(places = [], { source = null, countryCode = null,
                                when place_index.ownership = 'claimed' or excluded.ownership = 'claimed' then 'claimed'
                                else 'identified' end,
               -- An ownership that moved is a place that counts differently, and
-              -- area_stats counts ownership. Clearing placed_at puts it back
-              -- in settleNew's hands so the rollups catch up on the hour
-              -- rather than at the next full rebuild (Codex, 17 Sep 2026).
+              -- area_stats counts ownership, place_areas is built from the
+              -- country, and the ring is read off the position — so a row whose
+              -- ownership rises, or that learns where it is, goes back in
+              -- settleNew's hands and the boards catch up on the hour rather
+              -- than at the next full rebuild (Codex, 17 Sep 2026).
               placed_at = case
                 when place_index.ownership <> (
                   case when place_index.ownership = 'owned' or excluded.ownership = 'owned' then 'owned'
                        when place_index.ownership = 'claimed' or excluded.ownership = 'claimed' then 'claimed'
                        else 'identified' end)
+                  or (place_index.country_code is null and excluded.country_code is not null)
+                  or (place_index.lat is null and excluded.lat is not null)
                 then null else place_index.placed_at end,
               last_seen = now()`,
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified']));

@@ -265,6 +265,10 @@ router.get('/search', requires('view_reporting'), async (req, res, next) => {
       askedAbout: asked,
       refetchedPence: spentPence,
       nameless: rows.filter((r) => !r.name).length,
+      // What asking for them would cost, from the one price table — the screen
+      // used to work it out at the old 1.4p and show about half (Codex, 17 Sep
+      // 2026).
+      namelessPence: Math.round(nameless.length * PRICE_PER_UNIT_USD.google * 100 * USD_TO_GBP),
       // Why a row is still an identifier — never left to be guessed at.
       namelessWhy: why,
     });

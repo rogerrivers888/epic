@@ -26,7 +26,7 @@ import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js
 import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
 import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
 import { writeAudit } from '../repositories/roles.js';
-import { OUR_LABEL, detailFor, blank, lineUp } from '../sources/compare.js';
+import { OUR_LABEL, detailFor, detailHeld, blank, lineUp } from '../sources/compare.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { TRIPADVISOR_CAP } from '../repositories/runs.js';
@@ -1123,7 +1123,11 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
       // 2026). The Tripadvisor column below has always claimed its locations;
       // this is the same rule for money. Two calls where a match is needed,
       // one where we already hold the identifier.
-      const wants = id ? DETAIL_PENCE : DETAIL_PENCE + MATCH_PENCE;
+      // A detail already held costs nothing to show, and refusing *that* when
+      // the month is spent hides a column fetched minutes ago (Codex, 17 Sep
+      // 2026). `detailFor` keeps its last three hundred for six hours.
+      const cached = id ? detailHeld('google', id) : false;
+      const wants = cached ? 0 : (id ? DETAIL_PENCE : DETAIL_PENCE + MATCH_PENCE);
       const room = await roomToSpend(Math.round(wants), { holder: 'compare' });
       if (!room.ok) {
         google.note = `over this month's ceiling · ${money(room.leftPence)} left`;
@@ -1156,12 +1160,16 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         // before it asks, and this comparison did not — so once the allowance
         // was gone, every uncached comparison went on billing two locations
         // past a cap the Runs board calls hard (Codex, 17 Sep 2026).
-        const room = await tripadvisorRoom(TA_UNITS_PER_VIEW);
+        // The same: a view already held is free to show.
+        const cached = detailHeld('tripadvisor', id);
+        const room = cached
+          ? { granted: TA_UNITS_PER_VIEW, left: 0, reservation: null }
+          : await tripadvisorRoom(TA_UNITS_PER_VIEW);
         // Both limits, because there are two: the monthly allowance of
         // locations, and the month's money. A view bills two locations, and one
         // left is not enough for a look — "any grant will do" spent it anyway
         // — and nothing was asking about the money at all (Codex, 17 Sep 2026).
-        const purse = await roomToSpend(taCost(1), { holder: 'compare' });
+        const purse = cached ? { ok: true, reservation: null, leftPence: 0 } : await roomToSpend(taCost(1), { holder: 'compare' });
         if (room.granted < TA_UNITS_PER_VIEW) {
           ta.note = `over the monthly ceiling · ${room.left} location${room.left === 1 ? '' : 's'} left, and a view bills two`;
         } else if (!purse.ok) {

@@ -266,7 +266,7 @@ function Replay({ id, onClose, canManage }: { id: string; onClose: () => void; c
       </View>
       {data.nameless && data.namelessWhy === 'not asked' ? (
         <Footer left={<Word muted>{`${data.nameless} of these are identifiers we hold no name for. Asking Google costs a call each.`}</Word>}>
-          <Act label={asking ? 'Asking…' : `Ask for the ${data.nameless} missing names · ${pounds(Math.round(data.nameless * 1.4))}`}
+          <Act label={asking ? 'Asking…' : `Ask for the ${data.nameless} missing names · ${pounds(Math.round(data.namelessPence))}`}
                icon="search" disabled={!canManage || asking} onPress={askNames} />
         </Footer>
       ) : null}
