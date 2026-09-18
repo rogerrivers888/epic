@@ -537,7 +537,12 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
     // earlier (Codex, 18 Sep 2026).
     const where = await whereIs(settingsOf(req.query).q, household);
     const ringKey = await ringParams(settingsOf(req.query), household, { place: where });
-    const ringHeld = Boolean(ringKey && searchKept(ringKey));
+    // A ring already on its way is as free as one already held: `searchCached`
+    // joins it rather than asking anybody. Without this, two comparisons of the
+    // same ring at once had the second one claim a second ring's worth — and
+    // near the ceiling that refusal dropped Google from a request that was
+    // going to be answered for nothing (Codex, 18 Sep 2026).
+    const ringHeld = Boolean(ringKey && (searchKept(ringKey) || searchOnItsWay(ringKey)));
     const googleHeld = googleId ? detailHeld('google', googleId) : false;
     const calls = googleSource.enabled()
       ? (ringHeld ? 0 : RING_CALLS) + (googleHeld ? 0 : (googleId ? 1 : 2))

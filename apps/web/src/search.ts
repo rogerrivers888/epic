@@ -126,7 +126,11 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
   if (sending.get(surface) === key) return;
   sending.set(surface, key);
   void api.searchDrawn({ queryId, refs: kept })
-    .then(() => { drawn.set(surface, key); })
+    // `ok: false` is a fulfilled request that recorded nothing — a write that
+    // fell over, or a search older than the endpoint's half-hour. Marking it
+    // recorded on any answer is the same mistake as marking it before the post
+    // (Codex, 18 Sep 2026).
+    .then((r) => { if (r?.ok) drawn.set(surface, key); })
     .catch(() => null)
     .finally(() => { if (sending.get(surface) === key) sending.delete(surface); });
 }
