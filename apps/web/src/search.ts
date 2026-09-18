@@ -17,68 +17,28 @@
  */
 
 import { api } from './api';
+import { cameFrom, hold, letGo, positionOf, setPositions, standingOn, type Surface } from './searchCards';
 
-type Surface = 'find' | 'inspire' | 'places' | 'plan' | 'trip';
 type Kind = 'open' | 'dismiss' | 'save' | 'shortlist' | 'add_to_trip' | 'refine' | 'close';
 
-const current = new Map<Surface, string>();
-/** Where each ref sat in the list it was shown in, so a replay prints the order. */
-const positions = new Map<string, number>();
 const opened = new Map<string, number>();
 
 /**
  * A search answered: remember its id, and where each result sat.
  *
- * A new set of results with **no** id forgets the old one rather than keeping
- * it. The planner publishes fresh ideas while it is still placing them and
- * writes the search down afterwards, so for a second or two the poll calls this
- * with the new ideas and no id — and holding the previous id meant a quick tap
- * was recorded against the *previous* search (Codex, 17 Sep 2026). Attributing
- * it to nothing is a gap; attributing it to the wrong search is a wrong number.
+ * The rule itself — which card belongs to which search, and what an append or a
+ * missing id mean — lives in `searchCards.ts`, where it is held to all four of
+ * its cases at once. It would not stay fixed while it lived here.
  */
 export function heldSearch(
   surface: Surface,
   queryId: string | null | undefined,
   refs: (string | null | undefined)[] = [],
-  /**
-   * `append` where the cards already on screen stay there — the planner's "show
-   * me 5 more" is the only one. Everything else *replaces* what is on the
-   * surface, and keeping the old ownership meant a place that appeared in both
-   * answers — a chain, the same museum after moving the map — went on being
-   * counted against the search before it, leaving the new one falsely unclicked
-   * (Codex, 18 Sep 2026).
-   */
-  { append = false }: { append?: boolean } = {},
+  /** `append` for "show me 5 more", where the cards already on screen stay. */
+  opts: { append?: boolean } = {},
 ) {
-  // No id is a *replacement* with nothing to attribute to, so the surface is let
-  // go of entirely — the cards as well as the search.
-  //
-  // Dropping only `current` was almost right and stopped being right the moment
-  // an event about a place was resolved from `came` alone (round 127): a search
-  // whose logging failed answers with its places and no id, and the previous
-  // search's cards were still standing there to claim the next tap (Codex, 19
-  // Sep 2026). Nothing is the honest answer; the search before it is not.
-  if (!queryId) { forgetSearch(surface); return; }
-  current.set(surface, queryId);
-  if (!append) for (const key of [...came.keys()]) if (key.startsWith(`${surface}:`)) came.delete(key);
-  refs.forEach((ref, i) => {
-    if (!ref) return;
-    positions.set(`${queryId}:${ref}`, i + 1);
-    // Which search this card came from, kept once.
-    //
-    // "Show me 5 more" leaves the earlier five on screen and hands back a new
-    // search — and the API records only what each ask produced (round 122), so
-    // crediting an old card to the new search attaches an event to a row that
-    // search never had, and leaves the one that did produce it reading as
-    // clicked on nothing (Codex, 18 Sep 2026). First claim wins, which is the
-    // same rule the positions keep. On a replacement the surface was cleared
-    // above, so "first" means first in this answer.
-    if (!came.has(`${surface}:${ref}`)) came.set(`${surface}:${ref}`, queryId);
-  });
+  hold(surface, queryId, refs, opts);
 }
-
-/** Which search each card on a surface came from, where more than one is on screen. */
-const came = new Map<string, string>();
 
 /** The places each search has already had an `open` counted for. */
 const openedOnce = new Set<string>();
@@ -97,7 +57,7 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
   // search that had shown forty places and been ignored read as one that worked
   // (Codex, 18 Sep 2026). A place nothing showed us belongs to no search, and
   // nothing is the honest answer.
-  const queryId = venueRef ? came.get(`${surface}:${venueRef}`) : current.get(surface);
+  const queryId = venueRef ? cameFrom(surface, venueRef) : standingOn(surface);
   if (!queryId) return;
   const key = `${queryId}:${venueRef ?? ''}`;
   // An open is counted once per place per search.
@@ -126,7 +86,7 @@ export function noteSearchEvent(surface: Surface, kind: Kind, venueRef?: string 
   else if (opened.has(key)) { dwellMs = Date.now() - (opened.get(key) as number); opened.delete(key); }
   void api.searchEvent({
     queryId, kind, venueRef: venueRef ?? null,
-    position: positions.get(key) ?? null,
+    position: venueRef ? positionOf(queryId, venueRef) : null,
     dwellMs,
     // Only when the API says it wrote it. A fulfilled request is not the same
     // as a recorded event — the write can fail, or the search can belong to
@@ -155,7 +115,7 @@ const fixed = new Set<string>();
  * 18 Sep 2026).
  */
 export function noteDrawn(surface: Surface, refs: (string | null | undefined)[]) {
-  const queryId = current.get(surface);
+  const queryId = standingOn(surface);
   if (!queryId) return;
   const kept = refs.filter(Boolean) as string[];
   // Every ref, not the first forty: two lists with the same length and the same
@@ -195,7 +155,7 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
       // first list is the one both sides recorded.
       if (!fixed.has(queryId)) {
         fixed.add(queryId);
-        kept.forEach((ref, i) => positions.set(`${queryId}:${ref}`, i + 1));
+        setPositions(queryId, kept);
       }
     })
     .catch(() => null)
@@ -211,15 +171,14 @@ export function noteDrawn(surface: Surface, refs: (string | null | undefined)[])
  * never gave it back (Codex, 18 Sep 2026). A screen that is leaving says so.
  */
 export function forgetSearch(surface: Surface) {
-  current.delete(surface);
+  letGo(surface);
   drawn.delete(surface);
   sending.delete(surface);
-  // The cards go with the surface they were on.
-  for (const key of [...came.keys()]) if (key.startsWith(`${surface}:`)) came.delete(key);
 }
 
 /** Which search a surface is standing on, where a screen needs to say so. */
-export const searchIdOf = (surface: Surface) => current.get(surface) ?? null;
+export const searchIdOf = (surface: Surface) => standingOn(surface);
+
 
 /**
  * A conversion that has been asked for but has not happened yet.
@@ -251,7 +210,7 @@ export function holdConversion(surface: Surface, venueRef?: string | null) {
   // leaving lets go of its search — so by the time the trip existed there was no
   // held id, and the one outcome the whole board is built around was dropped
   // (Codex, 18 Sep 2026).
-  pending = { surface, queryId: current.get(surface) ?? null, ref: venueRef ?? null, at: Date.now() };
+  pending = { surface, queryId: standingOn(surface), ref: venueRef ?? null, at: Date.now() };
 }
 
 /** The trip exists. Now it counts. */
@@ -281,7 +240,7 @@ function send(held: Pending, attempt: number) {
   const key = `${held.queryId}:${held.ref ?? ''}`;
   void api.searchEvent({
     queryId: held.queryId as string, kind: 'add_to_trip', venueRef: held.ref ?? null,
-    position: positions.get(key) ?? null, dwellMs: null,
+    position: held.queryId && held.ref ? positionOf(held.queryId, held.ref) : null, dwellMs: null,
   }).then((r) => {
     if (!r?.ok && attempt + 1 < TRIES) setTimeout(() => send(held, attempt + 1), 1500 * (attempt + 1));
   }).catch(() => {
