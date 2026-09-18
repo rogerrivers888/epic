@@ -81,7 +81,9 @@ export async function detailFor(provider, id, householdId) {
       while (details.size > 300) details.delete(details.keys().next().value);
       return detail;
     } finally {
-      if (Object.keys(meter).length) await visitsRepo.recordProviderCall(householdId, provider, 'admin.lookup.compare', meter).catch(() => null);
+      // Which place it was about: the provider's own reference is the one
+      // this call was made against, and it is what the History tab asks by.
+      if (Object.keys(meter).length) await visitsRepo.recordProviderCall(householdId, provider, 'admin.lookup.compare', meter, `${provider}:${id}`).catch(() => null);
       detailsInFlight.delete(key);
     }
   })();

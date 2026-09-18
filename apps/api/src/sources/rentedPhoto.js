@@ -107,7 +107,7 @@ export async function photosFor(venueRef, { householdId = null } = {}) {
   // Remembered either way — see photosKept. A restaurant with no photograph is
   // a fact about that restaurant, and one worth not re-buying every read.
   remember(venueRef, found ?? []);
-  await providerCalls.record(householdId, 'google', 'atlas.photos', JSON.stringify({ google: 1 })).catch(() => null);
+  await providerCalls.record(householdId, 'google', 'atlas.photos', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
   return found;
 }
 

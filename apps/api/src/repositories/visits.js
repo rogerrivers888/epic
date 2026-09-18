@@ -213,5 +213,5 @@ export async function statusForRefs(householdId, refs) {
  * `estimated_cost_usd`, so the monthly ceiling was blind to whichever paths
  * used the others (Codex, 17 Sep 2026).
  */
-export const recordProviderCall = (householdId, provider, purpose, units = null) =>
-  providerCalls.record(householdId, provider, purpose, units);
+export const recordProviderCall = (householdId, provider, purpose, units = null, venueRef = null) =>
+  providerCalls.record(householdId, provider, purpose, units, null, venueRef);

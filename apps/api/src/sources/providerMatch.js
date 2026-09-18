@@ -169,7 +169,7 @@ export async function googleMatchFor({ venueRef, name, lat, lng, householdId = n
   const found = await googleSource.search({
     center: { lat, lng }, radiusKm: 3, query: name, limit: 8,
   }).catch((err) => { failure = Object.assign(err instanceof Error ? err : new Error(String(err)), { provider: 'google' }); return []; });
-  await providerCalls.record(householdId, 'google', 'atlas.match', JSON.stringify({ google: 1 })).catch(() => null);
+  await providerCalls.record(householdId, 'google', 'atlas.match', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
   if (failure) {
     if (strict) throw failure;
     return null;
@@ -251,7 +251,7 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
   }
 
   const v = await googleSource.get(id).catch(() => null);
-  await providerCalls.record(householdId, 'google', 'atlas.reviews', JSON.stringify({ google: 1 })).catch(() => null);
+  await providerCalls.record(householdId, 'google', 'atlas.reviews', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
   const value = {
     rating: v?.rating ?? null,
     ratingCount: v?.ratingCount ?? null,

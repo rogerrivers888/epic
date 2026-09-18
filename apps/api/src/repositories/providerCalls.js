@@ -19,8 +19,15 @@ import { costOf } from '../domain/providerPrices.js';
 // writing
 // ---------------------------------------------------------------------------
 
-/** One call, with whatever units the provider counts in. */
-export async function record(householdId, provider, purpose, units = null, sessionId = null) {
+/**
+ * One call, with whatever units the provider counts in.
+ *
+ * `venueRef` is which place it was about, where a call is about one — the
+ * History tab on a place reads the ledger by it. It is not part of the meter:
+ * the meter is priced by adding up its keys, and a reference is not a unit of
+ * anything (Codex, 18 Sep 2026).
+ */
+export async function record(householdId, provider, purpose, units = null, sessionId = null, venueRef = null) {
   // The money as well as the meter. The monthly ceiling is a sum of
   // `estimated_cost_usd`, so a row with a meter and no price is a call the
   // limit cannot see — and the matcher's Nearby Search was exactly that
@@ -28,8 +35,9 @@ export async function record(householdId, provider, purpose, units = null, sessi
   // and as an object from others; both are priced.
   const meter = typeof units === 'string' ? (() => { try { return JSON.parse(units); } catch { return null; } })() : units;
   await query(
-    'insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, $2, $3, $4, $5, $6)',
-    [householdId, sessionId, provider, purpose, units, costOf(units, provider) || null],
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [householdId, sessionId, provider, purpose, units, costOf(units, provider) || null, venueRef],
   );
 }
 

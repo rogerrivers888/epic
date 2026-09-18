@@ -88,7 +88,7 @@ export async function ratingFor(venueRef, { householdId = null } = {}) {
   // Remembered either way — see ratingKept. A place nobody has rated is a fact
   // about that place, and one worth not re-buying every read.
   remember(venueRef, found ?? { rating: null, ratingCount: null });
-  await providerCalls.record(householdId, 'google', 'atlas.rating', JSON.stringify({ google: 1 })).catch(() => null);
+  await providerCalls.record(householdId, 'google', 'atlas.rating', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
   return found;
 }
 

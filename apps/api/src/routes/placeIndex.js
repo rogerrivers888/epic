@@ -981,9 +981,16 @@ router.get('/place/history', requires('view_library'), async (req, res, next) =>
     const { rows } = await query(
       `select at, action, actor_label, before, after from admin_audit
         where subject_id = $1 order by at desc limit 40`, [ref]);
+    // By the ledger's own column, not by a key in the billing meter: no writer
+    // ever put a reference there, so this tab showed a place's edits and none
+    // of the asking that had been done about it (Codex, 18 Sep 2026). A place
+    // we hold a Google id for was also asked about under that id, so both
+    // references are the same history.
+    const alias = ref.startsWith('google:') ? null : (await matchesFor([ref], 'google')).get(ref) ?? null;
     const { rows: calls } = await query(
       `select created_at, provider, purpose, estimated_cost_usd from provider_calls
-        where units->>'ref' = $1 order by created_at desc limit 40`, [ref]);
+        where venue_ref = any($1) order by created_at desc limit 40`,
+      [[ref, ...(alias ? [`google:${alias}`] : [])]]);
     res.json({
       rows: [
         ...rows.map((r) => ({ at: r.at, what: r.action, who: r.actor_label, kind: 'edit' })),
@@ -1088,12 +1095,38 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
       // the wrong outcode came back (Codex, 17 Sep 2026). The owned record's
       // postcode is where a rebuild takes it from, so that is where it goes,
       // and `place_areas` is updated now so the boards do not wait.
-      await query(
-        `insert into place_records (venue_ref, postcode, updated_at) values ($1,$2, now())
-         on conflict (venue_ref) do update set postcode = excluded.postcode, updated_at = now()`,
-        [ref, value ? String(value).toUpperCase() : null]);
-      await query('delete from place_areas pa using localities l where l.slug = pa.area_slug and pa.venue_ref = $1 and l.kind = $2', [ref, 'postcode']);
-      if (value) await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', [ref, lower(value)]);
+      // All three writes together, and the outcode made before it is linked.
+      //
+      // `place_areas.area_slug` points at `localities`, and an outcode nobody
+      // has swept yet is not in there — so correcting a postcode to a real but
+      // unvisited outcode broke the foreign key *after* the record had already
+      // been changed, leaving half a correction behind a 500 (Codex, 18 Sep
+      // 2026). One transaction, and an outcode we do not hold is created rather
+      // than refused: the correction is somebody telling us where the place is.
+      const outcode = value ? String(value).toUpperCase().trim() : null;
+      if (outcode && !/^[A-Z]{1,2}[0-9][A-Z0-9]?$/.test(outcode)) {
+        throw bad(`“${outcode}” is not an outcode. The first half of a postcode — RG1, SW1A.`);
+      }
+      await withTransaction(async (client) => {
+        await client.query(
+          `insert into place_records (venue_ref, postcode, updated_at) values ($1,$2, now())
+           on conflict (venue_ref) do update set postcode = excluded.postcode, updated_at = now()`,
+          [ref, outcode]);
+        await client.query(
+          'delete from place_areas pa using localities l where l.slug = pa.area_slug and pa.venue_ref = $1 and l.kind = $2',
+          [ref, 'postcode']);
+        if (outcode) {
+          const place = (await client.query(
+            'select country_code from place_index where venue_ref = $1', [ref])).rows[0] ?? null;
+          await client.query(
+            `insert into localities (slug, name, kind, country_code) values ($1,$2,'postcode',$3)
+             on conflict (slug) do nothing`,
+            [lower(outcode), outcode, place?.country_code ?? 'GB']);
+          await client.query(
+            'insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing',
+            [ref, lower(outcode)]);
+        }
+      });
     } else if (key === 'busy') {
       // A sweep-only place has no owned record yet, and an UPDATE against no row
       // reported success while changing nothing (Codex, 17 Sep 2026).

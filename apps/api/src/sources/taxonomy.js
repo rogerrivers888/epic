@@ -58,7 +58,7 @@ export async function taxonomyFor(venueRef, { householdId = null } = {}) {
   const value = await googleSource.types(rest.join(':'));
   if (!value) return null;
   remember(venueRef, value);
-  await providerCalls.record(householdId, 'google', 'atlas.types', JSON.stringify({ google: 1 })).catch(() => null);
+  await providerCalls.record(householdId, 'google', 'atlas.types', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
   return value;
 }
 
