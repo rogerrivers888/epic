@@ -349,7 +349,7 @@ export function Act({ label, icon, onPress, tone = 'primary', small, disabled }:
 /** The footer every board ends in: a rule, then the actions on the right. */
 export const Footer = ({ children, left }: { children: React.ReactNode; left?: React.ReactNode }) => (
   <View style={styles.footer}>
-    {left ? <View style={{ flex: 1, minWidth: 0 }}>{left}</View> : <View style={{ flex: 1 }} />}
+    {left ? <View style={{ flex: 1, minWidth: 0 }}>{left}</View> : <View style={{ flexGrow: 1, flexBasis: 0 }} />}
     <View style={styles.footerActs}>{children}</View>
   </View>
 );
@@ -454,9 +454,13 @@ const styles = StyleSheet.create({
 
   footer: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xl,
+    // Wraps, and may be narrower than its buttons ask for: two actions whose
+    // labels carry a price — "Ask them all · free" — are wider than 390 side by
+    // side (measured at the frame, 18 Sep 2026).
+    flexWrap: 'wrap',
     borderTopWidth: BORDER, borderTopColor: colors.ruleMuted, paddingTop: 15, marginTop: 'auto',
   },
-  footerActs: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  footerActs: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', flexShrink: 1, minWidth: 0 },
 
   kicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
   statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
