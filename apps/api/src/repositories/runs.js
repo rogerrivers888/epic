@@ -14,6 +14,7 @@ import { menuCauses } from './scout.js';
 import { OURS_KINDS, oursKindOf } from '../domain/menuCauses.js';
 import * as collectRuns from './collectRuns.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
+import { OTHER_PURSE } from '../constants.js';
 
 /** Pounds, to the nearest tenth of a penny, the way the board writes money. */
 /**
@@ -203,9 +204,16 @@ export async function list() {
     },
   ];
 
+  // The same money the ceiling is made of. This figure is printed against the
+  // ceiling and drawn as a bar under it, so summing the whole ledger put Claude
+  // planning and OpenAI speech into a board about buying places — a number that
+  // disagrees with the guard beside it is worse than no number (Codex, 18 Sep
+  // 2026). `constants.js` OTHER_PURSE holds the two that bill elsewhere.
   const spend = await one(
     `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd, count(*)::int as calls
-       from provider_calls where created_at > date_trunc('month', now())`);
+       from provider_calls
+      where created_at > date_trunc('month', now())
+        and provider <> all ($1::text[])`, [OTHER_PURSE]);
   const ceiling = await one("select value from app_settings where key = 'collect.ceiling_pence'").catch(() => null);
 
   return {
