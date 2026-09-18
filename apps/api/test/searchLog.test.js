@@ -1555,3 +1555,33 @@ test('a conversion that arrives after the roll-up still counts', async () => {
   assert.deepEqual(await bucket(), { searches: 1, no_trip: 0, tripped: 1 },
     'the conversion moves from one column of its bucket to the other');
 });
+
+test('a place a live search showed is a place the index has seen', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const ref = 'google:SHOWN-BY-A-SEARCH';
+  await query('delete from place_index where venue_ref = $1', [ref]);
+
+  // What the discover route does with what it drew: the reference, where it is
+  // and who returned it. The board's own words for Known are "every place any
+  // source has ever seen here, however little we hold about it" — and a place a
+  // provider returned and we put in front of a household is one of those. It
+  // was recorded only as an impression and a log row, neither of which the
+  // rebuild reads (Codex, 18 Sep 2026).
+  await index.noteMany([{
+    ref, lat: 51.48, lng: -0.61, sourceId: 'SHOWN-BY-A-SEARCH', countryCode: 'GB',
+    sources: ['google', 'osm'],
+  }], { source: 'live' });
+
+  const { rows } = await query(
+    'select ownership, lat, country_code from place_index where venue_ref = $1', [ref]);
+  assert.equal(rows.length, 1, 'it is in the index');
+  assert.equal(rows[0].ownership, 'identified', 'and it is identified: we hold nothing about it yet');
+
+  // Both sources are recorded, and no name is stored anywhere — a provider's
+  // name is rented and the index has nowhere to put one.
+  const sources = (await query(
+    'select source from place_index_sources where venue_ref = $1 order by source', [ref])).rows.map((r) => r.source);
+  assert.deepEqual(sources, ['google', 'osm']);
+  const named = await index.namesFor([ref]);
+  assert.equal(named.get(ref)?.name ?? null, null, 'and it has no name we may hold');
+});
