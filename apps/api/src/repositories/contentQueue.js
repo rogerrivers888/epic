@@ -327,9 +327,10 @@ export async function counts({ areaSlug = null, state: forState = 'waiting' } = 
   let reported = 0;
   const counting = STATES.includes(forState) ? forState : 'waiting';
   for (const r of rows) {
-    if (counting === 'reported' ? r.reported : r.state === counting) kind[r.kind] = (kind[r.kind] ?? 0) + r.n;
+    if (counting === 'reported' ? (r.reported && r.state === 'waiting') : r.state === counting) kind[r.kind] = (kind[r.kind] ?? 0) + r.n;
     state[r.state] = (state[r.state] ?? 0) + r.n;
-    if (r.reported) reported += r.n;
+    // The headline figure is work to do, so it is the ones nobody has decided.
+    if (r.reported && r.state === 'waiting') reported += r.n;
   }
   state.reported = reported;
   const { rows: [oldest] } = await query(
@@ -359,7 +360,13 @@ export async function list({ kind = null, state = 'waiting', areaSlug = null } =
             case when q.kind = 'data' then split_part(q.subject_id, '#', 2) else null end as field
        from content_queue q
       where ($1::text is null or q.kind = $1)
-        and ($2::text = 'reported' and q.reported or $2::text <> 'reported' and q.state = $2)
+        -- Reported *and* still waiting. A report is a reason to look now, not a
+        -- mark that never comes off: once somebody has decided, the row belongs
+        -- in Approved or Rejected like any other, and leaving it here kept
+        -- finished work in the urgent lane for ever — where approving it again
+        -- changed nothing at all (Codex, 18 Sep 2026).
+        and ($2::text = 'reported' and q.reported and q.state = 'waiting'
+             or $2::text <> 'reported' and q.state = $2)
         and ($3::text is null or q.area_slug = $3)
       -- Reported first, because it is on a different clock; then what
       -- households sent us, oldest first; then the facts we flagged ourselves,
