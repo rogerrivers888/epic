@@ -319,7 +319,7 @@ function Level(props: {
 
   const body = (() => {
     if (lens === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
-    if (lens === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} />;
+    if (lens === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} areaKind={level.areaKind} />;
     if (lens === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lens === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lens === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
@@ -856,7 +856,9 @@ function CoverageBoard({ q, onWhere, onCollect }: {
 // BO2c / BO2o / BO2p — the category ladder, driven by the taxonomy
 // ---------------------------------------------------------------------------
 
-function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, within, onCollect }: {
+function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, within, onCollect, areaKind }: {
+  /** What kind of area the board is standing on — an outcode reads like a ring. */
+  areaKind?: string | null;
   q: any; cat: string; onCat: (c: string) => void; onSub: (s: string) => void; canManage: boolean;
   /** Collect lives inside Places, so every one of these opens its lens. */
   onCollect: () => void;
@@ -906,7 +908,14 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
   // A ring is one area, so its rows are the eight categories (BO2o). An area
   // with a ladder under it lists every subcategory under its category heading
   // (BO2c). Both are driven by the taxonomy, not the data.
-  const ring = q.within != null;
+  // A ring is one area and its rows are the eight categories (BO2o) — and so
+  // is an outcode, which is the same size of thing: you have narrowed to one
+  // place on the map and the question is which kind of place to look at next.
+  // A county goes straight to subcategories (BO2c), where the finer grain is
+  // what you want. Landing an outcode on subcategories skipped a whole step
+  // (owner, 18 Sep 2026: "it's taking me straight into a list of subcategories
+  // when the view it's supposed to take me to is Categories").
+  const ring = q.within != null || areaKind === 'postcode';
   const all = data?.categories ?? [];
   const flat = all.flatMap((c) => c.subcategories.map((s) => ({ ...s, categoryLabel: c.label })));
   const shown = hideFull ? flat.filter((s) => s.known === 0) : flat;
