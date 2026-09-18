@@ -1476,6 +1476,11 @@ router.get('/place/raw', requires('view_library'), async (req, res, next) => {
       ref,
       sources: index.SOURCES.map((s) => ({
         key: s.key, label: s.label, explain: s.explain,
+        // Whether this source's content is rented, which decides what "matched
+        // and nothing kept" means: for Google it means the content is read
+        // live; for the atlas it means the facts live elsewhere, in
+        // `attractions`, and were never `place_facts` to begin with.
+        rented: s.paid,
         // An identifier is a match. A licensed source stores one and no facts
         // on purpose — its content is rented and never kept — so reading the
         // fields alone called every successful Google and Tripadvisor lookup a

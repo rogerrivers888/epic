@@ -2389,7 +2389,11 @@ function RawTab({ refId }: { refId: string }) {
             <View style={{ flex: 1 }}>
               {s.state === 'not-asked' ? <Explain tip="notAsked"><NotAsked /></Explain>
                 : s.state === 'no-match' ? <Explain tip="noMatch"><NoMatch /></Explain>
-                : s.state === 'matched' ? <Explain tip="matchedNotKept"><Text style={styles.fieldValue}>Matched · nothing kept</Text></Explain>
+                : s.state === 'matched' ? (
+                  <Explain tip={s.rented ? 'matchedNotKept' : 'matchedHeldElsewhere'}>
+                    <Text style={styles.fieldValue}>{s.rented ? 'Matched · nothing kept' : 'Matched · held elsewhere'}</Text>
+                  </Explain>
+                )
                   : <Text style={styles.fieldValue}>{`${s.fields.length} field${s.fields.length === 1 ? '' : 's'}`}</Text>}
             </View>
             <Text style={[styles.fieldMeta, { width: 140 }]}>{s.id ?? '—'}</Text>
@@ -2400,7 +2404,9 @@ function RawTab({ refId }: { refId: string }) {
             <View style={styles.expand}>
               {s.fields.length === 0 ? (
                 <Word muted>{s.state === 'matched'
-                  ? 'We hold their identifier and nothing else — this source is rented, and is read live.'
+                  ? (s.rented
+                    ? 'We hold their identifier and nothing else — this source is rented, and is read live.'
+                    : 'Matched here; what this source gave us is kept in its own place rather than as fields on this record.')
                   : 'Nothing held from this source.'}</Word>
               ) : s.fields.map((f) => (
                 <View key={f.field} style={styles.detailRow}>
