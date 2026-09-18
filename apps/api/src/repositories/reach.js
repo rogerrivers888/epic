@@ -232,11 +232,21 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
 
 /** How many places sit in each cell. Refreshed rather than incremented. */
 export async function refreshCellCounts() {
+  // Every cell, not only the ones that still have something in them.
+  //
+  // Joining the grouped counts left a cell nothing points at any more with the
+  // number it had before: a place corrected across the country emptied its old
+  // cell, and that cell went on claiming those places — the matrix build orders
+  // by this figure, so the emptiest places in the country were being built
+  // first (Codex, 18 Sep 2026). A left join from the cells, so a cell with no
+  // rows is set to nought rather than skipped.
   await query(
     `update geo_cells g
         set places = coalesce(c.n, 0), updated_at = now()
-       from (select cell, count(*)::int as n from place_cells where cell is not null group by cell) c
-      where c.cell = g.code`,
+       from geo_cells gg
+       left join (select cell, count(*)::int as n from place_cells where cell is not null group by cell) c
+              on c.cell = gg.code
+      where gg.code = g.code and g.places is distinct from coalesce(c.n, 0)`,
   );
 }
 

@@ -400,8 +400,23 @@ router.get('/size', requires('view_reporting'), async (_req, res, next) => {
  */
 router.post('/roll-up', requires('manage_settings'), async (req, res, next) => {
   try {
-    const before = req.body?.before ? new Date(req.body.before) : new Date(Date.now() - 365 * 86400_000);
-    res.json(await searches.rollUp({ before, drop: req.body?.drop === true }));
+    const asked = req.body?.before ? new Date(req.body.before) : new Date(Date.now() - 365 * 86400_000);
+    if (Number.isNaN(asked.getTime())) throw bad('That is not a date.');
+    // Never into the month we are in.
+    //
+    // A month that has not finished cannot be folded: the roll-up marks its
+    // rows as rolled and the live queries stop counting them, while the folded
+    // side treats a part-month bucket as a whole one. With `drop` on, the rows
+    // behind it are gone and the month is wrong for good (Codex, 18 Sep 2026).
+    // The rollup already moves the cutoff back to the first of its own month;
+    // this is the same rule said at the door, so the answer can say it happened.
+    const thisMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const before = asked > thisMonth ? thisMonth : asked;
+    res.json({
+      ...(await searches.rollUp({ before, drop: req.body?.drop === true })),
+      // What it actually rolled to, where that is not what was asked for.
+      cappedAt: before < asked ? before.toISOString().slice(0, 10) : null,
+    });
   } catch (err) { next(err); }
 });
 

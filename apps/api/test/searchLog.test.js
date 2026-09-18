@@ -1439,3 +1439,25 @@ test('an open is counted once however many times it is sent', async () => {
       where search_id = $1 and kind = 'save' and venue_ref = 'test:opened-twice'`, [id]);
   assert.equal(saves[0].n, 2);
 });
+
+test('a cell nothing points at any more is set to nought', async () => {
+  const reach = await import('../src/repositories/reach.js');
+  await query(
+    `insert into geo_cells (code, scheme, label, country_code, lat, lng, points, places, source) values
+       ('sector:EMPTY 1','sector','EMPTY 1','GB',51.4,-0.9,1,0,'test')
+     on conflict (code) do update set places = 0`);
+  const ref = 'osm:node/leaves-a-cell-behind';
+  await query(
+    `insert into place_cells (venue_ref, cell, lat, lng) values ($1,'sector:EMPTY 1',51.4,-0.9)
+     on conflict (venue_ref) do update set cell = excluded.cell, lat = excluded.lat, lng = excluded.lng`, [ref]);
+  await reach.refreshCellCounts();
+  assert.equal((await query(`select places from geo_cells where code = 'sector:EMPTY 1'`)).rows[0].places, 1);
+
+  // The place moves away and the cell is left holding nothing. Joining the
+  // grouped counts skipped it entirely, so it kept the number it had — and the
+  // matrix build orders by this figure, so the emptiest places in the country
+  // were being built first (Codex, 18 Sep 2026).
+  await query('delete from place_cells where venue_ref = $1', [ref]);
+  await reach.refreshCellCounts();
+  assert.equal((await query(`select places from geo_cells where code = 'sector:EMPTY 1'`)).rows[0].places, 0);
+});
