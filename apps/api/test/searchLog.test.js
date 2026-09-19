@@ -1796,14 +1796,23 @@ test('a place that learns what kind it is goes back to be shelved', async () => 
   const shelf = await query('select category from place_index where venue_ref = $1', [ref]);
   assert.ok(shelf.rows[0].category, `and it lands on a shelf, not ${shelf.rows[0].category}`);
 
-  // And a pass that learned nothing about its kind leaves it alone: the
-  // researcher writes every column on every pass, so reacting to the column
-  // list sent every researched place back to be placed whether or not there was
-  // anything new to file it by.
+  // A pass that says the same thing again leaves it alone. The researcher writes
+  // every column on every pass, so reacting to the column list sent every
+  // researched place back to be placed whether there was anything new or not.
   await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
-  await owned.writeRecord(ref, ['name', 'category', 'experiences'], ['A museum', null, '[]'], {}, {});
+  await owned.writeRecord(ref, ['name', 'category', 'experiences'], ['A museum', 'museum', '[]'], {}, {});
   const quiet = await query('select placed_at from place_index where venue_ref = $1', [ref]);
-  assert.ok(quiet.rows[0].placed_at, 'nothing learned, nothing to redo');
+  assert.ok(quiet.rows[0].placed_at, 'nothing changed, nothing to redo');
+
+  // And a kind that is *withdrawn* has to travel too. Reacting only to a value
+  // arriving left a place standing in a category board it no longer belonged to,
+  // which is worse than the gap that rule was written to close.
+  await owned.writeRecord(ref, ['name', 'category', 'experiences'], ['A museum', null, '[]'], {}, {});
+  const gone = await query('select placed_at from place_index where venue_ref = $1', [ref]);
+  assert.equal(gone.rows[0].placed_at, null, 'losing its kind sends it back as surely as gaining one');
+  await index.shelveAll({ refs: [ref] });
+  const cleared = await query('select category from place_index where venue_ref = $1', [ref]);
+  assert.equal(cleared.rows[0].category, null, 'and the shelf it no longer belongs on is cleared');
 });
 
 test('a place two providers found is a place two providers found', async () => {

@@ -187,42 +187,57 @@ export async function knownCategory(venueRef) {
 export async function writeRecord(venueRef, columns, values, attribution, provenance) {
   const sets = columns.map((c, i) => `${c} = $${i + 2}`).join(', ');
   const { rows } = await query(
-    `update place_records set ${sets},
+    // What it said before, read in the same statement.
+    //
+    // `returning` can only see the new row, and the question here is whether the
+    // *classification changed* — which includes losing one. A CTE is the only
+    // way to have both without a second round trip and a window in between.
+    `with was as (select venue_ref, category, experiences from place_records where venue_ref = $1)
+     update place_records set ${sets},
        attribution = $${columns.length + 2}, provenance = $${columns.length + 3}, updated_at = now()
-     where venue_ref = $1
-     returning ${ownedRecordSql('place_records')} as holds_something`,
+     from was w
+     where place_records.venue_ref = w.venue_ref
+     returning ${ownedRecordSql('place_records')} as holds_something,
+               w.category as was_category, w.experiences as was_experiences`,
     [venueRef, ...values, JSON.stringify(attribution), JSON.stringify(provenance)],
   );
   // This is the moment a place becomes ours: a fact of our own has landed on
   // it. Before this, the record is an empty row `ensureRecord` made so the
   // research had somewhere to write (Codex, 17 Sep 2026).
   if (rows[0]?.holds_something) await noteOwned(venueRef);
-  // And if what landed was the kind of place it is, it needs shelving again.
+  if (!rows[0]) return;
+  // And if the kind of place it is has *changed*, it needs shelving again.
   //
-  // `shelveAll` only ever runs over places waiting to be placed — a full
-  // rebuild, or the hourly settle's list — so a record that learned its
-  // category while already placed kept no shelf at all, and the whole chain
-  // from "identify this place" to "it appears on a category board" stopped one
-  // link from the end: the identify pass ran, the category was written, and
-  // every board went on showing the same gap (19 Sep 2026, watching SL4 not
-  // move). Unplaced is how everything else here asks to be looked at again.
+  // `shelveAll` only ever runs over places waiting to be placed — a full rebuild,
+  // or the hourly settle's list — so a record whose classification moved while it
+  // was already placed kept whatever shelf it had. The whole chain from "identify
+  // this place" to "it appears on a category board" stopped one link from the end
+  // (19 Sep 2026, watching SL4 not move). Unplaced is how everything else here
+  // asks to be looked at again.
   //
-  // On the *value*, not on the column list: the researcher writes every column
-  // every time, so testing whether `category` was among them was true on every
-  // pass and sent every researched place back to be placed again whether or not
-  // it had learned anything (19 Sep 2026 — it worked, and it worked by accident,
-  // which is its own kind of wrong).
-  const told = (name) => {
+  // Changed, in either direction. Two wrong versions came before this one: the
+  // column list, which the researcher writes in full every pass, so it fired
+  // always; and then a non-empty value, which fired on a place that learned its
+  // kind and not on one that *lost* it — so a place whose category was withdrawn
+  // went on standing in its old category board for ever, which is worse than the
+  // gap it was fixing (Codex, 19 Sep 2026).
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const written = (name) => {
     const at = columns.indexOf(name);
-    if (at < 0) return false;
-    const v = values[at];
-    if (v == null || v === '') return false;
-    // The JSON columns arrive as text, and an empty list is not news.
-    return v !== '[]' && v !== 'null' && v !== '{}';
+    return at < 0 ? undefined : values[at];
   };
-  if (told('category') || told('experiences')) {
-    await query('update place_index set placed_at = null where venue_ref = $1', [venueRef]);
-  }
+  // The JSON columns go down as text and come back parsed, so both ends are
+  // compared as text.
+  const asText = (v) => (v === undefined || v === null ? null : typeof v === 'string' ? v : JSON.stringify(v));
+  const moved = [
+    ['category', rows[0].was_category],
+    ['experiences', rows[0].was_experiences],
+  ].some(([name, before]) => {
+    const now = written(name);
+    // A column this pass did not write cannot have moved.
+    return now !== undefined && !same(asText(before), asText(now));
+  });
+  if (moved) await query('update place_index set placed_at = null where venue_ref = $1', [venueRef]);
 }
 
 export async function recordAttempt(venueRef, a) {
