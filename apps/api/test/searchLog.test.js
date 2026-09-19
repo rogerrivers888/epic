@@ -1946,3 +1946,42 @@ test('the offline record never holds a fact that has to be thrown away', async (
   const live = await owned.liveFacts(ref);
   assert.ok(live.some((f) => f.field === 'summary'), 'a rented fact is ours to show now, not to keep');
 });
+
+test('the search box finds a place by a name we are allowed to search', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ours = 'osm:node/searchable';
+  const rented = 'google:ChIJrented-name';
+  await index.noteMany([
+    { ref: ours, lat: 51.4, lng: -0.6, countryCode: 'GB' },
+    { ref: rented, lat: 51.4, lng: -0.6, countryCode: 'GB' },
+  ], { source: 'osm' });
+  await owned.ensureRecord(ours);
+  await query('update place_records set name = $2 where venue_ref = $1', [ours, 'Sunningdale Larder']);
+  // The sweep's word for a place whose reference belongs to Google. A provider's
+  // name is rented: it is never searched and never returned (CLAUDE.md).
+  await query(
+    `insert into scout_areas (code, country_code, lat, lng, radius_km)
+     values ('ZZ9', 'GB', 51.4, -0.6, 5) on conflict do nothing`);
+  await query(
+    `insert into scout_places (venue_ref, area_code, name, lat, lng, rank)
+     values ($1, 'ZZ9', 'Sunningdale Rented Room', 51.4, -0.6, 1)
+     on conflict do nothing`, [rented]);
+
+  const { rows } = await query(
+    `with hits as (
+         (select venue_ref, name, 1 as rank from place_records where name ilike $1 limit 8)
+       union all
+         (select venue_ref, name, 3 from scout_places
+           where name ilike $1
+             and (venue_ref like 'osm:%' or venue_ref like 'atlas:%'
+               or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
+           limit 8)
+     ),
+     best as (select distinct on (venue_ref) venue_ref, name from hits where venue_ref is not null order by venue_ref, rank)
+     select pi.venue_ref as ref, b.name from best b join place_index pi on pi.venue_ref = b.venue_ref`,
+    ['%sunningdale%']);
+  const refs = rows.map((r) => r.ref);
+  assert.ok(refs.includes(ours), 'a name of our own is found');
+  assert.equal(refs.includes(rented), false, 'a rented name is never searched, however well it matches');
+});

@@ -2734,21 +2734,46 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
     // Only names that are ours to hold: OSM's, the atlas's, the encyclopedias'
     // and our own. A provider's name is rented and never searched, never
     // returned (CLAUDE.md).
+    // Asked of the names, not of the index.
+    //
+    // This drove off `place_index` — twenty-seven thousand rows — left joined to
+    // three name tables, one of them on `a.venue_ref = pi.venue_ref or 'atlas:'
+    // || a.id::text = pi.venue_ref`, which no index can serve at either end. So
+    // every keystroke was a sequential scan with a nested loop inside it, and
+    // the `limit 8` only rescued the common prefixes: they filled up early and
+    // felt instant, while a rare word had to read everything before it could
+    // report how little there was. Sixteen seconds for "sl5" (owner, 19 Sep
+    // 2026: "It should be absolutely instant").
+    //
+    // Each name source is now matched on its own — one table, one indexable
+    // column, its own small limit — and only the handful that matched is looked
+    // up in the index. Migration 181 puts a trigram index under each of them;
+    // without it this is still three small scans rather than one enormous one.
     const { rows: named } = await query(
-      `select pi.venue_ref as ref, pi.subcategory,
-              coalesce(r.name, a.name,
-                       case when pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
-                                 or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%'
-                            then sp.name else null end) as name,
+      `with hits as (
+           (select venue_ref, name, 1 as rank from place_records where name ilike $1 limit 8)
+         union all
+           (select venue_ref, name, 2 from attractions where venue_ref is not null and name ilike $1 limit 8)
+         union all
+           (select 'atlas:' || id::text, name, 2 from attractions where name ilike $1 limit 8)
+         union all
+           -- The sweep's own word for a place, which is ours to search only
+           -- where the reference belongs to a source whose names we may keep.
+           -- A provider's name is rented and is never searched and never
+           -- returned (CLAUDE.md).
+           (select venue_ref, name, 3 from scout_places
+             where name ilike $1
+               and (venue_ref like 'osm:%' or venue_ref like 'atlas:%'
+                 or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
+             limit 8)
+       ),
+       best as (
+         select distinct on (venue_ref) venue_ref, name
+           from hits where venue_ref is not null order by venue_ref, rank)
+       select pi.venue_ref as ref, pi.subcategory, b.name,
               (select l.name from place_areas pa join localities l on l.slug = pa.area_slug
                 where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as where_
-         from place_index pi
-         left join place_records r on r.venue_ref = pi.venue_ref
-         left join attractions a on a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref
-         left join scout_places sp on sp.venue_ref = pi.venue_ref
-        where (r.name ilike $1 or a.name ilike $1
-               or ((pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
-                    or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%') and sp.name ilike $1))
+         from best b join place_index pi on pi.venue_ref = b.venue_ref
         limit 8`, [`%${q}%`]);
     const sector = sectorOf(q);
     res.json({
