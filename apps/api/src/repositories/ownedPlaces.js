@@ -206,7 +206,21 @@ export async function writeRecord(venueRef, columns, values, attribution, proven
   // link from the end: the identify pass ran, the category was written, and
   // every board went on showing the same gap (19 Sep 2026, watching SL4 not
   // move). Unplaced is how everything else here asks to be looked at again.
-  if (columns.some((c) => c === 'category' || c === 'experiences')) {
+  //
+  // On the *value*, not on the column list: the researcher writes every column
+  // every time, so testing whether `category` was among them was true on every
+  // pass and sent every researched place back to be placed again whether or not
+  // it had learned anything (19 Sep 2026 — it worked, and it worked by accident,
+  // which is its own kind of wrong).
+  const told = (name) => {
+    const at = columns.indexOf(name);
+    if (at < 0) return false;
+    const v = values[at];
+    if (v == null || v === '') return false;
+    // The JSON columns arrive as text, and an empty list is not news.
+    return v !== '[]' && v !== 'null' && v !== '{}';
+  };
+  if (told('category') || told('experiences')) {
     await query('update place_index set placed_at = null where venue_ref = $1', [venueRef]);
   }
 }

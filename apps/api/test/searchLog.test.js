@@ -1785,7 +1785,9 @@ test('a place that learns what kind it is goes back to be shelved', async () => 
   // The identify pass answers: this is a museum. `shelveAll` only ever runs over
   // places waiting to be placed, so without this the category would sit on the
   // record and the place would appear on no category board ever again.
-  await owned.writeRecord(ref, ['category'], ['museum'], {}, {});
+  // Every column, every time — which is what the researcher actually writes, and
+  // what made testing the column list instead of the value meaningless.
+  await owned.writeRecord(ref, ['name', 'category', 'website'], ['A museum', 'museum', null], {}, {});
   const after = await query('select placed_at from place_index where venue_ref = $1', [ref]);
   assert.equal(after.rows[0].placed_at, null, 'learning its kind puts it back in the shelving pass’s hands');
 
@@ -1793,6 +1795,15 @@ test('a place that learns what kind it is goes back to be shelved', async () => 
   await index.shelveAll({ refs: [ref] });
   const shelf = await query('select category from place_index where venue_ref = $1', [ref]);
   assert.ok(shelf.rows[0].category, `and it lands on a shelf, not ${shelf.rows[0].category}`);
+
+  // And a pass that learned nothing about its kind leaves it alone: the
+  // researcher writes every column on every pass, so reacting to the column
+  // list sent every researched place back to be placed whether or not there was
+  // anything new to file it by.
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+  await owned.writeRecord(ref, ['name', 'category', 'experiences'], ['A museum', null, '[]'], {}, {});
+  const quiet = await query('select placed_at from place_index where venue_ref = $1', [ref]);
+  assert.ok(quiet.rows[0].placed_at, 'nothing learned, nothing to redo');
 });
 
 test('a place two providers found is a place two providers found', async () => {
