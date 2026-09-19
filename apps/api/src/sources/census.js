@@ -141,9 +141,11 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
     // question that returned it is the most informative thing about it, and the
     // first slice is always at least as narrow as any that follows it.
     if (!found.has(ref)) {
+      // An id, and which question found it. No point and no type: the census is
+      // IDs Only, and both of those are Pro fields that bill (owner, 19 Sep
+      // 2026). They arrive with the first display search that returns the place.
       found.set(ref, {
-        ref, lat: p.lat, lng: p.lng, types: p.types,
-        category, subcategory, foundBy: type, rank: res.places.indexOf(p) + 1, slice: boxLabel(box),
+        ref, category, subcategory, foundBy: type, rank: p.rank, slice: boxLabel(box),
       });
     }
   }
@@ -227,8 +229,10 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
     // `sourceId` for the source the caller is writing as. Handing it objects
     // stringified each one to "[object Object]" and dropped the Google id, so
     // the census wrote no Google coverage at all (Codex, 19 Sep 2026).
+    // No `lat`/`lng`: the census does not know them and must not pretend to.
+    // `noteMany` coalesces, so a null cannot erase a point something else knew.
     await index.noteMany(
-      batch.map((p) => ({ ref: p.ref, lat: p.lat, lng: p.lng, sourceId: p.ref.slice('google:'.length), sources: ['google'] })),
+      batch.map((p) => ({ ref: p.ref, sourceId: p.ref.slice('google:'.length), sources: ['google'] })),
       { source: 'google', countryCode: 'GB' },
     );
     await writeCensusFacts(batch);
@@ -259,12 +263,11 @@ const chunks = (rows, n) => Array.from({ length: Math.ceil(rows.length / n) }, (
  * the Google calls did.
  */
 async function writeCensusFacts(places) {
-  const values = places.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2},$${i * 7 + 3}::text[],$${i * 7 + 4},$${i * 7 + 5}::int,$${i * 7 + 6},$${i * 7 + 7})`).join(',');
-  const params = places.flatMap((p) => [p.ref, p.category, p.types, p.foundBy, p.rank, p.slice, p.subcategory]);
+  const values = places.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4}::int,$${i * 6 + 5},$${i * 6 + 6})`).join(',');
+  const params = places.flatMap((p) => [p.ref, p.category, p.foundBy, p.rank, p.slice, p.subcategory]);
   await query(
     `update place_index i
         set censused_at = now(),
-            google_types = v.types,
             found_by     = v.found_by,
             found_rank   = v.found_rank,
             slice        = v.slice,
@@ -275,7 +278,7 @@ async function writeCensusFacts(places) {
             category     = coalesce(i.category, v.category),
             subcategory  = coalesce(i.subcategory, v.subcategory),
             derived_by   = coalesce(i.derived_by, 'census')
-       from (values ${values}) as v(ref, category, types, found_by, found_rank, slice, subcategory)
+       from (values ${values}) as v(ref, category, found_by, found_rank, slice, subcategory)
       where i.venue_ref = v.ref`,
     params,
   );
@@ -336,4 +339,72 @@ export async function censusIsFresh(areaSlug, { days = CENSUS_FRESH_DAYS } = {})
     `select max(censused_at) at from area_counts where area_slug = $1`, [areaSlug],
   );
   return Boolean(row?.at) && Date.now() - new Date(row.at).getTime() < days * 86_400_000;
+}
+
+/**
+ * What a display search teaches the index, which the census could not.
+ *
+ * The census is IDs Only, so it knows a place exists and which question found
+ * it, and nothing about where it is. A point and Google's type words are Pro
+ * fields — dearer than the census may be — and they arrive here instead: on the
+ * first display search that returns the place, a call being made anyway for
+ * somebody who is actually looking at it (owner, 19 Sep 2026).
+ *
+ * So map placement and reachability apply to *surfaced* places only. That is
+ * the deliberate trade: the area board counts everything and locates nothing,
+ * and nothing on it can spend money.
+ *
+ * `coords_at` dates the point because Google's terms allow a coordinate to be
+ * held for 30 days and no longer, and `coords_from` says whether that clock
+ * applies: OpenStreetMap's own coordinates are ODbL and ours to keep, which is
+ * what makes the "Not on Google" residual a reachability fallback rather than
+ * another thing that expires.
+ */
+export async function noteFromDisplay(venues, { source = 'google' } = {}) {
+  const rows = (venues ?? [])
+    .map((v) => ({
+      ref: v.venueRef ?? (v.sourcePlaceId ? `${v.source ?? source}:${v.sourcePlaceId}` : null),
+      lat: v.lat, lng: v.lng,
+      types: [...new Set([v.primaryType, ...(v.labels ?? []).map((l) => String(l).replace(/^google:/, ''))].filter(Boolean))],
+    }))
+    .filter((r) => r.ref && r.lat != null && r.lng != null);
+  if (!rows.length) return { noted: 0 };
+
+  let noted = 0;
+  for (const batch of chunks(rows, WRITE_BATCH)) {
+    const values = batch.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2}::double precision,$${i * 4 + 3}::double precision,$${i * 4 + 4}::text[])`).join(',');
+    const params = batch.flatMap((r) => [r.ref, r.lat, r.lng, r.types]);
+    const { rowCount } = await query(
+      `update place_index i
+          set lat          = v.lat,
+              lng          = v.lng,
+              google_types = case when array_length(v.types, 1) is null then i.google_types else v.types end,
+              coords_at    = now(),
+              coords_from  = $${batch.length * 4 + 1}
+         from (values ${values}) as v(ref, lat, lng, types)
+        where i.venue_ref = v.ref`,
+      [...params, source],
+    );
+    noted += rowCount;
+  }
+  return { noted };
+}
+
+/**
+ * Coordinates past the thirty days Google's terms allow.
+ *
+ * Nulled rather than deleted: the place stays in the index — the id is ours
+ * indefinitely — and simply stops saying where it is until the next display
+ * search returns it. A place nobody has looked at in a month is a place we have
+ * no business holding a point for.
+ */
+export async function expireRentedCoordinates({ days = 30 } = {}) {
+  const { rowCount } = await query(
+    `update place_index
+        set lat = null, lng = null, cell = null, coords_at = null, coords_from = null
+      where coords_from = 'google'
+        and coords_at < now() - ($1 || ' days')::interval`,
+    [String(days)],
+  );
+  return { expired: rowCount };
 }

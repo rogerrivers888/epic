@@ -18,7 +18,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleSource, skuFor } from '../src/sources/google.js';
 import { costOf } from '../src/domain/providerPrices.js';
-import { censusArea, slicePlan } from '../src/sources/census.js';
+import { censusArea, slicePlan, noteFromDisplay, expireRentedCoordinates } from '../src/sources/census.js';
 import { query, pool } from '../src/db.js';
 
 test.after(() => pool.end());
@@ -77,7 +77,8 @@ const withCensus = async (impl, run) => {
 };
 
 const BOX = { minLat: 51.38, minLng: -0.70, maxLat: 51.44, maxLng: -0.62 };
-const place = (n) => ({ id: `ChIJcensus_test_${n}`, lat: 51.41, lng: -0.66, types: ['restaurant'] });
+// What IDs Only actually returns: an id and where it came in the answer.
+const place = (n) => ({ id: `ChIJcensus_test_${n}`, rank: 1 });
 
 test('a slice cut off at sixty is split, and the parent keeps its row beside its children', async () => {
   const plan = await slicePlan();
@@ -178,4 +179,63 @@ test('a slice that failed is not a slice that was empty', async () => {
 
   await query(`delete from census_slices where area_slug = 'census-test-fail'`);
   await query(`delete from area_counts where area_slug = 'census-test-fail'`);
+});
+
+// ---------------------------------------------------------------------------
+// where things are, which the census is not allowed to buy
+// ---------------------------------------------------------------------------
+
+test('the census locates nothing, and the first display search locates it', async () => {
+  const plan = await slicePlan();
+  if (!plan.length) return;
+
+  const impl = async () => ({ places: [{ id: 'ChIJcensus_locate', rank: 1 }], requests: 1, saturated: false, problem: null });
+  await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-loc', outcode: 'ZZ95', box: BOX, subcategories: [plan[0].subcategory],
+  }));
+
+  const ref = 'google:ChIJcensus_locate';
+  const after = async () => (await query(
+    `select lat, lng, google_types, coords_at, coords_from, found_by, found_rank, censused_at
+       from place_index where venue_ref = $1`, [ref])).rows[0];
+
+  let row = await after();
+  assert.ok(row, 'the census wrote the place down');
+  assert.equal(row.lat, null, 'and did not buy a point for it');
+  assert.equal(row.google_types, null, 'nor Googles words for what it is');
+  assert.ok(row.found_by, 'but it does know which question found it');
+  assert.ok(row.censused_at);
+
+  // The display search is the call that locates it — one being made anyway,
+  // for a place somebody is actually looking at.
+  await noteFromDisplay([{ venueRef: ref, lat: 51.41, lng: -0.66, primaryType: 'restaurant', labels: ['google:restaurant', 'google:bar'] }]);
+  row = await after();
+  assert.equal(Number(row.lat), 51.41);
+  assert.deepEqual(row.google_types.sort(), ['bar', 'restaurant']);
+  assert.equal(row.coords_from, 'google', 'and dates it, because a rented point expires');
+  assert.ok(row.coords_at);
+
+  // Thirty days later it is gone, and the place stays: the id is ours, the
+  // point never was.
+  await query(`update place_index set coords_at = now() - interval '31 days' where venue_ref = $1`, [ref]);
+  await expireRentedCoordinates();
+  row = await after();
+  assert.equal(row.lat, null, 'the point expired');
+  assert.ok(row.censused_at, 'the place did not');
+
+  await query(`delete from place_index where venue_ref = $1`, [ref]);
+  await query(`delete from census_slices where area_slug = 'census-test-loc'`);
+  await query(`delete from area_counts where area_slug = 'census-test-loc'`);
+});
+
+test("OpenStreetMap's own coordinates are ours to keep, so they never expire", async () => {
+  const ref = 'osm:node/999000111';
+  await query(`insert into place_index (venue_ref) values ($1) on conflict do nothing`, [ref]);
+  await noteFromDisplay([{ venueRef: ref, lat: 51.4, lng: -0.6 }], { source: 'osm' });
+  await query(`update place_index set coords_at = now() - interval '400 days' where venue_ref = $1`, [ref]);
+  await expireRentedCoordinates();
+  const { rows: [row] } = await query(`select lat, coords_from from place_index where venue_ref = $1`, [ref]);
+  assert.equal(row.coords_from, 'osm');
+  assert.ok(row.lat != null, 'ODbL lets us keep it, so the expiry sweep leaves it alone');
+  await query(`delete from place_index where venue_ref = $1`, [ref]);
 });

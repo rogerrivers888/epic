@@ -42,9 +42,19 @@ const TEXT_SEARCH_FIELDS = `${SEARCH_FIELDS},contextualContents.justifications`;
 const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber,generativeSummary,reviewSummary';
 /** The two figures alone — the Pro tier, a fraction of a full detail — for ranking a place we already know Google's id for. */
 const RATING_FIELDS = 'id,rating,userRatingCount';
-// The census mask: an id, a point, and Google's own words for what it is.
-// Nothing here is content — it is the Essentials tier, and it is free.
-const CENSUS_FIELDS = 'places.id,places.location,places.types,nextPageToken';
+// The census mask: an id, and nothing else.
+//
+// Essentials really is ids only. `places.location` and `places.types` are Pro
+// fields and bill, so asking for them made the census a paid call while the
+// meter recorded it as free (Codex, 19 Sep 2026). The owner's answer was to
+// take the tier at its word: census the ids, and let a point and a type arrive
+// later with the first display search — a call being made anyway, for a place
+// somebody is actually looking at (19 Sep 2026).
+//
+// What the census still knows without them: *which question found it*. The box
+// fences the answer and the query names the subcategory, so an id is enough to
+// count with and to file under a drawer.
+const CENSUS_FIELDS = 'places.id,nextPageToken';
 
 export const FOOD_TYPES = ['restaurant', 'cafe', 'bar', 'pub', 'bakery', 'ice_cream_shop', 'coffee_shop'];
 /**
@@ -766,7 +776,7 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
  * again. That is the only way to count with a provider that will not count.
  *
  * Returns `{ places, requests, saturated, problem }`. `places` carries only
- * what may be stored: the id, the point, and Google's own type words.
+ * what the free tier gives: the id, and where it came in the answer.
  */
 async function censusSlice({ box, includedType, query, pages = 3, meter = null } = {}) {
   if (!KEY() || !box) return { places: [], requests: 0, saturated: false, problem: 'no Google key' };
@@ -796,9 +806,12 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
       // refused must never read as an area with nothing in it.
       return { places: [...out.values()], requests, saturated: false, problem: String(err.message).slice(0, 160) };
     }
+    // An id and its rank. No point and no type: those are Pro, and the census
+    // does not buy them. `locationRestriction` is what guarantees the place is
+    // in the box, so a coordinate is not needed to know that it is.
     for (const p of data.places || []) {
-      if (!p.id || p.location?.latitude == null) continue;
-      out.set(p.id, { id: p.id, lat: p.location.latitude, lng: p.location.longitude, types: p.types || [] });
+      if (!p.id) continue;
+      if (!out.has(p.id)) out.set(p.id, { id: p.id, rank: out.size + 1 });
     }
     pageToken = data.nextPageToken ?? null;
     if (!pageToken) break;
