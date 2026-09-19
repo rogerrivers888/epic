@@ -1,4 +1,5 @@
 import { bump } from './meter.js';
+import { FENCE_M, metresBetween, namesAgree } from '../domain/matchFence.js';
 // Tripadvisor Terra Content API, Discover plan (Technical Constraints §3.3).
 // Billing is per *entity*, not per call: every location ID returned by a
 // search/nearby/details response counts once; a reviews or photos call counts
@@ -218,8 +219,12 @@ export const tripadvisorSource = {
         const loc = item.location ?? item;
         const hit = toVenue(loc, v.category);
         if (seen.has(hit.sourcePlaceId) || !Number.isFinite(hit.lat)) continue;
-        // Only a record that will merge is worth returning; the resolver's rule is the same test.
-        if (norm(hit.name) !== norm(v.name) || kmBetween(hit, v) > 0.4) continue;
+        // Only a record that will merge is worth returning; the resolver's
+        // rule is the same test. The fence is the one every by-name lookup
+        // uses rather than a number written here — it was 0.4 km, which is the
+        // same 400 m, and having it twice is how the two drift apart
+        // (domain/matchFence.js, 19 Sep 2026).
+        if (!namesAgree(hit.name, v.name) || metresBetween(hit, v) > FENCE_M) continue;
         seen.add(hit.sourcePlaceId);
         out.push(hit);
         break;
@@ -234,10 +239,20 @@ export const tripadvisorSource = {
    * meter says how many. The caller decides which, if any, is the place
    * (sources/providerMatch.js applies the atlas's two guards).
    */
-  async candidates({ name, category = 'attraction' }, { locality = null, meter = null } = {}) {
+  async candidates({ name, category = 'attraction', lat = null, lng = null }, { locality = null, meter = null, fenceM = FENCE_M } = {}) {
     if (!KEY() || !name) return [];
     const params = { query: String(name).slice(0, 200), size: ENRICH_SIZE };
-    if (locality) params.geo_name = locality;
+    // A point beats a place name. `geo_name: 'Ascot'` asks Tripadvisor to
+    // resolve a locality first and match inside whatever it decides that is,
+    // which found nothing for fifty-three of sixty SL5 places — a match rate
+    // that said more about the question than about their coverage (19 Sep
+    // 2026). `latLong` fences on the same 400 m as every other by-name lookup
+    // Epic makes (domain/matchFence.js), so the rates can be compared.
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      params.latLong = `${lat},${lng}`;
+      params.radius = Math.max(1, Math.round(fenceM));
+      params.radiusUnit = 'm';
+    } else if (locality) params.geo_name = locality;
     let data;
     try { data = await get('/catalog/locations/search', params, meter); }
     catch (err) {
