@@ -294,30 +294,26 @@ test('a place found by two questions is counted under both and filed under one',
   await query(`delete from area_counts where area_slug = 'census-test-both'`);
 });
 
-test('a type Google does not have is asked again as words', async () => {
-  // `place_of_worship` and `landmark` are what Google calls its own groups, not
-  // types in Table A. Both 400'd on the first SL5 census, so two subcategories
-  // silently never asked one of their questions (19 Sep 2026). A label taught
-  // in the back office should not have to be checked against Google's table by
-  // hand.
+test('a type Google does not have fails the slice rather than guessing', async () => {
+  // The first fix asked the same words as a plain text query instead. That was
+  // worse than the hole it filled: on IDs Only there is no `types` field to
+  // check the answer against — that field is Pro and the census may not buy it
+  // — so "landmark" would have counted anything merely *named* Landmark. A
+  // census that invents membership is worse than one with a gap, because the
+  // gap is visible and the invention is not (Codex, 19 Sep 2026).
   const { googleSource: src } = await import('../src/sources/google.js');
-  const seen = [];
+  let asked = 0;
   const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    const body = JSON.parse(init.body);
-    seen.push(body);
-    if (body.includedType) {
-      return { ok: false, status: 400, text: async () => '{"error":{"code":400,"message":"Invalid included_type: \'landmark\'."}}' };
-    }
-    return { ok: true, json: async () => ({ places: [{ id: 'ChIJwords' }] }) };
+  globalThis.fetch = async () => {
+    asked += 1;
+    return { ok: false, status: 400, text: async () => '{"error":{"code":400,"message":"Invalid included_type: \'landmark\'."}}' };
   };
   try {
     process.env.GOOGLE_MAPS_API_KEY ||= 'test-key';
     const out = await src.censusSlice({ box: BOX, includedType: 'landmark', meter: {} });
-    assert.equal(out.problem, null, 'the words worked where the type did not');
-    assert.deepEqual(out.places.map((p) => p.id), ['ChIJwords']);
-    assert.equal(seen.length, 2, 'asked twice: once as a type, once as words');
-    assert.equal(seen[1].includedType, undefined, 'and the second time without the type');
-    assert.equal(seen[1].textQuery, 'landmark');
+    assert.equal(asked, 1, 'asked once and gave up, rather than rephrasing the question');
+    assert.deepEqual(out.places, [], 'and counted nothing it could not verify');
+    assert.match(out.problem, /Google has no type "landmark"/);
+    assert.match(out.problem, /Table A/, 'the reason says what to do about it');
   } finally { globalThis.fetch = realFetch; }
 });

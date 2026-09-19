@@ -801,24 +801,33 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
       data = await call('/places:searchText', { fieldMask: CENSUS_FIELDS, meter, body });
       requests += 1;
     } catch (err) {
-      // A type Google does not have is still a question worth asking.
+      // A type Google does not have is a rule to fix, not a question to
+      // rephrase.
       //
       // `place_of_worship` and `landmark` are what Google calls its own
       // *groups*, not types in Table A, and both came back 400 on the first SL5
       // census — so two subcategories quietly never asked one of their
-      // questions (19 Sep 2026). A label taught in the back office should not
-      // have to be checked against Google's table by hand, so an invalid type
-      // falls back to the same words as a plain text query, which Google does
-      // answer. Asked once, and the reason is still recorded if it fails again.
+      // questions. The first fix asked the same words as a plain text query
+      // instead, which Google does answer.
+      //
+      // That was wrong, and worse than the hole it filled. On the IDs Only mask
+      // there is nothing to check the answer against: a text search for
+      // "landmark" returns anything *named* Landmark, and with no `types` field
+      // to filter on — that field is Pro, and the census may not buy it — those
+      // places would have been counted as that subcategory. A census that
+      // invents membership is worse than one with a gap in it, because the gap
+      // is visible and the invention is not (Codex, 19 Sep 2026).
+      //
+      // So the slice fails, loudly, with the reason on its row. The back office
+      // shows a rule naming a type Google does not have, and a person fixes the
+      // rule — which is free, and is what the Categories screen is for.
       if (/Invalid included_type/i.test(String(err.message)) && includedType) {
-        requests += 1;
-        try {
-          const { includedType: _drop, ...loose } = body;
-          data = await call('/places:searchText', { fieldMask: CENSUS_FIELDS, meter, body: { ...loose, textQuery: googleTypeWords(includedType) } });
-          requests += 1;
-        } catch (err2) {
-          return { places: [...out.values()], requests, saturated: false, problem: `as a text query too: ${String(err2.message).slice(0, 140)}` };
-        }
+        return {
+          places: [...out.values()],
+          requests,
+          saturated: false,
+          problem: `Google has no type "${includedType}" — the rule needs a type from Table A, or splitting into the ones it stands for`,
+        };
       } else {
         // A slice that failed is not a slice that was empty, and the difference
         // has to survive to the census row: an area under-counted because

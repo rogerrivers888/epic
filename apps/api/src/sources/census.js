@@ -315,7 +315,13 @@ async function writeSurfacings(rows) {
     `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, first_seen, last_seen)
      values ${values}
      on conflict (venue_ref, subcategory) do update
-        set found_by = excluded.found_by, found_rank = excluded.found_rank, last_seen = now()`,
+        -- The category too. A taxonomy change can move a subcategory to another
+        -- shelf, and leaving the old parent here made the (category,
+        -- subcategory) index answer with stale membership for ever — which
+        -- contradicts the one thing the plan being read from shelf_rules is
+        -- meant to buy, that a re-map costs nothing (Codex, 19 Sep 2026).
+        set category = excluded.category,
+            found_by = excluded.found_by, found_rank = excluded.found_rank, last_seen = now()`,
     params,
   );
 }
