@@ -157,6 +157,12 @@ export function Ladder<T>({
   return (
     <View>
       <View style={styles.head}>
+        {/* Every heading that explains itself says so.
+            The artboard marks only Ready, and the owner asked for all of them:
+            "All of them are supposed to have info and hover-over states. You've
+            got hover-over states for all of them. You just don't have the
+            question marks for all of them or the info icons for all of them"
+            (19 Sep 2026). A hover nobody knows is there is a hover nobody uses. */}
         {columns.map((c) => (
           <Explain key={c.key} tip={c.tip}
                    style={[cellStyle(c), { alignItems: alignOf(c.align), justifyContent: 'center' }]}>
@@ -166,6 +172,7 @@ export function Ladder<T>({
                      accessibilityLabel={`Show only the places missing ${c.label}`}
                      style={[styles.headSort, { justifyContent: alignOf(c.align) }]}>
                 <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, c.headerOn && styles.headLabelOn, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
+                {c.tip ? <Info /> : null}
               </Press>
             ) : c.sort && onSort ? (
               <Press effect="none" onPress={() => onSort(c.sort!)} accessibilityRole="button"
@@ -173,7 +180,13 @@ export function Ladder<T>({
                      style={[styles.headSort, { justifyContent: alignOf(c.align) }]}>
                 <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, sort === c.sort && styles.headLabelOn, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
                 {sort === c.sort ? <Icon name={desc ? 'expand' : 'collapse'} size={11} strokeWidth={2.6} color={colors.ink} /> : null}
+                {c.tip ? <Info /> : null}
               </Press>
+            ) : c.tip ? (
+              <View style={[styles.headSort, { justifyContent: alignOf(c.align) }]}>
+                <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
+                <Info />
+              </View>
             ) : (
               <Text style={[styles.headLabel, c.muted && styles.headLabelMuted, { textAlign: textAlign(c.align) }]}>{c.label}</Text>
             )}
@@ -373,13 +386,21 @@ export const Kicker = ({ children, accent, tip }: {
 };
 
 /** One of the five numbers at the top of every level. */
-export function Stat({ label, value, tip, accent, big, mark = false }: {
+export function Stat({ label, value, tip, accent, big, mark = true }: {
   label: string; value: React.ReactNode; tip?: TipKey | Tip | null; accent?: boolean; big?: boolean;
   /**
    * The little info circle. The boards draw it on the figures whose definition
    * is genuinely arguable — ready, the average score, the three faults — and
    * leave it off the ones a word already explains. Every stat still explains
    * itself on hover either way.
+   */
+  /**
+   * Whether to show the mark that says there is an explanation here.
+   *
+   * On by default, and it was off: only Ready and Avg score carried one, so the
+   * other five figures explained themselves to nobody who did not already know
+   * to hover (owner, 19 Sep 2026). Left as a switch because a figure with no tip
+   * has nothing to mark, and `Stat` is used outside the boards too.
    */
   mark?: boolean;
 }) {
@@ -404,6 +425,9 @@ export function Stat({ label, value, tip, accent, big, mark = false }: {
  * the same inset, so every column stays lined up with its heading.
  */
 const INSET = 12;
+
+/** The mark that says "there is more here if you hover". One size, one colour. */
+const Info = () => <Icon name="info" size={10.5} strokeWidth={2.2} color={colors.inkMuted} />;
 
 const styles = StyleSheet.create({
   // BO2l, "Places at 390": a name with its note beside it, and the figures

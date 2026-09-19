@@ -363,9 +363,17 @@ function Level(props: {
       {/* The word that is underlined is the board you are on, not the word in
           the address — otherwise an outcode drew its categories under a lit
           "Coverage" (18 Sep 2026). */}
+      {/* A postcode is a place on the map, so what belongs beside it is how far
+          out to look — not another search box.
+          BO2o puts the bands and the modes here and nothing else, and the owner
+          said the same of SL5 (19 Sep 2026: "There's not supposed to be a
+          postcode search box… What should be here is the toggle for 30 minutes,
+          1 hour, 90 minutes… car, walk, or transit"). The search box stays
+          everywhere above a postcode, which is where searching for one is the
+          thing you came to do. */}
       <LensRow lens={lensHere} onLens={props.onLens}
-               right={ring
-                 ? <RingChooser minutes={within ?? 30} mode={mode} onMinutes={props.onWithin} onMode={props.onBy}
+               right={ring || level.areaKind === 'postcode'
+                 ? <RingChooser minutes={within} mode={mode} onMinutes={props.onWithin} onMode={props.onBy}
                                 cells={level.cells} modesBuilt={level.modesBuilt} />
                  : <AreaSearch onWhere={props.onWhere} onPlace={props.onPlace} />} />
       {body}
@@ -561,13 +569,21 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
 
 /** 30 min · 1 hour · 90 min, by car, walking or transit. */
 function RingChooser({ minutes, mode, onMinutes, onMode, cells, modesBuilt }: {
-  minutes: number; mode: string; onMinutes: (m: number) => void; onMode: (m: string) => void; cells: number | null;
+  /**
+   * The band in force, or null on a postcode nobody has drawn a ring from yet.
+   *
+   * Nothing is lit then, and the board is the outcode's own places. Lighting 30
+   * by default would say the board was showing a half-hour's drive when it was
+   * showing SL5 — and the two are 2,571 places and 92.
+   */
+  minutes: number | null;
+  mode: string; onMinutes: (m: number) => void; onMode: (m: string) => void; cells: number | null;
   /** Which ways of getting about the matrix can answer here; undefined means "do not know, offer them all". */
   modesBuilt?: string[];
 }) {
   return (
-    <Explain tip={['How far out', cells == null
-      ? 'The driving time between every postcode area is worked out once, so answering this does no sums.'
+    <Explain tip={['How far out', cells == null || minutes == null
+      ? 'How far to look around this place. The driving time between every postcode area is worked out once, so answering this does no sums.'
       : `${cells.toLocaleString()} postcode areas are within ${minutes} minutes of here. That was worked out once, so answering this does no sums.`]}>
       <View style={styles.chooser}>
         <View style={styles.segment}>
