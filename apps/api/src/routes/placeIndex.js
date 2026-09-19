@@ -620,6 +620,110 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
  * The facts at the bottom of that board are the point of the whole thing: one
  * row read, no distances computed, nothing spent.
  */
+/**
+ * The census board: what exists here, per drawer, for nothing.
+ *
+ * The data policy's area board (19 Sep 2026). Two rules shape it and both are
+ * about what it is *not* allowed to do:
+ *
+ *   · **It cannot trigger a paid call.** Every figure comes from `area_counts`,
+ *     `place_index` and the free cross-checks, all written when the census ran.
+ *     A board that recomputed from a provider on each view would cost money to
+ *     look at, and the whole point of the census is that knowing what exists is
+ *     free.
+ *   · **A hole is a finding.** A drawer with nothing in it keeps its row, and
+ *     a cross-check nobody has run reads `null` rather than nought — "nobody
+ *     has checked" and "there are none" are different facts and the board is
+ *     read for exactly that difference.
+ *
+ * `filed` is one per place, the shelving answer. `surfaced` is how many places
+ * this question actually found, which is the answer to "how many are there".
+ * The two differ by the overlap with other drawers, and both are shown because
+ * one number standing for both had golf reading nought in Ascot.
+ */
+router.get('/census', requires('view_library'), async (req, res, next) => {
+  try {
+    const where = String(req.query.where ?? '').trim().toUpperCase();
+    const reach = String(req.query.reach ?? 'outcode');
+    if (!where) throw bad('a census board needs a postcode or an outcode');
+    // A full postcode is not an outcode (migration 178): the board is keyed on
+    // the outward half and a household types either.
+    const code = where.replace(/\s+/g, ' ').split(' ')[0];
+
+    // Which outcodes the board covers. `outcode` is itself; a ring is what the
+    // matrix says is reachable, which is a fact of ours and costs nothing.
+    let codes = [code];
+    if (reach === '30' || reach === '60') {
+      const { rows } = await query(
+        `select distinct g.outcode from reach r
+           join geo_cells g on g.code = r.to_cell
+          where r.from_cell in (select code from geo_cells where outcode = $1)
+            and r.mode = 'driving' and r.minutes <= $2 and g.outcode is not null`,
+        [code, Number(reach)]);
+      if (rows.length) codes = rows.map((r) => r.outcode);
+    }
+    const slugs = codes.map((c) => c.toLowerCase());
+
+    const { rows } = await query(
+      `select a.category, a.subcategory,
+              sum(a.census_count)::int                     as filed,
+              sum(coalesce(a.surfaced_count, 0))::int      as surfaced,
+              sum(a.scored_count)::int                     as scored,
+              sum(a.saturated)::int                        as saturated,
+              -- Null, not nought, where nobody has run the free cross-check.
+              case when count(a.osm_count) = 0 then null else sum(coalesce(a.osm_count, 0))::int end  as osm,
+              case when count(a.fhrs_count) = 0 then null else sum(coalesce(a.fhrs_count, 0))::int end as fhrs,
+              case when count(a.residual) = 0 then null else sum(coalesce(a.residual, 0))::int end     as residual,
+              max(a.censused_at)                           as censused_at,
+              bool_and(a.complete)                         as complete
+         from area_counts a
+        where a.area_slug = any($1)
+        group by 1, 2
+        order by 1, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
+      [slugs]);
+
+    // The drawers that were asked about and found nothing are the point of the
+    // board, so they are listed rather than left out — and a drawer the census
+    // has never reached at all is a third state again.
+    const { rows: [seen] } = await query(
+      `select count(*)::int censused, min(censused_at) oldest, max(censused_at) newest
+         from area_counts where area_slug = any($1)`, [slugs]);
+    // The residual, which is held on the places themselves rather than the
+    // counts: an open-map place nobody could find on Google.
+    const { rows: [resid] } = await query(
+      `select count(*) filter (where not_on_google)::int residual,
+              count(*) filter (where checked_on_google_at is not null)::int checked
+         from place_index`);
+
+    res.json({
+      where: code,
+      reach,
+      outcodes: codes.sort(),
+      rows,
+      censused: seen?.censused ?? 0,
+      oldest: seen?.oldest ?? null,
+      newest: seen?.newest ?? null,
+      residual: resid?.residual ?? 0,
+      checkedOnGoogle: resid?.checked ?? 0,
+      // Said out loud so the screen can say it: nothing on this board cost
+      // anything, and nothing on it can.
+      free: true,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The standing verdicts, so a settled question is not asked again by accident.
+ */
+router.get('/verdicts', requires('view_library'), async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `select key, question, verdict, evidence, scope, method, revisit_when, decided_on, decided_by
+         from data_verdicts order by decided_on desc, key`);
+    res.json({ verdicts: rows });
+  } catch (err) { next(err); }
+});
+
 router.get('/ring', requires('view_library'), async (req, res, next) => {
   try {
     const scope = await resolveWhere({ ...req.query, within: req.query.within ?? 30 });

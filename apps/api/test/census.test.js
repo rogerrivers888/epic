@@ -317,3 +317,33 @@ test('a type Google does not have fails the slice rather than guessing', async (
     assert.match(out.problem, /Table A/, 'the reason says what to do about it');
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('a provider refusal stops the run, and an unanswered drawer is not rolled up as empty', async () => {
+  // The first ring census walked into the console's daily Text Search cap after
+  // two outcodes and then fired 9,321 more doomed requests — every remaining
+  // slice of every remaining outcode — because nothing read the answer. Worse,
+  // each of those outcodes rolled up as a completed census of nought places,
+  // which overwrote a good census of SL5 with forty-six zeroes (19 Sep 2026).
+  const plan = await slicePlan();
+  if (plan.length < 3) return;
+
+  let asked = 0;
+  const impl = async () => {
+    asked += 1;
+    return { places: [], requests: 1, saturated: false, problem: 'Google Places 429: {"error":{"code":429,"message":"Quota exceeded for quota metric \'SearchTextRequest\'"}}' };
+  };
+  const out = await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-429', outcode: 'ZZ93', box: BOX,
+  }));
+
+  assert.ok(asked <= 2, `stopped on the refusal rather than grinding through the plan (asked ${asked})`);
+  assert.ok(out.refused, 'and says the provider refused');
+  assert.match(out.problems.join(' '), /refused/);
+
+  const { rows } = await query(
+    `select count(*)::int n from area_counts where area_slug = 'census-test-429'`);
+  assert.equal(rows[0].n, 0, 'nothing rolled up: a refused drawer is not an empty one');
+
+  await query(`delete from census_slices where area_slug = 'census-test-429'`);
+  await query(`delete from area_counts where area_slug = 'census-test-429'`);
+});

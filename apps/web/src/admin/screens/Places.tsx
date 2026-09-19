@@ -39,7 +39,7 @@ import { asFlag, asNumber, asOneOf, asText, useQueryState, useRouter } from '../
 import { api, type PlaceLevel, type PlaceStats, type PlaceCountry, type PlaceAreaRow, type PlaceCoverageRow,
   type PlaceCategory, type PlaceSourceDef, type PlaceSourceRow, type PlaceQuality, type DemandRow, type DemandTotals,
   type PlaceRing, type PlaceRow, type PlaceDetail, type PictureIndex, type ReadyBars, type BarEffect, type BarFact,
-  type CompareColumn, type CompareRow, type RawSource, type PlaceHistoryRow, type FactDef, type PlaceLabel } from '../../api';
+  type CompareColumn, type CompareRow, type RawSource, type PlaceHistoryRow, type FactDef, type PlaceLabel, type PlaceCensusRow } from '../../api';
 import { AdminPage, ago, day, pounds, since } from '../kit';
 import { Explain, type TipKey } from '../explain';
 import { Ladder, Num, Word, Blank, NotAsked, NoMatch, Na, Tick, Pct, ScoreCell, Bar, Progress, Act, Footer, Kicker, Stat, type Col } from '../table';
@@ -50,15 +50,15 @@ const NEEDS_WORD: Record<string, string> = {
   menu: 'a menu', prices: 'prices', step_free: 'step-free',
 };
 
-const LENSES = ['coverage', 'category', 'source', 'quality', 'demand', 'collect'] as const;
+const LENSES = ['census', 'coverage', 'category', 'source', 'quality', 'demand', 'collect'] as const;
 /** What each way of cutting the same places is for. */
 const LENS_TIP: Record<string, TipKey> = {
-  coverage: 'lensCoverage', category: 'lensCategory', source: 'lensSource',
+  census: 'lensCensus', coverage: 'lensCoverage', category: 'lensCategory', source: 'lensSource',
   quality: 'lensQuality', demand: 'lensDemand', collect: 'collect',
 };
 type Lens = typeof LENSES[number];
 const LENS_LABEL: Record<Lens, string> = {
-  coverage: 'Coverage', category: 'Category', source: 'Source', quality: 'Quality', demand: 'Demand', collect: 'Collect',
+  census: 'Census', coverage: 'Coverage', category: 'Category', source: 'Source', quality: 'Quality', demand: 'Demand', collect: 'Collect',
 };
 
 const BY = ['county', 'city', 'postcode'] as const;
@@ -329,6 +329,7 @@ function Level(props: {
   const body = (() => {
     if (lensHere === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
     if (lensHere === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} areaKind={level.areaKind} />;
+    if (lensHere === 'census') return <CensusBoard where={level.slug} />;
     if (lensHere === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lensHere === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lensHere === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
@@ -1264,6 +1265,99 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
 // ---------------------------------------------------------------------------
 // BO2d — the source lens
 // ---------------------------------------------------------------------------
+
+
+/**
+ * The census board: what exists here, per drawer, for nothing.
+ *
+ * The data policy's area board (owner, 19 Sep 2026). It is defined as much by
+ * what it cannot do as by what it shows: **nothing on it can spend money.**
+ * Every figure was written down when the census ran, and a census asks Google
+ * only for identifiers — the tier that costs nothing — so this is the one board
+ * in the back office that can be read all day for free. It says so in its own
+ * header, because somebody who does not know that will use it more carefully
+ * than they need to.
+ *
+ * Two counts per drawer, not one. **Found** is how many places that question
+ * actually surfaced, which is the answer to "how many are there". **Filed** is
+ * one per place, which is the shelving answer. They differ by the overlap with
+ * other drawers — a golf course in a wood is both — and showing only the second
+ * had golf reading nought in Ascot while Google had just returned two courses.
+ *
+ * A hole is a finding, so a drawer that found nothing keeps its row, and a
+ * cross-check nobody has run reads as a dash rather than a nought: "nobody has
+ * checked" and "there are none" are different facts, and this board is read for
+ * exactly that difference.
+ */
+function CensusBoard({ where }: { where: string }) {
+  const [reach, setReach] = useState<'outcode' | '30' | '60'>('outcode');
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCensus>> | null>(null);
+  const [why, setWhy] = useState<string | null>(null);
+  const load = useCallback(() => {
+    setData(null); setWhy(null);
+    api.adminPlaceCensus({ where, reach })
+      .then(setData)
+      .catch((e) => setWhy(e?.message || 'That board could not be read.'));
+  }, [where, reach]);
+  useEffect(load, [load]);
+
+  const columns: Col<PlaceCensusRow>[] = [
+    { key: 'drawer', label: 'Drawer', tip: 'lensCensus', grow: true,
+      cell: (r) => (
+        <View style={styles.nameCell}>
+          <Text style={styles.rowName}>{r.subcategory}</Text>
+          <Text style={styles.rowNote}>{r.category}</Text>
+        </View>
+      ) },
+    { key: 'found', label: 'Found', tip: 'censusFound', width: 84, align: 'right',
+      cell: (r) => <Num n={r.surfaced || null} /> },
+    { key: 'filed', label: 'Filed', tip: 'censusFiled', width: 96, align: 'right',
+      cell: (r) => (
+        <Text style={styles.rowName}>
+          {r.filed ?? 0}
+          {(r.surfaced ?? 0) > (r.filed ?? 0) ? <Text style={styles.rowNote}>{`  +${(r.surfaced ?? 0) - (r.filed ?? 0)}`}</Text> : null}
+        </Text>
+      ) },
+    { key: 'osm', label: 'Open map', tip: 'censusCheck', width: 96, align: 'right',
+      cell: (r) => <Num n={r.osm} /> },
+    { key: 'fhrs', label: 'Hygiene', tip: 'censusCheck', width: 88, align: 'right',
+      cell: (r) => <Num n={r.fhrs} /> },
+    { key: 'scored', label: 'Scored', tip: 'censusScored', width: 84, align: 'right',
+      cell: (r) => <Num n={r.scored || null} /> },
+    { key: 'cut', label: 'Cut off', tip: 'censusCutOff', width: 84, align: 'right',
+      cell: (r) => <Num n={r.saturated || null} /> },
+  ];
+
+  return (
+    <>
+      <View style={styles.censusHead}>
+        <View style={styles.censusReach}>
+          {([['outcode', data?.where ?? where.toUpperCase()], ['30', '30 min'], ['60', '1 hour']] as const).map(([k, label]) => (
+            <Press key={k} effect="none" onPress={() => setReach(k as 'outcode' | '30' | '60')}
+                   accessibilityRole="tab" accessibilityState={{ selected: reach === k }}
+                   style={[styles.lens, reach === k && styles.lensOn]}>
+              <Text style={[styles.lensWord, reach === k && styles.lensWordOn]}>{label}</Text>
+            </Press>
+          ))}
+        </View>
+        <Explain tip="censusFree">
+          <Text style={styles.censusFree}>
+            {`FREE · ${data?.outcodes?.length ?? 1} OUTCODE${(data?.outcodes?.length ?? 1) === 1 ? '' : 'S'} · CENSUSED ${data?.newest ? day(data.newest) : 'NEVER'}`}
+          </Text>
+        </Explain>
+      </View>
+      {data ? (
+        data.rows.length ? (
+          <Ladder columns={columns} rows={data.rows} keyOf={(r) => `${r.category}/${r.subcategory}`} />
+        ) : (
+          <Text style={styles.censusNone}>
+            Nothing here has been censused yet. The census runs on the first search of an area, and costs nothing.
+          </Text>
+        )
+      ) : why ? <Trouble why={why} onRetry={load} /> : <Waiting />}
+    </>
+  );
+}
 
 function SourceBoard({ q, onSub }: { q: any; onSub: (s: string) => void }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceSources>> | null>(null);
@@ -3201,6 +3295,11 @@ const styles = StyleSheet.create({
   trailNote: { ...type.small, fontSize: 12.5, color: colors.inkMuted },
 
   // the lens row
+  // The census board. Rules rather than boxes, the same as Categories.
+  censusHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md },
+  censusReach: { flexDirection: 'row', gap: spacing.xs },
+  censusFree: { ...type.label, marginBottom: 0, marginTop: 0 },
+  censusNone: { ...type.body, paddingVertical: spacing.lg },
   lensRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap' },
   // The label-above-lenses column has to be told it may be narrower than its
   // content, or it takes the width of six lenses and carries the row off the

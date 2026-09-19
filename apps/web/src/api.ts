@@ -1408,6 +1408,21 @@ export type PlaceAreaRow = PlaceStats & {
   searches: number; empty: number;
 };
 
+/**
+ * One drawer on the census board.
+ *
+ * `surfaced` and `filed` answer different questions and both are shown: how
+ * many this question found, against how many are filed here. A cross-check
+ * nobody has run is `null` rather than nought, because "nobody has checked" and
+ * "there are none" are different facts.
+ */
+export type PlaceCensusRow = {
+  category: string; subcategory: string;
+  filed: number; surfaced: number; scored: number; saturated: number;
+  osm: number | null; fhrs: number | null; residual: number | null;
+  censused_at: string | null; complete: boolean;
+};
+
 export type PlaceCoverageRow = {
   slug: string; name: string; kind: string;
   /** An outcode says which towns its own places sit in — the way back across the two ladders. */
@@ -2498,6 +2513,20 @@ export const api = {
   /** BO2a / BO2n — the level cut by county, by city or by postcode district. */
   adminPlaceBreakdown: (p: PlaceWhere & { by?: string; sort?: string; desc?: string; since?: number }) =>
     request<{ rows: PlaceAreaRow[]; all: number; totals: PlaceStats }>(`/api/admin/place-index/breakdown${qs(p)}`),
+  /**
+   * The census board — what exists here, per drawer, for nothing.
+   *
+   * Free by construction: every figure was written down when the census ran,
+   * and a census asks Google only for identifiers. Nothing this endpoint
+   * returns can have cost anything, and nothing it offers can spend (data
+   * policy, 19 Sep 2026).
+   */
+  adminPlaceCensus: (p: { where: string; reach?: string }) =>
+    request<{
+      where: string; reach: string; outcodes: string[]; rows: PlaceCensusRow[];
+      censused: number; oldest: string | null; newest: string | null;
+      residual: number; checkedOnGoogle: number; free: boolean;
+    }>(`/api/admin/place-index/census${qs(p)}`),
   /** BO2b — the coverage grid, towns and outcodes together. */
   adminPlaceCoverage: (p: PlaceWhere) =>
     request<{ rows: PlaceCoverageRow[]; towns: number; outcodes: number; allTowns: number; refreshedAt: string | null }>(`/api/admin/place-index/coverage${qs(p)}`),

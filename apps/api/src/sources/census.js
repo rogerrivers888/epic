@@ -171,7 +171,24 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
       type, type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId],
   );
   stats.slices += 1;
-  if (res.problem) stats.problems.push(`${subcategory}/${type}: ${res.problem}`);
+  if (res.problem) {
+    stats.problems.push(`${subcategory}/${type}: ${res.problem}`);
+    // A refusal is not a slice that found nothing; it is the whole run being
+    // told to stop. The first ring census walked into the console's daily
+    // Text Search cap after two outcodes and then fired **9,321 more doomed
+    // requests** — every remaining slice of every remaining outcode — because
+    // nothing read the answer. Worse, each of those outcodes then rolled up as
+    // a completed census of nought places (19 Sep 2026).
+    if (/\b429\b|RESOURCE_EXHAUSTED|Quota exceeded|rate limit/i.test(res.problem)) {
+      stats.refused = res.problem.slice(0, 200);
+      stats.stopped = true;
+    }
+  } else {
+    // At least one slice of this subcategory was actually answered. Without
+    // this a subcategory whose every slice was refused looked exactly like one
+    // Google answered with nothing.
+    stats.answered.add(subcategory);
+  }
   if (res.saturated && depth >= MAX_DEPTH) stats.saturated += 1;
 
   if (!saturated) return;
@@ -205,7 +222,7 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   // per place: the two answer different questions and the board shows both.
   const surfaced = new Map();
   const meter = {};
-  const stats = { requests: 0, slices: 0, saturated: 0, problems: [], maxRequests, stopped: false };
+  const stats = { requests: 0, slices: 0, saturated: 0, problems: [], maxRequests, stopped: false, refused: null, answered: new Set() };
   // Only the subcategories carried all the way through. A run that stopped at
   // its ceiling used to roll the *whole plan* up anyway, which wrote nought
   // against every subcategory it never reached and stamped the area fresh — so
@@ -216,9 +233,14 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   for (const { category, subcategory, types } of plan) {
     for (const type of types) {
       await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats });
-      if (stats.stopped) break;
+      if (stats.stopped || stats.refused) break;
     }
+    if (stats.refused) { stats.problems.push(`the provider refused: ${stats.refused}`); break; }
     if (stats.stopped) { stats.problems.push(`stopped at the ${maxRequests}-request ceiling; ${plan.length - done.length} subcategories were not reached`); break; }
+    // Only a subcategory something actually answered for. A drawer whose every
+    // slice was refused is not a drawer with nothing in it, and rolling it up
+    // as nought overwrote a good census of SL5 with forty-six zeroes.
+    if (!stats.answered.has(subcategory)) continue;
     done.push({ category, subcategory });
     onProgress?.({ subcategory, found: found.size, requests: stats.requests });
   }
@@ -255,7 +277,12 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   }
   await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
 
-  return { noted: places.length, surfacings: surfaced.size, ...stats, runId, plan: plan.length, completed: done.length };
+  return {
+    noted: places.length, surfacings: surfaced.size, ...stats,
+    // A Set does not survive JSON, and the count is what a caller wants anyway.
+    answered: stats.answered.size,
+    runId, plan: plan.length, completed: done.length,
+  };
 }
 
 /**
@@ -475,4 +502,69 @@ export async function expireRentedCoordinates({ days = 30 } = {}) {
     cells += rowCount;
   }
   return { expired: rows.length, cells };
+}
+
+/**
+ * Rebuild an area's board counts from what is already stored.
+ *
+ * The census writes two things: the places, into `place_index` and
+ * `place_subcategories`, and the roll-up, into `area_counts`. The first is the
+ * record and the second is derived from it — so when a run zeroed SL5's
+ * forty-six drawers by rolling up a census in which every slice had been
+ * refused, nothing was actually lost. The places were still there; only the
+ * summary was wrong.
+ *
+ * This puts the summary back from the record, which is the right direction of
+ * travel and costs nothing. It is also what makes the zeroing survivable at
+ * all: a derived table that cannot be rebuilt is not derived, it is the record.
+ */
+export async function rebuildCounts(areaSlug) {
+  const { rows } = await query(
+    `select ps.category, ps.subcategory,
+            count(*)::int                                            as surfaced,
+            count(*) filter (where i.subcategory = ps.subcategory)::int as filed,
+            count(e.venue_ref)::int                                  as scored
+       from place_subcategories ps
+       join place_index i on i.venue_ref = ps.venue_ref
+       left join epic_scores e on e.venue_ref = ps.venue_ref
+      where ps.venue_ref in (
+              select distinct cs_ps.venue_ref
+                from place_subcategories cs_ps
+               where exists (select 1 from census_slices cs
+                              where cs.area_slug = $1 and cs.subcategory = cs_ps.subcategory))
+      group by 1, 2`,
+    [areaSlug],
+  );
+  let written = 0;
+  for (const r of rows) {
+    const { rows: [sat] } = await query(
+      `select count(*)::int n from census_slices
+        where area_slug = $1 and subcategory = $2 and saturated and depth >= $3
+          and run_id = (select run_id from census_slices
+                         where area_slug = $1 and subcategory = $2 and problem is null
+                         order by ran_at desc limit 1)`,
+      [areaSlug, r.subcategory, MAX_DEPTH],
+    );
+    await query(
+      `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete)
+       values ($1,$2,$3,$4,$5,$6,$7,
+               (select max(ran_at) from census_slices where area_slug = $1 and subcategory = $3 and problem is null),
+               true)
+       on conflict (area_slug, category, subcategory) do update
+          set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count,
+              scored_count = excluded.scored_count, saturated = excluded.saturated,
+              censused_at = excluded.censused_at, complete = true`,
+      [areaSlug, r.category, r.subcategory, r.filed, r.surfaced, r.scored, sat.n],
+    );
+    written += 1;
+  }
+  // A drawer with no surfacings at all keeps no row: the board draws the plan,
+  // and a row of noughts asserts an answer nobody got.
+  await query(
+    `delete from area_counts a
+      where a.area_slug = $1
+        and not exists (select 1 from place_subcategories ps where ps.subcategory = a.subcategory)`,
+    [areaSlug],
+  );
+  return { written };
 }
