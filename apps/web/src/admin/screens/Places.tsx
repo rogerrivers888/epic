@@ -1718,6 +1718,35 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
           <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.ref} onRow={(r) => onPlace(r.ref)}
                   sort={sort} desc={desc}
                   onSort={(k) => { if (k === sort) setDesc(!desc); else { setSort(k); setDesc(true); } }}
+                  /* BO2q's stacked row. This board is the one that never got a
+                     phone layout: a fact column per thing a place can be missing
+                     put Hours at 608px inside a 390px frame, with nothing to
+                     scroll it into view (19 Sep 2026, the 390px audit). The
+                     facts become chips, which is what chips are for — and the
+                     ones this kind of place is not judged on stay out, rather
+                     than reading as things it lacks. */
+                  phoneRow={(r) => ({
+                    name: r.standIn
+                      ? <Explain tip="standInName"><Text style={[styles.rowName, styles.refName]}>{`Unnamed ${String(r.name ?? '').replace(/^\(|\)$/g, '')}`}</Text></Explain>
+                      : <Text style={[styles.rowName, !r.name && styles.refName]}>{r.name ?? r.ref}</Text>,
+                    note: [r.outcode, r.unseenBy?.length ? `unseen by ${r.unseenBy.length}` : null]
+                      .filter(Boolean).join(' · '),
+                    chips: [
+                      { key: 'score', word: `score ${r.score == null ? '—' : r.score}`, tip: 'scoreWeights' as const, lead: true },
+                      // Only the facts this kind of place is judged on, and only
+                      // the ones it is missing. The wide board greys what does
+                      // not count; a chip that says "no menu" about a playground
+                      // would read as a gap rather than as not applicable, which
+                      // is the one thing the per-kind bar exists to prevent.
+                      ...facts
+                        .filter((f) => (data?.counted ?? []).includes(f.key) && r.facts[f.key] === 'no')
+                        .map((f) => ({
+                          key: f.key,
+                          word: `no ${f.short.toLowerCase()}`,
+                          tip: [f.label, f.explain] as const,
+                        })),
+                    ],
+                  })}
                   empty={<Word muted>Nothing here that is {show === 'ready' ? 'ready' : 'not ready'}.</Word>} />
         </>
       ) : <Waiting />}
@@ -1965,6 +1994,10 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   tab: PlaceTab; onTab: (t: PlaceTab) => void;
 }) {
   const setTab = onTab;
+  // The drawer is told it is 390 wide by the frame, like everything else — never
+  // the window (CLAUDE.md).
+  const { width } = useViewport();
+  const narrow = width < PHONE;
   const [place, setPlace] = useState<PlaceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [curating, setCurating] = useState(false);
@@ -2020,9 +2053,17 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
       } />
 
       <View style={styles.lensRow}>
-        <View style={styles.lensLeft}>
+        <View style={[styles.lensLeft, narrow && styles.lensLeftPhone, narrow && styles.lensLeftPhoneWidth]}>
           <Kicker tip="sectionLookingAt">Looking at</Kicker>
-          <View style={styles.lenses}>
+          {/* The same sideways scroller the board's own lens row uses, and for
+              the same reason. Six tab names are 719px wide and the drawer is
+              390: laid out flat, "What each source returned" and "History" were
+              off the edge of a phone with nothing to scroll to them, so two of
+              the drawer's six tabs could not be reached at all (19 Sep 2026,
+              the 390px audit). */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.lenses}
+                      style={narrow ? [styles.lensScrollPhone, { width: '100%' }] : { flexShrink: 1, minWidth: 0 }}>
             {/* Six words, six hovers: they are the headings of this drawer, and
                 they were the last labels on it that explained nothing (18 Sep
                 2026, the separate audit). */}
@@ -2035,9 +2076,12 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
                 </Press>
               </Explain>
             ))}
-          </View>
+          </ScrollView>
         </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        {/* Wraps on a phone: three actions with their prices on them are wider
+            than the frame, and the third — "Ask Google about it" — is BO2r's own
+            primary action (19 Sep 2026, the 390px audit). */}
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Act label={curating ? 'Curating…' : 'Curate it · free'} tone="secondary" disabled={!canManage || curating}
                onPress={() => { setCurating(true); api.adminCuratePlaces([refId]).finally(() => { setCurating(false); load(); }); }} />
           {/* What it would actually spend, from the API rather than a figure
