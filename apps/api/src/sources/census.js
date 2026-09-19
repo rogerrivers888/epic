@@ -142,9 +142,9 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
     // ran first made `sport/golf` read nought in Ascot while Google had just
     // returned two courses (owner, 19 Sep 2026). `found` still keeps the one
     // filing — a place lives on one shelf — and this keeps the count.
-    const key = `${ref}|${subcategory}`;
+    const key = `${ref}|${subcategory}|${areaSlug ?? ''}`;
     if (!surfaced.has(key)) {
-      surfaced.set(key, { ref, category, subcategory, foundBy: type, rank: p.rank });
+      surfaced.set(key, { ref, category, subcategory, foundBy: type, rank: p.rank, areaSlug });
     }
     if (!found.has(ref)) fresh += 1;
     // Later slices do not overwrite the first one to find a place: the narrowest
@@ -336,12 +336,12 @@ async function writeCensusFacts(places) {
  * legible rather than silently vanishing.
  */
 async function writeSurfacings(rows) {
-  const values = rows.map((_, i) => `($${i * 5 + 1},$${i * 5 + 2},$${i * 5 + 3},$${i * 5 + 4},$${i * 5 + 5}::int, now(), now())`).join(',');
-  const params = rows.flatMap((r) => [r.ref, r.category, r.subcategory, r.foundBy, r.rank]);
+  const values = rows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::int,$${i * 6 + 6}, now(), now())`).join(',');
+  const params = rows.flatMap((r) => [r.ref, r.category, r.subcategory, r.foundBy, r.rank, r.areaSlug ?? null]);
   await query(
-    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, first_seen, last_seen)
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, area_slug, first_seen, last_seen)
      values ${values}
-     on conflict (venue_ref, subcategory) do update
+     on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update
         -- The category too. A taxonomy change can move a subcategory to another
         -- shelf, and leaving the old parent here made the (category,
         -- subcategory) index answer with stale membership for ever — which
@@ -527,11 +527,7 @@ export async function rebuildCounts(areaSlug) {
        from place_subcategories ps
        join place_index i on i.venue_ref = ps.venue_ref
        left join epic_scores e on e.venue_ref = ps.venue_ref
-      where ps.venue_ref in (
-              select distinct cs_ps.venue_ref
-                from place_subcategories cs_ps
-               where exists (select 1 from census_slices cs
-                              where cs.area_slug = $1 and cs.subcategory = cs_ps.subcategory))
+      where ps.area_slug = $1
       group by 1, 2`,
     [areaSlug],
   );
@@ -563,7 +559,8 @@ export async function rebuildCounts(areaSlug) {
   await query(
     `delete from area_counts a
       where a.area_slug = $1
-        and not exists (select 1 from place_subcategories ps where ps.subcategory = a.subcategory)`,
+        and not exists (select 1 from place_subcategories ps
+                         where ps.area_slug = a.area_slug and ps.subcategory = a.subcategory)`,
     [areaSlug],
   );
   return { written };
