@@ -1897,6 +1897,37 @@ test('two outcomes on one rolled search never leave it counted twice', async () 
   assert.equal(b.no_trip, 0, 'and not also in the one it passed through');
 });
 
+test('an open and a trip arriving together never deadlock, twenty times running', async () => {
+  // The single-shot version of this above passed about half the time and read
+  // as a flaky test. It was not: writing a `search_events` row takes a `for key
+  // share` lock on its parent search, so two events that then asked to upgrade
+  // to `for update` deadlocked, the loser was rolled back, and the swallow
+  // turned a lost outcome into a quiet null. A search that reached an itinerary
+  // was left counted under "clicked, never tripped" (19 Sep 2026).
+  //
+  // Twenty rounds, because a coin-toss bug that is asserted once is a bug that
+  // ships half the time.
+  const { household: h } = await aHousehold(query);
+  const fell = [];
+  for (let i = 0; i < 20; i += 1) {
+    const area = `zz-race-${Math.random().toString(36).slice(2, 8)}`;
+    const id = await log.logSearch({
+      householdId: h.id, surface: 'places', areaSlug: area, subject: 'food', shownTotal: 4, shown: [],
+    });
+    await Promise.all([
+      log.logEvent({ searchId: id, kind: 'open', venueRef: 'osm:node/1', householdId: h.id }),
+      log.logEvent({ searchId: id, kind: 'add_to_trip', venueRef: 'osm:node/1', householdId: h.id }),
+    ]);
+    const { rows: [row] } = await query('select outcome from searches where id = $1', [id]);
+    if (row.outcome !== 'tripped') fell.push(`${i}:${row.outcome}`);
+    // Both events happened and both are on the record, whichever won the lock.
+    const { rows: [ev] } = await query('select count(*)::int n from search_events where search_id = $1', [id]);
+    assert.equal(ev.n, 2, 'a deadlocked event is a lost event, and neither of these may be lost');
+    await query('delete from searches where id = $1', [id]);
+  }
+  assert.deepEqual(fell, [], 'the outcome only ever rises, every time and not on average');
+});
+
 test('both shapes of Tripadvisor meter count against the contractual cap', async () => {
   const runs = await import('../src/repositories/runs.js');
   await query('delete from provider_calls');

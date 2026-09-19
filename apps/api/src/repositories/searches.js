@@ -133,6 +133,12 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
     // and outcomes only ever rise. Half-applied is the one state there is no
     // recovering from, and that is what this transaction exists to prevent.
     let ok = true;
+    // Told apart on purpose. `ok === false` is "this did not go through, ask
+    // again" and the route turns it into a retry; `gone` is "there is no such
+    // search", which no amount of asking again will fix — a client holding an
+    // id from before a deploy, which must be answered and ignored rather than
+    // turned into a five hundred. Both return null; only one of them means try.
+    let gone = false;
     await withTransaction(async (client) => {
       // The row and the outcome together.
       //
@@ -143,20 +149,50 @@ async function writeEvent({ searchId, kind, venueRef, position, dwellMs, meta, h
       // uniqueness constraint to stop it (Codex, 19 Sep 2026; migration 176 is
       // the one that gave `open` its). Either the household did this and the
       // search says so, or neither is true yet.
+      // **The search is locked before the event is written, and that order is
+      // the whole fix.**
+      //
+      // It was the other way round — insert the event, then take the row's lock
+      // inside a CTE. Writing a `search_events` row takes a `for key share`
+      // lock on its parent `searches` row, because that is what a foreign key
+      // does. Two events arriving together therefore each held a share of the
+      // row and then each asked to upgrade it to `for update`, and neither
+      // could have it until the other let go. **Postgres detected a deadlock in
+      // about half of sixty runs**, rolled the loser back, and
+      // `.catch(() => { ok = false })` turned that into a quiet `null`: the
+      // event was lost and the outcome never moved. An open landing beside an
+      // add-to-trip left the search on `clicked`, so a search that reached an
+      // itinerary was counted under "clicked, never tripped" — the one number
+      // the demand board exists to report (19 Sep 2026).
+      //
+      // Taking the exclusive lock first means there is no upgrade and so no
+      // cycle. The second event waits, then reads what the first committed.
+      // Outcomes only ever rise, and the three faults are counted off that.
+      //
+      // The CTE it replaced was wrong for a second reason worth keeping in
+      // mind: a CTE is evaluated against the statement's snapshot, so even
+      // where it did not deadlock, the value the outer update compared against
+      // was the one read before the wait rather than after it.
+      const { rows: [was] } = await client.query(
+        `select outcome as before, empty, rolled_at, area_slug, subject, at
+           from searches where id = $1::uuid for update`,
+        [searchId]);
+      // No such search: it went while this was in flight, or the id was never
+      // ours. Nothing to attach an event to and nothing to raise. Before the
+      // lock moved above the insert this was a foreign-key violation, which
+      // came out as the same `null` by a longer route.
+      if (!was) { gone = true; return; }
       await client.query(...insert);
-      const { rows: [moved] } = await client.query(
-        `with was as (
-           select id, outcome as before, empty, rolled_at, area_slug, subject, at
-             from searches where id = $1::uuid for update)
-         update searches s set outcome = $2, outcome_at = now()
-           from was w
-          where s.id = w.id
-            and (case w.before when 'tripped' then 3 when 'saved' then 2 when 'clicked' then 1 else 0 end) < $3
-         returning w.before, w.empty, w.rolled_at, w.area_slug, w.subject, w.at`,
-        [searchId, outcome, ORDER[outcome]]);
-      if (moved?.rolled_at) await moveInTheRollup(moved, outcome, client);
+      // Already at or above where this event would put it. The event is still
+      // written — it happened — but there is nothing to move, and nothing to
+      // correct in the bucket either.
+      if ((ORDER[was.before] ?? 0) >= ORDER[outcome]) return;
+      await client.query(
+        'update searches set outcome = $2, outcome_at = now() where id = $1::uuid',
+        [searchId, outcome]);
+      if (was.rolled_at) await moveInTheRollup(was, outcome, client);
     }).catch(() => { ok = false; });
-    if (!ok) return null;
+    if (gone || !ok) return null;
   }
   return true;
 }
