@@ -801,10 +801,30 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
       data = await call('/places:searchText', { fieldMask: CENSUS_FIELDS, meter, body });
       requests += 1;
     } catch (err) {
-      // A slice that failed is not a slice that was empty, and the difference
-      // has to survive to the census row: an area under-counted because Google
-      // refused must never read as an area with nothing in it.
-      return { places: [...out.values()], requests, saturated: false, problem: String(err.message).slice(0, 160) };
+      // A type Google does not have is still a question worth asking.
+      //
+      // `place_of_worship` and `landmark` are what Google calls its own
+      // *groups*, not types in Table A, and both came back 400 on the first SL5
+      // census — so two subcategories quietly never asked one of their
+      // questions (19 Sep 2026). A label taught in the back office should not
+      // have to be checked against Google's table by hand, so an invalid type
+      // falls back to the same words as a plain text query, which Google does
+      // answer. Asked once, and the reason is still recorded if it fails again.
+      if (/Invalid included_type/i.test(String(err.message)) && includedType) {
+        requests += 1;
+        try {
+          const { includedType: _drop, ...loose } = body;
+          data = await call('/places:searchText', { fieldMask: CENSUS_FIELDS, meter, body: { ...loose, textQuery: googleTypeWords(includedType) } });
+          requests += 1;
+        } catch (err2) {
+          return { places: [...out.values()], requests, saturated: false, problem: `as a text query too: ${String(err2.message).slice(0, 140)}` };
+        }
+      } else {
+        // A slice that failed is not a slice that was empty, and the difference
+        // has to survive to the census row: an area under-counted because
+        // Google refused must never read as an area with nothing in it.
+        return { places: [...out.values()], requests, saturated: false, problem: String(err.message).slice(0, 160) };
+      }
     }
     // An id and its rank. No point and no type: those are Pro, and the census
     // does not buy them. `locationRestriction` is what guarantees the place is

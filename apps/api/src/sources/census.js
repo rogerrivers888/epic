@@ -121,7 +121,7 @@ const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((
  * thing to look at when a count reads wrong, and a tree that quietly replaced
  * the parent with its tiles would hide it.
  */
-async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, meter, stats }) {
+async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats }) {
   if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
   const before = meter['google'] ?? 0;
   const res = await googleSource.censusSlice({ box, includedType: type, meter });
@@ -136,6 +136,16 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
   let fresh = 0;
   for (const p of res.places) {
     const ref = `google:${p.id}`;
+    // Every question that surfaced it, not only the first.
+    //
+    // A golf course in a wood is both, and filing it under whichever question
+    // ran first made `sport/golf` read nought in Ascot while Google had just
+    // returned two courses (owner, 19 Sep 2026). `found` still keeps the one
+    // filing — a place lives on one shelf — and this keeps the count.
+    const key = `${ref}|${subcategory}`;
+    if (!surfaced.has(key)) {
+      surfaced.set(key, { ref, category, subcategory, foundBy: type, rank: p.rank });
+    }
     if (!found.has(ref)) fresh += 1;
     // Later slices do not overwrite the first one to find a place: the narrowest
     // question that returned it is the most informative thing about it, and the
@@ -168,7 +178,7 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
   for (const q of quarters(box)) {
     await sliceDown({
       box: q, type, category, subcategory, areaSlug, outcode, householdId, runId,
-      depth: depth + 1, parentId: row.id, found, meter, stats,
+      depth: depth + 1, parentId: row.id, found, surfaced, meter, stats,
     });
   }
 }
@@ -191,6 +201,9 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
 
   const runId = randomUUID();
   const found = new Map();
+  // One entry per place *per subcategory that found it*. `found` is one entry
+  // per place: the two answer different questions and the board shows both.
+  const surfaced = new Map();
   const meter = {};
   const stats = { requests: 0, slices: 0, saturated: 0, problems: [], maxRequests, stopped: false };
   // Only the subcategories carried all the way through. A run that stopped at
@@ -202,7 +215,7 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
 
   for (const { category, subcategory, types } of plan) {
     for (const type of types) {
-      await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, found, meter, stats });
+      await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats });
       if (stats.stopped) break;
     }
     if (stats.stopped) { stats.problems.push(`stopped at the ${maxRequests}-request ceiling; ${plan.length - done.length} subcategories were not reached`); break; }
@@ -237,9 +250,12 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
     );
     await writeCensusFacts(batch);
   }
-  await rollUp({ areaSlug, runId, done, found: places });
+  for (const batch of chunks([...surfaced.values()], WRITE_BATCH)) {
+    await writeSurfacings(batch);
+  }
+  await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
 
-  return { noted: places.length, ...stats, runId, plan: plan.length, completed: done.length };
+  return { noted: places.length, surfacings: surfaced.size, ...stats, runId, plan: plan.length, completed: done.length };
 }
 
 /**
@@ -285,6 +301,26 @@ async function writeCensusFacts(places) {
 }
 
 /**
+ * Every question that surfaced a place, so a count can be honest.
+ *
+ * Written after the index, because the foreign key points at it. `last_seen`
+ * moves on a re-census and `first_seen` does not: a subcategory that stopped
+ * finding a place keeps its row, which is how "this used to be here" stays
+ * legible rather than silently vanishing.
+ */
+async function writeSurfacings(rows) {
+  const values = rows.map((_, i) => `($${i * 5 + 1},$${i * 5 + 2},$${i * 5 + 3},$${i * 5 + 4},$${i * 5 + 5}::int, now(), now())`).join(',');
+  const params = rows.flatMap((r) => [r.ref, r.category, r.subcategory, r.foundBy, r.rank]);
+  await query(
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, first_seen, last_seen)
+     values ${values}
+     on conflict (venue_ref, subcategory) do update
+        set found_by = excluded.found_by, found_rank = excluded.found_rank, last_seen = now()`,
+    params,
+  );
+}
+
+/**
  * The area board's numbers, written down so the board can draw without calling
  * anybody.
  *
@@ -297,10 +333,15 @@ async function writeCensusFacts(places) {
  * clocks. A null is honest — it says nobody has checked — and is not the same
  * as a nought.
  */
-async function rollUp({ areaSlug, runId, done, found }) {
+async function rollUp({ areaSlug, runId, done, found, surfaced }) {
   if (!areaSlug) return;
   for (const { category, subcategory } of done) {
+    // Filed here — one per place, the shelving answer.
     const mine = found.filter((p) => p.subcategory === subcategory);
+    // Found by this question — the answer to "how many are there". The gap
+    // between the two is the overlap with other drawers, and the owner asked
+    // to see both where they differ (19 Sep 2026).
+    const surfacedHere = surfaced.filter((p) => p.subcategory === subcategory);
     // This run's saturation, not every run's. Slices are append-only, so
     // counting them all meant a later clean census could never clear an earlier
     // one and two runs over the same ground made the number climb by itself
@@ -313,21 +354,24 @@ async function rollUp({ areaSlug, runId, done, found }) {
     // Scored places *here*, not everywhere. The unscoped count wrote the same
     // national figure into every area's board the moment a second area existed
     // (Codex, 19 Sep 2026); the places this run found are the honest scope.
-    const refs = mine.map((p) => p.ref);
+    // Scored is counted over everything this question found, not only what it
+    // was filed under: a golf course scored as a wood is still scored.
+    const refs = [...new Set(surfacedHere.map((p) => p.ref))];
     const { rows: [scored] } = refs.length
       ? await query(`select count(*)::int n from epic_scores where venue_ref = any($1)`, [refs])
       : { rows: [{ n: 0 }] };
     await query(
-      `insert into area_counts (area_slug, category, subcategory, census_count, scored_count, saturated, censused_at, run_id, complete)
-       values ($1,$2,$3,$4,$5,$6, now(), $7, true)
+      `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, run_id, complete)
+       values ($1,$2,$3,$4,$5,$6,$7, now(), $8, true)
        on conflict (area_slug, category, subcategory) do update
-          set census_count = excluded.census_count,
-              scored_count = excluded.scored_count,
-              saturated    = excluded.saturated,
-              censused_at  = excluded.censused_at,
-              run_id       = excluded.run_id,
-              complete     = true`,
-      [areaSlug, category, subcategory, mine.length, scored.n, sat.n, runId],
+          set census_count   = excluded.census_count,
+              surfaced_count = excluded.surfaced_count,
+              scored_count   = excluded.scored_count,
+              saturated      = excluded.saturated,
+              censused_at    = excluded.censused_at,
+              run_id         = excluded.run_id,
+              complete       = true`,
+      [areaSlug, category, subcategory, mine.length, surfacedHere.length, scored.n, sat.n, runId],
     );
   }
 }

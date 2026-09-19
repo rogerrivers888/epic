@@ -258,3 +258,66 @@ test("OpenStreetMap's own coordinates are ours to keep, so they never expire", a
   assert.ok(row.lat != null, 'ODbL lets us keep it, so the expiry sweep leaves it alone');
   await query(`delete from place_index where venue_ref = $1`, [ref]);
 });
+
+test('a place found by two questions is counted under both and filed under one', async () => {
+  // Golf reading nought in Ascot while Google had just returned two courses:
+  // the place was filed under whichever question ran first, and the count came
+  // off the filing (owner, 19 Sep 2026). A place lives on one shelf and is
+  // counted under every question that found it, and the board shows both.
+  const plan = await slicePlan();
+  if (plan.length < 2) return;
+  const [first, second] = plan;
+
+  // The same place returned to two different subcategories.
+  const impl = async () => ({ places: [{ id: 'ChIJcensus_both', rank: 1 }], requests: 1, saturated: false, problem: null });
+  const out = await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-both', outcode: 'ZZ94', box: BOX,
+    subcategories: [first.subcategory, second.subcategory],
+  }));
+  assert.equal(out.noted, 1, 'one place');
+  assert.ok(out.surfacings >= 2, 'surfaced under both questions');
+
+  const { rows: subs } = await query(
+    `select subcategory from place_subcategories where venue_ref = 'google:ChIJcensus_both' order by subcategory`);
+  assert.equal(subs.length, 2, 'both questions are on the record');
+
+  const { rows: counts } = await query(
+    `select subcategory, census_count, surfaced_count from area_counts
+      where area_slug = 'census-test-both' order by subcategory`);
+  assert.equal(counts.reduce((n, r) => n + r.census_count, 0), 1, 'filed once');
+  assert.equal(counts.reduce((n, r) => n + r.surfaced_count, 0), 2, 'found twice');
+  // The one the board is for: the later question no longer reads nought.
+  assert.ok(counts.every((r) => r.surfaced_count === 1), 'neither question reads zero');
+
+  await query(`delete from place_index where venue_ref = 'google:ChIJcensus_both'`);
+  await query(`delete from census_slices where area_slug = 'census-test-both'`);
+  await query(`delete from area_counts where area_slug = 'census-test-both'`);
+});
+
+test('a type Google does not have is asked again as words', async () => {
+  // `place_of_worship` and `landmark` are what Google calls its own groups, not
+  // types in Table A. Both 400'd on the first SL5 census, so two subcategories
+  // silently never asked one of their questions (19 Sep 2026). A label taught
+  // in the back office should not have to be checked against Google's table by
+  // hand.
+  const { googleSource: src } = await import('../src/sources/google.js');
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    seen.push(body);
+    if (body.includedType) {
+      return { ok: false, status: 400, text: async () => '{"error":{"code":400,"message":"Invalid included_type: \'landmark\'."}}' };
+    }
+    return { ok: true, json: async () => ({ places: [{ id: 'ChIJwords' }] }) };
+  };
+  try {
+    process.env.GOOGLE_MAPS_API_KEY ||= 'test-key';
+    const out = await src.censusSlice({ box: BOX, includedType: 'landmark', meter: {} });
+    assert.equal(out.problem, null, 'the words worked where the type did not');
+    assert.deepEqual(out.places.map((p) => p.id), ['ChIJwords']);
+    assert.equal(seen.length, 2, 'asked twice: once as a type, once as words');
+    assert.equal(seen[1].includedType, undefined, 'and the second time without the type');
+    assert.equal(seen[1].textQuery, 'landmark');
+  } finally { globalThis.fetch = realFetch; }
+});
