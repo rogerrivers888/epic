@@ -234,7 +234,19 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
    * is still thinking, rather than either starting a second one or showing
    * nothing at all.
    */
-  const watchRun = async (id: number, ofSession: string, ref: string | null, startedAt: number) => {
+  const watchRun = async (
+    id: number, ofSession: string, ref: string | null, startedAt: number,
+    /**
+     * Whether these ideas are being *added* to what is on screen.
+     *
+     * A fresh Inspire me replaces the list, and registering it as an append kept
+     * the previous run's ownership — so a place both runs suggested was still
+     * counted against the old ask and the new one read as clicked on nothing
+     * (Codex, 19 Sep 2026). Only "show me 5 more", and rejoining a run whose
+     * ideas are already registered, are appends.
+     */
+    { append = false }: { append?: boolean } = {},
+  ) => {
     for (;;) {
       await wait(2000);
       if (inspireRun.current !== id) return;
@@ -250,7 +262,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       // What the household does with these ideas is counted against the ask
       // that produced them; without the id every planner ask stayed at "clicked
       // nothing" for ever (Codex, 17 Sep 2026).
-      heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id), { append: true });
+      heldSearch('plan', s.searchId, (s.ideas ?? []).map((i) => i.place?.ref ?? i.id), { append });
       setStage(s.stage); setPlaced(s.placed ?? 0);
       if (s.error) throw new Error(`${s.error}${ref ? ` (run ${ref})` : ''}`);
       if (!s.running) break;
@@ -391,12 +403,12 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       // restored session has normally finished, and opening one of its ideas
       // was either dropped or counted against an older ask (Codex, 17 Sep
       // 2026).
-      heldSearch('plan', s.searchId, kept.map((i) => i.place?.ref ?? i.id), { append: true });
+      heldSearch('plan', s.searchId, kept.map((i) => i.place?.ref ?? i.id));
       if (s.running) {
         setBusy(true); setStage(s.stage ?? 'thinking');
         const startedAt = s.startedAt ? new Date(s.startedAt).getTime() : Date.now();
         const ticking = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
-        try { await watchRun(id, memory.sessionId, s.ref ?? null, startedAt); }
+        try { await watchRun(id, memory.sessionId, s.ref ?? null, startedAt, { append: true }); }
         finally { clearInterval(ticking); if (inspireRun.current === id) { setBusy(false); setStage(null); } }
       }
     } catch {
