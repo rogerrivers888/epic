@@ -315,10 +315,57 @@ export function toVenue(place, justification = null) {
   };
 }
 
+/**
+ * Which SKU a request falls under, read from the field mask that was asked for.
+ *
+ * Google does not bill one price for "a request". It bills by the most
+ * expensive field asked for, in three tiers — Essentials (an id, a point, a
+ * type), Pro (the place itself: name, address, hours), and Enterprise +
+ * Atmosphere (rating, reviews, price, the AI summaries). The meter counted a
+ * flat `google` for all three and the ledger priced every one of them at the
+ * Enterprise rate.
+ *
+ * That was tolerable while every call was a display search. It is not tolerable
+ * under the data policy (19 Sep 2026), whose whole foundation is that the
+ * census — one Text Search per slice on `id,location,types` — is free: on the
+ * old meter a free census of SL5 would have reported about £1.30, and the
+ * first-run instruction is to report the census cost from the ledger and
+ * *expect nought*. A ledger that cannot tell the free tier from the paid one
+ * cannot answer the question the policy is built on.
+ *
+ * Read from the mask rather than passed by the caller on purpose: the mask is
+ * what Google actually prices, so the two cannot drift apart by somebody
+ * adding a field and forgetting to change a label.
+ */
+export function skuFor(fieldMask, path = '') {
+  const mask = String(fieldMask ?? '');
+  // A place fetched by its own id is a Place Details request; anything else is
+  // a search. Google prices the two separately, so the meter must tell them
+  // apart: the policy's worked example has a display search at 3.2p for twenty
+  // places and a details call at 2p for one.
+  const isDetails = /^\/places\/[^:/]+$/.test(String(path ?? ''));
+  if (!mask) return isDetails ? 'google-details' : 'google-search';
+  const has = (f) => mask.includes(f);
+  // Essentials is an id, a point and a type — no name, no hours, no opinion.
+  // It is what the census asks for, and it is the free tier the policy rests on.
+  const paid = has('rating') || has('priceLevel') || has('reviews') || has('generativeSummary')
+    || has('reviewSummary') || has('userRatingCount') || has('servesVegetarianFood')
+    || has('goodForChildren') || has('menuForChildren') || has('reservable')
+    || has('displayName') || has('formattedAddress') || has('OpeningHours')
+    || has('websiteUri') || has('nationalPhoneNumber') || has('editorialSummary')
+    || has('photos');
+  if (!paid) return 'google-essentials';
+  return isDetails ? 'google-details' : 'google-search';
+}
+
 async function call(path, { method = 'POST', body, fieldMask, meter }) {
   const key = KEY();
   if (!key) throw new Error('GOOGLE_MAPS_API_KEY not set');
-  bump(meter, 'google'); // one billable request, whatever it returns
+  // One billable request, at the tier the mask puts it in. `google` stays as
+  // the count of Google requests however they were priced, because Settings ›
+  // Usage and the free-allowance lines are counted in requests.
+  bump(meter, 'google');
+  bump(meter, skuFor(fieldMask, path));
   const res = await fetch(`${PLACES}${path}`, {
     method,
     headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': key, ...(fieldMask ? { 'X-Goog-FieldMask': fieldMask } : {}) },

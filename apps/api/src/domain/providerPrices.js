@@ -37,7 +37,28 @@
 export const PRICE_PER_UNIT_USD = {
   // Places API: one billable request per Nearby Search, Text Search or Place
   // Details call, past the 5,000-a-month Pro-tier threshold.
+  //
+  // This is the *fallback* price now, for the hand-built meters that record
+  // `{ google: 1 }` directly rather than going through the adapter's own
+  // `call()`. Where the adapter metered a tier (below), that tier carries the
+  // money and this key is ignored — see `costOf`. Left at the Enterprise rate
+  // deliberately: a meter that does not say what it bought should be assumed
+  // to have bought the dear thing.
   google: 0.032,
+  // The three tiers the data policy (19 Sep 2026) is costed on, at its own
+  // figures and its own $1.25 to the pound. **These are list prices we have
+  // written down, not an invoice** — the true rate card is in Google Cloud
+  // Console and `sources/pricing.js` links to it. Confirm before they are used
+  // to justify a spend.
+  //
+  //   essentials  an id, a point, a type. What the census asks for, and free
+  //               inside the 10,000-a-month allowance. The whole policy rests
+  //               on this line being nought.
+  'google-essentials': 0,
+  //   search      a display search: twenty places with ratings, 3.2p.
+  'google-search': 0.04,
+  //   details     one place opened, with reviews and the AI summaries, 2p.
+  'google-details': 0.025,
   // Place Photos, past 1,000 a month.
   'google-photos': 0.007,
   // Routes API, priced per element rather than per request, past 5,000.
@@ -72,8 +93,17 @@ export function costOf(units, provider = null) {
   const meter = normalise(units, provider);
   if (!meter) return 0;
   const units_ = meter;
+  // A call metered at a tier is not also charged the flat `google` rate.
+  //
+  // `sources/google.js` bumps both: `google` so the free-allowance lines and
+  // Settings › Usage keep counting Google *requests* however they were priced,
+  // and the tier so the money is right. Adding every key up would then bill the
+  // same request twice — and would price the census, whose tier is free, at the
+  // Enterprise rate anyway, which is the exact fault this split exists to fix.
+  const tiered = ['google-essentials', 'google-search', 'google-details'].some((k) => k in units_);
   let usd = 0;
   for (const [key, n] of Object.entries(units_)) {
+    if (tiered && key === 'google') continue;
     usd += (PRICE_PER_UNIT_USD[key] ?? 0) * (Number(n) || 0);
   }
   // Six places: a tenth of a cent matters when the ceiling is £250 and the

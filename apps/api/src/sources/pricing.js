@@ -46,6 +46,28 @@ export const LINES = [
     console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {
+    key: 'google-essentials', label: 'Google census', source: 'google', unit: 'request', unitPlural: 'requests',
+    // The line the whole data policy rests on. A census slice asks for an id, a
+    // point and a type and nothing else, which is Google's Essentials tier —
+    // free inside the allowance. Knowing what exists has to be free, or nothing
+    // else in the policy is affordable.
+    what: 'Knowing what exists. One Text Search per slice on the narrowest mask there is (id, location, types), written to the place index and never asked again for 30 days.',
+    allowance: { kind: 'monthly', limit: 10_000, beyondUsd: PRICE_PER_UNIT_USD['google-essentials'], basis: "Google's Essentials (IDs Only) threshold — 10,000 requests a month at no charge" },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
+  },
+  {
+    key: 'google-search', label: 'Google display search', source: 'google', unit: 'request', unitPlural: 'requests',
+    what: 'What a household sees: one Text Search per category returns 20 places with rating, review count, price, hours, website and photo references.',
+    allowance: { kind: 'monthly', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['google-search'], basis: "Google's free threshold for Enterprise + Atmosphere Text Search" },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
+  },
+  {
+    key: 'google-details', label: 'Google place detail', source: 'google', unit: 'request', unitPlural: 'requests',
+    what: 'One place opened: reviews, phone and the AI summaries. Only on a tap — never for a place a search already returned.',
+    allowance: { kind: 'monthly', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['google-details'], basis: "Google's free threshold for Enterprise + Atmosphere Place Details" },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
+  },
+  {
     key: 'google-photos', label: 'Google photos', source: 'google', unit: 'photo', unitPlural: 'photos',
     what: 'Each place photo shown is one Place Photo request, streamed through the API so the key stays server-side.',
     allowance: { kind: 'monthly', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['google-photos'], basis: "Google's free threshold for Place Details Photos" },
