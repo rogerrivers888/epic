@@ -529,8 +529,11 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
   const narrow = width < PHONE;
   return (
     <View style={styles.lensRow}>
+      {/* No label in front of the lenses. The words are the menu and say what
+          they are; "Cut by" was a heading for a control that needs none (owner,
+          19 Sep 2026: "I don't understand what the 'Cut by' is in front of
+          Coverage and Category. You can remove that. We just need the menu"). */}
       <View style={[styles.lensLeft, narrow && styles.lensLeftPhone, narrow && styles.lensLeftPhoneWidth]}>
-        <Kicker tip="sectionCutBy">Cut by</Kicker>
         {/* BO2l draws this row clipped, ending in "Qua…" — six words will not
             fit 390 and must not be allowed to wrap into a block either. A
             sideways scroller keeps every lens reachable and the row one line. */}
@@ -931,10 +934,20 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
     const c = open;
     return (
       <>
-        {data && c
-          ? <SubcategoryLadder rows={c.subcategories} onSub={onSub} factLabel={factLabel} canManage={canManage}
+        {data && c ? (
+          <>
+            {/* Where the subcategories actually are. It used to sit above the
+                whole board, which is where the board no longer lists any. */}
+            <View style={styles.subRow}>
+              <View style={{ flex: 1 }} />
+              <Act label={hideFull ? `Show me all ${c.subcategories.length}` : `Hide the ones with places · ${c.subcategories.filter((x) => x.known > 0).length}`}
+                   tone="secondary" onPress={() => setHideFull(!hideFull)} />
+            </View>
+            <SubcategoryLadder rows={hideFull ? c.subcategories.filter((x) => x.known === 0) : c.subcategories}
+                               onSub={onSub} factLabel={factLabel} canManage={canManage}
                                inRing={q.within != null} of={c.subcategories.length} onCollect={onCollect} />
-          : <Waiting />}
+          </>
+        ) : <Waiting />}
         <Footer>
           {q.within != null && (within ?? 30) < 90
             ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
@@ -945,37 +958,57 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
     );
   }
 
-  // A ring is one area, so its rows are the eight categories (BO2o). An area
-  // with a ladder under it lists every subcategory under its category heading
-  // (BO2c). Both are driven by the taxonomy, not the data.
-  // A ring is one area and its rows are the eight categories (BO2o) — and so
-  // is an outcode, which is the same size of thing: you have narrowed to one
-  // place on the map and the question is which kind of place to look at next.
-  // A county goes straight to subcategories (BO2c), where the finer grain is
-  // what you want. Landing an outcode on subcategories skipped a whole step
-  // (owner, 18 Sep 2026: "it's taking me straight into a list of subcategories
-  // when the view it's supposed to take me to is Categories").
+  // The category lens shows categories. Every level, collapsed, and a category
+  // opens its subcategories in place.
+  //
+  // A ring and an outcode always did; a country, a county and a town went
+  // straight to all fifty-nine subcategories under their category headings,
+  // which is a page you read rather than a board you act on (owner, 19 Sep
+  // 2026: "I click on City, and I click on Categories. The categories should be
+  // collapsed, but at the moment they're expanded, so you can see all the
+  // subcategories"). BO2c's rule — every subcategory listed, the empty ones
+  // included, because an empty one is the finding — is kept exactly, one click
+  // in, which is where BO2p already puts it.
   const ring = q.within != null || areaKind === 'postcode';
+  // Held here rather than in the address: eight rows re-order in the hand, and a
+  // board whose headings do nothing when you click them is a board that looks
+  // broken (owner, 19 Sep 2026: "I should be able to sort on the column headers
+  // as well. That's not working").
+  const [catSort, setCatSort] = useState<string>('known');
+  const [catDesc, setCatDesc] = useState(true);
   const all = data?.categories ?? [];
   const flat = all.flatMap((c) => c.subcategories.map((s) => ({ ...s, categoryLabel: c.label })));
   const shown = hideFull ? flat.filter((s) => s.known === 0) : flat;
   const withPlaces = flat.filter((s) => s.known > 0).length;
 
+  // Sorted in the hand. `label` is a word and everything else is a figure, and a
+  // figure nobody has — a category with no places and so no average — sorts to
+  // the bottom whichever way round it is asked for, because "we do not know" is
+  // not a small number.
+  const sortedCats = [...all].sort((a: any, b: any) => {
+    if (catSort === 'label') return (catDesc ? -1 : 1) * String(a.label).localeCompare(String(b.label));
+    const av = a[catSort]; const bv = b[catSort];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (catDesc ? -1 : 1) * (Number(av) - Number(bv));
+  });
+
   const catColumns: Col<PlaceCategory>[] = [
-    { key: 'label', label: 'Our category', note: `${all.length} of ${all.length}`, tip: 'ourCategory', grow: true,
+    { key: 'label', label: 'Our category', note: `${all.length} of ${all.length}`, tip: 'ourCategory', grow: true, sort: 'label',
       cell: (c) => (
         <View style={styles.nameCell}>
           <Text style={styles.rowName}>{c.label}</Text>
           <Text style={styles.rowNote}>{`${c.subcategories.length} subcategories`}</Text>
         </View>
       ) },
-    { key: 'known', label: 'Known', tip: 'known', width: 104, align: 'right', cell: (c) => <Num n={c.known || null} /> },
-    { key: 'owned', label: 'Owned', tip: 'owned', width: 96, align: 'right', cell: (c) => <Num n={c.owned || null} /> },
-    { key: 'ident', label: 'Identified only', tip: 'identifiedOnly', width: 140, align: 'right', cell: (c) => <Num n={c.identified || null} /> },
-    { key: 'ready', label: 'Ready', tip: 'readyShort', width: 104, align: 'right', cell: (c) => <Pct v={c.ready} strong min={52} /> },
-    { key: 'score', label: 'Avg score', tip: 'avgScoreCategory', width: 110, align: 'right', cell: (c) => <Num n={c.avgScore} /> },
-    { key: 'searches', label: 'Searches', note: '30 days', tip: ring ? 'searchesRing' : 'searches', width: 104, align: 'right', cell: (c) => <Num n={c.searches || null} /> },
-    { key: 'empty', label: 'Came back empty', note: 'of those searches', tip: 'empty', width: 134, align: 'right',
+    { key: 'known', label: 'Known', tip: 'known', width: 104, align: 'right', sort: 'known', cell: (c) => <Num n={c.known || null} /> },
+    { key: 'owned', label: 'Owned', tip: 'owned', width: 96, align: 'right', sort: 'owned', cell: (c) => <Num n={c.owned || null} /> },
+    { key: 'ident', label: 'Identified only', tip: 'identifiedOnly', width: 140, align: 'right', sort: 'identified', cell: (c) => <Num n={c.identified || null} /> },
+    { key: 'ready', label: 'Ready', tip: 'readyShort', width: 104, align: 'right', sort: 'ready', cell: (c) => <Pct v={c.ready} strong min={52} /> },
+    { key: 'score', label: 'Avg score', tip: 'avgScoreCategory', width: 110, align: 'right', sort: 'avgScore', cell: (c) => <Num n={c.avgScore} /> },
+    { key: 'searches', label: 'Searches', note: '30 days', tip: ring ? 'searchesRing' : 'searches', width: 104, align: 'right', sort: 'searches', cell: (c) => <Num n={c.searches || null} /> },
+    { key: 'empty', label: 'Came back empty', note: 'of those searches', tip: 'empty', width: 134, align: 'right', sort: 'empty',
       cell: (c) => <Num n={c.empty || null} strong={c.empty > 0} accent={c.searches > 0 && c.empty === c.searches} /> },
     { key: 'go', label: '', width: 78, align: 'right', stops: true,
       cell: (c) => (c.known > 0
@@ -999,14 +1032,14 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
               </Press>
             ))}
           </View>
-          <Act label={hideFull ? `Show me all ${flat.length}` : `Hide the ones with places · ${withPlaces}`}
-               tone="secondary" onPress={() => setHideFull(!hideFull)} />
         </View>
       ) : null}
       {!data ? <Waiting /> : by === 'labels' ? (
         <LabelLadder rows={data.labels ?? []} />
-      ) : ring ? (
-        <Ladder columns={catColumns} rows={all} keyOf={(c) => c.key} onRow={(c) => onCat(c.key)}
+      ) : (
+        <Ladder columns={catColumns} rows={sortedCats} keyOf={(c) => c.key} onRow={(c) => onCat(c.key)}
+                sort={catSort} desc={catDesc}
+                onSort={(k) => { if (k === catSort) setCatDesc(!catDesc); else { setCatSort(k); setCatDesc(true); } }}
                 highlight={(c) => c.searches > 0 && c.empty / Math.max(1, c.searches) > 0.2}
                 /* BO2l's stacked row. Eight columns of figures will not fit 390
                    whatever you do to them, and this board is now where an
@@ -1021,10 +1054,6 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
                     ...(c.searches ? [{ key: 'searches', word: `${c.searches.toLocaleString()} searches`, tip: 'searches' as const }] : []),
                   ],
                 })} />
-      ) : (
-        <SubcategoryLadder rows={shown} onSub={onSub} factLabel={factLabel} canManage={canManage} inRing={false}
-                           of={data.subcategories} onCollect={onCollect}
-                           groupOfCategory={(key) => all.find((x) => x.key === key) ?? null} />
       )}
       <Footer>
         {/* The board's own footer word for the same act as the switch above: show

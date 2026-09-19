@@ -429,7 +429,14 @@ const styles = StyleSheet.create({
   // is the *panel* tint and is four times that, which turned a board of empty
   // subcategories into a green page (Codex, 17 Sep 2026).
   rowOn: { backgroundColor: 'transparent' },
-  wash: { backgroundColor: colors.selected, opacity: 0.07 },
+  // Wider than the row it marks, so the band never sits flush against the first
+  // word or the last figure. Drawn on the row's exact bounds, "Great Britain"
+  // touched the left edge of the tint and "Ready · 6,205 areas" the right, which
+  // reads as text jammed into a box (owner, 19 Sep 2026: "Great Britain is
+  // touching the box… it's the same at the other end. That's not okay"). Bleeding
+  // outwards rather than padding inwards, because every column has to stay lined
+  // up with its heading.
+  wash: { backgroundColor: colors.selected, opacity: 0.07, left: -spacing.md, right: -spacing.md },
   group: { paddingTop: 6 },
   empty: { paddingVertical: spacing.lg },
 
