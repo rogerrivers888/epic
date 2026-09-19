@@ -1,5 +1,5 @@
 import { bump } from './meter.js';
-import { FENCE_M, metresBetween, namesAgree } from '../domain/matchFence.js';
+import { FENCE_M, metresBetween, namesAreSame } from '../domain/matchFence.js';
 // Tripadvisor Terra Content API, Discover plan (Technical Constraints §3.3).
 // Billing is per *entity*, not per call: every location ID returned by a
 // search/nearby/details response counts once; a reviews or photos call counts
@@ -224,7 +224,7 @@ export const tripadvisorSource = {
         // uses rather than a number written here — it was 0.4 km, which is the
         // same 400 m, and having it twice is how the two drift apart
         // (domain/matchFence.js, 19 Sep 2026).
-        if (!namesAgree(hit.name, v.name) || metresBetween(hit, v) > FENCE_M) continue;
+        if (!namesAreSame(hit.name, v.name) || metresBetween(hit, v) > FENCE_M) continue;
         seen.add(hit.sourcePlaceId);
         out.push(hit);
         break;

@@ -87,12 +87,44 @@ export function boxAround({ lat, lng }, metres = FENCE_M) {
  * map's ("Prime Turkish Kitchen" against "Prime Turkish Kitchen & Bar Woking").
  */
 const DECOR = /\b(the|ltd|limited|plc|uk|co|inc)\b/g;
-export const normaliseName = (s) => String(s ?? '').toLowerCase()
+/**
+ * An accent is a spelling, not a different place.
+ *
+ * `Café Rouge` and `Cafe Rouge` are one restaurant and two providers routinely
+ * disagree about the accent. Decomposing first and dropping the combining marks
+ * is what makes them the same string — without it the é was simply not a letter
+ * a-z, so it fell out entirely and "café" normalised to "caf" while "cafe"
+ * normalised to "cafe", and the two stopped matching (Codex, 19 Sep 2026).
+ */
+export const normaliseName = (s) => String(s ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
   .replace(/&/g, ' and ').replace(DECOR, ' ').replace(/[^a-z0-9]+/g, '');
 
+/**
+ * The same name, allowing one to be the longer trading version of the other.
+ *
+ * For a *by-name lookup*, where the question is "does this provider hold this
+ * place at all" and the fence has already narrowed it to a few hundred metres.
+ * A provider's trading name is routinely longer than the open map's.
+ */
 export function namesAgree(a, b) {
   const x = normaliseName(a);
   const y = normaliseName(b);
   if (!x || !y) return false;
   return x === y || x.includes(y) || y.includes(x);
 }
+
+/**
+ * The same name, exactly.
+ *
+ * For *merging two records into one row*, which is a stricter question than
+ * whether a provider has the place: a merge that is wrong shows a household one
+ * restaurant wearing another's reviews. `resolveVenues` has always required
+ * equality, and loosening only one side of that produced a duplicate standalone
+ * result rather than an enrichment (Codex, 19 Sep 2026).
+ */
+export const namesAreSame = (a, b) => {
+  const x = normaliseName(a);
+  return Boolean(x) && x === normaliseName(b);
+};

@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FENCE_M, fenceFor, metresBetween, boxAround, namesAgree } from '../src/domain/matchFence.js';
+import { FENCE_M, fenceFor, metresBetween, boxAround, namesAgree, namesAreSame } from '../src/domain/matchFence.js';
 
 test('a point gets four hundred metres', () => {
   assert.equal(FENCE_M, 400);
@@ -49,4 +49,20 @@ test('a trading name is longer than the map name, and two clubs on one road are 
   assert.ok(namesAgree('Rose and Crown', 'The Rose & Crown Bar'));
   assert.ok(!namesAgree('Royal Ascot Golf Club', 'Royal Ascot Cricket Club'));
   assert.ok(!namesAgree('', 'Anything'));
+});
+
+test('an accent is a spelling, not a different place', () => {
+  // Without decomposing first, the e-acute was not a letter a-z and fell out
+  // entirely: "café" became "caf" and stopped matching "cafe" (Codex, 19 Sep 2026).
+  assert.ok(namesAgree('Café Rouge', 'Cafe Rouge'));
+  assert.ok(namesAreSame('Café Rouge', 'Cafe Rouge'));
+  assert.ok(namesAreSame('Le Café Créme', 'Le Cafe Creme'));
+});
+
+test('merging asks a stricter question than looking up', () => {
+  // A by-name lookup only asks whether they hold the place at all, and the
+  // fence has already narrowed it. A merge puts two records in one row, and a
+  // wrong one shows a household somebody else's reviews.
+  assert.ok(namesAgree('Prime Turkish Kitchen', 'Prime Turkish Kitchen & Bar Woking'));
+  assert.ok(!namesAreSame('Prime Turkish Kitchen', 'Prime Turkish Kitchen & Bar Woking'));
 });

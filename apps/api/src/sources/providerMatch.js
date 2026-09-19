@@ -206,7 +206,12 @@ export async function tripadvisorMatchFor({ venueRef, name, lat, lng, category =
   if (!tripadvisorSource.enabled()) return null;
   let found;
   try {
-    found = await tripadvisorSource.candidates({ name, category }, { locality, meter });
+    // With the point, so Tripadvisor fences the search rather than answering
+    // globally and leaving us to post-filter its top two. Without it a venue a
+    // few streets away could be written down as a permanent miss because two
+    // same-named places elsewhere in the world came back first (Codex, 19 Sep
+    // 2026).
+    found = await tripadvisorSource.candidates({ name, category, lat, lng }, { locality, meter });
   } catch (err) {
     throw Object.assign(err instanceof Error ? err : new Error(String(err)), { provider: 'tripadvisor' });
   }
