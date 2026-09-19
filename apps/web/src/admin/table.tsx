@@ -394,6 +394,17 @@ export function Stat({ label, value, tip, accent, big, mark = false }: {
   );
 }
 
+/**
+ * How far the content sits inside a row.
+ *
+ * About three millimetres, which is what the owner asked for after seeing the
+ * alternative: the highlight band is drawn on the row, so without this the tint
+ * sat flush against the first word and the last figure, and extending the band
+ * past the rules to fix it looked worse again (19 Sep 2026). The header carries
+ * the same inset, so every column stays lined up with its heading.
+ */
+const INSET = 12;
+
 const styles = StyleSheet.create({
   // BO2l, "Places at 390": a name with its note beside it, and the figures
   // under as wrapped chips. Nothing here is a box — the row is a hairline.
@@ -407,9 +418,19 @@ const styles = StyleSheet.create({
   stackChipWord: { ...type.tiny, fontSize: 11.5, color: colors.ink },
   stackChipWordLead: { fontWeight: '700', color: colors.ink },
 
+  // Indented, with the rows below it, so the highlight band has somewhere to be.
+  //
+  // The band used to be drawn on the row's exact bounds, which put the tint
+  // flush against the first word and the last figure. Bleeding it outwards fixed
+  // that and looked worse: "the green bar goes longer than the lines" (owner,
+  // 19 Sep 2026). So the content moves in instead and the band, the rules above
+  // and below and the row all end at the same place — "the country header above,
+  // and the country name below should be indented maybe 2 or 3 mm. The 6205
+  // areas should be just indented 2 or 3 mm as well."
   head: {
     flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md,
-    paddingBottom: 9, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted,
+    paddingBottom: 9, paddingHorizontal: INSET,
+    borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted,
   },
   headSort: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   headLabel: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
@@ -419,7 +440,8 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+    paddingVertical: 12, paddingHorizontal: INSET,
+    borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
   },
   rowDense: { paddingVertical: 9 },
   /** The pressable middle of a row: it grows, and it carries the row's own gap. */
@@ -429,14 +451,8 @@ const styles = StyleSheet.create({
   // is the *panel* tint and is four times that, which turned a board of empty
   // subcategories into a green page (Codex, 17 Sep 2026).
   rowOn: { backgroundColor: 'transparent' },
-  // Wider than the row it marks, so the band never sits flush against the first
-  // word or the last figure. Drawn on the row's exact bounds, "Great Britain"
-  // touched the left edge of the tint and "Ready · 6,205 areas" the right, which
-  // reads as text jammed into a box (owner, 19 Sep 2026: "Great Britain is
-  // touching the box… it's the same at the other end. That's not okay"). Bleeding
-  // outwards rather than padding inwards, because every column has to stay lined
-  // up with its heading.
-  wash: { backgroundColor: colors.selected, opacity: 0.07, left: -spacing.md, right: -spacing.md },
+  // The band is the row, exactly — the row is what carries the inset now.
+  wash: { backgroundColor: colors.selected, opacity: 0.07 },
   group: { paddingTop: 6 },
   empty: { paddingVertical: spacing.lg },
 
