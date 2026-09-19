@@ -322,43 +322,56 @@ export function toVenue(place, justification = null) {
  * Which SKU a request falls under, read from the field mask that was asked for.
  *
  * Google does not bill one price for "a request". It bills by the most
- * expensive field asked for, in three tiers — Essentials (an id, a point, a
- * type), Pro (the place itself: name, address, hours), and Enterprise +
- * Atmosphere (rating, reviews, price, the AI summaries). The meter counted a
- * flat `google` for all three and the ledger priced every one of them at the
- * Enterprise rate.
+ * expensive field in the mask, in tiers: **Essentials** (the id and the
+ * resource name — nothing else), **Pro** (what the place is: display name,
+ * address, *location*, *types*, photos), and **Enterprise + Atmosphere**
+ * (rating, price, reviews, the AI summaries). The meter counted a flat
+ * `google` for all of them and the ledger priced every one at the Enterprise
+ * rate.
  *
  * That was tolerable while every call was a display search. It is not tolerable
- * under the data policy (19 Sep 2026), whose whole foundation is that the
- * census — one Text Search per slice on `id,location,types` — is free: on the
- * old meter a free census of SL5 would have reported about £1.30, and the
- * first-run instruction is to report the census cost from the ledger and
- * *expect nought*. A ledger that cannot tell the free tier from the paid one
- * cannot answer the question the policy is built on.
+ * under the data policy (19 Sep 2026), whose foundation is that the census is
+ * free: a ledger that cannot tell the free tier from the paid one cannot answer
+ * the question the policy is built on.
+ *
+ * **`places.location` and `places.types` are Pro, not Essentials** (Codex,
+ * 19 Sep 2026). The first draft of this function put them in the free tier and
+ * would have recorded every census slice at nought while Google billed it —
+ * the exact failure the split was written to prevent, inverted. Essentials is
+ * *ids only*: a point and a type are things Google charges to tell you. That
+ * finding is the reason the census is not free, and it is the owner's to act on
+ * rather than this function's to hide.
  *
  * Read from the mask rather than passed by the caller on purpose: the mask is
- * what Google actually prices, so the two cannot drift apart by somebody
- * adding a field and forgetting to change a label.
+ * what Google actually prices, so the two cannot drift apart by somebody adding
+ * a field and forgetting to change a label.
+ *
+ * These tier boundaries are our reading of the published rate card, not an
+ * invoice. The Cloud Console billing report is the truth and `sources/pricing.js`
+ * links to it.
  */
 export function skuFor(fieldMask, path = '') {
   const mask = String(fieldMask ?? '');
   // A place fetched by its own id is a Place Details request; anything else is
-  // a search. Google prices the two separately, so the meter must tell them
-  // apart: the policy's worked example has a display search at 3.2p for twenty
-  // places and a details call at 2p for one.
+  // a search. Google prices the two separately.
   const isDetails = /^\/places\/[^:/]+$/.test(String(path ?? ''));
   if (!mask) return isDetails ? 'google-details' : 'google-search';
   const has = (f) => mask.includes(f);
-  // Essentials is an id, a point and a type — no name, no hours, no opinion.
-  // It is what the census asks for, and it is the free tier the policy rests on.
-  const paid = has('rating') || has('priceLevel') || has('reviews') || has('generativeSummary')
+  // Enterprise and Atmosphere: what other people think, what it costs, when it
+  // is open, and Google's own writing about it.
+  const atmosphere = has('rating') || has('priceLevel') || has('reviews') || has('generativeSummary')
     || has('reviewSummary') || has('userRatingCount') || has('servesVegetarianFood')
     || has('goodForChildren') || has('menuForChildren') || has('reservable')
-    || has('displayName') || has('formattedAddress') || has('OpeningHours')
-    || has('websiteUri') || has('nationalPhoneNumber') || has('editorialSummary')
-    || has('photos');
-  if (!paid) return 'google-essentials';
-  return isDetails ? 'google-details' : 'google-search';
+    || has('editorialSummary') || has('OpeningHours');
+  if (atmosphere) return isDetails ? 'google-details' : 'google-search';
+  // Pro: what the place *is*. A name, an address, a point, a type, a photograph
+  // — all of it billable, which is the correction above.
+  const pro = has('displayName') || has('formattedAddress') || has('location') || has('types')
+    || has('primaryType') || has('photos') || has('websiteUri') || has('nationalPhoneNumber')
+    || has('utcOffsetMinutes') || has('googleMapsUri');
+  if (pro) return 'google-pro';
+  // Essentials: ids only. Free, and it is genuinely only ids.
+  return 'google-essentials';
 }
 
 async function call(path, { method = 'POST', body, fieldMask, meter }) {

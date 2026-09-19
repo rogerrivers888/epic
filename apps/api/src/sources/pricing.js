@@ -51,8 +51,14 @@ export const LINES = [
     // point and a type and nothing else, which is Google's Essentials tier —
     // free inside the allowance. Knowing what exists has to be free, or nothing
     // else in the policy is affordable.
-    what: 'Knowing what exists. One Text Search per slice on the narrowest mask there is (id, location, types), written to the place index and never asked again for 30 days.',
+    what: 'Ids and nothing else. Free — but a point and a type are Pro fields, so the census as specified bills on the line below rather than this one.',
     allowance: { kind: 'monthly', limit: 10_000, beyondUsd: PRICE_PER_UNIT_USD['google-essentials'], basis: "Google's Essentials (IDs Only) threshold — 10,000 requests a month at no charge" },
+    console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
+  },
+  {
+    key: 'google-pro', label: 'Google census', source: 'google', unit: 'request', unitPlural: 'requests',
+    what: 'Knowing what exists: one Text Search per slice for an id, a point and a type, written to the place index and not asked again for 30 days. Pro tier — `places.location` and `places.types` are billable.',
+    allowance: { kind: 'monthly', limit: 5000, beyondUsd: PRICE_PER_UNIT_USD['google-pro'], basis: "Google's Pro-tier free threshold for Text Search" },
     console: { label: 'Google Cloud quotas', url: 'https://console.cloud.google.com/google/maps-apis/quotas?project=epic-507516' },
   },
   {

@@ -1,16 +1,17 @@
 /**
- * The census has to be free, and it has to be able to count.
+ * What the census costs, and whether it can count at all.
  *
- * Two claims underpin the whole data policy (19 Sep 2026) and neither is
- * obviously true, so both are held here rather than believed:
+ * Two claims underpin the data policy (19 Sep 2026). One of them turned out to
+ * be false, which is why both are held here rather than believed:
  *
- *   · **Free.** A census slice asks for an id, a point and a type — Google's
- *     Essentials tier. The meter was a flat `google` priced at the Enterprise
- *     rate whatever the mask, so a census of one outcode would have reported
- *     about £1.30 and the policy's "expect nought" would have been unanswerable.
- *   · **Counts.** Google returns its top twenty and stops at sixty, so a slice
- *     that comes back full has been cut off and must be split. A census that
- *     took sixty for an answer would report sixty restaurants in Bristol.
+ *   · **The price.** The policy is costed on the census being free. It is not:
+ *     Essentials is *ids only*, and `places.location` and `places.types` — the
+ *     two things a census exists to record — are Pro fields (Codex, 19 Sep
+ *     2026). These tests pin each tier to its own price so the census cannot
+ *     drift back into the free column without somebody saying so out loud.
+ *   · **The count.** Google returns its top twenty and stops at sixty, so a
+ *     slice that comes back full has been cut off and must be split. A census
+ *     that took sixty for an answer would report sixty restaurants in Bristol.
  */
 
 import test from 'node:test';
@@ -26,21 +27,28 @@ test.after(() => pool.end());
 // free
 // ---------------------------------------------------------------------------
 
-test('the tier is read off the mask, because the mask is what Google prices', () => {
-  assert.equal(skuFor('places.id,places.location,places.types', '/places:searchText'), 'google-essentials');
-  assert.equal(skuFor('id,location,types', '/places/ChIJabc'), 'google-essentials');
-  // A name is not free. This is the line that decides whether the census stays
-  // inside the tier it is costed on, so it is asserted rather than assumed.
-  assert.equal(skuFor('places.id,places.displayName', '/places:searchText'), 'google-search');
+test('a point and a type are things Google charges to tell you', () => {
+  // The finding that cost the policy its central claim (Codex, 19 Sep 2026).
+  // Essentials is *ids only*; `places.location` and `places.types` are Pro. The
+  // first draft of `skuFor` put them in the free tier, which would have recorded
+  // every census slice at nought while Google billed for it — the exact failure
+  // the tier split was written to prevent, inverted. Asserted here so nobody
+  // can quietly move the census back into the free tier without saying so.
+  assert.equal(skuFor('places.id,nextPageToken', '/places:searchText'), 'google-essentials');
+  assert.equal(skuFor('places.id,places.location', '/places:searchText'), 'google-pro');
+  assert.equal(skuFor('places.id,places.types', '/places:searchText'), 'google-pro');
+  assert.equal(skuFor('places.id,places.location,places.types,nextPageToken', '/places:searchText'), 'google-pro');
+  // An opinion is dearer than a description, and a details call is its own SKU.
   assert.equal(skuFor('places.id,places.rating', '/places:searchText'), 'google-search');
   assert.equal(skuFor('id,displayName,reviews', '/places/ChIJabc'), 'google-details');
   // No mask at all is somebody forgetting, not somebody asking for nothing.
   assert.equal(skuFor('', '/places:searchText'), 'google-search');
 });
 
-test('a census slice costs nothing, and a display search still costs what it did', () => {
-  assert.equal(costOf({ google: 1, 'google-essentials': 1 }), 0, 'the census is free or the policy is not affordable');
-  assert.equal(costOf({ google: 40, 'google-essentials': 40 }), 0);
+test('each tier is priced as itself', () => {
+  assert.equal(costOf({ google: 1, 'google-essentials': 1 }), 0, 'ids only really are free');
+  assert.equal(costOf({ google: 1, 'google-pro': 1 }), 0.032, 'and the census is not');
+  assert.equal(costOf({ google: 40, 'google-pro': 40 }), 1.28);
   assert.equal(costOf({ google: 1, 'google-search': 1 }), 0.04);
   assert.equal(costOf({ google: 1, 'google-details': 1 }), 0.025);
 });
@@ -51,6 +59,7 @@ test('a request metered at a tier is not also billed the flat rate', () => {
   // bill the same request twice — and would price the census at the Enterprise
   // rate anyway, which is the fault the split exists to fix.
   assert.equal(costOf({ google: 1, 'google-search': 1 }), 0.04, 'not 0.072');
+  assert.equal(costOf({ google: 1, 'google-pro': 1 }), 0.032, 'not 0.064');
   // A hand-built meter that says only `google` is still charged: a call that
   // does not say what it bought is assumed to have bought the dear thing.
   assert.equal(costOf({ google: 1 }), 0.032);
@@ -126,6 +135,30 @@ test('a run stops at its own ceiling rather than trusting the console to stop it
 
   await query(`delete from census_slices where area_slug = 'census-test-cap'`);
   await query(`delete from area_counts where area_slug = 'census-test-cap'`);
+});
+
+test('a run that stopped early leaves the area stale rather than claiming it is done', async () => {
+  // The worst outcome available: a run cut short used to roll the whole plan up
+  // anyway, writing nought against every subcategory it never reached and
+  // stamping the area fresh — so the next thirty days of boards showed empty
+  // drawers as fact and no census would run to correct them (Codex, 19 Sep 2026).
+  const plan = await slicePlan();
+  if (plan.length < 2) return;
+
+  const impl = async () => ({ places: [place('stale')], requests: 1, saturated: true, problem: null });
+  const out = await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-stale', outcode: 'ZZ96', box: BOX, maxRequests: 3,
+  }));
+  assert.ok(out.stopped);
+  assert.ok(out.completed < out.plan, 'it did not get through the plan');
+
+  const { rows } = await query(
+    `select count(*)::int n from area_counts where area_slug = 'census-test-stale'`);
+  assert.equal(rows[0].n, out.completed,
+    'only the subcategories that finished are written down; the rest keep no row at all');
+
+  await query(`delete from census_slices where area_slug = 'census-test-stale'`);
+  await query(`delete from area_counts where area_slug = 'census-test-stale'`);
 });
 
 test('a slice that failed is not a slice that was empty', async () => {

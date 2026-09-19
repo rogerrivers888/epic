@@ -30,6 +30,7 @@
  * the census permanent where a search result is not.
  */
 
+import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { googleSource } from './google.js';
 import * as index from '../repositories/placeIndex.js';
@@ -120,10 +121,17 @@ const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((
  * thing to look at when a count reads wrong, and a tree that quietly replaced
  * the parent with its tiles would hide it.
  */
-async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, depth = 0, parentId = null, found, meter, stats }) {
+async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, meter, stats }) {
   if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
+  const before = meter['google'] ?? 0;
   const res = await googleSource.censusSlice({ box, includedType: type, meter });
-  stats.requests += res.requests;
+  // Count what was *attempted*, not what succeeded. `call` bumps the meter
+  // before it fetches, so a timeout or a 429 is still a request Google saw —
+  // and counting only the successes meant a run of failures never reached the
+  // ceiling and never wrote a ledger row, while the outbound calls kept going
+  // (Codex, 19 Sep 2026). The meter is the honest count.
+  const attempted = Math.max((meter['google'] ?? 0) - before, res.requests);
+  stats.requests += attempted;
 
   let fresh = 0;
   for (const p of res.places) {
@@ -144,11 +152,11 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
   const { rows: [row] } = await query(
     `insert into census_slices
        (area_slug, outcode, min_lat, min_lng, max_lat, max_lng, category, subcategory,
-        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem, run_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      returning id`,
     [areaSlug, outcode, box.minLat, box.minLng, box.maxLat, box.maxLng, category, subcategory,
-      type, type, res.places.length, fresh, res.saturated, parentId, depth, res.requests, res.problem],
+      type, type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId],
   );
   stats.slices += 1;
   if (res.problem) stats.problems.push(`${subcategory}/${type}: ${res.problem}`);
@@ -157,7 +165,7 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
   if (!saturated) return;
   for (const q of quarters(box)) {
     await sliceDown({
-      box: q, type, category, subcategory, areaSlug, outcode, householdId,
+      box: q, type, category, subcategory, areaSlug, outcode, householdId, runId,
       depth: depth + 1, parentId: row.id, found, meter, stats,
     });
   }
@@ -179,16 +187,25 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   const plan = await slicePlan({ subcategories });
   if (!plan.length) return { noted: 0, requests: 0, slices: 0, plan: 0, problems: ['no Google types are taught onto any active subcategory'] };
 
+  const runId = randomUUID();
   const found = new Map();
   const meter = {};
   const stats = { requests: 0, slices: 0, saturated: 0, problems: [], maxRequests, stopped: false };
+  // Only the subcategories carried all the way through. A run that stopped at
+  // its ceiling used to roll the *whole plan* up anyway, which wrote nought
+  // against every subcategory it never reached and stamped the area fresh — so
+  // `censusIsFresh` then held a half-done census off for thirty days and the
+  // board showed empty drawers as fact (Codex, 19 Sep 2026).
+  const done = [];
 
   for (const { category, subcategory, types } of plan) {
     for (const type of types) {
-      await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, found, meter, stats });
+      await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, found, meter, stats });
+      if (stats.stopped) break;
     }
+    if (stats.stopped) { stats.problems.push(`stopped at the ${maxRequests}-request ceiling; ${plan.length - done.length} subcategories were not reached`); break; }
+    done.push({ category, subcategory });
     onProgress?.({ subcategory, found: found.size, requests: stats.requests });
-    if (stats.stopped) { stats.problems.push(`stopped at the ${maxRequests}-request ceiling for one run`); break; }
   }
 
   // One ledger row for the whole census, metered at the tier it actually used.
@@ -200,14 +217,37 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   }
 
   const places = [...found.values()];
-  if (places.length) {
-    await index.noteMany(places.map((p) => ({ ref: p.ref, lat: p.lat, lng: p.lng, sources: [{ source: 'google', sourceId: p.ref.slice(7) }] })), { source: 'google', countryCode: 'GB' });
-    await writeCensusFacts(places);
+  // In chunks, because a census of a city centre is tens of thousands of places
+  // and one statement carries several bind parameters each: past about nine
+  // thousand places the write blows Postgres's 65,535-parameter protocol limit
+  // and the whole persistence step aborts — losing a census that cost real
+  // money to take (Codex, 19 Sep 2026).
+  for (const batch of chunks(places, WRITE_BATCH)) {
+    // `sources` is a list of source *names*; the identifier travels as
+    // `sourceId` for the source the caller is writing as. Handing it objects
+    // stringified each one to "[object Object]" and dropped the Google id, so
+    // the census wrote no Google coverage at all (Codex, 19 Sep 2026).
+    await index.noteMany(
+      batch.map((p) => ({ ref: p.ref, lat: p.lat, lng: p.lng, sourceId: p.ref.slice('google:'.length), sources: ['google'] })),
+      { source: 'google', countryCode: 'GB' },
+    );
+    await writeCensusFacts(batch);
   }
-  await rollUp({ areaSlug, plan, found: places });
+  await rollUp({ areaSlug, runId, done, found: places });
 
-  return { noted: places.length, ...stats, plan: plan.length };
+  return { noted: places.length, ...stats, runId, plan: plan.length, completed: done.length };
 }
+
+/**
+ * How many places go into one write.
+ *
+ * Seven bind parameters each here and five in `noteMany`, against Postgres's
+ * limit of 65,535 for one statement. Two thousand leaves room in both and is
+ * still one round trip per two thousand places rather than per place.
+ */
+const WRITE_BATCH = 2000;
+
+const chunks = (rows, n) => Array.from({ length: Math.ceil(rows.length / n) }, (_, i) => rows.slice(i * n, i * n + n));
 
 /**
  * What the census learned, onto the index.
@@ -254,29 +294,37 @@ async function writeCensusFacts(places) {
  * clocks. A null is honest — it says nobody has checked — and is not the same
  * as a nought.
  */
-async function rollUp({ areaSlug, plan, found }) {
+async function rollUp({ areaSlug, runId, done, found }) {
   if (!areaSlug) return;
-  for (const { category, subcategory } of plan) {
+  for (const { category, subcategory } of done) {
     const mine = found.filter((p) => p.subcategory === subcategory);
+    // This run's saturation, not every run's. Slices are append-only, so
+    // counting them all meant a later clean census could never clear an earlier
+    // one and two runs over the same ground made the number climb by itself
+    // (Codex, 19 Sep 2026).
     const { rows: [sat] } = await query(
       `select count(*)::int n from census_slices
-        where area_slug = $1 and subcategory = $2 and saturated and depth >= $3`,
-      [areaSlug, subcategory, MAX_DEPTH],
+        where run_id = $1 and subcategory = $2 and saturated and depth >= $3`,
+      [runId, subcategory, MAX_DEPTH],
     );
-    const { rows: [scored] } = await query(
-      `select count(*)::int n from epic_scores e join place_index i on i.venue_ref = e.venue_ref
-        where i.subcategory = $1`,
-      [subcategory],
-    );
+    // Scored places *here*, not everywhere. The unscoped count wrote the same
+    // national figure into every area's board the moment a second area existed
+    // (Codex, 19 Sep 2026); the places this run found are the honest scope.
+    const refs = mine.map((p) => p.ref);
+    const { rows: [scored] } = refs.length
+      ? await query(`select count(*)::int n from epic_scores where venue_ref = any($1)`, [refs])
+      : { rows: [{ n: 0 }] };
     await query(
-      `insert into area_counts (area_slug, category, subcategory, census_count, scored_count, saturated, censused_at)
-       values ($1,$2,$3,$4,$5,$6, now())
+      `insert into area_counts (area_slug, category, subcategory, census_count, scored_count, saturated, censused_at, run_id, complete)
+       values ($1,$2,$3,$4,$5,$6, now(), $7, true)
        on conflict (area_slug, category, subcategory) do update
           set census_count = excluded.census_count,
               scored_count = excluded.scored_count,
               saturated    = excluded.saturated,
-              censused_at  = excluded.censused_at`,
-      [areaSlug, category, subcategory, mine.length, scored.n, sat.n],
+              censused_at  = excluded.censused_at,
+              run_id       = excluded.run_id,
+              complete     = true`,
+      [areaSlug, category, subcategory, mine.length, scored.n, sat.n, runId],
     );
   }
 }

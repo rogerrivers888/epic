@@ -51,10 +51,15 @@ export const PRICE_PER_UNIT_USD = {
   // Console and `sources/pricing.js` links to it. Confirm before they are used
   // to justify a spend.
   //
-  //   essentials  an id, a point, a type. What the census asks for, and free
-  //               inside the 10,000-a-month allowance. The whole policy rests
-  //               on this line being nought.
+  //   essentials  ids only — the id and the resource name, nothing else. Free.
+  //               **Not what the census asks for**: a point and a type are Pro
+  //               fields, so a census that stores coordinates is billed at the
+  //               line below (Codex, 19 Sep 2026). Kept because it is the right
+  //               boundary and because an ids-only pass is a real option.
   'google-essentials': 0,
+  //   pro         what the place is: name, address, point, type, photograph.
+  //               The tier the census actually falls in.
+  'google-pro': 0.032,
   //   search      a display search: twenty places with ratings, 3.2p.
   'google-search': 0.04,
   //   details     one place opened, with reviews and the AI summaries, 2p.
@@ -100,7 +105,7 @@ export function costOf(units, provider = null) {
   // and the tier so the money is right. Adding every key up would then bill the
   // same request twice — and would price the census, whose tier is free, at the
   // Enterprise rate anyway, which is the exact fault this split exists to fix.
-  const tiered = ['google-essentials', 'google-search', 'google-details'].some((k) => k in units_);
+  const tiered = ['google-essentials', 'google-pro', 'google-search', 'google-details'].some((k) => k in units_);
   let usd = 0;
   for (const [key, n] of Object.entries(units_)) {
     if (tiered && key === 'google') continue;
