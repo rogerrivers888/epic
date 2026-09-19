@@ -67,6 +67,7 @@ import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, settleNew } from './repositories/placeIndex.js';
+import { expireRentedCoordinates } from './sources/census.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
@@ -588,6 +589,15 @@ const sweep = async () => {
   // minutes are picked up, so a slow one is never started twice.
   const back = await resumeCollections().catch(() => null);
   if (back?.resumed) console.log(`epic-api: collect — picked up ${back.resumed} interrupted run(s)`);
+  // Coordinates past the thirty days a provider's terms allow.
+  //
+  // On the hour for the same reason the planning sessions are: the interval is
+  // part of the retention, and a daily sweep would mean a point outliving its
+  // terms by up to another day depending on the time it was written. A point
+  // from the open map is ODbL and is not touched — `coords_from` is what tells
+  // them apart (migration 184).
+  const stale = await expireRentedCoordinates().catch(() => null);
+  if (stale?.expired) console.log(`epic-api: places — ${stale.expired} rented coordinate(s) expired, ${stale.cells} cell row(s) with them`);
 };
 
 // The index is derived, so on an installation that predates it there is nothing

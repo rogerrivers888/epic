@@ -346,46 +346,35 @@ export async function censusIsFresh(areaSlug, { days = CENSUS_FRESH_DAYS } = {})
  *
  * The census is IDs Only, so it knows a place exists and which question found
  * it, and nothing about where it is. A point and Google's type words are Pro
- * fields — dearer than the census may be — and they arrive here instead: on the
- * first display search that returns the place, a call being made anyway for
- * somebody who is actually looking at it (owner, 19 Sep 2026).
+ * fields — dearer than the census may be — and they arrive on the first display
+ * search that returns the place, a call being made anyway for somebody who is
+ * actually looking at it (owner, 19 Sep 2026).
  *
- * So map placement and reachability apply to *surfaced* places only. That is
- * the deliberate trade: the area board counts everything and locates nothing,
- * and nothing on it can spend money.
- *
- * `coords_at` dates the point because Google's terms allow a coordinate to be
- * held for 30 days and no longer, and `coords_from` says whether that clock
- * applies: OpenStreetMap's own coordinates are ODbL and ours to keep, which is
- * what makes the "Not on Google" residual a reachability fallback rather than
- * another thing that expires.
+ * This is a thin wrapper over `placeIndex.noteMany`, and deliberately so. The
+ * first cut of it was a direct `update place_index`, which went round the two
+ * things that writer does and nothing else does: it dates the position and
+ * names whose it is, and it clears `placed_at` when a place learns where it is
+ * so the hourly settler gives it a cell and a ring. A census row is exactly a
+ * row with no position, so going round that meant a place could be surfaced,
+ * gain a coordinate, and never once appear in a reachability ring (Codex,
+ * 19 Sep 2026). The display routes already call `noteSeen`, which goes through
+ * the same writer — so in practice this is for callers that hold venues and no
+ * route.
  */
 export async function noteFromDisplay(venues, { source = 'google' } = {}) {
   const rows = (venues ?? [])
     .map((v) => ({
       ref: v.venueRef ?? (v.sourcePlaceId ? `${v.source ?? source}:${v.sourcePlaceId}` : null),
-      lat: v.lat, lng: v.lng,
+      lat: v.lat,
+      lng: v.lng,
       types: [...new Set([v.primaryType, ...(v.labels ?? []).map((l) => String(l).replace(/^google:/, ''))].filter(Boolean))],
     }))
     .filter((r) => r.ref && r.lat != null && r.lng != null);
   if (!rows.length) return { noted: 0 };
-
   let noted = 0;
   for (const batch of chunks(rows, WRITE_BATCH)) {
-    const values = batch.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2}::double precision,$${i * 4 + 3}::double precision,$${i * 4 + 4}::text[])`).join(',');
-    const params = batch.flatMap((r) => [r.ref, r.lat, r.lng, r.types]);
-    const { rowCount } = await query(
-      `update place_index i
-          set lat          = v.lat,
-              lng          = v.lng,
-              google_types = case when array_length(v.types, 1) is null then i.google_types else v.types end,
-              coords_at    = now(),
-              coords_from  = $${batch.length * 4 + 1}
-         from (values ${values}) as v(ref, lat, lng, types)
-        where i.venue_ref = v.ref`,
-      [...params, source],
-    );
-    noted += rowCount;
+    await index.noteMany(batch, { source });
+    noted += batch.length;
   }
   return { noted };
 }
@@ -398,13 +387,42 @@ export async function noteFromDisplay(venues, { source = 'google' } = {}) {
  * search returns it. A place nobody has looked at in a month is a place we have
  * no business holding a point for.
  */
+/**
+ * Whose coordinates never expire.
+ *
+ * The open map is ODbL, the atlas harvest and our own research are ours. Every
+ * other prefix is somebody else's and gets the clock — named this way round on
+ * purpose: a new provider added tomorrow is rented by default, where a list of
+ * *what expires* would have silently granted it permanent retention until
+ * somebody remembered to add it. Tripadvisor was exactly that case (Codex,
+ * 19 Sep 2026).
+ */
+const OURS_TO_KEEP = ['osm', 'atlas', 'own'];
+
 export async function expireRentedCoordinates({ days = 30 } = {}) {
-  const { rowCount } = await query(
+  const { rows } = await query(
     `update place_index
-        set lat = null, lng = null, cell = null, coords_at = null, coords_from = null
-      where coords_from = 'google'
-        and coords_at < now() - ($1 || ' days')::interval`,
-    [String(days)],
+        set lat = null, lng = null, cell = null, coords_at = null, coords_from = null,
+            -- Back into the settler's hands. Without this the row keeps a
+            -- placed_at that refers to a position it no longer has, and if the
+            -- place is surfaced again the ring is worked out from nothing.
+            placed_at = null
+      where coords_from is not null
+        and coords_from <> all ($2::text[])
+        and coords_at < now() - ($1 || ' days')::interval
+      returning venue_ref`,
+    [String(days), OURS_TO_KEEP],
   );
-  return { expired: rowCount };
+  if (!rows.length) return { expired: 0, cells: 0 };
+  // The same point, copied. `repositories/reach.js` stamps a place into
+  // `place_cells` with its own lat and lng, so clearing the index alone left
+  // the rented coordinate sitting in the other table for ever — and left the
+  // place looking stamped, so nothing ever asked for it again (Codex, 19 Sep
+  // 2026). Both copies go, or neither has expired.
+  let cells = 0;
+  for (const batch of chunks(rows.map((r) => r.venue_ref), WRITE_BATCH)) {
+    const { rowCount } = await query('delete from place_cells where venue_ref = any($1)', [batch]);
+    cells += rowCount;
+  }
+  return { expired: rows.length, cells };
 }

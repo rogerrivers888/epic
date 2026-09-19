@@ -228,6 +228,25 @@ test('the census locates nothing, and the first display search locates it', asyn
   await query(`delete from area_counts where area_slug = 'census-test-loc'`);
 });
 
+test('a licensed point that is not Google\'s expires too', async () => {
+  // Migration 184 marked every non-Google reference as OpenStreetMap's, and the
+  // sweep leaves OSM alone — so a Tripadvisor coordinate would have been kept
+  // for ever under a rule written to throw it away at thirty days (Codex,
+  // 19 Sep 2026). Provenance is read off the reference now, and the sweep names
+  // what it *keeps* rather than what it drops, so a provider added tomorrow is
+  // rented by default.
+  const ref = 'tripadvisor:9900112233';
+  await query('insert into place_index (venue_ref) values ($1) on conflict do nothing', [ref]);
+  await noteFromDisplay([{ venueRef: ref, lat: 51.4, lng: -0.6 }], { source: 'tripadvisor' });
+  const { rows: [before] } = await query('select coords_from from place_index where venue_ref = $1', [ref]);
+  assert.equal(before.coords_from, 'tripadvisor', 'whose point it is comes from the reference');
+  await query(`update place_index set coords_at = now() - interval '31 days' where venue_ref = $1`, [ref]);
+  await expireRentedCoordinates();
+  const { rows: [after] } = await query('select lat, coords_from from place_index where venue_ref = $1', [ref]);
+  assert.equal(after.lat, null, 'rented is rented, whoever is renting it');
+  await query('delete from place_index where venue_ref = $1', [ref]);
+});
+
 test("OpenStreetMap's own coordinates are ours to keep, so they never expire", async () => {
   const ref = 'osm:node/999000111';
   await query(`insert into place_index (venue_ref) values ($1) on conflict do nothing`, [ref]);

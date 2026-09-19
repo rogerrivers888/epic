@@ -1298,9 +1298,19 @@ export async function noteMany(places = [], { source = null, countryCode = null,
     // statement had five targets and four expressions and threw every time —
     // which the swallow on the pool path hid completely, so the index was never
     // actually written to (found by the sweep's own tests, 17 Sep 2026).
-    const values = rows.map((_, i) => `($${i * 5 + 1},$${i * 5 + 2}::double precision,$${i * 5 + 3}::double precision,$${i * 5 + 4},$${i * 5 + 5}, now())`).join(',');
+    // A position carries its own provenance and its own clock.
+    //
+    // The data policy holds a coordinate for thirty days where it came from a
+    // provider, and for good where it came from the open map (migration 184).
+    // Stamping it *here* rather than in a writer of its own is the whole point:
+    // every display path already reaches the index through `noteSeen` and this,
+    // so a parallel writer would have left every live search's coordinates
+    // undated and outside the expiry — which is exactly what the first cut of
+    // it did (Codex, 19 Sep 2026). The source is read off the reference, which
+    // is the only thing that actually knows whose point it is.
+    const values = rows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2}::double precision,$${i * 6 + 3}::double precision,$${i * 6 + 4},$${i * 6 + 5}, now(), $${i * 6 + 6}::text[], case when $${i * 6 + 2}::double precision is not null then now() end, case when $${i * 6 + 2}::double precision is not null then split_part($${i * 6 + 1}, ':', 1) end)`).join(',');
     await exec(
-      `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen)
+      `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen, google_types, coords_at, coords_from)
        values ${values}
        on conflict (venue_ref) do update
           -- A later source's position wins, where it has one.
@@ -1362,8 +1372,15 @@ export async function noteMany(places = [], { source = null, countryCode = null,
                       and (abs(place_index.lat - excluded.lat) > 0.0005
                            or abs(coalesce(place_index.lng, 0) - coalesce(excluded.lng, 0)) > 0.0005))
                 then null else place_index.placed_at end,
+              -- Only where a position actually arrived. A caller with none must
+              -- not restart somebody else's thirty days.
+              coords_at = case when excluded.lat is not null then excluded.coords_at else place_index.coords_at end,
+              coords_from = case when excluded.lat is not null then excluded.coords_from else place_index.coords_from end,
+              -- Google's own words for what it is, which the census is too
+              -- cheap to buy and a display search carries for nothing.
+              google_types = coalesce(excluded.google_types, place_index.google_types),
               last_seen = now()`,
-      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified']));
+      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', p.types?.length ? p.types : null]));
     // Who has returned each place, which may be more than one of them.
     //
     // A sweep result is often Google *and* OpenStreetMap, and the sweep keeps
@@ -2373,6 +2390,9 @@ export async function noteSeen(venues = []) {
         ref,
         lat: v.lat, lng: v.lng,
         countryCode: v.countryCode ?? null,
+        // What Google calls it. Free on a display search, Pro on its own, so
+        // this is the only place it is ever learned (data policy, 19 Sep 2026).
+        types: [...new Set([v.primaryType, ...(v.labels ?? []).map((l) => String(l).replace(/^google:/, ''))].filter(Boolean))],
         sources,
         // Its own id for the source the reference belongs to, and every other
         // contributor's where the merge carried one.
