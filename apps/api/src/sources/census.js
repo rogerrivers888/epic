@@ -1,0 +1,291 @@
+/**
+ * The census: knowing what exists, free and for good.
+ *
+ * The second of the data policy's five sentences (19 Sep 2026), and the one the
+ * other four stand on. Ranking from what we own is only possible once we own a
+ * complete list of what there is; buying only for what is shown is only
+ * possible once something other than Google decides what to show.
+ *
+ * **Google cannot count.** Every query returns its top twenty and pages to a
+ * hard stop at sixty. Ask "restaurants in Bristol" and you are told about sixty
+ * restaurants, not how many there are — and there is no parameter, anywhere, to
+ * ask the second question. So a count is *built*:
+ *
+ *   1. One query per Google place type inside each Epic subcategory, fenced to
+ *      a box. `pub` and `bar` and `gastropub` are three questions, not one.
+ *   2. A slice that comes back with sixty was cut off. It is marked saturated
+ *      and split — into four tiles — and each tile is asked the same question.
+ *   3. Recurse until every slice answers under the ceiling. The union of the
+ *      ids is the census.
+ *
+ * All of it on the Essentials mask — an id, a point, a type — which is free.
+ * The whole design exists because that tier is free: it is what lets us ask
+ * Google forty times about one outcode without it costing anything, and it is
+ * why `sources/google.js` now meters the tier separately (a flat meter priced
+ * every one of those slices at the Enterprise rate).
+ *
+ * **What is written down is identifiers and our own derivations.** The place
+ * id, the point, Google's type words, which slice found it and at what rank.
+ * Never a name, an opinion, an opening time or a photograph. That is what makes
+ * the census permanent where a search result is not.
+ */
+
+import { query } from '../db.js';
+import { googleSource } from './google.js';
+import * as index from '../repositories/placeIndex.js';
+import * as providerCalls from '../repositories/providerCalls.js';
+
+/**
+ * How far a saturated slice is allowed to be split.
+ *
+ * Four tiles a level, so depth 3 is sixty-four tiles of the original box. An
+ * outcode cut sixty-four ways is a few hundred metres a side; if Google still
+ * says sixty in that, the honest answer is that the box is a city centre and
+ * the count is a floor, which is what `saturated` on the row is for. Going
+ * deeper trades real requests for a number nobody will act on.
+ */
+const MAX_DEPTH = 3;
+/** A census is good for 30 days; the policy's own figure. */
+export const CENSUS_FRESH_DAYS = 30;
+/**
+ * A ceiling on one run, whatever the plan says.
+ *
+ * Essentials requests are free inside Google's allowance and priced at nought
+ * here, which is exactly the condition under which a runaway goes unnoticed:
+ * nothing in the ledger would complain, and the first sign would be the console
+ * showing the allowance gone. Forty-six subcategories over two hundred and
+ * fifty types, each able to split into sixty-four tiles, is an upper bound in
+ * the tens of thousands — so the run stops at a number a person chose, records
+ * that it stopped, and is resumed rather than silently half-done.
+ *
+ * The owner is setting a daily cap in the Cloud Console as the outer guard
+ * (19 Sep 2026). This is the inner one: a console cap protects the account, and
+ * this protects the run from having to rely on it.
+ */
+export const MAX_REQUESTS_PER_RUN = Number(process.env.EPIC_CENSUS_MAX_REQUESTS || 2000);
+
+/**
+ * The slice plan: which Google types stand for which Epic subcategory.
+ *
+ * Read from `shelf_rules`, not from a table of its own, because the mapping
+ * already exists there — 250 `labels` rules carrying `google:<type>` against a
+ * subcategory, taught in the back office. A census that kept its own copy would
+ * be a second taxonomy to maintain and would drift from the one the app files
+ * places under, which is the exact thing the labels work was done to stop.
+ *
+ * That also delivers the policy's "a taxonomy change re-maps for free": teach a
+ * type onto a different drawer and the next census slices for it there, with no
+ * migration and no new questions asked of Google.
+ */
+export async function slicePlan({ subcategories = null } = {}) {
+  const { rows } = await query(
+    `select s.category_key                as category,
+            r.subcategory                 as subcategory,
+            array_agg(distinct substring(l from 8)) as types
+       from shelf_rules r
+       join shelf_subcategories s on s.key = r.subcategory
+       cross join lateral unnest(r.labels) as l
+      where r.scope = 'labels'
+        and r.subcategory is not null
+        and s.active
+        and l like 'google:%'
+        ${subcategories?.length ? 'and r.subcategory = any($1)' : ''}
+      group by 1, 2
+      order by 1, 2`,
+    subcategories?.length ? [subcategories] : [],
+  );
+  return rows.map((r) => ({ ...r, types: r.types.filter(Boolean) }));
+}
+
+/** The four tiles a saturated box splits into. */
+function quarters(box) {
+  const midLat = (box.minLat + box.maxLat) / 2;
+  const midLng = (box.minLng + box.maxLng) / 2;
+  return [
+    { minLat: box.minLat, minLng: box.minLng, maxLat: midLat, maxLng: midLng },
+    { minLat: box.minLat, minLng: midLng, maxLat: midLat, maxLng: box.maxLng },
+    { minLat: midLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: midLng },
+    { minLat: midLat, minLng: midLng, maxLat: box.maxLat, maxLng: box.maxLng },
+  ];
+}
+
+const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((n) => Number(n).toFixed(4)).join(',');
+
+/**
+ * One type, one box, splitting itself until nothing is cut off.
+ *
+ * Returns every id found anywhere under it. The rows written to
+ * `census_slices` are the working: a saturated parent keeps its row *beside*
+ * its four children, because "we asked and the answer was cut off" is the first
+ * thing to look at when a count reads wrong, and a tree that quietly replaced
+ * the parent with its tiles would hide it.
+ */
+async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, depth = 0, parentId = null, found, meter, stats }) {
+  if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
+  const res = await googleSource.censusSlice({ box, includedType: type, meter });
+  stats.requests += res.requests;
+
+  let fresh = 0;
+  for (const p of res.places) {
+    const ref = `google:${p.id}`;
+    if (!found.has(ref)) fresh += 1;
+    // Later slices do not overwrite the first one to find a place: the narrowest
+    // question that returned it is the most informative thing about it, and the
+    // first slice is always at least as narrow as any that follows it.
+    if (!found.has(ref)) {
+      found.set(ref, {
+        ref, lat: p.lat, lng: p.lng, types: p.types,
+        category, subcategory, foundBy: type, rank: res.places.indexOf(p) + 1, slice: boxLabel(box),
+      });
+    }
+  }
+
+  const saturated = res.saturated && depth < MAX_DEPTH;
+  const { rows: [row] } = await query(
+    `insert into census_slices
+       (area_slug, outcode, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     returning id`,
+    [areaSlug, outcode, box.minLat, box.minLng, box.maxLat, box.maxLng, category, subcategory,
+      type, type, res.places.length, fresh, res.saturated, parentId, depth, res.requests, res.problem],
+  );
+  stats.slices += 1;
+  if (res.problem) stats.problems.push(`${subcategory}/${type}: ${res.problem}`);
+  if (res.saturated && depth >= MAX_DEPTH) stats.saturated += 1;
+
+  if (!saturated) return;
+  for (const q of quarters(box)) {
+    await sliceDown({
+      box: q, type, category, subcategory, areaSlug, outcode, householdId,
+      depth: depth + 1, parentId: row.id, found, meter, stats,
+    });
+  }
+}
+
+/**
+ * Census one box.
+ *
+ * `box` is corners, never a postcode: the policy keys everything on a place id
+ * and a point, because a thirty-minute ring is not a postcode and never was.
+ * `areaSlug` and `outcode` are labels for the board to group by, not the key.
+ *
+ * Nothing about this is a search a household made, so no rented content is
+ * fetched, held or shown. It is the one Google call Epic makes that produces
+ * something it may keep for ever.
+ */
+export async function censusArea({ areaSlug = null, outcode = null, box, subcategories = null, householdId = null, onProgress = null, maxRequests = MAX_REQUESTS_PER_RUN } = {}) {
+  if (!box || box.minLat == null) throw Object.assign(new Error('a census needs a box'), { status: 400 });
+  const plan = await slicePlan({ subcategories });
+  if (!plan.length) return { noted: 0, requests: 0, slices: 0, plan: 0, problems: ['no Google types are taught onto any active subcategory'] };
+
+  const found = new Map();
+  const meter = {};
+  const stats = { requests: 0, slices: 0, saturated: 0, problems: [], maxRequests, stopped: false };
+
+  for (const { category, subcategory, types } of plan) {
+    for (const type of types) {
+      await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, found, meter, stats });
+    }
+    onProgress?.({ subcategory, found: found.size, requests: stats.requests });
+    if (stats.stopped) { stats.problems.push(`stopped at the ${maxRequests}-request ceiling for one run`); break; }
+  }
+
+  // One ledger row for the whole census, metered at the tier it actually used.
+  // Priced at nought by `domain/providerPrices.js` — which is the point, and is
+  // the thing the first run is asked to demonstrate from the ledger rather than
+  // from a promise.
+  if (stats.requests) {
+    await providerCalls.record(householdId, 'google', 'census.slice', JSON.stringify(meter)).catch(() => null);
+  }
+
+  const places = [...found.values()];
+  if (places.length) {
+    await index.noteMany(places.map((p) => ({ ref: p.ref, lat: p.lat, lng: p.lng, sources: [{ source: 'google', sourceId: p.ref.slice(7) }] })), { source: 'google', countryCode: 'GB' });
+    await writeCensusFacts(places);
+  }
+  await rollUp({ areaSlug, plan, found: places });
+
+  return { noted: places.length, ...stats, plan: plan.length };
+}
+
+/**
+ * What the census learned, onto the index.
+ *
+ * Separate from `noteMany` because that is the general "we saw this place"
+ * path shared with every other source, and these columns are the census's own.
+ * Written in one statement rather than a row at a time: a census of a city
+ * centre is thousands of places and a round trip each would take longer than
+ * the Google calls did.
+ */
+async function writeCensusFacts(places) {
+  const values = places.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2},$${i * 7 + 3}::text[],$${i * 7 + 4},$${i * 7 + 5}::int,$${i * 7 + 6},$${i * 7 + 7})`).join(',');
+  const params = places.flatMap((p) => [p.ref, p.category, p.types, p.foundBy, p.rank, p.slice, p.subcategory]);
+  await query(
+    `update place_index i
+        set censused_at = now(),
+            google_types = v.types,
+            found_by     = v.found_by,
+            found_rank   = v.found_rank,
+            slice        = v.slice,
+            -- The census is allowed to file a place it found under the drawer
+            -- whose question found it, but never to overwrite a filing somebody
+            -- made by hand: a rule taught in the back office outranks a guess
+            -- made from the query that happened to surface it.
+            category     = coalesce(i.category, v.category),
+            subcategory  = coalesce(i.subcategory, v.subcategory),
+            derived_by   = coalesce(i.derived_by, 'census')
+       from (values ${values}) as v(ref, category, types, found_by, found_rank, slice, subcategory)
+      where i.venue_ref = v.ref`,
+    params,
+  );
+}
+
+/**
+ * The area board's numbers, written down so the board can draw without calling
+ * anybody.
+ *
+ * The policy is explicit that the board "cannot trigger a paid call" and shows
+ * "the same numbers on every visit until the census re-runs". A board that
+ * recomputed from a provider on each view would be neither.
+ *
+ * `osm_count`, `fhrs_count` and `residual` are left alone here: they are the
+ * free cross-checks and are filled by their own passes, which run on their own
+ * clocks. A null is honest — it says nobody has checked — and is not the same
+ * as a nought.
+ */
+async function rollUp({ areaSlug, plan, found }) {
+  if (!areaSlug) return;
+  for (const { category, subcategory } of plan) {
+    const mine = found.filter((p) => p.subcategory === subcategory);
+    const { rows: [sat] } = await query(
+      `select count(*)::int n from census_slices
+        where area_slug = $1 and subcategory = $2 and saturated and depth >= $3`,
+      [areaSlug, subcategory, MAX_DEPTH],
+    );
+    const { rows: [scored] } = await query(
+      `select count(*)::int n from epic_scores e join place_index i on i.venue_ref = e.venue_ref
+        where i.subcategory = $1`,
+      [subcategory],
+    );
+    await query(
+      `insert into area_counts (area_slug, category, subcategory, census_count, scored_count, saturated, censused_at)
+       values ($1,$2,$3,$4,$5,$6, now())
+       on conflict (area_slug, category, subcategory) do update
+          set census_count = excluded.census_count,
+              scored_count = excluded.scored_count,
+              saturated    = excluded.saturated,
+              censused_at  = excluded.censused_at`,
+      [areaSlug, category, subcategory, mine.length, scored.n, sat.n],
+    );
+  }
+}
+
+/** Has this area been censused recently enough to leave alone? */
+export async function censusIsFresh(areaSlug, { days = CENSUS_FRESH_DAYS } = {}) {
+  if (!areaSlug) return false;
+  const { rows: [row] } = await query(
+    `select max(censused_at) at from area_counts where area_slug = $1`, [areaSlug],
+  );
+  return Boolean(row?.at) && Date.now() - new Date(row.at).getTime() < days * 86_400_000;
+}

@@ -42,6 +42,9 @@ const TEXT_SEARCH_FIELDS = `${SEARCH_FIELDS},contextualContents.justifications`;
 const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber,generativeSummary,reviewSummary';
 /** The two figures alone — the Pro tier, a fraction of a full detail — for ranking a place we already know Google's id for. */
 const RATING_FIELDS = 'id,rating,userRatingCount';
+// The census mask: an id, a point, and Google's own words for what it is.
+// Nothing here is content — it is the Essentials tier, and it is free.
+const CENSUS_FIELDS = 'places.id,places.location,places.types,nextPageToken';
 
 export const FOOD_TYPES = ['restaurant', 'cafe', 'bar', 'pub', 'bakery', 'ice_cream_shop', 'coffee_shop'];
 /**
@@ -379,8 +382,13 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   return res.json();
 }
 
+/** `movie_theater` -> "movie theater", which is what a text query wants. */
+const googleTypeWords = (t) => String(t ?? '').replace(/_/g, ' ');
+
 export const googleSource = {
   key: 'google',
+  /** The census's own call. See `censusSlice`. */
+  censusSlice,
   label: 'Google',
   /** The furthest a nearby search may look; a wider ring is asked at this width. */
   maxRadiusKm: 50,
@@ -727,6 +735,64 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
     website: p.websiteUri ?? null,
   }));
   return { places, calls: 1, problem: null, fenced: searchable };
+}
+
+/**
+ * The narrowest question Google answers: what is here, by id.
+ *
+ * The census (data policy, 19 Sep 2026). An id, a point and a type — no name,
+ * no hours, no opinion — which is Google's Essentials tier and free inside the
+ * allowance. `sources/google.js` meters it as `google-essentials` and the
+ * ledger prices that at nought, so a census can be run and shown to have cost
+ * nothing.
+ *
+ * Text Search rather than Nearby Search because Nearby stops at twenty with no
+ * way to ask for the next page: Text Search pages to sixty, and sixty is the
+ * ceiling the whole slicing idea is built around. A slice that comes back with
+ * sixty has been cut off — `saturated` — and the caller splits it and asks
+ * again. That is the only way to count with a provider that will not count.
+ *
+ * Returns `{ places, requests, saturated, problem }`. `places` carries only
+ * what may be stored: the id, the point, and Google's own type words.
+ */
+async function censusSlice({ box, includedType, query, pages = 3, meter = null } = {}) {
+  if (!KEY() || !box) return { places: [], requests: 0, saturated: false, problem: 'no Google key' };
+  const rectangle = {
+    low: { latitude: box.minLat, longitude: box.minLng },
+    high: { latitude: box.maxLat, longitude: box.maxLng },
+  };
+  const out = new Map();
+  let requests = 0;
+  let pageToken = null;
+  for (let page = 0; page < pages; page += 1) {
+    const body = {
+      textQuery: query || googleTypeWords(includedType),
+      pageSize: 20,
+      languageCode: 'en-GB',
+      locationRestriction: { rectangle },
+      ...(includedType ? { includedType } : {}),
+      ...(pageToken ? { pageToken } : {}),
+    };
+    let data;
+    try {
+      data = await call('/places:searchText', { fieldMask: CENSUS_FIELDS, meter, body });
+      requests += 1;
+    } catch (err) {
+      // A slice that failed is not a slice that was empty, and the difference
+      // has to survive to the census row: an area under-counted because Google
+      // refused must never read as an area with nothing in it.
+      return { places: [...out.values()], requests, saturated: false, problem: String(err.message).slice(0, 160) };
+    }
+    for (const p of data.places || []) {
+      if (!p.id || p.location?.latitude == null) continue;
+      out.set(p.id, { id: p.id, lat: p.location.latitude, lng: p.location.longitude, types: p.types || [] });
+    }
+    pageToken = data.nextPageToken ?? null;
+    if (!pageToken) break;
+  }
+  // Sixty back with another page waiting is Google saying "there are more of
+  // these than I will tell you about". That is the saturation signal.
+  return { places: [...out.values()], requests, saturated: out.size >= 60 || Boolean(pageToken), problem: null };
 }
 
 export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null, includedType = 'restaurant', keepLodging = false } = {}) {
