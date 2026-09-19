@@ -1924,3 +1924,25 @@ test('both shapes of Tripadvisor meter count against the contractual cap', async
           or (jsonb_typeof(units) = 'number' and provider = 'tripadvisor'))`);
   assert.equal(both.calls, 5, 'and Google’s bare meter is not one of them');
 });
+
+test('the offline record never holds a fact that has to be thrown away', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'osm:node/rented-fact';
+  const index = await import('../src/repositories/placeIndex.js');
+  await index.noteMany([{ ref, lat: 51.4, lng: -0.6, countryCode: 'GB' }], { source: 'osm' });
+  await owned.ensureRecord(ref);
+  await owned.putFact(ref, { field: 'name', source: 'osm', value: 'Ours for good', licence: 'ODbL 1.0', retention: 'indefinite', expiresAt: null });
+  await owned.putFact(ref, { field: 'summary', source: 'google', value: 'Rented', licence: 'Google', retention: '30 days', expiresAt: new Date(Date.now() + 86_400_000) });
+
+  // `place_records` goes out to devices through /api/offline/records, and the
+  // expiry sweep can empty a table on our own server but cannot reach a phone
+  // in somebody's pocket. A fact with an expiry is live — it is just not ours.
+  const keepable = await owned.liveFacts(ref, { keepableOnly: true });
+  assert.ok(keepable.some((f) => f.field === 'name'), 'what we may keep is kept');
+  assert.equal(keepable.some((f) => f.expires_at || f.field === 'summary'), false,
+    'and nothing with a clock on it goes near the offline record');
+
+  // The display reading still sees it, which is what the wider predicate was for.
+  const live = await owned.liveFacts(ref);
+  assert.ok(live.some((f) => f.field === 'summary'), 'a rented fact is ours to show now, not to keep');
+});

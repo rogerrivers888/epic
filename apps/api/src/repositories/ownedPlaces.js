@@ -42,13 +42,23 @@ export function forgetSourceFacts(venueRef, sources) {
   return query('delete from place_facts where venue_ref = $1 and source = any($2)', [venueRef, sources]);
 }
 
-export async function liveFacts(venueRef) {
+export async function liveFacts(venueRef, { keepableOnly = false } = {}) {
   const { rows } = await query(
     // `expires_at is null` is "ours for good"; a licensed fact that has not yet
     // expired is also ours *now*, and one that has expired is nobody's. Reading
     // only the first left a live licensed fact out and, worse, let an expired
     // one through anywhere the predicate was looser (Codex, 18 Sep 2026).
-    `select field, source, value, confidence from place_facts where venue_ref = $1 and (expires_at is null or expires_at > now())`,
+    //
+    // `keepableOnly` is for the one caller that is building something we cannot
+    // take back. `place_records` is the offline record and goes out to devices,
+    // so a fact with an expiry must never reach it — the expiry sweep can empty
+    // a table on our own server and cannot reach a phone in somebody's pocket.
+    // Widening this predicate for display quietly widened it for that too
+    // (Codex, 19 Sep 2026). Rented is rented: CLAUDE.md, and `compose` said so
+    // in its own docstring all along.
+    `select field, source, value, confidence from place_facts
+      where venue_ref = $1
+        and ${keepableOnly ? 'expires_at is null' : '(expires_at is null or expires_at > now())'}`,
     [venueRef],
   );
   return rows;
@@ -186,58 +196,46 @@ export async function knownCategory(venueRef) {
  */
 export async function writeRecord(venueRef, columns, values, attribution, provenance) {
   const sets = columns.map((c, i) => `${c} = $${i + 2}`).join(', ');
+  // Whether the classification moved, decided in the statement that moves it.
+  //
+  // Only over the columns this pass actually wrote: one it did not write cannot
+  // have changed. `is distinct from` rather than `<>`, because null is one of
+  // the values that matters here — a kind being *withdrawn* has to travel as
+  // surely as one arriving.
+  const changed = ['category', 'experiences']
+    .map((name) => [name, columns.indexOf(name)])
+    .filter(([, at]) => at >= 0)
+    .map(([name, at]) => `w.${name} is distinct from $${at + 2}${name === 'experiences' ? '::jsonb' : ''}`);
   const { rows } = await query(
-    // What it said before, read in the same statement.
+    // Three things in one statement, on one snapshot.
     //
-    // `returning` can only see the new row, and the question here is whether the
-    // *classification changed* — which includes losing one. A CTE is the only
-    // way to have both without a second round trip and a window in between.
-    `with was as (select venue_ref, category, experiences from place_records where venue_ref = $1)
-     update place_records set ${sets},
-       attribution = $${columns.length + 2}, provenance = $${columns.length + 3}, updated_at = now()
-     from was w
-     where place_records.venue_ref = w.venue_ref
-     returning ${ownedRecordSql('place_records')} as holds_something,
-               w.category as was_category, w.experiences as was_experiences`,
+    // `returning` can only see the new row, and the question is whether the
+    // classification *changed* — so the previous values come from a CTE. And the
+    // re-shelving has to be in here too: as two statements, a process that died
+    // between them left the record saying one thing and the index shelved by
+    // another, and the retry would compare the new value against itself, find
+    // nothing moved, and leave the place on its old shelf until somebody ran a
+    // full rebuild (Codex, 19 Sep 2026).
+    `with was as (
+       select venue_ref, category, experiences from place_records where venue_ref = $1),
+     upd as (
+       update place_records set ${sets},
+         attribution = $${columns.length + 2}, provenance = $${columns.length + 3}, updated_at = now()
+       from was w
+       where place_records.venue_ref = w.venue_ref
+       returning ${ownedRecordSql('place_records')} as holds_something)
+     ${changed.length ? `, reshelve as (
+       update place_index pi set placed_at = null
+         from was w
+        where pi.venue_ref = w.venue_ref and (${changed.join(' or ')})
+       returning 1)` : ''}
+     select holds_something from upd`,
     [venueRef, ...values, JSON.stringify(attribution), JSON.stringify(provenance)],
   );
   // This is the moment a place becomes ours: a fact of our own has landed on
   // it. Before this, the record is an empty row `ensureRecord` made so the
   // research had somewhere to write (Codex, 17 Sep 2026).
   if (rows[0]?.holds_something) await noteOwned(venueRef);
-  if (!rows[0]) return;
-  // And if the kind of place it is has *changed*, it needs shelving again.
-  //
-  // `shelveAll` only ever runs over places waiting to be placed — a full rebuild,
-  // or the hourly settle's list — so a record whose classification moved while it
-  // was already placed kept whatever shelf it had. The whole chain from "identify
-  // this place" to "it appears on a category board" stopped one link from the end
-  // (19 Sep 2026, watching SL4 not move). Unplaced is how everything else here
-  // asks to be looked at again.
-  //
-  // Changed, in either direction. Two wrong versions came before this one: the
-  // column list, which the researcher writes in full every pass, so it fired
-  // always; and then a non-empty value, which fired on a place that learned its
-  // kind and not on one that *lost* it — so a place whose category was withdrawn
-  // went on standing in its old category board for ever, which is worse than the
-  // gap it was fixing (Codex, 19 Sep 2026).
-  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-  const written = (name) => {
-    const at = columns.indexOf(name);
-    return at < 0 ? undefined : values[at];
-  };
-  // The JSON columns go down as text and come back parsed, so both ends are
-  // compared as text.
-  const asText = (v) => (v === undefined || v === null ? null : typeof v === 'string' ? v : JSON.stringify(v));
-  const moved = [
-    ['category', rows[0].was_category],
-    ['experiences', rows[0].was_experiences],
-  ].some(([name, before]) => {
-    const now = written(name);
-    // A column this pass did not write cannot have moved.
-    return now !== undefined && !same(asText(before), asText(now));
-  });
-  if (moved) await query('update place_index set placed_at = null where venue_ref = $1', [venueRef]);
 }
 
 export async function recordAttempt(venueRef, a) {

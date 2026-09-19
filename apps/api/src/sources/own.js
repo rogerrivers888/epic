@@ -190,7 +190,9 @@ const JSON_FIELDS = new Set(Object.keys(JSON_DEFAULTS));
  * away on a device we cannot reach.
  */
 async function compose(venueRef) {
-  const rows = await owned.liveFacts(venueRef);
+  // Only what we may keep for good: this builds `place_records`, which is the
+  // offline record and goes out to devices we cannot reach again.
+  const rows = await owned.liveFacts(venueRef, { keepableOnly: true });
   const bySource = new Map();
   for (const r of rows) bySource.set(`${r.field}|${r.source}`, r.value);
 
