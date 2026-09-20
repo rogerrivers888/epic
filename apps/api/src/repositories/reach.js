@@ -196,7 +196,19 @@ export async function stampPlaces({ limit = 2000, householdId = null } = {}) {
            on conflict (venue_ref) do update
               set cell = null, postcode = null, lat = excluded.lat, lng = excluded.lng,
                   why = excluded.why, at = now()`,
-          [batch[i].ref, batch[i].lat, batch[i].lng, a ? 'no postcode near it' : 'no answer for this point'],
+          // What actually happened, rather than what the shape of `a` suggests.
+          //
+          // `outcodesFor` returns `{ failed: true }` for a request that never
+          // arrived — handled above — and leaves the slot **null** when the
+          // request did arrive and ONS simply had no postcode within its two
+          // kilometres. Null was being written down as "no answer for this
+          // point", which reads as an outage and is the opposite of the truth:
+          // all 638 unplaceable places carried it, and the field exists for
+          // exactly one purpose — telling a bad batch from a genuinely
+          // unplaceable place — which it therefore could not do (owner,
+          // 20 Sep 2026). The other branch was unreachable.
+          [batch[i].ref, batch[i].lat, batch[i].lng,
+            a ? `postcode we cannot read: ${a.postcode ?? 'none given'}` : 'ONS answered; no postcode within 2km'],
         );
         unplaced += 1;
         continue;
