@@ -92,6 +92,79 @@ export const PURPOSE_CLASSES = {
   'bench.research': 'research',
   'bench.google': 'research',
   'bench.tripadvisor': 'research',
+
+  /**
+   * The rest of what the production ledger actually holds.
+   *
+   * Read off `provider_calls` on 20 Sep 2026 rather than guessed: fifty-three
+   * purposes were unclassified, **$90.92 of a $563.90 bill** — sixteen per cent
+   * of it sitting outside every class, and the biggest single one was
+   * `scout.sweep` at $49. A classification that misses a sixth of the spend
+   * cannot answer the question it exists for.
+   */
+
+  // Library — building the index, paid once per place.
+  'scout.sweep': 'library',
+  'menu.read.image': 'library',
+  'menu.read.web': 'library',
+  'menu.check': 'library',
+  'menu.dish': 'library',
+  'atlas.read': 'library',
+  'atlas.reviews': 'library',
+  'atlas.venue.read': 'library',
+  'atlas.venue.research': 'library',
+  'census.notongoogle': 'library',
+  'own.findPage': 'library',
+  'own.match': 'library',
+  'own.where': 'library',
+  'places.areas': 'library',
+  'places.geocode': 'library',
+  'places.where': 'library',
+  'reach.stamp': 'library',
+
+  // Serve — marginal, and a household's own.
+  'places.photo': 'serve',
+  'plan.inspire.headline': 'serve',
+  'plan.inspire.more': 'serve',
+  discover: 'serve',
+  'trip.directions': 'serve',
+  'trip.stays': 'serve',
+  'trip.stays.rates': 'serve',
+  'speech.intake': 'serve',
+  'speech.live': 'serve',
+  'speech.live.start': 'serve',
+  'speech.plan': 'serve',
+  'speech.transcribe': 'serve',
+  'speech.transcribe.stream': 'serve',
+  'speech.household.food': 'serve',
+  'speech.household.likes': 'serve',
+  'speech.household.who': 'serve',
+
+  // Office — somebody using the back office.
+  'admin.bench': 'office',
+  'admin.bench.sources': 'office',
+  'admin.category.teach': 'office',
+  'admin.lookup.compare': 'office',
+  'admin.lookup.tripadvisor': 'office',
+  'admin.lookup.where': 'office',
+  'admin.taxonomy.examples': 'office',
+  'admin.taxonomy.research': 'office',
+  'shelves.food': 'office',
+  'shelves.teach': 'office',
+  'skills candidate lookup': 'office',
+  'skills identifier run': 'office',
+  'skills parent suggestion': 'office',
+
+  // Research — production endpoints exercised to learn something, and the
+  // probes that exist only to check a key still works.
+  'experiment.score': 'research',
+  'experiment.display': 'research',
+  'keycheck.essentials': 'research',
+  'keycheck.routes': 'research',
+  'keycheck.search': 'research',
+  'speech.plan.lab': 'research',
+  'speech.live.start.probe': 'research',
+  'speech.transcribe.probe': 'research',
 };
 
 export const COST_CLASSES = ['library', 'serve', 'office', 'research'];

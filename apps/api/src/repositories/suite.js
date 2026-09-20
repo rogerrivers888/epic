@@ -1508,12 +1508,33 @@ export async function readSuite(period, { now = new Date() } = {}) {
         total: cost$,
         allocated: serve,
         byKind: bars(costNow.byProvider.map((p) => row(p.provider, Math.round(p.usd * 100) / 100))),
-        byClass: [
-          row('Library', Math.round(library * 100) / 100),
-          row('Serving households', Math.round(serve * 100) / 100),
-          row('Back office', Math.round(office * 100) / 100),
-          row('Research', Math.round(research * 100) / 100),
-        ],
+        /**
+         * The classes, and **whatever is not in one of them**.
+         *
+         * Built from the ledger's own rows rather than from a list of the four
+         * names, because a purpose nobody has classified is real spend and used
+         * to vanish out of this sentence while staying in the total above it:
+         * $90.92 of a $563.90 production bill, sixteen per cent, invisible
+         * (20 Sep 2026, reading production). The classes are given in a fixed
+         * order so the line reads the same every time, and anything left over
+         * appears under its own name, which is what makes somebody go and
+         * classify it.
+         */
+        byClass: (() => {
+          const of = (cls) => costNow.byClass.find((c) => c.class === cls)?.usd ?? 0;
+          const named = ['library', 'serve', 'office', 'research'];
+          const rows = [
+            row('Library', Math.round(of('library') * 100) / 100),
+            row('Serving households', Math.round(of('serve') * 100) / 100),
+            row('Back office', Math.round(of('office') * 100) / 100),
+            row('Research', Math.round(of('research') * 100) / 100),
+          ];
+          const rest = costNow.byClass
+            .filter((c) => !named.includes(c.class))
+            .reduce((n, c) => n + c.usd, 0);
+          if (rest > 0) rows.push(row('Not classified', Math.round(rest * 100) / 100));
+          return rows;
+        })(),
         byPurpose: costNow.byPurpose.map((p) => ({ label: p.purpose, value: Math.round(p.usd * 100) / 100, cls: p.class, calls: p.calls })),
         research: Math.round(research * 100) / 100,
         delta: change(cost$, costPrev.total),

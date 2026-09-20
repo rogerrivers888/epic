@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_PERIOD, PERIODS, monthBuckets, resolvePeriod } from '../src/domain/reportingPeriods.js';
 import { FIXTURE_SUBSCRIBERS, fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } from '../src/domain/reportingFixtures.js';
 import { annualPence } from '../src/repositories/pricing.js';
-import { PURPOSE_CLASSES, backOfficeActorExpression, classOf } from '../src/domain/costClass.js';
+import { PURPOSE_CLASSES, backOfficeActorExpression, classExpression, classOf } from '../src/domain/costClass.js';
 import { change } from '../src/repositories/suite.js';
 import { listCounterparties, setAdapter } from '../src/repositories/counterparties.js';
 import { readStanding, readTiers, setPrice } from '../src/repositories/pricing.js';
@@ -206,6 +206,54 @@ test('the actor never turns library or office spend into something else', () => 
   assert.equal(classOf({ purpose: 'atlas.rating', actorHoldsBackOffice: true }), 'library');
   assert.equal(classOf({ purpose: 'atlas.rating', actorHoldsBackOffice: false }), 'library');
   assert.equal(classOf({ purpose: 'admin.lookup', actorHoldsBackOffice: true }), 'office');
+});
+
+test('the classes add up to the bill, whatever the ledger holds', async () => {
+  /**
+   * The line under Cost to serve names the classes, and it has to sum to the
+   * figure above it. It did not: fifty-three purposes were unclassified —
+   * **$90.92 of a $563.90 production bill, sixteen per cent** — and they fell
+   * out of the sentence while staying in the total, because the sentence was
+   * built from a list of four names instead of from the ledger (20 Sep 2026,
+   * reading production).
+   */
+  const { rows } = await query(
+    `select ${classExpression('c')} as class, coalesce(sum(c.estimated_cost_usd), 0)::float as usd
+       from provider_calls c group by 1`,
+  );
+  const total = rows.reduce((n, r) => n + r.usd, 0);
+  const named = rows.filter((r) => ['library', 'serve', 'office', 'research'].includes(r.class));
+  const rest = rows.filter((r) => !['library', 'serve', 'office', 'research'].includes(r.class));
+
+  // Every row lands in one of the five buckets the screen draws, and the five
+  // add up to the whole bill.
+  assert.ok(Math.abs(named.reduce((n, r) => n + r.usd, 0) + rest.reduce((n, r) => n + r.usd, 0) - total) < 0.01);
+  // And nothing is in a class the screen has no name for.
+  for (const r of rest) assert.equal(r.class, 'unclassified', `${r.class} is a class nothing draws`);
+});
+
+test('every purpose the ledger holds has been classified', async () => {
+  // Not a rule about the code — a check against what is actually in there. A
+  // purpose that appears in production and in no class is spend nobody can
+  // explain, and the answer is to classify it rather than to widen a default.
+  /**
+   * Only the purposes that cost something.
+   *
+   * A purpose with no spend behind it is usually a row a test left there, and
+   * failing the suite over a free one would teach people to widen the default
+   * — which is the fault this whole file exists to prevent. Where there is
+   * money, there has to be a class.
+   */
+  const { rows } = await query(
+    `select purpose, coalesce(sum(estimated_cost_usd), 0)::float as usd
+       from provider_calls group by 1 having coalesce(sum(estimated_cost_usd), 0) > 0`,
+  );
+  const missing = rows.filter((r) => !PURPOSE_CLASSES[r.purpose]);
+  assert.deepEqual(
+    missing.map((r) => `${r.purpose} ($${r.usd.toFixed(2)})`),
+    [],
+    'classify these in domain/costClass.js rather than letting them fall outside every class',
+  );
 });
 
 test('a purpose nobody has classified is unclassified, never serving', () => {
