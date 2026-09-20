@@ -21,7 +21,7 @@ import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import {
   Act, Alarm, Band, Cell, Col, DeskPill, Head, Kicker, Link, Mark, Nothing, Row, Value, WARN, tabular,
 } from './desk';
-import type { Candidate, GlobalLabel, PendingWord, SetQuestion, SetRow, Threshold, VocabRow } from './types';
+import type { Candidate, GlobalLabel, PendingWord, SetDetail, SetQuestion, SetRow, Threshold, VocabRow } from './types';
 
 // ---------------------------------------------------------------------------
 // The question sets
@@ -93,7 +93,7 @@ export function QuestionSet({
   set, questions, globals, candidates, pen, inFlight, thin, thresholds, readNote,
   onRemoveQuestion, onDetach, onPromote, onIgnore,
 }: {
-  set: SetRow;
+  set: SetDetail;
   questions: SetQuestion[];
   globals: GlobalLabel[];
   /** Judgeable, at or above the sightings floor, ordered by how unevenly spread. */
@@ -122,21 +122,21 @@ export function QuestionSet({
       <Band
         title={set.name}
         stats={[
-          { label: 'Questions here', value: set.questions, strong: true },
+          { label: 'Questions here', value: questions.length, strong: true },
           { label: 'Places', value: set.places },
           { label: 'Candidates', value: candidates.length },
         ]}
       />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        {set.usedBy.map((name) => (
-          <DeskPill key={name} name={name} onRemove={() => onDetach(name)} />
+        {set.usedBy.map((s2) => (
+          <DeskPill key={s2.key} name={s2.label} onRemove={() => onDetach(s2.key)} />
         ))}
       </View>
 
       <View style={{ flexDirection: 'row', gap: 40, alignItems: 'flex-start' }}>
         {/* Asked here, and what every place is asked anyway. */}
         <View style={{ width: 620, flexGrow: 0, flexShrink: 0, gap: 12 }}>
-          <Kicker>{`Asked here · ${set.questions}`}</Kicker>
+          <Kicker>{`Asked here · ${questions.length}`}</Kicker>
           <View>
             {questions.length === 0 ? <Nothing>Nothing is asked here yet.</Nothing> : null}
             {questions.map((q) => (

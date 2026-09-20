@@ -44,6 +44,22 @@ export type SetRow = {
   waiting: number;
 };
 
+/**
+ * One set, opened.
+ *
+ * `usedBy` carries keys here and bare labels on the list row, because on this
+ * screen each one is a removable pill that has to know what it would detach.
+ * `state` has no `settling`: that distinction is a fact about the queue, and
+ * the queue is the three candidate lists sitting beside it.
+ */
+export type SetDetail = {
+  key: string;
+  name: string;
+  state: 'settled' | null;
+  usedBy: { key: string; label: string }[];
+  places: number;
+};
+
 /** A question being asked of every place in a set. */
 export type SetQuestion = {
   id: number;

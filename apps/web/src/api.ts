@@ -1815,7 +1815,8 @@ export type QueueItem = {
 
 import type {
   BrowseRow, Candidate, Decision, District, ExcludedRow, GlobalLabel, HouseMember, MappingEvidence,
-  PendingWord, RuleRow, RunRow, RunWeek, Saturation, SetQuestion, SetRow, Trail, Trigger, VocabRow, WordRow,
+  PendingWord, RuleRow, RunRow, RunWeek, Saturation, SetDetail, SetQuestion, SetRow, Trail, Trigger,
+  VocabRow, WordRow,
 } from './admin/filing/types';
 
 /** The four states the Mapping header counts, and the two totals beside them. */
@@ -3489,17 +3490,25 @@ export const api = {
     put<{ word: string; labels: string[] }>(
       `/api/admin/filing/mapping/${encodeURIComponent(word)}/carries`, { label, on }),
 
-  /** The question sets, and what waits in each. */
+  /**
+   * The question sets, and what waits in each.
+   *
+   * `globals` rides on the list and not on the set, because it is the same
+   * list for every set — the labels asked of everything, which each set
+   * inherits rather than owns.
+   */
   adminFilingSets: () =>
-    request<{ sets: SetRow[]; counts: { sets: number; pending: number; vocabulary: number } }>(
-      '/api/admin/filing/sets'),
+    request<{
+      sets: SetRow[]; globals: GlobalLabel[];
+      counts: { sets: number; questions: number; waiting: number };
+    }>('/api/admin/filing/labels'),
   /** One set: what it asks, and the words waiting to join it. */
   adminFilingSet: (key: string) =>
     request<{
-      set: SetRow; questions: SetQuestion[]; globals: GlobalLabel[];
+      set: SetDetail; questions: SetQuestion[];
       candidates: Candidate[]; pen: Candidate[]; inFlight: Candidate[]; thin: Candidate[];
       readNote: string;
-    }>(`/api/admin/filing/sets/${encodeURIComponent(key)}`),
+    }>(`/api/admin/filing/labels/sets/${encodeURIComponent(key)}`),
   /** Ask a candidate of every place in the set, as an ordinary question or a gate. */
   adminFilingPromote: (id: number, gate: boolean) =>
     post<{ question: SetQuestion }>(`/api/admin/filing/candidates/${id}/promote`, { gate }),
@@ -3518,7 +3527,11 @@ export const api = {
   adminFilingReject: (id: number) => post<{ rejected: true }>(`/api/admin/filing/pending/${id}/reject`, {}),
 
   /** Epic's whole vocabulary, and where each word is asked. */
-  adminFilingVocabulary: () => request<{ labels: VocabRow[] }>('/api/admin/filing/labels'),
+  adminFilingVocabulary: () =>
+    request<{
+      vocabulary: VocabRow[];
+      counts: { labels: number; everywhere: number; nowhere: number };
+    }>('/api/admin/filing/labels/vocabulary'),
   /** Retiring takes it out of the vocabulary and out of every set. */
   adminFilingRetire: (key: string) =>
     post<{ retired: true }>(`/api/admin/filing/labels/${encodeURIComponent(key)}/retire`, {}),
