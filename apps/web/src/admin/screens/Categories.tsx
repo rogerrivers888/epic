@@ -1552,6 +1552,46 @@ function WordPage({ r, tax, secondary, wide, canManage, catLabel, subLabel, back
 }
 
 /**
+ * The labels half of a word's control.
+ *
+ * The owner, 20 Sep 2026: "when I'm doing categorization, I should also be able
+ * to add labels right there rather than having to come to you to do it."
+ * Where a word goes and what else it says are two answers about one word, and
+ * saying the second meant leaving the list. One group per label, its values as
+ * the items, and what it is set to shown without drilling.
+ *
+ * A range is not here: "suits ages 3 to 14" is two numbers typed against a
+ * drawer or a place, not a choice a menu can offer. And a label is only offered
+ * where it means something -- Cuisine under a dog park was the fault the owner
+ * named on 15 Sep 2026 -- so `only_in` is read against where the word lands.
+ */
+function labelPane(r: TaxonomyLabel, secondary: SecondaryLabel[]) {
+  const here = r.landing?.category ?? null;
+  const asks = (a: SecondaryLabel) => !(a.only_in ?? []).length || (here ? (a.only_in ?? []).includes(here) : false);
+  const mine = new Map((r.carries ?? []).map((c) => [c.key, c.value]));
+  return secondary.filter((a) => a.kind !== 'range' && asks(a)).map((a) => {
+    const v = mine.get(a.key);
+    const clear = v ? [{ key: '\u2717', label: `It says nothing about ${a.label.toLowerCase()}`, on: false }] : [];
+    return {
+      key: a.key,
+      label: a.label,
+      note: v ? said_(v) : '\u2014',
+      items: a.kind === 'oneof'
+        ? [...a.options.map((o) => ({ key: o, label: o, on: v?.choice === o })), ...clear]
+        : [
+          { key: 'yes', label: 'Yes', on: v?.yesno === true },
+          { key: 'no', label: 'No', on: v?.yesno === false },
+          ...clear,
+        ],
+    };
+  });
+}
+
+/** What a pick in that half means: the attribute is the group, the value the item. */
+const labelValue = (key: string): AttributeValue | null =>
+  (key === '\u2717' ? null : key === 'yes' ? { yesno: true } : key === 'no' ? { yesno: false } : { choice: key });
+
+/**
  * BO1i — our 59, as the rows.
  *
  * "Our subcategory | Home, and also in | Google words | Places." Grouping by
@@ -3157,11 +3197,13 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
  * adventure sports centre on none, so alphabetical order puts the pointless one
  * first. The default is by consequence and it stays that way.
  */
-function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, onDecide, onExamples, onOpen, egKey, children }: {
-  rows: TaxonomyLabel[]; tax: Taxonomy; wide: boolean;
+function WhatIsLeft({ rows, tax, secondary, wide, catLabel, subLabel, canManage, busyKey, onDecide, onCarry, onExamples, onOpen, egKey, children }: {
+  rows: TaxonomyLabel[]; tax: Taxonomy; secondary: SecondaryLabel[]; wide: boolean;
   catLabel: (k: string | null | undefined) => string;
   subLabel: (k: string | null | undefined) => string | null;
   canManage: boolean; busyKey: string | null;
+  /** What the word says besides where it goes — the panel's second half. */
+  onCarry: (r: TaxonomyLabel, attribute: string, value: AttributeValue | null) => void;
   onDecide: (r: TaxonomyLabel, choice: { subcategory?: string | null; aside?: boolean; nearby?: boolean; travel?: boolean; generic?: boolean; unanswered?: boolean }) => void;
   onExamples: (key: string) => void; onOpen: (key: string) => void; egKey: string;
   children?: (r: TaxonomyLabel) => React.ReactNode;
@@ -3218,6 +3260,12 @@ function WhatIsLeft({ rows, tax, wide, catLabel, subLabel, canManage, busyKey, o
                   items: c.subcategories.filter((sc) => sc.active).map((sc) => ({ key: sc.key, label: sc.label, on: false })),
                 }))}
                 onPick={(k) => onDecide(r, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
+                aside={{
+                  mine: 'Where it goes',
+                  label: 'What it says',
+                  groups: labelPane(r, secondary),
+                  onPick: (attribute, k) => onCarry(r, attribute, labelValue(k)),
+                }}
               />
             </View>
           ) : null}
@@ -4145,6 +4193,25 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
    * and the word is mapped to it (owner, 13 Sep 2026: "if they call it water
    * park… I would like a new one called water park, and likewise with marina").
    */
+  /**
+   * One secondary label on one word, from the list rather than the word's page.
+   *
+   * Setting it never moves a place: where a word points and what it also says
+   * are separate questions, and this is the second.
+   */
+  const carryOne = async (r: TaxonomyLabel, attribute: string, value: AttributeValue | null) => {
+    setBusyKey(r.key);
+    try {
+      await api.taxonomySetCarries({ label: `google:${r.key}`, attribute, value });
+      await reload();
+      const name = secondary.find((x) => x.key === attribute)?.label ?? attribute;
+      await onChanged(value
+        ? `${r.label ?? r.key} also says ${name} \u00b7 ${said_(value)}.`
+        : `${r.label ?? r.key} no longer says ${name}.`);
+    } catch (err) { await onChanged(String((err as Error).message)); }
+    finally { setBusyKey(null); }
+  };
+
   const adoptWord = async (r: TaxonomyLabel, categoryKey: string, alsoIn: string[] = []) => {
     setBusyKey(r.key);
     try {
@@ -4269,6 +4336,8 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
           tax={tax} wide={wide} catLabel={catLabel} subLabel={subLabel} canManage={canManage}
           busyKey={busyKey}
           onDecide={(r, choice) => void decide(r, choice)}
+          secondary={secondary}
+          onCarry={(row, attribute, value) => void carryOne(row, attribute, value)}
           onExamples={(k) => { setEg(egKey === k ? '' : k); setWith(''); }}
           onOpen={(k) => setWord(k)}
           egKey={egKey}
@@ -4607,6 +4676,15 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             label: `Adopt Google's “${r.label ?? r.key}” as a new subcategory`,
                             onPick: (cat, alsoIn) => void adoptWord(r, cat, alsoIn),
                           }}
+                          /* The other half of the same control: what the word
+                             says besides where it sends a place (owner, 20 Sep
+                             2026). */
+                          aside={{
+                            mine: 'Where it goes',
+                            label: 'What it says',
+                            groups: labelPane(r, secondary),
+                            onPick: (attribute, k) => void carryOne(r, attribute, labelValue(k)),
+                          }}
                           startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
                         {/* The drawer a word lands in is a way into that drawer.
@@ -4672,9 +4750,11 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                               return (
                                 <View key={w.key} style={[styles.pairRow, openKey === w.key ? { zIndex: 40 } : undefined, !wide && { flexDirection: 'column', alignItems: 'stretch', gap: 4 }]}>
                                   <View style={[{ flex: 1, minWidth: 0 }, !wide && { width: '100%' }]}>
-                                    <Text style={type.small} numberOfLines={1}>
-                                      <Text style={{ fontWeight: '600' }}>{w.label ?? w.key}</Text> <Text style={{ color: colors.inkMuted }}>{w.key}</Text>
-                                    </Text>
+                                    {/* The name, once. The last list still
+                                        printing it twice (owner, 16 Sep 2026:
+                                        "I see dog park, and I see dog_park
+                                        right next to it. That's duplication"). */}
+                                    <Text style={[type.small, { fontWeight: '600' }]} numberOfLines={1}>{w.label ?? w.key.replace(/_/g, ' ')}</Text>
                                     {!wide ? <Text style={type.tiny}>{count(w.seen_count)} {w.seen_count === 1 ? 'place' : 'places'}</Text> : null}
                                   </View>
                                   {/* The same three slots as the row above, so Places stays
@@ -4710,6 +4790,12 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                                       onPick={(k) => void decide(w, k === '-' ? { aside: true } : k === '>' ? { travel: true } : k === '~' ? { nearby: true } : k === '=' ? { generic: true } : k === '?' ? { unanswered: true } : { subcategory: k })}
                                       onOpenChange={(o) => setOpenKey(o ? w.key : null)}
                                       adopt={{ label: `Adopt Google\u2019s \u201C${w.label ?? w.key}\u201D as a new subcategory`, onPick: (cat, alsoIn) => void adoptWord(w, cat, alsoIn) }}
+                                      aside={{
+                                        mine: 'Where it goes',
+                                        label: 'What it says',
+                                        groups: labelPane(w, secondary),
+                                        onPick: (attribute, k) => void carryOne(w, attribute, labelValue(k)),
+                                      }}
                                       startIn={wst === 'mapped' ? w.landing.category ?? null : null}
                                     />
                                     </View>

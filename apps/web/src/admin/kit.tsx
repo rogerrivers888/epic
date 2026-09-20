@@ -779,10 +779,10 @@ export function Note({ children }: { children: string }) {
   );
 }
 
-export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, nudge = 0, stacked = false, showLabel = true }: {
+export function DrillDropdown({ label, value, groups, extra = [], onPick, width = 280, align = 'left', set = false, onOpenChange, startIn = null, adopt = null, aside = null, nudge = 0, stacked = false, showLabel = true }: {
   label: string;
   value: string;
-  groups: { key: string; label: string; items: DropdownOption[] }[];
+  groups: { key: string; label: string; items: DropdownOption[]; note?: string }[];
   extra?: DropdownOption[];
   onPick: (key: string) => void;
   width?: number;
@@ -804,6 +804,25 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
    * like a new one called water park").
    */
   adopt?: { label: string; onPick: (groupKey: string, alsoIn: string[]) => void } | null;
+  /**
+   * A second half of the same panel, reached by a tab at its head.
+   *
+   * The owner, 20 Sep 2026: "when I'm doing categorization, I should also be
+   * able to add labels right there rather than having to come to you to do it.
+   * Maybe make it a bigger UI so I can toggle between the categorization and
+   * the labels." Where a word *goes* and what it *says* are two answers about
+   * one word, and they were two screens. One control, two tabs: `mine` names
+   * the pane already here, `label` names the new one, and its pick is told
+   * which group it came from, because an attribute is the group and its value
+   * is the item.
+   */
+  aside?: {
+    mine: string;
+    label: string;
+    /** `note` says what the group is set to, where a count would say nothing. */
+    groups: { key: string; label: string; items: DropdownOption[]; note?: string }[];
+    onPick: (groupKey: string, itemKey: string) => void;
+  } | null;
   /** Pixels to hold a right-aligned panel off whatever sits to its right. */
   nudge?: number;
   /**
@@ -822,12 +841,19 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const { width: screen, height: screenH, framed, origin } = useViewport();
   /** A phone gets a sheet; anything wider gets the panel (the handoff, BO1m). */
   const sheet = screen < 560;
+  /**
+   * A panel holding two halves is given more room than one holding a list --
+   * the owner asked for "a bigger UI so I can toggle between the categorization
+   * and the labels" (20 Sep 2026) -- and never more than the window has.
+   */
+  const wide = Math.min(aside ? width + 60 : width, Math.max(240, screen - 16));
   // And the sheet is pinned to the frame, not the window: anything fixed
   // escapes the phone frame unless told where it is (CLAUDE.md; the audit).
   const inFrame = framed && origin
     ? { left: origin.x, top: origin.y, width: screen, height: screenH, right: 'auto' as never, bottom: 'auto' as never }
     : null;
   const [open, setOpenState] = useState(false);
+  const [pane, setPane] = useState<'mine' | 'aside'>('mine');
   const [into, setInto] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
   /** The home picked in step one, and the extra menus picked in step two. */
@@ -835,25 +861,36 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
   const [also, setAlso] = useState<string[]>([]);
   /** What has been typed into the search over every group's items at once. */
   const [q, setQ] = useState('');
+  /** Whichever half is showing. Everything below reads this, not the props. */
+  const on = pane === 'aside' && aside ? { groups: aside.groups, extra: [] as DropdownOption[] } : { groups, extra };
   const found = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return null;
-    return groups.flatMap((g) => g.items
+    return on.groups.flatMap((g) => g.items
       .filter((o) => o.label.toLowerCase().includes(needle))
       .map((o) => ({ ...o, group: g.key, groupLabel: g.label })));
     // Not truncated: a slice would silently hide a real answer from a broad
     // query, and the panel already scrolls (Codex, 15 Sep 2026).
-  }, [q, groups]);
-  const group = groups.find((g) => g.key === into) ?? null;
+  }, [q, on.groups]);
+  const group = on.groups.find((g) => g.key === into) ?? null;
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
-  const close = () => { setOpen(false); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); };
+  const close = () => { setOpen(false); setPane('mine'); setInto(null); setAdopting(false); setHome(null); setAlso([]); setQ(''); };
+  /** Moving between the halves starts that half at its own top. */
+  const toPane = (p: 'mine' | 'aside') => { setPane(p); setInto(null); setQ(''); setAdopting(false); };
   const wrapRef = React.useRef<any>(null);
   const at = useAnchor(open, wrapRef);
   // Not `useCloseOutside`: the panel is drawn in a layer of its own now, so
   // every one of its own menu items is "outside" this control and a press on
   // one would close the menu before it fired. The scrim below covers the page
   // and is what closes it (15 Sep 2026).
-  const pick = (key: string) => { onPick(key); close(); };
+  const pick = (key: string, fromGroup?: string | null) => {
+    // In the second half the group is the attribute and the item is its value,
+    // so the caller needs both. A search result carries its own group, which
+    // is why it is passed rather than read from `into`.
+    if (pane === 'aside' && aside) aside.onPick(fromGroup ?? into ?? '', key);
+    else onPick(key);
+    close();
+  };
   return (
     <View ref={wrapRef} style={[dd.wrap, open && dd.wrapOpen]}>
       <Press
@@ -909,8 +946,8 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                 return {
                   top: up ? at.y - room - gap : at.y + at.h + gap,
                   maxHeight: room,
-                  left: align === 'right' ? Math.max(8, at.x + at.w - width - nudge) : Math.min(at.x, Math.max(8, screen - width - 8)),
-                  width,
+                  left: align === 'right' ? Math.max(8, at.x + at.w - wide - nudge) : Math.min(at.x, Math.max(8, screen - wide - 8)),
+                  width: wide,
                 };
               })() : null,
               // Not drawn at 0,0 for the frame between opening and measuring.
@@ -924,9 +961,22 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                 <Icon name="close" size={16} color={colors.ink} strokeWidth={2.4} />
               </Press>
             ) : null}
+            {/* Two halves of one answer, and which one you are in. Hidden while
+                adopting, which is a flow of its own with its own back row. */}
+            {aside && !adopting ? (
+              <View style={dd.tabs}>
+                {([['mine', aside.mine], ['aside', aside.label]] as const).map(([k, t]) => (
+                  <Press key={k} onPress={() => toPane(k)} accessibilityRole="tab"
+                         accessibilityState={{ selected: pane === k }}
+                         style={({ hovered }: any) => [dd.tab, pane === k && dd.tabOn, hovered && !(pane === k) && dd.itemHover]}>
+                    <Text style={[type.small, { fontWeight: '700', color: pane === k ? colors.selectedFg : colors.inkMuted }]} numberOfLines={1}>{t}</Text>
+                  </Press>
+                ))}
+              </View>
+            ) : null}
             {/* Only on the first level, and only where there is enough to make
                 drilling a chore. Inside one group the list is already short. */}
-            {!group && !adopting && groups.reduce((n, g) => n + g.items.length, 0) >= 12 ? (
+            {!group && !adopting && on.groups.reduce((n, g) => n + g.items.length, 0) >= 12 ? (
               <View style={dd.search}>
                 <Icon name="search" size={13} color={colors.inkMuted} strokeWidth={2.2} />
                 <TextInput
@@ -992,10 +1042,10 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                          style={({ hovered }: any) => [dd.item, dd.back, hovered && dd.itemHover]}>
                     <Icon name="back" size={14} color={colors.ink} strokeWidth={2.4} />
                     <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: '700' }]} numberOfLines={1}>{group.label}</Text>
-                    <Text style={type.tiny}>all categories</Text>
+                    <Text style={type.tiny}>{pane === 'aside' && aside ? aside.label.toLowerCase() : 'all categories'}</Text>
                   </Press>
                   {group.items.map((o) => (
-                    <Press key={o.key} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
+                    <Press key={o.key} onPress={() => pick(o.key, group.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
                            style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
                       <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
                       <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
@@ -1003,7 +1053,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                     </Press>
                   ))}
                   {/* Inside a category, adopting puts the new subcategory right here. */}
-                  {adopt ? (
+                  {adopt && pane === 'mine' ? (
                     <>
                       <View style={dd.rule} />
                       <Press onPress={() => { setHome(group.key); setAlso([]); setAdopting(true); }} accessibilityRole="menuitem"
@@ -1031,7 +1081,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                   {found.length === 0 ? (
                     <View style={dd.item}><Text style={type.small}>Nothing called that.</Text></View>
                   ) : found.map((o) => (
-                    <Press key={`${o.group}:${o.key}`} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
+                    <Press key={`${o.group}:${o.key}`} onPress={() => pick(o.key, o.group)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
                            style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
                       <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
                       <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: o.on ? '600' : '400' }]} numberOfLines={1}>{o.label}</Text>
@@ -1045,20 +1095,22 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                    way round, with adopt in the middle and in ink (the audit,
                    15 Sep 2026). */
                 <>
-                  {groups.map((g) => {
+                  {on.groups.map((g) => {
                     const within = g.items.some((o) => o.on);
                     return (
                       <Press key={g.key} onPress={() => setInto(g.key)} accessibilityRole="menuitem" accessibilityState={{ expanded: false }}
                              style={({ hovered }: any) => [dd.item, hovered && dd.itemHover]}>
                         <View style={{ width: 16, alignItems: 'center' }}>{within ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
                         <Text style={[type.small, { color: colors.ink, flex: 1, fontWeight: within ? '600' : '400' }]} numberOfLines={1}>{g.label}</Text>
-                        <Text style={type.tiny}>{g.items.length}</Text>
+                        {/* What it is set to beats how many choices it has: a
+                            "2" beside Indoors tells nobody anything. */}
+                        <Text style={[type.tiny, g.note && within ? { color: colors.accent } : null]} numberOfLines={1}>{g.note ?? g.items.length}</Text>
                         <Icon name="more" size={14} color={colors.inkMuted} />
                       </Press>
                     );
                   })}
-                  {extra.length ? <View style={dd.rule} /> : null}
-                  {extra.map((o) => (
+                  {on.extra.length ? <View style={dd.rule} /> : null}
+                  {on.extra.map((o) => (
                     <Press key={o.key} onPress={() => pick(o.key)} accessibilityRole="menuitem" accessibilityState={{ selected: o.on }}
                            style={({ hovered }: any) => [dd.item, hovered && dd.itemHover, o.on && dd.itemOn]}>
                       <View style={{ width: 16, alignItems: 'center' }}>{o.on ? <Icon name="check" size={13} color={colors.ink} strokeWidth={2.8} /> : null}</View>
@@ -1067,7 +1119,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
                   ))}
                   {/* At the foot, and in lime: it is the one thing here that
                       makes something new rather than choosing something. */}
-                  {adopt ? (
+                  {adopt && pane === 'mine' ? (
                     <>
                       <View style={dd.rule} />
                       <Press onPress={() => setAdopting(true)} accessibilityRole="menuitem"
@@ -1126,6 +1178,9 @@ const dd = StyleSheet.create({
   // the panel kept `left: 0` and ran off the page to the right (owner, 13 Sep 2026).
   panelRight: { left: 'auto' as never, right: 0 },
   back: { borderBottomWidth: 1, borderBottomColor: colors.lineSoft, marginBottom: 4 },
+  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.line },
+  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 10, alignItems: 'center' },
+  tabOn: { backgroundColor: colors.selected },
   rule: { height: 1, backgroundColor: colors.lineSoft, marginVertical: 4 },
   quick: { gap: spacing.md, paddingHorizontal: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, flexWrap: 'wrap' },
   group: { ...type.tiny, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.sm, paddingTop: 8, paddingBottom: 2 },
