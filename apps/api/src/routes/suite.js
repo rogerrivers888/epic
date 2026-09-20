@@ -35,7 +35,7 @@
  */
 
 import express from 'express';
-import { requires } from '../access.js';
+import { can, requires } from '../access.js';
 import { DEFAULT_PERIOD, PERIODS, resolvePeriod } from '../domain/reportingPeriods.js';
 import { fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } from '../domain/reportingFixtures.js';
 import { readHousehold, readSuite, readSupplierRecord } from '../repositories/suite.js';
@@ -103,7 +103,81 @@ router.get('/', requires('view_reporting'), async (req, res, next) => {
       ? { basis: 'fixtures', gaps: {}, ...scaleFixtures(fixtures(), period) }
       : await readSuite(period);
 
-    res.json({ ...model, mock, period, periods: PERIODS });
+    res.json({ ...withhold(model, req), mock, period, periods: PERIODS });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Take the money out for a caller who may not see it.
+ *
+ * **Server-side, not on the screen.** `view_reporting` and `view_financials`
+ * are two capabilities, and the whole `money` section, subscription revenue,
+ * supplier spend and every rate were coming back to anybody holding the first
+ * (Codex, 20 Sep 2026). Drawing them or not is a courtesy; what is in the
+ * answer is the boundary.
+ *
+ * Withheld rather than deleted: the rest of the back office already works this
+ * way, because a section that vanishes reads as "there is nothing here" and a
+ * section marked withheld reads as "you may not see this", and those are
+ * different facts (`routes/admin.js`).
+ */
+export function withhold(model, req) {
+  if (can(req, 'view_financials')) return model;
+
+  const hide = (rows) => (Array.isArray(rows) ? null : rows);
+  return {
+    ...model,
+    money: null,
+    subscriptions: null,
+    suppliers: null,
+    overview: {
+      ...model.overview,
+      // Revenue is a money measure and is on Overview's face.
+      measures: model.overview.measures.map((m) => (m.unit === 'money'
+        ? { ...m, value: null, delta: null, series: null, withheld: true }
+        : m)),
+      revenue: null,
+      events: { ...model.overview.events, selling: hide(model.overview.events.selling), averageTicket: null },
+    },
+    customers: {
+      ...model.customers,
+      households: model.customers.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
+      payingMrr: null,
+    },
+    withheld: ['view_financials'],
+  };
+}
+
+/**
+ * GET /api/admin/suite/customers — the household list, on its own.
+ *
+ * Customers is advertised to `view_accounts`, which the built-in support role
+ * holds — and it was reading the whole estate model, which needs
+ * `view_reporting`, so support saw the rail item and got a 403 on opening it
+ * (Codex, 20 Sep 2026). The list is an accounts question, so it has an
+ * accounts-gated read.
+ *
+ * The money columns still need `view_financials`: a support account sees who
+ * the households are and what they do, and not what they pay.
+ */
+router.get('/customers', requires('view_accounts'), async (req, res, next) => {
+  try {
+    const period = periodOf(req);
+    const mock = wantsMock(req);
+    const model = mock ? scaleFixtures(fixtures(), period) : await readSuite(period);
+    const money = can(req, 'view_financials');
+    const c = model.customers;
+    return res.json({
+      mock,
+      period,
+      customers: money ? c : {
+        ...c,
+        households: c.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
+        payingMrr: null,
+      },
+      gaps: model.gaps ?? {},
+      withheld: money ? [] : ['view_financials'],
+    });
   } catch (err) { next(err); }
 });
 
@@ -119,7 +193,19 @@ router.get('/household/:id', requires('view_accounts'), async (req, res, next) =
     const mock = wantsMock(req);
     const household = mock ? fixtureHousehold(req.params.id) : await readHousehold(req.params.id, period);
     if (!household) return res.status(404).json({ error: 'not_found', message: 'No such household.' });
-    return res.json({ mock, period, household });
+    /**
+     * The support role holds `view_accounts` and explicitly no money access,
+     * and this was returning subscription spend, booking spend, provider cost
+     * and margin regardless (Codex, 20 Sep 2026). What they pay is withheld;
+     * who they are and what they do is not.
+     */
+    if (can(req, 'view_financials')) return res.json({ mock, period, household });
+    return res.json({
+      mock,
+      period,
+      household: { ...household, monthPence: 0, spend: null, bookings: null, cost: null, charts: { ...household.charts, spend: null } },
+      withheld: ['view_financials'],
+    });
   } catch (err) { next(err); }
 });
 

@@ -105,13 +105,15 @@ async function estate(period) {
        (select count(*)::int from accounts a join households h on h.id = a.household_id
          where a.status <> 'suspended' and ${NOT_GUEST}
            and exists (select 1 from plans p where p.key = a.plan and p.price_pence is null))    as trial,
+       -- Bounded at both ends: `>= from` alone counted the current month inside
+       -- "last month", so the figure was not the window's (Codex, 20 Sep 2026).
        (select count(distinct e.household_id)::int from activity_events e
           join households h on h.id = e.household_id
-         where e.at >= $1 and ${NOT_GUEST})                                            as active_window,
+         where e.at >= $1 and e.at < $2 and ${NOT_GUEST})                              as active_window,
        (select count(distinct e.household_id)::int from activity_events e
           join households h on h.id = e.household_id
          where e.at >= now() - interval '90 days' and ${NOT_GUEST})                    as active_90`,
-    [period.from],
+    [period.from, period.to],
   );
 
   const { rows: origins } = await query(
@@ -169,28 +171,60 @@ async function estate(period) {
  */
 async function subscriptionRevenue(from, to) {
   const { rows: [r] } = await query(
+    /**
+     * Two things this query has to get right, and both were wrong (Codex,
+     * 20 Sep 2026):
+     *
+     *  · **A month is priced at what it was sold at.** It read `ph.plan` from
+     *    the history and then took `plans.price_pence` — today's cached price —
+     *    and `accounts.status` as it stands. So changing a price rewrote every
+     *    prior month, and suspending an account removed it from history. The
+     *    history row carries its own `price_pence` and `status` for exactly
+     *    this reason, and now they are what is read. `plans.price_pence` is the
+     *    fallback only for an account that predates the history table, which is
+     *    what `estimated` reports.
+     *  · **`to` is exclusive.** `generate_series` to `date_trunc('month', $2)`
+     *    put the current month inside "last month", because `to` is the first
+     *    instant of this one. It stops a microsecond short now.
+     */
     `with months as (
        select generate_series(date_trunc('month', $1::timestamptz),
-                              date_trunc('month', $2::timestamptz), '1 month') as month
+                              date_trunc('month', $2::timestamptz - interval '1 microsecond'),
+                              '1 month') as month
      ),
      state as (
        select m.month, a.id as account_id,
-              coalesce((select ph.plan from account_plan_history ph
-                         where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
-                         order by ph.from_at desc limit 1), a.plan) as plan,
-              (select count(*) from account_plan_history ph where ph.account_id = a.id) as history_rows,
-              (a.created_at < m.month + interval '1 month') as existed,
-              a.status
+              (select ph.plan from account_plan_history ph
+                where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
+                order by ph.from_at desc limit 1)                                 as held_plan,
+              (select ph.price_pence from account_plan_history ph
+                where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
+                order by ph.from_at desc limit 1)                                 as held_pence,
+              (select ph.status from account_plan_history ph
+                where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
+                order by ph.from_at desc limit 1)                                 as held_status,
+              a.plan                                                              as now_plan,
+              a.status                                                            as now_status,
+              (a.created_at < m.month + interval '1 month')                       as existed
          from months m
          left join accounts a on true
          left join households h on h.id = a.household_id
-        where a.id is null or (h.origin <> 'guest_invite')
+        where a.id is null or h.origin <> 'guest_invite'
+     ),
+     priced as (
+       select st.*,
+              coalesce(st.held_status, st.now_status)                             as status,
+              -- The price on the history row first; the plan's cached price only
+              -- where there is no history to read.
+              coalesce(st.held_pence, p.price_pence)                              as pence,
+              (st.held_plan is null)                                              as estimated
+         from state st
+         left join plans p on p.key = coalesce(st.held_plan, st.now_plan)
      )
-     select coalesce(sum(p.price_pence) filter (where st.existed and st.status <> 'suspended'), 0)::int as pence,
-            coalesce(sum(case when st.history_rows = 0 then 1 else 0 end) filter (where st.existed), 0)::int as estimated_rows,
-            count(*) filter (where st.existed)::int as rows_total
-       from state st
-       left join plans p on p.key = st.plan`,
+     select coalesce(sum(pence) filter (where existed and status <> 'suspended'), 0)::int as pence,
+            count(*) filter (where existed and estimated)::int                            as estimated_rows,
+            count(*) filter (where existed)::int                                          as rows_total
+       from priced`,
     [from, to],
   );
   return { pence: int(r.pence), estimated: int(r.estimated_rows) === int(r.rows_total) && int(r.rows_total) > 0 };
@@ -199,12 +233,18 @@ async function subscriptionRevenue(from, to) {
 /** Monthly recurring revenue as it stands, by plan — a rate, never scaled. */
 async function mrr() {
   const { rows } = await query(
+    /**
+     * `h.origin <> 'guest_invite'` in the LEFT JOIN condition only made `h`
+     * null for a guest — it did not drop the account row — so guests were still
+     * counted and still summed (Codex, 20 Sep 2026). The exclusion belongs in
+     * the aggregate's own filter, where it actually excludes.
+     */
     `select p.key, p.label, p.price_pence,
-            count(a.id) filter (where a.status <> 'suspended')::int as households,
-            coalesce(sum(p.price_pence) filter (where a.status <> 'suspended'), 0)::int as pence
+            count(a.id) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite')::int as households,
+            coalesce(sum(p.price_pence) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite'), 0)::int as pence
        from plans p
        left join accounts a on a.plan = p.key
-       left join households h on h.id = a.household_id and h.origin <> 'guest_invite'
+       left join households h on h.id = a.household_id
       group by p.key, p.label, p.price_pence, p.position
       order by p.position`,
   );
@@ -1564,7 +1604,17 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
     : lifeMonths * int(h.price_pence);
 
   const bookedPence = int(life.booked_pence);
-  const costPence = Math.round(life.cost_ever_usd * 100);
+  /**
+   * What serving them cost, in the currency it was recorded in.
+   *
+   * It used to be `cost_ever_usd * 100` treated as pence and subtracted from
+   * pound revenue — a margin computed at an implicit 1:1 exchange rate, which
+   * is a fabricated figure (Codex, 20 Sep 2026). `provider_calls` records
+   * dollars. So the cost stays dollars, the revenue stays pounds, and **there
+   * is no margin figure** until somebody decides what rate to convert at. The
+   * screen names the gap rather than drawing a number nobody can stand behind.
+   */
+  const costUsd = life.cost_ever_usd;
 
   return {
     id: h.id,
@@ -1585,8 +1635,10 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
       yearPence: null,
       previousYearPence: null,
       earnedPence: subscriptionPence,
-      costPence,
-      marginPence: subscriptionPence - costPence,
+      costUsd,
+      costPence: null,
+      marginPence: null,
+      marginGap: 'Revenue is in pounds and provider cost in dollars — no exchange rate is set',
       keptFromBookingsPence: null,
     },
     spendGap: GAPS.commission,

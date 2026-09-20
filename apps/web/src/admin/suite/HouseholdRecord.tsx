@@ -25,17 +25,23 @@ import { Gap, Kv, KvAction, Spark, SuiteHead, SuitePage, SuitePanel, Trouble, Wa
 import { useFormatters } from './useSuite';
 import { share, type HouseholdRecord, type Suite } from './model';
 
-export function HouseholdRecordView({ record, error, suite, onBack, controls, kicker, onFilterToFamily }: {
+export function HouseholdRecordView({ record, error, gaps, onBack, controls, kicker, onFilterToFamily }: {
   record: HouseholdRecord | null;
   error: string | null;
-  suite: Suite;
+  /**
+   * The estate's named gaps, so a missing figure here says the same thing it
+   * says on Money. Passed in rather than read from the whole model: Customers
+   * is gated on accounts and never fetches the reporting model (Codex, 20 Sep
+   * 2026).
+   */
+  gaps: Record<string, string>;
   onBack: () => void;
   controls?: React.ReactNode;
   kicker?: string | null;
   onFilterToFamily?: () => void;
 }) {
   const { width } = useViewport();
-  const fmt = useFormatters(suite, null);
+  const fmt = useFormatters(null, null);
 
   if (error) {
     return (
@@ -84,13 +90,24 @@ export function HouseholdRecordView({ record, error, suite, onBack, controls, ki
         <Stat
           label="Spent last 12 months"
           value={pence(s.yearPence)}
-          gap={record.bookingsGap ?? suite.gaps.bookings}
+          gap={record.bookingsGap ?? gaps.bookings}
           sub={s.previousYearPence == null ? 'against the year before' : `against ${pence(s.previousYearPence)} the year before`}
         />
+        {/*
+          Margin, or the reason there isn't one.
+          Revenue is contracted in pence and provider cost is what the ledger
+          recorded, which is dollars. Subtracting one from the other is a margin
+          at an implicit 1:1 rate — a fabricated figure (Codex, 20 Sep 2026) —
+          so the two halves are shown in their own currencies and the margin
+          waits for somebody to set a rate.
+        */}
         <Stat
           label="Margin to Epic"
           value={pence(s.marginPence)}
-          sub={`${pence(s.earnedPence)} earned · ${pence(s.costPence)} to serve`}
+          gap={s.marginGap}
+          sub={s.costUsd == null
+            ? `${pence(s.earnedPence)} earned`
+            : `${pence(s.earnedPence)} earned · $${s.costUsd.toFixed(2)} to serve`}
         />
       </View>
 
@@ -196,7 +213,7 @@ export function HouseholdRecordView({ record, error, suite, onBack, controls, ki
             value={s.yearPence != null && s.previousYearPence
               ? `${s.yearPence >= s.previousYearPence ? '+' : '−'}${Math.abs(Math.round((s.yearPence / s.previousYearPence - 1) * 100))}%`
               : null}
-            gap={suite.gaps.bookings}
+            gap={gaps.bookings}
             strong
             lime
             last

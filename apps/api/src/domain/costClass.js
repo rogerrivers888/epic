@@ -146,13 +146,39 @@ export function purposeClassExpression(alias = 'c') {
  * way is what produced the $96.46 that read as a unit cost and was not one.
  */
 export function backOfficeActorExpression(alias = 'c') {
-  return `coalesce((
-      select (a.role = 'owner' or a.role_id is not null)
-        from api_sessions s
-        join accounts a on a.id = s.account_id
-       where s.id = ${alias}.session_id
-       limit 1
-    ), true)`;
+  /**
+   * **A swept session must not reclassify a closed month.**
+   *
+   * The first version fell back to "back office" whenever the session row could
+   * not be joined — and `sweepDeadSessions()` deletes expired and revoked
+   * sessions after thirty days, so an ordinary household's `serve` calls turned
+   * into `research` a month later and last quarter's cost to serve quietly
+   * changed (Codex, 20 Sep 2026). A report that restates itself with age is
+   * worse than one that is approximate.
+   *
+   * So the fallback reads the thing that is never swept: `household_id`. A call
+   * attributed to a household whose accounts hold no back-office role was a
+   * household's call, whatever became of the session. Only a call attributed to
+   * nobody at all falls back to the back office — which is the shared passcode
+   * and the server's own jobs, and is the conservative default the brief asks
+   * for.
+   *
+   * The real answer is `provider_calls.class`, resolved and stored at write
+   * time so nothing can restate it. This is what holds until that column exists.
+   */
+  return `coalesce(
+      -- The session, where it is still there.
+      (select (a.role = 'owner' or a.role_id is not null)
+         from api_sessions s
+         join accounts a on a.id = s.account_id
+        where s.id = ${alias}.session_id
+        limit 1),
+      -- Otherwise the household, which outlives the session.
+      (select bool_or(a.role = 'owner' or a.role_id is not null)
+         from accounts a
+        where a.household_id = ${alias}.household_id),
+      -- Attributed to nobody: the passcode, or a job of our own.
+      true)`;
 }
 
 /**

@@ -23,7 +23,7 @@
  * its own spend figure would be a second version of the ledger.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { setSourceOff, sourceKeys, sourceOff } from '../sources/index.js';
 
 export const DIRECTIONS = ['inbound_cost', 'outbound_revenue', 'both'];
@@ -129,20 +129,30 @@ export async function setRate(key, { says, amount, unit, currency, sourceUrl, by
   const { rows: [exists] } = await query('select key from counterparties where key = $1', [key]);
   if (!exists) throw Object.assign(new Error('No such counterparty.'), { status: 404, code: 'not_found' });
 
-  await query(
-    `update counterparty_rates set effective_to = now()
-      where counterparty_key = $1 and sku = 'default' and effective_to is null`,
-    [key],
-  );
-  const { rows: [row] } = await query(
-    `insert into counterparty_rates (counterparty_key, says, amount, unit, currency, source_url, confirmed_at, confirmed_by)
-     values ($1, $2, $3, $4, coalesce($5, 'GBP'), $6, now(), $7)
-     returning id, says, effective_from, confirmed_at`,
-    [key, clean, amount == null ? null : Number(amount), unit ?? null, currency ?? null, sourceUrl ?? null, by ?? null],
-  );
-  // A new rate is confirmed by definition: somebody has just read it off the
-  // provider's page and typed it in.
-  return row;
+  /**
+   * One transaction, because the close and the insert are one act.
+   *
+   * As two autocommit statements, an insert that failed left the counterparty
+   * with no current rate at all, and two concurrent edits could leave two open
+   * rows (Codex, 20 Sep 2026). Migration 202 adds the unique partial index that
+   * makes the second impossible rather than unlikely.
+   */
+  return withTransaction(async (client) => {
+    await client.query(
+      `update counterparty_rates set effective_to = now()
+        where counterparty_key = $1 and sku = 'default' and effective_to is null`,
+      [key],
+    );
+    const { rows: [row] } = await client.query(
+      `insert into counterparty_rates (counterparty_key, says, amount, unit, currency, source_url, confirmed_at, confirmed_by)
+       values ($1, $2, $3, $4, coalesce($5, 'GBP'), $6, now(), $7)
+       returning id, says, effective_from, confirmed_at`,
+      [key, clean, amount == null ? null : Number(amount), unit ?? null, currency ?? null, sourceUrl ?? null, by ?? null],
+    );
+    // A new rate is confirmed by definition: somebody has just read it off the
+    // provider's page and typed it in.
+    return row;
+  });
 }
 
 /** Stamp the rate in force as still right. No new row: nothing changed. */

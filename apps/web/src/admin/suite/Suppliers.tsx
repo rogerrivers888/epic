@@ -111,8 +111,17 @@ export function Suppliers({ canSeeMoney, canManage }: {
 
   // `£70 (7%)`, and `−£16 (−26%)` — the design's exact shape. No plus signs,
   // and both parts derived from the two visible columns so the row adds up.
+  /**
+   * `£70 (7%)` — derived from the two columns beside it so the row reconciles.
+   *
+   * Nothing at all where there is no window to compare with: the ledger began
+   * in September, so "expected" is nought for every supplier and a variance of
+   * "$376.01 (0%)" is a percentage of nothing dressed up as a measurement. The
+   * handoff's own rule — a change prints only where a full prior window exists
+   * and sums above zero — applies to this column too (20 Sep 2026, live).
+   */
   const variance = (r: Priced) => {
-    if (r.variance == null) return null;
+    if (r.variance == null || !r.expected) return null;
     const money = fmt.cost.money(Math.abs(r.variance));
     if (money == null) return null;
     const pct = r.variancePct == null ? '' : `  (${r.variancePct < 0 ? '−' : ''}${Math.abs(r.variancePct)}%)`;
@@ -139,15 +148,25 @@ export function Suppliers({ canSeeMoney, canManage }: {
        */
       cell: (r) => <Cell muted>{r.volume == null ? '—' : fmt.plain.count(r.volume)}</Cell>,
     },
+    /**
+     * The reason is given **once** on a row, and the rest of the row is dashes.
+     *
+     * A gap says what it is — but "Invoiced, not metered" printed in the spend,
+     * expected, variance and share columns of the same row is one sentence four
+     * times, which reads as a broken table rather than an honest one (20 Sep
+     * 2026, on the live estate). The first money column carries it; the others
+     * are em dashes, which is what "there is nothing here to compare" looks
+     * like once the reason has already been said.
+     */
     { key: 'spend', label: 'This period', width: 98, sort: 'spend', cell: (r) => <Cell strong gap={r.gap}>{fmt.cost.money(r.spend)}</Cell> },
-    { key: 'expected', label: 'Expected', width: 88, cell: (r) => <Cell muted gap={r.gap}>{fmt.cost.money(r.expected)}</Cell> },
+    { key: 'expected', label: 'Expected', width: 88, cell: (r) => <Cell muted>{r.expected == null ? '—' : fmt.cost.money(r.expected)}</Cell> },
     {
       key: 'variance', label: 'Variance', width: 112, sort: 'variance',
       // Lime at fifteen per cent or more over: the one figure on this screen
       // somebody is looking for, and below that it is noise.
-      cell: (r) => <Cell strong lime={(r.variancePct ?? 0) >= 15} gap={r.gap}>{variance(r)}</Cell>,
+      cell: (r) => <Cell strong lime={(r.variancePct ?? 0) >= 15}>{variance(r) ?? '—'}</Cell>,
     },
-    { key: 'share', label: 'Share', width: 74, sort: 'share', cell: (r) => <Cell muted>{r.share == null ? null : `${r.share}%`}</Cell> },
+    { key: 'share', label: 'Share', width: 74, sort: 'share', cell: (r) => <Cell muted>{r.share == null ? '—' : `${r.share}%`}</Cell> },
   ];
 
   const largest = [...priced].filter((r) => r.spend != null).sort((a, b) => (b.spend ?? 0) - (a.spend ?? 0))[0];
@@ -220,7 +239,10 @@ export function Suppliers({ canSeeMoney, canManage }: {
           {
             label: 'Expected next month',
             value: fmt.cost.money(suite.suppliers.expectedNextMonth),
-            gap: 'No rate card — the commercial register is not built',
+            // The register *is* built (migration 201). What is missing is a
+            // trend to forecast from: the ledger began in September, and a run
+            // rate through a single point is not one.
+            gap: suite.suppliers.expectedNextMonthGap ?? 'Not forecast',
             delta: suite.suppliers.expectedNextMonthDeltaPct == null
               ? undefined
               : fmt.cost.delta(suite.suppliers.expectedNextMonthDeltaPct) ?? undefined,

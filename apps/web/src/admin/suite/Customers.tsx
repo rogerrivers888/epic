@@ -20,7 +20,7 @@ import {
   Cell, Chip, ChipGroup, FilterBar, SearchBox, Standing, SuiteHead, SuitePage, SuiteTable, TwoLine,
   Trouble, Waiting, type Col,
 } from './pieces';
-import { SuiteControls, suiteKicker, useFormatters, useHouseholdRecord, useSuite, useSuiteControls } from './useSuite';
+import { SuiteControls, suiteKicker, useCustomers, useFormatters, useHouseholdRecord, useSuiteControls } from './useSuite';
 import { HouseholdRecordView } from './HouseholdRecord';
 import { joinedDay, lastSeen, share, sortRows, statusWord, type HouseholdRow } from './model';
 
@@ -41,8 +41,10 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
   const [dir, setDir] = useQueryState<'up' | 'down'>('dir', 'down', asOneOf(['up', 'down'] as const, 'down'));
   const [householdId, setHouseholdId] = useQueryState<string>('household', '', asText);
 
-  const { suite, error, reading, reload } = useSuite(period, source);
-  const fmt = useFormatters(suite, null);
+  // The list alone, through the accounts-gated read — not the whole estate
+  // model, which needs `view_reporting` (Codex, 20 Sep 2026).
+  const { customers, gaps, error, reading, reload } = useCustomers(period, source);
+  const fmt = useFormatters(null, null);
   const { record, error: recordError } = useHouseholdRecord(householdId || null, period, source);
 
   const controls = <SuiteControls period={period} setPeriod={setPeriod} source={source} setSource={setSource} />;
@@ -50,7 +52,7 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
   if (error) {
     return <SuitePage><SuiteHead title="Customers" right={controls} /><Trouble says={error} onRetry={reload} /></SuitePage>;
   }
-  if (!suite) {
+  if (!customers) {
     return <SuitePage><SuiteHead title="Customers" right={controls} /><Waiting says={reading ? 'Reading the households…' : undefined} /></SuitePage>;
   }
 
@@ -60,7 +62,7 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
       <HouseholdRecordView
         record={record}
         error={recordError}
-        suite={suite}
+        gaps={gaps}
         onBack={() => setHouseholdId('')}
         onFilterToFamily={() => setHouseholdId('')}
         controls={controls}
@@ -69,7 +71,7 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
     );
   }
 
-  const all = suite.customers.households;
+  const all = customers.households;
   const needle = q.trim().toLowerCase();
   let rows = all.filter((h) => (needle
     ? `${h.name} ${h.area ?? ''}`.toLowerCase().includes(needle)
@@ -117,7 +119,7 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
 
       <FilterBar right={(
         <Text style={type.small}>
-          {`${rows.length} of ${all.length} shown · ${suite.customers.total.toLocaleString()} households`}
+          {`${rows.length} of ${all.length} shown · ${customers.total.toLocaleString()} households`}
         </Text>
       )}>
         <SearchBox value={q} onChange={(v) => setQ(v, { replace: true })} placeholder="Search a name or an area" />
@@ -147,19 +149,19 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
         items={[
           {
             label: 'Paying',
-            value: fmt.plain.count(suite.customers.paying),
-            sub: canSeeMoney ? `${fmt.revenue.money(suite.customers.payingMrr)} a month` : undefined,
+            value: fmt.plain.count(customers.paying),
+            sub: canSeeMoney ? `${fmt.revenue.money(customers.payingMrr)} a month` : undefined,
           },
           {
             label: 'On trial',
-            value: fmt.plain.count(suite.customers.trial),
-            sub: suite.customers.trialConvertPct == null
+            value: fmt.plain.count(customers.trial),
+            sub: customers.trialConvertPct == null
               ? undefined
-              : `${suite.customers.trialConvertPct}% convert · ${suite.customers.trialGranted} granted by hand`,
+              : `${customers.trialConvertPct}% convert · ${customers.trialGranted} granted by hand`,
           },
           {
             label: 'At risk',
-            value: fmt.plain.count(suite.customers.atRisk),
+            value: fmt.plain.count(customers.atRisk),
             sub: 'paying, nothing opened in 30 days',
           },
         ]}
@@ -167,9 +169,9 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
 
       {/* Small-n honesty, said once where it applies: a share of a dozen
           households is a count, not a percentage. */}
-      {suite.customers.total < 30 ? (
+      {customers.total < 30 ? (
         <Text style={type.tiny}>
-          {`Shares on the other screens read as counts while the estate is this small — ${share(suite.customers.paying, suite.customers.total)} paying.`}
+          {`Shares on the other screens read as counts while the estate is this small — ${share(customers.paying, customers.total)} paying.`}
         </Text>
       ) : null}
     </SuitePage>
