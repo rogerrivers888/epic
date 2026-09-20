@@ -386,11 +386,17 @@ async function censusOneTile({ run, tile, pace, remaining, until = Infinity, sto
           set done_subcategories = $2,
               requests = requests + $3,
               slices = slices + $4,
-              places = places + $5,
-              saturated = saturated + $6,
-              problem = coalesce($7, problem)
+              -- Counted, not added up. A place found by three drawers is one
+              -- place in this tile, and adding each drawer's total would have
+              -- made the run's headline number a count of surfacings wearing
+              -- the word "places" — the same mistake as 135 rows for 65 places
+              -- (repositories/censusRing.js).
+              places = (select count(distinct venue_ref)::int from place_subcategories
+                         where area_slug = census_tiles.grid_key),
+              saturated = saturated + $5,
+              problem = coalesce($6, problem)
         where id = $1`,
-      [tile.id, [...done], out.requests ?? 0, out.slices ?? 0, out.noted ?? 0, out.saturated ?? 0,
+      [tile.id, [...done], out.requests ?? 0, out.slices ?? 0, out.saturated ?? 0,
         out.problems?.length ? out.problems.slice(0, 2).join(' · ').slice(0, 300) : null]);
 
     if (out.refused) { refused = out.refused; break; }

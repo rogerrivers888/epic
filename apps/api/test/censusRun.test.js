@@ -329,3 +329,21 @@ test('a tile interrupted half way keeps what it answered, and the next pass asks
     assert.ok(!secondAsked.includes(type), `${type} was answered in the first pass and is not asked again`);
   }
 });
+
+test('a place found by three drawers is one place in the tile', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test counting' });
+  await seedTile(run, 'test/counting');
+
+  // The same place for every question. Adding each drawer's total would make
+  // the tile's "places" a count of surfacings — 135 rows for 65 places was that
+  // mistake in the ring count, and this is the same one a tile further up.
+  const one = { id: 'ChIJrun_test_the_same_place', rank: 1 };
+  await withCensus(async () => ({ places: [one], requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  const { rows: [tile] } = await query(`select places, done_subcategories from census_tiles where grid_key = 'test/counting'`);
+  assert.ok(tile.done_subcategories.length > 1, 'several drawers were asked');
+  assert.equal(tile.places, 1, 'and they all found the one place, which is one place');
+});
