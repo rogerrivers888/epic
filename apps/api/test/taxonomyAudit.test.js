@@ -36,19 +36,28 @@ test('an empty subcategory is a mapping gap and names the words that would fill 
   assert.ok(!one.proposed.includes('Winery'));
 });
 
+// A corpus that is actually used: opened four hundred times out of two
+// thousand, so one open in five, and the signal has something to measure
+// against.
+const BUSY_SHOWN = ['elsewhere', 2000];
+const BUSY_OPENED = ['elsewhere', 400];
+
 test('nobody goes stays silent until enough of its places have been shown', () => {
   const refs = Array.from({ length: 30 }, (_, i) => `r${i}`);
   const words = [{ key: 'road_bridge', label: 'Road bridge' }];
   const placesByWord = new Map([['road_bridge', refs]]);
   const thin = nobodyGoes({
-    words, placesByWord, shownByRef: new Map([['r0', 3]]), openedByRef: new Map(),
+    words, placesByWord,
+    shownByRef: new Map([['r0', 3], BUSY_SHOWN]),
+    openedByRef: new Map([BUSY_OPENED]),
   });
   assert.equal(thin.proposals.length, 0, 'three impressions is not evidence');
   assert.equal(thin.thin.length, 1, 'and it says so');
 
   const loud = nobodyGoes({
     words, placesByWord,
-    shownByRef: new Map(refs.map((r) => [r, 5])), openedByRef: new Map(),
+    shownByRef: new Map([...refs.map((r) => [r, 5]), BUSY_SHOWN]),
+    openedByRef: new Map([BUSY_OPENED]),
   });
   assert.equal(loud.proposals.length, 1);
   assert.equal(loud.proposals[0].proposed, 'Not in Epic');
@@ -191,4 +200,33 @@ test('a word named by two accepted proposals is snapshotted once, before either'
   assert.equal(back.decision, null, 'restored to what it was, not to the state after the first proposal');
   assert.equal(back.points_at, 'tmp-dst');
   assert.equal(back.active, true);
+});
+
+test('nobody goes stays blind until the corpus shows that opening happens', () => {
+  const refs = Array.from({ length: 40 }, (_, i) => `r${i}`);
+  const words = [{ key: 'restaurant', label: 'Restaurant' }];
+  const placesByWord = new Map([['restaurant', refs]]);
+  const shownByRef = new Map(refs.map((r) => [r, 10]));
+
+  // Production, 20 Sep 2026: four opens in the whole system.
+  const young = nobodyGoes({ words, placesByWord, shownByRef, openedByRef: new Map([['x', 4]]) });
+  assert.equal(young.proposals.length, 0, 'four opens is not evidence that nobody goes');
+  assert.ok(young.blind, 'and the run says it was blind');
+  assert.equal(young.blind.opens, 4);
+
+  // The corpus opens one in five. This word's 400 impressions yield 80 opens,
+  // which is one in five, so there is nothing to report.
+  const seenAll = new Map([...refs.map((r) => [r, 10]), BUSY_SHOWN]);
+  const normal = nobodyGoes({
+    words, placesByWord, shownByRef: seenAll,
+    openedByRef: new Map([...refs.map((r) => [r, 2]), BUSY_OPENED]),
+  });
+  assert.equal(normal.proposals.length, 0, 'opened at the corpus rate is not a finding');
+
+  // Same corpus, and this word is never opened at all.
+  const dead = nobodyGoes({
+    words, placesByWord, shownByRef: seenAll, openedByRef: new Map([BUSY_OPENED]),
+  });
+  assert.equal(dead.proposals.length, 1);
+  assert.match(dead.proposals[0].because, /against .*% across everything else/);
 });

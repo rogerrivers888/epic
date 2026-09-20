@@ -93,22 +93,47 @@ export function orphans({ subs, rulesBySub, placesBySub, unmapped }) {
  * least `seen` times between them. Otherwise the answer is "we do not know
  * yet", and the run records that rather than a proposal.
  */
-export function nobodyGoes({ words, placesByWord, shownByRef, openedByRef, floor = 25, seen = 20 }) {
+export function nobodyGoes({
+  words, placesByWord, shownByRef, openedByRef,
+  floor = 25, seen = 20, corpusOpens = 200, worseThan = 0.25,
+}) {
   const out = []; const thin = [];
+
+  // **Zero opens only means something where opening happens.**
+  //
+  // Run against production on 20 Sep 2026 this proposed excluding `restaurant`,
+  // `cafe`, `park`, `playground` and `indian_restaurant` — the heart of the
+  // product — because the whole system held four opens and "opened: 0" was
+  // therefore true of everything. The signal was measuring how young the
+  // product is, not whether anybody goes. Accepting that group in bulk, which
+  // is exactly what the screen invites, would have emptied the taxonomy.
+  //
+  // So it stays silent until the corpus shows that opening happens at all, and
+  // then judges a word against the rate the rest of the corpus actually
+  // achieves rather than against nought.
+  const opensAll = [...openedByRef.values()].reduce((n, v) => n + v, 0);
+  const shownAll = [...shownByRef.values()].reduce((n, v) => n + v, 0);
+  if (opensAll < corpusOpens) {
+    return { proposals: [], thin: [], blind: { opens: opensAll, needs: corpusOpens } };
+  }
+  const rate = shownAll ? opensAll / shownAll : 0;
+
   for (const w of words) {
     const refs = placesByWord.get(w.key) ?? [];
     if (refs.length < floor) continue;
     const shown = refs.reduce((n, r) => n + (shownByRef.get(r) ?? 0), 0);
     const opened = refs.reduce((n, r) => n + (openedByRef.get(r) ?? 0), 0);
     if (shown < seen) { thin.push({ key: w.key, places: refs.length, shown }); continue; }
-    if (opened > 0) continue;
+    const mine = shown ? opened / shown : 0;
+    if (mine > rate * worseThan) continue;
     out.push(say('nobody_goes', {
       subject_kind: 'word', subject: w.key, subject_label: w.label,
       action: 'exclude',
       now_value: w.subcategoryLabel ?? null,
       proposed: 'Not in Epic',
-      because: `Brings in ${refs.length} places. They have been shown ${shown} times and opened none.`,
-      numbers: { places: refs.length, shown, opened },
+      because: `Brings in ${refs.length} places. Shown ${shown} times and opened ${opened}`
+        + ` — ${(mine * 100).toFixed(1)}% against ${(rate * 100).toFixed(1)}% across everything else.`,
+      numbers: { places: refs.length, shown, opened, rate: Number(mine.toFixed(4)), corpusRate: Number(rate.toFixed(4)) },
       moves: refs.length,
     }));
   }
@@ -238,6 +263,9 @@ export function auditAll(input) {
     researched: input.ownedByRef.size,
     tooThinToJudge: goes.thin.length,
     drawersTooThinToJudge: mix.thin.length,
+    // Named rather than implied: a run that could not judge demand at all must
+    // say so, or a clean audit reads as a clean taxonomy.
+    demandBlind: goes.blind ?? null,
   };
   return { proposals, evidence };
 }
