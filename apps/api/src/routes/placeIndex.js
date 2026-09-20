@@ -1007,10 +1007,17 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
       minutes, mode,
     });
     if (!ring) throw bad('Which ring? Pass ?where= or ?lat=&lng=.');
-    const [now, before] = await Promise.all([
+    const [now, before, seen] = await Promise.all([
       censusInRing({ cells: ring.cells, outcodes: ring.outcodes }),
       censusByOutcodeSum(ring.outcodes),
+      query('select distinct area_slug from area_counts where area_slug = any($1)',
+        [ring.outcodes.map((o) => o.toLowerCase())]),
     ]);
+    // A district nobody has censused contributes nought, and nought is not an
+    // answer — it is the absence of one. So it makes every count in this ring a
+    // floor, exactly as an unresolved box does.
+    const censused = new Set(seen.rows.map((r) => r.area_slug));
+    const notCensused = ring.outcodes.filter((o) => !censused.has(o.toLowerCase()));
     const keys = [...new Set([...Object.keys(before), ...Object.keys(now.counts)])].sort();
     res.json({
       ring: {
@@ -1026,7 +1033,10 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
         // (owner, 20 Sep 2026: "Do not discard them. Resolve them, then count
         // them… A floor is honest").
         unresolved: now.unresolved[key] ?? 0,
+        // Whether this number may be printed plain, or only with a plus on it.
+        floor: (now.unresolved[key] ?? 0) > 0 || notCensused.length > 0,
       })),
+      notCensused: notCensused.length,
       // How the boxes themselves fell: wholly in, wholly out, or across the
       // edge. The third is the only work a re-census has to do.
       boxes: now.boxes,
