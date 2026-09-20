@@ -138,16 +138,15 @@ export function MediaCard({ thumb, name, muted, wide, selected, onPress, childre
  * A shelf's title, with "All N ›" opposite — the door into the whole of it.
  * One component so the shelves and the drill-down cannot drift apart.
  */
-export function SectionHead({ title, count, of = null, onAll }: {
-  title: string; count: number;
-  /** What the census says is within reach, where that is more than the shelf holds. */
-  of?: number | null;
-  onAll?: () => void;
-}) {
-  // The shelf has room for two numbers and no room for a sentence: what we
-  // have looked up, and what the census counted in the postcode districts this
-  // ring touches. The opened list says which is which in words.
-  const said = of ? `${count} of ${of.toLocaleString()}` : `All ${count}`;
+export function SectionHead({ title, count, onAll }: { title: string; count: number; onAll?: () => void }) {
+  /**
+   * One number, and it is the length of the list behind it.
+   *
+   * A second number — the census's count for the ring — was here and it was
+   * wrong in five directions at once (owner, 20 Sep 2026: "no household-facing
+   * number unless we can show the places behind it").
+   */
+  const said = `All ${count}`;
   const right = (
     <View style={styles.allLink}>
       <Text style={styles.meta}>{said}</Text>
@@ -166,17 +165,8 @@ export function SectionHead({ title, count, of = null, onAll }: {
 }
 
 /** All: one category's worth, across. The title is a door into the whole of it. */
-export function Carousel({ title, count, within, items, onAll, onOpen, crowdOf, travel }: {
+export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travel }: {
   title: string; count: number; items: InspireItem[];
-  /**
-   * What the census says is within reach, where it is more than this shelf
-   * holds.
-   *
-   * "All 10" over a category the census counts three thousand six hundred of
-   * read as ten being all there is (owner, 20 Sep 2026). The shelf holds what
-   * we have bought; the ring holds what is there.
-   */
-  within?: number | null;
   onAll: () => void; onOpen: (i: InspireItem) => void;
   /** What the crowd made of it, once Google has answered for this one. */
   crowdOf?: (i: InspireItem) => Crowd;
@@ -185,7 +175,7 @@ export function Carousel({ title, count, within, items, onAll, onOpen, crowdOf, 
   if (!items.length) return null;
   return (
     <View style={styles.section}>
-      <SectionHead title={title} count={count} of={within && within > count ? within : null} onAll={onAll} />
+      <SectionHead title={title} count={count} onAll={onAll} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
         {items.map((i) => (
           <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travel={travel} onOpen={() => onOpen(i)} />

@@ -23,6 +23,7 @@ import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
+import { censusInRing, censusByOutcodeSum } from '../repositories/censusRing.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP } from '../sources/census.js';
@@ -981,6 +982,53 @@ router.get('/household', requires('view_library'), async (req, res, next) => {
       ...(await head(scope)),
       stats: await statsOf(scope, { category: req.query.cat ? String(req.query.cat) : '', subcategory: sub ?? '' }),
       ...out,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * What the census knows inside a ring, counted properly — and counted the old
+ * way beside it, so the difference can be seen rather than asserted.
+ *
+ * The old way summed `area_counts` over the whole postcode districts a ring
+ * touches, across every drawer. It said 23 where the ring held three to five
+ * (owner, 20 Sep 2026). The new way places every census row — by its own
+ * coordinate where it has one, by the box the census found it in where it does
+ * not — tests it against the ring's own sectors, and counts distinct places per
+ * category.
+ */
+router.get('/census-ring', requires('view_library'), async (req, res, next) => {
+  try {
+    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    const mode = travelMode(req.query.mode);
+    const ring = await reach.ringFor({
+      where: req.query.where ?? null,
+      lat: req.query.lat ?? null, lng: req.query.lng ?? null,
+      minutes, mode,
+    });
+    if (!ring) throw bad('Which ring? Pass ?where= or ?lat=&lng=.');
+    const [now, before] = await Promise.all([
+      censusInRing({ cells: ring.cells, outcodes: ring.outcodes }),
+      censusByOutcodeSum(ring.outcodes),
+    ]);
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(now.counts)])].sort();
+    res.json({
+      ring: {
+        where: ring.label, minutes, mode,
+        cells: ring.cells.length, outcodes: ring.outcodes.length,
+      },
+      categories: keys.map((key) => ({
+        key,
+        before: before[key] ?? 0,
+        after: now.counts[key] ?? 0,
+        uncertain: now.uncertain[key] ?? 0,
+      })),
+      // How each place was put on the map: its own point, or the box the census
+      // asked inside. The second is the census-only population, which counting
+      // by `place_cells` would have lost entirely.
+      placed: now.placed,
+      unplaceable: now.unplaceable,
+      tooWideM: now.tooWideM,
     });
   } catch (err) { next(err); }
 });

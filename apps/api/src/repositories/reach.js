@@ -474,6 +474,52 @@ export async function placesWithin(cell, { minutes = 30, mode = 'driving', edge 
   return rows;
 }
 
+/**
+ * The ring round a place: its sectors, the districts they sit in, and a box.
+ *
+ * One resolver, because two screens were drawing "the ring" from two different
+ * pieces of code and only one of them knew that an outward code is a district
+ * rather than a sector (20 Sep 2026). A full postcode is its own sector; an
+ * outcode or a named place is snapped to the nearest sector we hold.
+ */
+export async function ringFor({ where = null, lat = null, lng = null, label = null, minutes = 30, mode = 'driving' } = {}) {
+  const said = String(where ?? '').trim();
+  const slug = said.toLowerCase().replace(/\s+/g, '-');
+  const sector = said ? sectorOf(said.replace(/-/g, ' ')) : null;
+  let cell = sector ? `sector:${sector}` : null;
+  let name = sector ? said.toUpperCase() : null;
+  if (!cell && slug) {
+    const { rows: [area] } = await query(
+      'select name, lat, lng from localities where slug = $1 and lat is not null limit 1', [slug]);
+    if (area) {
+      const at = await cellAt({ lat: Number(area.lat), lng: Number(area.lng) }).catch(() => null);
+      cell = at?.code ?? null;
+      name = area.name ?? said.toUpperCase();
+    }
+  }
+  if (!cell && lat != null && lng != null) {
+    const at = await cellAt({ lat: Number(lat), lng: Number(lng) }).catch(() => null);
+    cell = at?.code ?? null;
+    name = label ?? at?.code ?? null;
+  }
+  if (!cell) return null;
+  const within = await reachableCells(cell, { minutes, mode });
+  const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
+  const { rows } = await query('select code, lat, lng from geo_cells where code = any($1)', [codes]);
+  if (!rows.length) return null;
+  const home = rows.find((r) => r.code === cell) ?? null;
+  return {
+    cell,
+    label: name ?? cell,
+    cells: codes,
+    outcodes: [...new Set(codes.map(outcodeOf).filter(Boolean))],
+    points: rows,
+    at: lat != null && lng != null
+      ? { lat: Number(lat), lng: Number(lng) }
+      : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null,
+  };
+}
+
 /** What has been built, for the back office and for the tests. */
 export async function state({ scheme = 'sector', country = 'GB' } = {}) {
   const { rows: [cells] } = await query(

@@ -640,18 +640,20 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           : mode === 'food' ? cap1(within) : drawers.get(within) ?? cap1(within);
   const listCount = layer === 'subs' ? inPick.length : listed.length;
   /**
-   * What the census says is within reach, beside what is on the screen.
+   * No number a household sees is anything but the length of a list we can put
+   * in front of them.
    *
-   * The two are different numbers and both are true: 1,374 things to do within
-   * thirty minutes is what we know is there, from the census, for nothing; the
-   * twenty below are the ones we have bought and can actually show (owner,
-   * 20 Sep 2026 — "show the census count for the reach… and the top 5").
-   * Printing only the second made a ring of a thousand places read as
-   * seventeen.
+   * The census count was on this screen as a free headline and it was wrong in
+   * five directions at once — whole postcode districts rather than the ring,
+   * drawers summed so a place could count twice, most of the ring never
+   * censused, saturated slices floored, and all of it as of the last run. It
+   * said 23 for a ring holding three to five (owner, 20 Sep 2026: "That is a
+   * hard no — no household-facing number unless we can show the places behind
+   * it. Where we can't produce a list, show no number").
+   *
+   * So there is no second number here. The back office keeps the census —
+   * that is what it is for — and this screen counts what it can draw.
    */
-  const censusHere = pick && pickIsCategory
-    ? (pool?.moods ?? []).find((m) => m.key === pick)?.count ?? null
-    : null;
 
   // Whichever list is actually on screen is the one worth asking about — and,
   // under a rating floor, the whole of the mode, so the floor can be honest.
@@ -956,9 +958,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   key={sh.key}
                   title={sh.label}
                   count={sh.items.length}
-                  // What the census says is within reach of this ring, which is
-                  // a different and larger number than the shelf holds.
-                  within={(pool?.moods ?? []).find((m) => m.key === sh.key)?.count ?? null}
                   items={sh.items.slice(0, ACROSS)}
                   onAll={() => goTo('activities', sh.key)}
                   onOpen={open}
@@ -984,18 +983,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                     onBack={() => goTo(mode, null)}
                     backLabel="All"
                     title={listTitle}
-                    aside={listCount
-                      ? (censusHere && censusHere > listCount
-                        // "Within reach" was a promise the number does not
-                        // make: it is the census's count over the whole
-                        // postcode districts the ring touches, so part of it
-                        // lies outside the ring, and all of it is ids rather
-                        // than places we have looked up. Said as what it is
-                        // (owner, 20 Sep 2026: "it says 3 of 23 within reach,
-                        // but it only shows me 3").
-                        ? `${listCount} looked up · ${censusHere.toLocaleString()} counted nearby`
-                        : `${listCount} place${listCount === 1 ? '' : 's'}`)
-                      : null}
+                    aside={listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : null}
                   />
                   {layer === 'subs' ? (
                     <View>

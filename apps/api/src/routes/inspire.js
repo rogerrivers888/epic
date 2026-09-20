@@ -581,9 +581,19 @@ inspire.get('/near', async (req, res, next) => {
         moods.push({
           key,
           label: tax.vocab?.categories?.[key]?.label ?? key,
-          // The census count for the reach: free, ours, and the number the
-          // screen prints beside the name.
-          count: census.counts[key] ?? 0,
+          /**
+           * The length of the list, and nothing else.
+           *
+           * This carried the census's count for the ring, and the screen drew
+           * it: "23" over a ring holding three to five. It was wrong in five
+           * directions at once and none of them was fixable by wording (owner,
+           * 20 Sep 2026: "Stop showing any count that isn't the length of a
+           * list we can render… Where we can't produce a list, show no
+           * number"). The census has not gone anywhere — it is what the back
+           * office counts with, and what decides where to collect next — it is
+           * simply not a number a household is shown.
+           */
+          count: got.items.length,
           icon: tax.vocab?.categories?.[key]?.icon ?? null,
           // Food is a shelf again, not a door: it is bought the same way as
           // everything else now.
