@@ -25,6 +25,7 @@ import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
+import { OURS_TO_KEEP } from '../sources/census.js';
 import { LIVE_ROW } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { searchAreas } from '../sources/areas.js';
@@ -769,9 +770,17 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
       `select count(*)::int as held,
               count(*) filter (where coords_at < now() - interval '23 days')::int as expiring_soon
          from place_index
-        where coords_from = 'google' and lat is not null
+        -- The same keep-list the sweep expires by, and named the same way round
+        -- on purpose: everything that is not ours is rented, so a provider added
+        -- tomorrow is counted here without anybody remembering to add it. Asking
+        -- for 'google' instead was narrower than the sweep, so a Tripadvisor
+        -- point would have been expired without ever being reported as held or
+        -- as about to go, and would then have turned up in the dropped total out
+        -- of nowhere (Codex, 20 Sep 2026).
+        where coords_from is not null and coords_from <> all ($2::text[])
+          and lat is not null
           and cell is not null
-          and lower(split_part(replace(cell, 'sector:', ''), ' ', 1)) = any($1)`, [slugs]);
+          and lower(split_part(replace(cell, 'sector:', ''), ' ', 1)) = any($1)`, [slugs, OURS_TO_KEEP]);
     // Tolerant of its own table not being there yet: migrations are a separate
     // step from the deploy, and a board that 500s for the minute in between is
     // a worse answer than a board that says nothing has been dropped.

@@ -501,7 +501,7 @@ export async function noteFromDisplay(venues, { source = 'google' } = {}) {
  * somebody remembered to add it. Tripadvisor was exactly that case (Codex,
  * 19 Sep 2026).
  */
-const OURS_TO_KEEP = ['osm', 'atlas', 'own'];
+export const OURS_TO_KEEP = ['osm', 'atlas', 'own'];
 
 export async function expireRentedCoordinates({ days = 30 } = {}) {
   const { rows } = await query(
