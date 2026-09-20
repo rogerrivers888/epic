@@ -21,6 +21,7 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 
+import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 
@@ -342,30 +343,17 @@ export function DeskPill({ name, kind = 'sub', pending, onRemove }: {
         paddingVertical: 5,
         paddingHorizontal: 11,
       }}>
-        {kind === 'label' ? <TagGlyph /> : null}
+        {kind === 'label' ? <Icon name="keep" size={12} color={LIME} /> : null}
         <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: solid ? ON_LIME : LIME }}>
           {name}
         </Text>
         {onRemove ? (
-          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '600', opacity: 0.55, color: solid ? ON_LIME : LIME }}>
-            ×
-          </Text>
+          <View style={{ opacity: 0.55 }}>
+            <Icon name="close" size={12} color={solid ? ON_LIME : LIME} />
+          </View>
         ) : null}
       </View>
     </Press>
-  );
-}
-
-/** The tag that tells a label pill from a subcategory pill, drawn not imported. */
-function TagGlyph() {
-  return (
-    <View style={{
-      width: 9,
-      height: 9,
-      borderWidth: 1.5,
-      borderColor: LIME,
-      transform: [{ rotate: '45deg' }],
-    }} />
   );
 }
 
@@ -505,11 +493,7 @@ export function TickBox({ on, onPress }: { on: boolean; onPress: () => void }) {
         alignItems: 'center',
         justifyContent: 'center',
       }}>
-        {on ? (
-          <Text style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '800', color: ON_LIME, lineHeight: 14 }}>
-            ✓
-          </Text>
-        ) : null}
+        {on ? <Icon name="check" size={13} color={ON_LIME} strokeWidth={3.4} /> : null}
       </View>
     </Press>
   );
