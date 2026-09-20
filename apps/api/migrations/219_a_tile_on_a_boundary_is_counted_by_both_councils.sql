@@ -1,0 +1,20 @@
+-- A tile on a boundary is counted by both councils.
+--
+-- The hygiene register is asked by local authority rather than by box — a nine
+-- kilometre tile in central London holds twenty thousand inspected kitchens,
+-- and asking for them per tile would be asking a free government service for
+-- the same rows four hundred times (`sources/groundCounts.js`).
+--
+-- But a grid takes no notice of a council boundary. The first pass counted a
+-- tile from whichever authority its middle happened to sit in and then marked
+-- it done, so a tile straddling two boroughs was written down with one
+-- borough's kitchens in it — and an undercount presented as a ground count is
+-- worse than no ground count at all, because the census is then measured
+-- against it and comes out looking complete.
+--
+-- So a register count is *added to* rather than replaced, and the row carries
+-- the authorities that have contributed to it. An authority already in the list
+-- is never added twice, which is what makes a re-run safe; and a tile that has
+-- only been reached by one of its two councils says so, rather than implying it
+-- has been reached by both.
+alter table ground_counts add column if not exists contributors text[] not null default '{}';

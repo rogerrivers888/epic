@@ -313,21 +313,37 @@ export function fhrsCountsInBox(points, box) {
  * `on conflict` rather than an insert: a tile counted again is the same fact
  * measured later, and the point of re-counting is to move the number.
  */
-export async function noteGround({ gridKey, source, counts, asked = {}, problem = null }) {
+export async function noteGround({ gridKey, source, counts, asked = {}, problem = null, from = null }) {
   const keys = Object.keys(counts);
   if (!keys.length) return { written: 0 };
   const caveats = source === 'osm' ? OSM_GROUND : FHRS_GROUND;
-  const values = keys.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4}::int,$${i * 6 + 5},$${i * 6 + 6})`).join(',');
+  const values = keys.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2},$${i * 7 + 3},$${i * 7 + 4}::int,$${i * 7 + 5},$${i * 7 + 6},$${i * 7 + 7}::text[])`).join(',');
   const params = keys.flatMap((key) => [
-    gridKey, source, key, counts[key], asked[key] ?? null, caveats[key]?.caveat ?? null,
+    gridKey, source, key, counts[key], asked[key] ?? null, caveats[key]?.caveat ?? null, from ? [from] : [],
   ]);
+  // **Added to, when the count comes from one contributor of several.** A grid
+  // takes no notice of a council boundary: a tile straddling two boroughs is
+  // counted once by each, and replacing the row would leave it holding one
+  // borough's kitchens while looking like a whole-tile number. An authority
+  // already in `contributors` adds nothing, which is what makes a re-run safe.
+  //
+  // The open map has no such problem — Overpass answers about the box itself —
+  // so an OSM count replaces, which is what lets a re-count move the number.
   await query(
-    `insert into ground_counts (grid_key, source, subcategory, places, asked, caveat)
+    `insert into ground_counts (grid_key, source, subcategory, places, asked, caveat, contributors)
      values ${values}
      on conflict (grid_key, source, subcategory) do update
-        set places = excluded.places, asked = excluded.asked, caveat = excluded.caveat,
+        set places = case when $${keys.length * 7 + 1}::boolean
+                            then (case when ground_counts.contributors @> excluded.contributors
+                                       then ground_counts.places
+                                       else ground_counts.places + excluded.places end)
+                          else excluded.places end,
+            contributors = case when ground_counts.contributors @> excluded.contributors
+                                then ground_counts.contributors
+                                else ground_counts.contributors || excluded.contributors end,
+            asked = excluded.asked, caveat = excluded.caveat,
             counted_at = now(), problem = null`,
-    params,
+    [...params, Boolean(from)],
   );
   if (problem) {
     await query('update ground_counts set problem = $3 where grid_key = $1 and source = $2', [gridKey, source, problem]);
@@ -421,7 +437,7 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
       await noteGround({
         gridKey: next.grid_key, source: 'fhrs',
         counts: Object.fromEntries(Object.keys(FHRS_GROUND).map((k) => [k, 0])),
-        asked: askedFhrs(),
+        asked: askedFhrs(), from: 'none within three miles',
       });
       counted.add(next.grid_key);
       continue;
@@ -443,7 +459,11 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
       // cannot speak for — it belongs to a neighbour, and saying nought would
       // be this authority answering for ground it does not cover.
       if (!any) continue;
-      await noteGround({ gridKey: t.grid_key, source: 'fhrs', counts, asked: askedFhrs() });
+      // Added rather than written. A tile that straddles a boundary gets this
+      // authority's kitchens now and its neighbour's when that authority is
+      // downloaded in a later pass — which happens on its own, because some
+      // tile's middle sits in every authority in the region.
+      await noteGround({ gridKey: t.grid_key, source: 'fhrs', counts, asked: askedFhrs(), from: String(authority.id) });
       counted.add(t.grid_key);
     }
     counted.add(next.grid_key);

@@ -213,3 +213,29 @@ test('every ground count is stored with the words it was asked in and the caveat
   assert.equal(rows[0].asked, '["leisure"="marina"]');
   assert.ok(rows[0].caveat, 'a number with no caveat gets read as a target');
 });
+
+test('a tile on a boundary is counted by both councils, and by neither twice', async () => {
+  const gridKey = 'test/ground/straddles';
+  await aCensusedTile({ gridKey, outcodes: ['ZZ94'], subcategory: 'restaurants', places: 0, osmAt: new Date() });
+  // Two authorities, each with the half of the tile that is theirs.
+  await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 12 }, from: '501' });
+  await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 9 }, from: '502' });
+  let { rows } = await query(
+    `select places, contributors from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]);
+  assert.equal(rows[0].places, 21, 'both councils, added — a tile counted by one of its two is an undercount presented as a ground count');
+  assert.deepEqual(rows[0].contributors.sort(), ['501', '502']);
+
+  // The same download again, because a pass was interrupted and repeated.
+  await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 12 }, from: '501' });
+  ({ rows } = await query(
+    `select places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+  assert.equal(rows[0].places, 21, 'an authority already counted adds nothing, so a re-run is safe');
+
+  // The open map has no boundary problem: Overpass answers about the box, so a
+  // re-count replaces and the number can go down as well as up.
+  await ground.noteGround({ gridKey, source: 'osm', counts: { restaurants: 30 } });
+  await ground.noteGround({ gridKey, source: 'osm', counts: { restaurants: 28 } });
+  ({ rows } = await query(
+    `select places from ground_counts where grid_key = $1 and source = 'osm' and subcategory = 'restaurants'`, [gridKey]));
+  assert.equal(rows[0].places, 28, 'a re-count is the same ground measured later, not more ground');
+});
