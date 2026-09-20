@@ -121,6 +121,18 @@ test('a banding writes no scored_at, and the board still reads it as the newer o
   assert.equal(out.rows[0].standing, 'top');
 });
 
+test('the next ten, and the next', async () => {
+  await seed();
+  const one = await index.household(AREA, { subcategory: 'pubs-bars', limit: 2, offset: 0 });
+  const two = await index.household(AREA, { subcategory: 'pubs-bars', limit: 2, offset: 2 });
+  assert.deepEqual(one.rows.map((r) => r.name), ['The Top One', 'The Middle One']);
+  assert.deepEqual(two.rows.map((r) => r.name), ['Nobody Has Scored This']);
+  // The counts are of the whole scope on every page, so the line above the list
+  // says "11 to 20 of 127" rather than starting again.
+  assert.equal(two.named, 3);
+  assert.equal(two.from, 2);
+});
+
 test('what we say a place is, in a line, with the markup taken out', async () => {
   await seed();
   await query(

@@ -24,6 +24,7 @@ import { rules as shelfRules } from './shelfRules.js';
 import { taxonomy } from './shelfTaxonomy.js';
 import { FACT_KEYS, FACT_WEIGHTS, defaultBars, scorePlace, readyShare, ownedRecordSql } from '../domain/placeIndex.js';
 import { COUNTRY_NAMES } from '../sources/portraits.js';
+import { crowdBand, countBand, score } from '../domain/scoring.js';
 
 /** Sources we can be asked about, in the order the boards print them. */
 export const SOURCES = [
@@ -2391,6 +2392,74 @@ export async function places(areaSlug, {
  * Inspire — and the last four times a rule lived in more than one place, the
  * copies drifted.
  */
+/**
+ * Turn what a search just paid for into a score that is ours to keep.
+ *
+ * The owner, 20 Sep 2026: "we're supposed to be taking these review scores and
+ * converting them into an epic score, so they're stored. If I pay to look at
+ * the next 30 pubs and bars, we should be converting it into our score, and
+ * from that moment on, that location should always have a score."
+ *
+ * Agreed, and it was not happening: a display search carried a rating and a
+ * review count for every place it returned, the results were composed, and both
+ * figures were dropped on the floor. The next search bought them again.
+ *
+ * What is written down is *derived* and nothing else — the crowd as one of four
+ * words, how many have been as one of four, and the Epic score itself. The
+ * rating never lands in a column and never reaches a device; it is read, turned
+ * into a judgement of ours, and forgotten (data policy, 19 Sep 2026: "The Epic
+ * score is ours because it is derived… never a stored copy of Google's 4.6").
+ * None of these is an owned *fact* (`OWNED_FACTS`), so scoring a place does not
+ * make it owned — it makes it ranked.
+ *
+ * Both places a score is kept are written, for the same reason `rescoreOne`
+ * writes both: a screen reading one and a list ordering by the other is drift.
+ */
+export async function noteScores(venues = []) {
+  const refs = []; const crowds = []; const counts = []; const epics = []; const owneds = [];
+  for (const v of venues ?? []) {
+    const ref = v?.venueRef ?? (v?.source && v?.sourcePlaceId ? `${v.source}:${v.sourcePlaceId}` : null);
+    const rating = Number(v?.rating);
+    if (!ref || !Number.isFinite(rating) || rating <= 0) continue;
+    const reviews = Number.isFinite(Number(v?.ratingCount)) ? Number(v.ratingCount) : 0;
+    const crowd = crowdBand(rating, reviews);
+    const many = countBand(reviews);
+    const { epicScore, ownedScore } = score({
+      crowd, count: many,
+      accolades: v.accolades ?? [],
+      menuItems: v.menuItems ?? 0,
+      cuisines: v.cuisines ?? [],
+      website: v.website ?? null,
+      summary: v.summary ?? null,
+      openingHours: v.openingHours ?? null,
+      chainScale: v.chainScale ?? 'independent',
+    });
+    refs.push(ref); crowds.push(crowd); counts.push(many); epics.push(epicScore); owneds.push(ownedScore);
+  }
+  if (!refs.length) return { scored: 0 };
+  await query(
+    `insert into place_records (venue_ref, crowd_band, count_band, epic_score, owned_score, banded_at, scored_at, updated_at)
+     select t.ref, t.crowd, t.many, t.epic, t.owned, now(), now(), now()
+       from unnest($1::text[], $2::text[], $3::text[], $4::numeric[], $5::numeric[]) as t(ref, crowd, many, epic, owned)
+     on conflict (venue_ref) do update
+        set crowd_band = excluded.crowd_band, count_band = excluded.count_band,
+            epic_score = excluded.epic_score, owned_score = excluded.owned_score,
+            banded_at = now(), scored_at = now(), updated_at = now()`,
+    [refs, crowds, counts, epics, owneds],
+  );
+  // The sweep's copy, where it has one. Never inserted: a sweep row belongs to
+  // an area sweep and inventing one here would claim we had swept somewhere.
+  await query(
+    `update scout_places sp
+        set epic_score = t.epic, owned_score = t.owned,
+            crowd_band = t.crowd, count_band = t.many, scored_at = now()
+       from unnest($1::text[], $2::text[], $3::text[], $4::numeric[], $5::numeric[]) as t(ref, crowd, many, epic, owned)
+      where sp.venue_ref = t.ref`,
+    [refs, crowds, counts, epics, owneds],
+  );
+  return { scored: refs.length };
+}
+
 export async function noteSeen(venues = []) {
   const rows = (venues ?? [])
     .map((v) => {
@@ -2519,7 +2588,7 @@ const inAWord = (text) => {
 };
 
 export async function household(areaSlug, {
-  refs = null, category = null, subcategory = null, limit = 10,
+  refs = null, category = null, subcategory = null, limit = 10, offset = 0,
 } = {}) {
   const args = [];
   const where = [];
@@ -2554,6 +2623,7 @@ export async function household(areaSlug, {
     when ${OWN_SCORED} >= coalesce(sp.scored_at, to_timestamp(0)) then r.epic_score
     else sp.epic_score end`;
   args.push(limit);
+  args.push(offset);
   const sql = (select, tail) => `
     select ${select}
       from place_index pi
@@ -2619,7 +2689,7 @@ export async function household(areaSlug, {
     (select m.state = 'read' from place_menus m where m.venue_ref = pi.venue_ref order by m.read_at desc nulls last limit 1) as menu_read`,
     ` and ${NAME} is not null
       order by ${SCORE} desc nulls last, sp.rank asc nulls last, pi.data_score desc nulls last, pi.venue_ref
-      limit $${args.length}`), args);
+      limit $${args.length - 1} offset $${args.length}`), args);
 
   // What the ten were chosen from, and what was held back for having no name we
   // may show. Both are counted over the same scope, so the board can say "ten
@@ -2627,7 +2697,7 @@ export async function household(areaSlug, {
   const { rows: [counted] } = await query(sql(`
     count(*) filter (where ${NAME} is not null)::int as named,
     count(*) filter (where ${NAME} is null)::int as nameless,
-    count(*) filter (where ${NAME} is not null and ${SCORE} is null)::int as unscored`, ''), args.slice(0, -1));
+    count(*) filter (where ${NAME} is not null and ${SCORE} is null)::int as unscored`, ''), args.slice(0, -2));
 
   return {
     rows: rows.map((r) => ({
@@ -2647,7 +2717,7 @@ export async function household(areaSlug, {
       lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng),
       dataScore: r.data_score, ready: r.ready, ownership: r.ownership,
     })),
-    named: counted?.named ?? 0,
+    from: offset, named: counted?.named ?? 0,
     nameless: counted?.nameless ?? 0,
     unscored: counted?.unscored ?? 0,
   };
@@ -2703,5 +2773,5 @@ export async function namesFor(refs) {
 export default {
   SOURCES, bars, seedBars, setBar, reindex, rescore, note, noteMany, refreshStats, statsAge,
   statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll, settleClaims,
-  sources, quality, places, household, namesFor, labels, noteSeen,
+  sources, quality, places, household, namesFor, labels, noteSeen, noteScores,
 };

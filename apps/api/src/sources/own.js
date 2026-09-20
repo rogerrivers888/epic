@@ -30,6 +30,7 @@
 // place_records goes to the device.
 
 import * as owned from '../repositories/ownedPlaces.js';
+import { phoneOf } from '../domain/contact.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { matchOsm } from './openMatch.js';
 import { venueFromOsmElement, kindFromOsmTags, OSM_ATTRIBUTION } from './osm.js';
@@ -477,7 +478,7 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
         put('address', v?.address ?? null),
         put('postcode', t['addr:postcode'] ?? null),
         put('website', v?.website ?? null),
-        put('phone', t.phone ?? t['contact:phone'] ?? null),
+        put('phone', phoneOf(t.phone ?? t['contact:phone'] ?? null)),
         put('email', t.email ?? t['contact:email'] ?? null),
         put('opening_hours', v?.openingHours ?? null),
         put('cuisines', v?.cuisines ?? []),
@@ -566,7 +567,7 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
         matched.site = { url: site.sourceUrl ?? seed.website, how: site.how ?? null };
         const put = (field, value) => putFact(venueRef, field, 'site', value, 1);
         await Promise.all([
-          put('phone', site.phone), put('email', site.email),
+          put('phone', phoneOf(site.phone)), put('email', site.email),
           put('address', site.address), put('postcode', site.postcode),
           put('opening_hours', site.openingHours),
           put('cuisines', site.cuisines ?? []),

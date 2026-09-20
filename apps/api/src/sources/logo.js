@@ -35,6 +35,54 @@ import { fetchHtml, fetchPicture } from './pictureBytes.js';
 // survives a 56px tile on a 2× screen.
 const MIN_PX = 64;
 
+/** Words too common to tell one venue's domain from another's. */
+const COMMON = new Set([
+  'the', 'and', 'at', 'of', 'on', 'in', 'bar', 'pub', 'inn', 'cafe', 'caf', 'restaurant',
+  'kitchen', 'house', 'hotel', 'club', 'shop', 'store', 'centre', 'center', 'ltd', 'limited',
+]);
+
+/**
+ * Whether the page we hold is this venue's own site, or a page on somebody
+ * else's.
+ *
+ * The Curator is a restaurant inside Heathrow, and the only website anybody
+ * publishes for it is
+ * `heathrow.com/at-the-airport/restaurants-a-z/the-curator`. That is a good
+ * page about the restaurant — and the mark on it is the airport's. We took it
+ * and drew a purple Heathrow logo on the restaurant's card (owner, 20 Sep 2026:
+ * "the picture is not a picture of the venue… it's actually a logo for London
+ * Heathrow… so we shouldn't be showing that").
+ *
+ * The same is true of a brewery's pub pages, a shopping centre's directory and
+ * a station's retail list: a venue inside a bigger place gets the bigger
+ * place's mark, which is exactly the "generic images mixed and matched across
+ * restaurants" this file exists to prevent.
+ *
+ * The test is deliberately blunt, because the two mistakes do not cost the
+ * same: a wrong mark sits on the card for ever, and a missing one falls through
+ * to the next rung of the ladder. A site root is theirs — nobody else's home
+ * page is about one restaurant. Deeper than that, the domain has to look like
+ * the venue's own name.
+ */
+export function ownSite(website, name = '') {
+  let u;
+  try { u = new URL(String(website ?? '')); } catch { return false; }
+  const depth = u.pathname.split('/').filter(Boolean).length;
+  // The root, or one level down — /home, /en, /the-pub — is a site about them.
+  if (depth <= 1) return true;
+  const host = u.hostname.replace(/^www\./i, '').split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  const words = String(name ?? '').toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !COMMON.has(w));
+  if (!host || !words.length) return false;
+  const joined = words.join('');
+  return host.includes(joined)
+    || joined.includes(host)
+    || words.some((w) => w.length >= 5 && host.includes(w));
+}
+
 /**
  * Hosts whose icon is theirs, not the restaurant's.
  *
@@ -153,12 +201,14 @@ function fromIcons(html, base) {
  *
  * Never throws.
  */
-export async function findLogo({ website } = {}) {
+export async function findLogo({ website, name = '' } = {}) {
   const url = String(website ?? '').trim();
   if (!/^https?:\/\//i.test(url)) return null;
   // Their profile on somebody else's platform is not their website, and the
   // icon on it is not their mark.
   try { if (PLATFORM.test(new URL(url).hostname)) return null; } catch { return null; }
+  // Nor is the mark on the site of the place they are inside.
+  if (!ownSite(url, name)) return null;
 
   const page = await fetchHtml(url);
   // A site that will not serve its home page can still be serving the icon at

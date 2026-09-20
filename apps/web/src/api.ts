@@ -1582,6 +1582,8 @@ export type PlaceDetail = {
     id: string; source: string; licence: string | null; licenceUrl: string | null; creator: string | null;
     credit: string | null; title: string | null; page: string | null; width: number | null; height: number | null;
     bytes: number | null; fetchedAt: string | null; owned: boolean; role: string | null;
+    /** False where the mark was taken off the site of the place this one is inside. */
+    belongsHere?: boolean;
     /** Which place it is attached to, in words — the same column the Pictures board prints. */
     onPlace: string | null;
   }[];
@@ -2624,8 +2626,8 @@ export const api = {
    * The same scope as a household would be shown it — our order, our fields,
    * nothing nameless. Free: no provider is asked anything.
    */
-  adminHouseholdView: (p: PlaceWhere & { cat?: string | null; sub?: string | null; limit?: number }) =>
-    request<PlaceLevel & { rows: HouseholdRow[]; named: number; nameless: number; unscored: number }>(`/api/admin/place-index/household${qs(p)}`),
+  adminHouseholdView: (p: PlaceWhere & { cat?: string | null; sub?: string | null; limit?: number; page?: number }) =>
+    request<PlaceLevel & { rows: HouseholdRow[]; from: number; named: number; nameless: number; unscored: number }>(`/api/admin/place-index/household${qs(p)}`),
   /** BO2h / BO2r — one place, every field, and what nobody has asked yet. */
   adminPlace: (ref: string) => request<PlaceDetail>(`/api/admin/place-index/place${qs({ ref })}`),
   /** BO2h — ours beside each provider's. Spends: one detail call per place. */
@@ -2951,6 +2953,65 @@ export const api = {
   adminPerson: (id: string, days = 30) => request<PersonRecord>(`/api/admin/people/${id}?days=${days}`),
   adminSetRole: (id: string, roleId: string | null) => patch<{ account: { id: string; role: any } }>(`/api/admin/people/${id}/role`, { roleId }),
   adminActivity: (days = 30) => request<{ window: { days: number }; feed: FeedRow[]; screens: ScreenRow[]; daily: DailyRow[]; active: Engagement['active'] }>(`/api/admin/activity?days=${days}`),
+  /**
+   * The reporting suite: Overview, Money, Customers, Suppliers and Behaviour,
+   * over one estate model (routes/suite.js).
+   *
+   * `data: 'mock'` asks for the handoff's numbers model instead of the database
+   * — the fixtures live on the server, so a real reading can never carry one.
+   * `period` is resolved to a date range there and comes back already correct
+   * for the window; nothing on this side multiplies anything.
+   */
+  adminSuite: ({ period, data }: { period: string; data: 'real' | 'mock' }) =>
+    request<AdminSuite>(`/api/admin/suite?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
+  adminSuiteHousehold: (id: string, { period, data }: { period: string; data: 'real' | 'mock' }) =>
+    request<{ mock: boolean; household: Record<string, any> }>(
+      `/api/admin/suite/household/${encodeURIComponent(id)}?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
+
+  // --- the two editing screens ---------------------------------------------
+  //
+  // Subscriptions and a supplier's record are not reports: they set prices,
+  // rates and published benefits. Both write through insert-only tables
+  // (`plan_prices`, `counterparty_rates`), so a change closes the row in force
+  // and opens another and last quarter stays true. A write while the fixtures
+  // are on is refused by the API with a 409 rather than appearing to work.
+
+  /** The tiers, their price in each channel, where they were bought, and the benefits matrix. */
+  adminSuiteSubscriptions: ({ data }: { data: 'real' | 'mock' }) =>
+    request<AdminSubscriptions>(`/api/admin/suite/subscriptions${data === 'mock' ? '?data=mock' : ''}`),
+  /** Setting a price closes the row in force and inserts a new one. */
+  adminSetTierPrice: (body: { planKey: string; channel: 'web' | 'ios' | 'android'; amountPence: number; discountPct?: number; note?: string }) =>
+    put<{ price: unknown }>('/api/admin/suite/subscriptions/price', body),
+  adminAddBenefit: (body: { label: string; values?: Record<string, string> }) =>
+    post<{ benefit: { id: string } }>('/api/admin/suite/subscriptions/benefits', body),
+  /** Editing a benefit un-publishes that row, and nothing else. */
+  adminSetBenefit: (id: string, body: { label?: string; values?: Record<string, string>; position?: number }) =>
+    patch<{ benefit: { id: string } }>(`/api/admin/suite/subscriptions/benefits/${encodeURIComponent(id)}`, body),
+  adminRemoveBenefit: (id: string) =>
+    del<{ removed: boolean }>(`/api/admin/suite/subscriptions/benefits/${encodeURIComponent(id)}`),
+  adminPublishBenefits: () =>
+    post<{ published: number; publishedAt: string | null }>('/api/admin/suite/subscriptions/publish', {}),
+
+  /** One supplier's record: what it is for, whether it is connected, its health. */
+  adminSuiteSupplier: (key: string, { period, data }: { period: string; data: 'real' | 'mock' }) =>
+    request<AdminSupplierRecord>(
+      `/api/admin/suite/supplier/${encodeURIComponent(key)}?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
+  /** A new rate row — and writing one stamps it confirmed, because somebody just read it. */
+  adminSetSupplierRate: (key: string, body: { says: string; amount?: number | null; unit?: string; currency?: string; sourceUrl?: string }) =>
+    put<{ rate: unknown }>(`/api/admin/suite/supplier/${encodeURIComponent(key)}/rate`, body),
+  /** Confirming changes nothing: it stamps the row in force as still right. */
+  adminConfirmSupplierRate: (key: string) =>
+    post<{ rate: unknown }>(`/api/admin/suite/supplier/${encodeURIComponent(key)}/confirm`, {}),
+  /**
+   * Record that the credential was rotated. **Never the key itself** — the
+   * secret goes into Doppler by hand, which is the owner's to do, and this is
+   * the masked reminder the screen shows instead (CLAUDE.md).
+   */
+  adminRotateSupplierCredential: (key: string, body: { masked: string; expiry?: string }) =>
+    post<{ counterparty: unknown }>(`/api/admin/suite/supplier/${encodeURIComponent(key)}/credential`, body),
+  adminSetSupplierAdapter: (key: string, on: boolean) =>
+    post<{ counterparty: unknown }>(`/api/admin/suite/supplier/${encodeURIComponent(key)}/adapter`, { on }),
+
   adminEngagement: (days = 30) => request<Engagement>(`/api/admin/reporting/engagement?days=${days}`),
   adminRevenue: () => request<RevenueReport>('/api/admin/reporting/revenue'),
   adminUsage: (days = 30) => request<UsageReport>(`/api/admin/reporting/usage?days=${days}`),
@@ -4216,6 +4277,17 @@ export type SourcesReport = {
   };
   searchable: Record<string, boolean>;
 };
+
+/**
+ * The reporting suite's answer.
+ *
+ * Shaped in `apps/web/src/admin/suite/model.ts`, which is where the suite's own
+ * arithmetic lives; re-exported here so the client method has a return type
+ * without api.ts having to hold two hundred lines of reporting shape.
+ */
+export type AdminSuite = import('./admin/suite/model').Suite;
+export type AdminSubscriptions = import('./admin/suite/model').Subscriptions;
+export type AdminSupplierRecord = import('./admin/suite/model').SupplierRecord;
 
 export type AdminOverview = {
   window: { days: number };

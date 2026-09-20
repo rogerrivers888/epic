@@ -2029,6 +2029,20 @@ const ACTION_WORD: Record<FieldAction, string> = {
 };
 
 /**
+ * The same four acts, said as a sentence rather than as a verb.
+ *
+ * "Ask · £0.03" does not say who is being asked, and the owner read it and had
+ * to guess: "I'm assuming that's Google, but ask who?" (20 Sep 2026). These sit
+ * inside the opened row, where there is room for the whole sentence.
+ */
+const ACTION_SAYS: Record<FieldAction, string> = {
+  write: 'Research it from its own website · free',
+  find: 'Look for one we may keep · free',
+  read: 'Read it from their site · free',
+  ask: `Ask Google for it · ${pounds(3)}`,
+};
+
+/**
  * The two ways of reading a subcategory, and the default is the household's.
  *
  * Owner, 20 Sep 2026: "I want the default view to be what the user sees… if I
@@ -2074,12 +2088,17 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
       ? api.adminPlaceList({ ...q, cat: cat || undefined, sub, show, q: query || undefined, missing: missing || undefined, sort, desc: desc ? undefined : '0' })
       : Promise.resolve(null)),
   );
+  // Which ten. In the address, because a page is a page somebody can be sent —
+  // and it goes back to the first whenever the question changes, since page
+  // four of a different subcategory is not where anybody was.
+  const [page, setPage] = useQueryState<number>('page', 1, asNumber(1));
   const [seen] = useFresh<Awaited<ReturnType<typeof api.adminHouseholdView>> | null>(
-    JSON.stringify(['household', q, cat, sub, view]),
+    JSON.stringify(['household', q, cat, sub, view, page]),
     () => (view === 'household'
-      ? api.adminHouseholdView({ ...q, cat: cat || undefined, sub, limit: 10 })
+      ? api.adminHouseholdView({ ...q, cat: cat || undefined, sub, limit: 10, page: page > 1 ? page : undefined })
       : Promise.resolve(null)),
   );
+  useEffect(() => { if (page !== 1) setPage(1, { replace: true }); }, [q, cat, sub]);
 
   const counted = data?.counted ?? [];
   const facts: FactDef[] = data?.facts ?? [];
@@ -2160,7 +2179,7 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
           </View>
         </View>
       </View>
-      {view === 'household' ? <HouseholdSeen data={seen} onPlace={onPlace} /> : (
+      {view === 'household' ? <HouseholdSeen data={seen} onPlace={onPlace} page={page} onPage={(n) => setPage(n, { replace: true })} /> : (
       <>
       <View style={styles.subRow}>
         <View style={styles.lensLeft}>
@@ -2302,9 +2321,11 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
  *     column says whether there is one; the place's own Pictures tab is where
  *     they are.
  */
-function HouseholdSeen({ data, onPlace }: {
+function HouseholdSeen({ data, onPlace, page, onPage }: {
   data: Awaited<ReturnType<typeof api.adminHouseholdView>> | null;
   onPlace: (ref: string) => void;
+  /** Which ten, one-based — a household scrolls for these, so this board has them too. */
+  page: number; onPage: (n: number) => void;
 }) {
   if (!data) return <Waiting />;
   const columns: Col<HouseholdRow>[] = [
@@ -2345,7 +2366,11 @@ function HouseholdSeen({ data, onPlace }: {
             way of seeing a place as a household sees it goes to a provider. */}
         <Text style={styles.rowNote}>
           {[
-            data.rows.length ? `The first ${data.rows.length} of ${data.named.toLocaleString()}` : 'Nothing here a household could be shown yet',
+            data.rows.length
+              // Which ten of how many, so the page says where in the list it is
+              // rather than always claiming to be the first.
+              ? `${(data.from + 1).toLocaleString()}\u2013${(data.from + data.rows.length).toLocaleString()} of ${data.named.toLocaleString()}`
+              : 'Nothing here a household could be shown yet',
             data.nameless ? `${data.nameless.toLocaleString()} with no name we may show ${data.nameless === 1 ? 'is' : 'are'} not here` : null,
             data.unscored ? `${data.unscored.toLocaleString()} not scored yet` : null,
             'nothing asked of a provider',
@@ -2367,6 +2392,17 @@ function HouseholdSeen({ data, onPlace }: {
                   ? `Nothing here has a name we may show. ${data.nameless.toLocaleString()} ${data.nameless === 1 ? 'place is' : 'places are'} known here by a provider\u2019s identifier alone.`
                   : 'Nothing here yet.'}
               </Word>} />
+      <Footer left={data.named > data.rows.length
+        ? <Text style={styles.rowNote}>{`Page ${page} of ${Math.max(1, Math.ceil(data.named / 10)).toLocaleString()}`}</Text>
+        : null}>
+        {/* A household scrolls; a board pages. Both are the same act — show me
+            the ones after these (owner, 20 Sep 2026: "users can also go to the
+            next 10 and the next 10"). */}
+        {page > 1 ? <Act label="The ten before" tone="secondary" onPress={() => onPage(page - 1)} /> : null}
+        {data.from + data.rows.length < data.named
+          ? <Act label={`The next ${Math.min(10, data.named - (data.from + data.rows.length))}`} onPress={() => onPage(page + 1)} />
+          : null}
+      </Footer>
     </>
   );
 }
@@ -2566,7 +2602,7 @@ const PLACE_TABS = ['record', 'compare', 'score', 'pictures', 'raw', 'history'] 
 type PlaceTab = typeof PLACE_TABS[number];
 const PLACE_TAB_LABEL: Record<PlaceTab, string> = {
   record: 'The record', compare: 'Ours beside theirs', score: 'How it scored',
-  pictures: 'Pictures', raw: 'What each source returned', history: 'History',
+  pictures: 'Pictures', raw: 'Sources', history: 'History',
 };
 const PLACE_TAB_TIP: Record<PlaceTab, TipKey> = {
   record: 'tabTheRecord', compare: 'tabOursBesideTheirs', score: 'tabHowItScored',
@@ -2588,8 +2624,8 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   const { width } = useViewport();
   const narrow = width < PHONE;
   const [error, setError] = useState<string | null>(null);
-  const [curating, setCurating] = useState(false);
-  const [asking, setAsking] = useState(false);
+  /** What the drawer is doing, in the words the menu used to say it. */
+  const [busyWord, setBusyWord] = useState<string | null>(null);
   const [place, refresh] = useFresh(
     JSON.stringify(['place', refId]),
     () => api.adminPlace(refId).then((p) => { setError(null); return p; }),
@@ -2638,7 +2674,9 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
                   tip={['Have · missing', `Counts only the ${place.have + place.missingCount} facts this kind of place is judged on. Everything else is recorded when we have it and never counts against the score.`]} />
             <Stat label="Seen by" value={place.seenBy} tip="seenBy" mark />
             <Stat label="Unseen by" value={place.unseen.length} tip="unseenByPlace" accent mark />
-            <Stat label="Pictures" value={place.pictures.filter((p) => p.owned).length} tip="pictures" mark />
+            {/* What we could actually show: a mark that belongs to somebody
+                else is not a picture of this place. */}
+            <Stat label="Pictures" value={place.pictures.filter((p) => p.owned && p.belongsHere !== false).length} tip="pictures" mark />
             <Stat label="Oldest fact" value={place.oldestFact ? ago(place.oldestFact) : 'never'} tip="oldestFactPlace" mark />
           </View>
         )
@@ -2673,27 +2711,41 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
         {/* Wraps on a phone: three actions with their prices on them are wider
             than the frame, and the third — "Ask Google about it" — is BO2r's own
             primary action (19 Sep 2026, the 390px audit). */}
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <Act label={curating ? 'Curating…' : 'Curate it · free'} tone="secondary" disabled={!canManage || curating}
-               onPress={() => { setCurating(true); api.adminCuratePlaces([refId]).finally(() => { setCurating(false); load(); }); }} />
-          {/* What it would actually spend, from the API rather than a figure
-              typed on the screen (Codex, 17 Sep 2026). */}
-          <Act label={`Compare all three · ${place.comparePence ? pounds(Math.round(place.comparePence)) : 'free'}`}
-               tone="secondary" disabled={!canManage} onPress={() => setTab('compare')} />
-          {/* BO2r's own primary action, which was not built: asking Google about
-              this one place, at what the API says it costs (18 Sep 2026, the
-              separate audit). */}
-          <Act label={asking ? 'Asking…' : `Ask Google about it · ${place.askPence ? pounds(Math.round(place.askPence)) : 'free'}`}
-               disabled={!canManage || asking}
-               onPress={() => { setAsking(true); api.adminAskAboutPlaces([refId]).finally(() => { setAsking(false); load(); }); }} />
-        </View>
+        {/* One list, not a row of words nobody can tell apart.
+
+            The owner, 20 Sep 2026: "I don't know what 'curate it free' is
+            supposed to mean or do, and compare all 3, and ask Google about it
+            when we've already asked Google about it… Looking at it, we should
+            just have a menu, and that's it." So every act this drawer can
+            perform is in one place, each says plainly what it does and what it
+            costs, and the price is the API's own figure rather than one typed
+            on a screen. Asking again lives on Sources, where it can say when we
+            last asked. */}
+        <Dropdown label="Do something" value={busyWord ?? 'Choose'} width={300}
+                  options={[
+                    { on: false, key: 'research', label: 'Research it from its own website · free', group: 'Free, from what it publishes' },
+                    { on: false, key: 'picture', label: 'Look for a picture we may keep · free', group: 'Free, from what it publishes' },
+                    { on: false, key: 'menu', label: 'Read its menu · free', group: 'Free, from what it publishes' },
+                    { on: false, key: 'ask', label: `Ask Google about this one place · ${place.askPence ? pounds(Math.round(place.askPence)) : 'free'}`, group: 'Spends' },
+                    { on: false, key: 'compare', label: `Put ours beside theirs · ${place.comparePence ? pounds(Math.round(place.comparePence)) : 'free'}`, group: 'Spends' },
+                  ]}
+                  onPick={(k) => {
+                    if (!canManage || busyWord) return;
+                    if (k === 'compare') { setTab('compare'); return; }
+                    const run = k === 'ask' ? api.adminAskAboutPlaces([refId])
+                      : k === 'picture' ? api.adminFindPictures([refId])
+                      : k === 'menu' ? api.scoutReadMenus(1, refId)
+                      : api.adminCuratePlaces([refId]);
+                    setBusyWord(k === 'ask' ? 'Asking Google…' : k === 'picture' ? 'Looking…' : k === 'menu' ? 'Reading the menu…' : 'Researching…');
+                    Promise.resolve(run).finally(() => { setBusyWord(null); load(); });
+                  }} />
       </View>
 
       {tab === 'record' ? <RecordTab place={place} canManage={canManage} onSaved={load} /> : null}
       {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} /> : null}
       {tab === 'score' ? <ScoreTab refId={refId} canManage={canManage} /> : null}
       {tab === 'pictures' ? <PlacePicturesTab place={place} canManage={canManage} onFound={load} /> : null}
-      {tab === 'raw' ? <RawTab refId={refId} /> : null}
+      {tab === 'raw' ? <RawTab refId={refId} canManage={canManage} onDone={load} /> : null}
       {tab === 'history' ? <HistoryTab refId={refId} /> : null}
     </AdminPage>
   );
@@ -2769,15 +2821,16 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
               <Text style={[styles.fieldMeta, { width: 92 }]}>
                 {f.checked === 'never' ? 'never' : f.checked ? day(f.checked) : '—'}
               </Text>
-              <View style={{ width: f.editable && f.action ? 128 : 72, flexDirection: 'row', gap: 6, justifyContent: 'flex-end' }}>
-                {/* Both, where a hole can be typed into *and* filled by a run:
-                    the two used to shadow each other whichever way the flags
-                    fell (17 Sep 2026). */}
-                {f.action && canManage ? (
-                  <Act label={busy === f.key ? '…' : (ACTION_WORD[f.action as FieldAction] ?? 'Ask')}
-                       small tone="secondary" disabled={busy != null}
-                       onPress={() => runFor(f.key, f.action as FieldAction)} />
-                ) : null}
+              {/* The act that fills this hole is in the row when it is opened,
+                  not in the row itself.
+                  The owner, 20 Sep 2026: "we shouldn't have a button that's
+                  inserted in a row that then moves the date into another area…
+                  the menu read, I think, should just be in the down arrow or in
+                  an actions tab, but at the moment it's not very nicely
+                  designed, not very clean." A button that appears on some rows
+                  and not others shifts every column beside it, which is what
+                  moved the dates. */}
+              <View style={{ width: 72, flexDirection: 'row', gap: 6, justifyContent: 'flex-end' }}>
                 {f.editable && canManage ? (
                   <Explain tip="editableValue">
                     <Press effect="none" onPress={() => { setEditing(f.key); setDraft(String(f.value ?? '')); }}
@@ -2799,6 +2852,17 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
                 <Detail label="Raw value" value={f.value ? `"${f.value}"` : '—'} />
                 <Detail label="Set by" value={f.note ?? (f.source ? sourceWord(f.source) : 'nothing yet')} />
                 <Detail label="Counts towards ready" value={f.counted == null ? '—' : f.counted ? 'yes' : 'no, recorded only'} />
+                {f.action && canManage ? (
+                  <View style={{ flexDirection: 'row', gap: 8, paddingTop: 4 }}>
+                    {/* Who is being asked, not just "Ask". A price with no name
+                        beside it is a question nobody can answer: "the opening
+                        hours say Ask for 3p. I'm assuming that's Google, but
+                        ask who?" (owner, 20 Sep 2026.) */}
+                    <Act label={busy === f.key ? 'Asking…' : (ACTION_SAYS[f.action as FieldAction] ?? 'Ask Google')}
+                         small tone="secondary" disabled={busy != null}
+                         onPress={() => runFor(f.key, f.action as FieldAction)} />
+                  </View>
+                ) : null}
               </View>
             ) : null}
             {editing === f.key ? (
@@ -2827,32 +2891,34 @@ function RecordTab({ place, canManage, onSaved }: { place: PlaceDetail; canManag
           {place.pictures.length === 0 ? <Word muted>None yet.</Word> : place.pictures.slice(0, 6).map((p, i) => (
             // A picture can be linked to the place and to its atlas row at once,
             // so the position is part of the key.
-            <Explain key={`${p.id}-${i}`} tip={p.owned ? null : 'rented'} style={[styles.thumb, !p.owned && { opacity: 0.5 }]}>
+            // A mark taken off the site of the place this one sits inside is
+            // not this place's picture, and the tile says so rather than
+            // leaving an airport's logo looking like a restaurant's (owner, 20
+            // Sep 2026). It is dimmed and named, never quietly deleted.
+            <Explain key={`${p.id}-${i}`}
+                     tip={p.belongsHere === false
+                       ? ['Not this place\u2019s mark', 'This was taken off the website we hold for the venue, and that website is a page on somebody else\u2019s site — an airport, a shopping centre, a brewery. The mark on it belongs to them. New ones are refused; this one is still here and should not be shown.']
+                       : (p.owned ? null : 'rented')}
+                     style={[styles.thumb, (!p.owned || p.belongsHere === false) && { opacity: 0.5 }]}>
               {/* The picture, not a grey box. The ids were in hand and the panel
                   drew N empty squares under the words "N owned" (17 Sep 2026,
                   the verification audit). */}
               <View style={styles.thumbImage}>
                 <Image source={{ uri: api.imageUrl(p.id, 240) }} style={StyleSheet.absoluteFill as any} resizeMode="cover" />
               </View>
-              <Text style={styles.thumbNote} numberOfLines={1}>{p.owned ? (p.source ?? 'ours') : 'rented'}</Text>
+              <Text style={styles.thumbNote} numberOfLines={1}>
+                {p.belongsHere === false ? 'not this place' : p.owned ? (p.source ?? 'ours') : 'rented'}
+              </Text>
             </Explain>
           ))}
         </View>
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          {/* Curate is the run that looks for a picture we are allowed to keep;
-              asking a household is a message and needs a sender key, which is
-              the owner's to add — so it says so rather than doing nothing. */}
-          <Act label={busy === 'commons' ? 'Looking…' : 'Look on Commons · free'} small tone="secondary" disabled={!canManage || busy != null}
-               onPress={() => { setBusy('commons'); api.adminFindPictures([place.ref]).finally(() => { setBusy(null); onSaved(); }); }} />
-          {/* The door into the queue. Every cell that stands for a row of work
-              opens the queue at its own address (README law 8) — and until this
-              there was no link into it from anywhere in the back office, so the
-              address it prints on its own board could only be typed (18 Sep
-              2026, the separate audit). */}
-          <Act label="What households have sent" small tone="secondary" icon="preview"
-               onPress={() => navigate(`/admin/queue?kind=photo${place.areas[0]?.slug ? `&where=${encodeURIComponent(place.areas[0].slug)}` : ''}`)} />
-          <Act label="Ask a household · needs a sender" small tone="secondary" disabled onPress={() => {}} />
-        </View>
+        {/* No buttons under the thumbnails.
+            The owner, 20 Sep 2026: "I don't understand what 'Look on Commons
+            Free' is underneath the image and what 'households have sent' is…
+            You can remove the text. Looking at it, we should just have a menu,
+            and that's it." Looking for a picture is in the drawer's own menu
+            now; the queue of what households have sent is a board of its own,
+            reached from the Pictures tab where a picture is the subject. */}
 
         <View style={{ height: spacing.lg }} />
         <Kicker tip="sectionNotChecked">Not checked</Kicker>
@@ -3236,6 +3302,7 @@ const weightRows = (w: any) => {
 
 /** The pictures on one place, with every licence field. */
 function PlacePicturesTab({ place, canManage, onFound }: { place: PlaceDetail; canManage: boolean; onFound: () => void }) {
+  const { navigate } = useRouter();
   const [sel, setSel] = useState(0);
   const [looking, setLooking] = useState(false);
   const { width } = useViewport();
@@ -3244,13 +3311,14 @@ function PlacePicturesTab({ place, canManage, onFound }: { place: PlaceDetail; c
     return (
       <View style={{ gap: spacing.md }}>
         <Word muted>No picture we own.</Word>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          {/* Curate is the run that looks for a picture we may keep; asking a
-              household is a message, and a message needs a sender key the owner
-              has to add — so it says so rather than doing nothing. */}
-          <Act label={looking ? 'Looking…' : 'Look on Commons · free'} tone="secondary" disabled={!canManage || looking}
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          {/* Here, where a picture is the subject and the words mean something.
+              They are off the record tab's panel, which is a list of facts
+              (owner, 20 Sep 2026). */}
+          <Act label={looking ? 'Looking…' : 'Look for one we may keep · free'} tone="secondary" disabled={!canManage || looking}
                onPress={() => { setLooking(true); api.adminFindPictures([place.ref]).finally(() => { setLooking(false); onFound(); }); }} />
-          <Act label="Ask a household · needs a sender" tone="secondary" disabled onPress={() => {}} />
+          <Act label="What households have sent" tone="secondary" icon="preview"
+               onPress={() => navigate(`/admin/queue?kind=photo${place.areas[0]?.slug ? `&where=${encodeURIComponent(place.areas[0].slug)}` : ''}`)} />
         </View>
       </View>
     );
@@ -3281,10 +3349,32 @@ function PlacePicturesTab({ place, canManage, onFound }: { place: PlaceDetail; c
 }
 
 /** BO2r — literally the fields each source returned. */
-function RawTab({ refId }: { refId: string }) {
+/**
+ * Sources — who we have asked about this place, when, and what to do next.
+ *
+ * The owner, 20 Sep 2026: "whether we create a sources tab that says, 'We asked
+ * Google a month ago. Do you want to ask them again? Do you want to go get some
+ * other sources?'" It was already the tab that listed what each source
+ * returned; what it could not do was the second half of that sentence. Now each
+ * row says when it last answered and carries the one act that applies to it, at
+ * the price the API works out — and the free three say out loud that they are
+ * one pass, because asking one of them asks all three.
+ */
+function RawTab({ refId, canManage = false, onDone }: { refId: string; canManage?: boolean; onDone?: () => void }) {
   const [data, setData] = useState<{ ref: string; sources: RawSource[] } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  useEffect(() => { setData(null); api.adminPlaceRaw(refId).then(setData).catch(() => setData(null)); }, [refId]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const reload = useCallback(() => { api.adminPlaceRaw(refId).then(setData).catch(() => setData(null)); }, [refId]);
+  useEffect(() => { setData(null); reload(); }, [refId, reload]);
+  // Free is our own research pass over the open map and the encyclopedias;
+  // Google is the only one on this drawer that spends.
+  const FREE = new Set(['osm', 'wikidata', 'wikipedia', 'commons', 'own', 'atlas', 'sweep']);
+  const run = (key: string) => {
+    if (!canManage || busy) return;
+    setBusy(key);
+    const call = FREE.has(key) ? api.adminCuratePlaces([refId]) : api.adminAskAboutPlaces([refId]);
+    Promise.resolve(call).finally(() => { setBusy(null); reload(); onDone?.(); });
+  };
   if (!data) return <Waiting />;
   return (
     <View>
@@ -3295,6 +3385,8 @@ function RawTab({ refId }: { refId: string }) {
         <Explain tip="rawWhatItReturned" style={{ flex: 1 }}><Text style={styles.headLabelSmall}>What it returned</Text></Explain>
         <Explain tip="rawTheirIdentifier" style={{ width: 140 }}><Text style={styles.headLabelSmall}>Their identifier</Text></Explain>
         <Explain tip="rawLastAnswered" style={{ width: 110 }}><Text style={styles.headLabelSmall}>Last answered</Text></Explain>
+        <Explain tip={['Ask them', 'Asking again is the only thing to decide on this tab, so it is the only button on it. The free three are one pass — our own research reads the open map and the encyclopedias together — and Google is the one that spends.']}
+                 style={{ width: 132 }}><Text style={styles.headLabelSmall}>Ask them</Text></Explain>
         <View style={{ width: 15 }} />
       </View>
       {data.sources.map((s) => (
@@ -3314,6 +3406,15 @@ function RawTab({ refId }: { refId: string }) {
             </View>
             <Text style={[styles.fieldMeta, { width: 140 }]}>{s.id ?? '—'}</Text>
             <Text style={[styles.fieldMeta, { width: 110 }]}>{s.lastSeen ? day(s.lastSeen) : '—'}</Text>
+            {/* The one decision on this tab, on the row it belongs to. A source
+                that has never answered is asked; one that answered months ago is
+                asked again; and the word says which, so nobody has to remember
+                what "curate" meant. */}
+            <View style={{ width: 132 }}>
+              <Act small tone="secondary" disabled={!canManage || busy != null}
+                   label={busy === s.key ? 'Asking…' : s.lastSeen ? 'Ask again' : 'Ask'}
+                   onPress={() => run(s.key)} />
+            </View>
             <Icon name={open === s.key ? 'collapse' : 'expand'} size={15} strokeWidth={2} color={colors.inkMuted} />
           </Press>
           {open === s.key ? (

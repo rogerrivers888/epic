@@ -22,6 +22,8 @@ import { can, requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
+import { phoneOf } from '../domain/contact.js';
+import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { LIVE_ROW } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
@@ -38,7 +40,7 @@ import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import { OTHER_PURSE } from '../constants.js';
 import * as collectRuns from '../repositories/collectRuns.js';
 import * as ownedPlaces from '../repositories/ownedPlaces.js';
-import { googleMatchFor, matchesFor, forgetMisses, triedFor, missesKept } from '../sources/providerMatch.js';
+import { googleMatchFor, matchesFor, tripadvisorMatchFor, forgetMisses, triedFor, missesKept } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
@@ -1114,7 +1116,11 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
             null, factOf('opening_hours') ? `place_facts ${ref} · opening_hours · ${factOf('opening_hours').source}` : null),
       field('prices', 'Prices', rec?.price_range ?? null, rec?.price_range ? 'ours' : factOf('price_range')?.source ?? null, factOf('price_range')?.fetched_at ?? null, 'prices', true),
       field('step_free', 'Step-free', rec?.accessibility?.stepFree == null ? null : (rec.accessibility.stepFree ? 'yes' : 'no'), 'ours', rec?.updated_at ?? null, 'step_free', true),
-      field('phone', 'Telephone', rec?.phone ?? null, rec?.phone ? 'ours' : factOf('phone')?.source ?? null, factOf('phone')?.fetched_at ?? null, null, true,
+      // Through the gate on the way to the screen as well as on the way in, so
+      // a number stored before the gate existed stops being shown rather than
+      // waiting for the place to be researched again (owner, 20 Sep 2026: "if
+      // the phone number is not suitable, then we can't show that at all").
+      field('phone', 'Telephone', phoneOf(rec?.phone), rec?.phone ? 'ours' : factOf('phone')?.source ?? null, factOf('phone')?.fetched_at ?? null, null, true,
             null, null, factOf('phone') ? `place_facts ${ref} · phone · ${factOf('phone').source}` : null),
       field('website', 'Website', rec?.website ?? att?.website ?? sweep?.website ?? null, rec?.website ? 'ours' : factOf('website')?.source ?? (att?.website ? 'atlas' : sweep?.website ? 'osm' : null), factOf('website')?.fetched_at ?? null, null, true, 'find'),
       field('menu', 'Menu', menus[0]?.state === 'read' ? `${menus[0].item_count} dishes` : null, menus[0]?.url ? 'their site' : null, menus[0]?.read_at ?? null, 'menu', false, 'read',
@@ -1183,6 +1189,15 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
         // it the way the Pictures board does. Without it the column read a
         // permanent dash (17 Sep 2026, the verification audit).
         onPlace: p.on_place_name ?? (p.link_kind === 'place' ? name.name : null),
+        // Whether the mark we took is this place's at all.
+        //
+        // A logo is taken off the site we hold for the venue, and plenty of
+        // venues sit inside a bigger place whose site is the only one that
+        // writes about them: The Curator is a restaurant in Heathrow, and its
+        // "own logo" was the airport's (owner, 20 Sep 2026). New ones are
+        // refused at source now; this says so about the ones already taken,
+        // rather than leaving somebody else's mark on the card unremarked.
+        belongsHere: p.source !== 'logo' || ownSite(p.source_page_url, name.name ?? ''),
       })),
       // Identifiers, and what it means when there is not one: `not asked` is not
       // the same fact as `no match`, and the two must stay visibly different.
@@ -1571,8 +1586,36 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
     if (!tripadvisorSource.enabled()) ta.note = 'not switched on';
     else if (!maySpend) ta.note = 'not asked';
     else {
-      const id = ref.startsWith('tripadvisor:') ? ref.slice(12) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
-      if (!id) ta.note = 'not asked';
+      let id = ref.startsWith('tripadvisor:') ? ref.slice(12) : (await matchesFor([ref], 'tripadvisor')).get(ref) ?? null;
+      // No join yet: make one, here, on the point.
+      //
+      // "Only where a ranking run has already made the join" meant this column
+      // said "not asked" for ever on a place no run had touched — which is
+      // every place somebody opens by hand, and is why the owner could not see
+      // Tripadvisor beside Google at all (20 Sep 2026: "I can confirm that the
+      // Tripadvisor API is also working. Are we able to then start calling that
+      // also so that I can start seeing what's coming from Tripadvisor versus
+      // Google"). It is matched the way the policy says a drawer matches —
+      // on the point, at the shared 400 m fence, failing closed — and only
+      // when somebody has asked for the comparison and accepted its price.
+      // The identifier is remembered by `tripadvisorMatchFor`; whether that
+      // may be kept is the owner's to confirm with their terms (CLAUDE.md).
+      if (!id && !ref.startsWith('tripadvisor:')) {
+        const point = {
+          lat: rec?.lat ?? att?.lat ?? sweep?.lat ?? pi.lat ?? null,
+          lng: rec?.lng ?? att?.lng ?? sweep?.lng ?? pi.lng ?? null,
+        };
+        if (named.name && point.lat != null && point.lng != null) {
+          const made = await tripadvisorMatchFor({
+            venueRef: ref, name: named.name, lat: point.lat, lng: point.lng,
+            category: pi.category === 'food' ? 'restaurant' : 'attraction',
+            locality: rec?.postcode ?? null,
+          }).catch(() => null);
+          id = made?.id ?? null;
+          if (!id) ta.note = 'no match inside the fence';
+        }
+      }
+      if (!id) ta.note = ta.note ?? 'not asked';
       else {
         // The monthly ceiling, here as well. Collect claims its locations
         // before it asks, and this comparison did not — so once the allowance

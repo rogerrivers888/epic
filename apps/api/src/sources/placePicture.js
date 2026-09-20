@@ -144,7 +144,7 @@ async function fromWikimedia({ wikidataId, wikipediaUrl }) {
 
 /** The logo rung, in the shape the writer below wants. */
 async function fromLogo({ venueRef, name, website }) {
-  const logo = await findLogo({ website });
+  const logo = await findLogo({ website, name });
   if (!logo) return null;
   // These exact bytes already being another site's mark means they are not a
   // mark at all — they are a platform's icon or a template's placeholder, and

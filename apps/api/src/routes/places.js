@@ -460,6 +460,21 @@ places.get('/search', async (req, res, next) => {
     // not it fitted on the page. Indexing the slice alone left the rest out of
     // coverage and open to being bought again by Collect (Codex, 18 Sep 2026).
     await placeIndex.noteSeen(shown);
+    // And what the ratings we just paid for are worth, as our own number.
+    //
+    // A display search carries a rating and a review count for every place in
+    // it. Both were dropped once the results were composed, so the next search
+    // bought them again and a place could be looked at ten times without ever
+    // acquiring a score (owner, 20 Sep 2026: "If I pay to look at the next 30
+    // pubs and bars, we should be converting it into our score, and from that
+    // moment on, that location should always have a score"). Only the derived
+    // figures are written — the bands and the Epic score — never the rating
+    // (data policy, 19 Sep 2026).
+    //
+    // `shown` rather than `drawn`, for the same reason the index takes it: we
+    // were told about all of them, and a place paid for is scored whether or
+    // not it fitted on the page.
+    await placeIndex.noteScores(shown).catch(() => null);
 
     res.json({
       queryId: searchId,

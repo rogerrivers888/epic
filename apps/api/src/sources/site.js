@@ -17,6 +17,7 @@
 // one megabyte, and never follow the site into a crawl.
 
 import { findMenuUrl } from './menuLink.js';
+import { phoneOf } from '../domain/contact.js';
 import { userAgent } from '../origins.js';
 
 const TIMEOUT_MS = 6000;
@@ -285,7 +286,10 @@ export async function siteFacts({ website, name = '', category = null, locality 
     const hit = links.find((h) => scheme.test(h));
     return hit ? hit.replace(scheme, '').split('?')[0].trim() || null : null;
   };
-  const tel = text(node.telephone) ?? linked(/^tel:/i) ?? printedPhone(html);
+  // Through the one gate, wherever it came from. A `tel:` link carries what a
+  // URL carries — `tel:+44%20(0)20%208564%208492` — and it reached the record,
+  // and the screen, exactly like that (owner, 20 Sep 2026).
+  const tel = phoneOf(text(node.telephone) ?? linked(/^tel:/i) ?? printedPhone(html));
   const mail = text(node.email) ?? linked(/^mailto:/i);
 
   // The one piece of their prose that is written to be quoted elsewhere.
