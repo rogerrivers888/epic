@@ -19,7 +19,7 @@
  * file's own note says the same thing about its canvas.
  */
 
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing, type, BORDER } from '../theme';
 import { TIPS, type Tip, type TipKey, tipOf } from './tips';
@@ -119,8 +119,30 @@ export function Explain({ tip, style, children, cursor = 'help' }: {
 }) {
   const { show, hide } = useContext(Ctx);
   const resolved = tipOf(tip);
+  /** Whether this one is the reason a panel is on the screen. */
+  const mine = React.useRef(false);
+  /**
+   * A panel is taken down by the thing that put it up.
+   *
+   * The panel lives in the provider and is cleared on mouse-leave, so a wrapper
+   * that stops being a wrapper — its `tip` set to null, or unmounted — left its
+   * own panel on the screen for ever, with no element under the pointer to
+   * leave. That is what covered the How far list: the control hands the tip
+   * back while the list is open, and the panel it had already raised stayed
+   * exactly where the list draws (owner, 20 Sep 2026: "this hover-over box
+   * keeps overlaying the dropdown so that I can't actually interact with the
+   * dropdown").
+   *
+   * Above the early return, because a hook below one is a different number of
+   * hooks on the render that takes it.
+   */
+  useEffect(() => {
+    if (!resolved && mine.current) { mine.current = false; hide(); }
+  }, [resolved, hide]);
+  useEffect(() => () => { if (mine.current) { mine.current = false; hide(); } }, [hide]);
   if (!resolved) return <View style={style}>{children}</View>;
   const enter = (e: any) => {
+    mine.current = true;
     const el = e?.currentTarget;
     if (el && typeof el.getBoundingClientRect === 'function') {
       const r = el.getBoundingClientRect();
@@ -133,7 +155,7 @@ export function Explain({ tip, style, children, cursor = 'help' }: {
       // RNW forwards these to the DOM; on a device there is no hover and the
       // screen simply does not explain itself, which is the honest behaviour
       // rather than a long-press that fights the scroll.
-      {...(Platform.OS === 'web' ? { onMouseEnter: enter, onMouseLeave: hide } as any : {})}
+      {...(Platform.OS === 'web' ? { onMouseEnter: enter, onMouseLeave: () => { mine.current = false; hide(); } } as any : {})}
       accessibilityLabel={`${resolved[0]}. ${resolved[1]}`}
     >
       {children}
