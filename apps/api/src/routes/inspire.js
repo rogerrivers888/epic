@@ -232,6 +232,32 @@ function attributionOf(v, lines) {
  * Nothing here is stored except the Epic scores derived on the way through.
  */
 /**
+ * One place, in the shape every card on this screen draws.
+ *
+ * Both the board and a category's next page hand back the same thing. They did
+ * not: the paged-in places carried no journey, and the cards printed "NaNh
+ * drive" under a photograph of a go-karting track (20 Sep 2026).
+ */
+const asCard = (it, { centre, origin, mode, category }) => ({
+  venueRef: it.venueRef, source: 'google', name: it.name, category: it.category,
+  moods: it.moods?.length ? it.moods : [category], subcategory: it.subcategory ?? null,
+  experiences: [], cuisines: [],
+  rating: it.rating, ratingCount: it.ratingCount, priceLevel: it.priceLevel,
+  goodForChildren: null,
+  photos: it.photos ?? [],
+  attribution: ['Powered by Google'],
+  lat: it.lat, lng: it.lng,
+  distanceKm: Number(kmBetween(centre, it).toFixed(1)),
+  travelMinutes: estimateTravelMinutes(origin, it, mode),
+  estimated: true,
+  dwellMinutes: 90,
+  household: null,
+  image: null,
+  epicScore: it.epicScore,
+  outcode: it.outcode,
+});
+
+/**
  * The ring itself: which cells are within the time, and the box round them.
  *
  * A postcode is its own cell; a point is snapped to the nearest one we hold.
@@ -268,8 +294,14 @@ async function ringFrom(q, { minutes, mode }) {
   const { rows } = await query('select code, lat, lng from geo_cells where code = any($1)', [codes]);
   const box = boxAround(rows);
   if (!box) return null;
+  // Where the ring is drawn from, so a card can say how long the journey is.
+  // A ring with no point to measure from printed "NaNh drive" (20 Sep 2026).
+  const home = rows.find((r) => r.code === cell) ?? null;
+  const at = q.lat != null && q.lng != null
+    ? { lat: Number(q.lat), lng: Number(q.lng) }
+    : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null;
   return {
-    cell, label: label ?? cell, cells: codes, box,
+    cell, label: label ?? cell, cells: codes, box, at,
     outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
   };
 }
@@ -420,7 +452,10 @@ inspire.get('/around', async (req, res, next) => {
         // the name, and the one thing on this board that never costs anything.
         count: census.counts[key] ?? 0,
         censused: census.missing.length === 0,
-        items: got.items.slice(0, shows),
+        items: got.items.slice(0, shows).map((it) => asCard(it, {
+          centre: { lat: ring.at?.lat ?? it.lat, lng: ring.at?.lng ?? it.lng },
+          origin: ring.at ?? it, mode, category: key,
+        })),
         of: got.items.length,
         // Where the twenty went.
         sifted: { returned: got.returned, inRing: got.inRing, onShelf: got.onShelf, scored: got.scored },
@@ -559,24 +594,7 @@ inspire.get('/near', async (req, res, next) => {
           more: Boolean(got.nextPageToken),
         });
         for (const it of got.items) {
-          items.push({
-            venueRef: it.venueRef, source: 'google', name: it.name, category: it.category,
-            moods: [key], subcategory: it.subcategory ?? null,
-            experiences: [], cuisines: [],
-            rating: it.rating, ratingCount: it.ratingCount, priceLevel: it.priceLevel,
-            goodForChildren: null,
-            photos: it.photos ?? [],
-            attribution: ['Powered by Google'],
-            lat: it.lat, lng: it.lng,
-            distanceKm: Number(kmBetween(centre, it).toFixed(1)),
-            travelMinutes: estimateTravelMinutes(origin, it, mode),
-            estimated: true,
-            dwellMinutes: 90,
-            household: null,
-            image: null,
-            epicScore: it.epicScore,
-            outcode: it.outcode,
-          });
+          items.push(asCard(it, { centre, origin, mode, category: key }));
         }
       }
       const answer = {
