@@ -287,6 +287,17 @@ const ringFrom = (q, { minutes, mode }) => reach.ringFor({
  * judgement about the place (data policy, 19 Sep 2026).
  */
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
+  const start = from ?? ring.at ?? null;
+  const reachKm = boundKm(minutes, mode);
+  const searchBox = start
+    ? {
+      minLat: start.lat - reachKm / 111.32,
+      maxLat: start.lat + reachKm / 111.32,
+      minLng: start.lng - reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
+      maxLng: start.lng + reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
+    }
+    : ring.bandBox ?? ring.box;
+
   const got = await categoryPage({
     /**
      * The ring, not its size.
@@ -339,16 +350,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // One fence, in `domain/band.js`, measured from the point the card prints
   // from. Written here by hand it was written twice, and the second copy went
   // on using the finder's ring after the first was corrected (20 Sep 2026).
-  const start = from ?? ring.at ?? null;
-  const reachKm = boundKm(minutes, mode);
-  const searchBox = start
-    ? {
-      minLat: start.lat - reachKm / 111.32,
-      maxLat: start.lat + reachKm / 111.32,
-      minLng: start.lng - reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
-      maxLng: start.lng + reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
-    }
-    : ring.bandBox ?? ring.box;
+
 
   // The fence is the ring, and the question was the category.
   //
