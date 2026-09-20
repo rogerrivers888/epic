@@ -51,7 +51,11 @@ export type SearchGround = {
 const MODE = {
   walking: { kmh: 4.8, detourFactor: 1.15, overhead: 0 },
   cycling: { kmh: 15, detourFactor: 1.2, overhead: 2 },
-  driving: { kmh: 28, detourFactor: 1.25, overhead: 5 },
+  // Recalibrated with the API's, 20 Sep 2026, against 473 real road times.
+  // These two copies have to move together: this one draws the band and the
+  // API's decides what is inside it, so a stale copy here paints a ring that
+  // is not the ring that was searched.
+  driving: { kmh: 32.5, detourFactor: 1.4, overhead: 3 },
   transit: { kmh: 22, detourFactor: 1.35, overhead: 8 },
 };
 export type TravelMode = keyof typeof MODE;
