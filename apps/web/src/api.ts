@@ -1376,8 +1376,15 @@ export type PlaceLevel = {
   cellKnown?: boolean | null;
   kind: 'area' | 'ring' | 'none';
   slug: string; name: string; areaKind: string;
-  /** What a ring was drawn round — a town, a postcode district — or null on a level. */
+  /**
+   * What a ring was drawn round — a town, a postcode district — or null.
+   *
+   * Null on a level, and null on a ring round a *full* postcode, which is a
+   * point on the map rather than a place anything is filed under.
+   */
   fromKind?: string | null;
+  /** The area behind the level, when there is one to stand on without a ring. */
+  area?: string | null;
   minutes: number | null; mode: string | null; cells: number | null;
   trail: ({ slug: string; label: string } & PlaceStats)[];
   stats: PlaceStats;

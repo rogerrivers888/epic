@@ -255,6 +255,12 @@ async function resolveWhere({ where, within, by }) {
 
   const minutes = Number(within);
   const ring = Number.isFinite(minutes) && minutes > 0 ? Math.min(CAP_MINUTES, minutes) : null;
+  // What a ring is when nobody said: the first band. It used to be thirty, so
+  // a full postcode with nothing said drew half an hour's drive under a
+  // chooser that had not been asked (owner, 20 Sep 2026 — "5 minutes, which
+  // should be the default"). An area with no ring asked for is not a ring at
+  // all and never reaches this.
+  const asked = ring ?? BANDS[0];
   const mode = MODES.includes(lower(by)) ? lower(by) : 'drive';
 
   const area = await index.areaBySlug(slug);
@@ -276,16 +282,16 @@ async function resolveWhere({ where, within, by }) {
   // nothing has been indexed in, and the honest answer is the nearest one we do
   // hold with the distance said out loud.
   const known = (await query('select code, lat, lng, places from geo_cells where code = $1', [cell])).rows[0] ?? null;
-  const within_ = await reach.placesWithin(cell, { minutes: ring ?? 30, mode: travelMode(mode) });
+  const within_ = await reach.placesWithin(cell, { minutes: asked, mode: travelMode(mode) });
   return {
     kind: 'ring',
     area: area ?? null,
     cell, cellLabel: labelOf(cell), label: label ?? labelOf(cell),
-    minutes: ring ?? 30, mode,
+    minutes: asked, mode,
     refs: [...new Set(within_.map((p) => p.venue_ref))],
     minutesByRef: new Map(within_.map((p) => [p.venue_ref, p.minutes])),
     cellKnown: Boolean(known),
-    cells: (await reach.reachableCells(cell, { minutes: ring ?? 30, mode: travelMode(mode) })).length,
+    cells: (await reach.reachableCells(cell, { minutes: asked, mode: travelMode(mode) })).length,
   };
 }
 
@@ -323,8 +329,14 @@ const head = async (scope) => ({
   name: scope.kind === 'area' ? scope.area.name : scope.label,
   areaKind: scope.kind === 'area' ? scope.area.kind : 'ring',
   // A ring drawn round a town is still a town, and the kicker says so rather
-  // than calling Maidstone a postcode.
-  fromKind: scope.kind === 'ring' ? (scope.area?.kind ?? 'postcode') : null,
+  // than calling Maidstone a postcode. Null when there is no area behind the
+  // ring at all, which is a full postcode: SL4 1QN is a point on the map, not
+  // a place anything is filed under, so there is nothing to stand on when the
+  // ring is taken away (Codex, 20 Sep 2026).
+  fromKind: scope.kind === 'ring' ? (scope.area?.kind ?? null) : null,
+  // The area itself, so the board knows whether "just here, no ring" is a
+  // place it can go to.
+  area: scope.area?.slug ?? null,
   minutes: scope.minutes ?? null, mode: scope.mode ?? null,
   cells: scope.cells ?? null,
   // Whether the matrix has ever heard of this cell.

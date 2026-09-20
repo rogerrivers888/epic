@@ -323,7 +323,19 @@ function Level(props: {
   // rather than a move (routes law, §13.14) — and it writes `0` when the
   // district itself is what is wanted, so this never fights the chooser.
   useEffect(() => {
-    if (level?.areaKind === 'postcode' && within == null) props.onWithin(BANDS[0], { replace: true });
+    // A postcode district, and a full postcode — which has no area to be, so
+    // the API answers it as a ring whether or not one was asked for. Both open
+    // at the first band and both say so in the address (Codex, 20 Sep 2026:
+    // the district rule alone never fired on a full postcode).
+    const unsaid = within == null
+      // Nought minutes means "just here", and a full postcode has no here to
+      // be just: the API draws the first band round it whatever this says, so
+      // the address is corrected to the band that is actually being drawn
+      // rather than left claiming a scope that does not exist (Codex, 20 Sep
+      // 2026).
+      || (within === 0 && level?.areaKind === 'ring' && !level?.area);
+    if (!unsaid) return;
+    if (level?.areaKind === 'postcode' || level?.areaKind === 'ring') props.onWithin(BANDS[0], { replace: true });
   }, [level, within, props.onWithin]);
 
   if (noSuchArea) {
@@ -360,7 +372,8 @@ function Level(props: {
   // rules below hold inside it as well — they read `areaKind`, which a ring
   // answers 'ring' to (20 Sep 2026, when the first band became the default and
   // every outcode became a ring).
-  const onAPostcode = level?.areaKind === 'postcode' || (level?.areaKind === 'ring' && (level?.fromKind ?? 'postcode') === 'postcode');
+  const onAPostcode = level?.areaKind === 'postcode'
+    || (level?.areaKind === 'ring' && (level?.fromKind == null || level?.fromKind === 'postcode'));
   const lensHere: Lens = lens === 'coverage' && onAPostcode ? 'category' : lens;
 
 
@@ -415,8 +428,14 @@ function Level(props: {
           everywhere above a postcode, which is where searching for one is the
           thing you came to do. */}
       <LensRow lens={lensHere} onLens={props.onLens}
-               right={ring || level.areaKind === 'postcode'
-                 ? <RingChooser minutes={ring ? within : 0} here={level.name} mode={mode} onMinutes={props.onWithin}
+               right={ring || level.areaKind === 'ring' || level.areaKind === 'postcode'
+                 ? <RingChooser minutes={ring ? within : 0} mode={mode} onMinutes={props.onWithin}
+                                /* Only where taking the ring away leaves a board to
+                                   stand on: a postcode district. A full postcode has
+                                   no area behind it, and a ring round a town would
+                                   drop onto the town, which has no chooser to come
+                                   back by (Codex, 20 Sep 2026). */
+                                here={level.areaKind === 'postcode' || (level.fromKind === 'postcode' && level.area) ? level.name : null}
                                 /* How you are travelling only means something inside a
                                    ring, so choosing it draws one at the first band —
                                    the same act as picking a way to travel in the search
@@ -629,14 +648,17 @@ function RingChooser({ minutes, here, mode, onMinutes, onMode, cells, modesBuilt
    * places and five minutes' drive of it is 113.
    */
   minutes: number | null;
-  /** What the board is standing on, so the first choice can name it. */
-  here: string;
+  /** What the board is standing on, or null when there is nothing to stand on without a ring. */
+  here: string | null;
   mode: string; onMinutes: (m: number) => void; onMode: (m: string) => void; cells: number | null;
   /** Which ways of getting about the matrix can answer here; undefined means "do not know, offer them all". */
   modesBuilt?: string[];
 }) {
   const ring = minutes != null && minutes > 0;
-  const chosen = ring ? bandLabel(minutes as number) : `${here} only`;
+  // With no ring and nowhere to stand still, the board is showing the first
+  // band — the API draws one whether or not it was asked for — so the control
+  // says that rather than naming a scope that is not on the screen.
+  const chosen = ring ? bandLabel(minutes as number) : here ? `${here} only` : bandLabel(BANDS[0]);
   return (
     <View style={styles.chooser}>
       <Explain tip={['How far out', !ring || cells == null
@@ -647,7 +669,7 @@ function RingChooser({ minutes, here, mode, onMinutes, onMode, cells, modesBuilt
                     // Named, not "no ring": a list whose first line is an
                     // absence reads as a way of clearing the control rather
                     // than as a place to stand.
-                    { key: '0', label: `${here} only`, on: !ring },
+                    ...(here ? [{ key: '0', label: `${here} only`, on: !ring }] : []),
                     ...BANDS.map((b) => ({ key: String(b), label: bandLabel(b), on: minutes === b })),
                   ]}
                   onPick={(k) => onMinutes(Number(k))} />
