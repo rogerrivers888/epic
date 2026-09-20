@@ -159,9 +159,16 @@ const RULE_COLS: Col[] = [
   { w: 200, align: 'right' },
 ];
 
-export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, onPlaces, onSet, onStrike, onMap }: {
+export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAcceptAll, onPlaces, onSet, onStrike, onMap }: {
   data: FilingSubcategory;
   busy: string | null;
+  /**
+   * Without it the screen is a reading of the taxonomy rather than a way of
+   * changing it. Every write here needs `manage_library`, so offering the
+   * controls to somebody who only has `view_library` buys them a 403 for
+   * their trouble (Codex, 20 Sep 2026).
+   */
+  canManage: boolean;
   onAccept: (attribute: string) => void;
   onFlip: (attribute: string) => void;
   onAcceptAll: () => void;
@@ -253,7 +260,9 @@ export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, on
                       tone="dim" ruled={false}
                       onPress={() => setOpenRule(openRule === r.id ? null : r.id)}
                     />
-                    <Act label="Strike it" tone="warn" onPress={() => onStrike(r.words[0] ?? r.subject)} />
+                    {canManage ? (
+                      <Act label="Strike it" tone="warn" onPress={() => onStrike(r.words[0] ?? r.subject)} />
+                    ) : null}
                   </View>
                 </Cell>
               </View>
@@ -301,7 +310,8 @@ export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, on
           >
             <View>
               {data.facets.map((f) => (
-                <FacetRow key={f.key} a={f} busy={busy === f.key} onAccept={onAccept} onFlip={onFlip} />
+                <FacetRow key={f.key} a={f} busy={busy === f.key} canManage={canManage}
+                          onAccept={onAccept} onFlip={onFlip} />
               ))}
               {data.facets.length === 0 ? <Nothing>Nothing to propose here yet.</Nothing> : null}
             </View>
@@ -324,7 +334,7 @@ export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, on
           <DeskSection kicker="THE EIGHT · OUTLINE IS PROPOSED, FILLED IS SET">
             <View>
               {data.axes.map((a) => (
-                <AxisRow key={a.key} a={a} busy={busy === a.key} onAccept={onAccept} />
+                <AxisRow key={a.key} a={a} busy={busy === a.key} canManage={canManage} onAccept={onAccept} />
               ))}
             </View>
           </DeskSection>
@@ -339,7 +349,7 @@ export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, on
           }}>
             <DeskButton
               label={s.proposed ? `Accept all ${s.proposed}` : 'Nothing to accept'}
-              disabled={!s.proposed || busy === 'all'}
+              disabled={!canManage || !s.proposed || busy === 'all'}
               onPress={onAcceptAll}
             />
             <Value tone="muted" size={12.5}>
@@ -428,8 +438,8 @@ function ruleSummary(data: FilingSubcategory): string {
   return `${rules} ${rules === 1 ? 'rule fills it' : 'rules fill it'}, none of them a Google type`;
 }
 
-function FacetRow({ a, busy, onAccept, onFlip }: {
-  a: FilingAnswer; busy: boolean;
+function FacetRow({ a, busy, canManage, onAccept, onFlip }: {
+  a: FilingAnswer; busy: boolean; canManage: boolean;
   onAccept: (k: string) => void; onFlip: (k: string) => void;
 }) {
   const nothing = !a.value;
@@ -453,8 +463,8 @@ function FacetRow({ a, busy, onAccept, onFlip }: {
         <Value tone="dim" size={11.5}>{a.why}</Value>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flexGrow: 0, flexShrink: 0 }}>
-        {nothing || a.settled ? (
-          <Value tone="dim" size={12.5}>{a.settled ? 'set' : ''}</Value>
+        {nothing || a.settled || !canManage ? (
+          <Value tone="dim" size={12.5}>{a.settled ? 'set' : a.proposed ? 'proposed' : ''}</Value>
         ) : (
           <>
             <Act label={busy ? 'accepting…' : 'Accept'} onPress={busy ? undefined : () => onAccept(a.key)} />
@@ -468,8 +478,8 @@ function FacetRow({ a, busy, onAccept, onFlip }: {
   );
 }
 
-function AxisRow({ a, busy, onAccept }: {
-  a: FilingAnswer; busy: boolean; onAccept: (k: string) => void;
+function AxisRow({ a, busy, canManage, onAccept }: {
+  a: FilingAnswer; busy: boolean; canManage: boolean; onAccept: (k: string) => void;
 }) {
   const level = a.value?.level ?? null;
   return (
@@ -492,10 +502,10 @@ function AxisRow({ a, busy, onAccept }: {
         <Value tone={a.settled || !a.value ? 'dim' : 'lime'} size={11.5}>{a.why}</Value>
       </View>
       <View style={{ flexGrow: 0, flexShrink: 0 }}>
-        {a.value && !a.settled ? (
+        {a.value && !a.settled && canManage ? (
           <Act label={busy ? 'accepting…' : 'Accept'} onPress={busy ? undefined : () => onAccept(a.key)} />
         ) : (
-          <Value tone="dim" size={12.5}>{a.settled ? 'set' : ''}</Value>
+          <Value tone="dim" size={12.5}>{a.settled ? 'set' : a.proposed ? 'proposed' : ''}</Value>
         )}
       </View>
     </View>

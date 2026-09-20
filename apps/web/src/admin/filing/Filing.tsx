@@ -99,8 +99,14 @@ export function Filing({ canManage }: { canManage: boolean }) {
       }
       if (tab === 'labels') {
         if (view === 'vocabulary') setVocabulary(await api.filingVocabulary());
-        else if (set) setOneSet(await api.filingSet(set));
-        else setLabels(await api.filingLabels());
+        else if (set) {
+          // Both, always. The set screen draws the global labels and its own
+          // row from the list, so fetching only the set left a shared link
+          // like `?tab=labels&set=water` rendering nothing at all — which is
+          // the one promise the addresses here exist to keep (Codex, 20 Sep).
+          const [one, list] = await Promise.all([api.filingSet(set), api.filingLabels()]);
+          setOneSet(one); setLabels(list);
+        } else setLabels(await api.filingLabels());
       }
       if (tab === 'mapping' && view === 'excluded') setExcluded(await api.filingExcluded());
     } catch (err) {
@@ -249,6 +255,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
             <Overview
               data={overview}
               onGo={goQueue}
+              canManage={canManage}
               onThreshold={(key, value) => void run(key, async () => {
                 const out = await api.filingSetThreshold({ key, value });
                 return `${out.threshold.label} → ${out.threshold.value}`;
@@ -272,6 +279,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
             <SubcategoryBoard
               data={drawer}
               busy={busy}
+              canManage={canManage}
               onPlaces={() => go({ view: 'places' })}
               onSet={(key) => go({ tab: 'labels', set: key, cat: '', sub: '', view: '' })}
               onMap={() => go({ tab: 'mapping', cat: '', sub: '', set: '', view: '' })}

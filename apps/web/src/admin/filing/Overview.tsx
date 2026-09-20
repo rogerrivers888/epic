@@ -42,9 +42,12 @@ function when(iso: string | null): string {
 
 const money = (usd: number) => (usd ? `£${usd.toFixed(2)}` : '£0.00');
 
-export function Overview({ data, onGo, onThreshold }: {
+export function Overview({ data, onGo, canManage, onThreshold }: {
   data: FilingOverview;
   onGo: (where: string) => void;
+  /** Without it the thresholds are shown and not offered: they are what every
+   *  other screen judges by, so a reader should still see where the lines are. */
+  canManage: boolean;
   onThreshold: (key: string, value: number) => void;
 }) {
   return (
@@ -162,7 +165,7 @@ export function Overview({ data, onGo, onThreshold }: {
           </View>
           <View>
             {data.thresholds.map((t) => (
-              <Stepper key={t.key} t={t} onChange={onThreshold} />
+              <Stepper key={t.key} t={t} canManage={canManage} onChange={onThreshold} />
             ))}
           </View>
         </View>
@@ -222,7 +225,9 @@ function BlindNote({ data }: { data: FilingOverview }) {
  * of the person. The value is still shown in the box, so it reads as a number
  * and not as a slider.
  */
-function Stepper({ t, onChange }: { t: Threshold; onChange: (key: string, value: number) => void }) {
+function Stepper({ t, canManage, onChange }: {
+  t: Threshold; canManage: boolean; onChange: (key: string, value: number) => void;
+}) {
   const move = (by: number) => {
     const next = Math.round((t.value + by) * 100) / 100;
     const lo = t.min ?? Number.NEGATIVE_INFINITY;
@@ -245,7 +250,7 @@ function Stepper({ t, onChange }: { t: Threshold; onChange: (key: string, value:
         <Text style={{ fontFamily: fonts.body, fontSize: 11, color: desk.inkDim, marginTop: 2 }}>{t.why}</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexGrow: 0, flexShrink: 0 }}>
-        <Act label="−" tone="dim" ruled={false} onPress={() => move(-t.step)} />
+        {canManage ? <Act label="−" tone="dim" ruled={false} onPress={() => move(-t.step)} /> : null}
         <View style={{
           width: 58,
           alignItems: 'center',
@@ -264,7 +269,7 @@ function Stepper({ t, onChange }: { t: Threshold; onChange: (key: string, value:
             {t.value}
           </Text>
         </View>
-        <Act label="+" tone="dim" ruled={false} onPress={() => move(t.step)} />
+        {canManage ? <Act label="+" tone="dim" ruled={false} onPress={() => move(t.step)} /> : null}
       </View>
     </View>
   );
