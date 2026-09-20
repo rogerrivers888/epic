@@ -506,19 +506,33 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   if (!cell) return null;
   const within = await reachableCells(cell, { minutes, mode });
   const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
+  // The band itself, without the finder's allowance.
+  //
+  // `reachableCells` reads ten minutes past what was asked, on purpose — a
+  // place near the edge of its sector can be inside the band while its sector's
+  // centre is outside it. That is right for *finding* and wrong for *fencing*:
+  // a search box drawn round the wide ring spends its twenty results on the
+  // thirty-to-forty-minute hinterland, and the exact pass then puts most of
+  // them back (20 Sep 2026 — food came back with two). So the band is kept
+  // separately, and the display search is fenced with it.
+  const band = [...new Set([cell, ...within.filter((c) => c.minutes <= minutes).map((c) => c.to_cell)])];
   const { rows } = await query('select code, lat, lng from geo_cells where code = any($1)', [codes]);
   if (!rows.length) return null;
   const home = rows.find((r) => r.code === cell) ?? null;
+  const inBand = new Set(band);
+  const bandPoints = rows.filter((r) => inBand.has(r.code));
   return {
     cell,
     label: name ?? cell,
     cells: codes,
+    band,
     // `outcodeOf` takes a sector *label* — "SL5 0" — and a cell is a code:
     // "sector:SL5 0". Handed the code it answered "sector:SL5", which matches
     // no district in the world, and every count over the ring came back empty
     // (20 Sep 2026).
     outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
     points: rows,
+    bandPoints: bandPoints.length ? bandPoints : rows,
     at: lat != null && lng != null
       ? { lat: Number(lat), lng: Number(lng) }
       : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null,

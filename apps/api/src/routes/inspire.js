@@ -326,8 +326,19 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
      * places that were in reach and offering places that were not (Codex, 20
      * Sep 2026). The cells themselves are what the page is about.
      */
-    ringKey: `${ring.cell}|${[...ring.cells].sort().join(',')}`,
-    box: ring.box, cells: ring.cells,
+    ringKey: `${ring.cell}|band|${[...(ring.band ?? ring.cells)].sort().join(',')}`,
+    // Fenced with the band, not the finder.
+    //
+    // `reachableCells` reads ten minutes past what was asked, on purpose: a
+    // place near the edge of its sector can be inside the band while the
+    // sector's centre is outside it. That is right for finding and wrong for
+    // fencing — a box drawn round the wide ring spends its twenty results on
+    // the thirty-to-forty-minute hinterland and the exact pass puts most of
+    // them back. Food came back with two (20 Sep 2026). The box is the band's,
+    // with the two kilometres of margin `boxAround` already adds, so a place at
+    // the edge of a band sector is still found and the exact pass still judges
+    // it.
+    box: ring.bandBox ?? ring.box, cells: ring.band ?? ring.cells,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
   /**
@@ -448,6 +459,7 @@ inspire.get('/around', async (req, res, next) => {
     }
 
     // Free, and no provider: what the census found in these outcodes.
+    ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
     const census = await censusCounts(ring.outcodes);
 
     const taught = await shelfRules();
@@ -583,7 +595,8 @@ inspire.get('/near', async (req, res, next) => {
     const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {
-      const census = await censusCounts(ring.outcodes);
+      ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
+    const census = await censusCounts(ring.outcodes);
       const taught = await shelfRules();
       const tax = await taxonomy();
       const meter = { google: 0 };
