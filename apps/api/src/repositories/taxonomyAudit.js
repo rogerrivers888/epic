@@ -8,7 +8,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { auditAll } from '../domain/taxonomyAudit.js';
-import { agreed } from '../domain/taxonomyCleanup.js';
+import { agreed, LANDMARK_SPLIT } from '../domain/taxonomyCleanup.js';
 
 /** What the signals need, read in one pass. */
 export async function evidence() {
@@ -117,6 +117,58 @@ function nearest(rulesBySub, subs, together) {
     out.set(s.key, scored.sort((a, b) => b.shared - a.shared));
   }
   return out;
+}
+
+/**
+ * What mapping a word somewhere would actually do, before it is committed.
+ *
+ * Both briefs call this the highest-value thing on the Mapping screen. The
+ * design brief, §2.4: "Landmarks & monuments — brings in 1,240 places · 1,180
+ * have never been opened. That one line would have prevented most of the
+ * current mess."
+ *
+ * Read from the same evidence the audit uses and costs nothing, so the screen
+ * may ask for every destination in a dropdown at once. Two numbers, and the
+ * second is only offered where it means anything: with nine opens in the whole
+ * system, "none have ever been opened" is true of everything and says nothing
+ * about the word (see `nobodyGoes`). `openable` is false until the corpus has
+ * enough opens to make the figure worth printing, and the screen should draw
+ * the places count alone until it flips.
+ */
+export async function consequence(keys = []) {
+  const wanted = [...new Set(keys.map((k) => String(k).split(':').pop()))].filter(Boolean);
+  if (!wanted.length) return { openable: false, words: {} };
+  const [pairs, shown, opened] = await Promise.all([
+    query(`select found_by, venue_ref from place_subcategories where found_by = any($1)
+            union
+           select found_by, venue_ref from place_index where found_by = any($1)`, [wanted]),
+    query("select venue_ref, count(*)::int n from search_events where kind = 'shown' and venue_ref is not null group by 1"),
+    query(`select venue_ref, count(*)::int n from search_events
+            where kind in ('open','save','add_to_trip') and venue_ref is not null group by 1`),
+  ]);
+  const shownBy = new Map(shown.rows.map((r) => [r.venue_ref, r.n]));
+  const openBy = new Map(opened.rows.map((r) => [r.venue_ref, r.n]));
+  const opensAll = [...openBy.values()].reduce((n, v) => n + v, 0);
+
+  const refs = new Map();
+  for (const r of pairs.rows) {
+    const had = refs.get(r.found_by) ?? new Set();
+    had.add(r.venue_ref);
+    refs.set(r.found_by, had);
+  }
+  const words = {};
+  for (const k of wanted) {
+    const list = [...(refs.get(k) ?? [])];
+    const everShown = list.filter((r) => shownBy.has(r)).length;
+    const everOpened = list.filter((r) => openBy.has(r)).length;
+    words[k] = {
+      places: list.length,
+      shown: everShown,
+      opened: everOpened,
+      neverOpened: everShown - everOpened,
+    };
+  }
+  return { openable: opensAll >= 200, corpusOpens: opensAll, words };
 }
 
 /** Run every signal and keep what it found. Returns the run. */
@@ -243,7 +295,7 @@ export async function decideGroup({ auditId, flag, state, by = null }) {
  * places incidentally. Each needs somebody to choose, so each is left open and
  * counted in `advisory`.
  */
-const DOES = new Set(['exclude', 'rename', 'retire', 'fold', 'create', 'carry', 'repoint']);
+const DOES = new Set(['exclude', 'rename', 'retire', 'fold', 'create', 'carry', 'repoint', 'split']);
 
 export async function apply({ auditId, by = null }) {
   // Applied once, and once only. A run that left advisory proposals sitting in
@@ -341,6 +393,36 @@ export async function apply({ auditId, by = null }) {
           await client.query(
             `update taxonomy_labels set points_at = $2, updated_at = now() where points_at = $1`, [p.subject, target.key]);
           await client.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [p.subject]);
+        } else if (p.action === 'split') {
+          // A split only applies where somebody has said which words go to
+          // which half. The owner named these two (20 Sep 2026); a split whose
+          // halves nobody has named stays advisory, which is why this checks
+          // rather than assumes.
+          const plan = p.subject === LANDMARK_SPLIT.from ? LANDMARK_SPLIT : null;
+          if (!plan) { advisory += 1; continue; }
+          for (const half of plan.halves) {
+            const { rows: [to] } = await client.query(
+              'select key from shelf_subcategories where key = $1 and active', [half.key]);
+            if (!to) continue;
+            for (const w of half.words) {
+              await keepWord(w);
+              await keepRules('subject = $1 or subject = $2', [`google:${w}`, w]);
+              await client.query(
+                `update taxonomy_labels set points_at = $2, updated_at = now()
+                  where namespace = 'google' and key = $1`, [w, half.key]);
+              await client.query(
+                `update shelf_rules set subcategory = $2, updated_at = now()
+                  where subject = $1 or subject = $3`, [`google:${w}`, half.key, w]);
+            }
+          }
+          // The source keeps whatever nobody named. Retired only if it is
+          // actually empty -- saying "split" and leaving twenty rules behind in
+          // a drawer marked gone would lose them.
+          const { rows: [left] } = await client.query(
+            'select count(*)::int n from shelf_rules where subcategory = $1', [p.subject]);
+          if (left.n === 0) {
+            await client.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [p.subject]);
+          }
         } else if (p.action === 'create') {
           // The category comes with the proposal, because a drawer without a
           // cabinet is not a drawer. Made switched on and empty; what fills it

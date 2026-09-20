@@ -105,7 +105,12 @@ export function agreed({ have = new Set(), words = new Set() } = {}) {
     'Retire. Rowing and canoeing venue goes to Rowing, paddling & sailing; distilleries to Breweries, wineries & distilleries; heritage railway to Heritage railways.');
 
   // ---- water -------------------------------------------------------------
-  ifSub('water-park', 'fold', 'Water parks',
+  // The brief says "fold the Fun > Water park singleton into Water parks", and
+  // `water-park` *is* the water parks drawer -- there is nothing else to fold
+  // it into. So it is the rename the sentence actually asks for, and the three
+  // drawers the brief wants then all exist: Water parks, Pools & leisure
+  // centres, Lidos & outdoor swimming.
+  ifSub('water-park', 'rename', 'Water parks',
     'Resolve water to three drawers: Water parks (indoor), Pools & leisure centres, Lidos & outdoor swimming.');
 
   // ---- singletons --------------------------------------------------------

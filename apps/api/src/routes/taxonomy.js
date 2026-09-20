@@ -593,6 +593,21 @@ taxonomyRoutes.get('/audit', requires('view_library'), async (req, res, next) =>
   } catch (err) { return next(err); }
 });
 
+/**
+ * GET /consequence?words=a,b,c — what mapping each of these would bring in.
+ *
+ * For the line under every destination in the mapping dropdown (both briefs,
+ * §2.4). Free: it reads the index and the search log and calls nobody.
+ */
+taxonomyRoutes.get('/consequence', requires('view_library'), async (req, res, next) => {
+  try {
+    const words = String(req.query.words || '').split(',').map((w) => w.trim()).filter(Boolean);
+    if (!words.length) throw bad('Which words?');
+    if (words.length > 200) throw bad('Two hundred words at a time.');
+    res.json(await taxonomyAudit.consequence(words));
+  } catch (err) { next(err); }
+});
+
 taxonomyRoutes.post('/audit/run', requires('manage_library'), async (req, res, next) => {
   try {
     const audit = await taxonomyAudit.run({ by: actorOf(req), withAgreed: req.body?.agreed === true });

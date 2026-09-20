@@ -132,7 +132,7 @@ test('the effect of a set is counted before it is applied', () => {
 // --- what Codex found in the apply path, 20 Sep 2026 -----------------------
 
 import { query } from '../src/db.js';
-import { apply, run, undo } from '../src/repositories/taxonomyAudit.js';
+import { apply, consequence, run, undo } from '../src/repositories/taxonomyAudit.js';
 
 const tidy = async () => {
   await query("delete from taxonomy_labels where key in ('tmp_word','tmp_two')");
@@ -229,4 +229,22 @@ test('nobody goes stays blind until the corpus shows that opening happens', () =
   });
   assert.equal(dead.proposals.length, 1);
   assert.match(dead.proposals[0].because, /against .*% across everything else/);
+});
+
+test('the consequence line counts places, and withholds the opened figure until it means something', async (t) => {
+  t.after(tidy);
+  const out = await consequence(['google:restaurant', 'museum']);
+  assert.ok('restaurant' in out.words, 'the namespace is stripped');
+  assert.ok('museum' in out.words);
+  assert.equal(typeof out.words.restaurant.places, 'number');
+  // Nine opens in production, twenty-nine locally: either way the figure is
+  // not worth printing, and the flag says so rather than the screen guessing.
+  assert.equal(out.openable, out.corpusOpens >= 200);
+  assert.ok(out.corpusOpens >= 0);
+});
+
+test('the consequence line refuses an empty ask rather than answering for everything', async () => {
+  const none = await consequence([]);
+  assert.equal(none.openable, false);
+  assert.deepEqual(none.words, {});
 });
