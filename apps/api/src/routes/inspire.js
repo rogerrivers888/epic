@@ -286,22 +286,21 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     ringKey: `${ring.cell}|${ring.cells.length}`, box: ring.box, cells: ring.cells,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
-  // Held to the category by our own taxonomy — but only where the taxonomy
-  // actually knows.
+  // The fence is the ring, and the question was the category.
   //
-  // A text search answers with whatever matched, so Food & drink must mean food
-  // and drink. Dropping everything our shelves did not positively agree with
-  // was far too blunt: Sport came back with twenty places and showed none of
-  // them, because a leisure centre shelves as Active and a golf club as
-  // Outdoors. So a place is dropped only when we *know* it belongs on another
-  // shelf; a place we cannot shelve is kept, because Google was answering our
-  // own question about this category and its answer is the only evidence there
-  // is (20 Sep 2026).
-  const mine = got.venues.filter((v) => {
-    if (category === 'food') return true;
-    const shelves = shelvesForVenue(v, taught, tax.vocab)?.shelves ?? [];
-    return shelves.length === 0 || shelves.includes(category);
-  });
+  // Two goes at filtering by our own shelves both took the answer away: Sport
+  // bought twenty and showed none, because a leisure centre shelves as Active
+  // and a golf club as Outdoors, and keeping the unshelvable ones did not help
+  // because these are shelved — just not here. The categories genuinely
+  // overlap, and the search asked this category's own question ("sports
+  // centres, swimming pools, golf courses and climbing walls"), so Google's
+  // answer *is* this category's answer (owner, 20 Sep 2026: "Rank the 20
+  // returned by Epic score where one exists, Google order otherwise").
+  //
+  // The shelves still travel on every item — they name the drawer and they
+  // decide what the place page says — they simply no longer decide whether a
+  // household may see it.
+  const mine = got.venues;
   const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
   const scores = refs.length
     ? (await query(
