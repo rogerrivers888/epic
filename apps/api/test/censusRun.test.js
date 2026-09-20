@@ -347,3 +347,34 @@ test('a place found by three drawers is one place in the tile', async (t) => {
   assert.ok(tile.done_subcategories.length > 1, 'several drawers were asked');
   assert.equal(tile.places, 1, 'and they all found the one place, which is one place');
 });
+
+test('re-censusing a tile counts what is there now, not what was there last time', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test recensus' });
+  await seedTile(run, 'test/recensus');
+
+  // A census that finds two places.
+  const both = [{ id: 'ChIJrun_test_still_open', rank: 1 }, { id: 'ChIJrun_test_closed_down', rank: 2 }];
+  await withCensus(async () => ({ places: both, requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: run.id, budgetMs: 30_000 }));
+  const { rows: [first] } = await query(`select places from census_tiles where grid_key = 'test/recensus'`);
+  assert.equal(first.places, 2);
+
+  // The same ground a month later, with one of them gone. The surfacing stays
+  // on the record — that is deliberate, "this used to be here" is a fact — but
+  // it is not something this census found.
+  await query(
+    `update census_tiles set state = 'todo', done_subcategories = '{}', censused_at = now() - interval '40 days',
+                             started_at = null, places = 0
+      where grid_key = 'test/recensus'`);
+  await query(`update census_runs set state = 'running', finished_at = null where id = $1`, [run.id]);
+  await withCensus(async () => ({ places: [both[0]], requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  const { rows: [second] } = await query(`select places from census_tiles where grid_key = 'test/recensus'`);
+  assert.equal(second.places, 1, 'the count goes down when the ground does');
+  const { rows: kept } = await query(
+    `select distinct venue_ref from place_subcategories where area_slug = 'test/recensus'`);
+  assert.equal(kept.length, 2, 'and the one that is gone is still on the record, not deleted');
+});

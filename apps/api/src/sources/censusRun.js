@@ -205,7 +205,15 @@ async function refreshProgress(runId) {
 async function claimTile(run) {
   const { rows } = await query(
     `update census_tiles t
-        set state = 'doing', claimed_at = now(), claimed_by = $2, run_id = $1
+        set state = 'doing', claimed_at = now(), claimed_by = $2, run_id = $1,
+            -- When this sweep of the tile began, which is what its place count
+            -- is counted from. A tile part way through keeps its start: three
+            -- passes of the loop are still one census of it. A tile coming
+            -- round again after the freshness window starts afresh, and
+            -- anything the last census found drops out of the count unless
+            -- this one finds it too (Codex, 20 Sep 2026).
+            started_at = case when t.done_subcategories = '{}'::text[] or t.started_at is null
+                              then now() else t.started_at end
       where t.id = (
         select id from census_tiles
          where run_id = $1
@@ -391,8 +399,14 @@ async function censusOneTile({ run, tile, pace, remaining, until = Infinity, sto
               -- made the run's headline number a count of surfacings wearing
               -- the word "places" — the same mistake as 135 rows for 65 places
               -- (repositories/censusRing.js).
+              -- Counted, not added up, and counted from when this sweep began.
+              -- A place found by three drawers is one place (135 rows for 65
+              -- places was that mistake in the ring count); and a surfacing
+              -- left over from the last census of this tile is not something
+              -- this one found, however legitimately the row is kept.
               places = (select count(distinct venue_ref)::int from place_subcategories
-                         where area_slug = census_tiles.grid_key),
+                         where area_slug = census_tiles.grid_key
+                           and last_seen >= coalesce(census_tiles.started_at, census_tiles.claimed_at, now())),
               saturated = saturated + $5,
               problem = coalesce($6, problem)
         where id = $1`,
@@ -518,11 +532,17 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     if (!tiles.length) continue;
     const keys = tiles.map((t) => t.grid_key);
 
+    // Only what the current census of each tile found. A surfacing is kept
+    // after its question stops finding it — "this used to be here" is worth
+    // keeping — but a board counting those would report a district as growing
+    // every time it was re-censused, however many places had closed.
     const { rows } = await query(
       `select ps.category, ps.subcategory, ps.venue_ref, pi.lat, pi.lng, pi.slice
          from place_subcategories ps
          join place_index pi on pi.venue_ref = ps.venue_ref
-        where ps.area_slug = any($1)`, [keys]);
+         join census_tiles t on t.grid_key = ps.area_slug
+        where ps.area_slug = any($1)
+          and ps.last_seen >= coalesce(t.started_at, t.censused_at)`, [keys]);
 
     const mine = new Set(universe.filter((u) => u.outcode === code).map((u) => u.code));
     if (!mine.size) continue;
