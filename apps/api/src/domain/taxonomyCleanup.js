@@ -22,6 +22,19 @@ const sub = (key, action, proposed, because, extra = {}) => ({
   flag: 'agreed', subject_kind: 'subcategory', subject: key, subject_label: null,
   action, now_value: null, proposed, because, numbers: extra, moves: 0,
 });
+/**
+ * A Wikidata type, addressed by the QID a rule is stored under.
+ *
+ * Most of what section 4 names is *not* a Google word. Landmarks & monuments
+ * holds 25 rules and 19 of them are `kind` scope — arch bridge is Q158438, not
+ * `google:arch_bridge` — so a cleanup that only spoke to Google words left
+ * every bridge in place and reported success (found by applying it to
+ * production, 20 Sep 2026).
+ */
+const kind = (qid, label, action, proposed, because) => ({
+  flag: 'agreed', subject_kind: 'kind', subject: qid, subject_label: label,
+  action, now_value: null, proposed, because, numbers: { qid }, moves: 0,
+});
 
 /**
  * The two halves of the Landmarks split, and the words that go to each.
@@ -34,9 +47,12 @@ export const LANDMARK_SPLIT = {
   from: 'landmarks',
   halves: [
     { key: 'monuments-memorials', label: 'Monuments & memorials',
-      words: ['monument', 'memorial', 'statue', 'war_memorial'] },
+      words: ['monument', 'memorial', 'statue', 'war_memorial'],
+      kinds: ['monument', 'memorial', 'statue', 'war memorial', 'sculpture', 'fountain'] },
     { key: 'landmarks-you-can-see', label: 'Landmarks',
-      words: ['lighthouse', 'pier', 'tower', 'viaduct', 'observation_wheel', 'ferris_wheel'] },
+      words: ['lighthouse', 'pier', 'tower', 'viaduct', 'observation_wheel', 'ferris_wheel'],
+      kinds: ['lighthouse', 'pier', 'tower', 'viaduct', 'railway viaduct', 'windmill',
+        'historical landmark', 'cultural landmark', 'historical place'] },
   ],
 };
 
@@ -44,6 +60,16 @@ export const LANDMARK_SPLIT = {
 export const STRUCTURAL = [
   'arch_bridge', 'bridge', 'footbridge', 'railway_bridge', 'road_bridge',
   'building_complex', 'staff_college',
+];
+
+/**
+ * The same map furniture, as Wikidata calls it. Named rather than QID'd because
+ * the QIDs differ per database and the label is what section 4 says.
+ */
+export const STRUCTURAL_KINDS = [
+  'arch bridge', 'bridge', 'footbridge', 'railway bridge', 'road bridge',
+  'stone bridge', 'suspension bridge', 'building complex', 'staff college',
+  'military academy',
 ];
 
 /** Types that are a building, not a visit. Individual places get filed by hand. */
@@ -85,16 +111,23 @@ export const NEW_SUBCATEGORIES = [
  * `have` is the set of subcategory keys that exist, so a proposal about a
  * drawer this database does not have is left out rather than failing at apply.
  */
-export function agreed({ have = new Set(), words = new Set() } = {}) {
+export function agreed({ have = new Set(), words = new Set(), kinds = new Map() } = {}) {
   const out = [];
   const ifWord = (k, ...rest) => { if (words.has(k)) out.push(word(k, ...rest)); };
   const ifSub = (k, ...rest) => { if (have.has(k)) out.push(sub(k, ...rest)); };
+  // `kinds` maps a type's plain name to the QID its rule is stored under, so
+  // section 4 can go on naming "arch bridge" rather than Q158438.
+  const ifKind = (name, ...rest) => {
+    const qid = kinds.get(name);
+    if (qid) out.push(kind(qid, name, ...rest));
+  };
 
   // ---- junk drawers ------------------------------------------------------
-  for (const k of STRUCTURAL) {
-    ifWord(k, 'exclude', 'Not in Epic',
-      'Structural map furniture. It is on the map because maps need it, not because anybody visits it.');
-  }
+  const furniture = 'Structural map furniture. It is on the map because maps need it, not because anybody visits it.';
+  for (const k of STRUCTURAL) ifWord(k, 'exclude', 'Not in Epic', furniture);
+  // The same words again as Wikidata types, which is how most of them are
+  // actually filed.
+  for (const name of STRUCTURAL_KINDS) ifKind(name, 'exclude', 'Not in Epic', furniture);
   for (const k of CHURCHES_OUT) {
     ifWord(k, 'exclude', 'Not in Epic',
       'A building, not a visit. Cathedrals, abbeys, minsters and priories stay; individual churches get filed by hand.');

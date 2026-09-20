@@ -73,6 +73,13 @@ export async function evidence() {
     if (!r.subcategory) continue;
     rulesBySub.set(r.subcategory, [...(rulesBySub.get(r.subcategory) ?? []), r]);
   }
+  // Wikidata types by the name their rule carries, so a cleanup can go on
+  // saying "arch bridge" instead of Q158438.
+  const kindsByName = new Map();
+  for (const r of rules.rows) {
+    if (r.scope !== 'kind' || !r.subject_label) continue;
+    kindsByName.set(String(r.subject_label).toLowerCase(), r.subject);
+  }
 
   return {
     subs: subs.rows,
@@ -89,6 +96,7 @@ export async function evidence() {
     // The first type Google lists is the one it thinks the place mostly is.
     primaryByRef: new Map(types.rows.map((r) => [r.venue_ref, r.google_types[0]])),
     together: new Map([...together].map(([k, v]) => [k, [...v]])),
+    kindsByName,
     // A rule's words, for the junk-drawer detector.
     wordsOfRule: (r) => (r.labels ?? []).map((l) => String(l).split(':').pop()),
     // Which subcategories share words with which, for fold targets.
@@ -180,6 +188,7 @@ export async function run({ by = null, extra = [], withAgreed = false } = {}) {
     ? agreed({
       have: new Set(input.subs.map((s) => s.key)),
       words: new Set(input.words.map((w) => w.key)),
+      kinds: input.kindsByName,
     })
     : [];
   const { proposals, evidence: saw } = auditAll(input);
@@ -350,7 +359,16 @@ export async function apply({ auditId, by = null }) {
     for (const p of accepted) {
       if (!DOES.has(p.action) || (p.action === 'repoint' && !p.proposed)) { advisory += 1; continue; }
 
-      if (p.subject_kind === 'word') {
+      if (p.subject_kind === 'kind') {
+        await keepRules('scope = $1 and subject = $2', ['kind', p.subject]);
+        if (p.action === 'exclude') {
+          await client.query("delete from shelf_rules where scope = 'kind' and subject = $1", [p.subject]);
+        } else if (p.action === 'repoint') {
+          await client.query(
+            `update shelf_rules set subcategory = $2, updated_at = now()
+              where scope = 'kind' and subject = $1`, [p.subject, p.proposed]);
+        } else { advisory += 1; continue; }
+      } else if (p.subject_kind === 'word') {
         await keepWord(p.subject);
         await keepRules('subject = $1 or subject = $2', [`google:${p.subject}`, p.subject]);
         if (p.action === 'exclude') {
@@ -413,6 +431,13 @@ export async function apply({ auditId, by = null }) {
               await client.query(
                 `update shelf_rules set subcategory = $2, updated_at = now()
                   where subject = $1 or subject = $3`, [`google:${w}`, half.key, w]);
+            }
+            // And the Wikidata types, which is how most of these are filed.
+            for (const name of half.kinds ?? []) {
+              await keepRules('scope = $1 and lower(subject_label) = $2', ['kind', name.toLowerCase()]);
+              await client.query(
+                `update shelf_rules set subcategory = $2, updated_at = now()
+                  where scope = 'kind' and lower(subject_label) = $1`, [name.toLowerCase(), half.key]);
             }
           }
           // The source keeps whatever nobody named. Retired only if it is
