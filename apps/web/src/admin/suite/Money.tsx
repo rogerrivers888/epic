@@ -303,6 +303,8 @@ type TableRow = {
   gap?: string | null;
   detail?: boolean;
   memo?: string | null;
+  /** False where a column is not a question this row answers at all. */
+  applies?: boolean;
 };
 
 function StreamTable({ suite, fmt, stream, onStream, per }: {
@@ -318,19 +320,42 @@ function StreamTable({ suite, fmt, stream, onStream, per }: {
       ),
     },
     { key: 'units', label: 'Units', width: 70, cell: (r) => <Cell muted>{r.units == null ? '—' : fmt.plain.count(r.units)}</Cell> },
-    { key: 'revenue', label: 'Revenue', width: 90, cell: (r) => <Cell strong={!r.detail} gap={r.gap}>{fmt.revenue.money(r.revenue)}</Cell> },
+    {
+      key: 'revenue', label: 'Revenue', width: 90,
+      // A dash where there is nothing to have — the research class earns no
+      // revenue by definition — and a reason only where a figure ought to exist
+      // and does not.
+      cell: (r) => <Cell strong={!r.detail} gap={r.gap}>{r.applies === false ? '—' : fmt.revenue.money(r.revenue)}</Cell>,
+    },
     // A number, so Per subscriber converts it and the period restates it — the
     // stock/flow rule's second consequence, which a pre-formatted "£17.77"
     // quietly broke.
-    { key: 'avg', label: 'Avg unit', width: 80, cell: (r) => <Cell muted gap={r.gap}>{fmt.plain.money(r.avgUnit)}</Cell> },
-    { key: 'churn', label: 'Churn', width: 64, cell: (r) => <Cell muted gap={r.detail ? undefined : suite.gaps.churn}>{r.churn ?? (r.detail ? '—' : null)}</Cell> },
+    { key: 'avg', label: 'Avg unit', width: 80, cell: (r) => <Cell muted gap={r.gap}>{r.applies === false ? '—' : fmt.plain.money(r.avgUnit)}</Cell> },
+    {
+      key: 'churn', label: 'Churn', width: 64,
+      /**
+       * Only subscriptions can churn.
+       *
+       * A hotel booking is not cancelled every month — there is no such figure
+       * for the other three streams, so they read as a dash. Printing "No
+       * subscription state" against a booking stream said we had failed to
+       * measure something that does not exist (20 Sep 2026, the separate audit).
+       */
+      cell: (r) => (r.key === 'subscriptions' && !r.detail
+        ? <Cell muted gap={suite.gaps.churn}>{r.churn}</Cell>
+        : <Cell muted>—</Cell>),
+    },
     { key: 'cost', label: 'Cost', width: 80, cell: (r) => <Cell gap={r.detail ? undefined : suite.money.totalGap}>{r.detail ? '—' : fmt.cost.money(r.cost)}</Cell> },
     { key: 'margin', label: 'Margin', width: 90, cell: (r) => <Cell gap={r.detail ? undefined : suite.money.totalGap}>{r.detail ? '—' : fmt.revenue.money(r.margin)}</Cell> },
     {
       key: 'marginPct', label: 'Margin %', width: 74,
-      cell: (r) => <Cell gap={r.detail ? undefined : suite.money.totalGap}>{r.detail ? '—' : r.marginPct == null ? null : `${r.marginPct}%`}</Cell>,
+      cell: (r) => (
+        <Cell gap={r.detail || r.applies === false ? undefined : suite.money.totalGap}>
+          {r.detail || r.applies === false ? '—' : r.marginPct == null ? null : `${r.marginPct}%`}
+        </Cell>
+      ),
     },
-    { key: 'perSub', label: 'Per sub', width: 70, cell: (r) => <Cell muted gap={r.detail ? undefined : r.gap}>{r.perSub == null ? '—' : fmt.plain.money(r.perSub)}</Cell> },
+    { key: 'perSub', label: 'Per sub', width: 70, cell: (r) => <Cell muted gap={r.detail || r.applies === false ? undefined : r.gap}>{r.perSub == null ? '—' : fmt.plain.money(r.perSub)}</Cell> },
     { key: 'growth', label: 'Growth', width: 70, cell: (r) => <Cell lime>{fmt.revenue.delta(r.growth) ?? '—'}</Cell> },
   ];
 
@@ -362,6 +387,7 @@ function StreamTable({ suite, fmt, stream, onStream, per }: {
       id: 'research', key: 'research', label: 'Research · unallocated',
       units: null, revenue: null, avgUnit: null, churn: null,
       cost: research, margin: -research, marginPct: null, perSub: null, growth: null,
+      applies: false,
     });
   }
 
@@ -489,6 +515,31 @@ function Breakdown({ suite, fmt, stream }: { suite: Suite; fmt: Fmt; stream: str
       {rows('selling') ? (
         <SuitePanel title="How own hosts sell">
           <Bars rows={rows('selling')} format={money} />
+        </SuitePanel>
+      ) : null}
+
+      {/* What a subscriber is worth and what one costs to get. The numbers
+          model names LTV £284 at 3.8% churn, CAC £41 and a 3.8-month payback,
+          and nothing was drawing them — which on a screen about margin is the
+          one thing a reader would go looking for. */}
+      {stream === 'subscriptions' ? (
+        <SuitePanel title="What a subscriber is worth">
+          {suite.money.unitEconomics ? (
+            <>
+              <Kv label="Lifetime value" value={fmt.revenue.money(suite.money.unitEconomics.ltv)} strong lime />
+              <Kv label={`At ${suite.money.unitEconomics.churnPct}% churn a month`} value={`${suite.money.unitEconomics.lifeMonths} months`} />
+              <Kv label="Cost to acquire" value={fmt.revenue.money(suite.money.unitEconomics.cac)} />
+              <Kv label="Payback" value={`${suite.money.unitEconomics.paybackMonths} months`} />
+              <Kv
+                label="Value over cost"
+                value={suite.money.unitEconomics.cac
+                  ? `${Math.round((suite.money.unitEconomics.ltv / suite.money.unitEconomics.cac) * 10) / 10}×`
+                  : null}
+                strong
+                last
+              />
+            </>
+          ) : <Gap says={suite.money.unitEconomicsGap} />}
         </SuitePanel>
       ) : null}
 

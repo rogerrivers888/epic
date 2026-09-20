@@ -117,24 +117,25 @@ export function useHouseholdRecord(id: string | null, period: PeriodKey, source:
   const [record, setRecord] = useState<HouseholdRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!id) { setRecord(null); return; }
-    let live = true;
-    (async () => {
-      try {
-        const body = await api.adminSuiteHousehold(id, { period, data: source });
-        // The record is a wide, screen-shaped object rather than a narrow type:
-        // it is one household's whole file, and every panel reads a different
-        // corner of it. The cast is the one place that is admitted.
-        if (live) { setRecord(body.household as HouseholdRecord); setError(null); }
-      } catch (e: any) {
-        if (live) setError(e instanceof ApiError && e.status === 404 ? 'No such household.' : 'Could not reach Epic.');
-      }
-    })();
-    return () => { live = false; };
+    try {
+      const body = await api.adminSuiteHousehold(id, { period, data: source });
+      // The record is a wide, screen-shaped object rather than a narrow type:
+      // it is one household's whole file, and every panel reads a different
+      // corner of it. The cast is the one place that is admitted.
+      setRecord(body.household as HouseholdRecord);
+      setError(null);
+    } catch (e: unknown) {
+      setError(e instanceof ApiError && e.status === 404 ? 'No such household.' : 'Could not reach Epic.');
+    }
   }, [id, period, source]);
 
-  return { record, error };
+  // `reload` so an action taken on the record — granting a trial — can read it
+  // back rather than leave the screen showing what was true before.
+  useEffect(() => { void load(); }, [load]);
+
+  return { record, error, reload: load };
 }
 
 /**

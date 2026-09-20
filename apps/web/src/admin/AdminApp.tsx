@@ -107,12 +107,16 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    */
   { key: 'customers', label: 'Customers', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'Reporting' },
   /**
-   * Suppliers is money end to end — spend, a rate, a variance — so it asks for
-   * the money capability rather than the reporting one. Advertising it to a
-   * reader who would get an empty screen is the fault Customers had the other
-   * way round (Codex, 20 Sep 2026).
+   * Suppliers asks for `view_reporting`, because that is what loads it.
+   *
+   * It is money end to end, so moving the gate to `view_financials` looked
+   * right — and it reads the estate model, which is `view_reporting`, so a role
+   * holding only the money capability saw the item and got a 403 (Codex, 20 Sep
+   * 2026, having just watched me fix the same fault on Customers the other way
+   * round). The rail advertises what opens; the screen's own `canSeeMoney`
+   * says what may be read inside it, which is how Money already works.
    */
-  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_financials', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
+  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_reporting', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
   { key: 'behaviour', label: 'Behaviour', icon: 'inspire', needs: 'view_reporting', sub: 'What households actually do, and whether they come back', group: 'Reporting' },
   /**
    * Data. Five screens that were each bound to a different table became three

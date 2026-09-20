@@ -25,7 +25,7 @@ import { Gap, Kv, KvAction, Spark, SuiteHead, SuitePage, SuitePanel, Trouble, Wa
 import { useFormatters } from './useSuite';
 import { share, type HouseholdRecord, type Suite } from './model';
 
-export function HouseholdRecordView({ record, error, gaps, onBack, controls, kicker, onFilterToFamily }: {
+export function HouseholdRecordView({ record, error, gaps, onBack, controls, kicker, onFilterToFamily, onTrial, trialBusy }: {
   record: HouseholdRecord | null;
   error: string | null;
   /**
@@ -39,6 +39,9 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
   controls?: React.ReactNode;
   kicker?: string | null;
   onFilterToFamily?: () => void;
+  /** Grant or extend a trial. Absent where the reader may not manage accounts. */
+  onTrial?: (what: 'grant' | 'extend') => void;
+  trialBusy?: 'grant' | 'extend' | null;
 }) {
   const { width } = useViewport();
   const fmt = useFormatters(null, null);
@@ -223,10 +226,44 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
         {/* Actions. Two of these are navigations and work; two need an endpoint
             that does not exist, and say so rather than pretending to fire. */}
         <SuitePanel title="Actions">
-          <Kv label="Grant a 30-day trial" value={null} gap="Needs a plan-change endpoint" />
-          <Kv label="Extend the current trial" value={null} gap="Needs a plan-change endpoint" />
-          <KvAction label="Filter every screen to this family" action="Apply" onPress={() => onFilterToFamily?.()} />
-          <Kv label="Open their chat history" value={null} gap="Chat is not joined to a household here yet" last />
+          {/* A trial is a plan and a date on the household's own account, which
+              `PATCH /api/accounts/:id` already sets and already writes a plan
+              history row for — so these are real, and `canManage` decides
+              whether they are controls or a sentence saying what is missing. */}
+          {onTrial ? (
+            <>
+              <KvAction
+                label="Grant a 30-day trial"
+                action={trialBusy === 'grant' ? 'Granting…' : 'Grant'}
+                disabled={!!trialBusy}
+                onPress={() => onTrial('grant')}
+              />
+              <KvAction
+                label="Extend the current trial"
+                action={record.status === 'active' && record.monthPence === 0
+                  ? (trialBusy === 'extend' ? 'Extending…' : 'Extend by 30 days')
+                  : 'Not on trial'}
+                done={!(record.status === 'active' && record.monthPence === 0) || !!trialBusy}
+                onPress={() => onTrial('extend')}
+              />
+            </>
+          ) : (
+            <>
+              <Kv label="Granting a trial" value={null} gap="Needs manage_accounts" />
+              <Kv label="Extending a trial" value={null} gap="Needs manage_accounts" />
+            </>
+          )}
+          {/* What it can honestly do: filter the customer list. Scoping
+              Overview, Money and Behaviour to one household needs a per-
+              household variant of every section — it is named as an open
+              question rather than promised by a button. */}
+          <KvAction label="Filter the customer list to this family" action="Apply" onPress={() => onFilterToFamily?.()} />
+          <Kv
+            label="Open their chat history"
+            value={null}
+            gap="Chat belongs to a trip or an offer, not to a household"
+            last
+          />
         </SuitePanel>
       </View>
     </SuitePage>

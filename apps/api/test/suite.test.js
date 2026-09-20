@@ -343,24 +343,43 @@ test('a household keeps the price it was sold at when the price goes up', async 
   const was = { plan: a.plan, status: a.status };
   const { rows: [price] } = await query(
     "select amount_pence, annual_discount_pct from plan_prices where plan_key='household' and channel='web' and effective_to is null");
+  /**
+   * Everything this test writes is remembered by id and removed by id.
+   *
+   * The first version deleted *every* history row for the account and left its
+   * own price rows in the insert-only table, so against a real estate it would
+   * have destroyed a household's plan history and accumulated pricing
+   * decisions nobody took (Codex, 20 Sep 2026).
+   */
+  const mine = { history: null, prices: [] };
   try {
     await query("update accounts set plan = 'household' where id = $1", [a.id]);
-    await query(
-      "insert into account_plan_history (account_id, plan, status, price_pence) values ($1, 'household', $2, 899)",
+    const { rows: [row] } = await query(
+      `insert into account_plan_history (account_id, plan, status, price_pence)
+       values ($1, 'household', $2, 899) returning id`,
       [a.id, a.status]);
+    mine.history = row.id;
     assert.equal((await readStanding()).mrrPence, 899, 'sold at £8.99');
 
-    await setPrice({ planKey: 'household', channel: 'web', amountPence: 1199, discountPct: 7, by: 'a test' });
+    const raised = await setPrice({ planKey: 'household', channel: 'web', amountPence: 1199, discountPct: 7, by: 'a test' });
+    if (raised.row) mine.prices.push(raised.row.id);
     // The price on the tier moved…
     assert.equal((await readTiers()).find((t) => t.key === 'household').webPence, 1199);
     // …and what this household is worth did not.
     assert.equal((await readStanding()).mrrPence, 899, 'grandfathered');
   } finally {
-    await setPrice({
-      planKey: 'household', channel: 'web',
-      amountPence: price.amount_pence, discountPct: Number(price.annual_discount_pct), by: 'a test, putting it back',
-    });
-    await query('delete from account_plan_history where account_id = $1', [a.id]);
+    // Put the rows back exactly: delete what this test inserted, then re-open
+    // the row it closed, rather than inserting a third one.
+    for (const id of mine.prices) await query('delete from plan_prices where id = $1', [id]);
+    if (mine.history) await query('delete from account_plan_history where id = $1', [mine.history]);
+    await query(
+      `update plan_prices set effective_to = null
+        where plan_key = 'household' and channel = 'web'
+          and id = (select id from plan_prices
+                     where plan_key = 'household' and channel = 'web'
+                     order by effective_from desc limit 1)`,
+    );
+    await query('update plans set price_pence = $1 where key = $2', [price.amount_pence, 'household']);
     await query('update accounts set plan = $2, status = $3 where id = $1', [a.id, was.plan, was.status]);
   }
 });

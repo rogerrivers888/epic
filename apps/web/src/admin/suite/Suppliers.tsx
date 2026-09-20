@@ -24,7 +24,9 @@ import { SupplierRecord } from './SupplierRecord';
 import { sortRows, type SupplierRow } from './model';
 
 const DIRECTIONS = ['all', 'cost', 'revenue'] as const;
-const SORTS = ['name', 'spend', 'variance', 'share'] as const;
+// Every header sorts (handoff §5: "sortable headers"). The chips are the
+// four somebody reaches for; the headers are all eight.
+const SORTS = ['name', 'unitName', 'unitCost', 'volume', 'spend', 'expected', 'variance', 'share'] as const;
 type Direction = typeof DIRECTIONS[number];
 type SortKey = typeof SORTS[number];
 
@@ -133,10 +135,10 @@ export function Suppliers({ canSeeMoney, canManage }: {
       key: 'name', label: 'Supplier', grow: true, align: 'left', sort: 'name',
       cell: (r) => <TwoLine top={r.name} bottom={r.direction === 'revenue' ? 'they pay us' : null} />,
     },
-    { key: 'unitName', label: 'What a unit is', width: 150, align: 'left', wideOnly: true, cell: (r) => <Cell muted left>{r.unitName}</Cell> },
-    { key: 'unitCost', label: 'Unit cost', width: 98, wideOnly: true, cell: (r) => <Cell muted>{r.unitCost}</Cell> },
+    { key: 'unitName', label: 'What a unit is', width: 150, align: 'left', sort: 'unitName', cell: (r) => <Cell muted left>{r.unitName}</Cell> },
+    { key: 'unitCost', label: 'Unit cost', width: 98, sort: 'unitCost', cell: (r) => <Cell muted>{r.unitCost}</Cell> },
         {
-      key: 'volume', label: 'Volume', width: 86,
+      key: 'volume', label: 'Volume', width: 86, sort: 'volume',
       /**
        * A dash rather than a reason.
        *
@@ -159,7 +161,7 @@ export function Suppliers({ canSeeMoney, canManage }: {
      * like once the reason has already been said.
      */
     { key: 'spend', label: 'This period', width: 98, sort: 'spend', cell: (r) => <Cell strong gap={r.gap}>{fmt.cost.money(r.spend)}</Cell> },
-    { key: 'expected', label: 'Expected', width: 88, cell: (r) => <Cell muted>{r.expected == null ? '—' : fmt.cost.money(r.expected)}</Cell> },
+    { key: 'expected', label: 'Expected', width: 88, sort: 'expected', cell: (r) => <Cell muted>{r.expected == null ? '—' : fmt.cost.money(r.expected)}</Cell> },
     {
       key: 'variance', label: 'Variance', width: 112, sort: 'variance',
       // Lime at fifteen per cent or more over: the one figure on this screen

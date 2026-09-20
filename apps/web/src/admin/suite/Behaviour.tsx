@@ -72,7 +72,13 @@ export function Behaviour() {
 
   /** A rate becomes an estate total by multiplying by the households it is a rate over. */
   const scaled = (v: number | null) => (v == null ? null : estate ? Math.round(v * base) : v);
-  const say = (v: number | null) => (v == null ? null : estate ? fmt.plain.count(v) : fmt.plain.count(v, 2));
+  /**
+   * A per-household rate keeps its decimals and drops a trailing zero — 7.1 and
+   * 0.76, not "7.10". Forcing two places made every whole-ish measure read as a
+   * price (20 Sep 2026, opening the screen); `count` already keeps two places
+   * for anything under ten and trims the zero.
+   */
+  const say = (v: number | null) => (v == null ? null : fmt.plain.count(v));
 
   if (chart) {
     return (
@@ -117,7 +123,9 @@ export function Behaviour() {
             value={say(scaled(m.value))}
             delta={fmt.plain.delta(m.delta)}
             deltaDown={(m.delta ?? 0) < 0}
-            series={m.series}
+            // No sparkline: the handoff says a Behaviour tile shows "the value
+            // and its change in lime, nothing else", and the twelve-month shape
+            // is what "Open the chart" is for.
             selected={m.key === measure}
             onPress={() => setMeasure(m.key as BMeasure)}
           />

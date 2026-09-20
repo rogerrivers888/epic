@@ -305,6 +305,24 @@ export function SupplierRecord({
       {/* The spend chart, in the standard drill shape (§7). */}
       {drill.ok ? (
         <>
+          {/* The three tiles §7 calls "the signed-off shape … use it for every
+              metric drill": the selected period, and the two run rates. They
+              were being computed and thrown away here, so the one drill reached
+              from a table row was the only one without them (20 Sep 2026). */}
+          <View style={styles.tiles}>
+            {drill.tiles.map((t, i) => (
+              <View key={t.label} style={[styles.tile, t.selected && styles.tileOn]}>
+                <Text style={[styles.tileKicker, t.selected && { color: colors.accent }]}>{t.label.toUpperCase()}</Text>
+                <Text style={styles.tileValue} numberOfLines={1}>
+                  {i === 0
+                    ? spend.money(t.value) ?? '—'
+                    : `${t.value >= 0 ? '+' : '−'}${Math.abs(t.value).toFixed(i === 1 ? 1 : 2)}% ${view === 'quarterly' ? '/ qtr' : '/ mo'}`}
+                </Text>
+                {t.change ? <Text style={[styles.tileDelta, t.down && { color: colors.inkMuted }]}>{t.change}</Text> : null}
+              </View>
+            ))}
+          </View>
+
           <View style={styles.rateRow}>
             <Text style={styles.kicker}>SPEND · {s.unitName?.toUpperCase() ?? 'PROVIDER CALL'}</Text>
             <View style={{ flex: 1 }} />
@@ -358,6 +376,23 @@ const labelOf = (p: PeriodKey) => LABELS[p] ?? 'This month';
 
 const styles = StyleSheet.create({
   panels: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'stretch' },
+  tiles: {
+    display: 'grid' as any,
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' as any,
+    gap: 14,
+  } as any,
+  tile: {
+    borderWidth: 1, borderColor: colors.lineSoft, backgroundColor: colors.surface,
+    paddingVertical: 16, paddingHorizontal: 18, gap: 8, minWidth: 0,
+  },
+  tileOn: {
+    borderColor: colors.lime, borderTopWidth: 3, borderTopColor: colors.lime,
+    backgroundColor: colors.panelWarm, paddingTop: 14,
+  },
+  tileKicker: { fontFamily: type.title.fontFamily, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.86, color: colors.inkMuted },
+  tileValue: { fontFamily: type.title.fontFamily, fontSize: 30, lineHeight: 34, fontWeight: '800', color: colors.ink, letterSpacing: -1.1 },
+  tileDelta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.accent },
+
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   kicker: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.inkMuted },
   charts: { flexDirection: 'row', gap: 22, alignItems: 'stretch', flexWrap: 'wrap' },

@@ -12,14 +12,15 @@
  * rule: instrument entry, derive exit.
  */
 
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 import { asOneOf, asText, useQueryState, useStickyQuery } from '../../router';
 import { spacing, type } from '../../theme';
 import {
-  Cell, Chip, ChipGroup, FilterBar, SearchBox, Standing, SuiteHead, SuitePage, SuiteTable, TwoLine,
-  Trouble, Waiting, type Col,
+  Bars, Cell, Chip, ChipGroup, FilterBar, SearchBox, Standing, SuiteHead, SuitePage, SuitePanel,
+  SuiteTable, TwoLine, Trouble, Waiting, type Col,
 } from './pieces';
+import { api, ApiError } from '../../api';
 import { SuiteControls, suiteKicker, useCustomers, useFormatters, useHouseholdRecord, useSuiteControls } from './useSuite';
 import { HouseholdRecordView } from './HouseholdRecord';
 import { joinedDay, lastSeen, share, sortRows, statusWord, type HouseholdRow } from './model';
@@ -31,21 +32,63 @@ type Status = typeof STATUSES[number];
 const SORTS = ['name', 'plan', 'monthPence', 'joined', 'lastSeenDays', 'places', 'daysOut', 'bookings', 'ratings', 'status'] as const;
 type SortKey = typeof SORTS[number];
 
-export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
+export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; canManage: boolean }) {
   const { period, setPeriod, source, setSource } = useSuiteControls();
-  useStickyQuery('admin.suite.customers', ['q', 'plan', 'status', 'sort', 'dir']);
+  useStickyQuery('admin.suite.customers', ['q', 'plan', 'status', 'sort', 'dir', 'guests']);
   const [q, setQ] = useQueryState<string>('q', '', asText);
   const [plan, setPlan] = useQueryState<Plan>('plan', 'All', asOneOf(PLANS, 'All'));
   const [status, setStatus] = useQueryState<Status>('status', 'All', asOneOf(STATUSES, 'All'));
   const [sort, setSort] = useQueryState<SortKey>('sort', 'places', asOneOf(SORTS, 'places'));
   const [dir, setDir] = useQueryState<'up' | 'down'>('dir', 'down', asOneOf(['up', 'down'] as const, 'down'));
   const [householdId, setHouseholdId] = useQueryState<string>('household', '', asText);
+  /**
+   * Whether guests are in the list.
+   *
+   * Rule 4: "Guest-invite households are ~15% of the estate and ~4% of revenue;
+   * **the default view excludes them**." A guest invited to somebody else's trip
+   * is a household of its own and a success, and counting them beside a trial
+   * signup makes activation read as broken while the business works. The chip
+   * is there because they are real and somebody will want to see them.
+   */
+  const [guests, setGuests] = useQueryState<boolean>('guests', false, {
+    read: (r) => r === '1', write: (v) => (v ? '1' : null),
+  });
 
   // The list alone, through the accounts-gated read — not the whole estate
   // model, which needs `view_reporting` (Codex, 20 Sep 2026).
   const { customers, gaps, error, reading, reload } = useCustomers(period, source);
+  const [trialBusy, setTrialBusy] = useState<'grant' | 'extend' | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
   const fmt = useFormatters(null, null);
-  const { record, error: recordError } = useHouseholdRecord(householdId || null, period, source);
+  const { record, error: recordError, reload: reloadRecord } = useHouseholdRecord(householdId || null, period, source);
+
+  /**
+   * Grant or extend a thirty-day trial.
+   *
+   * `PATCH /api/accounts/:id` already puts an account on a plan and sets its
+   * trial end date, and already writes an `account_plan_history` row for the
+   * change — which is what makes the household record's lifetime subscription
+   * figure agree with its plan history afterwards.
+   */
+  const trial = useCallback(async (what: 'grant' | 'extend') => {
+    if (!record?.accountId) return;
+    setTrialBusy(what);
+    try {
+      const ends = new Date();
+      ends.setDate(ends.getDate() + 30);
+      await api.updateAccount(record.accountId, {
+        ...(what === 'grant' ? { plan: 'trial', status: 'active' } : {}),
+        trialEndsOn: ends.toISOString().slice(0, 10),
+      });
+      await reloadRecord();
+      await reload();
+    } catch (e: unknown) {
+      // Said where the action was taken, in plain words.
+      setTrouble(e instanceof ApiError ? e.message : 'Could not reach Epic.');
+    } finally {
+      setTrialBusy(null);
+    }
+  }, [record?.accountId, reloadRecord, reload]);
 
   const controls = <SuiteControls period={period} setPeriod={setPeriod} source={source} setSource={setSource} />;
 
@@ -64,14 +107,25 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
         error={recordError}
         gaps={gaps}
         onBack={() => setHouseholdId('')}
-        onFilterToFamily={() => setHouseholdId('')}
+        onFilterToFamily={() => {
+          // Filter, rather than only close: the search box is what the list is
+          // narrowed by, so the household's own name goes into it and the
+          // record steps back to a list of one.
+          setQ(record?.name ?? '', { replace: true });
+          setGuests(true, { replace: true });
+          setHouseholdId('');
+        }}
+        onTrial={canManage ? trial : undefined}
+        trialBusy={trialBusy}
         controls={controls}
         kicker={suiteKicker(source, period)}
       />
     );
   }
 
-  const all = customers.households;
+  const everyone = customers.households;
+  const all = guests ? everyone : everyone.filter((h) => h.origin !== 'guest_invite');
+  const guestCount = everyone.length - everyone.filter((h) => h.origin !== 'guest_invite').length;
   const needle = q.trim().toLowerCase();
   let rows = all.filter((h) => (needle
     ? `${h.name} ${h.area ?? ''}`.toLowerCase().includes(needle)
@@ -86,24 +140,37 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
     setDir('down', { replace: true });
   };
 
+  // A cancelled household is still a row you can read, at `#cfcac7` — the
+  // handoff's own value, which is `mutedOnInk` here. It used to be only the
+  // status cell that dimmed, so the row read as live with one grey word in it.
+  const gone = (h: HouseholdRow) => h.status === 'cancelled';
+
   const columns: Col<HouseholdRow>[] = [
     {
       key: 'name', label: 'Household', grow: true, align: 'left', sort: 'name',
-      cell: (h) => <TwoLine top={h.name} bottom={[h.area, h.people ? `${h.people} ${h.people === 1 ? 'person' : 'people'}` : null].filter(Boolean).join(' · ') || null} />,
+      cell: (h) => (
+        <TwoLine
+          top={h.name}
+          bottom={[h.area, h.people ? `${h.people} ${h.people === 1 ? 'person' : 'people'}` : null].filter(Boolean).join(' · ') || null}
+          muted={gone(h)}
+        />
+      ),
     },
     { key: 'plan', label: 'Plan', width: 92, align: 'left', sort: 'plan', cell: (h) => <Cell muted left>{h.plan}</Cell> },
     {
       key: 'mo', label: '£ / mo', width: 66, sort: 'monthPence',
       cell: (h) => (canSeeMoney
-        ? <Cell strong>{h.monthPence ? fmt.revenue.money(h.monthPence, { pence: true }) : '—'}</Cell>
-        : <Cell muted gap="view_financials">{null}</Cell>),
+        ? <Cell strong={!gone(h)} muted={gone(h)}>{h.monthPence ? fmt.revenue.money(h.monthPence, { pence: true }) : '—'}</Cell>
+        // Withheld, and it says so in words rather than printing the name of
+        // the capability at somebody (rule 7).
+        : <Cell muted gap="Withheld">{null}</Cell>),
     },
     { key: 'joined', label: 'Joined', width: 86, sort: 'joined', cell: (h) => <Cell muted>{joinedDay(h.joined)}</Cell> },
     { key: 'seen', label: 'Last seen', width: 86, sort: 'lastSeenDays', cell: (h) => <Cell muted>{lastSeen(h.lastSeenDays)}</Cell> },
-    { key: 'places', label: 'Places', width: 64, sort: 'places', cell: (h) => <Cell>{String(h.places)}</Cell> },
-    { key: 'out', label: 'Days out', width: 74, sort: 'daysOut', cell: (h) => <Cell>{String(h.daysOut)}</Cell> },
-    { key: 'bookings', label: 'Bookings', width: 78, sort: 'bookings', cell: (h) => <Cell>{String(h.bookings)}</Cell> },
-    { key: 'ratings', label: 'Ratings', width: 68, sort: 'ratings', cell: (h) => <Cell>{String(h.ratings)}</Cell> },
+    { key: 'places', label: 'Places', width: 64, sort: 'places', cell: (h) => <Cell muted={gone(h)}>{String(h.places)}</Cell> },
+    { key: 'out', label: 'Days out', width: 74, sort: 'daysOut', cell: (h) => <Cell muted={gone(h)}>{String(h.daysOut)}</Cell> },
+    { key: 'bookings', label: 'Bookings', width: 78, sort: 'bookings', cell: (h) => <Cell muted={gone(h)}>{String(h.bookings)}</Cell> },
+    { key: 'ratings', label: 'Ratings', width: 68, sort: 'ratings', cell: (h) => <Cell muted={gone(h)}>{String(h.ratings)}</Cell> },
     {
       // The last figure column is right-aligned and this one is left-aligned,
       // so without a gap of its own "9" and "Live" read as one string. The
@@ -129,6 +196,15 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
         <ChipGroup label="Status">
           {STATUSES.map((s) => <Chip key={s} label={s} on={status === s} onPress={() => setStatus(s, { replace: true })} />)}
         </ChipGroup>
+        {guestCount || guests ? (
+          <ChipGroup label="Guests">
+            <Chip
+              label={guests ? `${guestCount} included` : `${guestCount} hidden`}
+              on={guests}
+              onPress={() => setGuests(!guests, { replace: true })}
+            />
+          </ChipGroup>
+        ) : null}
       </FilterBar>
 
       <View style={{ gap: spacing.sm }}>
@@ -144,6 +220,18 @@ export function Customers({ canSeeMoney }: { canSeeMoney: boolean }) {
             : 'No households yet.'}
         />
       </View>
+
+      {/* How the estate arrived. Rule 4 — "origin slices everything" — and the
+          reason the list above hides guests by default: they are a sixth of the
+          households and a twenty-fifth of the revenue, and counting them beside
+          a trial signup makes activation read as broken. */}
+      <SuitePanel title="How they arrived">
+        <Bars
+          rows={customers.origins ?? null}
+          gap="Origin is not recorded"
+          format={(v) => fmt.plain.count(typeof v === 'number' ? v : null)}
+        />
+      </SuitePanel>
 
       <Standing
         items={[

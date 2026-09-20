@@ -62,11 +62,26 @@ export type Stream = {
   perSub: number | null;
   units: number | null;
   unitName: string;
-  avgUnit: string | null;
+  /** What one unit was worth — a number, so Per subscriber converts it. */
+  avgUnit: number | null;
   churn: string | null;
   series: number[] | null;
   estimated?: boolean;
   gap?: string | null;
+  /**
+   * The channels the money came through, indented under the stream in the table
+   * lens. They deliberately carry no cost and no margin: cost allocates at
+   * stream level only (handoff §2).
+   */
+  details?: {
+    label: string;
+    units: number | null;
+    revenue: number | null;
+    avgUnit: number | null;
+    growth: number | null;
+    /** A count that is not part of the units total — "14 bookings", free. */
+    memo?: string | null;
+  }[];
 };
 
 export type HouseholdRow = {
@@ -272,6 +287,8 @@ export type Suite = {
     households: HouseholdRow[]; shown: number; total: number;
     paying: number; payingMrr: number; trial: number;
     trialConvertPct: number | null; trialGranted: number | null; atRisk: number;
+    /** How the estate arrived — the slice rule 4 makes every figure subject to. */
+    origins?: Row[] | null;
   };
   subscriptions: Subscriptions;
   suppliers: {

@@ -52,6 +52,8 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
   const [billing, setBilling] = useQueryState<'monthly' | 'annual'>('billing', 'monthly', asOneOf(['monthly', 'annual'] as const, 'monthly'));
 
   const [model, setModel] = useState<Model | null>(null);
+  /** The tier being edited, and what its fields would make it. */
+  const [draft, setDraft] = useState<{ key: string; tier: Partial<Tier> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saying, setSaying] = useState<string | null>(null);
 
@@ -97,13 +99,31 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
   const tier = model.tiers.find((t) => t.key === tierKey) ?? model.tiers[0];
   const annual = billing === 'annual';
 
+  /**
+   * What has been typed but not yet saved, held on the screen rather than
+   * inside the price panel.
+   *
+   * The handoff: "Editing any field recalculates **the tile**, the derived rows
+   * and the revenue immediately." With the draft inside the panel the tile went
+   * on showing the saved price until somebody pressed Publish and the model came
+   * back (20 Sep 2026, the separate audit). The tile now reads the draft where
+   * there is one and the model where there is not.
+   */
+  const drafted = draft && draft.key === tier?.key ? { ...tier, ...draft.tier } : tier;
+
   return (
     <SuitePage>
       <SuiteHead title="Subscriptions" kicker={suiteKicker(source, period)} right={controls} />
 
       <TileGrid min={230}>
         {model.tiers.map((t) => (
-          <TierTile key={t.key} tier={t} annual={annual} selected={t.key === tier?.key} onPress={() => setTierKey(t.key)} />
+          <TierTile
+            key={t.key}
+            tier={t.key === drafted?.key ? drafted : t}
+            annual={annual}
+            selected={t.key === tier?.key}
+            onPress={() => setTierKey(t.key)}
+          />
         ))}
       </TileGrid>
 
@@ -113,7 +133,8 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
             tier={tier}
             canManage={canManage && source === 'real'}
             mock={source === 'mock'}
-            onSaved={async (says) => { setSaying(says); await load(); }}
+            onDraft={(patch) => setDraft(patch ? { key: tier.key, tier: patch } : null)}
+            onSaved={async (says) => { setSaying(says); setDraft(null); await load(); }}
           />
         ) : null}
         <ChannelPanel model={model} />
@@ -174,9 +195,19 @@ function TierTile({ tier, annual, selected, onPress }: {
   const whole = (pence: number | null) => (pence == null ? null : `£${Math.round(pence / 100).toLocaleString()}`);
 
   const value = annual ? whole(tier.annualWebPence) : money(tier.webPence);
-  const sub = annual
-    ? `a year on the website · ${tier.discountPct}% off · ${whole(tier.annualIosPence) ?? '—'} in the App Store`
-    : `a month on the website · ${money(tier.iosPence) ?? '—'} in the App Store`;
+  /**
+   * What the tile says under the price.
+   *
+   * A tier nobody is on says so on its face — "none yet · not launched" — as
+   * well as in the Subscribers footer. The handoff writes Pro's tile that way
+   * because a price with no subscribers and no note reads as a product that is
+   * failing rather than one that has not opened.
+   */
+  const sub = tier.subscribers === 0 && tier.note
+    ? `none yet · ${tier.note}`
+    : annual
+      ? `a year on the website · ${tier.discountPct}% off · ${whole(tier.annualIosPence) ?? '—'} in the App Store`
+      : `a month on the website · ${money(tier.iosPence) ?? '—'} in the App Store`;
 
   return (
     <MeasureTile
@@ -202,10 +233,12 @@ function TierTile({ tier, annual, selected, onPress }: {
  * there is anything outstanding, so "up to date" and "three changes to save"
  * are the same row rather than two states of a button.
  */
-function PricePanel({ tier, canManage, mock, onSaved }: {
+function PricePanel({ tier, canManage, mock, onDraft, onSaved }: {
   tier: Tier;
   canManage: boolean;
   mock: boolean;
+  /** What the fields would make this tier, so the tile above moves with them. */
+  onDraft: (patch: Partial<Tier> | null) => void;
   onSaved: (says: string) => void;
 }) {
   const fmt = useFormatters(null, null);
@@ -226,6 +259,31 @@ function PricePanel({ tier, canManage, mock, onSaved }: {
   const webPence = penceOf(web);
   const iosPence = penceOf(ios);
   const discPct = Number(disc) || 0;
+
+  /**
+   * Hand the tile what the fields would make this tier, every time they change.
+   *
+   * Derived here rather than in the tile so there is one place the annual rule
+   * lives — and reported upward rather than held privately, because the tile is
+   * a sibling and the handoff wants it to move as you type.
+   */
+  useEffect(() => {
+    const same = webPence === (tier.webPence ?? 0)
+      && iosPence === (tier.iosPence ?? 0)
+      && discPct === (tier.discountPct ?? 0);
+    onDraft(same ? null : {
+      webPence,
+      iosPence,
+      discountPct: discPct,
+      annualWebPence: annualPence(webPence, discPct),
+      annualIosPence: annualPence(iosPence, discPct),
+      iosUpliftPct: webPence ? Math.round((iosPence / webPence - 1) * 100) : null,
+      revenueAtThisPricePence: tier.subscribers * webPence,
+    });
+    // `onDraft` is a fresh closure on every render of the parent; depending on
+    // it would report a draft on every keystroke of any field on the screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [webPence, iosPence, discPct, tier]);
 
   const dirty = useMemo(() => (
     webPence !== (tier.webPence ?? 0)
