@@ -21,6 +21,7 @@ import express from 'express';
 import { can, requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
+import { decodeEntities } from '../repositories/placeIndex.js';
 import * as reach from '../repositories/reach.js';
 import { LIVE_ROW } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
@@ -1099,7 +1100,11 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       // — every attempt a 400 (Codex, 17 Sep 2026). The rule is changed on
       // Categories, and the warning beside the shelf says how far that travels.
       field('labels', 'Labels', (labelRows.map((l) => l.label).join(' · ') || null), 'ours', pi.indexed_at, null, false),
-      field('what_it_is', 'What it is', rec?.summary ?? att?.summary ?? null, rec?.summary_source ?? att?.summary_source ?? null, rec?.curated_at ?? null, 'what_it_is', true, 'write',
+      // Decoded on the way to the screen: what was read off a venue's own page
+      // carries its markup with it, and "Great for a snack, [&hellip;]" is not
+      // a sentence anybody wrote (20 Sep 2026, on the deployed place page).
+      // What is stored is left exactly as it was fetched.
+      field('what_it_is', 'What it is', decodeEntities(rec?.summary ?? att?.summary ?? '') || null, rec?.summary_source ?? att?.summary_source ?? null, rec?.curated_at ?? null, 'what_it_is', true, 'write',
             null, rec?.curated_from?.length ? `read from ${rec.curated_from.join(', ')}` : null),
       field('hours', 'Opening hours', hoursVal,
             factOf('opening_hours')?.source ?? (rec?.opening_hours ? 'ours' : atlasDetail?.hours ? 'atlas' : null),
