@@ -324,6 +324,17 @@ const row = (label, value, pct = null, opts = {}) => ({ label, value, pct, ...op
 const rate = (label, value) => row(label, value, null, { rate: true });
 
 /**
+ * Bar lengths, as a share of the biggest in the set.
+ *
+ * The design draws a bar row against the largest figure rather than against a
+ * total, so the longest bar is always full and the rest are read against it.
+ */
+const bars = (rows) => {
+  const max = Math.max(1, ...rows.map((r) => (typeof r.value === 'number' ? r.value : 0)));
+  return rows.map((r) => ({ ...r, pct: typeof r.value === 'number' ? Math.round((r.value / max) * 100) : 0 }));
+};
+
+/**
  * The whole model, with every flow quoted per month.
  *
  * Read the shape here rather than in the route: this is the contract the five
@@ -340,13 +351,15 @@ export function fixtures() {
       trial: 182,
       atRisk: 48,
       people: 3612,
-      origins: [
+      // 1 + 743 + 196 + 148 + 196 = 1,284, the whole estate. Guest invites are
+      // 15% of it, which is why the customer list hides them by default.
+      origins: bars([
         row('Founding', 1),
         row('Signed up', 743),
         row('Invited as a guest', 196),
         row('In somebody’s household', 148),
         row('From a host’s page', 196),
-      ],
+      ]),
     },
 
     // -----------------------------------------------------------------------

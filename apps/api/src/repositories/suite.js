@@ -168,10 +168,12 @@ async function estate(period) {
     trial: int(counts.trial),
     atRisk: int(risk.at_risk),
     people: int(counts.people),
-    origins: ['founding', 'signup', 'guest_invite', 'peer', 'marketplace'].map((k) => row(
+    // Bar lengths against the biggest, the same as every other bar list, so the
+    // panel draws rather than showing five empty tracks.
+    origins: bars(['founding', 'signup', 'guest_invite', 'peer', 'marketplace'].map((k) => row(
       ORIGIN_LABELS[k],
       int(origins.find((o) => o.origin === k)?.households),
-    )),
+    ))),
   };
 }
 
