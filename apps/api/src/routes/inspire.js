@@ -60,6 +60,7 @@ import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
 import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.js';
 import { fenceToBand, minutesTo } from '../domain/band.js';
+import { boundKm } from '../domain/reach.js';
 import { dwellFor } from '../domain/options.js';
 import { distinguish } from '../domain/naming.js';
 import { shelvesForAtlas, shelvesForVenue, FOOD_DRAWER } from '../domain/moods.js';
@@ -297,19 +298,25 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
      * places that were in reach and offering places that were not (Codex, 20
      * Sep 2026). The cells themselves are what the page is about.
      */
-    ringKey: `${ring.cell}|band|${[...(ring.band ?? ring.cells)].sort().join(',')}`,
-    // Fenced with the band, not the finder.
-    //
-    // `reachableCells` reads ten minutes past what was asked, on purpose: a
-    // place near the edge of its sector can be inside the band while the
-    // sector's centre is outside it. That is right for finding and wrong for
-    // fencing — a box drawn round the wide ring spends its twenty results on
-    // the thirty-to-forty-minute hinterland and the exact pass puts most of
-    // them back. Food came back with two (20 Sep 2026). The box is the band's,
-    // with the two kilometres of margin `boxAround` already adds, so a place at
-    // the edge of a band sector is still found and the exact pass still judges
-    // it.
-    box: ring.bandBox ?? ring.box, cells: ring.band ?? ring.cells,
+    ringKey: `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}`,
+    /**
+     * A box the size of the journey, not the shape of the sectors.
+     *
+     * Drawn round the finder, the search spent most of its twenty on the
+     * thirty-to-forty-minute hinterland and the exact pass put them back.
+     * Drawn round the band's sectors, it collapsed at the small end: a
+     * five-minute band is *one sector*, because sector centres are two to four
+     * kilometres apart and a centre-to-centre time overstates every short
+     * journey — which is the topology half of the finder's allowance, and
+     * exactly what it exists to cover.
+     *
+     * So the box is neither. It is a rectangle round where the household
+     * actually is, as wide as `boundKm` says this many minutes could possibly
+     * reach in a straight line. Topology cannot distort it and the finder's
+     * allowance is not in it. Whatever comes back, the exact pass judges each
+     * place on its own point.
+     */
+    box: searchBox, cells: null,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
   /**
@@ -333,6 +340,15 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // from. Written here by hand it was written twice, and the second copy went
   // on using the finder's ring after the first was corrected (20 Sep 2026).
   const start = from ?? ring.at ?? null;
+  const reachKm = boundKm(minutes, mode);
+  const searchBox = start
+    ? {
+      minLat: start.lat - reachKm / 111.32,
+      maxLat: start.lat + reachKm / 111.32,
+      minLng: start.lng - reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
+      maxLng: start.lng + reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
+    }
+    : ring.bandBox ?? ring.box;
 
   // The fence is the ring, and the question was the category.
   //

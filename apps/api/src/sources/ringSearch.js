@@ -231,13 +231,16 @@ export async function categoryPage({
     'gas_station', 'bank', 'atm', 'insurance_agency', 'real_estate_agency', 'travel_agency',
     'lodging', 'hotel', 'storage', 'moving_company', 'warehouse_store',
   ]);
-  const inRing = new Set(cells);
+  // A search fenced by a geographic box needs no sector test: the exact pass
+  // judges every place on its own point, which is finer than any sector. `null`
+  // means "keep what the box returned and let the band decide".
+  const inRing = cells ? new Set(cells) : null;
   const placed = await Promise.all(out.venues.map(async (v) => {
     if (v.lat == null || v.lng == null) return null;
     if (category !== 'food' && SHOPS.has(v.primaryType)) return null;
     const at = await cellAt({ lat: v.lat, lng: v.lng }).catch(() => null);
-    if (!at?.code || !inRing.has(at.code)) return null;
-    return { ...v, cell: at.code, outcode: outcodeOfCell(at.code) };
+    if (inRing && (!at?.code || !inRing.has(at.code))) return null;
+    return { ...v, cell: at?.code ?? null, outcode: at?.code ? outcodeOfCell(at.code) : null };
   }));
   const kept_ = placed.filter(Boolean);
 
