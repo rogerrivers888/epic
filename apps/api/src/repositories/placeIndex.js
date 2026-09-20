@@ -1967,9 +1967,20 @@ export async function categories(areaSlug, { refs = null, category = null, since
   const scope = refs
     ? { sql: 'pi.venue_ref = any($1)', args: [refs] }
     : { sql: 'exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $1)', args: [slug] };
+  // "Can show" is the count that answers the owner's question of 20 Sep 2026:
+  // the board said 423 places in Fun inside this ring and the app showed five.
+  // Most of the difference is places we know only as a provider's identifier —
+  // real, countable, and not something a household may ever be shown, because
+  // we hold no name for them that is ours. The same name rule as `namesFor`
+  // and the household view, so the three never disagree.
+  const SHOWABLE = `coalesce(r.name, case when a.display_source is distinct from 'google' then a.name end,
+                             case when pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
+                                       or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%'
+                                  then sp.name end)`;
   const { rows: held } = await query(`
     select pi.category, pi.subcategory,
            count(*)::int as known,
+           count(*) filter (where ${SHOWABLE} is not null)::int as showable,
            count(*) filter (where pi.ownership = 'owned')::int as owned,
            count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where pi.ownership = 'identified')::int  as identified,
@@ -1981,14 +1992,24 @@ export async function categories(areaSlug, { refs = null, category = null, since
            -- and the row read differently for the same category, which the
            -- design's fourth law forbids (17 Sep 2026, the verification audit).
            count(pi.data_score)::int as scored
-      from place_index pi where ${scope.sql}
+      from place_index pi
+      left join place_records r on r.venue_ref = pi.venue_ref
+      left join lateral (
+        select a2.* from attractions a2
+         where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+           and a2.state <> 'hidden'
+         order by a2.last_seen desc, a2.id limit 1) a on true
+      left join lateral (
+        select s2.name from scout_places s2 where s2.venue_ref = pi.venue_ref
+         order by s2.last_seen desc limit 1) sp on true
+     where ${scope.sql}
      group by pi.category, pi.subcategory`, scope.args);
   const bySub = new Map(held.filter((h) => h.subcategory).map((h) => [h.subcategory, h]));
   const byCat = new Map();
   for (const h of held) {
     if (!h.category) continue;
-    const c = byCat.get(h.category) ?? { known: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, sum: 0, n: 0 };
-    c.known += h.known; c.owned += h.owned; c.claimed += h.claimed; c.identified += h.identified; c.ready_count += h.ready_count;
+    const c = byCat.get(h.category) ?? { known: 0, showable: 0, owned: 0, claimed: 0, identified: 0, ready_count: 0, sum: 0, n: 0 };
+    c.known += h.known; c.showable += h.showable; c.owned += h.owned; c.claimed += h.claimed; c.identified += h.identified; c.ready_count += h.ready_count;
     if (h.avg_score != null && h.scored) { c.sum += h.avg_score * h.scored; c.n += h.scored; }
     byCat.set(h.category, c);
   }
@@ -2045,7 +2066,7 @@ export async function categories(areaSlug, { refs = null, category = null, since
       const d = demand.get(t.category_key);
       current = {
         key: t.category_key, label: t.category_label, subcategories: [],
-        known: c?.known ?? 0, owned: c?.owned ?? 0, claimed: c?.claimed ?? 0, identified: c?.identified ?? 0,
+        known: c?.known ?? 0, showable: c?.showable ?? 0, owned: c?.owned ?? 0, claimed: c?.claimed ?? 0, identified: c?.identified ?? 0,
         readyCount: c?.ready_count ?? 0, ready: readyShare(c?.ready_count ?? 0, c?.known ?? 0),
         avgScore: c && c.n ? Math.round(c.sum / c.n) : null,
         searches: d?.searches ?? 0, empty: d?.empty ?? 0,
@@ -2059,7 +2080,7 @@ export async function categories(areaSlug, { refs = null, category = null, since
     const bar = bars_.get(t.sub_key) ?? [];
     current.subcategories.push({
       key: t.sub_key, label: t.sub_label, category: t.category_key,
-      known: h?.known ?? 0, owned: h?.owned ?? 0, claimed: h?.claimed ?? 0, identified: h?.identified ?? 0,
+      known: h?.known ?? 0, showable: h?.showable ?? 0, owned: h?.owned ?? 0, claimed: h?.claimed ?? 0, identified: h?.identified ?? 0,
       readyCount: h?.ready_count ?? 0, ready: h ? readyShare(h.ready_count, h.known) : null,
       avgScore: h?.avg_score == null ? null : Math.round(h.avg_score),
       searches: d?.searches ?? 0, empty: d?.empty ?? 0,

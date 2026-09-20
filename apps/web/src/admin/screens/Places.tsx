@@ -777,12 +777,17 @@ function RingChooser({ minutes, here, mode, onMinutes, onMode, cells, modesBuilt
   // band — the API draws one whether or not it was asked for — so the control
   // says that rather than naming a scope that is not on the screen.
   const chosen = ring ? bandLabel(minutes as number) : here ? `${here} only` : bandLabel(BANDS[0]);
+  // While the list is open the explanation stands down: it is drawn over the
+  // list, and the list is what you opened it to use (owner, 20 Sep 2026: "this
+  // hover-over box keeps overlaying the dropdown so that I can't actually
+  // interact with the dropdown").
+  const [listOpen, setListOpen] = useState(false);
   return (
     <View style={styles.chooser}>
-      <Explain tip={['How far out', !ring || cells == null
+      <Explain tip={listOpen ? null : ['How far out', !ring || cells == null
         ? 'How far to look around this place. The driving time between every postcode area is worked out once, so answering this does no sums.'
         : `${cells.toLocaleString()} postcode areas are within ${bandLabel(minutes as number)} of here. That was worked out once, so answering this does no sums.`]}>
-        <Dropdown label="How far" value={chosen} width={200}
+        <Dropdown label="How far" value={chosen} width={200} onOpenChange={setListOpen}
                   options={[
                     // Named, not "no ring": a list whose first line is an
                     // absence reads as a way of clearing the control rather
@@ -846,7 +851,7 @@ function AreaSearch({ onWhere, onPlace }: {
                    placeholderTextColor={colors.inkMuted} style={styles.searchInput}
                    accessibilityLabel="Search for a county, town, postcode or place" />
       </View>
-      {out && !out.areas.length && !out.postcode && !(out.places ?? []).length ? (
+      {out && !out.areas.length && !out.postcode && !(out.places ?? []).length && !(out.elsewhere ?? []).length ? (
         // Never nothing. A box that does nothing when you type into it reads as
         // broken, and this one did (owner, 18 Sep 2026: "when I search for
         // Sunningdale, nothing happens").
@@ -854,7 +859,7 @@ function AreaSearch({ onWhere, onPlace }: {
           <View style={styles.suggestRow}><Text style={styles.suggestKind}>Nothing here by that name.</Text></View>
         </View>
       ) : null}
-      {out && (out.areas.length || out.postcode || (out.places ?? []).length) ? (
+      {out && (out.areas.length || out.postcode || (out.places ?? []).length || (out.elsewhere ?? []).length) ? (
         <View style={styles.suggest}>
           {out.postcode ? (
             <View style={styles.suggestPostcode}>
@@ -890,6 +895,19 @@ function AreaSearch({ onWhere, onPlace }: {
                 {[a.parent ? `${a.kind} · ${a.parent}` : a.kind,
                   a.known == null ? null : a.known ? `${a.known.toLocaleString()} known` : 'we hold none',
                 ].filter(Boolean).join(' · ')}
+              </Text>
+            </Press>
+          ))}
+          {/* A town the open map knows and we hold no area for: it opens the
+              outcode it sits in, because that is a board we can draw. The row
+              says so rather than pretending we have a Sunningdale board. */}
+          {(out.elsewhere ?? []).map((e) => (
+            <Press key={e.slug + e.name} effect="none" accessibilityRole="button" accessibilityLabel={`${e.name} — opens ${e.outcode}`}
+                   onPress={() => { setQ(''); setOut(null); onWhere(e.slug, intoArea('postcode')); }} style={styles.suggestRow}>
+              <Text style={styles.suggestName}>{e.name}</Text>
+              <Text style={styles.suggestKind}>
+                {[`${e.kind} · opens ${e.outcode}`, e.known ? `${e.known.toLocaleString()} known` : 'we hold none', e.where]
+                  .filter(Boolean).join(' · ')}
               </Text>
             </Press>
           ))}
@@ -1226,7 +1244,10 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
           <Text style={styles.rowNote}>{`${c.subcategories.length} subcategories`}</Text>
         </View>
       ) },
-    { key: 'known', label: 'Known', tip: 'known', width: 104, align: 'right', sort: 'known', cell: (c) => <Num n={c.known || null} /> },
+    { key: 'known', label: 'Known', tip: 'known', width: 96, align: 'right', sort: 'known', cell: (c) => <Num n={c.known || null} /> },
+    { key: 'showable', label: 'Can show', width: 104, align: 'right', sort: 'showable',
+      tip: ['Can show', 'How many of them a household could actually be shown: we hold a name for them that is ours to show. The rest are real places known to us only by a provider\u2019s identifier — they count as Known, and they are why the app lists fewer than this board does.'],
+      cell: (c) => <Num n={c.showable || null} strong accent={Boolean(c.known) && (c.showable ?? 0) < c.known / 2} /> },
     { key: 'owned', label: 'Owned', tip: 'owned', width: 96, align: 'right', sort: 'owned', cell: (c) => <Num n={c.owned || null} /> },
     { key: 'ident', label: 'Identified only', tip: 'identifiedOnly', width: 140, align: 'right', sort: 'identified', cell: (c) => <Num n={c.identified || null} /> },
     { key: 'ready', label: 'Ready', tip: 'readyShort', width: 104, align: 'right', sort: 'ready', cell: (c) => <Pct v={c.ready} strong min={52} /> },
@@ -1361,7 +1382,10 @@ function SubcategoryLadder({ rows, onSub, factLabel, canManage, inRing, of, grou
     // has a bare heading. One component, two boards (audit, 18 Sep 2026).
     { key: 'label', label: 'Our subcategory', note: inRing && of ? `${rows.length} of ${of}` : undefined, tip: 'ourSubcategory', grow: true,
       cell: (s) => <Text style={[styles.rowName, s.known === 0 && styles.rowNameEmpty]}>{s.label}</Text> },
-    { key: 'known', label: 'Known', tip: 'known', width: 96, align: 'right', cell: (s) => <Num n={s.known || null} /> },
+    { key: 'known', label: 'Known', tip: 'known', width: 90, align: 'right', cell: (s) => <Num n={s.known || null} /> },
+    { key: 'showable', label: 'Can show', width: 100, align: 'right',
+      tip: ['Can show', 'How many of them a household could actually be shown: we hold a name for them that is ours to show. The rest are real places known to us only by a provider\u2019s identifier.'],
+      cell: (s) => <Num n={s.showable || null} strong accent={Boolean(s.known) && (s.showable ?? 0) < s.known / 2} /> },
     { key: 'owned', label: 'Owned', tip: 'owned', width: 88, align: 'right', cell: (s) => <Num n={s.owned || null} /> },
     ...(inRing ? [{ key: 'ident', label: 'Identified only', tip: 'identifiedOnly', width: 140, align: 'right', cell: (s: any) => <Num n={s.identified || null} /> } as Col<any>] : []),
     { key: 'ready', label: 'Ready', tip: inRing ? 'readyShort' : 'ready', width: 96, align: 'right', cell: (s) => <Pct v={s.ready} min={48} /> },

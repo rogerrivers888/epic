@@ -602,7 +602,7 @@ function useCloseOutside(open: boolean, ref: React.RefObject<any>, close: () => 
   }, [open, ref, close]);
 }
 
-export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick, soft = false }: {
+export function Dropdown({ label, value, options, onPick, multi = false, width = 260, quick, soft = false, onOpenChange }: {
   label: string;
   value: string;
   options: DropdownOption[];
@@ -612,8 +612,23 @@ export function Dropdown({ label, value, options, onPick, multi = false, width =
   quick?: { key: string; label: string }[];
   /** Lookup's softer panel: a rounded corner and the soft rule. The control is plain text either way. */
   soft?: boolean;
+  /**
+   * Told when the list opens, so what wraps the control can get out of its way.
+   *
+   * An `Explain` round a dropdown draws its hover box over the open list, and
+   * the list is underneath it: the words you came to click cannot be reached
+   * (owner, 20 Sep 2026, the How far list on SL5).
+   */
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = useCallback((next: boolean | ((v: boolean) => boolean)) => {
+    setOpenState((v) => {
+      const to = typeof next === 'function' ? next(v) : next;
+      if (to !== v) onOpenChange?.(to);
+      return to;
+    });
+  }, [onOpenChange]);
   const wrapRef = React.useRef<any>(null);
   useCloseOutside(open, wrapRef, useCallback(() => setOpen(false), []));
   const groups = useMemo(() => {

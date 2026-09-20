@@ -25,6 +25,8 @@ import { decodeEntities } from '../repositories/placeIndex.js';
 import * as reach from '../repositories/reach.js';
 import { LIVE_ROW } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
+import { searchAreas } from '../sources/areas.js';
+import { outcodesFor } from '../sources/localities.js';
 import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
 import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
 import { writeAudit } from '../repositories/roles.js';
@@ -2974,8 +2976,49 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
          from best b join place_index pi on pi.venue_ref = b.venue_ref
         limit 8`, [`%${q}%`]);
     const sector = sectorOf(q);
+    /**
+     * A town the open map knows and we have no area for.
+     *
+     * "Sunningdale" is a real village with real places in it, and this box
+     * answered "Nothing here by that name" because nothing is *filed* under it
+     * — its places live under SL5 (owner, 20 Sep 2026: "when I search for it on
+     * the website, Sunningdale does not even come up… SL5 does work, which is
+     * where Sunningdale is"). The app has always found it, because the app asks
+     * the open map.
+     *
+     * So when our own tables have nothing, the same open typeahead the app uses
+     * answers — free, keyless, ODbL, cached for the day — and each answer is
+     * resolved to the outcode it sits in, because an outcode is a board we can
+     * actually draw. Only when we found no area of our own: a search that
+     * already worked never waits on anybody else.
+     */
+    const elsewhere = rows.length || sector ? [] : await (async () => {
+      const found = await searchAreas(q, { limit: 5, countryCode: 'GB' }).catch(() => []);
+      const towns = found.filter((f) => f.lat != null && f.lng != null).slice(0, 5);
+      if (!towns.length) return [];
+      const answers = await outcodesFor(towns.map((t) => ({ lat: t.lat, lng: t.lng }))).catch(() => []);
+      const out = [];
+      for (let i = 0; i < towns.length; i += 1) {
+        const outcode = answers[i]?.outcode ?? ((answers[i]?.postcode ?? '').split(' ')[0] || null);
+        if (!outcode) continue;
+        const slug = outcode.toLowerCase();
+        const known = (await query(
+          `select coalesce((select s.places from area_stats s
+                             where s.area_slug = $1 and s.category = '' and s.subcategory = ''
+                               and s.source = '' and s.ownership = ''), 0) as known`, [slug])).rows[0].known;
+        out.push({
+          name: towns[i].name, kind: towns[i].kind ?? 'town',
+          where: towns[i].where ?? towns[i].parent ?? null,
+          outcode, slug, known: Number(known) || 0,
+        });
+      }
+      // One row per outcode: five villages in SL5 is one board.
+      const seen = new Set();
+      return out.filter((o) => !seen.has(o.slug) && seen.add(o.slug));
+    })();
     res.json({
       areas: rows.map((r) => ({ slug: r.slug, name: r.name, kind: r.kind, parent: r.parent, known: r.known })),
+      elsewhere,
       places: named.filter((r) => r.name).map((r) => ({ ref: r.ref, name: r.name, where: r.where_ })),
       // A full postcode is not an area — it is a point, and a point takes a ring.
       postcode: sector ? { sector, cell: `sector:${sector}`, label: q.toUpperCase(), bands: BANDS, modes: MODES } : null,
