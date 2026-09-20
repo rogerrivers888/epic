@@ -856,6 +856,44 @@ An interval is part of a retention policy whether or not anybody wrote it down a
 
 **Whether a provider's figure may appear transiently on a back-office screen** — as it does on Lookup's not-owned list, which the owner asked for — is narrower and **still his**. Nothing in this section changes it.
 
+### 13.23 How Epic is taught — the training model (owner, 20 Sep 2026) — **partly built**
+
+> Owner, 20 Sep 2026: "What am I doing? Do I just go and have a look at 1 type of sports centre and say, 'This is an activity 3 to level 3, for example, adrenaline 3'? … How's it actually going to work in practise? We're very much reliant on the data that we get, which is basically just the category and subcategory." And: "I'm prepared to invest 20, 30, 40, 100 hours, whatever I need to … but only if it's really going to have a meaningful difference." And: "What I'm also scared about is then something just becoming invisible to me and me not knowing why."
+
+**The measured starting position** (production, 20 Sep 2026). 485 provider words, 483 answered. 64 primary labels in 8 categories. 7 secondary labels. Museums holds 1,595 places carrying 4,785 label values; Art galleries 63 and 126; Parks & commons 1,589 and 4,767. **Every one of those values came from the drawer's default.** Not one came from a place, from a word, or from a label brought by another — `setAt` is `subcategory` across the board. In the index, `derived_by` is harvest 1,268, census 639, own 37 and **hand 1**. So the honest position is: the *primary* layer is nearly fully taught and is taught at the word; the *secondary* layer has been taught only as blanket drawer defaults, and no individual place has ever been told anything.
+
+**Four levels, and only the bottom one fails to scale.** This is the answer to "what am I doing".
+
+| Level | The unit | How many | One decision answers for | Scales |
+|---|---|---|---|---|
+| Word | a provider's word (`google:museum`) | 485; 2 unanswered | every place that word ever touches, for ever | yes |
+| Kind | a Wikidata type (`Q483110` stadium) | 113 rules | every place of that type in the country | yes |
+| Drawer | one of the 64 subcategories | 64 × 7 labels | every place filed there, now and in future | yes |
+| Place | one place | 2,001 and growing | that place only | **no** |
+
+**The rule is: teach the rule, never the place.** A place-level answer exists for the exception — the museum that genuinely is not kid-friendly — and if the owner finds himself setting many by hand, the drawer above them is wrong and that is the thing to fix. Precedence already enforces this: `place → labels → ours → kind → category → experience`, so an exception always wins over the rule it contradicts without the rule having to be weakened.
+
+**The sports-centre case, worked.** `sports_activity_location` is one word with 132 sightings that *catches* 28 other words. It is a describer, not a drawer: it says a place is somewhere active without saying what you do there. Scoring one sports centre by hand teaches nothing, because nothing links the next one to it. The levers that do work, in order of leverage:
+
+1. **Say what the word means.** If the word cannot name a drawer on its own, it is kept as a secondary label — which is what "Catches 28 words" is reporting.
+2. **Write a combination rule.** The `labels` scope takes several labels at once, so `sports_complex + swimming_pool` can land somewhere different from `sports_complex + climbing`. This is the mechanism for nuance inside a coarse provider word, and it is built and under-used.
+3. **Set the drawer's defaults.** Once Indoor golf is a drawer, "indoors, rainy day" is said once and covers every indoor golf course Epic will ever hold.
+
+**Where AI fits, and the line it does not cross.** Google's `generativeSummary`, `reviewSummary`, `editorialSummary` and `reviews` are in the detail mask, bill at Atmosphere tier, and are **rented** (§13.10, and the data policy): they may be read live and never stored. So the pattern is **read once, propose a rule, store the rule** — the label, the reason in plain words and the http(s) source that justified it, never the provider's text. `domain/research.js` already does exactly this for a word and refuses any recommendation without a sentence and a source.
+
+**Propagation is by rule, not by similarity — deliberately.** The owner asked whether it could "go across and look at all the other activity centres that look similar and add the rating onto those ones accordingly". It could, and it must not: a nearest-neighbour score cannot be read, argued with or undone, and it is precisely the mechanism that would make a place disappear for a reason nobody can name. A rule is a sentence with an author and a date. Everything Epic infers has to survive being asked "why", and the answer has to be a sentence rather than a distance.
+
+**Nothing is invisible in the data; the screen is what is missing.** `domain/moods.js` already returns `because` for every place — the chain of rules that fired, each with its scope, subject, reason and the drawer it named — and a rule that loses its labels is renamed rather than silently dropped (migration 192). What does not exist is the surface the owner asked for, and it is specified here as **the bench**:
+
+- a query stated the way a household would state it ("rainy day, not too active");
+- **two lists, not one** — what it returned *and* what it excluded — because an empty result and a wrongly-excluded result look identical from the outside;
+- every row in both lists carrying the rule that decided it, by name;
+- the rule editable from that row, and the query re-runnable against the change without saving it.
+
+**Is it worth the hours.** Straight answer, from the numbers above. Words: two left, an hour. Drawers: 64 drawers × the labels that actually apply, realistically ~150 answers, and **this is the highest-value unspent effort in the taxonomy** — it is what makes "rainy day" mean anything at all, and each answer covers a whole drawer for ever. Kinds: as the atlas grows. Places: exceptions only, and never as a programme of work. That is **tens of hours, not hundreds** — and the difference between tens and hundreds is entirely whether the bench exists, because without it the drawer defaults are being set blind.
+
+**Therefore the order of work is: the bench first, then the drawer defaults.** Setting 150 defaults before there is a way to see what they excluded would be exactly the outcome the owner is afraid of, arrived at faster.
+
 ## 14. Spend containment patterns
 
 Cost is the central commercial risk: provider content cannot be retained between sessions, so the same search for the same household next week bills again. Nothing amortises. A client retry loop is a direct billing event.
