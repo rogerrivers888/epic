@@ -310,6 +310,22 @@ export async function setDefault(subcategoryKey, attributeKey, value, { settled 
 }
 
 /**
+ * Whether the row already in the table holds a value of its label's own shape.
+ *
+ * A SQL fragment rather than a parameter because it has to reference the
+ * conflicting row's columns, and a bound parameter cannot. The kind itself
+ * *is* bound (`$8`); nothing here is interpolated from anything a caller
+ * supplies.
+ */
+const READABLE = `case $8::text
+        when 'yesno' then shelf_subcategory_attributes.yesno is not null
+        when 'range' then (shelf_subcategory_attributes.from_value is not null
+                           or shelf_subcategory_attributes.to_value is not null)
+        when 'oneof' then shelf_subcategory_attributes.choice is not null
+        when 'scale' then shelf_subcategory_attributes.level is not null
+        else false end`;
+
+/**
  * Accept what the drawer is showing — whatever it turns out to be by the time
  * the statement runs.
  *
@@ -329,14 +345,39 @@ export async function acceptDefault(subcategoryKey, attributeKey, value) {
   if (!subcategoryKey || !attributeKey) throw bad('Which drawer, and which attribute?');
   if (!value) throw bad('There is nothing proposed there to accept.');
   await mustFit(attributeKey, value);
+  const { byKey } = await attributes();
+  const kind = byKey.get(attributeKey)?.kind ?? null;
+
+  /**
+   * Keep what is there only if what is there is *readable*.
+   *
+   * A row can exist and still hold nothing this label can be answered with:
+   * rows written before migration 132's trigger were never checked, so the
+   * table has yes/no labels carrying a range and labels carrying nothing at
+   * all. `valueOf` reads those as null or as the wrong shape, so the screen
+   * offers a proposal — and an update that kept the old row's columns would be
+   * refused by the trigger, meaning Accept could never succeed on exactly the
+   * rows that most need it (Codex via epic-f4, 20 Sep 2026).
+   *
+   * So: a well-formed value belonging to somebody else is kept and merely
+   * settled, and an unreadable one is replaced by the proposal. The kind comes
+   * in as a parameter rather than as a subquery repeated five times; `mustFit`
+   * has already read the vocabulary a line above.
+   */
   const { rows } = await query(
     `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
      values ($1, $2, $3, $4, $5, $6, $7, true)
-     on conflict (subcategory_key, attribute_key) do update
-        set settled = true, updated_at = now()
+     on conflict (subcategory_key, attribute_key) do update set
+       yesno      = case when ${READABLE} then shelf_subcategory_attributes.yesno      else excluded.yesno      end,
+       from_value = case when ${READABLE} then shelf_subcategory_attributes.from_value else excluded.from_value end,
+       to_value   = case when ${READABLE} then shelf_subcategory_attributes.to_value   else excluded.to_value   end,
+       choice     = case when ${READABLE} then shelf_subcategory_attributes.choice     else excluded.choice     end,
+       level      = case when ${READABLE} then shelf_subcategory_attributes.level      else excluded.level      end,
+       settled    = true,
+       updated_at = now()
      returning *`,
     [subcategoryKey, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null,
-     value.choice ?? null, value.level ?? null]);
+     value.choice ?? null, value.level ?? null, kind]);
   forget();
   return valueOf(rows[0]);
 }

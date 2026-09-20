@@ -22,7 +22,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { drawerAnswer, disagreeingIn, sameValue, said } = await import('../src/repositories/filing.js');
+const { drawerAnswer, disagreeingIn, fits, sameValue, said } = await import('../src/repositories/filing.js');
 
 const YESNO = { key: 'parking', label: 'Parking', kind: 'yesno', unit: null };
 const SCALE = { key: 'how-thrilling', label: 'How thrilling', kind: 'scale', unit: '0 calm · 4 a parachute jump', range_min: 0, range_max: 4 };
@@ -165,6 +165,28 @@ test('at exactly the limit a drawer is mixed, and a limit of nought does not mak
   const agreed = new Map(refs.map((ref) => [ref, new Map([['parking', { yesno: true }]])]));
   assert.equal(answer({ attribute: YESNO, refs, valuesByRef: agreed, spreadLimit: 0 }).mixed, false);
   assert.deepEqual(answer({ attribute: YESNO, refs, valuesByRef: agreed, spreadLimit: 0 }).value, { yesno: true });
+});
+
+test('a value of the wrong shape is no answer, not a quiet one', () => {
+  // The table predates migration 132's trigger, so it can still hold a range
+  // under a yes/no label. Read straight out that draws "Indoors · 0 to 7".
+  assert.equal(fits(YESNO, { from: 0, to: 7 }), false);
+  assert.equal(fits(YESNO, { yesno: false }), true);
+  assert.equal(fits(SCALE, { level: 0 }), true);
+  assert.equal(fits(SCALE, { yesno: true }), false);
+  assert.equal(fits(YESNO, null), false);
+
+  const a = answer({
+    attribute: YESNO,
+    refs: ['a', 'b'],
+    valuesByRef: valuesOf({ a: { parking: { from: 0, to: 7 } }, b: { parking: { yesno: true } } }),
+    defaults: new Map([['parking', { from: 0, to: 7, settled: true }]]),
+  });
+  // The mis-shaped default is not believed, so the drawer falls back to what
+  // its places say — and the one mis-shaped place value is not counted either.
+  assert.equal(a.settled, false);
+  assert.deepEqual(a.value, { yesno: true });
+  assert.equal(a.heard, 1);
 });
 
 test('the eight are proposed the same way, and a nought is a value like any other', () => {

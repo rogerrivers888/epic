@@ -20,6 +20,8 @@ import assert from 'node:assert/strict';
 import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
+// After `testDatabase`, so the repository's own pool is the test database's.
+const placeAttributes = await import('../src/repositories/placeAttributes.js');
 
 test.after(() => pool.end());
 
@@ -121,4 +123,53 @@ test('dog friendly is one of our labels, because the drawing asks a place about 
     "select target_key from attribute_aliases where norm in ('dog friendly', 'dogs allowed', 'dogs welcome')");
   assert.equal(alias.length, 3);
   for (const a of alias) assert.equal(a.target_key, 'dog-friendly');
+});
+
+
+test('Accept succeeds on a row written before the shapes were enforced', async () => {
+  const sub = await aDrawer();
+  // A range under a yes/no label — the shape the table can still hold because
+  // it predates migration 132's trigger. Written with the trigger off, which
+  // is the only way to create one now and is exactly how the real ones got in.
+  await query('alter table shelf_subcategory_attributes disable trigger shelf_subcategory_attributes_kind');
+  await query(
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, from_value, to_value, settled)
+     values ($1, 'toilets', 0, 7, false)
+     on conflict (subcategory_key, attribute_key) do update
+        set from_value = 0, to_value = 7, yesno = null, settled = false`, [sub]);
+  await query('alter table shelf_subcategory_attributes enable trigger shelf_subcategory_attributes_kind');
+
+  // Before: the screen offers a proposal, because the stored value is not
+  // readable as a yes or no. Accepting it used to be refused by the trigger,
+  // which meant the rows that most needed fixing were the ones that could not
+  // be (Codex via epic-f4, 20 Sep 2026).
+  const value = await placeAttributes.acceptDefault(sub, 'toilets', { yesno: true });
+  assert.deepEqual(value, { yesno: true });
+
+  const { rows } = await query(
+    'select yesno, from_value, to_value, settled from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',
+    [sub, 'toilets']);
+  assert.equal(rows[0].yesno, true);
+  assert.equal(rows[0].settled, true);
+  // And the range it was wearing is gone, rather than sitting alongside.
+  assert.equal(rows[0].from_value, null);
+  assert.equal(rows[0].to_value, null);
+});
+
+test('Accept settles a good value somebody else set, and does not overwrite it', async () => {
+  const sub = await aDrawer();
+  await query(
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, settled)
+     values ($1, 'parking', false, false)
+     on conflict (subcategory_key, attribute_key) do update set yesno = false, settled = false`, [sub]);
+
+  // The screen was showing "Yes" when it was rendered; by the time Accept runs
+  // somebody has set No. Accept means "the answer that is there is right".
+  const value = await placeAttributes.acceptDefault(sub, 'parking', { yesno: true });
+  assert.deepEqual(value, { yesno: false });
+  const { rows } = await query(
+    'select yesno, settled from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',
+    [sub, 'parking']);
+  assert.equal(rows[0].yesno, false);
+  assert.equal(rows[0].settled, true);
 });

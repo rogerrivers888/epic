@@ -171,6 +171,30 @@ export async function drawers() {
 }
 
 /**
+ * Whether a value is the shape its label is.
+ *
+ * The database refuses to *write* a mismatched value (migration 132) but the
+ * table predates that trigger, so it can still hold them — `museums / indoor`
+ * on one machine holds a range of 0 to 7 under a yes/no label. Read straight
+ * out, that draws "Indoors · 0 to 7" on a screen, which is worse than drawing
+ * nothing: it is a sentence nobody wrote and nobody can act on.
+ *
+ * So anything that does not fit is read as *nothing said*. Not deleted —
+ * clearing somebody's row is a decision about their data — but not believed
+ * either, and `acceptDefault` replaces it the moment anybody accepts.
+ */
+export function fits(attribute, value) {
+  if (!value) return false;
+  switch (attribute?.kind) {
+    case 'yesno': return value.yesno != null;
+    case 'range': return value.from != null || value.to != null;
+    case 'oneof': return value.choice != null;
+    case 'scale': return value.level != null;
+    default: return false;
+  }
+}
+
+/**
  * What one drawer says about one attribute, and on what evidence.
  *
  * The three states the screen draws, and they are genuinely three:
@@ -188,9 +212,11 @@ export function drawerAnswer({ attribute, refs, valuesByRef, defaults, spreadLim
   const said_ = [];
   for (const ref of refs) {
     const v = valuesByRef.get(ref)?.get(attribute.key);
-    if (v) said_.push(v);
+    // A value of the wrong shape is not a quieter answer, it is no answer.
+    if (fits(attribute, v)) said_.push(v);
   }
-  const current = defaults?.get(attribute.key) ?? null;
+  const was = defaults?.get(attribute.key) ?? null;
+  const current = fits(attribute, was) ? was : null;
 
   const counts = new Map();
   for (const v of said_) {
