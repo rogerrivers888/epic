@@ -813,6 +813,29 @@ export function SearchBox({ value, onChange, placeholder }: {
   );
 }
 
+/**
+ * The little summary that sits under a screen's name — a label over a figure,
+ * a few across.
+ *
+ * It is what the Households screen carried at the top of it before that screen
+ * was retired into Customers (owner, 20 Sep 2026). A row rather than tiles:
+ * these are facts about the list below, not measures you pick between, and a
+ * bordered tile would say they were.
+ */
+export function HeadStats({ items }: { items: { label: string; value: string | null; sub?: string | null }[] }) {
+  return (
+    <View style={styles.headStats}>
+      {items.map((s) => (
+        <View key={s.label} style={{ gap: 2, minWidth: 0 }}>
+          <Text style={styles.tileKicker}>{s.label.toUpperCase()}</Text>
+          <Text style={styles.headStatValue}>{s.value ?? '—'}</Text>
+          {s.sub ? <Text style={type.tiny} numberOfLines={1}>{s.sub}</Text> : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 /** A row of filters with a count on the right. */
 export function FilterBar({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   return (
@@ -894,6 +917,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md,
     paddingBottom: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
     flexWrap: 'wrap',
+    // In front of everything the page draws under it, so the period's open
+    // panel is over the tiles rather than behind them.
+    position: 'relative', zIndex: 30,
   },
   headNarrow: { alignItems: 'flex-start' },
   headRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
@@ -917,7 +943,17 @@ const styles = StyleSheet.create({
   // --- the period dropdown -----------------------------------------------
   // 176px is the design's width; `maxWidth` is what keeps it inside a frame
   // narrower than the row it sits in.
-  pickerWrap: { width: 176, maxWidth: '100%', flexShrink: 1, zIndex: 20 },
+  /**
+   * `position: relative` as well as `zIndex`.
+   *
+   * On the web a `z-index` does nothing at all on a statically positioned box,
+   * so the open panel painted *underneath* the measure tiles below it: the
+   * dropdown looked right, and a click on "Last 3 months" went through to the
+   * tile behind and selected a different measure instead (20 Sep 2026, driving
+   * the screen rather than photographing it). The same failure the owner
+   * reported on Places a fortnight earlier — "it's simply not clickable".
+   */
+  pickerWrap: { width: 176, maxWidth: '100%', flexShrink: 1, position: 'relative', zIndex: 40 },
   picker: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     borderWidth: 1, borderColor: colors.ruleMuted, paddingVertical: 6, paddingHorizontal: 11,
@@ -925,7 +961,7 @@ const styles = StyleSheet.create({
   pickerText: { ...type.small, fontSize: 12.5, color: colors.ink, flex: 1 },
   pickerPanel: {
     position: 'absolute', top: 34, left: 0, right: 0,
-    backgroundColor: colors.panelWarm, borderWidth: 1, borderColor: colors.ruleMuted, zIndex: 30,
+    backgroundColor: colors.panelWarm, borderWidth: 1, borderColor: colors.ruleMuted, zIndex: 41,
   },
   pickerOption: { paddingVertical: 8, paddingHorizontal: 11, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   pickerOptionOn: { backgroundColor: colors.selected },
@@ -1045,6 +1081,12 @@ const styles = StyleSheet.create({
   emptyText: { ...type.small, paddingVertical: spacing.lg },
 
   // --- filters ------------------------------------------------------------
+  headStats: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 34,
+    paddingBottom: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
+  },
+  headStatValue: { fontFamily: type.title.fontFamily, fontSize: 21, fontWeight: '800', color: colors.ink, letterSpacing: -0.7 },
+
   filterBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
   chipGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   chipGroupLabel: { ...type.tiny, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginRight: 2 },

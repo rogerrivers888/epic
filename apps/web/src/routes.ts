@@ -511,7 +511,10 @@ export function parseRoute(path: string): Route {
     }
 
     case 'admin': {
-      const screen = oneOf(ADMIN_SCREENS, a ?? 'overview');
+      // Bare `/admin` is the suite's Overview. It used to be the estate-at-a-
+      // glance screen, which left the rail on 20 Sep 2026 — its address still
+      // resolves, but it is no longer where the back office opens.
+      const screen = oneOf(ADMIN_SCREENS, a ?? 'reporting');
       return screen ? { name: 'admin', screen } : { name: 'unknown', path };
     }
 
@@ -965,7 +968,7 @@ export function parentOf(route: Route): string {
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
     case 'welcome': return '/inspire';
     case 'setup': return '/welcome';
-    case 'admin': return route.screen === 'overview' ? '/inspire' : '/admin/overview';
+    case 'admin': return route.screen === 'reporting' ? '/inspire' : '/admin/reporting';
     default: return '/inspire';
   }
 }

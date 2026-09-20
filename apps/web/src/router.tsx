@@ -257,13 +257,27 @@ export function useStickyQuery(name: string, keys: string[]): void {
   useEffect(() => {
     if (opened.current === name) return;
     opened.current = name;
-    // The address wins: somebody following a link meant what it says.
-    if (keys.some((k) => query.get(k) != null)) return;
     const held = recallScreen<Record<string, string>>(`q.${name}`);
     if (!held?.data || !Object.keys(held.data).length) return;
+    /**
+     * Key by key, and **only the ones the address has not spoken for**.
+     *
+     * It used to bail entirely if the address carried *any* of the keys, which
+     * meant a link with one of them stranded the rest: on the reporting suite,
+     * an address with `?period=…` and no `?data=` never restored "show mock
+     * data", so the switch looked like it kept losing itself (owner, 20 Sep
+     * 2026: "sometimes it's losing the mock data when I'm toggling between
+     * different sections").
+     *
+     * The address still wins wherever it says something — somebody following a
+     * link meant what it says — and this fills in only what it left unsaid.
+     */
     const patch: Record<string, string | null> = {};
-    for (const k of keys) patch[k] = held.data[k] ?? null;
-    setQuery(patch, { replace: true });
+    for (const k of keys) {
+      if (query.get(k) != null) continue;
+      if (held.data[k] != null) patch[k] = held.data[k];
+    }
+    if (Object.keys(patch).length) setQuery(patch, { replace: true });
   }, [name, signature, setQuery]);
 
   useEffect(() => {

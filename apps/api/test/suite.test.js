@@ -25,6 +25,7 @@ import { listCounterparties, setAdapter } from '../src/repositories/counterparti
 import { readStanding, readTiers, setPrice } from '../src/repositories/pricing.js';
 import { withhold } from '../src/routes/suite.js';
 import { enabledSources, loadSourceSettings, setSourceOff, sourceKeys, sourceOff } from '../src/sources/index.js';
+import { bump, healthOf, noteCall, noteFault } from '../src/sources/meter.js';
 import { pool, query } from '../src/db.js';
 
 test.after(() => pool.end());
@@ -726,4 +727,63 @@ test('the largest supplier is read off the rows rather than named by hand', () =
   const m = scaleFixtures(fixtures(), resolvePeriod('this-month', AT));
   assert.equal(m.suppliers.largest.key, 'anthropic');
   assert.equal(m.suppliers.largest.spend, Math.max(...m.suppliers.rows.map((r) => r.spend)));
+});
+
+// ---------------------------------------------------------------------------
+// a call says whether it came back
+// ---------------------------------------------------------------------------
+
+test('the meter carries how it went without becoming a unit of anything', () => {
+  // `meter` goes straight into `provider_calls.units`, which is priced by
+  // adding up its keys and shown on Settings › Usage as units. A `failed: 1`
+  // key would be counted as one and might be priced, so the outcome rides on
+  // symbols — invisible to `Object.keys`, to a spread and to `JSON.stringify`.
+  const meter = {};
+  bump(meter, 'google', 3);
+  noteCall(meter, 120);
+  noteCall(meter, 340);
+  noteFault(meter, 'http_429');
+
+  assert.deepEqual(Object.keys(meter), ['google']);
+  // The two that reach the database: the column is jsonb, and `costOf` prices
+  // by iterating keys.
+  assert.equal(JSON.stringify(meter), '{"google":3}');
+  // And a spread, which copies own *enumerable* symbols — which is why these
+  // are written non-enumerable rather than merely symbol-keyed.
+  assert.deepEqual({ ...meter }, { google: 3 });
+  assert.deepEqual(Object.getOwnPropertySymbols({ ...meter }), []);
+});
+
+test('a meter nobody observed is not a success', () => {
+  // The one that matters: an adapter that has never been instrumented must
+  // record `ok: null`, which reads as "not recorded". Defaulting it to true
+  // would write four thousand successes nobody watched.
+  assert.deepEqual(healthOf({ google: 3 }), { ok: null, ms: null, failed: 0, fault: null });
+  assert.deepEqual(healthOf(null), { ok: null, ms: null, failed: 0, fault: null });
+  assert.deepEqual(healthOf(undefined), { ok: null, ms: null, failed: 0, fault: null });
+});
+
+test('a meter that saw a call says so, and counts the ones that fell over', () => {
+  const ok = {};
+  noteCall(ok, 120);
+  noteCall(ok, 80);
+  assert.deepEqual(healthOf(ok), { ok: true, ms: 200, failed: 0, fault: null });
+
+  const bad = {};
+  noteCall(bad, 100);
+  noteFault(bad, 'timeout');
+  noteFault(bad, 'http_500');
+  const h = healthOf(bad);
+  assert.equal(h.ok, false);
+  assert.equal(h.failed, 2);
+  // The first reason, kept short — never the provider's own message, which can
+  // echo back a query, a key or somebody's address.
+  assert.equal(h.fault, 'timeout');
+  assert.equal(h.ms, 100);
+});
+
+test('a fault reason is a token, not a paragraph', () => {
+  const m = {};
+  noteFault(m, 'x'.repeat(200));
+  assert.equal(healthOf(m).fault.length, 40);
 });

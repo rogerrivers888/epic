@@ -50,10 +50,16 @@ export const GAPS = {
   runway: 'No salary or overhead ledger',
   listSize: 'Needs cancellation history',
   commission: 'No commission rate is recorded',
-  // Every outbound call is logged with its cost; none of them records whether
-  // it came back, or how long it took. Adding that means touching every
-  // adapter, which is the attribution spine's build rather than this one.
-  providerHealth: 'Provider calls do not record an outcome or a duration',
+  /**
+   * Since migration 203 a call records whether it came back and how long it
+   * took — but only through an adapter that observes it, and only from the day
+   * it was instrumented. Google and Anthropic do; the smaller ones do not yet,
+   * and every row written before 20 Sep 2026 has no outcome at all.
+   *
+   * So this says what is true rather than what used to be: nothing in *this
+   * window* was watched. It is not "nothing failed".
+   */
+  providerHealth: 'No call in this window recorded an outcome',
   // What a supplier we are invoiced by costs is on an invoice nobody has
   // entered. Not nought — unread.
   invoiced: 'Invoiced, not metered',
@@ -168,6 +174,7 @@ async function estate(period) {
     trial: int(counts.trial),
     atRisk: int(risk.at_risk),
     people: int(counts.people),
+    signedIn: int(counts.signed_in),
     // Bar lengths against the biggest, the same as every other bar list, so the
     // panel draws rather than showing five empty tracks.
     origins: bars(['founding', 'signup', 'guest_invite', 'peer', 'marketplace'].map((k) => row(
@@ -1115,6 +1122,45 @@ function costByCounterparty(register, byProvider) {
 }
 
 /**
+ * How a provider behaved over a window: calls, failures, and the p95.
+ *
+ * Read from `provider_calls.ok`, `.failed` and `.ms` (migration 203). A row
+ * with a null `ok` was written by an adapter nobody has instrumented, and is
+ * counted in `unobserved` rather than assumed to have worked — which is why
+ * the panel can say "14 of 4,289 · 0.3%" for Google and "not recorded" for
+ * Mapbox on the same screen without either being a guess.
+ *
+ * The denominator is calls whose outcome was *observed*. A failure rate over
+ * calls nobody watched is a rate over the wrong number.
+ */
+async function providerHealth(providerKey, period) {
+  const { rows: [h] } = await query(
+    `select count(*) filter (where c.ok is not null)::int                       as observed,
+            count(*) filter (where c.ok is null)::int                           as unobserved,
+            coalesce(sum(c.failed), 0)::int                                     as failed,
+            coalesce(round(percentile_cont(0.95) within group (order by c.ms)
+                     filter (where c.ms is not null)), 0)::int                  as p95,
+            max(c.created_at) filter (where c.failed > 0)                       as last_fault_at,
+            (array_agg(c.fault order by c.created_at desc)
+               filter (where c.fault is not null))[1]                           as last_fault
+       from provider_calls c
+      where c.provider = $1 and c.created_at >= $2 and c.created_at < $3`,
+    [providerKey, period.from, period.to],
+  );
+  const observed = int(h.observed);
+  const failed = int(h.failed);
+  return {
+    observed,
+    unobserved: int(h.unobserved),
+    failures: observed ? failed : null,
+    failurePct: observed ? Math.round((failed / observed) * 1000) / 10 : null,
+    latencyMs: int(h.p95) || null,
+    lastFault: h.last_fault ?? null,
+    lastFaultAt: h.last_fault_at ?? null,
+  };
+}
+
+/**
  * One supplier's record: what it is for, whether it is connected, and its
  * health and spend over the window.
  *
@@ -1133,12 +1179,15 @@ export async function readSupplierRecord(key, period) {
   let before = { calls: 0, usd: 0 };
   let series = null;
 
+  let health = null;
   if (metered) {
-    const [a, b, hist] = await Promise.all([
+    const [a, b, hist, h] = await Promise.all([
       cost(period.from, period.to),
       cost(period.prevFrom, period.prevTo),
       supplierHistory(new Date()),
+      providerHealth(c.providerKey, period),
     ]);
+    health = h;
     now = a.byProvider.find((p) => p.provider === c.providerKey) ?? now;
     before = b.byProvider.find((p) => p.provider === c.providerKey) ?? before;
     series = hist.of(c.providerKey);
@@ -1167,13 +1216,20 @@ export async function readSupplierRecord(key, period) {
     },
     health: {
       calls: metered ? int(now.calls) : null,
-      // Nothing records whether a provider call came back, or how long it took.
-      // A zero here would be the most dangerous zero in the suite — it would
-      // read as "nothing has ever failed" on a health panel.
-      failures: null,
-      failurePct: null,
-      latency: null,
-      healthGap: GAPS.providerHealth,
+      /**
+       * Real now (migration 203), and null where it is genuinely unknown.
+       *
+       * A null failure count is an adapter nobody has instrumented yet, and the
+       * panel says so. A zero would be the most dangerous zero in the suite: it
+       * would read as "nothing has ever failed" on a health panel.
+       */
+      failures: health?.failures ?? null,
+      failurePct: health?.failurePct ?? null,
+      latency: health?.latencyMs ? `${health.latencyMs < 1000 ? `${health.latencyMs}ms` : `${(health.latencyMs / 1000).toFixed(1)}s`} p95` : null,
+      lastFault: health?.lastFault ?? null,
+      observed: health?.observed ?? null,
+      unobserved: health?.unobserved ?? null,
+      healthGap: health?.observed ? null : GAPS.providerHealth,
       spend,
       expected,
       /**
@@ -1558,6 +1614,22 @@ export async function readSuite(period, { now = new Date() } = {}) {
       trialConvertPct: null,
       trialGranted: null,
       atRisk: est.atRisk,
+      /**
+       * The counts the Households screen carried at the top of it.
+       *
+       * The owner, 20 Sep 2026: "We should probably have the little summary at
+       * the top that we have on households, like total households invited,
+       * suspended, something like that, in the customer screen. Other than
+       * that, you can retire households." So they moved here, and that screen
+       * left the rail.
+       */
+      estate: {
+        households: est.households,
+        people: est.people,
+        invited: list.filter((h) => h.status === 'invited').length,
+        suspended: list.filter((h) => h.status === 'cancelled').length,
+        signedIn: est.signedIn,
+      },
     },
 
     subscriptions: subs,

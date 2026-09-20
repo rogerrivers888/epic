@@ -112,9 +112,48 @@ export function asBudgetError(err) {
   return new ModelBudgetError(on, text.slice(0, 400));
 }
 
-const ask = async (run) => {
-  try { return await run(); } catch (err) { throw asBudgetError(err) ?? err; }
+/**
+ * One call to Anthropic, timed and with its outcome observed.
+ *
+ * Every Claude request goes through here, so it is where a failure can be
+ * written down (owner, 20 Sep 2026: the supplier record "should show failures
+ * also"). A call that throws never reaches `recordCall` — the ledger records
+ * what was *spent*, and a request that fell over spent nothing — so the failure
+ * gets a row of its own with a cost of nought, or there is no numerator for a
+ * failure rate.
+ *
+ * The fault is a short token, never the provider's message: an error body can
+ * echo the prompt back, and a prompt carries the household's own words.
+ */
+const ask = async ({ householdId = null, sessionId = null, purpose = null } = {}, run) => {
+  const began = Date.now();
+  try {
+    const out = await run();
+    lastCall = { ok: true, ms: Date.now() - began, fault: null };
+    return out;
+  } catch (err) {
+    const budget = asBudgetError(err);
+    const fault = budget ? 'budget'
+      : err?.status === 429 ? 'http_429'
+        : err?.status ? `http_${err.status}`
+          : err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout'
+            : 'error';
+    lastCall = { ok: false, ms: Date.now() - began, fault };
+    if (purpose) {
+      await providerCalls.recordFailure({ householdId, sessionId, provider: 'anthropic', purpose, ms: lastCall.ms, fault });
+    }
+    throw budget ?? err;
+  }
 };
+
+/**
+ * How the most recent call went, for the row `recordCall` is about to write.
+ *
+ * A module-level hand-off rather than a parameter because `ask` wraps the
+ * request and `recordCall` is called after it returns, with the response in
+ * between; threading it would mean changing every caller of both.
+ */
+let lastCall = { ok: null, ms: null, fault: null };
 
 async function recordCall({ householdId, sessionId, provider, purpose, usage, model = MODEL }) {
   const RATE = rateFor(model);
@@ -130,6 +169,7 @@ async function recordCall({ householdId, sessionId, provider, purpose, usage, mo
     inputTokens: usage?.input_tokens ?? null, outputTokens: usage?.output_tokens ?? null,
     cacheReadTokens: usage?.cache_read_input_tokens ?? null, cacheWriteTokens: usage?.cache_creation_input_tokens ?? null,
     costUsd: cost,
+    ok: lastCall.ok, ms: lastCall.ms, fault: lastCall.fault,
   });
   return { costUsd: cost, usage, model };
 }
@@ -161,7 +201,7 @@ export async function parseStructured({
 }) {
   await assertWithinBounds({ householdId, sessionId });
 
-  const response = await ask(() => client.messages.parse({
+  const response = await ask({ householdId, sessionId, purpose }, () => client.messages.parse({
     model,
     max_tokens: maxTokens,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
@@ -200,7 +240,7 @@ export async function parseStructured({
 export async function searchWeb({ system, prompt, householdId, sessionId, purpose, maxSearches = 6, maxFetches = 6, effort = 'medium', meta = null }) {
   await assertWithinBounds({ householdId, sessionId });
 
-  const response = await ask(() => client.messages.create({
+  const response = await ask({ householdId, sessionId, purpose }, () => client.messages.create({
     model: MODEL,
     max_tokens: 8000,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],

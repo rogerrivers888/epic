@@ -75,10 +75,22 @@ type Screen = AdminScreen;
  * atlas, the shelves and the sweep are where they were until he moves them.
  */
 const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: string; group?: string }[] = [
-  { key: 'overview', label: 'Overview', icon: 'plan', sub: 'The estate at a glance' },
-  { key: 'accounts', label: 'Accounts', icon: 'accounts', needs: 'view_accounts', sub: 'Invite people and manage their plan' },
-  { key: 'households', label: 'Households', icon: 'household', needs: 'view_accounts', sub: 'What each one does, and what it costs' },
-  { key: 'activity', label: 'Activity', icon: 'list', needs: 'view_activity', sub: 'Everything that has happened' },
+  /**
+   * The four that used to be at the top of this rail — Overview, Accounts,
+   * Households, Activity — are gone from it (owner, 20 Sep 2026: "The whole
+   * top 4 tabs can be removed completely").
+   *
+   * Each one was answering a question the suite below now answers better, and
+   * the two things only they could do came with them: Households' summary of
+   * the estate and Accounts' invite are both on **Customers**. Activity's feed
+   * and the old estate overview had no such remainder.
+   *
+   * Their addresses still resolve — `/admin/overview`, `/admin/accounts`,
+   * `/admin/households`, `/admin/activity` — because that is this repo's rule
+   * for a screen that leaves the rail, and because a link somebody kept should
+   * land somewhere rather than on a 404 (routes.ts). They are simply not a way
+   * in any more.
+   */
   /**
    * Reporting. Six sections over one estate model (handoff "Reporting &
    * overview", 20 Sep 2026), answering five questions: is the business growing,

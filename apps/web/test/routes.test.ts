@@ -333,7 +333,15 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/coverage'), { name: 'admin', screen: 'coverage' });
   assert.deepEqual(roundTrip('/admin/library'), { name: 'admin', screen: 'library' });
   assert.deepEqual(roundTrip('/admin/scout'), { name: 'admin', screen: 'scout' });
-  assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'overview' });
+  // Bare `/admin` opens on the suite's Overview. It used to be the estate-at-
+  // a-glance screen, which left the rail on 20 Sep 2026 (its address still
+  // resolves — see below — but it is not where the back office starts).
+  assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'reporting' });
+  // The four that left the rail all still land rather than 404.
+  assert.deepEqual(roundTrip('/admin/overview'), { name: 'admin', screen: 'overview' });
+  assert.deepEqual(roundTrip('/admin/accounts'), { name: 'admin', screen: 'accounts' });
+  assert.deepEqual(roundTrip('/admin/households'), { name: 'admin', screen: 'households' });
+  assert.deepEqual(roundTrip('/admin/activity'), { name: 'admin', screen: 'activity' });
 });
 
 test('a tag has a page of its own, and so does a facet', () => {
@@ -416,7 +424,7 @@ test('Back has somewhere to go for somebody who arrived on a shared link', () =>
   assert.equal(parentOf(parseRoute('/places/GB')), '/places');
   assert.equal(parentOf(parseRoute('/places/home')), '/places');
   assert.equal(parentOf(parseRoute('/household/m1')), '/settings');
-  assert.equal(parentOf(parseRoute('/admin/audit')), '/admin/overview');
+  assert.equal(parentOf(parseRoute('/admin/audit')), '/admin/reporting');
 });
 
 test('a window of Epic tabs is not seven identical ones', () => {

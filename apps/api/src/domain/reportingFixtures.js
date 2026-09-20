@@ -794,6 +794,11 @@ export function fixtureSupplier(key, period) {
       failures,
       failurePct: failures == null || !calls ? null : Math.round((failures / calls) * 1000) / 10,
       latency: base.latency,
+      // The mock estate watches every call it makes, so the two denominators
+      // are the same and there is nothing unwatched to name.
+      observed: calls,
+      unobserved: 0,
+      lastFault: base.failed ? 'http_429' : null,
       healthGap: null,
       spend,
       expected,

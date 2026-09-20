@@ -12,13 +12,14 @@
  * rule: instrument entry, derive exit.
  */
 
-import React, { useCallback, useState } from 'react';
-import { Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Press } from '../../components/press';
 import { asOneOf, asText, useQueryState, useStickyQuery } from '../../router';
-import { spacing, type } from '../../theme';
+import { colors, spacing, type } from '../../theme';
 import {
-  Bars, Cell, Chip, ChipGroup, FilterBar, SearchBox, Standing, SuiteHead, SuitePage, SuitePanel,
-  SuiteTable, TwoLine, Trouble, Waiting, type Col,
+  Bars, Cell, Chip, ChipGroup, FilterBar, HeadStats, NO_OUTLINE, SearchBox, Standing, SuiteHead,
+  SuitePage, SuitePanel, SuiteTable, TwoLine, Trouble, Waiting, type Col,
 } from './pieces';
 import { api, ApiError } from '../../api';
 import { SuiteControls, suiteKicker, useCustomers, useFormatters, useHouseholdRecord, useSuiteControls } from './useSuite';
@@ -58,6 +59,24 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
   // model, which needs `view_reporting` (Codex, 20 Sep 2026).
   const { customers, gaps, error, reading, reload } = useCustomers(period, source);
   const [trialBusy, setTrialBusy] = useState<'grant' | 'extend' | null>(null);
+  const [inviting, setInviting] = useState(false);
+  /**
+   * The link, where Epic could not send it itself.
+   *
+   * "I don't want to claim a name. I want to send an invite" (4 Sep 2026) — and
+   * where no mail sender is configured the honest answer is the link itself, to
+   * be sent by hand, rather than a screen that says "invited" and did nothing.
+   */
+  const [invitation, setInvitation] = useState<{ url: string; email: string | null; delivery?: string } | null>(null);
+  const [plans, setPlans] = useState<{ key: string; label: string }[]>([]);
+
+  useEffect(() => {
+    if (!canManage) return;
+    (async () => {
+      try { setPlans((await api.adminPlans()).plans.filter((p) => p.active).map((p) => ({ key: p.key, label: p.label }))); }
+      catch { /* the form falls back to the default plan */ }
+    })();
+  }, [canManage]);
   const [trouble, setTrouble] = useState<string | null>(null);
   const fmt = useFormatters(null, null);
   const { record, error: recordError, reload: reloadRecord } = useHouseholdRecord(householdId || null, period, source);
@@ -107,14 +126,6 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
         error={recordError}
         gaps={gaps}
         onBack={() => setHouseholdId('')}
-        onFilterToFamily={() => {
-          // Filter, rather than only close: the search box is what the list is
-          // narrowed by, so the household's own name goes into it and the
-          // record steps back to a list of one.
-          setQ(record?.name ?? '', { replace: true });
-          setGuests(true, { replace: true });
-          setHouseholdId('');
-        }}
         onTrial={canManage ? trial : undefined}
         trialBusy={trialBusy}
         controls={controls}
@@ -183,6 +194,51 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
   return (
     <SuitePage>
       <SuiteHead title="Customers" kicker={suiteKicker(source, period)} right={controls} />
+
+      {/* The summary the Households screen used to carry at the top of it
+          (owner, 20 Sep 2026). Households is retired; these are the facts
+          about the estate that only it was saying. */}
+      {customers.estate ? (
+        <HeadStats
+          items={[
+            { label: 'Households', value: fmt.plain.count(customers.estate.households), sub: `${fmt.plain.count(customers.estate.people)} people` },
+            { label: 'Invited, not in', value: fmt.plain.count(customers.estate.invited), sub: 'a link was sent' },
+            { label: 'Suspended', value: fmt.plain.count(customers.estate.suspended), sub: 'signed out, data kept' },
+            { label: 'Signed in now', value: fmt.plain.count(customers.estate.signedIn), sub: 'on at least one device' },
+          ]}
+        />
+      ) : null}
+
+      {/* Inviting somebody is the one thing Accounts did that Customers did not
+          (owner, 20 Sep 2026: "we should have invite, we should add that to the
+          customer screen"). An e-mail address and a plan; the link goes out if
+          a sender is configured, and if it is not the screen hands back the
+          link to send by hand rather than pretending it was delivered. */}
+      {canManage ? (
+        <Invite
+          plans={plans}
+          busy={!!inviting}
+          onInvite={async (body) => {
+            setInviting(true);
+            setTrouble(null);
+            try {
+              const r = await api.addAccount({ ...body, invite: true });
+              setInvitation(r.invitation ? { ...r.invitation, email: r.account.email } : null);
+              await reload();
+              return true;
+            } catch (e: unknown) {
+              setTrouble(e instanceof ApiError ? e.message : 'Could not reach Epic.');
+              return false;
+            } finally {
+              setInviting(false);
+            }
+          }}
+          invitation={invitation}
+          onDone={() => setInvitation(null)}
+        />
+      ) : null}
+
+      {trouble ? <Text style={[type.small, { color: colors.overrun }]}>{trouble}</Text> : null}
 
       <FilterBar right={(
         <Text style={type.small}>
@@ -265,3 +321,121 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
     </SuitePage>
   );
 }
+
+/**
+ * Invite somebody, from the screen that lists everybody.
+ *
+ * The owner, 20 Sep 2026, retiring the Accounts tab: "we should have invite, we
+ * should add that to the customer screen."
+ *
+ * A closed row until it is opened, because the common case on this screen is
+ * reading the list rather than adding to it, and a form permanently open above
+ * a table is a form in the way. The fields are rules rather than boxes, which
+ * is the back office's own grammar.
+ */
+function Invite({ plans, busy, onInvite, invitation, onDone }: {
+  plans: { key: string; label: string }[];
+  busy: boolean;
+  onInvite: (body: { email: string; name?: string; plan?: string }) => Promise<boolean>;
+  invitation: { url: string; email: string | null; delivery?: string } | null;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [plan, setPlan] = useState<string | null>(null);
+
+  // The link Epic could not send itself. Shown until it is dismissed, because
+  // it is the only copy: it is not stored anywhere a screen can read again.
+  if (invitation) {
+    return (
+      <View style={inviteStyles.done}>
+        <Text style={[type.small, { color: colors.ink, flexShrink: 1, minWidth: 0 }]}>
+          {invitation.delivery === 'email'
+            ? `Invitation sent to ${invitation.email ?? 'them'}.`
+            : `Invitation made for ${invitation.email ?? 'them'} — Epic has no sender, so send this link: ${invitation.url}`}
+        </Text>
+        <Press effect="none" onPress={onDone} accessibilityRole="button">
+          <Text style={inviteStyles.action}>Done</Text>
+        </Press>
+      </View>
+    );
+  }
+
+  if (!open) {
+    return (
+      <View style={{ alignSelf: 'flex-start' }}>
+        <Press effect="none" onPress={() => setOpen(true)} accessibilityRole="button" style={inviteStyles.opener}>
+          <Text style={inviteStyles.action}>Invite someone</Text>
+        </Press>
+      </View>
+    );
+  }
+
+  const send = async () => {
+    if (!email.trim()) return;
+    const ok = await onInvite({ email: email.trim(), name: name.trim() || undefined, plan: plan ?? undefined });
+    if (ok) { setOpen(false); setEmail(''); setName(''); setPlan(null); }
+  };
+
+  return (
+    <View style={inviteStyles.form}>
+      <View style={inviteStyles.field}>
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          onSubmitEditing={send}
+          placeholder="Their e-mail"
+          placeholderTextColor={colors.inkMuted}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          accessibilityLabel="Their e-mail"
+          style={inviteStyles.input as any}
+        />
+      </View>
+      <View style={inviteStyles.field}>
+        <TextInput
+          value={name}
+          onChangeText={setName}
+          onSubmitEditing={send}
+          placeholder="Their name, if you know it"
+          placeholderTextColor={colors.inkMuted}
+          accessibilityLabel="Their name"
+          style={inviteStyles.input as any}
+        />
+      </View>
+      {plans.length ? (
+        <ChipGroup label="Plan">
+          {plans.map((p) => <Chip key={p.key} label={p.label} on={plan === p.key} onPress={() => setPlan(plan === p.key ? null : p.key)} />)}
+        </ChipGroup>
+      ) : null}
+      <Press effect="none" onPress={send} accessibilityRole="button" disabled={busy || !email.trim()}>
+        <Text style={[inviteStyles.action, (busy || !email.trim()) && { color: colors.inkMuted, textDecorationLine: 'none' }]}>
+          {busy ? 'Sending…' : 'Send the invitation'}
+        </Text>
+      </Press>
+      <Press effect="none" onPress={() => setOpen(false)} accessibilityRole="button">
+        <Text style={[type.small, { color: colors.inkMuted }]}>Cancel</Text>
+      </Press>
+    </View>
+  );
+}
+
+const inviteStyles = StyleSheet.create({
+  opener: { borderBottomWidth: 1.5, borderBottomColor: colors.accent, alignSelf: 'flex-start' },
+  action: { ...type.small, fontSize: 12.5, color: colors.accent, fontWeight: '700' },
+  form: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  // A rule underneath, never a box round (owner, 12 Sep 2026).
+  field: { minWidth: 200, flexGrow: 1, flexBasis: 200, borderBottomWidth: 1, borderBottomColor: colors.ruleMuted, paddingBottom: 4 },
+  input: {
+    backgroundColor: 'transparent', borderWidth: 0,
+    color: colors.ink, fontFamily: type.body.fontFamily, fontSize: 13,
+    // `outlineStyle` is web-only and not in React Native's TextStyle; the kit
+    // names the cast once so it is not repeated at every field (pieces.tsx).
+    ...NO_OUTLINE,
+  },
+  done: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap',
+    borderLeftWidth: 2, borderLeftColor: colors.accent, paddingLeft: spacing.md, paddingVertical: spacing.sm,
+  },
+});

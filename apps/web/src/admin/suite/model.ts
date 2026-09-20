@@ -151,6 +151,11 @@ export type SupplierRecord = {
     failures: number | null;
     failurePct: number | null;
     latency: string | null;
+    /** The most recent reason — `http_429`, `timeout` — where there was one. */
+    lastFault?: string | null;
+    /** How many of the window's calls had their outcome watched, and how many did not. */
+    observed?: number | null;
+    unobserved?: number | null;
     healthGap?: string | null;
     spend: number | null;
     expected: number | null;
@@ -289,6 +294,14 @@ export type Suite = {
     trialConvertPct: number | null; trialGranted: number | null; atRisk: number;
     /** How the estate arrived — the slice rule 4 makes every figure subject to. */
     origins?: Row[] | null;
+    /**
+     * The counts the Households screen carried at the top of it, moved here
+     * when that screen was retired (owner, 20 Sep 2026).
+     */
+    estate?: {
+      households: number; people: number;
+      invited: number; suspended: number; signedIn: number;
+    } | null;
   };
   subscriptions: Subscriptions;
   suppliers: {

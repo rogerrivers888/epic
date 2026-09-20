@@ -14,6 +14,7 @@
 import { query } from '../db.js';
 import { canBill } from '../constants.js';
 import { costOf } from '../domain/providerPrices.js';
+import { healthOf } from '../sources/meter.js';
 
 // ---------------------------------------------------------------------------
 // writing
@@ -34,11 +35,21 @@ export async function record(householdId, provider, purpose, units = null, sessi
   // (Codex, 17 Sep 2026). `units` arrives here as JSON text from some callers
   // and as an object from others; both are priced.
   const meter = typeof units === 'string' ? (() => { try { return JSON.parse(units); } catch { return null; } })() : units;
+  /**
+   * How it went, where the adapter observed it (`sources/meter.js`).
+   *
+   * `ok` stays null for an adapter nobody has instrumented, which reads on the
+   * supplier record as "not recorded" — a different fact from "it worked", and
+   * the reason this is not defaulted to true.
+   */
+  const health = healthOf(typeof units === 'string' ? null : units);
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref)
-     values ($1, $2, $3, $4, $5, $6, $7)`,
-    [householdId, sessionId, provider, purpose, units, costOf(units, provider) || null, venueRef],
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [householdId, sessionId, provider, purpose, units, costOf(units, provider) || null, venueRef,
+      health.ok, health.ms, health.failed, health.fault],
   );
+  void meter;
 }
 
 /** One Claude call, billed in tokens rather than requests. */
@@ -46,11 +57,27 @@ export async function recordTokens(c) {
   await query(
     `insert into provider_calls
        (household_id, session_id, provider, purpose, input_tokens, output_tokens,
-        cache_read_tokens, cache_write_tokens, estimated_cost_usd)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [c.householdId, c.sessionId, c.provider, c.purpose, c.inputTokens ?? null, c.outputTokens ?? null,
-      c.cacheReadTokens ?? null, c.cacheWriteTokens ?? null, c.costUsd],
+      c.cacheReadTokens ?? null, c.cacheWriteTokens ?? null, c.costUsd,
+      c.ok ?? null, c.ms ?? null, c.ok === false ? 1 : 0, c.fault ?? null],
   );
+}
+
+/**
+ * A call that never came back, and so has no units and no cost.
+ *
+ * Without this a failure is simply an absence — the ledger records what was
+ * spent, and a request that fell over spent nothing. A failure rate needs a
+ * numerator, so the failure gets a row of its own with a cost of nought.
+ */
+export async function recordFailure({ householdId = null, sessionId = null, provider, purpose, ms = null, fault }) {
+  await query(
+    `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault)
+     values ($1, $2, $3, $4, 0, false, $5, 1, $6)`,
+    [householdId, sessionId, provider, purpose, ms, String(fault ?? 'error').slice(0, 40)],
+  ).catch(() => null);
 }
 
 /**
@@ -58,11 +85,11 @@ export async function recordTokens(c) {
  * `units` is the object form (`{ 'openai-minutes': 0.4 }`) so the Settings
  * spend table can add it up by key, and the cost is the list price for it.
  */
-export async function recordMetered({ householdId, sessionId = null, provider, purpose, units, costUsd = null }) {
+export async function recordMetered({ householdId, sessionId = null, provider, purpose, units, costUsd = null, ok = null, ms = null, fault = null }) {
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd)
-     values ($1, $2, $3, $4, $5, $6)`,
-    [householdId, sessionId, provider, purpose, units, costUsd],
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [householdId, sessionId, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault],
   );
 }
 

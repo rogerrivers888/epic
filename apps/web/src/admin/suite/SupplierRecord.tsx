@@ -284,10 +284,24 @@ export function SupplierRecord({
           <Kv label="Calls" value={fmt.plain.count(h.calls)} gap={h.gap ?? 'Not metered'} />
           <Kv
             label="Failed"
-            value={h.failures == null ? null : `${h.failures.toLocaleString()} · ${h.failurePct ?? 0}%`}
+            // Of the calls whose outcome was actually watched, which is a
+            // smaller number than the calls made until every adapter is
+            // instrumented — so the row says which denominator it is over.
+            value={h.failures == null
+              ? null
+              : `${h.failures.toLocaleString()} of ${(h.observed ?? h.calls ?? 0).toLocaleString()} · ${h.failurePct ?? 0}%`}
             gap={h.healthGap}
           />
           <Kv label="Response time" value={h.latency} gap={h.healthGap} />
+          {h.lastFault ? <Kv label="Last fault" value={h.lastFault} /> : null}
+          {h.unobserved ? (
+            // Said plainly: this adapter has not been instrumented, so some of
+            // its calls are simply not watched. Not the same as "they worked".
+            <Kv
+              label="Not watched"
+              value={`${h.unobserved.toLocaleString()} ${h.unobserved === 1 ? 'call' : 'calls'}`}
+            />
+          ) : null}
           <Kv label="Spend" value={spend.money(h.spend)} gap={h.gap} strong />
           <Kv label="Expected" value={spend.money(h.expected)} gap={h.gap} />
           <Kv

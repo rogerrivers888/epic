@@ -25,7 +25,7 @@ import { Gap, Kv, KvAction, Spark, SuiteHead, SuitePage, SuitePanel, Trouble, Wa
 import { useFormatters } from './useSuite';
 import { share, type HouseholdRecord, type Suite } from './model';
 
-export function HouseholdRecordView({ record, error, gaps, onBack, controls, kicker, onFilterToFamily, onTrial, trialBusy }: {
+export function HouseholdRecordView({ record, error, gaps, onBack, controls, kicker, onTrial, trialBusy }: {
   record: HouseholdRecord | null;
   error: string | null;
   /**
@@ -38,7 +38,6 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
   onBack: () => void;
   controls?: React.ReactNode;
   kicker?: string | null;
-  onFilterToFamily?: () => void;
   /** Grant or extend a trial. Absent where the reader may not manage accounts. */
   onTrial?: (what: 'grant' | 'extend') => void;
   trialBusy?: 'grant' | 'extend' | null;
@@ -253,11 +252,12 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
               <Kv label="Extending a trial" value={null} gap="Needs manage_accounts" />
             </>
           )}
-          {/* What it can honestly do: filter the customer list. Scoping
-              Overview, Money and Behaviour to one household needs a per-
-              household variant of every section — it is named as an open
-              question rather than promised by a button. */}
-          <KvAction label="Filter the customer list to this family" action="Apply" onPress={() => onFilterToFamily?.()} />
+          {/* No filter-to-a-family anywhere (owner, 20 Sep 2026: "There should
+              be no filters on any screen for a particular family. The only way
+              I can see a particular family's activity is by going into the
+              household accounts and looking at it"). This record *is* that
+              way in, so the control that pointed back at a filtered list has
+              gone rather than been reworded. */}
           <Kv
             label="Open their chat history"
             value={null}
