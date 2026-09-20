@@ -59,6 +59,7 @@ import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
 import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.js';
+import { fenceToBand, minutesTo } from '../domain/band.js';
 import { dwellFor } from '../domain/options.js';
 import { distinguish } from '../domain/naming.js';
 import { shelvesForAtlas, shelvesForVenue, FOOD_DRAWER } from '../domain/moods.js';
@@ -248,7 +249,9 @@ const asCard = (it, { centre, origin, mode, category }) => ({
   attribution: ['Powered by Google'],
   lat: it.lat, lng: it.lng,
   distanceKm: Number(kmBetween(centre, it).toFixed(1)),
-  travelMinutes: estimateTravelMinutes(origin, it, mode),
+  // The very number the fence measured: one function, so the screen cannot
+  // contradict itself at the edge.
+  travelMinutes: minutesTo(origin, it, mode),
   estimated: true,
   dwellMinutes: 90,
   household: null,
@@ -326,12 +329,10 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
    * with itself: no more spa in Chiswick, forty minutes away, on a thirty
    * minute ring (owner, 20 Sep 2026).
    */
-  // Measured from the same point the card prints from, or the screen contradicts
-  // itself by a minute at the edge: two places came back saying "31 min drive"
-  // on a thirty-minute ring because the fence measured from the ring's centre
-  // and the card from where the family sets off (20 Sep 2026).
+  // One fence, in `domain/band.js`, measured from the point the card prints
+  // from. Written here by hand it was written twice, and the second copy went
+  // on using the finder's ring after the first was corrected (20 Sep 2026).
   const start = from ?? ring.at ?? null;
-  const within = (v) => !start || v.lat == null || estimateTravelMinutes(start, v, mode) <= minutes;
 
   // The fence is the ring, and the question was the category.
   //
@@ -347,7 +348,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // The shelves still travel on every item — they name the drawer and they
   // decide what the place page says — they simply no longer decide whether a
   // household may see it.
-  const mine = got.venues.filter(within);
+  const mine = fenceToBand(got.venues, { from: start, minutes, mode });
   const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
   const scores = refs.length
     ? (await query(

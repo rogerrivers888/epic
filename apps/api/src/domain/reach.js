@@ -66,11 +66,21 @@ export const CAP_MINUTES = 90;
  * At ten, 4.4% of place-pairs are never offered; at five it was 15.6%, and at
  * seven — the estimator's half alone — 9.5%.
  *
- * **Round up, because the matrix is a filter and should err wide.** Showing a
- * place that turns out to be a few minutes past the band is a smaller harm than
- * hiding one that is inside it, and on the browsing screens there is no exact
- * pass to rescue the second kind. Seven would have left the water crossings
- * lost, which is the fault of 6 and 12 September all over again.
+ * **Round up, because the matrix is a filter and should err wide.** Hiding a
+ * place that is genuinely inside the band is the worse harm, and seven would
+ * have left the water crossings lost — the fault of 6 and 12 September all over
+ * again.
+ *
+ * **This allowance belongs to the finder and must never reach the household.**
+ * The finder errs wide so that we do not hide reachable places; the display is
+ * then fenced on exactly the number the card prints (`domain/band.js`). If a
+ * household asks for thirty minutes, nothing over thirty minutes appears on a
+ * screen, in any list, on any card, ever (owner, 20 Sep 2026, making it
+ * permanent). The note that stood here described the leak as a known cost of
+ * rounding up — "on the browsing screens there is no exact pass to rescue the
+ * second kind" — and it was not a cost. It was a bug, and it put a
+ * forty-minute spa in Chiswick on a thirty-minute ring. `test/band.test.js`
+ * fails loudly if it comes back.
  *
  * **It should fall to roughly seven when OSRM lands.** A road-network build
  * removes the topology half of this number, and 7 is what the estimator half
