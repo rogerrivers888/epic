@@ -239,9 +239,22 @@ function attributionOf(v, lines) {
  */
 async function ringFrom(q, { minutes, mode }) {
   const said = String(q.where ?? '').trim();
+  const slug = said.toLowerCase().replace(/\s+/g, '-');
+  // A full postcode is its own sector. An outward code — SL5 — is not: it is a
+  // district of several, so the ring is drawn from the one nearest its centre,
+  // exactly as the back office draws it.
   const sector = said ? sectorOf(said.replace(/-/g, ' ')) : null;
   let cell = sector ? `sector:${sector}` : null;
   let label = sector ? said.toUpperCase() : null;
+  if (!cell && slug) {
+    const { rows: [area] } = await query(
+      'select name, lat, lng from localities where slug = $1 and lat is not null limit 1', [slug]);
+    if (area) {
+      const at = await reach.cellAt({ lat: Number(area.lat), lng: Number(area.lng) }).catch(() => null);
+      cell = at?.code ?? null;
+      label = area.name ?? said.toUpperCase();
+    }
+  }
   if (!cell && q.lat != null && q.lng != null) {
     const at = await reach.cellAt({ lat: Number(q.lat), lng: Number(q.lng) }).catch(() => null);
     cell = at?.code ?? null;
