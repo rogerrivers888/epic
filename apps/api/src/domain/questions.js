@@ -253,7 +253,13 @@ export function saturation(perPlace = [], { step = SATURATION_STEP, threshold = 
     curve,
     // Saturated only on a full step: a partial last block of three places
     // teaching two words is not evidence of anything.
-    saturated: Boolean(last && !last.partial && last.newWords < threshold),
+    //
+    // And never on an empty sample. Twenty places that taught nothing because
+    // there was nothing to read about them are not a subcategory we have
+    // finished with — they are the one that most needs the next pass, and the
+    // first run reported twenty-one of them as "saturated".
+    saturated: Boolean(last && !last.partial && last.newWords < threshold && seen.size > 0),
+    nothingToRead: seen.size === 0,
     threshold,
   };
 }
