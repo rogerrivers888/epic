@@ -45,12 +45,40 @@ export const CAP_MINUTES = 90;
  * Centre-to-centre is the approximation, and a place near the edge of its
  * sector can be inside the limit while its sector's centre is outside it. The
  * exact pass can throw a place away; it cannot go and find one the matrix never
- * offered, so the asymmetry has to be paid for here. Five minutes is roughly
- * three kilometres at town speed — comfortably wider than a sector almost
- * anywhere people live, and cheap, because every candidate it lets through is
- * then measured properly.
+ * offered, so the asymmetry has to be paid for here.
+ *
+ * **Ten is measured, not chosen** (owner, 20 Sep 2026: "Round the combined p95
+ * of 9.5 up, not down… record the number with its derivation next to it, so
+ * nobody in six months reads 10 as a guess"). Five was a guess — roughly three
+ * kilometres at the town speed we then believed — and it was wrong in both of
+ * its halves, because the allowance has two of them:
+ *
+ *   **the estimator**   p95 of the residual on 393 holdout pairs from 90
+ *                       origins the speed fit never saw: **7 minutes**
+ *                       (`reach-fit2.mjs`, `holdout.json`, `short-hold.json`).
+ *   **the topology**    how far a place sits from its sector's centre, over all
+ *                       27,426 stamped places: p95 **10.6 minutes**
+ *                       (`reach-geometry.mjs`).
+ *
+ * They stack, but they do not simply add: the offset only costs a place when it
+ * points back toward the origin. Drawing from both empirical distributions with
+ * a random bearing gives a combined **p95 of 9.5 minutes**, rounded up to ten.
+ * At ten, 4.4% of place-pairs are never offered; at five it was 15.6%, and at
+ * seven — the estimator's half alone — 9.5%.
+ *
+ * **Round up, because the matrix is a filter and should err wide.** Showing a
+ * place that turns out to be a few minutes past the band is a smaller harm than
+ * hiding one that is inside it, and on the browsing screens there is no exact
+ * pass to rescue the second kind. Seven would have left the water crossings
+ * lost, which is the fault of 6 and 12 September all over again.
+ *
+ * **It should fall to roughly seven when OSRM lands.** A road-network build
+ * removes the topology half of this number, and 7 is what the estimator half
+ * measures on its own — so the allowance narrowing from ten to seven is the
+ * measurable payoff for doing OSRM, and the way to check the build was worth
+ * it rather than merely finished.
  */
-export const EDGE_MINUTES = 5;
+export const EDGE_MINUTES = 10;
 
 /**
  * How far out the matrix is actually built.

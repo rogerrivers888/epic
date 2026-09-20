@@ -13,7 +13,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateTravelMinutes, detourMinutes, kmBetween } from '../src/domain/travel.js';
+import { estimateTravelMinutes, detourMinutes, kmBetween, reachRadiusKm } from '../src/domain/travel.js';
 
 const HOME = { lat: 51.38622, lng: -0.62342 };            // Fairways, Ascot
 const CRYSTAL_PALACE = { lat: 51.422294, lng: -0.075789 };
@@ -50,11 +50,22 @@ test('a longer drive averages a faster speed, and a short hop a slower one', () 
   assert.ok(speed(100) < 70, `a hundred kilometres averaged ${speed(100).toFixed(1)} km/h, which is not driving`);
 });
 
-test('the corridor still keeps out what is not on the way', () => {
-  // Chobham Common: only ten minutes extra by the arithmetic — back past the
-  // house and round — but nobody calls it on the way to Thorpe Park. What keeps
-  // it out is the width of the corridor, not the detour, so the width must stay
-  // tight on a short journey however much it grows on a long one.
+test('the corridor grows with the journey, and a short run stays tight', () => {
+  // Chobham Common used to be the case this test pinned: 2.05km off a 7.9km
+  // drive to Thorpe Park, and it had to stay out (owner, 6 Sep 2026 — "nobody
+  // calls it on the way"). It is inside the band now, deliberately.
+  //
+  // The width was hand-tuned against an estimator that overstated every drive.
+  // When that was measured and corrected on 20 Sep 2026 the band widened from
+  // 1.9km to 2.3km, and holding it still would have kept the old bias alive in
+  // a second place after being removed from the first (owner, same day:
+  // "keeping it pinned now double-compensates"). So the width follows the
+  // arithmetic again, and whether 2.3km on an eight-kilometre drive is too
+  // generous is being judged against real trips rather than against this one
+  // remembered example. If it is re-tuned, the reason goes here.
+  //
+  // What must stay true either way is the shape: the band is much tighter on a
+  // short run than on a long one, because that is the whole reason it exists.
   const CHOBHAM = { lat: 51.3733, lng: -0.5867 };
   const width = (origin, destination, reachKm) => Math.min(8, Math.max(1, reachKm / 2, kmBetween(origin, destination) * 0.12));
   const offLine = (origin, destination, v) => {
@@ -64,17 +75,23 @@ test('the corridor still keeps out what is not on the way', () => {
     const t = Math.max(0, Math.min(1, (ax * (v.lng - origin.lng) * kx + ay * (v.lat - origin.lat)) / (ax * ax + ay * ay)));
     return kmBetween({ lat: origin.lat + (destination.lat - origin.lat) * t, lng: origin.lng + (destination.lng - origin.lng) * t }, v);
   };
-  const reach = 3.73; // driving, a fifteen-minute budget — the width is pinned (routes/trips.js)
-  assert.ok(
-    offLine(HOME, THORPE_PARK, CHOBHAM) > width(HOME, THORPE_PARK, reach),
-    'Chobham Common is back inside the corridor to Thorpe Park',
-  );
-  // And Richmond Park, three and a half kilometres off a thirty-eight kilometre
-  // drive, is inside the one to Crystal Palace — it was not, and that is why
-  // the screen was empty.
+  const reach = reachRadiusKm('driving', 15);
+
+  const short = width(HOME, THORPE_PARK, reach);
+  const long = width(HOME, CRYSTAL_PALACE, reach);
+  assert.ok(long > short * 1.5, `a 38km drive's corridor (${long.toFixed(2)}km) is barely wider than a 7.9km drive's (${short.toFixed(2)}km)`);
+  assert.ok(short < 3, `a short run's corridor opened out to ${short.toFixed(2)}km, which is a search of the county`);
+
+  // Richmond Park, three and a half kilometres off a thirty-eight kilometre
+  // drive, is inside the corridor to Crystal Palace — it was not, and that is
+  // why the screen was empty.
   const RICHMOND_PARK = { lat: 51.4413, lng: -0.2749 };
   assert.ok(
-    offLine(HOME, CRYSTAL_PALACE, RICHMOND_PARK) < width(HOME, CRYSTAL_PALACE, reach),
-    'Richmond Park is still outside the corridor to Crystal Palace',
+    offLine(HOME, CRYSTAL_PALACE, RICHMOND_PARK) < long,
+    'Richmond Park is outside the corridor to Crystal Palace',
   );
+  // And the corridor is still a corridor: somewhere genuinely off the route is
+  // still out of it, whatever the width.
+  const BRIGHTON = { lat: 50.8225, lng: -0.1372 };
+  assert.ok(offLine(HOME, CRYSTAL_PALACE, BRIGHTON) > long, 'Brighton is on the way to Crystal Palace');
 });
