@@ -20,6 +20,7 @@ import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts, house } from '../../theme';
 import { Act, Band, Kicker, Nothing, Value } from './desk';
+import { heartAge, shareSays, thinSomewhere, waiting } from './say';
 import type { BrowseRow, District, HouseMember } from './types';
 
 // ---------------------------------------------------------------------------
@@ -52,13 +53,14 @@ export function Rows({
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; field: 'title' | 'copy' | 'rule' } | null>(null);
 
+  const codes = districts.map((d) => d.code);
   const hearted = rows.filter((r) => r.hearted).length;
-  const thin = rows.filter((r) => r.thin).length;
+  const thin = rows.filter((r) => thinSomewhere(r, codes, minFill)).length;
   const cold = rows.filter((r) => r.share == null).length;
 
   const shown = rows.filter((r) => {
     if (filter === 'hearted') return r.hearted;
-    if (filter === 'thin') return r.thin;
+    if (filter === 'thin') return thinSomewhere(r, codes, minFill);
     if (filter === 'cold') return r.share == null;
     return true;
   });
@@ -191,7 +193,7 @@ export function Rows({
                       rather than about the row.
                     */}
                     <Value numeric tone={r.share == null ? 'warn' : 'muted'} size={13}>
-                      {r.share == null ? 'nobody yet' : `${Math.round(r.share * 100)}%`}
+                      {shareSays(r.share)}
                     </Value>
                   </View>
                 </Press>
@@ -464,7 +466,7 @@ export function HouseholdView({
           <View style={{ paddingTop: 2, paddingBottom: 20 }}>
             {rows.map((r) => {
               const fill = r.fill[district]?.count ?? 0;
-              const waiting = r.hearted && fill < minFill;
+              const isWaiting = waiting(r, district, minFill);
               return (
                 <View key={r.id} style={{
                   gap: 3, paddingVertical: 11, paddingHorizontal: 18,
@@ -480,7 +482,7 @@ export function HouseholdView({
                         }}>
                           {r.title}
                         </Text>
-                        {waiting ? (
+                        {isWaiting ? (
                           <View style={{ borderWidth: 1, borderColor: house.inkMuted, paddingVertical: 1, paddingHorizontal: 5 }}>
                             <Text style={{
                               fontFamily: fonts.body, fontSize: 9.5, fontWeight: '800',
@@ -492,7 +494,7 @@ export function HouseholdView({
                         ) : null}
                       </View>
                       <Text style={{ fontFamily: fonts.body, fontSize: 13, color: house.inkMuted, lineHeight: 18.2 }}>
-                        {waiting
+                        {isWaiting
                           ? 'Nothing near you this week — it comes back when there is'
                           : r.copy || `${fill} places near ${here?.town ?? ''}`}
                       </Text>
@@ -509,7 +511,7 @@ export function HouseholdView({
                     "there is nothing good here"; no shelf reads as "not this
                     week", which is what is true.
                   */}
-                  {r.hearted && !waiting && r.shelf.length ? (
+                  {r.hearted && !isWaiting && r.shelf.length ? (
                     <View style={{ flexDirection: 'row', gap: 8, paddingTop: 7 }}>
                       {r.shelf.slice(0, 3).map((p) => (
                         <View key={p.name} style={{ width: 106, flexGrow: 0, flexShrink: 0, gap: 5 }}>
@@ -547,7 +549,7 @@ export function HouseholdView({
             {hearts.map((h) => {
               // A heart that has sat untouched for months is fading: it was
               // true once and may not be now.
-              const fading = h.days > 120;
+              const age = heartAge(h.days);
               return (
                 <View key={h.id} style={{
                   flexDirection: 'row', alignItems: 'center', gap: 14,
@@ -560,11 +562,7 @@ export function HouseholdView({
                     <Value size={12.5} tone="muted">{h.who}</Value>
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Value size={12} tone={fading ? 'warn' : 'dim'}>
-                      {fading
-                        ? `hearted ${Math.round(h.days / 30)} months ago · fading`
-                        : `hearted ${h.days} ${h.days === 1 ? 'day' : 'days'} ago`}
-                    </Value>
+                    <Value size={12} tone={age.fading ? 'warn' : 'dim'}>{age.says}</Value>
                   </View>
                   <Act label="unheart" tone="dim" ruled={false} onPress={() => onHeart(h.id)} />
                 </View>

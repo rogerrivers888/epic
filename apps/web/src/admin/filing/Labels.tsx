@@ -21,6 +21,7 @@ import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import {
   Act, Alarm, Band, Cell, Col, DeskPill, Head, Kicker, Link, Mark, Nothing, Row, Value, WARN, tabular,
 } from './desk';
+import { rung, tooManyQuestions } from './say';
 import type { Candidate, GlobalLabel, PendingWord, SetDetail, SetQuestion, SetRow, Threshold, VocabRow } from './types';
 
 // ---------------------------------------------------------------------------
@@ -34,14 +35,6 @@ const SET_COLS: Col[] = [
   { w: 100, label: 'Places', align: 'right' },
   { w: 140, label: 'Candidates', align: 'right' },
 ];
-
-/**
- * A set with eight questions or more is drawn red.
- *
- * Not a rule about tidiness: every question is asked of every place in every
- * subcategory the set covers, so the cost of one more is the whole population.
- */
-const TOO_MANY_QUESTIONS = 8;
 
 export function QuestionSets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: string) => void }) {
   return (
@@ -67,8 +60,8 @@ export function QuestionSets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: s
               <Value tone="muted" size={12.5}>{s.usedBy.join(' · ') || 'not attached to anything'}</Value>
             </Cell>
             <Cell col={SET_COLS[2]}>
-              <Value numeric weight={s.questions >= TOO_MANY_QUESTIONS ? '800' : '400'}
-                tone={s.questions >= TOO_MANY_QUESTIONS ? 'warn' : 'ink'}>
+              <Value numeric weight={tooManyQuestions(s.questions) ? '800' : '400'}
+                tone={tooManyQuestions(s.questions) ? 'warn' : 'ink'}>
                 {s.questions}
               </Value>
             </Cell>
@@ -330,11 +323,9 @@ function CandidateRow({ c, thresholds, open, onToggle, onAsk, onIgnore }: {
   onAsk: () => void;
   onIgnore: () => void;
 }) {
-  const low = thresholds.distinctLow?.value ?? 0.2;
-  const high = thresholds.distinctHigh?.value ?? 0.8;
-  const share = c.of ? c.seen / c.of : 0;
-  const distinctive = share <= low;
-  const useless = share >= high;
+  const on = rung(c.seen, c.of, thresholds.distinctLow?.value ?? 0.2, thresholds.distinctHigh?.value ?? 0.8);
+  const distinctive = on === 'distinctive';
+  const useless = on === 'useless';
   const confirmed = c.state === 'confirmed';
 
   return (

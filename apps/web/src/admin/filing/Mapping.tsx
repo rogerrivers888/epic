@@ -30,21 +30,13 @@ import {
   Act, Band, Cell, Col, DeskPill, Head, Kicker, Mark, Nothing, Row, Value, WARN,
 } from './desk';
 import { Destination, PickCategory, Picker } from './Picker';
+import { SORTS, appliedSays, pointsAt, sortLabel, startsDescending } from './say';
+import type { SortKey } from './say';
 import type { ExcludedRow, MappingEvidence, WordRow } from './types';
 
 // ---------------------------------------------------------------------------
 // The words
 // ---------------------------------------------------------------------------
-
-export type SortKey = 'brings' | 'opens' | 'word' | 'points' | 'flags';
-
-const SORTS: { key: SortKey; name: string; dir: string }[] = [
-  { key: 'brings', name: 'Places it brings in', dir: 'most first' },
-  { key: 'opens', name: 'Ever opened', dir: 'fewest first' },
-  { key: 'word', name: 'Google’s word', dir: 'A to Z' },
-  { key: 'points', name: 'Where it points', dir: 'A to Z' },
-  { key: 'flags', name: 'Flags', dir: 'most flags first' },
-];
 
 const WORD_COLS: Col[] = [
   { w: 250, label: 'Google’s word' },
@@ -57,49 +49,7 @@ const WORD_COLS: Col[] = [
 /** Over this many places, a word's blast radius is worth reading twice. */
 const BIG = 100;
 
-/**
- * Where a word points, said the way the person who answered would recognise.
- *
- * "Kept as a label" is four of our five stored answers, and flattening them
- * loses two real decisions: `travel` is how you get there (parking, the bus
- * station) and `nearby` is what happens to be next to the place you came for
- * (the chemist by the museum). Somebody who answered one of those has to see
- * that they did, or the screen reads as though their answer was thrown away.
- */
-function pointsAt(w: WordRow): string {
-  if (w.pointsAt) return w.pointsAt.label;
-  if (w.decision === 'notinepic') return 'Not in Epic';
-  if (w.decision === 'secondary') {
-    if (w.answer === 'travel') return 'Kept as a label · how you get there';
-    if (w.answer === 'nearby') return 'Kept as a label · what is nearby';
-    return 'Kept as a label';
-  }
-  return 'not answered';
-}
 
-/**
- * The sort button says its direction in words rather than with an arrow.
- *
- * An arrow here would be a symbol standing in for an icon, which this app does
- * not do; and "most first" is clearer than a glyph anyway. The column headers
- * keep a real chevron, because there the direction is the only thing the mark
- * is carrying.
- */
-function sortLabel(sort: SortKey, desc: boolean) {
-  const s = SORTS.find((x) => x.key === sort);
-  if (!s) return 'Sorted';
-  const forwards = s.key === 'word' || s.key === 'points' ? !desc : desc;
-  const dir = forwards ? s.dir : REVERSED[s.key];
-  return `Sorted by ${s.name.toLowerCase()} · ${dir}`;
-}
-
-const REVERSED: Record<SortKey, string> = {
-  brings: 'fewest first',
-  opens: 'most first',
-  word: 'Z to A',
-  points: 'Z to A',
-  flags: 'fewest flags first',
-};
 
 export function Words({
   words, counts, evidence, sort, desc, onSort, filters, onFilters, filterOptions,
@@ -201,7 +151,7 @@ export function Words({
             return (
               <Press key={s.key} effect="none" accessibilityRole="button" accessibilityState={{ selected: on }}
                 onPress={() => {
-                  onSort(s.key, on ? !desc : !(s.key === 'word' || s.key === 'points'));
+                  onSort(s.key, on ? !desc : startsDescending(s.key));
                   setSortMenu(false);
                 }}>
                 <View style={{
@@ -215,7 +165,7 @@ export function Words({
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Value size={13} weight={on ? '700' : '500'} tone={on ? 'lime' : 'ink'}>{s.name}</Value>
                   </View>
-                  <Value size={11.5} tone="dim">{s.dir}</Value>
+                  <Value size={11.5} tone="dim">{s.forwards}</Value>
                 </View>
               </Press>
             );
@@ -419,7 +369,7 @@ function SortHead({ cols, sort, desc, onSort }: {
         const on = key === sort;
         return (
           <Press key={i} effect="none" accessibilityRole="button"
-            onPress={() => onSort(key, on ? !desc : !(key === 'word' || key === 'points'))}
+            onPress={() => onSort(key, on ? !desc : startsDescending(key))}
             style={c.w === 'auto' ? { flex: 1, minWidth: 0 } : { width: c.w, flexGrow: 0, flexShrink: 0 }}>
             <View style={{
               flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -605,9 +555,7 @@ export function Audit({
               <>
                 {/* Reported as it came back, not as it was asked for. */}
                 <Value size={12.5} weight="700" tone="muted">
-                  {applied.advisory
-                    ? `${applied.applied} applied, ${applied.advisory} still ${applied.advisory === 1 ? 'needs' : 'need'} you`
-                    : `${applied.applied} applied`}
+                  {appliedSays(applied.applied, applied.advisory)}
                 </Value>
                 <Act label="Undo the whole audit" tone="ink" onPress={onUndo} />
               </>
