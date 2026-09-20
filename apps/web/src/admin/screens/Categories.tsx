@@ -1571,6 +1571,8 @@ function labelPane(r: TaxonomyLabel, secondary: SecondaryLabel[]) {
   const mine = new Map((r.carries ?? []).map((c) => [c.key, c.value]));
   return secondary.filter((a) => a.kind !== 'range' && asks(a)).map((a) => {
     const v = mine.get(a.key);
+    // The clear row's key is a character no option can be, so a label whose
+    // choices include the word "clear" still clears rather than chooses.
     const clear = v ? [{ key: '\u2717', label: `It says nothing about ${a.label.toLowerCase()}`, on: false }] : [];
     return {
       key: a.key,
@@ -1587,9 +1589,19 @@ function labelPane(r: TaxonomyLabel, secondary: SecondaryLabel[]) {
   });
 }
 
-/** What a pick in that half means: the attribute is the group, the value the item. */
-const labelValue = (key: string): AttributeValue | null =>
-  (key === '\u2717' ? null : key === 'yes' ? { yesno: true } : key === 'no' ? { yesno: false } : { choice: key });
+/**
+ * What a pick in that half means: the attribute is the group, the value the item.
+ *
+ * The *attribute's* kind decides, never the item's key. Reading the key meant a
+ * one-of label with an option called "Yes" -- a cuisine, a dining style, or any
+ * label somebody makes later -- wrote a yes/no, which the API is right to
+ * refuse (Codex, 20 Sep 2026).
+ */
+const labelValue = (a: SecondaryLabel | undefined, key: string): AttributeValue | null => {
+  if (key === '\u2717') return null;
+  if (a?.kind === 'oneof') return { choice: key };
+  return { yesno: key === 'yes' };
+};
 
 /**
  * BO1i — our 59, as the rows.
@@ -3264,7 +3276,7 @@ function WhatIsLeft({ rows, tax, secondary, wide, catLabel, subLabel, canManage,
                   mine: 'Where it goes',
                   label: 'What it says',
                   groups: labelPane(r, secondary),
-                  onPick: (attribute, k) => onCarry(r, attribute, labelValue(k)),
+                  onPick: (attribute, k) => onCarry(r, attribute, labelValue(secondary.find((a) => a.key === attribute), k)),
                 }}
               />
             </View>
@@ -4683,7 +4695,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                             mine: 'Where it goes',
                             label: 'What it says',
                             groups: labelPane(r, secondary),
-                            onPick: (attribute, k) => void carryOne(r, attribute, labelValue(k)),
+                            onPick: (attribute, k) => void carryOne(r, attribute, labelValue(secondary.find((a) => a.key === attribute), k)),
                           }}
                           startIn={st === 'mapped' || st === 'category' ? r.landing.category ?? null : sug?.subcategory ? tax.subcategories.find((x) => x.key === sug.subcategory)?.category_key ?? null : null}
                         />
@@ -4794,7 +4806,7 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
                                         mine: 'Where it goes',
                                         label: 'What it says',
                                         groups: labelPane(w, secondary),
-                                        onPick: (attribute, k) => void carryOne(w, attribute, labelValue(k)),
+                                        onPick: (attribute, k) => void carryOne(w, attribute, labelValue(secondary.find((a) => a.key === attribute), k)),
                                       }}
                                       startIn={wst === 'mapped' ? w.landing.category ?? null : null}
                                     />
