@@ -84,12 +84,17 @@ export const tileOf = (lat, lng, dLat = TILE_LAT, dLng = TILE_LNG) => {
  * of those sectors are written onto the tile, which is how a tile census is
  * reported by outcode afterwards without anybody having to guess.
  */
-export async function planTiles({ areas = [], dLat = TILE_LAT, dLng = TILE_LNG } = {}) {
-  if (!areas.length) return [];
+export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dLng = TILE_LNG } = {}) {
+  if (!areas.length && !outcodes.length) return [];
+  // Either the whole postcode area or named districts. The second is what a
+  // calibration run needs — three areas before committing to a thousand — and
+  // what re-censusing one district after a taxonomy change needs afterwards.
   const { rows } = await query(
     `select outcode, lat, lng from geo_cells
-      where outcode is not null and substring(outcode from '^[A-Z]+') = any($1)`,
-    [areas.map((a) => a.toUpperCase())],
+      where outcode is not null
+        and (($1::text[] <> '{}' and substring(outcode from '^[A-Z]+') = any($1))
+          or ($2::text[] <> '{}' and upper(outcode) = any($2)))`,
+    [areas.map((a) => a.toUpperCase()), outcodes.map((o) => o.toUpperCase())],
   );
   const tiles = new Map();
   for (const r of rows) {
@@ -109,22 +114,25 @@ export async function planTiles({ areas = [], dLat = TILE_LAT, dLng = TILE_LNG }
  * as `collectRuns.startIfClear`).
  */
 export async function startRun({
-  label, areas, maxRequests = 250_000, ratePerSec = 5, freshDays = CENSUS_FRESH_DAYS,
+  label, areas = [], outcodes = [], maxRequests = 250_000, ratePerSec = 5, freshDays = CENSUS_FRESH_DAYS,
   dLat = TILE_LAT, dLng = TILE_LNG, startedBy = null,
 } = {}) {
-  if (!areas?.length) throw Object.assign(new Error('a run needs postcode areas'), { status: 400 });
+  if (!areas?.length && !outcodes?.length) {
+    throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
+  }
   const { rows: going } = await query(
     `select id, label from census_runs where state = 'running' limit 1`);
   if (going.length) {
     throw Object.assign(new Error(`“${going[0].label}” is already running; stop it before starting another`), { status: 409 });
   }
-  const tiles = await planTiles({ areas, dLat, dLng });
+  const tiles = await planTiles({ areas, outcodes, dLat, dLng });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
-    [label ?? areas.join(', '), areas.map((a) => a.toUpperCase()), dLat, dLng,
+    [label ?? [...areas, ...outcodes].join(', '),
+      [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
       maxRequests, ratePerSec, freshDays, startedBy, tiles.length]);
 
   // Tiles outlive runs: the same square keeps its row and its history, and this

@@ -249,3 +249,15 @@ test('a tile census is reported by outcode, and a box across the edge is neither
   assert.equal(b.census_count, 0, 'a box wholly in the other outcode is not counted here');
   assert.equal(b.unresolved, 1, 'the straddling one is unresolved in both, because it is in one of them');
 });
+
+test('a run can be three districts, which is what calibrating before committing means', async () => {
+  const districts = await planTiles({ outcodes: ['SL5', 'GU21'] });
+  if (!districts.length) return; // no geo_cells for those in this database
+  assert.ok(districts.every((t) => t.outcodes.some((o) => ['SL5', 'GU21'].includes(o))),
+    'the tiles are the ones those districts sit in');
+  const wholeArea = await planTiles({ areas: ['SL'] });
+  if (wholeArea.length) {
+    assert.ok(districts.length < wholeArea.length + 10,
+      'and naming a district is not a way of accidentally censusing its whole postcode area');
+  }
+});

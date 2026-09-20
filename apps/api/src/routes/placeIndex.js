@@ -3252,13 +3252,14 @@ router.get('/census/runs', requires('view_library'), async (req, res, next) => {
 router.get('/census/quote', requires('view_library'), async (req, res, next) => {
   try {
     const areas = String(req.query.areas ?? '').split(',').map((a) => a.trim()).filter(Boolean);
-    if (!areas.length) throw bad('a quote needs postcode areas');
-    const tiles = await censusRun.planTiles({ areas });
+    const outcodes = String(req.query.outcodes ?? '').split(',').map((a) => a.trim()).filter(Boolean);
+    if (!areas.length && !outcodes.length) throw bad('a quote needs postcode areas or districts');
+    const tiles = await censusRun.planTiles({ areas, outcodes });
     const plan = await slicePlan();
     const questions = plan.reduce((n, p) => n + p.questions.length, 0);
     const floor = tiles.length * questions;
     res.json({
-      areas,
+      areas: [...areas, ...outcodes],
       tiles: tiles.length,
       outcodes: new Set(tiles.flatMap((t) => t.outcodes)).size,
       questions,
@@ -3276,9 +3277,11 @@ router.get('/census/quote', requires('view_library'), async (req, res, next) => 
 router.post('/census/run', requires('manage_library'), async (req, res, next) => {
   try {
     const areas = Array.isArray(req.body?.areas) ? req.body.areas : [];
+    const outcodes = Array.isArray(req.body?.outcodes) ? req.body.outcodes : [];
     const run = await censusRun.startRun({
       label: req.body?.label,
       areas,
+      outcodes,
       maxRequests: Number(req.body?.maxRequests) || undefined,
       ratePerSec: Number(req.body?.ratePerSec) || undefined,
       freshDays: Number(req.body?.freshDays) || undefined,
