@@ -22,7 +22,10 @@ export const TRAVEL_MODES = ['walking', 'cycling', 'driving', 'transit'];
 const MODE_PROFILE = {
   walking: { kmh: 4.8, openKmh: 4.8, rampKm: 1, detourFactor: 1.15, fixedOverheadMinutes: 0 },
   cycling: { kmh: 15, openKmh: 18, rampKm: 8, detourFactor: 1.2, fixedOverheadMinutes: 2 },
-  driving: { kmh: 28, openKmh: 58, rampKm: 12, detourFactor: 1.25, fixedOverheadMinutes: 5 },
+  // Fitted against 473 real road times, 20 Sep 2026 — see `speedFor` below.
+  // The detour factor is measured rather than assumed (owner's call): the road
+  // is 1.4x the straight line at the median, not 1.25.
+  driving: { kmh: 32.5, openKmh: 102, rampKm: 32, detourFactor: 1.4, fixedOverheadMinutes: 3 },
   // Wait time is why a transit isochrone is lumpy rather than circular. A real
   // provider derives this from the timetable at the outing time (Epic 3 C2).
   transit: { kmh: 22, openKmh: 45, rampKm: 10, detourFactor: 1.35, fixedOverheadMinutes: 8 },
@@ -43,6 +46,49 @@ const MODE_PROFILE = {
  *
  * A speed that climbs smoothly with the distance has no step to fall off, so
  * two legs and the journey they replace are measured on the same curve.
+ *
+ * **And the curve itself was wrong until 20 September 2026, which is the other
+ * half of the same fault.** Removing the step fixed the discontinuity and left
+ * the numbers too slow: 58 km/h as the open-road speed, applied to a distance
+ * already inflated by a detour factor, is nobody's motorway. Measured against
+ * Google Routes on 286 random sector pairs (free of traffic, so the comparison
+ * is like for like), Epic overstated 4 journeys in 5 — by a median of 5 minutes
+ * and by as much as 35 on a long one. The bias grew with distance: −1.6 min on
+ * a quarter-hour hop, −15.9 on an hour and a half.
+ *
+ * Overstating a journey does not show a household a wrong number. It shows them
+ * *fewer places*, because every list is fenced by this function — which is why
+ * the symptom was always an empty screen. The owner reported it twice and it was
+ * treated as two bugs: Crystal Palace on 6 September (one restaurant on a
+ * twenty-mile run) and Bristol on 12 September ("nothing matches" inside an
+ * hour). The step explained part of the first. This explains both.
+ *
+ * So the four driving numbers are now fitted rather than assumed: 473 pairs as
+ * the training set, absolute error as the loss — squared error would let the
+ * handful of sea-loch pairs, where a straight line crosses water and no speed
+ * curve can help, drag the curve for everybody else. Tested on **393 further
+ * pairs from 90 origins the fit never saw**: journeys overstated fall from 75%
+ * to 41%, and the share that would be wrongly put out of reach at a 5-minute
+ * allowance falls from 37% to 10%. Walking, cycling and transit are untouched —
+ * only driving was measured, and a profile nobody has tested is not improved by
+ * being changed.
+ *
+ * The first fit was trained on pairs drawn by *stored minutes*, which gave it
+ * almost nothing under five minutes — and the short end is what the corridor
+ * width, the source radius and the five-minute default band are all worked out
+ * from. It came back with a town speed of 37 km/h, which is nobody's town. 187
+ * short pairs were added to the training set and 100 to the holdout, kept
+ * separate in the reporting so that a good long-range fit cannot hide a bad
+ * short-range one. Any refit must keep that split.
+ *
+ * The one fault this cannot fix is a straight line that is not a road: the Firth
+ * of Clyde, the Wester Ross sea lochs, the estuaries, the islands. About one
+ * pair in eight has a road more than 1.8x its straight line, and those are
+ * understated — offered and then dropped by the exact pass on the planning
+ * paths, and simply wrong on the browsing ones. A road network (OSRM) is the
+ * only real answer and the limitation is accepted until then (owner, 20 Sep
+ * 2026). `reach-fit.mjs` re-runs the fit; `train.json` and `holdout.json` are
+ * the pairs it was fitted and tested on.
  */
 const speedFor = (profile, km) =>
   profile.kmh + (profile.openKmh - profile.kmh) * (km / (km + profile.rampKm));

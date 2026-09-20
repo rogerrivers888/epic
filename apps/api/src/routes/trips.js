@@ -922,7 +922,27 @@ router.get('/:id/along', async (req, res, next) => {
       return m ? { lat: Number(m[1]), lng: Number(m[2]), label: String(req.query.aroundName || '').trim() || null } : null;
     })();
 
-    const reach = reachRadiusKm(mode, maxDetourMin);
+    // How far the detour budget reaches — the basis for the width below.
+    //
+    // Deliberately *not* the live driving profile any more. This width was
+    // tuned by hand against the old, slow estimator (owner, 6 Sep 2026, and the
+    // comment below): Chobham Common is 2.05km off a 7.9km drive to Thorpe Park
+    // and had to stay out of it. Recalibrating the car on 20 Sep 2026 made every
+    // driving estimate faster and honest, which widens this band from 1.9km to
+    // 2.3km and lets Chobham straight back in.
+    //
+    // Whether the corridor should widen now the arithmetic is right is a
+    // judgement about what counts as "on the way" — not a measurement — so it
+    // is held where he tuned it until he says otherwise, and held *explicitly
+    // here* rather than by leaving the travel model wrong for everything else.
+    // Delete these three lines to let it follow the model again.
+    // The three named modes keep following the model, because only driving was
+    // remeasured. Every other word resolves to driving in `reachRadiusKm`, so
+    // every other word lands on the pinned numbers — exactly as it did before.
+    const TUNED_DRIVE = { kmh: 28, detourFactor: 1.25, overheadMinutes: 5 };
+    const reach = ['walking', 'cycling', 'transit'].includes(mode)
+      ? reachRadiusKm(mode, maxDetourMin)
+      : Math.max(0.5, ((maxDetourMin - TUNED_DRIVE.overheadMinutes) / 60) * TUNED_DRIVE.kmh / TUNED_DRIVE.detourFactor);
     const journeyKm = destination ? kmBetween(origin, destination) : 0;
 
     /**

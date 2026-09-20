@@ -27,7 +27,12 @@ test('the ring is the furthest the minutes reach, and never further', () => {
     assert.ok(estimateTravelMinutes(at, past, mode) > minutes || km >= RING_CAP_KM, `${mode} ${minutes}: ${km + 0.5} km is outside`);
   }
   assert.ok(reachKm('walk', 15, { at }) < reachKm('drive', 15, { at }), 'a walk reaches less than a drive');
-  assert.ok(reachKm('drive', 60, { at }) < RING_CAP_KM, 'an hour by car is inside what the sources answer');
+  // An hour by car reached 37km under the old, slow estimator and reaches 51
+  // under the measured one (20 Sep 2026) — past the fifty Google's nearby
+  // search will answer. So an hour is now a *capped* ring and the screen says
+  // so; half an hour is still comfortably inside.
+  assert.ok(reachKm('drive', 30, { at }) < RING_CAP_KM, 'half an hour by car is inside what the sources answer');
+  assert.equal(reachKm('drive', 60, { at }), RING_CAP_KM, 'an hour by car now reaches past what the sources answer');
   assert.equal(reachKm('drive', 180, { at }), RING_CAP_KM, 'capped where the sources stop answering');
   assert.ok(reachKm('drive', 180, { at, cap: 1000 }) > RING_CAP_KM, 'and the uncapped figure is what says so');
 });

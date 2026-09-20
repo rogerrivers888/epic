@@ -12,6 +12,18 @@
  * "Has not been" is judged in the town, not across the whole reach: the food
  * pool is gathered from sixty kilometres around, and a swept Bath must not
  * make Bristol look covered.
+ *
+ * **Bristol had a third cause, found on 20 September 2026, and it was not in
+ * this file.** Two were fixed on the day: `from` was never sent, so every
+ * travel time was measured from Ascot, and the look-around did not run in a
+ * town the sweep had not reached. The third was the arithmetic. Measured
+ * against Google Routes on 473 sector pairs, `estimateTravelMinutes` overstated
+ * three driving journeys in four — by 16 minutes on an hour-and-a-half run —
+ * and every list in the app is fenced on that number, so an honest catchment
+ * was being trimmed before anything in this file was consulted. "Within an
+ * hour" was emptier than the road says it is. Recalibrated in
+ * `domain/travel.js`; the same fault, and the same fix, as Crystal Palace on
+ * 6 September.
  */
 export function needsLookAround(sweptFood, withinKm) {
   return !(sweptFood ?? []).some((f) => f?.km != null && f.km <= withinKm);

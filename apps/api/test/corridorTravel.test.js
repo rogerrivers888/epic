@@ -64,7 +64,7 @@ test('the corridor still keeps out what is not on the way', () => {
     const t = Math.max(0, Math.min(1, (ax * (v.lng - origin.lng) * kx + ay * (v.lat - origin.lat)) / (ax * ax + ay * ay)));
     return kmBetween({ lat: origin.lat + (destination.lat - origin.lat) * t, lng: origin.lng + (destination.lng - origin.lng) * t }, v);
   };
-  const reach = 3.73; // driving, a fifteen-minute budget
+  const reach = 3.73; // driving, a fifteen-minute budget — the width is pinned (routes/trips.js)
   assert.ok(
     offLine(HOME, THORPE_PARK, CHOBHAM) > width(HOME, THORPE_PARK, reach),
     'Chobham Common is back inside the corridor to Thorpe Park',
