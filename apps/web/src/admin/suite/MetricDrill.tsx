@@ -159,7 +159,7 @@ export function MetricDrill({
       <View style={styles.tiles}>
         {drill.tiles.map((t, i) => (
           <View key={t.label} style={[styles.tile, t.selected && styles.tileOn]}>
-            <Text style={[styles.kicker, t.selected && { color: colors.lime }]}>{t.label.toUpperCase()}</Text>
+            <Text style={[styles.kicker, t.selected && { color: colors.accent }]}>{t.label.toUpperCase()}</Text>
             <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit>
               {i === 0
                 ? say(t.value)
@@ -252,7 +252,7 @@ export function Plot({ title, bars, axis, label, withAxis, dashed, changes = tru
           <Text
             key={`${b.label}-${i}`}
             numberOfLines={1}
-            style={[styles.tick, !changes && styles.tickTight, b.latest && { color: colors.lime, fontWeight: '800' }]}
+            style={[styles.tick, !changes && styles.tickTight, b.latest && { color: colors.accent, fontWeight: '800' }]}
           >
             {/*
               Every third month in a tight frame, and always the last one.
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
   },
   kicker: { fontFamily: type.title.fontFamily, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.86, color: colors.inkMuted },
   value: { fontFamily: type.title.fontFamily, fontSize: 30, lineHeight: 34, fontWeight: '800', color: colors.ink, letterSpacing: -1.1 },
-  delta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.lime },
+  delta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.accent },
 
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   rateLabel: { fontFamily: type.title.fontFamily, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.86, color: colors.inkMuted },
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   grid: { position: 'absolute', left: 0, right: 0, height: 1 },
   bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: PLOT },
   barSlot: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'flex-end' },
-  barChange: { fontFamily: type.title.fontFamily, fontSize: 10.5, fontWeight: '800', color: colors.lime, marginBottom: 3 },
+  barChange: { fontFamily: type.title.fontFamily, fontSize: 10.5, fontWeight: '800', color: colors.accent, marginBottom: 3 },
   labels: { flexDirection: 'row', gap: 4 },
   /** Only the history plot has an axis gutter, so only its ticks are inset by one. */
   labelsInset: { paddingLeft: 54 },

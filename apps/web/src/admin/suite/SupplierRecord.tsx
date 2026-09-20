@@ -37,6 +37,16 @@ import { asOneOf, useQueryState } from '../../router';
 import { useFormatters } from './useSuite';
 import { formatter, type Currency, type PeriodKey, type Suite, type SupplierRecord as Record_ } from './model';
 
+/**
+ * The counterparties that are search sources, and therefore have an estate
+ * switch behind them (`sources/index.js`).
+ *
+ * Held here as well as on the server because the *label* has to be right before
+ * the button is pressed: the server's answer says whether the calls stopped,
+ * which is one press too late to stop somebody believing they will.
+ */
+const SEARCH_SOURCES = new Set(['google-places', 'google-routes', 'tripadvisor', 'osm', 'openai']);
+
 const WORDS: globalThis.Record<string, string> = {
   live: 'Live', degraded: 'Degraded', trial: 'Trial', off: 'Off',
   approved: 'Approved', evaluating: 'Evaluating', declined: 'Declined', retired: 'Retired',
@@ -141,6 +151,14 @@ export function SupplierRecord({
   const roomForChanges = plotWidth / Math.max(1, drill.past.bars.length) >= 38;
 
   const editable = canManage && source === 'real';
+  /**
+   * Whether turning the adapter off stops anything.
+   *
+   * True only where the counterparty is one of the search sources the estate
+   * has a switch for. Everything else is an invoice, and no button in a back
+   * office stops an invoice.
+   */
+  const stopsCalls = SEARCH_SOURCES.has(s.key);
 
   return (
     <SuitePage>
@@ -214,8 +232,21 @@ export function SupplierRecord({
             credEdit == null ? (
               <>
                 <KvAction label="Rotate the credential" action="Rotate" onPress={() => setCredEdit(s.credentialMasked ?? '')} />
+                {/*
+                  The label says what turning it off actually does, which is not
+                  the same for every counterparty.
+
+                  A search source — Google, OSM, TripAdvisor, the event feeds —
+                  has an estate switch behind it, so off stops the calls. Fly.io,
+                  Neon, Stripe and the app stores do not: off records that the
+                  register says off, and the bill keeps arriving. Saying "stop
+                  the calls" over the second kind is the lie this control used to
+                  tell (20 Sep 2026).
+                */}
                 <KvAction
-                  label={s.adapterState === 'enabled' ? 'Turn the adapter off' : 'Turn the adapter on'}
+                  label={s.adapterState === 'enabled'
+                    ? (stopsCalls ? 'Turn it off and stop the calls' : 'Mark the adapter off')
+                    : (stopsCalls ? 'Turn it on and allow the calls' : 'Mark the adapter on')}
                   action={s.adapterState === 'enabled' ? 'Disable' : 'Enable'}
                   danger={s.adapterState === 'enabled'}
                   disabled={busy}

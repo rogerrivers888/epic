@@ -21,9 +21,14 @@ import { FIXTURE_SUBSCRIBERS, fixtureHousehold, fixtureSupplier, fixtures, scale
 import { annualPence } from '../src/repositories/pricing.js';
 import { PURPOSE_CLASSES, classOf } from '../src/domain/costClass.js';
 import { change } from '../src/repositories/suite.js';
-import { pool } from '../src/db.js';
+import { listCounterparties, setAdapter } from '../src/repositories/counterparties.js';
+import { enabledSources, loadSourceSettings, setSourceOff, sourceKeys, sourceOff } from '../src/sources/index.js';
+import { pool, query } from '../src/db.js';
 
 test.after(() => pool.end());
+// `enabledSources()` is synchronous and reads a set loaded once at start, so
+// the switch has to be in memory before anything asserts on it.
+test.before(() => loadSourceSettings());
 
 const AT = new Date('2026-09-20T12:00:00Z');
 
@@ -214,6 +219,81 @@ test('the biggest real purposes are all classified', () => {
     'plan.inspire.things', 'own.encyclopedia', 'photo', 'places.detail', 'places.search']) {
     assert.ok(PURPOSE_CLASSES[purpose], purpose);
   }
+});
+
+// ---------------------------------------------------------------------------
+// the red button actually does what it says
+// ---------------------------------------------------------------------------
+
+/**
+ * "Turn the adapter off" was register-only, under a comment claiming it stopped
+ * the calls (epic-59, 20 Sep 2026, exercising it live). It set
+ * `counterparties.status = 'off'` while `enabledSources()` went on returning
+ * the source and the search path went on buying.
+ *
+ * Held here because it is the one control in the suite whose failure costs
+ * money, and because the failure is invisible: the screen said "off".
+ */
+test('turning a search source off stops the calls, not only the register', async () => {
+  // Put the register back exactly as it was as well as the switch: tripadvisor
+  // is seeded `trial`/`wired`, and a test that left it `live`/`enabled` would
+  // have quietly turned a billed source on (20 Sep 2026).
+  const before = sourceOff('tripadvisor');
+  const { rows: [was] } = await query('select status, adapter_state from counterparties where key = $1', ['tripadvisor']);
+  try {
+    const off = await setAdapter('tripadvisor', { on: false });
+    assert.equal(off.status, 'off');
+    assert.equal(off.adapter_state, 'none');
+    // The estate's own switch, which is the half that was missing.
+    assert.equal(off.source, 'tripadvisor');
+    assert.equal(off.stopped, true);
+    assert.equal(sourceOff('tripadvisor'), true);
+    assert.ok(!enabledSources({ includeOptIn: true }).some((s) => s.key === 'tripadvisor'));
+
+    const on = await setAdapter('tripadvisor', { on: true });
+    assert.equal(on.stopped, false);
+    assert.equal(sourceOff('tripadvisor'), false);
+  } finally {
+    await setSourceOff('tripadvisor', before);
+    await query('update counterparties set status = $2, adapter_state = $3 where key = $1',
+      ['tripadvisor', was.status, was.adapter_state]);
+  }
+});
+
+test('a supplier that is not a search source says so rather than implying it stopped', async () => {
+  // Fly.io is an invoice. No button in a back office stops an invoice, and the
+  // answer must not suggest one did.
+  const off = await setAdapter('fly', { on: false });
+  assert.equal(off.status, 'off');
+  assert.equal(off.source, null);
+  assert.equal(off.stopped, false);
+  await setAdapter('fly', { on: true });
+});
+
+test('a provider_key that is not a source flips nothing, whatever it is called', async () => {
+  /**
+   * `provider_key` does two jobs, and only one of them is the source registry.
+   *
+   * It joins the register to `provider_calls` — where the provider may be
+   * anything the adapters log, `anthropic` and `mapbox` among them — and it is
+   * *also* how a counterparty is recognised as one of the search sources the
+   * estate has a switch for. So it is checked against `sourceKeys()` rather
+   * than assumed, and a register row naming a provider the registry has never
+   * heard of must turn nothing off rather than quietly flipping something else.
+   */
+  const keys = new Set(sourceKeys());
+  const register = await listCounterparties();
+  const anthropic = register.find((c) => c.key === 'anthropic');
+  assert.equal(anthropic.providerKey, 'anthropic');
+  assert.ok(!keys.has('anthropic'), 'anthropic is a ledger provider, not a search source');
+
+  const before = [...(await loadSourceSettings())].sort();
+  const off = await setAdapter('anthropic', { on: false });
+  assert.equal(off.source, null);
+  assert.equal(off.stopped, false);
+  // And nothing in the estate's switch moved.
+  assert.deepEqual([...(await loadSourceSettings())].sort(), before);
+  await setAdapter('anthropic', { on: true });
 });
 
 // ---------------------------------------------------------------------------

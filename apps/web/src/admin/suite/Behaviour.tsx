@@ -250,8 +250,8 @@ function ReturnBand({ suite }: { suite: Suite }) {
 }
 
 const styles = StyleSheet.create({
-  band: { borderTopWidth: BORDER, borderTopColor: colors.lime, paddingTop: 9 },
-  bandTitle: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.lime },
+  band: { borderTopWidth: BORDER, borderTopColor: colors.accent, paddingTop: 9 },
+  bandTitle: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.accent },
   buckets: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   // `alignItems: stretch` rather than `center`: centred, the label shrank to
   // its own content width and then had nowhere to wrap to, so at 390px

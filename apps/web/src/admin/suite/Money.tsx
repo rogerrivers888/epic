@@ -215,15 +215,19 @@ function MarginBand({ suite, fmt, stream, onStream, per }: {
         {t.marginPct == null
           ? <Gap says={suite.money.totalGap} />
           : <Text style={styles.marginPct}>{t.marginPct}%</Text>}
-        <Text style={type.small}>
-          {per === 'subscriber'
+        {/* The sub-line only exists where there is a margin to describe. The
+            gap above it has already said why there is not, and a dash under a
+            sentence reads as a second, emptier fact. */}
+        {(() => {
+          const said = per === 'subscriber'
             ? (t.perSubKept == null || t.perSub == null
-              ? '—'
+              ? null
               : `${fmt.plain.money(t.perSubKept)} kept from ${fmt.plain.money(t.perSub)} a month`)
             : (t.margin == null || t.revenue == null
-              ? '—'
-              : `${fmt.revenue.money(t.margin)} kept from ${fmt.revenue.money(t.revenue)}`)}
-        </Text>
+              ? null
+              : `${fmt.revenue.money(t.margin)} kept from ${fmt.revenue.money(t.revenue)}`);
+          return said ? <Text style={type.small}>{said}</Text> : null;
+        })()}
         {t.marginDelta != null ? <Text style={styles.marginDelta}>{fmt.revenue.delta(t.marginDelta)} on the window before</Text> : null}
       </View>
 
@@ -239,7 +243,7 @@ function MarginBand({ suite, fmt, stream, onStream, per }: {
               accessibilityState={{ selected: on }}
               style={styles.segment}
             >
-              <Text style={[styles.segmentKicker, on && { color: colors.lime }]}>{s.label.toUpperCase()}</Text>
+              <Text style={[styles.segmentKicker, on && { color: colors.accent }]}>{s.label.toUpperCase()}</Text>
               {s.marginPct == null ? (
                 // Left and wrapping: it is a sentence in a 150px column, and a
                 // right-aligned one-liner was cut off at the edge (20 Sep 2026).
@@ -440,7 +444,7 @@ const styles = StyleSheet.create({
   marginLeft: { width: 250, minWidth: 220, flexGrow: 1, flexBasis: 220, gap: 4 },
   marginKicker: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.inkMuted },
   marginPct: { fontFamily: type.title.fontFamily, fontSize: 52, lineHeight: 54, fontWeight: '800', color: colors.ink, letterSpacing: -2.3 },
-  marginDelta: { ...type.small, fontSize: 12.5, color: colors.lime, fontWeight: '700' },
+  marginDelta: { ...type.small, fontSize: 12.5, color: colors.accent, fontWeight: '700' },
 
   segments: {
     flexGrow: 3, flexBasis: 420, minWidth: 0,
@@ -454,6 +458,6 @@ const styles = StyleSheet.create({
   segmentTrack: { height: 10, backgroundColor: colors.lineSoft, marginTop: 3 },
   segmentGap: { ...type.tiny, fontSize: 11.5, color: colors.inkMuted, fontStyle: 'italic', lineHeight: 15 },
 
-  tableNote: { fontFamily: type.title.fontFamily, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.86, color: colors.lime },
+  tableNote: { fontFamily: type.title.fontFamily, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.86, color: colors.accent },
   footStrong: { fontFamily: type.title.fontFamily, fontSize: 15, fontWeight: '800', color: colors.ink },
 });

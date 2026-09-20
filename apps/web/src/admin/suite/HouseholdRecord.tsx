@@ -223,7 +223,7 @@ function Stat({ label, value, sub, gap, on }: {
 }) {
   return (
     <View style={[styles.stat, on && styles.statOn]}>
-      <Text style={[styles.statKicker, on && { color: colors.lime }]}>{label.toUpperCase()}</Text>
+      <Text style={[styles.statKicker, on && { color: colors.accent }]}>{label.toUpperCase()}</Text>
       {value == null ? <Gap says={gap} /> : <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>}
       {sub ? <Text style={type.tiny} numberOfLines={2}>{sub}</Text> : null}
     </View>
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   },
   chartHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
   chartValue: { fontFamily: type.title.fontFamily, fontSize: 17, fontWeight: '800', color: colors.ink },
-  chartDelta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.lime },
+  chartDelta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.accent },
   chartLabels: { flexDirection: 'row', gap: 2 },
   chartTick: { flex: 1, minWidth: 0, textAlign: 'center', ...type.tiny, fontSize: 9.5 },
 

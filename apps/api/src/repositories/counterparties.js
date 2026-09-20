@@ -24,6 +24,7 @@
  */
 
 import { query } from '../db.js';
+import { setSourceOff, sourceKeys, sourceOff } from '../sources/index.js';
 
 export const DIRECTIONS = ['inbound_cost', 'outbound_revenue', 'both'];
 export const STATUSES = ['live', 'degraded', 'trial', 'off', 'approved', 'evaluating', 'declined', 'retired'];
@@ -186,14 +187,48 @@ export async function rotateCredential(key, { masked, expiry }) {
 }
 
 /**
- * Turn the adapter on or off.
+ * Which search source a counterparty is, if it is one.
  *
- * Off is the one alarm-red control on the screen, and it is honest about what
- * it does: it sets the adapter to `none` and the status to `off`, so anything
- * reading the register knows not to call it. It does not delete a key and it
- * does not touch Doppler.
+ * The register's key and the source registry's key are not the same word —
+ * `google-places` and `google-routes` are both `google`, and several
+ * counterparties are no source at all. `provider_key` is the join, and it is
+ * checked against `sourceKeys()` rather than assumed, so a counterparty
+ * pointing at a provider the registry has never heard of turns nothing off
+ * silently.
+ */
+async function sourceFor(key) {
+  const { rows: [row] } = await query('select provider_key from counterparties where key = $1', [key]);
+  if (!row) return { found: false, source: null };
+  const source = row.provider_key && sourceKeys().includes(row.provider_key) ? row.provider_key : null;
+  return { found: true, source };
+}
+
+/**
+ * Turn the adapter off or on — and actually stop the calls.
+ *
+ * **This was register-only and the comment claimed otherwise** (epic-59, 20 Sep
+ * 2026, exercising it live): the control is alarm-red, says "Disable", and used
+ * to write `status = 'off'` while `enabledSources()` went on returning the
+ * source and the search path went on buying. A red button that records an
+ * intention is worse than no button, because the sentence a reader trusts
+ * before turning something off to stop a bill was false.
+ *
+ * So it does both, in this order: the estate's own switch first
+ * (`sources/index.js`, the same one `/api/admin/sources/:key` flips), then the
+ * register. If the switch fails the register is not written, because a register
+ * that says "off" over a source that is still running is the state this exists
+ * to prevent.
+ *
+ * Where the counterparty is **not** a search source — Fly.io, Neon, Stripe —
+ * there is nothing to flip, and the answer says so rather than implying the
+ * calls stopped. It still never deletes a key and never touches Doppler.
  */
 export async function setAdapter(key, { on }) {
+  const { found, source } = await sourceFor(key);
+  if (!found) throw Object.assign(new Error('No such counterparty.'), { status: 404, code: 'not_found' });
+
+  if (source) await setSourceOff(source, !on);
+
   const { rows: [row] } = await query(
     `update counterparties
         set adapter_state = $2, status = $3, updated_at = now()
@@ -201,8 +236,13 @@ export async function setAdapter(key, { on }) {
       returning key, adapter_state, status`,
     [key, on ? 'enabled' : 'none', on ? 'live' : 'off'],
   );
-  if (!row) throw Object.assign(new Error('No such counterparty.'), { status: 404, code: 'not_found' });
-  return row;
+  return {
+    ...row,
+    /** The registry key that was flipped, so the screen can say what happened. */
+    source,
+    /** True where the calls have actually stopped, not only been recorded. */
+    stopped: !!source && !on && sourceOff(source),
+  };
 }
 
 /** The plain-sentence fields: what it is for, who reads it, which class. */

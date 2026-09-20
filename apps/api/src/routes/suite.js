@@ -317,9 +317,15 @@ router.post('/supplier/:key/credential', requires('manage_settings'), async (req
  * POST /api/admin/suite/supplier/:key/adapter — turn the integration off or on.
  *
  * The one destructive-feeling control on the record, and the screen draws it
- * red for that reason. Where the counterparty is a search source it also flips
- * the estate's own switch (`sources/index.js`), so turning it off here actually
- * stops the calls rather than only recording an intention.
+ * red for that reason. Where the counterparty is a search source it flips the
+ * estate's own switch (`sources/index.js`) as well as the register, so the
+ * calls actually stop — `stopped` in the answer says whether they did.
+ *
+ * Where it is **not** a search source — Fly.io, Neon, Stripe, the app stores —
+ * there is no switch to flip and `stopped` is false. Turning it off records
+ * that the register says off; it does not stop an invoice. The screen says
+ * which, because a red button that only records an intention is worse than no
+ * button at all (epic-59, 20 Sep 2026, who found this claiming otherwise).
  */
 router.post('/supplier/:key/adapter', requires('manage_settings'), async (req, res, next) => {
   try {

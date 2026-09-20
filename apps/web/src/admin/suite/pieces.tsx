@@ -268,7 +268,7 @@ export function MeasureTile({ label, value, gap, delta, deltaDown, sub, series, 
 }) {
   const body = (
     <View style={[styles.tile, selected && styles.tileOn]}>
-      <Text style={[styles.tileKicker, selected && { color: colors.lime }]}>{label.toUpperCase()}</Text>
+      <Text style={[styles.tileKicker, selected && { color: colors.accent }]}>{label.toUpperCase()}</Text>
       {value == null
         ? <View style={{ paddingVertical: 6 }}><Gap says={gap} /></View>
         : <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>}
@@ -395,7 +395,7 @@ export function Kv({ label, value, gap, strong, lime, last, onPress, action, wid
         ? <Gap says={gap} small width={wide ? 190 : 120} />
         : (
           <Text
-            style={[styles.rowValue, wide && styles.rowValueWide, strong && styles.rowValueStrong, lime && { color: colors.lime }]}
+            style={[styles.rowValue, wide && styles.rowValueWide, strong && styles.rowValueStrong, lime && { color: colors.accent }]}
             numberOfLines={1}
           >
             {value}
@@ -559,7 +559,12 @@ export function Standing({ items }: {
         <View key={s.label} style={styles.standingItem}>
           <Text style={styles.tileKicker}>{s.label.toUpperCase()}</Text>
           <View style={styles.standingLine}>
-            {s.value == null ? <Gap says={s.gap} /> : <Text style={styles.standingValue}>{s.value}</Text>}
+            {s.value == null
+              // The reason wraps inside the column it sits in rather than
+              // running into the figure beside it: "No payment provider" was
+              // clipped to "No payment provide" (20 Sep 2026).
+              ? <View style={{ flexShrink: 1, minWidth: 0 }}><Gap says={s.gap} /></View>
+              : <Text style={styles.standingValue}>{s.value}</Text>}
             {s.delta ? <Text style={styles.tileDelta}>{s.delta}</Text> : null}
           </View>
           {s.sub ? <Text style={styles.tileSub} numberOfLines={2}>{s.sub}</Text> : null}
@@ -638,7 +643,7 @@ export function SuiteTable<T extends { id?: string }>({ columns, rows, sort, dir
           const text = (
             <Text
               numberOfLines={1}
-              style={[styles.th, on && { color: colors.lime }, c.align === 'left' && { textAlign: 'left' }]}
+              style={[styles.th, on && { color: colors.accent }, c.align === 'left' && { textAlign: 'left' }]}
             >
               {label}
             </Text>
@@ -707,7 +712,7 @@ export function Cell({ children, strong, muted, lime, alarm, gap, left }: {
         left && styles.tdLeft,
         strong && { fontWeight: '700', color: colors.ink },
         muted && { color: colors.inkMuted },
-        lime && { color: colors.lime, fontWeight: '700' },
+        lime && { color: colors.accent, fontWeight: '700' },
         alarm && { color: colors.overrun, fontWeight: '700' },
       ]}
     >
@@ -873,7 +878,7 @@ const styles = StyleSheet.create({
   crumbText: { ...type.small, fontSize: 13 },
   title: { fontFamily: type.title.fontFamily, fontSize: 22, fontWeight: '800', color: colors.ink, letterSpacing: -0.66 },
   titlePhone: { fontSize: 19, letterSpacing: -0.5 },
-  kickerLime: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.lime, textTransform: 'uppercase' },
+  kickerLime: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.accent, textTransform: 'uppercase' },
 
   // --- the segmented control ---------------------------------------------
   // `flexShrink` so a row of switches gives way inside a 390px frame rather
@@ -923,7 +928,7 @@ const styles = StyleSheet.create({
   tileKicker: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.inkMuted },
   tileValue: { fontFamily: type.title.fontFamily, fontSize: 34, lineHeight: 38, fontWeight: '800', color: colors.ink, letterSpacing: -1.3 },
   tileMeta: { flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' },
-  tileDelta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.lime },
+  tileDelta: { fontFamily: type.title.fontFamily, fontSize: 12.5, fontWeight: '700', color: colors.accent },
   tileDeltaDown: { color: colors.inkMuted },
   tileSub: { ...type.small, fontSize: 12, flexShrink: 1, minWidth: 0 },
   tileFoot: { flexDirection: 'row', alignItems: 'baseline', gap: 8, borderTopWidth: 1, borderTopColor: colors.lineSoft, paddingTop: 9 },
@@ -935,11 +940,11 @@ const styles = StyleSheet.create({
   // --- the band -----------------------------------------------------------
   band: {
     flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md,
-    borderTopWidth: BORDER, borderTopColor: colors.lime, paddingTop: 9,
+    borderTopWidth: BORDER, borderTopColor: colors.accent, paddingTop: 9,
   },
-  bandTitle: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.lime },
-  bandAction: { borderBottomWidth: 1.5, borderBottomColor: colors.lime },
-  bandActionText: { ...type.small, fontSize: 12.5, color: colors.lime, fontWeight: '700' },
+  bandTitle: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.accent },
+  bandAction: { borderBottomWidth: 1.5, borderBottomColor: colors.accent },
+  bandActionText: { ...type.small, fontSize: 12.5, color: colors.accent, fontWeight: '700' },
 
   panels: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'stretch' },
   panel: {
@@ -969,7 +974,7 @@ const styles = StyleSheet.create({
   rowValue: { ...type.small, fontSize: 13, color: colors.ink, fontWeight: '700', minWidth: 96, flexShrink: 0, textAlign: 'right' },
   rowValueWide: { width: 190, flexShrink: 0 },
   rowValueStrong: { fontFamily: type.title.fontFamily, fontSize: 17, fontWeight: '800' },
-  rowAction: { ...type.small, fontSize: 12.5, color: colors.lime, fontWeight: '700', textDecorationLine: 'underline' },
+  rowAction: { ...type.small, fontSize: 12.5, color: colors.accent, fontWeight: '700', textDecorationLine: 'underline' },
 
   // A field is a rule underneath, never a box round (owner, 12 Sep 2026).
   field: {
@@ -1033,7 +1038,7 @@ const styles = StyleSheet.create({
   },
 
   // --- gaps and trouble ---------------------------------------------------
-  gap: { ...type.small, fontSize: 12.5, color: colors.inkMuted, fontStyle: 'italic' },
+  gap: { ...type.small, fontSize: 12.5, color: colors.inkMuted, fontStyle: 'italic', flexShrink: 1, minWidth: 0 },
   gapSmall: { ...type.tiny, fontSize: 11.5, color: colors.inkMuted, fontStyle: 'italic', textAlign: 'right', flexShrink: 1, minWidth: 0 },
   trouble: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

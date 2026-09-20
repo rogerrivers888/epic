@@ -456,10 +456,19 @@ export const statusWord = (row: HouseholdRow) =>
 export const lastSeen = (days: number | null) =>
   (days == null ? 'never' : days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days`);
 
-/** "12 Mar 25" — the joined column, short because it is a column. */
+/**
+ * "12 Mar 25" — the joined column, short because it is a column.
+ *
+ * Three letters of month, always. `toLocaleDateString('en-GB')`'s own "short"
+ * gives "Sept" for September alone, which in a column of dates is the one that
+ * is a different width (20 Sep 2026).
+ */
 export function joinedDay(iso: string | null): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const month = d.toLocaleDateString('en-GB', { month: 'short' }).slice(0, 3);
+  return `${d.getDate()} ${month} ${String(d.getFullYear()).slice(2)}`;
 }
 
 /**

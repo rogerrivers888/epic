@@ -421,7 +421,7 @@ function BenefitMatrix({ model, selected, canManage, onChanged }: {
           {tiers.map((t) => (
             <Text
               key={t.key}
-              style={[styles.matrixCol, { width: width >= WIDE ? 130 : 96 }, t.key === selected && { color: colors.lime }]}
+              style={[styles.matrixCol, { width: width >= WIDE ? 130 : 96 }, t.key === selected && { color: colors.accent }]}
               // Two lines on a phone: "HOUSEHOLD" at 9.5px/800 with letter
               // spacing does not fit 96px on one, and a clipped column heading
               // is worse than a wrapped one (20 Sep 2026).
@@ -514,7 +514,7 @@ function BenefitRow({ benefit, tiers, selected, canManage, onChanged }: {
         const on2 = t.key === selected;
         if (!canManage) {
           return (
-            <Text key={t.key} style={[styles.readCell, { width: cellWidth }, on2 && { color: colors.lime, fontWeight: '700' }]} numberOfLines={1}>
+            <Text key={t.key} style={[styles.readCell, { width: cellWidth }, on2 && { color: colors.accent, fontWeight: '700' }]} numberOfLines={1}>
               {values[t.key] ?? '—'}
             </Text>
           );
@@ -526,7 +526,7 @@ function BenefitRow({ benefit, tiers, selected, canManage, onChanged }: {
               onChangeText={(v) => setValues((was) => ({ ...was, [t.key]: v }))}
               onBlur={commit}
               accessibilityLabel={`${label} — ${t.label}`}
-              style={[styles.cellInput, on2 && { color: colors.lime, fontWeight: '700' }] as any}
+              style={[styles.cellInput, on2 && { color: colors.accent, fontWeight: '700' }] as any}
             />
           </View>
         );
@@ -550,11 +550,11 @@ function BenefitRow({ benefit, tiers, selected, canManage, onChanged }: {
 const styles = StyleSheet.create({
   matrixHead: {
     flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md,
-    borderTopWidth: BORDER, borderTopColor: colors.lime, paddingTop: 9,
+    borderTopWidth: BORDER, borderTopColor: colors.accent, paddingTop: 9,
   },
-  matrixTitle: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.lime },
-  publish: { borderBottomWidth: 1.5, borderBottomColor: colors.lime },
-  publishText: { ...type.small, fontSize: 12.5, color: colors.lime, fontWeight: '700' },
+  matrixTitle: { fontFamily: type.title.fontFamily, fontSize: 10, fontWeight: '800', letterSpacing: 1, color: colors.accent },
+  publish: { borderBottomWidth: 1.5, borderBottomColor: colors.accent },
+  publishText: { ...type.small, fontSize: 12.5, color: colors.accent, fontWeight: '700' },
 
   matrixRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent', borderWidth: 0,
     color: colors.ink, fontFamily: type.body.fontFamily, fontSize: 13.5,
   },
-  addAction: { ...type.small, fontSize: 12, fontWeight: '800', color: colors.lime },
+  addAction: { ...type.small, fontSize: 12, fontWeight: '800', color: colors.accent },
 
   trouble: { ...type.small, fontSize: 12.5, color: colors.overrun },
 });
