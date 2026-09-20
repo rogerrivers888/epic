@@ -1973,14 +1973,30 @@ export async function categories(areaSlug, { refs = null, category = null, since
   // real, countable, and not something a household may ever be shown, because
   // we hold no name for them that is ours. The same name rule as `namesFor`
   // and the household view, so the three never disagree.
-  const SHOWABLE = `coalesce(r.name, case when a.display_source is distinct from 'google' then a.name end,
-                             case when pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
-                                       or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%'
-                                  then sp.name end)`;
+  //
+  // Written as three `exists` rather than as joins, and with the attraction
+  // matched two ways instead of on `a.venue_ref = pi.venue_ref or 'atlas:' ||
+  // a.id::text = pi.venue_ref`. That OR is the one no index can serve at either
+  // end — the same shape that made the search box take sixteen seconds (19 Sep
+  // 2026) — and joining it here took this board from two seconds to
+  // twenty-five on a thirty-minute ring (20 Sep 2026, on the deployed site).
+  const SHOWABLE = `(
+    exists (select 1 from place_records r2 where r2.venue_ref = pi.venue_ref and r2.name is not null)
+    or exists (select 1 from attractions a2
+                where a2.venue_ref = pi.venue_ref and a2.state <> 'hidden'
+                  and a2.name is not null and a2.display_source is distinct from 'google')
+    or (pi.venue_ref like 'atlas:%' and exists (
+          select 1 from attractions a3
+           where a3.id::text = substring(pi.venue_ref from 7) and a3.state <> 'hidden'
+             and a3.name is not null and a3.display_source is distinct from 'google'))
+    or ((pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
+         or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%')
+        and exists (select 1 from scout_places s2 where s2.venue_ref = pi.venue_ref and s2.name is not null))
+  )`;
   const { rows: held } = await query(`
     select pi.category, pi.subcategory,
            count(*)::int as known,
-           count(*) filter (where ${SHOWABLE} is not null)::int as showable,
+           count(*) filter (where ${SHOWABLE})::int as showable,
            count(*) filter (where pi.ownership = 'owned')::int as owned,
            count(*) filter (where pi.ownership = 'claimed')::int as claimed,
            count(*) filter (where pi.ownership = 'identified')::int  as identified,
@@ -1992,17 +2008,7 @@ export async function categories(areaSlug, { refs = null, category = null, since
            -- and the row read differently for the same category, which the
            -- design's fourth law forbids (17 Sep 2026, the verification audit).
            count(pi.data_score)::int as scored
-      from place_index pi
-      left join place_records r on r.venue_ref = pi.venue_ref
-      left join lateral (
-        select a2.* from attractions a2
-         where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
-           and a2.state <> 'hidden'
-         order by a2.last_seen desc, a2.id limit 1) a on true
-      left join lateral (
-        select s2.name from scout_places s2 where s2.venue_ref = pi.venue_ref
-         order by s2.last_seen desc limit 1) sp on true
-     where ${scope.sql}
+      from place_index pi where ${scope.sql}
      group by pi.category, pi.subcategory`, scope.args);
   const bySub = new Map(held.filter((h) => h.subcategory).map((h) => [h.subcategory, h]));
   const byCat = new Map();
