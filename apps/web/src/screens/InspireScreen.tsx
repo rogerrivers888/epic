@@ -939,6 +939,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   key={sh.key}
                   title={sh.label}
                   count={sh.items.length}
+                  // What the census says is within reach of this ring, which is
+                  // a different and larger number than the shelf holds.
+                  within={(pool?.moods ?? []).find((m) => m.key === sh.key)?.count ?? null}
                   items={sh.items.slice(0, ACROSS)}
                   onAll={() => goTo('activities', sh.key)}
                   onOpen={open}
