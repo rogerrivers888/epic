@@ -682,6 +682,37 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
         order by 1, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
       [slugs]);
 
+    // **Which drawer is empty, and where.** The grouped rows above lose that:
+    // a subcategory with nothing across thirty-nine outcodes and one with
+    // nothing in a single outcode read the same. The owner is coming to the
+    // board to look for exactly this (20 Sep 2026), so the pairs are returned
+    // whole — subcategory and outcode together, in the order that makes a list
+    // of places to go and look at.
+    const { rows: empties } = await query(
+      `select a.category, a.subcategory, upper(a.area_slug) as outcode, a.censused_at
+         from area_counts a
+        where a.area_slug = any($1) and coalesce(a.surfaced_count, 0) = 0
+        order by a.category, a.subcategory, a.area_slug`,
+      [slugs]);
+
+    // **Where the overlap went.** `surfaced` above `filed` means this question
+    // found places that live on somebody else's shelf, and the gap on its own
+    // does not say whose. This is that answer: for each drawer, which shelves
+    // its surplus is actually filed under, biggest first.
+    const { rows: elsewhere } = await query(
+      `select ps.subcategory as asked, i.subcategory as filed_under, count(*)::int n
+         from place_subcategories ps
+         join place_index i on i.venue_ref = ps.venue_ref
+        where ps.area_slug = any($1)
+          and i.subcategory is not null
+          and i.subcategory <> ps.subcategory
+        group by 1, 2
+        having count(*) > 0
+        order by 1, 3 desc`,
+      [slugs]);
+    const livesOn = {};
+    for (const r of elsewhere) (livesOn[r.asked] ??= []).push({ subcategory: r.filed_under, n: r.n });
+
     // The drawers that were asked about and found nothing are the point of the
     // board, so they are listed rather than left out — and a drawer the census
     // has never reached at all is a third state again.
@@ -700,6 +731,8 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
       reach,
       outcodes: codes.sort(),
       rows,
+      empties,
+      livesOn,
       censused: seen?.censused ?? 0,
       oldest: seen?.oldest ?? null,
       newest: seen?.newest ?? null,

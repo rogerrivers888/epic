@@ -2524,6 +2524,11 @@ export const api = {
   adminPlaceCensus: (p: { where: string; reach?: string }) =>
     request<{
       where: string; reach: string; outcodes: string[]; rows: PlaceCensusRow[];
+      // Which drawer is empty *and where*. The grouped rows lose that: nothing
+      // across thirty-nine outcodes and nothing in one read the same.
+      empties: { category: string; subcategory: string; outcode: string; censused_at: string | null }[];
+      // Where a drawer's surplus is actually filed, biggest shelf first.
+      livesOn: Record<string, { subcategory: string; n: number }[]>;
       censused: number; oldest: string | null; newest: string | null;
       residual: number; checkedOnGoogle: number; free: boolean;
     }>(`/api/admin/place-index/census${qs(p)}`),

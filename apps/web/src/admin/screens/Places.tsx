@@ -1301,6 +1301,7 @@ function CensusBoard({ where }: { where: string }) {
   }, [where, reach]);
   useEffect(load, [load]);
 
+  const livesOn = data?.livesOn;
   const columns: Col<PlaceCensusRow>[] = [
     { key: 'drawer', label: 'Drawer', tip: 'lensCensus', grow: true,
       cell: (r) => (
@@ -1309,15 +1310,31 @@ function CensusBoard({ where }: { where: string }) {
           <Text style={styles.rowNote}>{r.category}</Text>
         </View>
       ) },
-    { key: 'found', label: 'Found', tip: 'censusFound', width: 84, align: 'right',
-      cell: (r) => <Num n={r.surfaced || null} /> },
-    { key: 'filed', label: 'Filed', tip: 'censusFiled', width: 96, align: 'right',
-      cell: (r) => (
-        <Text style={styles.rowName}>
-          {r.filed ?? 0}
-          {(r.surfaced ?? 0) > (r.filed ?? 0) ? <Text style={styles.rowNote}>{`  +${(r.surfaced ?? 0) - (r.filed ?? 0)}`}</Text> : null}
-        </Text>
-      ) },
+    // A count built from a slice Google truncated is a floor, and must never
+    // be drawn as a total (owner, 20 Sep 2026). The "at least" is the whole
+    // point: the number is true as a minimum and false as an answer.
+    { key: 'found', label: 'Found', tip: 'censusFound', width: 96, align: 'right',
+      cell: (r) => ((r.saturated ?? 0) > 0
+        ? <Explain tip="censusFloor"><Text style={styles.rowName}>{`at least ${r.surfaced ?? 0}`}</Text></Explain>
+        : <Num n={r.surfaced || null} />) },
+    { key: 'filed', label: 'Filed', tip: 'censusFiled', width: 150, align: 'right',
+      cell: (r) => {
+        const gap = (r.surfaced ?? 0) - (r.filed ?? 0);
+        // Whose shelf the surplus went to. The gap on its own says a place
+        // lives somewhere else; this says where, which is what the owner came
+        // to the board to see (20 Sep 2026).
+        const on = (livesOn?.[r.subcategory] ?? []).slice(0, 2);
+        return (
+          <View style={styles.nameCell}>
+            <Text style={styles.rowName}>{r.filed ?? 0}{gap > 0 ? ` +${gap}` : ''}</Text>
+            {gap > 0 && on.length ? (
+              <Text style={styles.rowNote} numberOfLines={1}>
+                {`on ${on.map((x) => `${x.subcategory} ${x.n}`).join(', ')}`}
+              </Text>
+            ) : null}
+          </View>
+        );
+      } },
     { key: 'osm', label: 'Open map', tip: 'censusCheck', width: 96, align: 'right',
       cell: (r) => <Num n={r.osm} /> },
     { key: 'fhrs', label: 'Hygiene', tip: 'censusCheck', width: 88, align: 'right',
@@ -1355,7 +1372,58 @@ function CensusBoard({ where }: { where: string }) {
           </Text>
         )
       ) : why ? <Trouble why={why} onRetry={load} /> : <Waiting />}
+      {data?.empties?.length ? <FoundNothing rows={data.empties} /> : null}
     </>
+  );
+}
+
+/**
+ * The drawers that found nothing, and where.
+ *
+ * The board's grouped rows lose this: a subcategory with nothing across
+ * thirty-nine outcodes and one with nothing in a single outcode read exactly
+ * the same. It is also the list the owner came to the board for (20 Sep 2026),
+ * because it is the difference between a place that has no zoo and a question
+ * of ours that is not reaching one.
+ *
+ * Nothing here is a failure, so nothing here is red. It is a list of places to
+ * go and look at, and it stays shut until somebody asks for it.
+ */
+function FoundNothing({ rows }: { rows: { category: string; subcategory: string; outcode: string }[] }) {
+  const [open, setOpen] = useState(false);
+  // Grouped by drawer, because "spas: nowhere in GU18, GU20, GU25" is one
+  // finding and three rows is three.
+  const byDrawer = new Map<string, { category: string; outcodes: string[] }>();
+  for (const r of rows) {
+    const k = r.subcategory;
+    const hit = byDrawer.get(k) ?? { category: r.category, outcodes: [] };
+    hit.outcodes.push(r.outcode);
+    byDrawer.set(k, hit);
+  }
+  const drawers = [...byDrawer.entries()].sort((a, b) => b[1].outcodes.length - a[1].outcodes.length);
+  return (
+    <View style={styles.nothingWrap}>
+      <Press effect="none" onPress={() => setOpen((v) => !v)} accessibilityRole="button"
+             accessibilityState={{ expanded: open }} style={styles.nothingHead}>
+        <Explain tip="censusNothing">
+          <Text style={styles.censusFree}>
+            {`FOUND NOTHING · ${drawers.length} DRAWER${drawers.length === 1 ? '' : 'S'} · ${rows.length} ROW${rows.length === 1 ? '' : 'S'}`}
+          </Text>
+        </Explain>
+        <Icon name={open ? 'expand' : 'expand'} size={16} />
+      </Press>
+      {open ? drawers.map(([sub, d]) => (
+        <View key={sub} style={styles.nothingRow}>
+          <View style={styles.nameCell}>
+            <Text style={styles.rowName}>{sub}</Text>
+            <Text style={styles.rowNote}>{d.category}</Text>
+          </View>
+          <Text style={[styles.rowNote, styles.nothingWhere]} numberOfLines={2}>
+            {d.outcodes.length > 8 ? `${d.outcodes.slice(0, 8).join(' ')} +${d.outcodes.length - 8} more` : d.outcodes.join(' ')}
+          </Text>
+        </View>
+      )) : null}
+    </View>
   );
 }
 
@@ -3300,6 +3368,10 @@ const styles = StyleSheet.create({
   censusReach: { flexDirection: 'row', gap: spacing.xs },
   censusFree: { ...type.label, marginBottom: 0, marginTop: 0 },
   censusNone: { ...type.body, paddingVertical: spacing.lg },
+  nothingWrap: { borderTopWidth: 2, borderColor: colors.ink, marginTop: spacing.lg },
+  nothingHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.md },
+  nothingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderColor: colors.line },
+  nothingWhere: { flex: 1, minWidth: 0, textAlign: 'right' },
   lensRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap' },
   // The label-above-lenses column has to be told it may be narrower than its
   // content, or it takes the width of six lenses and carries the row off the

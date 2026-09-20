@@ -347,3 +347,73 @@ test('a provider refusal stops the run, and an unanswered drawer is not rolled u
   await query(`delete from census_slices where area_slug = 'census-test-429'`);
   await query(`delete from area_counts where area_slug = 'census-test-429'`);
 });
+
+test('a saturated slice keeps splitting until it answers, and says so when it cannot', async () => {
+  // Three levels was enough for Surrey and not for Southwark: SE1 left 73
+  // slices cut off after two splits and 30 at the limit, so its restaurant
+  // count was a floor and the board had no way of saying so (owner, 20 Sep
+  // 2026). The depth adapts now, and the request ceiling is the real guard.
+  const plan = await slicePlan();
+  if (!plan.length) return;
+
+  const depths = [];
+  // Saturated down to the fourth level and satisfied below it — deeper than the
+  // old limit of three, so this fails outright on the previous behaviour.
+  const impl = async ({ box }) => {
+    const span = box.maxLat - box.minLat;
+    const depth = Math.round(Math.log2((BOX.maxLat - BOX.minLat) / span));
+    depths.push(depth);
+    return depth < 4
+      ? { places: Array.from({ length: 60 }, (_, i) => place(`d${depth}_${i}`)), requests: 3, saturated: true, problem: null }
+      : { places: [place(`leaf${depths.length}`)], requests: 1, saturated: false, problem: null };
+  };
+
+  const out = await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-deep', outcode: 'ZZ92', box: BOX,
+    subcategories: [plan[0].subcategory], maxRequests: 4000,
+  }));
+
+  assert.ok(Math.max(...depths) >= 4, `split past the old limit of three (got ${Math.max(...depths)})`);
+  assert.equal(out.saturated, 0, 'nothing was left truncated, so no count here is a floor');
+
+  const { rows: [counts] } = await query(
+    `select coalesce(sum(saturated), 0)::int n from area_counts where area_slug = 'census-test-deep'`);
+  assert.equal(counts.n, 0, 'and the board is told there is nothing cut off');
+
+  await query(`delete from census_slices where area_slug = 'census-test-deep'`);
+  await query(`delete from area_counts where area_slug = 'census-test-deep'`);
+  await query(`delete from place_subcategories where area_slug = 'census-test-deep'`);
+});
+
+test('a slice still cut off at the ceiling is reported as a floor, never as a total', async () => {
+  const plan = await slicePlan();
+  if (!plan.length) return;
+  // One branch that stays dense all the way down — a city centre, not a whole
+  // city. Everything else answers at once, so the run finishes comfortably and
+  // the only thing left truncated is the corner that genuinely is.
+  //
+  // (Saturating *everything* would hit the request ceiling instead, and a run
+  // that stopped rolls nothing up at all — which is the right behaviour and the
+  // wrong test.)
+  const impl = async ({ box }) => {
+    const chain = Math.abs(box.minLat - BOX.minLat) < 1e-9 && Math.abs(box.minLng - BOX.minLng) < 1e-9;
+    return chain
+      ? { places: Array.from({ length: 60 }, (_, i) => place(`f${i}`)), requests: 3, saturated: true, problem: null }
+      : { places: [place(`q${box.minLat.toFixed(5)}_${box.minLng.toFixed(5)}`)], requests: 1, saturated: false, problem: null };
+  };
+  const out = await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-floor', outcode: 'ZZ91', box: BOX,
+    subcategories: [plan[0].subcategory], maxRequests: 4000,
+  }));
+
+  assert.ok(!out.stopped, 'the run finished rather than hitting the ceiling');
+  assert.ok(out.saturated > 0, 'and says a slice never came under sixty');
+
+  const { rows: [c] } = await query(
+    `select coalesce(sum(saturated), 0)::int n from area_counts where area_slug = 'census-test-floor'`);
+  assert.ok(c.n > 0, 'the board carries it, which is what makes the count read as a floor rather than a total');
+
+  await query(`delete from census_slices where area_slug = 'census-test-floor'`);
+  await query(`delete from area_counts where area_slug = 'census-test-floor'`);
+  await query(`delete from place_subcategories where area_slug = 'census-test-floor'`);
+});

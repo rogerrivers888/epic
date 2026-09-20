@@ -37,33 +37,38 @@ import * as index from '../repositories/placeIndex.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
 /**
- * How far a saturated slice is allowed to be split.
+ * How far a saturated slice may be split.
  *
- * Four tiles a level, so depth 3 is sixty-four tiles of the original box. An
- * outcode cut sixty-four ways is a few hundred metres a side; if Google still
- * says sixty in that, the honest answer is that the box is a city centre and
- * the count is a floor, which is what `saturated` on the row is for. Going
- * deeper trades real requests for a number nobody will act on.
+ * **Adaptive: keep splitting until a slice comes back under the ceiling**
+ * (owner, 20 Sep 2026). Three levels was enough for Surrey and not for
+ * Southwark — SE1 left **73 slices still cut off after two splits and 30 at the
+ * limit**, so its restaurant count was a floor and the board had no way of
+ * saying so. Six levels is 4,096 tiles of the original box, which for a
+ * 2.5 km outcode is about forty metres a side: past that the tile is smaller
+ * than the error in a pin and splitting further tells you nothing.
+ *
+ * The ceiling is not the guard. `MAX_REQUESTS_PER_RUN` is — a depth limit
+ * bounds one branch, and what actually needs bounding is the run.
  */
-const MAX_DEPTH = 3;
+const MAX_DEPTH = Number(process.env.EPIC_CENSUS_MAX_DEPTH || 6);
 /** A census is good for 30 days; the policy's own figure. */
 export const CENSUS_FRESH_DAYS = 30;
 /**
  * A ceiling on one run, whatever the plan says.
  *
- * Essentials requests are free inside Google's allowance and priced at nought
- * here, which is exactly the condition under which a runaway goes unnoticed:
- * nothing in the ledger would complain, and the first sign would be the console
- * showing the allowance gone. Forty-six subcategories over two hundred and
- * fifty types, each able to split into sixty-four tiles, is an upper bound in
- * the tens of thousands — so the run stops at a number a person chose, records
- * that it stopped, and is resumed rather than silently half-done.
+ * **This is the real guard, not the depth limit** (owner, 20 Sep 2026). Now
+ * that a saturated slice keeps splitting until it answers, one dense
+ * subcategory in one city could in principle ask four thousand questions on its
+ * own. A depth limit bounds a branch; only a request ceiling bounds the run.
  *
- * The owner is setting a daily cap in the Cloud Console as the outer guard
- * (19 Sep 2026). This is the inner one: a console cap protects the account, and
- * this protects the run from having to rely on it.
+ * Essentials requests are free and priced at nought here, which is exactly the
+ * condition under which a runaway goes unnoticed: nothing in the ledger would
+ * complain, and the first sign would be the console's daily cap. So the run
+ * stops at a number a person chose, records that it stopped, and is resumed
+ * rather than silently half-done. Twenty thousand against a whole
+ * thirty-nine-outcode ring's 11,287, and a 75,000-a-day cap above it.
  */
-export const MAX_REQUESTS_PER_RUN = Number(process.env.EPIC_CENSUS_MAX_REQUESTS || 2000);
+export const MAX_REQUESTS_PER_RUN = Number(process.env.EPIC_CENSUS_MAX_REQUESTS || 20_000);
 
 /**
  * The slice plan: which Google types stand for which Epic subcategory.
