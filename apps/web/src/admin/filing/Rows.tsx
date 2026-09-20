@@ -20,7 +20,7 @@ import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts, house } from '../../theme';
 import { Act, Band, Kicker, Nothing, Value } from './desk';
-import type { BrowseRow, District, Member } from './types';
+import type { BrowseRow, District, HouseMember } from './types';
 
 // ---------------------------------------------------------------------------
 // The back office list
@@ -321,8 +321,8 @@ export function HouseholdView({
   onDistrict: (code: string) => void;
   /** Already ordered for the state being shown. */
   rows: (BrowseRow & { shelf: { name: string; photo: string | null }[] })[];
-  members: Member[];
-  owner: Member | null;
+  members: HouseMember[];
+  owner: HouseMember | null;
   minFill: number;
   /** Every heart, with who set it and how old it is. */
   hearts: { id: string; title: string; who: string; days: number }[];

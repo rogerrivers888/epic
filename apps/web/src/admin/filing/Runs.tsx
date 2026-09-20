@@ -24,7 +24,7 @@ import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { Act, Band, Cell, Col, Head, Kicker, Nothing, Row, Value, WARN, tabular } from './desk';
-import type { Decision, Run, Saturation, Trail, Trigger, Week } from './types';
+import type { Decision, RunRow, Saturation, Trail, Trigger, RunWeek } from './types';
 
 // ---------------------------------------------------------------------------
 // Runs
@@ -44,8 +44,8 @@ export function Runs({
   triggers: Trigger[];
   /** The run in flight, if there is one. Runs take hours; this is not optional. */
   live: { name: string; scope: string; funnel: { name: string; count: number; done: boolean }[] } | null;
-  runs: Run[];
-  weeks: Week[];
+  runs: RunRow[];
+  weeks: RunWeek[];
   /**
    * Whether deciding outruns raising, said plainly. A single backlog total
    * cannot say this, which is the whole reason the chart is here.

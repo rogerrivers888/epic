@@ -30,7 +30,7 @@ import {
   Act, Band, Cell, Col, DeskPill, Head, Kicker, Mark, Nothing, Row, Value, WARN,
 } from './desk';
 import { Destination, PickCategory, Picker } from './Picker';
-import type { ExcludedRow, WordRow } from './types';
+import type { ExcludedRow, MappingEvidence, WordRow } from './types';
 
 // ---------------------------------------------------------------------------
 // The words
@@ -58,6 +58,26 @@ const WORD_COLS: Col[] = [
 const BIG = 100;
 
 /**
+ * Where a word points, said the way the person who answered would recognise.
+ *
+ * "Kept as a label" is four of our five stored answers, and flattening them
+ * loses two real decisions: `travel` is how you get there (parking, the bus
+ * station) and `nearby` is what happens to be next to the place you came for
+ * (the chemist by the museum). Somebody who answered one of those has to see
+ * that they did, or the screen reads as though their answer was thrown away.
+ */
+function pointsAt(w: WordRow): string {
+  if (w.pointsAt) return w.pointsAt.label;
+  if (w.decision === 'notinepic') return 'Not in Epic';
+  if (w.decision === 'secondary') {
+    if (w.answer === 'travel') return 'Kept as a label · how you get there';
+    if (w.answer === 'nearby') return 'Kept as a label · what is nearby';
+    return 'Kept as a label';
+  }
+  return 'not answered';
+}
+
+/**
  * The sort button says its direction in words rather than with an arrow.
  *
  * An arrow here would be a symbol standing in for an icon, which this app does
@@ -82,11 +102,13 @@ const REVERSED: Record<SortKey, string> = {
 };
 
 export function Words({
-  words, counts, sort, desc, onSort, filters, onFilters, filterOptions,
+  words, counts, evidence, sort, desc, onSort, filters, onFilters, filterOptions,
   picker, undo,
 }: {
   words: WordRow[];
-  counts: { answered: number; notSure: number; notInEpic: number; flagged: number };
+  counts: { answered: number; notSure: number; secondary: number; notInEpic: number; flagged: number; words: number };
+  /** What the signals could see. An unflagged table is not a clean one. */
+  evidence: MappingEvidence | null;
   sort: SortKey;
   desc: boolean;
   onSort: (key: SortKey, desc: boolean) => void;
@@ -128,6 +150,7 @@ export function Words({
         stats={[
           { label: 'Answered', value: counts.answered },
           { label: 'Not sure', value: counts.notSure },
+          { label: 'Kept as a label', value: counts.secondary },
           { label: 'Flagged', value: counts.flagged, strong: true },
         ]}
         right={
@@ -144,6 +167,8 @@ export function Words({
           </View>
         }
       />
+
+      <Blind evidence={evidence} flagged={counts.flagged} />
 
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
         <Control
@@ -266,10 +291,7 @@ export function Words({
                     onPress={() => { setOpen(isOpen ? null : w.word); setDestQuery(''); }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                       <Value weight="600" tone={w.pointsAt ? 'ink' : w.decision === 'secondary' ? 'muted' : 'lime'}>
-                        {w.pointsAt ? w.pointsAt.label
-                          : w.decision === 'secondary' ? 'kept as a label'
-                          : w.decision === 'notinepic' ? 'Not in Epic'
-                          : 'not answered'}
+                        {pointsAt(w)}
                       </Value>
                       <Icon name="expand" size={13} color={desk.inkDim} strokeWidth={2.2} />
                     </View>
@@ -342,6 +364,39 @@ export function Words({
         {undo ? <Act label={`Undo · ${undo.what}`} tone="ink" onPress={undo.onPress} /> : null}
       </View>
     </>
+  );
+}
+
+/**
+ * What the signals were working from, when they could not see enough.
+ *
+ * Drawn only when it changes how the table should be read: a demand signal
+ * with too few opens behind it, or rows and drawers that were skipped. One
+ * flagged word out of 479 looks like a clean taxonomy and is not.
+ */
+function Blind({ evidence, flagged }: { evidence: MappingEvidence | null; flagged: number }) {
+  if (!evidence) return null;
+  const blind = evidence.demandBlind;
+  const skipped = evidence.tooThinToJudge + evidence.drawersTooThinToJudge;
+  if (!blind && !skipped) return null;
+  return (
+    <View style={{ borderLeftWidth: 2, borderLeftColor: WARN, paddingLeft: 14, paddingVertical: 4, gap: 4 }}>
+      <Value size={13.5} weight="800" tone="warn">
+        {flagged
+          ? `${flagged} flagged, but the signals could not see everything`
+          : 'Nothing is flagged, because the signals could not see'}
+      </Value>
+      {blind ? (
+        <Value size={12.5} tone="muted">
+          {`${blind.opens.toLocaleString()} ${blind.opens === 1 ? 'place has' : 'places have'} ever been opened; judging demand needs about ${blind.needs.toLocaleString()}. Until then "nobody goes" would be true of nearly every word, so it is not offered.`}
+        </Value>
+      ) : null}
+      {skipped ? (
+        <Value size={12.5} tone="dim">
+          {`${evidence.tooThinToJudge} ${evidence.tooThinToJudge === 1 ? 'word' : 'words'} and ${evidence.drawersTooThinToJudge} ${evidence.drawersTooThinToJudge === 1 ? 'drawer' : 'drawers'} held too little to judge · ${evidence.researched.toLocaleString()} of ${evidence.words.toLocaleString()} researched`}
+        </Value>
+      ) : null}
+    </View>
   );
 }
 

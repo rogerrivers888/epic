@@ -1813,6 +1813,16 @@ export type QueueItem = {
   batchable: boolean;
 };
 
+import type {
+  BrowseRow, Candidate, Decision, District, ExcludedRow, GlobalLabel, HouseMember, MappingEvidence,
+  PendingWord, RuleRow, RunRow, RunWeek, Saturation, SetQuestion, SetRow, Trail, Trigger, VocabRow, WordRow,
+} from './admin/filing/types';
+
+/** The four states the Mapping header counts, and the two totals beside them. */
+export type MappingCounts = {
+  answered: number; notSure: number; secondary: number; notInEpic: number; flagged: number; words: number;
+};
+
 export const api = {
   health: () => request<{ ok: boolean; db: string }>('/health'),
   sources: () => request<SourcesStatus>('/api/sources'),
@@ -3254,6 +3264,50 @@ export const api = {
     post<{ undone: true; rules: number; back: number; words: number }>('/api/admin/taxonomy/rules/undo', { id }),
   /** The specific words seen on the same places as a generic one, commonest first. */
   taxonomyPairs: (label: string) => request<TaxonomyPairs>(`/api/admin/taxonomy/pairs${qs({ label })}`),
+  // -------------------------------------------------------------------------
+  // The filing desk (the Places redesign, 20 Sep 2026)
+  //
+  // Six tabs over one taxonomy. Every list row arrives carrying its own reason
+  // as a sentence, and every count arrives with its denominator rather than
+  // pre-divided — a screen handed 0.8 cannot tell 4 of 5 from 800 of 1,000.
+  // -------------------------------------------------------------------------
+
+  /** What waits on a person, what ran while you were out, and the thresholds. */
+  filingOverview: () => request<FilingOverview>('/api/admin/filing/overview'),
+  /** Nudge one of the numbers the screens judge by. */
+  filingSetThreshold: (body: { key: string; value: number }) =>
+    put<{ threshold: Threshold; thresholds: Threshold[] }>('/api/admin/filing/thresholds', body),
+  /** Every category, with what is in it and what waits. */
+  filingCategories: () => request<FilingCategories>('/api/admin/filing/categories'),
+  /** One category's drawers, as the table draws them. */
+  filingCategory: (key: string) => request<FilingCategory>(`/api/admin/filing/categories/${encodeURIComponent(key)}`),
+  /** One drawer: what fills it, what it says, and which of its places argue back. */
+  filingSubcategory: (key: string) => request<FilingSubcategory>(`/api/admin/filing/subcategories/${encodeURIComponent(key)}`),
+  /** Every place in a drawer. A place we have not researched has no name to show. */
+  filingPlaces: (key: string) => request<FilingPlaces>(`/api/admin/filing/subcategories/${encodeURIComponent(key)}/places`),
+  /**
+   * Accept, flip or set one of a drawer's answers.
+   *
+   * Three verbs and not one: accept says "the answer that is there is right"
+   * and changes no value, which is what lets a stale screen accept safely.
+   */
+  filingSetDefault: (key: string, body: { attribute: string; accept?: boolean; flip?: boolean; value?: AttributeValue | null }) =>
+    put<{ attribute: string; value: AttributeValue | null; settled: boolean }>(
+      `/api/admin/filing/subcategories/${encodeURIComponent(key)}/defaults`, body),
+  /** Agree with everything proposed at once. The reply says how many, not how many were asked for. */
+  filingAcceptAll: (key: string) =>
+    post<{ accepted: number; by: string }>(`/api/admin/filing/subcategories/${encodeURIComponent(key)}/accept`, {}),
+  /** Every provider word, where it points, and what looks wrong about it. */
+  filingMapping: () => request<FilingMapping>('/api/admin/filing/mapping'),
+  /** What is kept out of Epic, and why. Reversible from here. */
+  filingExcluded: () => request<FilingExcluded>('/api/admin/filing/mapping/excluded'),
+  /** Every question set, and the labels asked of everything. */
+  filingLabels: () => request<FilingLabels>('/api/admin/filing/labels'),
+  /** One set, its questions, and the words waiting on it. */
+  filingSet: (key: string) => request<FilingSet>(`/api/admin/filing/labels/sets/${encodeURIComponent(key)}`),
+  /** Our own labels, and where each is asked. */
+  filingVocabulary: () => request<FilingVocabulary>('/api/admin/filing/labels/vocabulary'),
+
   /** Our own secondary labels, with what every drawer is taken to be. */
   taxonomyAttributes: () => request<TaxonomyAttributes>('/api/admin/taxonomy/attributes'),
   /** Name a secondary label, or change one. */
@@ -3408,6 +3462,100 @@ export const api = {
    */
   reportActivity: (events: { kind: string; screen?: string; subject?: string; seconds?: number; at?: string }[]) =>
     post<{ recorded: number }>('/api/activity', { events }).catch(() => ({ recorded: 0 })),
+
+  // --- the filing desk (Places redesign, 20 Sep 2026) -----------------------
+  //
+  // Six tabs over one taxonomy. Added in one landing on purpose: this file is
+  // edited by several sessions an hour and hunks have been swept before now, so
+  // everything this section needs arrives together rather than a call at a time.
+  //
+  // Nothing here calls a provider. Every figure comes from the index, the owned
+  // records, the search log and the rules, so these screens can be refreshed as
+  // often as anybody likes and cost nothing.
+
+  /** Where each of Google's words points, and what the signals could see. */
+  adminFilingMapping: () =>
+    request<{ words: WordRow[]; counts: MappingCounts; evidence: MappingEvidence | null }>(
+      '/api/admin/filing/mapping'),
+  /** What is kept out of Epic, and why. Reversible from here. */
+  adminFilingExcluded: () =>
+    request<{ excluded: ExcludedRow[]; counts: { words: number; places: number } }>(
+      '/api/admin/filing/mapping/excluded'),
+  /** Point a word at a drawer, keep it as a label, or keep it out. */
+  adminFilingPoint: (word: string, body: { subcategory?: string | null; decision?: string | null }) =>
+    put<{ word: string }>(`/api/admin/filing/mapping/${encodeURIComponent(word)}`, body),
+  /** Put a label on a word, so it rides along on every place the word brings. */
+  adminFilingCarry: (word: string, label: string, on: boolean) =>
+    put<{ word: string; labels: string[] }>(
+      `/api/admin/filing/mapping/${encodeURIComponent(word)}/carries`, { label, on }),
+
+  /** The question sets, and what waits in each. */
+  adminFilingSets: () =>
+    request<{ sets: SetRow[]; counts: { sets: number; pending: number; vocabulary: number } }>(
+      '/api/admin/filing/sets'),
+  /** One set: what it asks, and the words waiting to join it. */
+  adminFilingSet: (key: string) =>
+    request<{
+      set: SetRow; questions: SetQuestion[]; globals: GlobalLabel[];
+      candidates: Candidate[]; pen: Candidate[]; inFlight: Candidate[]; thin: Candidate[];
+      readNote: string;
+    }>(`/api/admin/filing/sets/${encodeURIComponent(key)}`),
+  /** Ask a candidate of every place in the set, as an ordinary question or a gate. */
+  adminFilingPromote: (id: number, gate: boolean) =>
+    post<{ question: SetQuestion }>(`/api/admin/filing/candidates/${id}/promote`, { gate }),
+  /** Ignoring a word is permanent, and it does not come back. */
+  adminFilingIgnore: (id: number) => post<{ ignored: true }>(`/api/admin/filing/candidates/${id}/ignore`, {}),
+  adminFilingRemoveQuestion: (id: number) =>
+    request<{ removed: true }>(`/api/admin/filing/questions/${id}`, { method: 'DELETE' }),
+
+  /** Words a human typed that nothing asks yet. */
+  adminFilingPending: () => request<{ pending: PendingWord[] }>('/api/admin/filing/pending'),
+  adminFilingApprove: (id: number, sets: string[]) =>
+    post<{ asked: number }>(`/api/admin/filing/pending/${id}/approve`, { sets }),
+  /** Parked: in the vocabulary, asked nowhere, and All labels says so. */
+  adminFilingPark: (id: number) => post<{ parked: true }>(`/api/admin/filing/pending/${id}/park`, {}),
+  adminFilingMerge: (id: number) => post<{ merged: true }>(`/api/admin/filing/pending/${id}/merge`, {}),
+  adminFilingReject: (id: number) => post<{ rejected: true }>(`/api/admin/filing/pending/${id}/reject`, {}),
+
+  /** Epic's whole vocabulary, and where each word is asked. */
+  adminFilingVocabulary: () => request<{ labels: VocabRow[] }>('/api/admin/filing/labels'),
+  /** Retiring takes it out of the vocabulary and out of every set. */
+  adminFilingRetire: (key: string) =>
+    post<{ retired: true }>(`/api/admin/filing/labels/${encodeURIComponent(key)}/retire`, {}),
+
+  /** The defaults, and the two different ways each can be wrong. */
+  adminFilingRules: () => request<{ rules: RuleRow[]; counts: { rules: number } }>('/api/admin/filing/rules'),
+  adminFilingRetireRule: (id: number) => post<{ retired: true }>(`/api/admin/filing/rules/${id}/retire`, {}),
+
+  /** The browse rows, what each returns per district, and who hearts it. */
+  adminFilingRows: () =>
+    request<{ rows: BrowseRow[]; districts: District[]; members: HouseMember[]; household: string }>(
+      '/api/admin/filing/rows'),
+  adminFilingEditRow: (id: string, body: { title?: string; copy?: string; rule?: string }) =>
+    put<{ row: BrowseRow }>(`/api/admin/filing/rows/${encodeURIComponent(id)}`, body),
+  adminFilingHeart: (id: string, on: boolean, member?: string | null) =>
+    post<{ hearted: boolean }>(`/api/admin/filing/rows/${encodeURIComponent(id)}/heart`, { on, member }),
+
+  /** Where the volume dies, and whether the queue is winning. */
+  adminFilingRuns: () =>
+    request<{
+      headline: string; scope: string; triggers: Trigger[]; runs: RunRow[];
+      weeks: RunWeek[]; clears: { says: string; note: string; ever: boolean }; saturation: Saturation[];
+      live: { name: string; scope: string; funnel: { name: string; count: number; done: boolean }[] } | null;
+    }>('/api/admin/filing/runs'),
+  /** One stage of one run, and what is actually in it. */
+  adminFilingStage: (runId: string, stage: string) =>
+    request<{ key: string; name: string; note: string; items: string[]; subs: string }>(
+      `/api/admin/filing/runs/${encodeURIComponent(runId)}/stages/${encodeURIComponent(stage)}`),
+  adminFilingStartRun: (kind: string) => post<{ started: true }>('/api/admin/filing/runs', { kind }),
+  adminFilingStopRun: () => post<{ stopped: true }>('/api/admin/filing/runs/stop', {}),
+
+  /** What was decided, newest first, and the whole trail behind any word. */
+  adminFilingDecisions: (p: { decision?: string; set?: string } = {}) =>
+    request<{ decisions: Decision[]; sets: { key: string; name: string }[] }>(
+      `/api/admin/filing/decisions${qs(p)}`),
+  adminFilingTrail: (word: string) =>
+    request<{ trail: Trail }>(`/api/admin/filing/decisions/${encodeURIComponent(word)}/trail`),
 
   // --- writes that have not gone yet ----------------------------------------
 
@@ -4888,4 +5036,176 @@ export type AdminHosting = {
 export type GuestJoinResult = JoinView & {
   participantToken: string; sessionToken: string | null; account: GuestAccount | null;
   signInRequired?: boolean; codeSent?: boolean; contact?: string; expiresInMinutes?: number; returning?: boolean; message?: string;
+};
+
+
+// ---------------------------------------------------------------------------
+// The filing desk
+// ---------------------------------------------------------------------------
+
+/** One of the numbers the filing screens judge by, with how it is nudged. */
+export type Threshold = {
+  key: string; label: string; why: string;
+  value: number; step: number; min?: number; max?: number;
+  /** Whether the owner has moved it off the value it was born with. */
+  changed: boolean;
+};
+
+/** A queue on the front door: a count, what it is, and where it lives. */
+export type FilingQueue = {
+  kicker: string; count: number; what: string; where: string;
+  go: string; tone?: 'warn';
+};
+
+export type FilingOverview = {
+  queues: FilingQueue[];
+  /** The total in the title — things that wait on a *person*. */
+  waiting: number;
+  arguing: { key: string; label: string; category: string; places: number; about: string[]; worst: number }[];
+  /** What the audit could not see. An empty run is not a clean taxonomy. */
+  auditEvidence: Record<string, unknown> | null;
+  runs: { id: string; name: string; at: string | null; state: string; scope: string; places: number; words: number; cost: number }[];
+  /**
+   * The share of what households were shown that came through a mapping nobody
+   * engages with. `share` is null until the corpus has opens at all — below
+   * that it is measuring how young the product is, and `why` says so.
+   */
+  unengaged: {
+    share: number | null; impressions: number; attributed: number;
+    fromDead?: number; opens?: number; needs?: number;
+    words: { word: string; shown: number }[]; why: string | null;
+  };
+  thresholds: Threshold[];
+};
+
+export type FilingCategories = {
+  categories: { key: string; label: string; subs: number; places: number; sets: string[]; review: number }[];
+  counts: { categories: number; subcategories: number; places: number; review: number };
+};
+
+export type FilingSubcategoryRow = {
+  key: string; label: string; words: string[]; places: number; alsoIn: string[];
+  /** Nothing fills it — a mapping gap, and the screen says so in red. */
+  empty: boolean;
+  labels: string[]; review: number; set: string | null;
+};
+
+export type FilingCategory = {
+  category: { key: string; label: string };
+  subcategories: FilingSubcategoryRow[];
+  counts: { subcategories: number; places: number };
+};
+
+/**
+ * What a drawer says about one label, and on what evidence.
+ *
+ * `mixed` is the absence of a default rather than a kind of one: the places
+ * disagree, so the drawer keeps quiet and each place answers. A mixed answer
+ * arrives with no value at all, deliberately.
+ */
+export type FilingAnswer = {
+  key: string; label: string; kind: AttributeKind; anchor: string | null;
+  value: AttributeValue | null;
+  /** The value as a word: "Yes", "3", "4 to 12", or an em dash. */
+  said: string;
+  settled: boolean; proposed: boolean; mixed: boolean;
+  /** How many places have answered, and how many of those agree. */
+  heard: number; agree: number; spread: number;
+  /** "set" · "no places to read it from" · "3 of 4 agree". Written server-side. */
+  why: string;
+};
+
+export type FilingRule = {
+  id: string; scope: string; subject: string; label: string; words: string[];
+  brings: number; opens: number;
+  brought: { ref: string; name: string | null }[];
+};
+
+export type FilingSubcategory = {
+  subcategory: {
+    key: string; label: string;
+    category: { key: string; label: string } | null;
+    places: number; proposed: number;
+    set: { key: string; name: string | null } | null;
+  };
+  rules: FilingRule[];
+  facets: FilingAnswer[];
+  /** Facets the places disagree about, collapsed into one line. */
+  excluded: FilingAnswer[];
+  axes: FilingAnswer[];
+  disagreeing: {
+    ref: string; name: string | null; postcode: string | null; photo: string | null;
+    diff: string; more: number; human: boolean;
+  }[];
+  /** Offered where nothing fills the drawer. An empty list is a real answer. */
+  likely: { word: string; label: string; brings: number }[];
+  splitting: boolean;
+};
+
+export type FilingPlaces = {
+  subcategory: string;
+  places: { ref: string; name: string | null; town: string | null; photo: string | null; summary: string[]; answered: number; human: boolean }[];
+  counts: { places: number };
+};
+
+export type FilingFlag = { key: string; name: string; why: string; grave: boolean };
+
+export type FilingWord = {
+  word: string; label: string; brings: number; opens: number;
+  pointsAt: { key: string; label: string } | null;
+  decision: 'mapped' | 'notsure' | 'secondary' | 'notinepic';
+  /** Our own word for it, which is five where the screen draws four. */
+  answer: string | null;
+  labels: string[]; flags: FilingFlag[];
+};
+
+export type FilingMapping = {
+  words: FilingWord[];
+  counts: { answered: number; notSure: number; secondary: number; notInEpic: number; flagged: number; words: number };
+  evidence: Record<string, unknown>;
+};
+
+export type FilingExcluded = {
+  excluded: { word: string; label: string; brings: number; why: string }[];
+  counts: { words: number; places: number };
+};
+
+export type FilingSetRow = {
+  key: string; name: string;
+  state: 'settled' | 'settling' | null;
+  tooFewForTooMany: boolean;
+  usedBy: string[]; questions: number; places: number; waiting: number;
+};
+
+export type FilingLabels = {
+  sets: FilingSetRow[];
+  globals: { key: string; name: string; shape: string }[];
+  counts: { sets: number; questions: number; waiting: number };
+};
+
+export type FilingCandidate = {
+  id: number; word: string; seen: number; of: number;
+  state: 'confirmed' | 'notconfirmed' | 'validating' | 'seen' | 'held';
+  mark: string | null; provenance: string; raised: string;
+  /** Null where the harvest predates polarity — not the same as nought. */
+  denies: number | null;
+  quotes: { text: string; place: string; source: string }[];
+  snippet: { text: string; place: string; expired: boolean } | null;
+  places: string[]; why: string | null; doing: string | null;
+  subcategory: string;
+};
+
+export type FilingSet = {
+  set: { key: string; name: string; state: string | null; usedBy: { key: string; label: string }[]; places: number };
+  questions: { id: number; name: string; shape: string; gate: boolean; share: string; thin: boolean }[];
+  candidates: FilingCandidate[];
+  pen: FilingCandidate[];
+  inFlight: FilingCandidate[];
+  thin: FilingCandidate[];
+  readNote: string;
+};
+
+export type FilingVocabulary = {
+  vocabulary: { key: string; name: string; scope: 'everywhere' | 'sets' | 'nowhere'; sets: string[]; places: number }[];
+  counts: { labels: number; everywhere: number; nowhere: number };
 };

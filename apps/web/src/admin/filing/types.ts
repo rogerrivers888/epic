@@ -147,9 +147,41 @@ export type WordRow = {
   /** The subcategory it points at, or null. */
   pointsAt: { key: string; label: string } | null;
   decision: 'mapped' | 'notsure' | 'secondary' | 'notinepic';
+  /**
+   * Our own word for the decision, beside the screen's four.
+   *
+   * They are not the same vocabulary. `aside` is Not in Epic and `generic` is
+   * a label rather than a drawer, but **`travel` and `nearby` are real answers
+   * somebody gave** — parking, and the chemist beside the museum — and both
+   * collapse into "kept as a label" if only the four survive. A person who
+   * answered `travel` has to be able to see that they did.
+   */
+  answer: string | null;
   /** Labels riding along on every place it brings. */
   labels: string[];
   flags: Flag[];
+};
+
+/**
+ * What the signals could see when they last ran.
+ *
+ * One flagged row out of 479 does not mean the mapping is clean — it means the
+ * signals could not see. `demandBlind` is the case that bit us in production:
+ * with 29 opens against the 200 a demand signal needs, "nobody goes" was true
+ * of everything and the first audit proposed excluding `restaurant`. So the
+ * screen says what the run was working from rather than letting an unflagged
+ * table read as a healthy one.
+ */
+export type MappingEvidence = {
+  words: number;
+  subcategories: number;
+  opensKnownFor: number;
+  shownKnownFor: number;
+  primaryKnownFor: number;
+  researched: number;
+  tooThinToJudge: number;
+  drawersTooThinToJudge: number;
+  demandBlind: { opens: number; needs: number } | null;
 };
 
 /** A word kept out of Epic, and why. */
@@ -210,8 +242,15 @@ export type BrowseRow = {
   share: number | null;
 };
 
-/** Somebody in the household, for the first-heart question. */
-export type Member = { id: string; name: string; role: 'adult' | 'child'; age: number | null };
+/**
+ * Somebody in the household, for the first-heart question.
+ *
+ * Named `HouseMember` and not `Member` because `api.ts` already exports a
+ * `Member` — the household record proper, with birthdays and constraints. This
+ * is the four fields the preview needs, and two types called `Member` in one
+ * import graph is how the wrong one gets passed.
+ */
+export type HouseMember = { id: string; name: string; role: 'adult' | 'child'; age: number | null };
 
 // ---------------------------------------------------------------------------
 // Runs
@@ -231,7 +270,7 @@ export type Stage = {
 };
 
 /** A run, and where its volume died. */
-export type Run = {
+export type RunRow = {
   id: string;
   name: string;
   at: string;
@@ -263,7 +302,7 @@ export type Trigger = {
 };
 
 /** A week of raised against decided. */
-export type Week = { label: string; raised: number; decided: number };
+export type RunWeek = { label: string; raised: number; decided: number };
 
 /** A set's saturation, with what is waiting beside it. */
 export type Saturation = {
