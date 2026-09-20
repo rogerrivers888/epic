@@ -611,6 +611,19 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         : within === OTHER ? 'Everything else'
           : mode === 'food' ? cap1(within) : drawers.get(within) ?? cap1(within);
   const listCount = layer === 'subs' ? inPick.length : listed.length;
+  /**
+   * What the census says is within reach, beside what is on the screen.
+   *
+   * The two are different numbers and both are true: 1,374 things to do within
+   * thirty minutes is what we know is there, from the census, for nothing; the
+   * twenty below are the ones we have bought and can actually show (owner,
+   * 20 Sep 2026 — "show the census count for the reach… and the top 5").
+   * Printing only the second made a ring of a thousand places read as
+   * seventeen.
+   */
+  const censusHere = pick && pickIsCategory
+    ? (pool?.moods ?? []).find((m) => m.key === pick)?.count ?? null
+    : null;
 
   // Whichever list is actually on screen is the one worth asking about — and,
   // under a rating floor, the whole of the mode, so the floor can be honest.
@@ -940,7 +953,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                     onBack={() => goTo(mode, null)}
                     backLabel="All"
                     title={listTitle}
-                    aside={listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : null}
+                    aside={listCount
+                      ? (censusHere && censusHere > listCount
+                        ? `${listCount} of ${censusHere.toLocaleString()} within reach`
+                        : `${listCount} place${listCount === 1 ? '' : 's'}`)
+                      : null}
                   />
                   {layer === 'subs' ? (
                     <View>
