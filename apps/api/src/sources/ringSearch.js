@@ -175,15 +175,18 @@ export async function categoryPage({
   const out = await search({ box, includedType: asked.includedType, query: asked.words, pageToken, meter });
 
   // Inside the ring, not merely inside the box. `cellAt` is our own table — a
-  // point to its nearest sector — so this costs nothing.
+  // point to its nearest sector — so this costs no money; it does cost a round
+  // trip, and twenty of them one after another is most of a second per
+  // category. They are independent, so they go together (20 Sep 2026, on the
+  // home screen's cold load).
   const inRing = new Set(cells);
-  const kept_ = [];
-  for (const v of out.venues) {
-    if (v.lat == null || v.lng == null) continue;
+  const placed = await Promise.all(out.venues.map(async (v) => {
+    if (v.lat == null || v.lng == null) return null;
     const at = await cellAt({ lat: v.lat, lng: v.lng }).catch(() => null);
-    if (!at?.code || !inRing.has(at.code)) continue;
-    kept_.push({ ...v, cell: at.code, outcode: outcodeOfCell(at.code) });
-  }
+    if (!at?.code || !inRing.has(at.code)) return null;
+    return { ...v, cell: at.code, outcode: outcodeOfCell(at.code) };
+  }));
+  const kept_ = placed.filter(Boolean);
 
   // Everything we were told about is scored, not only what survived the fence:
   // we paid for the rating either way, and a place outside this ring is inside
