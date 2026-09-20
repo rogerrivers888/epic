@@ -435,4 +435,18 @@ export const desk = {
   ruleStrong: '#46413F',
   /** The fill of a control that is off — a disabled button, an empty step. */
   off: '#2E2A29',
+  /**
+   * The one colour here that is not lime, ink or cream.
+   *
+   * Red on this surface means the same as red anywhere in Epic — danger, not
+   * decoration (owner, 7 Sep 2026) — and it is what a never-opened mapping, a
+   * district below its minimum fill and a provisional threshold are drawn in.
+   *
+   * It is its own value rather than `colors.overrun` because `colors` follows
+   * the app's light-or-dark setting and this surface is pinned dark: a screen
+   * reading `colors.overrun` in light mode would draw the desk's warnings in
+   * the light red, which is four shades too dark to read on `ground`. The
+   * value is the handoff's own `oklch(0.72 0.19 25)` converted to sRGB.
+   */
+  warn: '#FF6A65',
 } as const;
