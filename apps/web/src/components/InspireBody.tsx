@@ -144,6 +144,9 @@ export function SectionHead({ title, count, of = null, onAll }: {
   of?: number | null;
   onAll?: () => void;
 }) {
+  // The shelf has room for two numbers and no room for a sentence: what we
+  // have looked up, and what the census counted in the postcode districts this
+  // ring touches. The opened list says which is which in words.
   const said = of ? `${count} of ${of.toLocaleString()}` : `All ${count}`;
   const right = (
     <View style={styles.allLink}>

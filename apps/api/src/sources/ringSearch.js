@@ -87,6 +87,32 @@ export const age = (key, byMs) => { const hit = kept.get(key); if (hit) hit.at -
  * a leisure centre is Sport and Active both — and this asked the category's own
  * question, so its answer is the category's answer.
  */
+/**
+ * The questions after the first one.
+ *
+ * A category is a cabinet of drawers and Google answers one question at a
+ * time: "go karting and high ropes" found three places in a ring the census
+ * counts twenty-three in, and there was no next page to buy — so the board
+ * said "3 of 23" and could never show a fourth (owner, 20 Sep 2026: "it says 3
+ * of 23 within reach, but it only shows me 3").
+ *
+ * So a category has a *list* of questions, in the order a household would
+ * think of them, and paging walks it: Google's own next page while there is
+ * one, then the next drawer's question. Nobody pays for a question nobody
+ * scrolled to.
+ */
+export const THEN = {
+  food: ['pubs and bars', 'cafés and coffee shops', 'takeaway'],
+  culture: ['castles and historic houses', 'cathedrals and churches', 'theatres'],
+  fun: ['theme parks and rides', 'zoos and farm parks', 'soft play and trampolines'],
+  outdoors: ['country parks', 'nature reserves and woodland', 'gardens open to the public'],
+  sport: ['swimming pools', 'golf courses', 'climbing walls', 'tennis and racquets'],
+  active: ['cycling and bike hire', 'watersports centres', 'adventure playgrounds'],
+  adrenaline: ['go karting', 'high ropes and zip lines', 'skydiving and indoor skydiving',
+    'quad biking and off-road driving', 'paintball and laser tag', 'motorsport circuits'],
+  relaxing: ['spas and wellness', 'saunas', 'quiet gardens'],
+};
+
 export const ASKED = {
   food: { includedType: 'restaurant', words: 'restaurants' },
   culture: { includedType: 'museum', words: 'museums and galleries' },
@@ -163,16 +189,24 @@ export async function categoryPage({
   // Page two needs page one's token: the chain is Google's, not ours. A caller
   // that asks for a page it has not reached gets nothing rather than a search
   // starting again from the top and billing for twenty it already has.
+  const lead = ASKED[category] ?? { includedType: null, words: category };
+  const rest = THEN[category] ?? [];
   let pageToken = null;
+  let askedAt = 0;
   if (page > 1) {
     const before = kept.get(pageKey(ringKey, category, page - 1));
-    if (!fresh(before)) return { venues: [], nextPageToken: null, cached: false, requests: 0, problem: 'the page before it has gone from the pool' };
-    pageToken = before.value.nextPageToken;
-    if (!pageToken) return { venues: [], nextPageToken: null, cached: false, requests: 0, problem: null, end: true };
+    if (!usable(before)) return { venues: [], nextPageToken: null, cached: false, requests: 0, problem: 'the page before it has gone from the pool' };
+    pageToken = before.value.nextPageToken ?? null;
+    // Google has no more of *that* question. Ask the next one rather than
+    // stopping: the census says there are more of these here, and a category is
+    // a cabinet of drawers.
+    askedAt = pageToken ? before.value.askedAt ?? 0 : (before.value.askedAt ?? 0) + 1;
+    if (!pageToken && askedAt > rest.length) {
+      return { venues: [], nextPageToken: null, cached: false, requests: 0, problem: null, end: true };
+    }
   }
-
-  const asked = ASKED[category] ?? { includedType: null, words: category };
-  const out = await search({ box, includedType: asked.includedType, query: asked.words, pageToken, meter });
+  const asking = askedAt === 0 ? lead : { includedType: null, words: rest[askedAt - 1] };
+  const out = await search({ box, includedType: asking.includedType, query: asking.words, pageToken, meter });
 
   // Inside the ring, not merely inside the box. `cellAt` is our own table — a
   // point to its nearest sector — so this costs no money; it does cost a round
@@ -196,6 +230,9 @@ export async function categoryPage({
 
   const value = {
     venues: kept_,
+    // Which question this page answered, so the page after it knows whether to
+    // follow Google's token or move to the next drawer.
+    askedAt, asked: asking.words,
     nextPageToken: out.nextPageToken,
     returned: out.venues.length,
     scored: scored.scored ?? 0,

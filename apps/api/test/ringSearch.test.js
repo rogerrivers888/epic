@@ -90,10 +90,28 @@ test('a page is bought once for the ring, held for the next household, and paged
   const second = await search.categoryPage({ ...args, page: 2 });
   assert.equal(second.requests, 1);
   assert.equal(calls, 2);
-  // And there is no page three: Google said so, and we do not go fishing.
+  assert.equal(second.askedAt, 0, 'still the category\u2019s first question');
+
+  // Google has no more of that question. The category is a cabinet of drawers,
+  // so the next page asks the next drawer rather than stopping (owner, 20 Sep
+  // 2026: "it says 3 of 23 within reach, but it only shows me 3").
   const third = await search.categoryPage({ ...args, page: 3 });
-  assert.equal(third.requests, 0);
-  assert.equal(third.end, true);
+  assert.equal(third.requests, 1);
+  assert.equal(third.askedAt, 1);
+  assert.equal(third.asked, search.THEN.fun[0]);
+});
+
+test('the questions run out, and then it really does end', async () => {
+  search.forgetPool();
+  const fake = async () => ({ venues: [], nextPageToken: null, requests: 1, problem: null });
+  const at = async () => ({ code: 'sector:ZZ1 1' });
+  const args = { ringKey: 'ring-end', box: { minLat: 0, maxLat: 1, minLng: 0, maxLng: 1 }, cells: ['sector:ZZ1 1'], category: 'fun', cellAt: at, search: fake };
+  // Every page answers a question and offers no token, so each one moves on.
+  const pages = search.THEN.fun.length + 1;
+  for (let n = 1; n <= pages; n += 1) await search.categoryPage({ ...args, page: n });
+  const past = await search.categoryPage({ ...args, page: pages + 1 });
+  assert.equal(past.end, true, 'a cabinet with no drawers left is the end of it');
+  assert.equal(past.requests, 0, 'and nobody is billed for asking again');
 });
 
 test('a stale page is drawn at once and replaced behind it', async () => {

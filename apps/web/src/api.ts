@@ -3384,6 +3384,13 @@ export const api = {
    * search log, where it would read as a search that showed everything and led
    * to nothing (Codex, 18 Sep 2026).
    */
+  /**
+   * One category's next page: twenty more, bought when somebody has reached
+   * the end of what is on the screen. Google's own next page where there is
+   * one, and the category's next drawer where there is not.
+   */
+  inspireCategoryPage: (q: { where?: string; lat?: number; lng?: number; label?: string; minutes?: number; mode?: string; cat: string; page: number; shows?: number }) =>
+    request<{ categories: { key: string; label: string; count: number; items: InspireItem[]; more: boolean; sifted?: { returned: number; inRing: number; scored: number } }[]; spent: { displaySearches: number } }>(`/api/inspire/around${qs(q)}`),
   inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; minutes?: number; live?: 1; refresh?: 1; count?: 1 }) =>
     request<InspireNear>(`/api/inspire/near${qs(q)}`),
 

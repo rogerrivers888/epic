@@ -18,6 +18,7 @@ import { CategoryStrip, InspireTop, MenuBar, ModeSwitch } from '../components/In
 import { ExperienceCard } from '../components/hosting';
 import { BoxRow, ControlButton, ControlRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
+import { Button } from '../components/ui';
 import { TRAVEL_MODES, type TravelMode } from '../components/TravelSheet';
 import { activeCount, howFarShort, keeps, nextWider, sortItems, HOW_FAR, PRICE_BANDS, PRICE_KEYS, RATING_FLOORS, SORTS, SORT_KEYS, type Filters, type InspireSort } from './inspireList';
 import type { OpenTripOptions } from './PlanScreen';
@@ -238,6 +239,18 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const [travel, setTravel] = useQueryState<number | null>('travel', HOW_FAR_DEFAULT, asNumber(HOW_FAR_DEFAULT));
   const [travelBy, setTravelBy] = useQueryState<TravelMode>('by', 'drive', asOneOf(['drive', 'transit', 'walk'], 'drive'));
   const [rating, setRating] = useQueryState<number>('rating', 0, asNumber(0));
+  /**
+   * The pages bought past the first, per category.
+   *
+   * A category's first search is twenty places and Google's next page where it
+   * has one; after that the category's other drawers are asked in turn. Nobody
+   * pays for a page nobody asked for — this only ever grows when somebody has
+   * reached the end of what is on the screen (owner, 20 Sep 2026: "it says 3 of
+   * 23 within reach, but it only shows me 3").
+   */
+  const [more, setMore] = useState<Record<string, InspireItem[]>>({});
+  const [buying, setBuying] = useState<string | null>(null);
+  const [spent, setSpent] = useState<Record<string, number>>({});
   const [price, setPrice] = useQueryState<string>('price', 'any', asOneOf(PRICE_KEYS, 'any'));
   const [sort, setSort] = useQueryState<InspireSort>('sort', 'rating', asOneOf(SORT_KEYS, 'rating'));
   const [who] = useQueryState<string[]>('who', [], asList);
@@ -463,7 +476,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * categories are the answer; an attraction with a café is an attraction.
    */
   const isFood = useCallback((i: InspireItem) => i.source === 'scout' || Boolean(FOOD_KINDS[i.category]), []);
-  const inMode = useMemo(() => (pool?.items ?? []).filter((i) => (mode === 'food' ? isFood(i) : !isFood(i))), [pool, mode, isFood]);
+  const inMode = useMemo(
+    () => [...(pool?.items ?? []), ...Object.values(more).flat()]
+      .filter((i) => (mode === 'food' ? isFood(i) : !isFood(i))),
+    [pool, more, mode, isFood],
+  );
 
   /** Which category or kind a place is in, in the strip's own keys. */
   const inCategory = useCallback((i: InspireItem, key: string) => (mode === 'food' ? FOOD_KINDS[i.category] === key : i.moods.includes(key)), [mode]);
@@ -969,7 +986,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                     title={listTitle}
                     aside={listCount
                       ? (censusHere && censusHere > listCount
-                        ? `${listCount} of ${censusHere.toLocaleString()} within reach`
+                        // "Within reach" was a promise the number does not
+                        // make: it is the census's count over the whole
+                        // postcode districts the ring touches, so part of it
+                        // lies outside the ring, and all of it is ids rather
+                        // than places we have looked up. Said as what it is
+                        // (owner, 20 Sep 2026: "it says 3 of 23 within reach,
+                        // but it only shows me 3").
+                        ? `${listCount} looked up · ${censusHere.toLocaleString()} counted nearby`
                         : `${listCount} place${listCount === 1 ? '' : 's'}`)
                       : null}
                   />
@@ -993,6 +1017,28 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                       {listed.map((i) => (
                         <CardWide key={i.venueRef} item={i} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />
                       ))}
+                      {/* The end of what we have looked up, and the way past it.
+                          One press is one search: twenty more from the same
+                          question while Google has them, then the next drawer
+                          in this cabinet. */}
+                      {pick && pickIsCategory && centre ? (
+                        <Button kind="secondary" loading={buying === pick}
+                                label={buying === pick ? 'Looking…' : 'Look up more'}
+                                onPress={async () => {
+                                  setBuying(pick);
+                                  try {
+                                    const page = (spent[pick] ?? 1) + 1;
+                                    const r = await api.inspireCategoryPage({
+                                      lat: centre.lat, lng: centre.lng, label: centre.label ?? undefined,
+                                      minutes: travel ?? HOW_FAR_DEFAULT, mode: travelBy, cat: pick, page, shows: 20,
+                                    });
+                                    const got = r.categories?.[0]?.items ?? [];
+                                    setSpent((was) => ({ ...was, [pick]: page }));
+                                    setMore((was) => ({ ...was, [pick]: [...(was[pick] ?? []), ...got] }));
+                                  } catch { /* the list stays as it is */ }
+                                  finally { setBuying(null); }
+                                }} />
+                      ) : null}
                     </View>
                   )}
                 </View>
