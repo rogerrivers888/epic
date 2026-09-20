@@ -374,7 +374,13 @@ function Level(props: {
           thing you came to do. */}
       <LensRow lens={lensHere} onLens={props.onLens}
                right={ring || level.areaKind === 'postcode'
-                 ? <RingChooser minutes={within} mode={mode} onMinutes={props.onWithin} onMode={props.onBy}
+                 ? <RingChooser minutes={within} mode={mode} onMinutes={props.onWithin}
+                                /* How you are travelling only means something inside a
+                                   ring, so choosing it draws one at the first band —
+                                   the same act as picking a way to travel in the search
+                                   box, which has always drawn the ring. Otherwise the
+                                   word lights nothing and the board does not move. */
+                                onMode={(m) => { props.onBy(m); if (within == null) props.onWithin(BANDS[0]); }}
                                 cells={level.cells} modesBuilt={level.modesBuilt} />
                  : <AreaSearch onWhere={props.onWhere} onPlace={props.onPlace} />} />
       {body}
@@ -603,13 +609,19 @@ function RingChooser({ minutes, mode, onMinutes, onMode, cells, modesBuilt }: {
             // say why. The word stays — removing a control is the owner's call
             // — and says what it is waiting for (17 Sep 2026).
             const built = !modesBuilt || modesBuilt.includes(m);
+            // Lit only once there is a ring, for the same reason the bands are.
+            // With no band chosen the board is the outcode's own places, and a
+            // lit Car said it was half an hour's drive — 92 places drawn under
+            // the chooser for 2,815 (owner, 20 Sep 2026: "a minute ago there
+            // were a lot more … now suddenly it's reduced significantly").
+            const on = minutes != null && mode === m;
             return (
               <Explain key={m} tip={built ? null : (['Not worked out yet', `The reachability matrix has not been built for ${MODE_LABEL[m].toLowerCase()} here. It is a free run, on Runs.`] as const)}>
                 <Press effect="none" onPress={() => (built ? onMode(m) : undefined)} accessibilityRole="button"
                        disabled={!built}
-                       accessibilityState={{ selected: mode === m, disabled: !built }} accessibilityLabel={MODE_LABEL[m]}
-                       style={[styles.segItem, mode === m && styles.segItemOn]}>
-                  <Text style={[styles.segWord, mode === m && styles.segWordOn, !built && styles.segWordOff]}>{MODE_LABEL[m]}</Text>
+                       accessibilityState={{ selected: on, disabled: !built }} accessibilityLabel={MODE_LABEL[m]}
+                       style={[styles.segItem, on && styles.segItemOn]}>
+                  <Text style={[styles.segWord, on && styles.segWordOn, !built && styles.segWordOff]}>{MODE_LABEL[m]}</Text>
                 </Press>
               </Explain>
             );
@@ -945,6 +957,19 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
     onNames({ cat: open?.label, subs: open?.subcategories.length ?? data?.subcategories });
   }, [open, data, onNames]);
 
+  // Held here rather than in the address: eight rows re-order in the hand, and a
+  // board whose headings do nothing when you click them is a board that looks
+  // broken (owner, 19 Sep 2026: "I should be able to sort on the column headers
+  // as well. That's not working").
+  //
+  // Above the one-category branch below, not beside the board that uses it: a
+  // hook after an early return is a different number of hooks on the render
+  // that opens a category, and React throws the whole screen away rather than
+  // draw it (20 Sep 2026 — "Epic stopped working", then Try again worked,
+  // because a remount reads the category straight off the address).
+  const [catSort, setCatSort] = useState<string>('known');
+  const [catDesc, setCatDesc] = useState(true);
+
   // One category open: its subcategories, every one of them, the empty ones
   // included — "an empty subcategory is the finding" (BO2p).
   if (cat) {
@@ -987,12 +1012,6 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
   // included, because an empty one is the finding — is kept exactly, one click
   // in, which is where BO2p already puts it.
   const ring = q.within != null || areaKind === 'postcode';
-  // Held here rather than in the address: eight rows re-order in the hand, and a
-  // board whose headings do nothing when you click them is a board that looks
-  // broken (owner, 19 Sep 2026: "I should be able to sort on the column headers
-  // as well. That's not working").
-  const [catSort, setCatSort] = useState<string>('known');
-  const [catDesc, setCatDesc] = useState(true);
   const all = data?.categories ?? [];
   const flat = all.flatMap((c) => c.subcategories.map((s) => ({ ...s, categoryLabel: c.label })));
   const shown = hideFull ? flat.filter((s) => s.known === 0) : flat;
