@@ -225,6 +225,12 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/suppliers'), { name: 'admin', screen: 'suppliers' });
   assert.deepEqual(roundTrip('/admin/behaviour'), { name: 'admin', screen: 'behaviour' });
   assert.deepEqual(roundTrip('/admin/engagement'), { name: 'admin', screen: 'engagement' });
+  /**
+   * The filing desk. Its six tabs and every layer inside them are query state,
+   * so the address survives a share and the path stays one screen.
+   */
+  assert.deepEqual(roundTrip('/admin/filing'), { name: 'admin', screen: 'filing' });
+  assert.deepEqual(parseRoute('/admin/filing?tab=categories&sub=golf'), { name: 'admin', screen: 'filing' });
 
   /**
    * Every layer inside a suite screen is in the query, so a figure somebody is

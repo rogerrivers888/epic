@@ -265,11 +265,20 @@ export type AdminScreen =
    */
   | 'money' | 'subscriptions' | 'customers' | 'suppliers' | 'behaviour' | 'engagement'
   | 'places' | 'demand' | 'runs' | 'queue'
+  /**
+   * The filing desk (the Places redesign, 20 Sep 2026): six tabs over one
+   * taxonomy — Overview, Categories, Labels, Mapping, Rules, Rows. One address
+   * with the tab and everything inside it as query state, so
+   * `/admin/filing?tab=categories&sub=golf` opens on that drawer for whoever
+   * it is sent to.
+   */
+  | 'filing'
   | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
 export const ADMIN_SCREENS: AdminScreen[] = [
   'overview', 'accounts', 'households', 'activity', 'reporting',
   'money', 'subscriptions', 'customers', 'suppliers', 'behaviour', 'engagement',
   'places', 'demand', 'runs', 'queue',
+  'filing',
   'lookup', 'coverage', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'mail', 'roles', 'plans', 'audit', 'how',
 ];
 

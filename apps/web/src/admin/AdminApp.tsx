@@ -55,6 +55,7 @@ import { Hosting } from './screens/Hosting';
 import { Mail } from './screens/Mail';
 import { Sources } from './screens/Sources';
 import { Categories } from './screens/Categories';
+import { Filing } from './filing/Filing';
 import { Skills } from './screens/Skills';
 
 const DESKTOP = 900;
@@ -145,6 +146,12 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'demand', label: 'Demand', icon: 'list', needs: 'view_reporting', sub: 'What people asked for, and what we failed to give them', group: 'Data' },
   { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
   { key: 'categories', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Categories and subcategories, every provider\'s words, and the rules that map one onto the other', group: 'Data' },
+  /**
+   * The filing desk (the Places redesign, 20 Sep 2026): six tabs over one
+   * taxonomy. It sits beside Categories rather than replacing it, because the
+   * screens it supersedes are live and retiring one is the owner's call.
+   */
+  { key: 'filing', label: 'Filing desk', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, labels, mapping, rules and the rows a household browses', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'Data' },
   { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports', group: 'Data' },
   { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
@@ -234,6 +241,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'engagement' ? <Reporting canSeeMoney={can('view_financials')} /> : null}
       {screen === 'lookup' ? <Lookup canManage={can('manage_library')} /> : null}
       {screen === 'coverage' ? <Coverage /> : null}
+      {screen === 'filing' ? <Filing canManage={can('manage_library')} /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}
       {/* Two capabilities, because two different things: starting a run is the
           library's, and setting the month's ceiling is the settings'. One flag
