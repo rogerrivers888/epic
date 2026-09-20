@@ -1123,7 +1123,15 @@ export type IdeaHeadline = { venueRef: string; name: string; category: string; e
  */
 export type MoodKey = 'fun' | 'food' | 'culture' | 'sport' | 'activity' | 'adrenaline' | 'relaxing' | 'outdoors' | (string & {});
 export type Mood = {
-  key: MoodKey; label: string; count: number;
+  key: MoodKey; label: string;
+  /** What the census found in the reach — free, ours, and not what is on screen. */
+  count: number;
+  /** How many of them this board actually holds, which is what the list draws. */
+  shown?: number;
+  /** Where the twenty went: what Google returned, what was inside the ring, what was scored. */
+  sifted?: { returned: number; inRing: number; scored: number };
+  /** Whether there is a next page to buy when somebody scrolls past the fifteenth. */
+  more?: boolean;
   /** An `Icon` name, from the table rather than a lookup in the bundle. */
   icon?: string | null;
   /** Food is a chip that navigates into Places rather than a shelf that fills. */
@@ -1215,6 +1223,18 @@ export type InspireNear = {
   from: { label: string | null; lat: number; lng: number; how: 'home' | 'given' | 'centre' };
   mode: string; radiusKm: number;
   moods: Mood[]; items: InspireItem[];
+  /**
+   * The ring this answer is of: a shape out of the reachability matrix, not a
+   * circle of kilometres (20 Sep 2026).
+   */
+  ring?: {
+    where: string; minutes: number; cells: number; outcodes: number;
+    /** Outcodes in the ring the census has never been run in: "we have not looked" is not "nothing here". */
+    notCensused: number;
+    box: { across: number; down: number } | null;
+  };
+  /** What drawing this board spent, said plainly. */
+  spent?: { displaySearches: number };
   /**
    * Which pools are in this answer. The home screen reads the atlas alone —
    * ours, illustrated, and answered in milliseconds — and `live` is only true
@@ -3354,7 +3374,7 @@ export const api = {
    * search log, where it would read as a search that showed everything and led
    * to nothing (Codex, 18 Sep 2026).
    */
-  inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; live?: 1; refresh?: 1; count?: 1 }) =>
+  inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; minutes?: number; live?: 1; refresh?: 1; count?: 1 }) =>
     request<InspireNear>(`/api/inspire/near${qs(q)}`),
 
   /** A library picture's bytes. Given the row rather than the id, a pending household upload's signed link comes with it. */

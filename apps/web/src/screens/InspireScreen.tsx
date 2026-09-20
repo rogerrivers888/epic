@@ -350,6 +350,14 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         // From home, nothing is sent and the API measures from home as before.
         from: chosen ? `${centre.lat},${centre.lng}` : null,
         mode: travelBy,
+        // How far, in minutes, because that is what the family said.
+        //
+        // This used to be sent as kilometres — the minutes times 0.8 — and a
+        // circle was searched. A circle is not a drive: a place twenty-five
+        // minutes up the motorway sat outside it and a field eight miles
+        // across country sat inside. The API draws the ring out of the
+        // reachability matrix now (owner, 20 Sep 2026).
+        minutes: travel ?? HOW_FAR_DEFAULT,
         // "Try again" after a source refused must ask the source again, not
         // read the refusal back out of the search cache (Codex, 12 Sep 2026).
         refresh: refresh ? 1 : undefined,
