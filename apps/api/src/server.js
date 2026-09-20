@@ -52,6 +52,8 @@ import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
 import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
+import questionRoutes from './routes/questions.js';
+import { ensureAttributeAliases } from './repositories/questionSets.js';
 import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
@@ -228,6 +230,11 @@ app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
 // source register (routes/hostSkills.js). Its own capability pair, because
 // approving a word is not the same privilege as reading the queue.
 app.use('/api/admin/skills', requireDoor('admin'), skillsAdminRoutes);
+// Question sets: what gets asked of what kind of place, the words a harvest
+// has raised, and the harvest itself (routes/questions.js). Its own capability
+// pair for the same reason as skills — promoting a word changes what every
+// place of that kind is asked afterwards, and the paid pass spends money.
+app.use('/api/admin/questions', requireDoor('admin'), questionRoutes);
 // Places: one index, every lens (routes/placeIndex.js). Five screens that were
 // each bound to a different table became one bound to a question, and this is
 // what it reads. The older locality routes stay mounted beneath it — nothing
@@ -635,6 +642,10 @@ setTimeout(() => { ensureTaxonomyReady().catch(() => null); }, 5000).unref?.();
 // field, or the resolver's first pass misses the rows whose hand-written key is
 // not the normalisation of their own label (routes/hostSkills.js).
 setTimeout(() => { ensureSkillsReady().catch(() => null); }, 5000).unref?.();
+// The same self-alias pass for our own labels, so a harvest raising "step free
+// access" resolves it to the `step-free` label rather than making a second one
+// beside it (repositories/questionSets.js).
+setTimeout(() => { ensureAttributeAliases().catch(() => null); }, 5000).unref?.();
 // Epic chases the group, the organiser does not (owner, 4 Sep 2026): any run
 // whose morning has passed is written once, whether or not anyone is looking.
 startReminderLoop();

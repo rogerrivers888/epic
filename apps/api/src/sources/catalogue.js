@@ -301,11 +301,17 @@ export const PROVIDERS = [
       editorial_summary: 'editorialSummary.text', review_text: 'reviews[].text.text; contextualContents.justifications', review_rating: 'reviews[].rating',
       review_author: 'reviews[].authorAttribution', review_date: 'reviews[].relativePublishTimeDescription', phone: 'nationalPhoneNumber',
       duration: 'routingSummaries[].legs[].duration', distance_m: 'routingSummaries[].legs[].distanceMeters',
+      // Asked for on Text Search by the vocabulary harvest, and read in memory
+      // only: the words are counted and the text is thrown away. It is `used`
+      // because the mask asks for it — what the catalogue says has to be what
+      // `google.js` does — and `kept: 'none'` because nothing it says is ever
+      // written down (sources/vocabulary.js, 20 Sep 2026).
+      review_summary: 'reviewSummary',
     },
     offered: {
       address_parts: 'addressComponents / postalAddress', plus_code: 'plusCode', viewport: 'viewport', business_status: 'businessStatus / movedPlaceId',
       phone_intl: 'internationalPhoneNumber', price_range: 'priceRange', hours_secondary: 'regularSecondaryOpeningHours / currentSecondaryOpeningHours',
-      ai_summary: 'generativeSummary', review_summary: 'reviewSummary', neighbourhood: 'neighborhoodSummary', entrances: 'entrances / navigationPoints',
+      ai_summary: 'generativeSummary', neighbourhood: 'neighborhoodSummary', entrances: 'entrances / navigationPoints',
       containing_place: 'containingPlaces / subDestinations', opened: 'openingDate', wheelchair: 'accessibilityOptions', dogs: 'allowsDogs',
       curbside: 'curbsidePickup', delivery: 'delivery', dine_in: 'dineIn', takeout: 'takeout', outdoor_seating: 'outdoorSeating', live_music: 'liveMusic',
       toilets: 'restroom', good_for_groups: 'goodForGroups', sports_screens: 'goodForWatchingSports', payment: 'paymentOptions', parking: 'parkingOptions',

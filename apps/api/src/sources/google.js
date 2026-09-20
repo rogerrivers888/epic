@@ -435,6 +435,8 @@ export const googleSource = {
   key: 'google',
   /** The census's own call. See `censusSlice`. */
   censusSlice,
+  /** The vocabulary harvest's own call: summaries read in memory, never stored. See `reviewSummaries`. */
+  reviewSummaries,
   label: 'Google',
   /** The furthest a nearby search may look; a wider ring is asked at this width. */
   maxRadiusKm: 50,
@@ -925,6 +927,69 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
   // Sixty back with another page waiting is Google saying "there are more of
   // these than I will tell you about". That is the saturation signal.
   return { places: [...out.values()], requests, saturated: out.size >= 60 || Boolean(pageToken), problem: null };
+}
+
+/**
+ * Twenty places' review summaries, for the vocabulary harvest and nothing else.
+ *
+ * Brief: "Epic — Question sets and the vocabulary harvest", 20 September 2026.
+ * **Google may raise a candidate word. Google may never answer a question
+ * about a place.** So this returns the text *in memory*, the harvester turns
+ * it into normalised candidate phrases and throws it away, and nothing it
+ * returns may be written to a row, a log or a debug field.
+ *
+ * `places.reviewSummary` is available on Text Search — confirmed against
+ * Google's own field-mask table and its review-summaries page, which lists the
+ * United Kingdom under English — and that is the whole economics of the run:
+ * one request returns twenty places' worth of writing where Place Details
+ * returns one, a factor of twenty on the bill.
+ *
+ * The mask is Enterprise + Atmosphere and `skuFor` prices it as a display
+ * search, which is correct: a summary is the dearest thing Google sells.
+ *
+ * Nothing but the id and the summary is asked for. A name would be rented
+ * content with nowhere legitimate to go, and the harvest does not need one —
+ * it is counting words, not describing places.
+ */
+const SUMMARY_FIELDS = 'places.id,places.reviewSummary';
+
+async function reviewSummaries({ textQuery, box = null, includedType = null, count = 20, meter = null } = {}) {
+  if (!KEY()) return { places: [], requests: 0, problem: 'no Google key' };
+  if (!textQuery) return { places: [], requests: 0, problem: 'no query' };
+  const body = {
+    textQuery,
+    pageSize: Math.min(20, Math.max(1, count)),
+    languageCode: 'en-GB',
+    regionCode: 'GB',
+    ...(includedType ? { includedType } : {}),
+    ...(box
+      ? {
+        locationRestriction: {
+          rectangle: {
+            low: { latitude: box.minLat, longitude: box.minLng },
+            high: { latitude: box.maxLat, longitude: box.maxLng },
+          },
+        },
+      }
+      : {}),
+  };
+  let data;
+  try {
+    data = await call('/places:searchText', { fieldMask: SUMMARY_FIELDS, meter, body });
+  } catch (err) {
+    return { places: [], requests: 1, problem: String(err.message).slice(0, 160) };
+  }
+  const places = (data.places || []).map((p) => ({
+    id: p.id,
+    // Held for as long as the caller's stack frame and no longer.
+    summary: p.reviewSummary?.text?.text ?? null,
+  }));
+  return {
+    places,
+    requests: 1,
+    withSummary: places.filter((p) => p.summary).length,
+    problem: null,
+  };
 }
 
 export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null, includedType = 'restaurant', keepLodging = false } = {}) {

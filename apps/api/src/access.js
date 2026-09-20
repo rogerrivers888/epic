@@ -51,6 +51,12 @@ export const CAPABILITIES = [
   // it is not the same privilege as reading the queue.
   { key: 'view_skills', area: 'Hosting', label: 'See host skills', note: 'The browse categories, formats, tags, facets, credential types and the review queue.' },
   { key: 'manage_skills', area: 'Hosting', label: 'Manage host skills', note: 'Approve, merge and reject proposed words, edit the vocabularies, and confirm credentials.', manages: true },
+  // The same split again, for the questions asked of a place. Promoting a word
+  // into a question set changes what every place of that kind is asked
+  // afterwards, and running the harvest spends money; reading the queue does
+  // neither.
+  { key: 'view_questions', area: 'Places', label: 'See question sets', note: 'The questions asked of each kind of place, what places answered, and the words a harvest has raised.' },
+  { key: 'manage_questions', area: 'Places', label: 'Manage question sets', note: 'Promote or ignore a harvested word, add and remove questions, and run the harvest.', manages: true },
 ];
 
 export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
