@@ -297,10 +297,10 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
   const scores = refs.length
     ? (await query(
-      `select venue_ref, coalesce(r.epic_score, s.epic_score) as epic
+      `select t.venue_ref as venue_ref, coalesce(r.epic_score, s.epic_score) as epic
          from unnest($1::text[]) as t(venue_ref)
          left join place_records r on r.venue_ref = t.venue_ref
-         left join lateral (select epic_score from scout_places s2 where s2.venue_ref = t.venue_ref order by last_seen desc limit 1) s on true`,
+         left join lateral (select s2.epic_score from scout_places s2 where s2.venue_ref = t.venue_ref order by s2.last_seen desc limit 1) s on true`,
       [refs])).rows
     : [];
   const byRef = new Map(scores.map((r) => [r.venue_ref, r.epic == null ? null : Number(r.epic)]));
