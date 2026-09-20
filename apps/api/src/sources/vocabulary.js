@@ -157,13 +157,27 @@ export async function heldTextFor(venueRef) {
   }
   const r = record.rows[0];
   if (r) {
-    const bits = [r.summary, ...listOf(r.cuisines), ...listOf(r.experiences), ...listOf(r.dietary_options), ...Object.keys(r.accessibility ?? {})];
+    const bits = [r.summary, ...listOf(r.cuisines), ...listOf(r.experiences), ...listOf(r.dietary_options),
+      ...Object.keys(r.accessibility ?? {}).map(keyWords)];
     texts.push({ source: 'site', text: bits.filter(Boolean).join('. ') });
   }
   const a = atlas.rows[0];
   if (a) texts.push({ source: 'wikipedia', text: [a.summary, ...(a.kinds ?? [])].filter(Boolean).join('. ') });
   return { texts: texts.filter((t) => t.text), tags };
 }
+
+/**
+ * A key as the words it is made of.
+ *
+ * Our own facts are written in three conventions at once — `step_free` in a
+ * tag, `wheelchair:toilet` in another, `stepFree` in the JSON `own.js`
+ * composes — and only the first two were being split. So the first sweep
+ * raised `stepfree` and `wheelchairtoilet` as *new* words, when `step-free` is
+ * already one of our labels and already a global question. The alias table
+ * exists to stop exactly that duplicate, and it could not do its job on a word
+ * whose spaces had been eaten (found in the live queue, 20 Sep 2026).
+ */
+const keyWords = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_:.-]+/g, ' ');
 
 /** A fact's value as words, whatever shape it was stored in. Numbers and URLs say nothing. */
 function wordsIn(value) {
@@ -173,7 +187,7 @@ function wordsIn(value) {
   if (Array.isArray(value)) return value.map(wordsIn).filter(Boolean).join('. ');
   if (typeof value === 'object') {
     return Object.entries(value)
-      .map(([k, v]) => (v === true ? k.replace(/[_:]+/g, ' ') : wordsIn(v)))
+      .map(([k, v]) => (v === true ? keyWords(k) : wordsIn(v)))
       .filter(Boolean).join('. ');
   }
   return '';

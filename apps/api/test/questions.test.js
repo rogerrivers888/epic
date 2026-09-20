@@ -373,3 +373,35 @@ test('a venue that says no is not read', async () => {
   // A site with no robots.txt has not refused anything.
   assert.equal(polite.allowedBy(polite.parse('').rules, '/x'), true);
 });
+
+// ---------------------------------------------------------------------------
+// the three ways our own facts are keyed
+// ---------------------------------------------------------------------------
+
+test('a key is split however it was written, so stepFree meets step free', async () => {
+  // Found in the live queue on 20 Sep: `stepfree` and `wheelchairtoilet`, six
+  // places each, raised as *new* words when `step-free` is already one of our
+  // labels and already a global question. The tag conventions were split and
+  // the camelCase keys `own.js` composes into `place_records.accessibility`
+  // were not, so the alias table — whose whole job is to stop that duplicate —
+  // never saw a word it could match.
+  const { heldTextFor } = await import('../src/sources/vocabulary.js');
+  const ref = 'test:keys';
+  await query('delete from place_facts where venue_ref = $1', [ref]);
+  await query('delete from place_records where venue_ref = $1', [ref]);
+  await query(
+    `insert into place_facts (venue_ref, field, source, value, licence, retention)
+     values ($1, 'accessibility', 'site', $2::jsonb, 'owned', 'keep')`,
+    [ref, JSON.stringify({ stepFree: true, 'wheelchair:toilet': true, hearing_loop: true })],
+  );
+  const { texts } = await heldTextFor(ref);
+  const words = texts.map((t) => t.text).join(' ');
+  for (const phrase of ['step Free', 'wheelchair toilet', 'hearing loop']) {
+    assert.match(words, new RegExp(phrase, 'i'), `${phrase} came back glued together`);
+  }
+  const { phrasesIn } = await import('../src/domain/questions.js');
+  const raised = [...phrasesIn(words).keys()];
+  assert.ok(raised.includes('step free'), 'the harvest must raise the words our label is written in');
+  assert.ok(!raised.includes('stepfree'), 'a glued key is a word nobody wrote');
+  await query('delete from place_facts where venue_ref = $1', [ref]);
+});
