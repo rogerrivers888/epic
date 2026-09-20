@@ -34,6 +34,7 @@ import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { googleSource } from './google.js';
 import { NOT_ASKABLE } from './googleTypes.js';
+import { wordQuestionsFor, WORD_QUESTION_SUBCATEGORIES } from './censusQuestions.js';
 import * as index from '../repositories/placeIndex.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
@@ -116,9 +117,39 @@ export async function slicePlan({ subcategories = null } = {}) {
   // registers every type the code reads taught one of them straight back
   // (Codex, 20 Sep 2026), so the census refuses to ask regardless of what is
   // taught.
-  return rows
-    .map((r) => ({ ...r, types: r.types.filter((t) => t && !NOT_ASKABLE.has(t)) }))
-    .filter((r) => r.types.length);
+  //
+  // A question is a type and, where Google has no word for the drawer, the
+  // words that narrow it (`censusQuestions.js`). A plain type question carries
+  // no words: the slice sends the type's own words as the text query, which is
+  // what it has always done.
+  const byKey = new Map(rows
+    .map((r) => ({
+      category: r.category,
+      subcategory: r.subcategory,
+      questions: r.types.filter((t) => t && !NOT_ASKABLE.has(t)).map((type) => ({ type, words: null })),
+    }))
+    .map((r) => [r.subcategory, r]));
+
+  // The five Google has no word for. Merged in here rather than taught as
+  // rules, because teaching the broad type onto the drawer would file every
+  // gym and five-a-side pitch there for ever — see `censusQuestions.js`.
+  const wanted = subcategories?.length ? new Set(subcategories) : null;
+  const missing = WORD_QUESTION_SUBCATEGORIES.filter((key) => (!wanted || wanted.has(key)) && !byKey.has(key));
+  if (missing.length) {
+    const { rows: subs } = await query(
+      'select key, category_key from shelf_subcategories where key = any($1) and active', [missing]);
+    for (const s of subs) byKey.set(s.key, { category: s.category_key, subcategory: s.key, questions: [] });
+  }
+  for (const [key, row] of byKey) {
+    for (const q of wordQuestionsFor(key)) {
+      if (NOT_ASKABLE.has(q.type)) continue;
+      row.questions.push({ type: q.type, words: q.words });
+    }
+  }
+
+  return [...byKey.values()]
+    .filter((r) => r.questions.length)
+    .sort((a, b) => a.category.localeCompare(b.category) || a.subcategory.localeCompare(b.subcategory));
 }
 
 /** The four tiles a saturated box splits into. */
@@ -144,10 +175,13 @@ const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((
  * thing to look at when a count reads wrong, and a tree that quietly replaced
  * the parent with its tiles would hide it.
  */
-async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats }) {
+async function sliceDown({ box, type, words = null, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats }) {
   if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
   const before = meter['google'] ?? 0;
-  const res = await googleSource.censusSlice({ box, includedType: type, meter });
+  // `words` only where Google has no word for the drawer. The type still goes
+  // as `includedType`, so what comes back is fenced by Google's own answer and
+  // not only by a string match (`censusQuestions.js`).
+  const res = await googleSource.censusSlice({ box, includedType: type, query: words ?? undefined, meter });
   // Count what was *attempted*, not what succeeded. `call` bumps the meter
   // before it fetches, so a timeout or a 429 is still a request Google saw —
   // and counting only the successes meant a run of failures never reached the
@@ -191,11 +225,11 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      returning id`,
     [areaSlug, outcode, box.minLat, box.minLng, box.maxLat, box.maxLng, category, subcategory,
-      type, type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId],
+      type, words ?? type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId],
   );
   stats.slices += 1;
   if (res.problem) {
-    stats.problems.push(`${subcategory}/${type}: ${res.problem}`);
+    stats.problems.push(`${subcategory}/${words ? `${type} “${words}”` : type}: ${res.problem}`);
     // A refusal is not a slice that found nothing; it is the whole run being
     // told to stop. The first ring census walked into the console's daily
     // Text Search cap after two outcodes and then fired **9,321 more doomed
@@ -217,7 +251,7 @@ async function sliceDown({ box, type, category, subcategory, areaSlug, outcode, 
   if (!saturated) return;
   for (const q of quarters(box)) {
     await sliceDown({
-      box: q, type, category, subcategory, areaSlug, outcode, householdId, runId,
+      box: q, type, words, category, subcategory, areaSlug, outcode, householdId, runId,
       depth: depth + 1, parentId: row.id, found, surfaced, meter, stats,
     });
   }
@@ -253,9 +287,9 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   // board showed empty drawers as fact (Codex, 19 Sep 2026).
   const done = [];
 
-  for (const { category, subcategory, types } of plan) {
-    for (const type of types) {
-      await sliceDown({ box, type, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats });
+  for (const { category, subcategory, questions } of plan) {
+    for (const { type, words } of questions) {
+      await sliceDown({ box, type, words, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats });
       if (stats.stopped || stats.refused) break;
     }
     if (stats.refused) { stats.problems.push(`the provider refused: ${stats.refused}`); break; }

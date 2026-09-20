@@ -434,9 +434,73 @@ test('a type that cannot be asked for is never asked for, whatever is taught', a
         and not exists (select 1 from shelf_rules where scope='labels' and subject='google:place_of_worship')`);
 
   const plan = await slicePlan({ subcategories: ['churches'] });
-  const asked = plan.flatMap((p) => p.types);
+  const asked = plan.flatMap((p) => p.questions.map((q) => q.type));
   assert.ok(!asked.includes('place_of_worship'), 'the plan does not carry it even though a rule does');
   if (asked.length) assert.ok(asked.includes('church'), 'and the askable siblings are still there');
 
   await query(`delete from shelf_rules where scope='labels' and subject='google:place_of_worship' and reason='taught back by the boot pass'`);
+});
+
+// ---------------------------------------------------------------------------
+// the drawers Google has no word for
+// ---------------------------------------------------------------------------
+
+test('a drawer Google has no word for is still asked about, in words fenced by a type', async () => {
+  // The big census brief, §2: a subcategory with no mapped types generates no
+  // queries, comes back nought, and nought is indistinguishable from "there are
+  // none in the south of England". Five were in that position because Google's
+  // Table A has no word for any of them.
+  const { WORD_QUESTIONS } = await import('../src/sources/censusQuestions.js');
+  const { GOOGLE_TYPES, NOT_ASKABLE } = await import('../src/sources/googleTypes.js');
+  const askable = new Set(GOOGLE_TYPES.map((t) => t.type).filter((t) => !NOT_ASKABLE.has(t)));
+
+  for (const [subcategory, questions] of Object.entries(WORD_QUESTIONS)) {
+    for (const q of questions) {
+      // The fence is the point. A bare text query on the IDs Only mask cannot
+      // be checked against anything, because `places.types` is a Pro field the
+      // census may not buy — so a search for "landmark" would count everything
+      // *named* Landmark (Codex, 19 Sep 2026). Every word question carries a
+      // real type Google will accept in `includedType`.
+      assert.ok(askable.has(q.type), `${subcategory} asks for a type Google has: ${q.type}`);
+      assert.ok(q.words && q.words.trim().length > 2, `${subcategory} says what it means`);
+    }
+  }
+
+  const plan = await slicePlan();
+  if (!plan.length) return;
+  const planned = new Set(plan.map((p) => p.subcategory));
+  for (const key of Object.keys(WORD_QUESTIONS)) {
+    // Only where the subcategory is actually active in this database — a test
+    // fixture need not carry the whole taxonomy.
+    const { rows } = await query('select 1 from shelf_subcategories where key = $1 and active', [key]);
+    if (rows.length) assert.ok(planned.has(key), `${key} is in the plan rather than silently unasked`);
+  }
+});
+
+test('the words go to Google as the query, and the type still fences the answer', async () => {
+  const plan = await slicePlan({ subcategories: ['climbing'] });
+  if (!plan.length) return; // no climbing drawer in this database
+
+  const asked = [];
+  const impl = async ({ box, includedType, query: words }) => {
+    asked.push({ includedType, words });
+    return { places: [place(`worded${asked.length}`)], requests: 1, saturated: false, problem: null };
+  };
+  await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-words', outcode: 'ZZ97', box: BOX, subcategories: ['climbing'],
+  }));
+
+  assert.ok(asked.length, 'the drawer was asked about at all');
+  assert.ok(asked.every((a) => a.includedType), 'every question carries a type Google can check');
+  assert.ok(asked.some((a) => /climbing/.test(a.words ?? '')), 'and the words that narrow it');
+
+  // The row says which question found it, so the audit can see that this drawer
+  // is answered in words rather than by a type of its own.
+  const { rows } = await query(
+    `select google_type, query from census_slices where area_slug = 'census-test-words'`);
+  assert.ok(rows.some((r) => r.query !== r.google_type), 'the question is on the record beside the type');
+
+  await query(`delete from census_slices where area_slug = 'census-test-words'`);
+  await query(`delete from area_counts where area_slug = 'census-test-words'`);
+  await query(`delete from place_subcategories where area_slug = 'census-test-words'`);
 });
