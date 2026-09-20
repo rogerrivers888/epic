@@ -397,8 +397,9 @@ inspire.get('/around', async (req, res, next) => {
 
     const categories = [];
     let requests = 0;
-    for (const key of wantedCats) {
-      const got = await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id });
+    const asked = await Promise.all(wantedCats.map(async (key) =>
+      [key, await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id })]));
+    for (const [key, got] of asked) {
       requests += got.requests;
       categories.push({
         key,
@@ -518,8 +519,17 @@ inspire.get('/near', async (req, res, next) => {
       const moods = [];
       const items = [];
       let requests = 0;
-      for (const key of Object.keys(ASKED)) {
-        const got = await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id });
+      // All eight at once.
+      //
+      // One after another is eight round trips to Google in series — five and a
+      // half seconds on a cold ring, on the one screen that opens when the app
+      // does (owner, 20 Sep 2026: "there was a significant delay when I loaded
+      // the screen"). They do not depend on each other, so they do not wait for
+      // each other; a page's own next page still does, because the token comes
+      // from the page before it.
+      const asked = await Promise.all(Object.keys(ASKED).map(async (key) =>
+        [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id })]));
+      for (const [key, got] of asked) {
         requests += got.requests;
         moods.push({
           key,

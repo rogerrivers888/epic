@@ -470,7 +470,18 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   /** The one word the Type sort orders by. */
   const typeOf = useCallback((i: InspireItem) => (mode === 'food' ? cap1(cuisineOf(i) ?? (FOOD_KINDS[i.category] === 'restaurants' ? 'Restaurant' : FOOD_LABELS[FOOD_KINDS[i.category]] ?? '')) : kindOf(i, drawers)), [mode, drawers]);
 
-  const filters: Filters = { travel, rating, price };
+  /**
+   * How far is the ring now, not a filter over the answer.
+   *
+   * `travelMinutes` on a card is a straight-line estimate at a per-mode speed;
+   * the ring is the real drive-time matrix, worked out once. Filtering the
+   * ring's own answer by the estimate threw away places that are genuinely
+   * within half an hour because a crude line said thirty-four minutes —
+   * ninety-five places became ten (owner, 20 Sep 2026: "it says 'All 10'.
+   * There are only 10 activities showing"). Changing How far changes the ring
+   * and asks again; it no longer culls what the ring already fenced.
+   */
+  const filters: Filters = { travel: pool?.pools?.ring ? null : travel, rating, price };
   const active = activeCount(filters, pick);
   /** The pool, narrowed by every filter and put in order. One pass, no calls. */
   const shown = useMemo(

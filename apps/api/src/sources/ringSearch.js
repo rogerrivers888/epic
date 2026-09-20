@@ -35,10 +35,24 @@ import * as placeIndex from '../repositories/placeIndex.js';
 
 /** The same twelve hours the rented search pool keeps. */
 const TTL_MS = 12 * 3600_000;
+/**
+ * How long a stale page may still be drawn while a fresh one is fetched behind
+ * it.
+ *
+ * Twelve hours is when a page stops being current; it is not when it stops
+ * being useful. A household whose ring expired overnight would otherwise wait
+ * the whole cold search on the first look of the morning — which is exactly
+ * what the owner hit: "there was a significant delay when I loaded the screen…
+ * because that's my home location, there shouldn't be any delay" (20 Sep
+ * 2026). So a stale page is served at once and replaced quietly.
+ */
+const STALE_MS = 72 * 3600_000;
 /** Rings are big; a few dozen of them is a day's worth of a small country. */
 const MAX = 200;
 const kept = new Map();
+const inFlight = new Map();
 const fresh = (hit) => hit && Date.now() - hit.at < TTL_MS;
+const usable = (hit) => hit && Date.now() - hit.at < STALE_MS;
 
 /** Ring, category, page — the three things that decide what a page holds. */
 export const pageKey = (ringKey, category, page) => `${ringKey}|${category}|${page}`;
@@ -51,7 +65,9 @@ const hold = (key, value) => {
 
 /** Only for the tests and the back office: how much of the pool is warm. */
 export const poolSize = () => [...kept.values()].filter(fresh).length;
-export const forgetPool = () => kept.clear();
+export const forgetPool = () => { kept.clear(); inFlight.clear(); };
+/** For the tests alone: make a page as old as it needs to be. */
+export const age = (key, byMs) => { const hit = kept.get(key); if (hit) hit.at -= byMs; };
 
 /**
  * One text query per Epic category, and the type to fence it with where Google
@@ -121,14 +137,28 @@ export async function censusCounts(outcodes = []) {
  * is actually enforced.
  */
 export async function categoryPage({
-  ringKey, box, cells, category, page = 1, meter = null, householdId = null, cellAt,
+  ringKey, box, cells, category, page = 1, meter = null, householdId = null, cellAt, force = false,
   // The one seam: the tests drive the pool without reaching for Google, and
   // nothing else ever passes this.
   search = displaySlice,
 } = {}) {
   const key = pageKey(ringKey, category, page);
+  // A refresh forgets first, or it would find its own stale page, hand it back
+  // and schedule another refresh of itself — for ever.
+  if (force) kept.delete(key);
   const hit = kept.get(key);
   if (fresh(hit)) return { ...hit.value, cached: true, requests: 0 };
+  // Stale but usable: draw it now, and put the fresh one behind it. One refresh
+  // at a time per page, however many households ask.
+  if (usable(hit)) {
+    if (!inFlight.has(key)) {
+      inFlight.set(key, Promise.resolve()
+        .then(() => categoryPage({ ringKey, box, cells, category, page, meter: null, householdId, cellAt, search, force: true }))
+        .catch(() => null)
+        .finally(() => inFlight.delete(key)));
+    }
+    return { ...hit.value, cached: true, stale: true, requests: 0 };
+  }
 
   // Page two needs page one's token: the chain is Google's, not ours. A caller
   // that asks for a page it has not reached gets nothing rather than a search

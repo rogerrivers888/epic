@@ -96,6 +96,26 @@ test('a page is bought once for the ring, held for the next household, and paged
   assert.equal(third.end, true);
 });
 
+test('a stale page is drawn at once and replaced behind it', async () => {
+  search.forgetPool();
+  let calls = 0;
+  const fake = async () => { calls += 1; return { venues: [], nextPageToken: null, requests: 1, problem: null }; };
+  const at = async () => ({ code: 'sector:ZZ1 1' });
+  const args = { ringKey: 'ring-stale', box: { minLat: 0, maxLat: 1, minLng: 0, maxLng: 1 }, cells: ['sector:ZZ1 1'], category: 'fun', cellAt: at, search: fake };
+  await search.categoryPage({ ...args, page: 1 });
+  assert.equal(calls, 1);
+
+  // Twelve hours on. The page is no longer current and is still worth drawing:
+  // the household sees it now and the fresh one lands behind them.
+  search.age('ring-stale|fun|1', 13 * 3600_000);
+  const stale = await search.categoryPage({ ...args, page: 1 });
+  assert.equal(stale.cached, true);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.requests, 0, 'nobody waited for it');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(calls, 2, 'and it was fetched behind them, once');
+});
+
 test('the keys are the ring, the category and the page', () => {
   assert.equal(search.pageKey('ring-a', 'fun', 1), 'ring-a|fun|1');
   assert.notEqual(search.pageKey('ring-a', 'fun', 1), search.pageKey('ring-b', 'fun', 1));
