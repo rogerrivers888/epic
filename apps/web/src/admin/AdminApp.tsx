@@ -34,6 +34,12 @@ import { Overview } from './screens/Overview';
 import { People } from './screens/People';
 import { Activity } from './screens/Activity';
 import { Reporting } from './screens/Reporting';
+import { Overview as SuiteOverview } from './suite/Overview';
+import { Money } from './suite/Money';
+import { Subscriptions } from './suite/Subscriptions';
+import { Customers } from './suite/Customers';
+import { Suppliers } from './suite/Suppliers';
+import { Behaviour } from './suite/Behaviour';
 import { Audit, Plans, Roles } from './screens/Governance';
 import { Library } from './screens/Library';
 import { Places } from './screens/Places';
@@ -73,7 +79,28 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'accounts', label: 'Accounts', icon: 'accounts', needs: 'view_accounts', sub: 'Invite people and manage their plan' },
   { key: 'households', label: 'Households', icon: 'household', needs: 'view_accounts', sub: 'What each one does, and what it costs' },
   { key: 'activity', label: 'Activity', icon: 'list', needs: 'view_activity', sub: 'Everything that has happened' },
-  { key: 'reporting', label: 'Reporting', icon: 'places', needs: 'view_reporting', sub: 'Engagement, revenue and usage' },
+  /**
+   * Reporting. Six sections over one estate model (handoff "Reporting &
+   * overview", 20 Sep 2026), answering five questions: is the business growing,
+   * where does the money come from and what margin survives, what are we
+   * selling and at what price, who are the customers, and what do households
+   * actually do in the product.
+   *
+   * Two of them are editing screens rather than reports — Subscriptions sets
+   * prices and published benefits, and a supplier's record corrects a rate —
+   * so they need their own capabilities rather than `view_reporting`.
+   *
+   * The old engagement/revenue/usage screen moved to `/admin/engagement`. It is
+   * still resolvable and no longer in the rail: `/admin/reporting`, which is
+   * the address every handover link already uses, now lands on the Overview
+   * below, which is the same question asked better.
+   */
+  { key: 'reporting', label: 'Overview', icon: 'plan', needs: 'view_reporting', sub: 'Is the business growing', group: 'Reporting' },
+  { key: 'money', label: 'Money', icon: 'money', needs: 'view_reporting', sub: 'Where it comes from, and what margin survives', group: 'Reporting' },
+  { key: 'subscriptions', label: 'Subscriptions', icon: 'wallet', needs: 'view_financials', sub: 'What we sell, at what price, and what it says you get', group: 'Reporting' },
+  { key: 'customers', label: 'Customers', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'Reporting' },
+  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_reporting', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
+  { key: 'behaviour', label: 'Behaviour', icon: 'inspire', needs: 'view_reporting', sub: 'What households actually do, and whether they come back', group: 'Reporting' },
   /**
    * Data. Five screens that were each bound to a different table became three
    * bound to three questions (17 Sep 2026): Places is what we know and where,
@@ -133,8 +160,8 @@ function Lights() {
 // own sidebar, so there is no third entry — one was carried for a group nothing
 // belongs to, which is a tooltip that could never be shown (18 Sep 2026, the
 // separate audit).
-const GROUP_TIP: Record<string, 'railData' | 'railAdmin'> = {
-  Data: 'railData', Admin: 'railAdmin',
+const GROUP_TIP: Record<string, 'railData' | 'railAdmin' | 'railReporting'> = {
+  Reporting: 'railReporting', Data: 'railData', Admin: 'railAdmin',
 };
 
 export function AdminApp({ access, screen, onScreen, onLeave }: {
@@ -165,7 +192,17 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'accounts' ? <AccountsScreen /> : null}
       {screen === 'households' ? <People canManageRoles={can('manage_roles')} /> : null}
       {screen === 'activity' ? <Activity /> : null}
-      {screen === 'reporting' ? <Reporting canSeeMoney={can('view_financials')} /> : null}
+      {/* The suite. `reporting` is its Overview; the screen that used to be at
+          that address is at `engagement` and still answers there. */}
+      {screen === 'reporting' ? <SuiteOverview /> : null}
+      {screen === 'money' ? <Money canSeeMoney={can('view_financials')} /> : null}
+      {screen === 'subscriptions'
+        ? <Subscriptions canSeeMoney={can('view_financials')} canManage={can('manage_plans')} /> : null}
+      {screen === 'customers' ? <Customers canSeeMoney={can('view_financials')} /> : null}
+      {screen === 'suppliers'
+        ? <Suppliers canSeeMoney={can('view_financials')} canManage={can('manage_settings')} /> : null}
+      {screen === 'behaviour' ? <Behaviour /> : null}
+      {screen === 'engagement' ? <Reporting canSeeMoney={can('view_financials')} /> : null}
       {screen === 'lookup' ? <Lookup canManage={can('manage_library')} /> : null}
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} /> : null}

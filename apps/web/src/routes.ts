@@ -255,10 +255,20 @@ export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips'
  */
 export type AdminScreen =
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
+  /**
+   * The reporting suite (handoff "Reporting & overview", 20 Sep 2026): six
+   * sections over one estate model. `reporting` is its Overview — the address
+   * every link to the old engagement/revenue/usage screen already points at,
+   * now landing on the richer thing — and `engagement` is where that screen
+   * moved to. It is still resolvable and no longer in the rail, which is the
+   * same treatment `coverage`, `lookup`, `library` and `scout` got.
+   */
+  | 'money' | 'subscriptions' | 'customers' | 'suppliers' | 'behaviour' | 'engagement'
   | 'places' | 'demand' | 'runs' | 'queue'
   | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
 export const ADMIN_SCREENS: AdminScreen[] = [
   'overview', 'accounts', 'households', 'activity', 'reporting',
+  'money', 'subscriptions', 'customers', 'suppliers', 'behaviour', 'engagement',
   'places', 'demand', 'runs', 'queue',
   'lookup', 'coverage', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'mail', 'roles', 'plans', 'audit', 'how',
 ];

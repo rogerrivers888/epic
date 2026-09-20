@@ -208,7 +208,65 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/settings/providers'), { name: 'settings', section: 'providers' });
   assert.deepEqual(roundTrip('/prototypes'), { name: 'prototypes', section: null });
   assert.deepEqual(roundTrip('/prototypes/trips'), { name: 'prototypes', section: 'trips' });
+  /**
+   * The reporting suite (20 Sep 2026): six sections, and every layer inside one
+   * has an address. A drill is a query on its own section rather than a screen
+   * of its own, because "the path is the page, the query is how that page is
+   * set" — Money with the hotel stream open is still Money.
+   *
+   * `/admin/reporting` is the suite's Overview now. It kept the address the old
+   * engagement/revenue/usage screen had, so every handover link still lands;
+   * that screen is at `/admin/engagement` and still answers there.
+   */
   assert.deepEqual(roundTrip('/admin/reporting'), { name: 'admin', screen: 'reporting' });
+  assert.deepEqual(roundTrip('/admin/money'), { name: 'admin', screen: 'money' });
+  assert.deepEqual(roundTrip('/admin/subscriptions'), { name: 'admin', screen: 'subscriptions' });
+  assert.deepEqual(roundTrip('/admin/customers'), { name: 'admin', screen: 'customers' });
+  assert.deepEqual(roundTrip('/admin/suppliers'), { name: 'admin', screen: 'suppliers' });
+  assert.deepEqual(roundTrip('/admin/behaviour'), { name: 'admin', screen: 'behaviour' });
+  assert.deepEqual(roundTrip('/admin/engagement'), { name: 'admin', screen: 'engagement' });
+
+  /**
+   * Every layer inside a suite screen is in the query, so a figure somebody is
+   * looking at is a link somebody else can open on the same figure — which is
+   * the whole of the owner's rule, 5 Sep 2026: "2 layers in, I should be able to
+   * share a URL with someone, and they should be able to get to the exact point
+   * that I was on".
+   */
+  assert.deepEqual(parseRoute('/admin/reporting?measure=revenue&chart=1'), { name: 'admin', screen: 'reporting' });
+  assert.equal(splitHref('/admin/reporting?measure=revenue&chart=1').query.get('measure'), 'revenue');
+  assert.equal(splitHref('/admin/money?stream=hotel&lens=table&per=subscriber').query.get('per'), 'subscriber');
+  assert.equal(splitHref('/admin/customers?household=abc&q=Okonkwo&plan=Solo').query.get('household'), 'abc');
+  assert.equal(splitHref('/admin/suppliers?supplier=anthropic&sort=variance').query.get('supplier'), 'anthropic');
+  assert.equal(splitHref('/admin/behaviour?measure=saves&scope=estate&chart=1').query.get('scope'), 'estate');
+  assert.equal(splitHref('/admin/subscriptions?tier=solo&billing=annual').query.get('billing'), 'annual');
+  // The period and the data source travel with you across all six screens.
+  assert.equal(splitHref('/admin/money?period=last-3-months&data=mock').query.get('period'), 'last-3-months');
+  assert.equal(splitHref('/admin/money?period=last-3-months&data=mock').query.get('data'), 'mock');
+  assert.deepEqual(roundTrip('/admin/engagement'), { name: 'admin', screen: 'engagement' });
+  assert.deepEqual(roundTrip('/admin/money'), { name: 'admin', screen: 'money' });
+  assert.deepEqual(roundTrip('/admin/subscriptions'), { name: 'admin', screen: 'subscriptions' });
+  assert.deepEqual(roundTrip('/admin/customers'), { name: 'admin', screen: 'customers' });
+  assert.deepEqual(roundTrip('/admin/suppliers'), { name: 'admin', screen: 'suppliers' });
+  assert.deepEqual(roundTrip('/admin/behaviour'), { name: 'admin', screen: 'behaviour' });
+  // The window and where the figures come from travel with you across all six.
+  assert.deepEqual(parseRoute('/admin/money?period=last-3-months&data=mock'), { name: 'admin', screen: 'money' });
+  assert.equal(splitHref('/admin/money?period=last-3-months&data=mock').query.get('period'), 'last-3-months');
+  assert.equal(splitHref('/admin/reporting?data=mock').query.get('data'), 'mock');
+  // A selected tile, a lens, a per-subscriber view and an open chart are all
+  // how one page is set, not four pages.
+  assert.equal(splitHref('/admin/reporting?measure=revenue&chart=1').query.get('measure'), 'revenue');
+  assert.equal(splitHref('/admin/money?stream=hotel&lens=table&per=subscriber').query.get('stream'), 'hotel');
+  assert.equal(splitHref('/admin/money?stream=hotel&lens=table&per=subscriber').query.get('per'), 'subscriber');
+  assert.equal(splitHref('/admin/behaviour?measure=saves&scope=estate&chart=1').query.get('scope'), 'estate');
+  // A household record and a supplier record are layers inside their section,
+  // so both are shareable addresses rather than modal state.
+  assert.equal(splitHref('/admin/customers?household=abc&q=oko&plan=Solo').query.get('household'), 'abc');
+  assert.equal(splitHref('/admin/suppliers?supplier=anthropic&sort=variance').query.get('supplier'), 'anthropic');
+  // The drill's own two switches, so a link lands on the quarterly view.
+  assert.equal(splitHref('/admin/reporting?measure=revenue&chart=1&view=quarterly&rate=3').query.get('view'), 'quarterly');
+  // Subscriptions: which tier is open, and monthly or annual.
+  assert.equal(splitHref('/admin/subscriptions?tier=pro&billing=annual').query.get('tier'), 'pro');
   // The voice lab: the ways of hearing compared on the same sentences.
   assert.deepEqual(roundTrip('/admin/voice'), { name: 'admin', screen: 'voice' });
   // Lookup: one place, one travel time, and what every source has inside it.

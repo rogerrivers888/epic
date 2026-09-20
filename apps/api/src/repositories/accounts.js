@@ -144,11 +144,13 @@ export async function listAccounts() {
  * children's birthdays and every rating the family has given — which is the
  * failure the door was built to prevent, arriving by a different route.
  */
-export async function createAccount({ email, name, plan, trialEndsOn, monthlyCallBound, note, role = 'customer', householdName }) {
+export async function createAccount({ email, name, plan, trialEndsOn, monthlyCallBound, note, role = 'customer', householdName, origin = 'signup' }) {
   return withTransaction(async (client) => {
+    // How they arrived, written at the moment it is known (migration 199). Every
+    // estate figure is divided by it, and it cannot be recovered afterwards.
     const { rows: households } = await client.query(
-      'insert into households (name) values ($1) returning id',
-      [householdName || name || normaliseEmail(email)],
+      'insert into households (name, origin) values ($1, $2) returning id',
+      [householdName || name || normaliseEmail(email), origin],
     );
     const { rows } = await client.query(
       `insert into accounts (household_id, email, name, role, plan, trial_ends_on, monthly_call_bound, note, invited_at)
@@ -169,11 +171,15 @@ export async function createAccount({ email, name, plan, trialEndsOn, monthlyCal
  * administrator. They are `active` from the first moment because they arrived
  * by holding a link somebody sent them and are standing in front of the screen.
  */
-export async function createGuestAccount({ name, email, mobile, trialDays = 30 }) {
+export async function createGuestAccount({ name, email, mobile, trialDays = 30, origin = 'guest_invite' }) {
   return withTransaction(async (client) => {
+    // A guest invited to somebody else's trip is a household of its own, and is
+    // the origin the reporting suite's denominators have to exclude by default:
+    // counting them beside a trial signup makes activation read as broken while
+    // the business works (migration 199).
     const { rows: households } = await client.query(
-      'insert into households (name) values ($1) returning id',
-      [name || 'A Epic household'],
+      'insert into households (name, origin) values ($1, $2) returning id',
+      [name || 'A Epic household', origin],
     );
     const ends = new Date();
     ends.setDate(ends.getDate() + trialDays);

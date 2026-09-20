@@ -333,9 +333,9 @@ export async function deleteAllHouseholds(client) {
 
 export async function createHousehold(client, h) {
   const { rows } = await client.query(
-    `insert into households (name, default_visit_minutes, max_travel_minutes, default_intensity)
-     values ($1, $2, $3, $4) returning id`,
-    [h.name, h.defaultVisitMinutes, h.maxTravelMinutes, h.defaultIntensity],
+    `insert into households (name, default_visit_minutes, max_travel_minutes, default_intensity, origin)
+     values ($1, $2, $3, $4, $5) returning id`,
+    [h.name, h.defaultVisitMinutes, h.maxTravelMinutes, h.defaultIntensity, h.origin ?? 'founding'],
   );
   return rows[0].id;
 }

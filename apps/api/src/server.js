@@ -27,6 +27,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
+import suiteRoutes from './routes/suite.js';
 import postmarkRoutes from './routes/postmark.js';
 import openToRoutes, { adminRouter as openToAdminRoutes, startOpenToLoop } from './routes/openTo.js';
 import { adminRouter as libraryAdminRoutes, atlasRouter as libraryAtlasRoutes, imageRouter as libraryImageRoutes } from './routes/library.js';
@@ -249,6 +250,9 @@ app.use('/api/admin/reach', requireDoor('admin'), reachRoutes);
 app.use('/api/admin/score', requireDoor('admin'), scoringRoutes);
 // The voice lab: the modes compared on the same sentences (routes/voice.js).
 app.use('/api/admin/voice', requireDoor('admin'), voiceLabRoutes);
+// The reporting suite: Overview, Money, Customers, Suppliers and Behaviour over
+// one estate model, mock or real (routes/suite.js).
+app.use('/api/admin/suite', requireDoor('admin'), suiteRoutes);
 
 // Telemetry is the household's own — which screen, and still here — and is
 // always written against the session's own household (routes/activity.js).

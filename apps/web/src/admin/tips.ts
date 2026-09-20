@@ -63,6 +63,7 @@ export const TIPS = {
   sectionRecentSearches: ['Searches · most recent first', 'Every search, as it happened: what was asked for, how many came back, and what the household did next. Open one to replay it exactly.'],
   sectionIfSaved: ['If saved', 'What changing this bar would do, before it does it: how many places would become ready, how many would stop being ready, and what Britain\u2019s figure would become.'],
   railBackOffice: ['Back office', 'Everything that is not the household app. The rail is grouped by what you would be here to do: run the business, work on the data, or set the place up.'],
+  railReporting: ['Reporting', 'Six sections over one estate model: is the business growing, where the money comes from and what margin survives, what we sell and at what price, who the customers are, who we pay, and what households actually do. Two of them — Subscriptions and a supplier’s record — are where prices and rates get set, not only read.'],
   railData: ['Data', 'The screens about what Epic knows: where the places are, what was asked for, which providers gave us what, how things are filed, and the runs that fill the gaps.'],
   railAdmin: ['Admin', 'The screens that set the place up rather than use it — who may do what, what goes out by e-mail, and the decisions behind how it works.'],
   askedForName: ['Asked for', 'The second name this screen goes by. The design offers it as the alternative to "Demand" and the owner has not picked one, so both are on the board rather than one being chosen quietly.'],
