@@ -44,5 +44,22 @@ export const GOOGLE_TYPE_GROUPS = {
 export const GOOGLE_TYPES = Object.entries(GOOGLE_TYPE_GROUPS)
   .flatMap(([group, types]) => types.map((type) => ({ type, group })));
 
+/**
+ * Types you may read but may not ask for.
+ *
+ * Google's Table A has entries that are the *name of a group* rather than a
+ * type you can put in `includedType`. A place genuinely comes back carrying
+ * `place_of_worship` in its `types`, so the label is real and teaching a rule
+ * on it is reasonable — but asking a search for it is a 400.
+ *
+ * The census hit this twice an outcode across a thirty-nine-outcode ring
+ * (19–20 Sep 2026), and deleting the rules was not enough: `knownLabels()`
+ * registers every type the code reads, including these, and the boot pass
+ * taught `place_of_worship` straight back the next morning (Codex, 20 Sep
+ * 2026). The durable fix is here rather than in the data — a type that cannot
+ * be asked for is a fact about Google, not about what anybody taught.
+ */
+export const NOT_ASKABLE = new Set(['place_of_worship', 'landmark']);
+
 /** `movie_theater` → "Movie theater". */
 export const googleTypeName = (type) => String(type).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());

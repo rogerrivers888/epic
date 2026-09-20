@@ -33,6 +33,7 @@
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { googleSource } from './google.js';
+import { NOT_ASKABLE } from './googleTypes.js';
 import * as index from '../repositories/placeIndex.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
@@ -110,7 +111,14 @@ export async function slicePlan({ subcategories = null } = {}) {
       order by 1, 2`,
     subcategories?.length ? [subcategories] : [],
   );
-  return rows.map((r) => ({ ...r, types: r.types.filter(Boolean) }));
+  // A type that cannot be asked for is dropped here rather than failing a slice
+  // later. Deleting the rules was not enough on its own: the boot pass that
+  // registers every type the code reads taught one of them straight back
+  // (Codex, 20 Sep 2026), so the census refuses to ask regardless of what is
+  // taught.
+  return rows
+    .map((r) => ({ ...r, types: r.types.filter((t) => t && !NOT_ASKABLE.has(t)) }))
+    .filter((r) => r.types.length);
 }
 
 /** The four tiles a saturated box splits into. */

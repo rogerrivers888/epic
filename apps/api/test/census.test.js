@@ -417,3 +417,26 @@ test('a slice still cut off at the ceiling is reported as a floor, never as a to
   await query(`delete from area_counts where area_slug = 'census-test-floor'`);
   await query(`delete from place_subcategories where area_slug = 'census-test-floor'`);
 });
+
+test('a type that cannot be asked for is never asked for, whatever is taught', async () => {
+  // Deleting the two group-name rules was not enough: `knownLabels()` registers
+  // every type the code reads, including these, and the boot pass taught
+  // `place_of_worship` straight back the next morning (Codex, 20 Sep 2026). A
+  // type that cannot go in `includedType` is a fact about Google rather than
+  // about what anybody taught, so the census refuses to ask for it regardless.
+  const { NOT_ASKABLE } = await import('../src/sources/googleTypes.js');
+  assert.ok(NOT_ASKABLE.has('place_of_worship') && NOT_ASKABLE.has('landmark'));
+
+  await query(
+    `insert into shelf_rules (scope, subject, labels, subcategory, weights, reason)
+     select 'labels', 'google:place_of_worship', array['google:place_of_worship'], 'churches', '{}'::jsonb, 'taught back by the boot pass'
+      where exists (select 1 from shelf_subcategories where key = 'churches')
+        and not exists (select 1 from shelf_rules where scope='labels' and subject='google:place_of_worship')`);
+
+  const plan = await slicePlan({ subcategories: ['churches'] });
+  const asked = plan.flatMap((p) => p.types);
+  assert.ok(!asked.includes('place_of_worship'), 'the plan does not carry it even though a rule does');
+  if (asked.length) assert.ok(asked.includes('church'), 'and the askable siblings are still there');
+
+  await query(`delete from shelf_rules where scope='labels' and subject='google:place_of_worship' and reason='taught back by the boot pass'`);
+});
