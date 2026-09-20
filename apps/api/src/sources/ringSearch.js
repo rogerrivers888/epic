@@ -57,21 +57,29 @@ export const forgetPool = () => kept.clear();
  * One text query per Epic category, and the type to fence it with where Google
  * has one that means the same thing.
  *
- * A category is wider than any single Google type — Culture is museums and
- * castles and cathedrals — so most of these are words, and the answer is held
- * to the category afterwards by our own taxonomy rather than by Google's. Food
- * is the exception: Google's `restaurant` family is exactly our Food & drink,
- * and fencing it is both cheaper and more accurate than filtering it.
+ * Short, and a type where Google has one that means the same thing.
+ *
+ * Text Search is a search, not a filter: a long phrase — "family days out,
+ * theme parks, zoos, farms and attractions" — narrows to the places whose own
+ * text matches most of it, and Fun came back with four. The same box asked
+ * "family days out" with `tourist_attraction` as the fence gives twenty. Where
+ * Google has a type that means what we mean (restaurant, museum, park, tourist
+ * attraction) the type is the fence and the words are the ranking; where it has
+ * none, two or three words do the whole job.
+ *
+ * The fence beyond that is the ring, not our shelves: the categories overlap —
+ * a leisure centre is Sport and Active both — and this asked the category's own
+ * question, so its answer is the category's answer.
  */
 export const ASKED = {
-  food: { includedType: 'restaurant', words: 'places to eat and drink' },
-  culture: { includedType: null, words: 'museums, art galleries, castles, historic houses and cathedrals' },
-  fun: { includedType: null, words: 'family days out, theme parks, zoos, farms and attractions' },
-  outdoors: { includedType: null, words: 'parks, gardens, woodland, nature reserves and walks' },
-  sport: { includedType: null, words: 'sports centres, swimming pools, golf courses and climbing walls' },
-  active: { includedType: null, words: 'activity centres, cycling, watersports and adventure parks' },
-  adrenaline: { includedType: null, words: 'karting, skydiving, high ropes and adventure activities' },
-  relaxing: { includedType: null, words: 'spas, saunas, wellness and quiet places' },
+  food: { includedType: 'restaurant', words: 'restaurants' },
+  culture: { includedType: 'museum', words: 'museums and galleries' },
+  fun: { includedType: 'tourist_attraction', words: 'family days out' },
+  outdoors: { includedType: 'park', words: 'parks and gardens' },
+  sport: { includedType: null, words: 'sports centre' },
+  active: { includedType: null, words: 'activity centre' },
+  adrenaline: { includedType: null, words: 'go karting and high ropes' },
+  relaxing: { includedType: null, words: 'spa' },
 };
 
 /**
