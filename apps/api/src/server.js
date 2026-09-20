@@ -36,6 +36,7 @@ import reachRoutes from './routes/reach.js';
 import scoringRoutes from './routes/scoring.js';
 import { router as localityRoutes } from './routes/localities.js';
 import placeIndexRoutes from './routes/placeIndex.js';
+import censusFindingRoutes from './routes/censusFindings.js';
 import runsRoutes from './routes/runs.js';
 import demandRoutes from './routes/demand.js';
 import queueRoutes from './routes/queue.js';
@@ -241,6 +242,11 @@ app.use('/api/admin/questions', requireDoor('admin'), questionRoutes);
 // what it reads. The older locality routes stay mounted beneath it — nothing
 // that had a link to them has lost it.
 app.use('/api/admin/place-index', requireDoor('admin'), placeIndexRoutes);
+// What the census found out, and what it found out about itself
+// (routes/censusFindings.js): denominators with their coverage, drawers nobody
+// asked about, types that never answer, and the free ground counts beside ours.
+// Nothing here can spend, so the boards it feeds are free to refresh.
+app.use('/api/admin/census', requireDoor('admin'), censusFindingRoutes);
 // Runs: the monitor. Starting a run happens on Places, where the gap is.
 app.use('/api/admin/runs', requireDoor('admin'), runsRoutes);
 // Demand: what people asked for, and which of the three faults it was.
