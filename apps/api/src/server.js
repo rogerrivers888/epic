@@ -52,6 +52,7 @@ import { startOwnLoop } from './sources/own.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
+import { filingRoutes } from './routes/filing.js';
 import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
 import questionRoutes from './routes/questions.js';
 import { ensureAttributeAliases } from './repositories/questionSets.js';
@@ -229,6 +230,10 @@ app.use('/api/admin/library', requireDoor('admin'), libraryAdminRoutes);
 app.use('/api/admin/shelves', requireDoor('admin'), shelfRoutes);
 // The taxonomy: categories, subcategories, every provider's words and the rules between (routes/taxonomy.js).
 app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
+// The filing desk: the six tabs the taxonomy is worked through (the Places
+// redesign, 20 Sep 2026). Its own prefix rather than more of /taxonomy, because
+// it reads the taxonomy rather than being it.
+app.use('/api/admin/filing', requireDoor('admin'), filingRoutes);
 // Host skills: the five vocabularies, the review queue, credentials and the
 // source register (routes/hostSkills.js). Its own capability pair, because
 // approving a word is not the same privilege as reading the queue.

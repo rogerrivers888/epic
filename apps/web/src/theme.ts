@@ -394,3 +394,45 @@ export const memberColor = (index: number) => memberColors[index % memberColors.
  */
 export const memberPastels = [LIME_TINT, '#F6E7C8', '#E3DCF0', '#F5E38A', '#D6E8C5', '#EFDCCB'];
 export const memberPastel = (index: number) => memberPastels[index % memberPastels.length];
+
+/**
+ * The filing desk's own ladder (the Places redesign, 20 Sep 2026).
+ *
+ * The back office is pinned dark, and the drawing this section is built from
+ * works on a warmer, lighter ground than the app's dark mode with more rungs
+ * between the ground and the type than a palette meant for a phone needs: a
+ * table wants a hairline between rows, a heavier rule under a header and a
+ * third weight again for a border, and the app's dark has one `ruleSoft` for
+ * all three. They are here rather than in the screens because a hex in a
+ * screen is how two tables come to be drawn on two different greys.
+ *
+ * Lime and ink are the brand's own and are not restated: every lime fill here
+ * is `LIME` and everything sitting on one is `ON_LIME`, as everywhere else.
+ * Red is the app's `overrun` for the same reason it is red anywhere — danger,
+ * not decoration — and is the only colour on this screen that is not from the
+ * lime/ink/cream axis.
+ */
+export const desk = {
+  /** The screen itself, and the sidebar. */
+  ground: '#1A1817',
+  /** A panel lifted off it — the picker, an input. Darker, not lighter. */
+  well: '#141212',
+  /** A row that is open, hearted, or otherwise the one being worked on. */
+  lifted: '#1F1D1C',
+  /** A row that is ticked, and the left rail's selection. */
+  picked: '#232120',
+  /** Every letter. */
+  ink: '#F2EFEC',
+  /** A second line under a name: still read, quieter. */
+  inkMuted: '#CFCAC7',
+  /** A label, a count, a note. The quietest thing that is still text. */
+  inkDim: '#9A9492',
+  /** Not text — a rule that has to disappear, or a disabled word. */
+  inkFaint: '#6B6664',
+  /** Between rows in a table. */
+  rule: '#2E2A29',
+  /** Under a table header, round a panel, and the tab strip's own line. */
+  ruleStrong: '#46413F',
+  /** The fill of a control that is off — a disabled button, an empty step. */
+  off: '#2E2A29',
+} as const;

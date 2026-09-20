@@ -29,6 +29,10 @@ const valueOf = (row) => {
   if (row.yesno != null) return { yesno: row.yesno };
   if (row.from_value != null || row.to_value != null) return { from: row.from_value, to: row.to_value };
   if (row.choice != null) return { choice: row.choice };
+  // A scale is one number on a nought-to-four run — the eight (migration 216).
+  // It is read last only because it is the newest; nothing else can produce a
+  // `level`, so the order does not matter to the answer.
+  if (row.level != null) return { level: row.level };
   return null;
 };
 
@@ -42,12 +46,19 @@ export async function attributes() {
     query('select * from taxonomy_label_carries'),
   ]);
   const bySub = new Map();
+  // Whether a person has agreed to each default, kept beside the values rather
+  // than folded into them: everything that reads a value wants the value, and
+  // only the Categories screen wants to know who said so.
+  const settledBySub = new Map();
   for (const d of defs.rows) {
     const v = valueOf(d);
     if (!v) continue;
     const m = bySub.get(d.subcategory_key) ?? new Map();
     m.set(d.attribute_key, v);
     bySub.set(d.subcategory_key, m);
+    const t = settledBySub.get(d.subcategory_key) ?? new Set();
+    if (d.settled) t.add(d.attribute_key);
+    settledBySub.set(d.subcategory_key, t);
   }
   // What each label brings, and as what (migration 114).
   const broughtBy = new Map();
@@ -68,7 +79,7 @@ export async function attributes() {
     const label = `${r.namespace}:${r.key}`;
     carriedBy.set(label, [...(carriedBy.get(label) ?? []), { key: r.attribute_key, value: v }]);
   }
-  cache = { list, byKey: new Map(list.map((a) => [a.key, a])), bySubcategory: bySub, carriedBy };
+  cache = { list, byKey: new Map(list.map((a) => [a.key, a])), bySubcategory: bySub, settledBySubcategory: settledBySub, carriedBy };
   cachedAt = Date.now();
   return cache;
 }
@@ -83,7 +94,7 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
   // (Codex, 14 Sep 2026).
   const { rows: clash } = await query('select label from shelf_subcategories where key = $1', [k]);
   if (clash[0]) throw bad(`${clash[0].label} is already one of our labels. Pick another name.`);
-  if (kind && !['yesno', 'range', 'oneof'].includes(kind)) throw bad(`${kind} is not a kind of attribute.`);
+  if (kind && !['yesno', 'range', 'oneof', 'scale'].includes(kind)) throw bad(`${kind} is not a kind of attribute.`);
   // Changing the kind would leave every value already set in the old shape — a
   // yes/no answer under an attribute that now wants a range. Refuse rather than
   // hand a screen data its controls cannot draw (Codex, 14 Sep 2026).
@@ -222,15 +233,36 @@ export async function mustFit(attributeKey, value) {
     if (!has('choice')) throw bad(`${a.label} is one of a list.`);
     if (!(a.options ?? []).includes(value.choice)) throw bad(`${value.choice} is not one of ${a.label}'s choices.`);
   }
+  if (a.kind === 'scale' && !has('level')) throw bad(`${a.label} is a scale \u2014 it needs a number on it.`);
   if (a.kind !== 'yesno' && has('yesno')) throw bad(`${a.label} is not a yes or no.`);
   if (a.kind !== 'range' && (has('from') || has('to'))) throw bad(`${a.label} is not a range.`);
   if (a.kind !== 'oneof' && has('choice')) throw bad(`${a.label} is not one of a list.`);
+  if (a.kind !== 'scale' && has('level')) throw bad(`${a.label} is not a scale.`);
   if (a.kind === 'range' && has('from') && has('to') && Number(value.from) > Number(value.to)) {
     throw bad(`${a.label} runs from the smaller number to the larger one.`);
   }
+  // A scale's ends are the label's own. The trigger says this too; saying it
+  // here as well is what turns a 22023 into a sentence a screen can print.
+  if (a.kind === 'scale' && has('level')) {
+    const n = Number(value.level);
+    if (!Number.isInteger(n)) throw bad(`${a.label} is a whole number.`);
+    if (a.range_min != null && n < a.range_min) throw bad(`${a.label} runs from ${a.range_min} upwards.`);
+    if (a.range_max != null && n > a.range_max) throw bad(`${a.label} runs up to ${a.range_max}.`);
+  }
 }
 
-export async function setDefault(subcategoryKey, attributeKey, value) {
+/**
+ * @param settled  Whether a person has said this is right.
+ *
+ *   A default arrives *proposed* — worked out from the places in the drawer
+ *   that already have values — and the Categories screen draws the difference:
+ *   outline is proposed, filled is set (the Places redesign, 20 Sep 2026). So
+ *   a machine writing a default passes nothing and the row stays proposed; a
+ *   person accepting or correcting one passes `true`. Passing nothing on a row
+ *   that is already settled leaves it settled, because re-proposing a value a
+ *   human has already agreed to would ask them the same question twice.
+ */
+export async function setDefault(subcategoryKey, attributeKey, value, { settled = null } = {}) {
   if (!subcategoryKey || !attributeKey) throw bad('Which drawer, and which attribute?');
   if (value == null) {
     await query('delete from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',
@@ -240,13 +272,35 @@ export async function setDefault(subcategoryKey, attributeKey, value) {
   }
   await mustFit(attributeKey, value);
   const { rows } = await query(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
+     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, false))
      on conflict (subcategory_key, attribute_key) do update
         set yesno = excluded.yesno, from_value = excluded.from_value,
-            to_value = excluded.to_value, choice = excluded.choice, updated_at = now()
+            to_value = excluded.to_value, choice = excluded.choice, level = excluded.level,
+            settled = coalesce($8, shelf_subcategory_attributes.settled), updated_at = now()
      returning *`,
-    [subcategoryKey, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null]);
+    [subcategoryKey, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null,
+     value.level ?? null, settled == null ? null : Boolean(settled)]);
+  forget();
+  return valueOf(rows[0]);
+}
+
+/**
+ * A person agrees with what was proposed, and nothing about the value changes.
+ *
+ * This is the Accept on the subcategory screen, and it is its own call rather
+ * than a `setDefault` with the same value passed back: reading a value out of
+ * a screen and writing it in again is how a stale render overwrites a change
+ * somebody else made in between. Accepting says only "the number that is there
+ * is right", and says it about whatever is there now.
+ */
+export async function settleDefault(subcategoryKey, attributeKey) {
+  if (!subcategoryKey || !attributeKey) throw bad('Which drawer, and which attribute?');
+  const { rows } = await query(
+    `update shelf_subcategory_attributes set settled = true, updated_at = now()
+      where subcategory_key = $1 and attribute_key = $2
+      returning *`, [subcategoryKey, attributeKey]);
+  if (!rows[0]) throw bad('There is nothing proposed there to accept.');
   forget();
   return valueOf(rows[0]);
 }
@@ -272,20 +326,23 @@ export async function setValue(venueRef, attributeKey, value, { reason = null, b
   const run = client ? (t, a) => client.query(t, a) : query;
   if (!venueRef || !attributeKey) throw bad('Which place, and which attribute?');
   // An empty object says nothing, and saying nothing is clearing it.
-  const empty = value != null && value.yesno == null && value.from == null && value.to == null && value.choice == null;
+  const empty = value != null && value.yesno == null && value.from == null && value.to == null
+    && value.choice == null && value.level == null;
   if (value == null || empty) {
     await run('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
     return null;
   }
   if (!client) await mustFit(attributeKey, value);
   const { rows } = await run(
-    `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, reason, set_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)
+    `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, level, reason, set_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      on conflict (venue_ref, attribute_key) do update
         set yesno = excluded.yesno, from_value = excluded.from_value, to_value = excluded.to_value,
-            choice = excluded.choice, reason = excluded.reason, set_by = excluded.set_by, updated_at = now()
+            choice = excluded.choice, level = excluded.level,
+            reason = excluded.reason, set_by = excluded.set_by, updated_at = now()
      returning *`,
-    [venueRef, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null, reason, by]);
+    [venueRef, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null,
+     value.level ?? null, reason, by]);
   return rows[0];
 }
 
