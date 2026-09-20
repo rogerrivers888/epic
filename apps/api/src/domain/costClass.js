@@ -159,6 +159,15 @@ export const PURPOSE_CLASSES = {
   'skills identifier run': 'office',
   'skills parent suggestion': 'office',
 
+  // The vocabulary harvest (20 Sep 2026). Library, not office: a question set
+  // is bought once and owned for ever, it is what every future place of that
+  // kind is asked, and the brief's whole argument is that this spend replaces
+  // renting the same facts again. The probe is research — it exists to check
+  // what Google's documentation claims.
+  'harvest.classify': 'library',
+  'harvest.vocabulary': 'library',
+  'harvest.probe': 'research',
+
   // Research — production endpoints exercised to learn something, and the
   // probes that exist only to check a key still works.
   'experiment.score': 'research',
