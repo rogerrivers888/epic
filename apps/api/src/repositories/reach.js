@@ -27,6 +27,7 @@ import { pool, query } from '../db.js';
 import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
 import { kmBetween, travelMode } from '../domain/travel.js';
 import { outcodesFor } from '../sources/localities.js';
+import { outcodeOfCell } from '../domain/ring.js';
 import * as providerCalls from './providerCalls.js';
 
 /** ONS's bulk reverse takes 100 points a request. */
@@ -512,7 +513,11 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     cell,
     label: name ?? cell,
     cells: codes,
-    outcodes: [...new Set(codes.map(outcodeOf).filter(Boolean))],
+    // `outcodeOf` takes a sector *label* — "SL5 0" — and a cell is a code:
+    // "sector:SL5 0". Handed the code it answered "sector:SL5", which matches
+    // no district in the world, and every count over the ring came back empty
+    // (20 Sep 2026).
+    outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
     points: rows,
     at: lat != null && lng != null
       ? { lat: Number(lat), lng: Number(lng) }
