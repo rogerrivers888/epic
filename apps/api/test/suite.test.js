@@ -19,9 +19,10 @@ import assert from 'node:assert/strict';
 import { DEFAULT_PERIOD, PERIODS, monthBuckets, resolvePeriod } from '../src/domain/reportingPeriods.js';
 import { FIXTURE_SUBSCRIBERS, fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } from '../src/domain/reportingFixtures.js';
 import { annualPence } from '../src/repositories/pricing.js';
-import { PURPOSE_CLASSES, classOf } from '../src/domain/costClass.js';
+import { PURPOSE_CLASSES, backOfficeActorExpression, classOf } from '../src/domain/costClass.js';
 import { change } from '../src/repositories/suite.js';
 import { listCounterparties, setAdapter } from '../src/repositories/counterparties.js';
+import { withhold } from '../src/routes/suite.js';
 import { enabledSources, loadSourceSettings, setSourceOff, sourceKeys, sourceOff } from '../src/sources/index.js';
 import { pool, query } from '../src/db.js';
 
@@ -219,6 +220,171 @@ test('the biggest real purposes are all classified', () => {
     'plan.inspire.things', 'own.encyclopedia', 'photo', 'places.detail', 'places.search']) {
     assert.ok(PURPOSE_CLASSES[purpose], purpose);
   }
+});
+
+// ---------------------------------------------------------------------------
+// a closed period is closed at both ends, and priced at what was sold
+// ---------------------------------------------------------------------------
+
+/**
+ * Three faults in the real reader that unit-testing the fixtures could never
+ * have found, all from Codex on 20 Sep 2026, and all of them the kind that
+ * makes a figure quietly wrong rather than visibly broken.
+ */
+test('last month ends where this month starts, exclusively', async () => {
+  const period = resolvePeriod('last-month');
+  // The window itself. `generate_series` to `date_trunc('month', to)` used to
+  // include the current month, because `to` is its first instant.
+  const { rows } = await query(
+    `select to_char(m, 'YYYY-MM') as month
+       from generate_series(date_trunc('month', $1::timestamptz),
+                            date_trunc('month', $2::timestamptz - interval '1 microsecond'),
+                            '1 month') m`,
+    [period.from, period.to],
+  );
+  assert.equal(rows.length, 1, 'one month in "last month"');
+  assert.equal(rows[0].month, period.from.slice(0, 7));
+});
+
+test('a closed window counts nothing after it', async () => {
+  const period = resolvePeriod('last-month');
+  // The estate's active count is the one that was bounded at the bottom only.
+  const { rows: [both] } = await query(
+    `select count(distinct e.household_id)::int as n from activity_events e
+       join households h on h.id = e.household_id
+      where e.at >= $1 and e.at < $2 and h.origin <> 'guest_invite'`,
+    [period.from, period.to],
+  );
+  const { rows: [open] } = await query(
+    `select count(distinct e.household_id)::int as n from activity_events e
+       join households h on h.id = e.household_id
+      where e.at >= $1 and h.origin <> 'guest_invite'`,
+    [period.from],
+  );
+  // Bounded is never larger than unbounded, and this is the assertion that
+  // fails the moment somebody drops the upper bound again.
+  assert.ok(both.n <= open.n);
+});
+
+test('a guest household is excluded from MRR by the filter, not by the join', async () => {
+  // `h.origin <> 'guest_invite'` in a LEFT JOIN condition only nulls `h`; the
+  // account row survives and is still counted. Asserted against the aggregate.
+  const { rows: [r] } = await query(
+    `select count(a.id) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite')::int as filtered,
+            count(a.id) filter (where a.status <> 'suspended')::int as unfiltered
+       from accounts a
+       left join households h on h.id = a.household_id`,
+  );
+  assert.ok(r.filtered <= r.unfiltered);
+  const { rows: [guests] } = await query(
+    `select count(*)::int as n from accounts a
+       join households h on h.id = a.household_id
+      where h.origin = 'guest_invite' and a.status <> 'suspended'`,
+  );
+  assert.equal(r.unfiltered - r.filtered, guests.n);
+});
+
+test('a price change cannot rewrite a month that has already been sold', async () => {
+  /**
+   * The history row carries its own `price_pence` and `status`, and those are
+   * what a closed month is priced from. The query used to read `ph.plan` and
+   * then take `plans.price_pence` — today's cached price — so changing a price
+   * restated every prior month, which is the one thing the insert-only
+   * discipline exists to prevent.
+   */
+  const { rows: [col] } = await query(
+    `select count(*)::int as n from information_schema.columns
+      where table_name = 'account_plan_history' and column_name in ('price_pence', 'status')`,
+  );
+  assert.equal(col.n, 2, 'the history must carry the price and the status it was sold at');
+
+  // And one current row per plan and channel, so "the price in force" is a
+  // question with one answer (migration 202).
+  const { rows: dupes } = await query(
+    `select plan_key, channel, count(*)::int as n from plan_prices
+      where effective_to is null group by 1, 2 having count(*) > 1`,
+  );
+  assert.deepEqual(dupes, []);
+  const { rows: rates } = await query(
+    `select counterparty_key, count(*)::int as n from counterparty_rates
+      where effective_to is null group by 1 having count(*) > 1`,
+  );
+  assert.deepEqual(rates, []);
+});
+
+test('a swept session does not turn a household’s call into research', () => {
+  /**
+   * `sweepDeadSessions()` deletes expired sessions after thirty days. The
+   * actor fallback used to read "no session row" as "the back office", so an
+   * ordinary household's `serve` calls became `research` a month later and a
+   * closed month's cost to serve changed. The expression now falls back to
+   * `household_id`, which is never swept.
+   */
+  const sql = backOfficeActorExpression('c');
+  assert.match(sql, /c\.household_id/, 'the fallback must read the household, which outlives the session');
+  // The session is still looked at first, and "attributed to nobody" is still
+  // the conservative default.
+  assert.ok(sql.indexOf('api_sessions') < sql.indexOf('c.household_id'));
+  assert.match(sql, /true\)$/);
+});
+
+// ---------------------------------------------------------------------------
+// money is withheld by the answer, not by the screen
+// ---------------------------------------------------------------------------
+
+/**
+ * `view_reporting` and `view_financials` are two capabilities, and the whole
+ * money section was coming back to anybody holding the first (Codex, 20 Sep
+ * 2026). Drawing a figure or not is a courtesy; what is in the answer is the
+ * boundary — and the built-in `support` role is a real caller who holds
+ * `view_accounts` and explicitly no money access.
+ */
+const holding = (...capabilities) => ({ access: { doors: ['admin'], capabilities: new Set(capabilities), isOwner: false } });
+
+test('a reporting reader without financials gets no money at all', () => {
+  const full = scaleFixtures(fixtures(), resolvePeriod('this-month', AT));
+  const cut = withhold(full, holding('view_reporting'));
+
+  assert.equal(cut.money, null);
+  assert.equal(cut.subscriptions, null);
+  assert.equal(cut.suppliers, null);
+  assert.equal(cut.overview.revenue, null);
+  assert.deepEqual(cut.withheld, ['view_financials']);
+
+  // Nothing anywhere in the answer still carries a revenue figure.
+  const said = JSON.stringify(cut);
+  assert.ok(!said.includes('9244'), 'revenue survived the redaction');
+  assert.ok(!said.includes('3851'), 'MRR survived the redaction');
+  assert.ok(!said.includes('41171'), 'gross bookings survived the redaction');
+});
+
+test('a money measure on Overview is withheld rather than dropped', () => {
+  const cut = withhold(scaleFixtures(fixtures(), resolvePeriod('this-month', AT)), holding('view_reporting'));
+  const revenue = cut.overview.measures.find((m) => m.key === 'revenue');
+  // Still there, and marked: a tile that vanishes reads as "there is nothing
+  // here", which is a different and wrong fact.
+  assert.ok(revenue);
+  assert.equal(revenue.value, null);
+  assert.equal(revenue.withheld, true);
+  // And the measures that are not money are untouched.
+  assert.equal(cut.overview.measures.find((m) => m.key === 'engagement').value, 862);
+});
+
+test('what a household pays is withheld from an accounts-only reader', () => {
+  const cut = withhold(scaleFixtures(fixtures(), resolvePeriod('this-month', AT)), holding('view_reporting'));
+  assert.equal(cut.customers.payingMrr, null);
+  for (const h of cut.customers.households) {
+    assert.equal(h.monthPence, 0, `${h.name} still carries a price`);
+    assert.equal(h.costUsd, undefined);
+  }
+  // Who they are and what they do is not money and stays.
+  assert.equal(cut.customers.households.length, 12);
+  assert.ok(cut.customers.households.every((h) => h.name && typeof h.places === 'number'));
+});
+
+test('holding financials changes nothing at all', () => {
+  const full = scaleFixtures(fixtures(), resolvePeriod('this-month', AT));
+  assert.strictEqual(withhold(full, holding('view_reporting', 'view_financials')), full);
 });
 
 // ---------------------------------------------------------------------------

@@ -144,9 +144,24 @@ export function withhold(model, req) {
       households: model.customers.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
       payingMrr: null,
     },
+    /**
+     * The drill's own twelve months, too.
+     *
+     * `history.series` is what "Open the chart" draws, so leaving revenue and
+     * the four streams in it handed over the whole year a month at a time — the
+     * redaction's own test caught this, which is what it was written for.
+     */
+    history: {
+      ...model.history,
+      series: Object.fromEntries(Object.entries(model.history.series)
+        .map(([k, v]) => [k, MONEY_SERIES.has(k) ? null : v])),
+    },
     withheld: ['view_financials'],
   };
 }
+
+/** The twelve-month series that are money, and therefore behind the capability. */
+const MONEY_SERIES = new Set(['revenue', 'cost', 'subscriptions', 'hotel', 'hosting', 'activity']);
 
 /**
  * GET /api/admin/suite/customers — the household list, on its own.

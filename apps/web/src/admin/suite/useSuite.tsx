@@ -75,6 +75,43 @@ export function useSuite(period: PeriodKey, source: DataSource) {
   return { suite, error, reading, reload: load };
 }
 
+/**
+ * The household list, on its own.
+ *
+ * Customers is an accounts question, not a reporting one: the built-in support
+ * role holds `view_accounts` and not `view_reporting`, so reading the whole
+ * estate model here showed them a rail item that answered 403 (Codex, 20 Sep
+ * 2026). This reads `/api/admin/suite/customers`, which is gated on accounts —
+ * and withholds the money columns from anybody without `view_financials`.
+ */
+export function useCustomers(period: PeriodKey, source: DataSource) {
+  const [customers, setCustomers] = useState<Suite['customers'] | null>(null);
+  const [gaps, setGaps] = useState<Record<string, string>>({});
+  const [withheld, setWithheld] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [reading, setReading] = useState(true);
+
+  const load = useCallback(async () => {
+    setReading(true);
+    try {
+      const body = await api.adminSuiteCustomers({ period, data: source });
+      setCustomers(body.customers);
+      setGaps(body.gaps ?? {});
+      setWithheld(body.withheld ?? []);
+      setError(null);
+    } catch (e: any) {
+      setError(e instanceof ApiError
+        ? (e.status === 403 ? 'Households are not yours to see. Ask an administrator for view_accounts.' : e.message)
+        : 'Could not reach Epic.');
+    } finally {
+      setReading(false);
+    }
+  }, [period, source]);
+
+  useEffect(() => { void load(); }, [load]);
+  return { customers, gaps, withheld, error, reading, reload: load };
+}
+
 /** One household's record, for the drill off Customers. */
 export function useHouseholdRecord(id: string | null, period: PeriodKey, source: DataSource) {
   const [record, setRecord] = useState<HouseholdRecord | null>(null);

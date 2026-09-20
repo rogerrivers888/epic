@@ -136,11 +136,13 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
 
       <MarginBand suite={suite} fmt={fmt} stream={stream} onStream={(k) => setStream(k)} per={per} />
 
-      {lens === 'streams' ? (
-        <Band title={bandTitle} onOpenChart={() => setChart(true)}>
-          <Breakdown suite={suite} fmt={fmt} stream={stream} />
-        </Band>
-      ) : null}
+      {/* The band, and with it "Open the chart", is drawn in both lenses. It
+          used to belong to the Streams layout alone, so half of Money's states
+          could not reach the metric drill at all (20 Sep 2026). In the Table
+          lens it is the heading over the selected stream's breakdown. */}
+      <Band title={bandTitle} onOpenChart={() => setChart(true)}>
+        <Breakdown suite={suite} fmt={fmt} stream={stream} />
+      </Band>
 
       <Standing
         items={[
@@ -276,23 +278,92 @@ function MarginBand({ suite, fmt, stream, onStream, per }: {
  * level, and a margin against a detail row would be an apportionment nobody
  * asked for.
  */
+/**
+ * A row of the table: a stream, one of its detail rows, or the research line.
+ *
+ * `detail` is indented and carries no cost and no margin — cost allocates at
+ * stream level only, and a margin against a channel would be an apportionment
+ * nobody asked for (handoff §2). `unallocated` is the research class, which has
+ * a cost and no revenue and is why the cost column adds to £2,926 rather than
+ * to the £2,864 the four streams account for (rule 1).
+ */
+type TableRow = {
+  id: string;
+  key: string;
+  label: string;
+  units: number | null;
+  revenue: number | null;
+  avgUnit: number | null;
+  churn: string | null;
+  cost: number | null;
+  margin: number | null;
+  marginPct: number | null;
+  perSub: number | null;
+  growth: number | null;
+  gap?: string | null;
+  detail?: boolean;
+  memo?: string | null;
+};
+
 function StreamTable({ suite, fmt, stream, onStream, per }: {
   suite: Suite; fmt: Fmt; stream: string; onStream: (k: StreamKey) => void; per: 'total' | 'subscriber';
 }) {
-  const columns: Col<Stream & { id: string }>[] = [
-    { key: 'stream', label: 'Stream', grow: true, align: 'left', cell: (r) => <Cell strong left>{r.label}</Cell> },
-    { key: 'units', label: 'Units', width: 70, cell: (r) => <Cell muted>{fmt.plain.count(r.units)}</Cell> },
-    { key: 'revenue', label: 'Revenue', width: 90, cell: (r) => <Cell strong gap={r.gap}>{fmt.revenue.money(r.revenue)}</Cell> },
-    { key: 'avg', label: 'Avg unit', width: 80, cell: (r) => <Cell muted gap={r.gap}>{r.avgUnit}</Cell> },
-    { key: 'churn', label: 'Churn', width: 64, wideOnly: true, cell: (r) => <Cell muted gap={suite.gaps.churn}>{r.churn}</Cell> },
-    { key: 'cost', label: 'Cost', width: 80, cell: (r) => <Cell gap={suite.money.totalGap}>{fmt.cost.money(r.cost)}</Cell> },
-    { key: 'margin', label: 'Margin', width: 90, cell: (r) => <Cell gap={suite.money.totalGap}>{fmt.revenue.money(r.margin)}</Cell> },
-    { key: 'marginPct', label: 'Margin %', width: 74, cell: (r) => <Cell gap={suite.money.totalGap}>{r.marginPct == null ? null : `${r.marginPct}%`}</Cell> },
-    { key: 'perSub', label: 'Per sub', width: 70, wideOnly: true, cell: (r) => <Cell muted gap={r.gap}>{r.perSub == null ? null : fmt.plain.money(r.perSub)}</Cell> },
-    { key: 'growth', label: 'Growth', width: 70, cell: (r) => <Cell lime>{fmt.revenue.delta(r.growth)}</Cell> },
+  const columns: Col<TableRow>[] = [
+    {
+      key: 'stream', label: 'Stream', grow: true, align: 'left',
+      cell: (r) => (
+        <Cell strong={!r.detail} muted={r.detail} left>
+          {r.memo ? `${r.label} · ${r.memo}` : r.label}
+        </Cell>
+      ),
+    },
+    { key: 'units', label: 'Units', width: 70, cell: (r) => <Cell muted>{r.units == null ? '—' : fmt.plain.count(r.units)}</Cell> },
+    { key: 'revenue', label: 'Revenue', width: 90, cell: (r) => <Cell strong={!r.detail} gap={r.gap}>{fmt.revenue.money(r.revenue)}</Cell> },
+    // A number, so Per subscriber converts it and the period restates it — the
+    // stock/flow rule's second consequence, which a pre-formatted "£17.77"
+    // quietly broke.
+    { key: 'avg', label: 'Avg unit', width: 80, cell: (r) => <Cell muted gap={r.gap}>{fmt.plain.money(r.avgUnit)}</Cell> },
+    { key: 'churn', label: 'Churn', width: 64, cell: (r) => <Cell muted gap={r.detail ? undefined : suite.gaps.churn}>{r.churn ?? (r.detail ? '—' : null)}</Cell> },
+    { key: 'cost', label: 'Cost', width: 80, cell: (r) => <Cell gap={r.detail ? undefined : suite.money.totalGap}>{r.detail ? '—' : fmt.cost.money(r.cost)}</Cell> },
+    { key: 'margin', label: 'Margin', width: 90, cell: (r) => <Cell gap={r.detail ? undefined : suite.money.totalGap}>{r.detail ? '—' : fmt.revenue.money(r.margin)}</Cell> },
+    {
+      key: 'marginPct', label: 'Margin %', width: 74,
+      cell: (r) => <Cell gap={r.detail ? undefined : suite.money.totalGap}>{r.detail ? '—' : r.marginPct == null ? null : `${r.marginPct}%`}</Cell>,
+    },
+    { key: 'perSub', label: 'Per sub', width: 70, cell: (r) => <Cell muted gap={r.detail ? undefined : r.gap}>{r.perSub == null ? '—' : fmt.plain.money(r.perSub)}</Cell> },
+    { key: 'growth', label: 'Growth', width: 70, cell: (r) => <Cell lime>{fmt.revenue.delta(r.growth) ?? '—'}</Cell> },
   ];
+
   const t = suite.money.total;
-  const rows = suite.money.streams.map((s) => ({ ...s, id: s.key }));
+  const research = suite.money.costToServe.research;
+
+  const rows: TableRow[] = [];
+  for (const s of suite.money.streams) {
+    rows.push({ ...s, id: s.key, key: s.key });
+    for (const d of s.details ?? []) {
+      rows.push({
+        id: `${s.key}:${d.label}`,
+        key: s.key,
+        label: d.label,
+        units: d.units,
+        revenue: d.revenue,
+        avgUnit: d.avgUnit,
+        churn: null, cost: null, margin: null, marginPct: null, perSub: null,
+        growth: d.growth ?? null,
+        memo: d.memo ?? null,
+        detail: true,
+      });
+    }
+  }
+  // The research class: a cost charged to no household, and the reason the cost
+  // column adds to more than the four streams do (rule 1).
+  if (research) {
+    rows.push({
+      id: 'research', key: 'research', label: 'Research · unallocated',
+      units: null, revenue: null, avgUnit: null, churn: null,
+      cost: research, margin: -research, marginPct: null, perSub: null, growth: null,
+    });
+  }
 
   return (
     <View style={{ gap: spacing.sm }}>
@@ -300,6 +371,7 @@ function StreamTable({ suite, fmt, stream, onStream, per }: {
       <SuiteTable
         columns={columns}
         rows={rows}
+        indent={(r) => (r.detail ? 16 : 0)}
         foot={{
           stream: <Text style={styles.footStrong}>All streams</Text>,
           revenue: <Cell strong>{fmt.revenue.money(t.revenue)}</Cell>,
@@ -312,7 +384,9 @@ function StreamTable({ suite, fmt, stream, onStream, per }: {
         onRow={(r) => onStream(r.key as StreamKey)}
         empty="No streams."
       />
-      <Text style={type.tiny}>Cost allocates at stream level only, so a detail row carries no margin.</Text>
+      <Text style={type.tiny}>
+        A detail row carries no cost and no margin: cost allocates at stream level only.
+      </Text>
     </View>
   );
 }

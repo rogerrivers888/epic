@@ -293,7 +293,7 @@ export function SupplierRecord({
           <Kv
             label="Variance"
             value={h.variance == null ? null : `${h.variance < 0 ? '−' : ''}${spend.money(Math.abs(h.variance))} (${h.variancePct == null ? '—' : `${h.variancePct < 0 ? '−' : ''}${Math.abs(h.variancePct)}%`})`}
-            gap={h.gap}
+            gap={h.varianceGap ?? h.gap}
             lime={(h.variancePct ?? 0) >= 15}
             last
           />

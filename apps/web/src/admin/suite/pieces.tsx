@@ -609,7 +609,7 @@ export type Col<T> = {
  * its baseline — the icon rule is about glyphs standing in for pictures (★ ♥ ✕),
  * and a sort direction is punctuation.
  */
-export function SuiteTable<T extends { id?: string }>({ columns, rows, sort, dir, onSort, onRow, foot, empty }: {
+export function SuiteTable<T extends { id?: string }>({ columns, rows, sort, dir, onSort, onRow, foot, empty, indent }: {
   columns: Col<T>[];
   rows: T[];
   sort?: string | null;
@@ -623,6 +623,12 @@ export function SuiteTable<T extends { id?: string }>({ columns, rows, sort, dir
    */
   foot?: Record<string, React.ReactNode>;
   empty?: string;
+  /**
+   * How far in a row's first column sits — Money's detail rows are indented
+   * 16px under the stream they belong to (handoff §2). Indenting rather than
+   * nesting keeps one flat list, so the sort and the totals row still work.
+   */
+  indent?: (row: T) => number;
 }) {
   const { width } = useViewport();
   const cols = columns.filter((c) => !c.wideOnly || width >= WIDE);
@@ -671,9 +677,14 @@ export function SuiteTable<T extends { id?: string }>({ columns, rows, sort, dir
       {rows.length === 0 ? <Text style={styles.emptyText}>{empty ?? 'Nothing here.'}</Text> : null}
 
       {rows.map((r, i) => {
+        const inset = indent?.(r) ?? 0;
         const line = (
           <View style={styles.tr}>
-            {cols.map((c) => <View key={c.key} style={cellStyle(c)}>{c.cell(r)}</View>)}
+            {cols.map((c, ci) => (
+              <View key={c.key} style={[cellStyle(c), ci === 0 && inset ? { paddingLeft: inset } : null]}>
+                {c.cell(r)}
+              </View>
+            ))}
           </View>
         );
         const key = r.id ?? String(i);

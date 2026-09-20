@@ -257,15 +257,71 @@ const BENEFITS = [
   publishedAt: '2026-09-19T00:00:00.000Z',
 }));
 
+/**
+ * The four streams, and the detail rows under each.
+ *
+ * `avgUnit` is a **number** and not "£17.77": the stock/flow rule's second
+ * consequence is that derived copy comes from the same scaled numbers as the
+ * figure it sits under and never from a hardcoded string, and a pre-formatted
+ * one neither converts under Per subscriber nor restates with the period.
+ *
+ * `details` are what the table indents under each stream — the channels the
+ * money actually came through. They deliberately carry **no cost and no
+ * margin**: cost allocates at stream level only, and a margin against a detail
+ * row would be an apportionment nobody asked for (handoff §2).
+ */
 const STREAMS = [
-  { key: 'subscriptions', label: 'Subscriptions', revenue: 3851, cost: 2715, margin: 1136, marginPct: 29.5, growth: 9.2, perSub: 6.65, units: 579, unitName: 'subscriptions', avgUnit: '£6.65', churn: '3.8%' },
-  { key: 'hotel', label: 'Hotel upsell', revenue: 3092, cost: 47, margin: 3045, marginPct: 98.5, growth: 22, perSub: 5.34, units: 174, unitName: 'bookings', avgUnit: '£17.77', churn: null },
-  { key: 'hosting', label: 'Hosting commission', revenue: 1315, cost: 91, margin: 1224, marginPct: 93.1, growth: 22, perSub: 2.27, units: 118, unitName: 'bookings', avgUnit: '£11.14', churn: null },
-  { key: 'activity', label: 'Activity upsell', revenue: 986, cost: 11, margin: 975, marginPct: 98.9, growth: 6, perSub: 1.7, units: 209, unitName: 'bookings', avgUnit: '£4.72', churn: null },
+  {
+    key: 'subscriptions', label: 'Subscriptions', revenue: 3851, cost: 2715, margin: 1136, marginPct: 29.5,
+    growth: 9.2, perSub: 6.65, units: 579, unitName: 'subscriptions', avgUnit: 6.65, churn: '3.8%',
+    details: [
+      { label: 'Household £8.99', units: 211, revenue: 1897, avgUnit: 8.99, growth: 11 },
+      { label: 'Solo £5.99', units: 321, revenue: 1602, avgUnit: 4.99, growth: 7.4 },
+      { label: 'Annual £100', units: 47, revenue: 352, avgUnit: 7.49, growth: 14 },
+    ],
+  },
+  {
+    key: 'hotel', label: 'Hotel upsell', revenue: 3092, cost: 47, margin: 3045, marginPct: 98.5,
+    growth: 22, perSub: 5.34, units: 174, unitName: 'bookings', avgUnit: 17.77, churn: null,
+    details: [
+      { label: 'LiteAPI direct · 13%', units: 139, revenue: 2395, avgUnit: 17.23, growth: 24 },
+      { label: 'Booking.com · 11%', units: 35, revenue: 697, avgUnit: 19.91, growth: 14 },
+    ],
+  },
+  {
+    key: 'hosting', label: 'Hosting commission', revenue: 1315, cost: 91, margin: 1224, marginPct: 93.1,
+    growth: 22, perSub: 2.27, units: 118, unitName: 'bookings', avgUnit: 11.14, churn: null,
+    details: [
+      { label: 'Marketplace · 15%', units: 92, revenue: 1022, avgUnit: 11.11, growth: 26 },
+      { label: 'Host’s own link · 5%', units: 26, revenue: 293, avgUnit: 11.27, growth: 9 },
+      // The first ninety days are free, so those bookings earned nothing and
+      // are **not** a third slice of the 118 that did. Shown as a memo row with
+      // no units, because adding them would stop the column reconciling.
+      { label: 'First 90 days · 0%', units: null, revenue: 0, avgUnit: 0, growth: null, memo: '14 bookings' },
+    ],
+  },
+  {
+    key: 'activity', label: 'Activity upsell', revenue: 986, cost: 11, margin: 975, marginPct: 98.9,
+    growth: 6, perSub: 1.7, units: 209, unitName: 'bookings', avgUnit: 4.72, churn: null,
+    details: [
+      { label: 'Viator · 10%', units: 121, revenue: 571, avgUnit: 4.72, growth: 7 },
+      { label: 'GetYourGuide · 9%', units: 88, revenue: 415, avgUnit: 4.72, growth: 4 },
+    ],
+  },
 ];
 
 /** A bar or key-value row: a label, a figure, and optionally a share of the row above it. */
-const row = (label, value, pct = null) => ({ label, value, pct });
+/**
+ * A bar or key-value row: a label, a figure, and optionally a share of the
+ * biggest beside it.
+ *
+ * `rate: true` marks a figure that does **not** move with the period — an
+ * average, a median, a per-something. Inferring it from the magnitude was the
+ * obvious shortcut and it was wrong: "4.2 searches before the first save" is
+ * above one and became 48 over a year (20 Sep 2026).
+ */
+const row = (label, value, pct = null, opts = {}) => ({ label, value, pct, ...opts });
+const rate = (label, value) => row(label, value, null, { rate: true });
 
 /**
  * The whole model, with every flow quoted per month.
@@ -488,19 +544,19 @@ export function fixtures() {
           asked: [row('Food and drink', '31%', 100), row('Outdoors', '22%', 71), row('Museums and culture', '16%', 52), row('Family activities', '14%', 45), row('Events', '11%', 35), row('Everything else', '6%', 19)],
           became: [row('Nothing', '67%', 100), row('A place saved', '21%', 31), row('Added to a trip', '9%', 13), row('A booking', '3%', 4)],
           becameHighlight: 1,
-          funnel: [row('Households who searched', 810), row('Created a trip or saved a place', '612 · 76%'), row('Created nothing at all', '198 · 24%'), row('Searches before the first save', 4.2)],
+          funnel: [row('Households who searched', 810), row('Created a trip or saved a place', '612 · 76%'), row('Created nothing at all', '198 · 24%'), rate('Searches before the first save', 4.2)],
         },
         saves: {
           asked: [row('Food and drink', '34%', 100), row('Outdoors', '23%', 68), row('Family activities', '17%', 50), row('Museums and culture', '15%', 44), row('Events', '11%', 32)],
           became: [row('Still on a list', '54%', 100), row('Added to a trip', '31%', 57), row('Actually visited', '19%', 35), row('Removed again', '8%', 15)],
           becameHighlight: 1,
-          funnel: [row('Median places saved', 14), row('0 to 4 places · cancel a month', '9.1%'), row('5 to 29 places', '3.4%'), row('30 or more', '1.4%')],
+          funnel: [rate('Median places saved', 14), row('0 to 4 places · cancel a month', '9.1%'), row('5 to 29 places', '3.4%'), row('30 or more', '1.4%')],
         },
         out: {
           asked: [row('A meal out', '34%', 100), row('Parks and outdoors', '22%', 65), row('A paid activity', '17%', 50), row('A museum or gallery', '14%', 41), row('A hosted event', '8%', 24), row('Everything else', '5%', 15)],
           became: [row('One', '41%', 100), row('Two', '34%', 83), row('Three', '18%', 44), row('Four or more', '7%', 17)],
           becameHighlight: 1,
-          becameFoot: row('Average', 1.9),
+          becameFoot: rate('Average', 1.9),
           funnel: [row('Days out', 1966), row('Rated', '1,204 · 61%'), row('Left no signal', '762 · 39%'), row('Good · fine · poor', '71 / 22 / 7')],
         },
         trips: {
@@ -513,7 +569,7 @@ export function fixtures() {
           asked: [row('A workshop', '29%', 100), row('A walk or tour', '24%', 83), row('Something food', '21%', 72), row('Something for kids', '17%', 59), row('Sport', '9%', 31)],
           became: [row('One-off', '68%', 100), row('A series over weeks', '22%', 32), row('Anytime, on request', '10%', 15)],
           becameHighlight: 0,
-          funnel: [row('Rated good', '78%'), row('Booked the same host again', '23%'), row('Left no signal', '22%'), row('Average party', 2.1)],
+          funnel: [row('Rated good', '78%'), row('Booked the same host again', '23%'), row('Left no signal', '22%'), rate('Average party', 2.1)],
         },
         hosted: {
           asked: [row('One-off', '61%', 100), row('A series over weeks', '24%', 39), row('Anytime, on request', '15%', 25)],
@@ -780,6 +836,12 @@ export function scaleFixtures(model, period) {
     cost: scale(st.cost),
     margin: scale(st.margin),
     units: st.units == null ? null : scale(st.units),
+    // `avgUnit` is a rate — what one booking was worth — and never scales.
+    details: st.details?.map((d) => ({
+      ...d,
+      revenue: scale(d.revenue),
+      units: d.units == null ? null : scale(d.units),
+    })),
   }));
   m.money.total = { ...m.money.total, revenue: scale(m.money.total.revenue), cost: scale(m.money.total.cost), margin: scale(m.money.total.margin) };
   for (const k of Object.keys(m.money.breakdown)) {
@@ -816,6 +878,37 @@ export function scaleFixtures(model, period) {
     mrrAfterFeesPence: m.subscriptions.channels.mrrAfterFeesPence,
     ifEveryoneUsedApplePence: Math.round(m.subscriptions.channels.ifEveryoneUsedApplePence * factor),
   };
+
+  /**
+   * Behaviour's panels.
+   *
+   * The tiles are rates — how much one household does in a month — and never
+   * move. The panels underneath are a mix: a share ("31%", "67%") is a share
+   * whatever the window, and a count (810 households who searched, 1,966 days
+   * out, 34 events run, 37 who started the wizard) is a flow. Leaving the
+   * counts monthly while every other screen moved was the stock/flow rule
+   * broken in the one place it is hardest to see (20 Sep 2026).
+   */
+  for (const key of Object.keys(m.behaviour.panels)) {
+    const panel = m.behaviour.panels[key];
+    // A number in these lists is a count; a string is already a share or an
+    // average and is left exactly as it is.
+    /**
+     * A number in these lists is a count and is whole — 2,389.5 households did
+     * not search for anything. A row marked `rate` is an average or a median
+     * and stays exactly as it is, and a string is already a share.
+     */
+    const scaleCounts = (rows) => rows?.map((r) => (
+      typeof r.value === 'number' && !r.rate
+        ? { ...r, value: Math.round(r.value * factor) }
+        : r));
+    panel.asked = scaleCounts(panel.asked);
+    panel.became = scaleCounts(panel.became);
+    panel.funnel = scaleCounts(panel.funnel);
+    if (panel.becameFoot) panel.becameFoot = { ...panel.becameFoot };
+  }
+  // How often a household came back is a fixed window — thirteen weeks of a
+  // quarter — and its own denominator. Neither moves with the picker.
 
   m.suppliers.rows = m.suppliers.rows.map((r) => ({
     ...r,

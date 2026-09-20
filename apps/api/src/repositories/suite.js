@@ -64,6 +64,27 @@ export const GAPS = {
 const NOT_GUEST = "h.origin <> 'guest_invite'";
 
 const int = (v) => (v == null ? 0 : Number(v));
+/**
+ * A host offer's shape, in the words the app uses for it.
+ *
+ * `host_offers.shape` is a key — `one_off`, `series`, `anytime` — and a bar
+ * chart labelled "one_off" is a database column on a screen.
+ */
+const SHAPE_WORDS = {
+  one_off: 'One-off', oneoff: 'One-off', series: 'A series over weeks',
+  anytime: 'Anytime, on request', course: 'A course', tour: 'A tour',
+};
+
+/**
+ * The latest month of a series against the one three back.
+ *
+ * Nothing where there is no comparator above zero — the same rule every other
+ * change figure in the suite is under.
+ */
+const quarterOn = (series) => (series && series.length >= 4
+  ? change(series[series.length - 1], series[series.length - 4])
+  : null);
+
 /** "1 host", "2 hosts" — said properly, because it is on every screen. */
 const plural = (n, one, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : null);
@@ -105,8 +126,8 @@ async function estate(period) {
        (select count(*)::int from accounts a join households h on h.id = a.household_id
          where a.status <> 'suspended' and ${NOT_GUEST}
            and exists (select 1 from plans p where p.key = a.plan and p.price_pence is null))    as trial,
-       -- Bounded at both ends: `>= from` alone counted the current month inside
-       -- "last month", so the figure was not the window's (Codex, 20 Sep 2026).
+       -- Bounded at both ends. A lower bound alone counted the current month
+       -- inside "last month", so the figure was not the window's (Codex, 20 Sep 2026).
        (select count(distinct e.household_id)::int from activity_events e
           join households h on h.id = e.household_id
          where e.at >= $1 and e.at < $2 and ${NOT_GUEST})                              as active_window,
@@ -938,6 +959,15 @@ async function eventsPanels(period) {
     `select o.shape, count(*)::int as n from host_offers o
       where o.state = 'live' group by 1 order by 2 desc`,
   );
+  // What kind of thing it is, which is a different question from what shape it
+  // takes. `category_key` is the taxonomy's word and `category` the host's own.
+  const { rows: categories } = await query(
+    `select coalesce(nullif(o.category_key, ''), nullif(o.category, ''), 'Not filed') as category,
+            count(*)::int as n
+       from host_offers o
+      where o.state = 'live'
+      group by 1 order by 2 desc limit 6`,
+  );
   const { rows: [hosts] } = await query(
     `select count(*)::int as hosts,
             count(*) filter (where h.checks <> 'running')::int as approved,
@@ -955,7 +985,8 @@ async function eventsPanels(period) {
     attended: int(attended.bookings),
     heads: int(attended.heads),
     refunded: int(attended.refunded),
-    shapes: bars(shapes.map((r) => row(r.shape, int(r.n)))),
+    shapes: bars(shapes.map((r) => row(SHAPE_WORDS[r.shape] ?? r.shape, int(r.n)))),
+    categories: categories.length ? bars(categories.map((r) => row(r.category, int(r.n)))) : null,
     hosts: {
       total: int(hosts.hosts), approved: int(hosts.approved), selling: int(hosts.selling),
       started: int(hosts.started), published: int(hosts.published),
@@ -1095,9 +1126,21 @@ export async function readSupplierRecord(key, period) {
       healthGap: GAPS.providerHealth,
       spend,
       expected,
-      // Derived from the two rows above it, so the panel reconciles on its face.
-      variance: spend == null || expected == null ? null : Math.round((spend - expected) * 100) / 100,
+      /**
+       * Derived from the two rows above it, so the panel reconciles on its face
+       * — and **absent where there is no window to compare with**.
+       *
+       * The ledger began in September, so the window before this one is empty
+       * for every supplier, and "$103.66 (—)" is the whole of this period's
+       * spend presented as a change. The handoff's rule for a change figure is
+       * that it prints only where a full prior window exists and sums above
+       * zero; the same holds for a variance, and the table on Suppliers now
+       * says the same thing (20 Sep 2026, on the live estate).
+       */
+      variance: spend == null || !expected ? null : Math.round((spend - expected) * 100) / 100,
       variancePct: spend == null || !expected ? null : Math.round(((spend - expected) / expected) * 1000) / 10,
+      /** Why there is no comparison, where the figure itself is real. */
+      varianceGap: spend != null && !expected ? 'No window before this one to compare with' : null,
       currency: metered ? 'usd' : 'gbp',
       gap: metered ? null : GAPS.invoiced,
     },
@@ -1461,21 +1504,38 @@ export async function readSuite(period, { now = new Date() } = {}) {
 
     behaviour: {
       base,
+      /**
+       * The six measures, with a change read off their own twelve-month series.
+       *
+       * The latest month against the one three back, which is the same span the
+       * short run rate uses and long enough that one quiet week does not read as
+       * a collapse. `change()` returns nothing where there is no prior figure
+       * above zero, so a measure that only started this month shows the value
+       * and no change rather than "+∞".
+       */
       measures: [
-        { key: 'searches', label: 'Searches', value: rates.searches, delta: null, series: hist.series.searches },
-        { key: 'saves', label: 'Places saved', value: rates.saves, delta: null, series: hist.series.saves },
-        { key: 'out', label: 'Days out', value: rates.out, delta: null, series: hist.series.out },
-        { key: 'trips', label: 'Trips away', value: rates.trips, delta: null, series: hist.series.trips },
-        { key: 'attended', label: 'Events attended', value: rates.attended, delta: null, series: hist.series.attended },
-        { key: 'hosted', label: 'Events hosted', value: rates.hosted, delta: null, series: hist.series.hosted },
+        { key: 'searches', label: 'Searches', value: rates.searches, delta: quarterOn(hist.series.searches), series: hist.series.searches },
+        { key: 'saves', label: 'Places saved', value: rates.saves, delta: quarterOn(hist.series.saves), series: hist.series.saves },
+        { key: 'out', label: 'Days out', value: rates.out, delta: quarterOn(hist.series.out), series: hist.series.out },
+        { key: 'trips', label: 'Trips away', value: rates.trips, delta: quarterOn(hist.series.trips), series: hist.series.trips },
+        { key: 'attended', label: 'Events attended', value: rates.attended, delta: quarterOn(hist.series.attended), series: hist.series.attended },
+        { key: 'hosted', label: 'Events hosted', value: rates.hosted, delta: quarterOn(hist.series.hosted), series: hist.series.hosted },
       ],
       panels: {
         searches: searchPanel,
         saves: savePanel,
         out: outPanel,
         trips: tripPanel,
+        /**
+         * Two different questions, and they were being answered with the same
+         * bars: `asked` is **what they went to** — the category an offer is
+         * filed under — and `became` is **what shape it was** — one-off, a
+         * series, anytime on request. Handing both `eventPanel.shapes` drew the
+         * same chart twice (20 Sep 2026, the separate audit).
+         */
         attended: {
-          asked: eventPanel.shapes,
+          asked: eventPanel.categories,
+          askedGap: 'No offer has a category yet',
           became: eventPanel.shapes,
           becameHighlight: 0,
           funnel: [
@@ -1487,6 +1547,8 @@ export async function readSuite(period, { now = new Date() } = {}) {
           funnelGap: GAPS.satisfaction,
         },
         hosted: {
+          // What they run is the shape of the offers they publish, which for
+          // hosting is the honest answer to "what they run".
           asked: eventPanel.shapes,
           became: [
             row('Hosts registered', eventPanel.hosts.total),

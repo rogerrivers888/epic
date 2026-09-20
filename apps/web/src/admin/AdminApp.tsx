@@ -98,6 +98,13 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'reporting', label: 'Overview', icon: 'plan', needs: 'view_reporting', sub: 'Is the business growing', group: 'Reporting' },
   { key: 'money', label: 'Money', icon: 'money', needs: 'view_reporting', sub: 'Where it comes from, and what margin survives', group: 'Reporting' },
   { key: 'subscriptions', label: 'Subscriptions', icon: 'wallet', needs: 'view_financials', sub: 'What we sell, at what price, and what it says you get', group: 'Reporting' },
+  /**
+   * Customers is `view_accounts` and stays that way: it reads
+   * `/api/admin/suite/customers`, which is gated on accounts rather than on
+   * reporting, so the support role sees the item and it opens. What they pay is
+   * withheld server-side without `view_financials` (Codex, 20 Sep 2026 — it
+   * used to read the whole reporting model and answer 403).
+   */
   { key: 'customers', label: 'Customers', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'Reporting' },
   { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_reporting', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
   { key: 'behaviour', label: 'Behaviour', icon: 'inspire', needs: 'view_reporting', sub: 'What households actually do, and whether they come back', group: 'Reporting' },

@@ -141,6 +141,8 @@ export type SupplierRecord = {
     expected: number | null;
     variance: number | null;
     variancePct: number | null;
+    /** Why there is no comparison, where the figure itself is real. */
+    varianceGap?: string | null;
     currency: Currency;
     gap?: string | null;
   };

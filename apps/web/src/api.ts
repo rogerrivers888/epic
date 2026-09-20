@@ -2964,6 +2964,14 @@ export const api = {
    */
   adminSuite: ({ period, data }: { period: string; data: 'real' | 'mock' }) =>
     request<AdminSuite>(`/api/admin/suite?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
+  /**
+   * The household list alone, gated on `view_accounts` rather than on
+   * `view_reporting`, because that is the capability Customers is advertised to.
+   * Money columns come back withheld without `view_financials`.
+   */
+  adminSuiteCustomers: ({ period, data }: { period: string; data: 'real' | 'mock' }) =>
+    request<{ mock: boolean; customers: AdminSuite['customers']; gaps: Record<string, string>; withheld: string[] }>(
+      `/api/admin/suite/customers?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
   adminSuiteHousehold: (id: string, { period, data }: { period: string; data: 'real' | 'mock' }) =>
     request<{ mock: boolean; household: Record<string, any> }>(
       `/api/admin/suite/household/${encodeURIComponent(id)}?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
