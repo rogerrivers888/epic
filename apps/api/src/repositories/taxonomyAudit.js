@@ -28,20 +28,33 @@ export async function evidence() {
     query(`select venue_ref, count(*) n from search_events where kind in ('open','save','add_to_trip') and venue_ref is not null group by 1`),
     // What we have actually researched, and whether it amounts to somewhere you
     // could go. Nothing rented is read here.
+    // Only records research has actually finished with. A row is created when a
+    // place is claimed and sits empty until the enrichment runs, so counting a
+    // pending one as "nothing says it is visitable" would let ten unresearched
+    // places condemn the word that found them (Codex, 20 Sep 2026).
     query(`select venue_ref,
                   (website is not null or opening_hours is not null or booking_url is not null) as visitable
-             from place_records`),
+             from place_records
+            where enrich_state in ('done', 'partial') and enriched_at is not null`),
     query(`select venue_ref, google_types from place_index
             where google_types is not null and cardinality(google_types) > 0`),
-    // Which words sit on the same place. The index knows the word that found a
-    // place; the library knows every word a place carries.
-    query(`select venue_ref, found_by from place_index where found_by is not null`),
+    // Every word that has ever surfaced a place, not the last one to do so.
+    // `place_index.found_by` is overwritten by each census run, so a place
+    // found by four words counted for one of them and the other three came out
+    // thin enough to skip (Codex, 20 Sep 2026). `place_subcategories` is the
+    // history and is what the thresholds have to be read from.
+    query(`select venue_ref, found_by from place_subcategories where found_by is not null
+            union
+           select venue_ref, found_by from place_index where found_by is not null`),
   ]);
 
   const byWord = new Map();
   for (const r of pairs.rows) {
-    byWord.set(r.found_by, [...(byWord.get(r.found_by) ?? []), r.venue_ref]);
+    const had = byWord.get(r.found_by) ?? new Set();
+    had.add(r.venue_ref);
+    byWord.set(r.found_by, had);
   }
+  for (const [k, v] of byWord) byWord.set(k, [...v]);
   // Two words are together when the same place carries both.
   const onPlace = new Map();
   for (const r of types.rows) {
@@ -233,21 +246,48 @@ export async function decideGroup({ auditId, flag, state, by = null }) {
 const DOES = new Set(['exclude', 'rename', 'retire', 'fold', 'create', 'carry', 'repoint']);
 
 export async function apply({ auditId, by = null }) {
+  // Applied once, and once only. A run that left advisory proposals sitting in
+  // `accepted` would otherwise be applied a second time, build an empty
+  // snapshot over the real one and take the undo with it (Codex, 20 Sep 2026).
+  const { rows: [already] } = await query('select applied_at, undone_at from taxonomy_audits where id = $1', [auditId]);
+  if (!already) throw Object.assign(new Error('No such audit.'), { status: 404 });
+  if (already.applied_at && !already.undone_at) {
+    throw Object.assign(new Error('That audit has already been applied. Put it back first.'), { status: 400 });
+  }
   const { rows: accepted } = await query(
     `select * from taxonomy_proposals where audit_id = $1 and state = 'accepted' order by action`, [auditId]);
   if (!accepted.length) return { applied: 0, advisory: 0, snapshot: null };
 
   return withTransaction(async (client) => {
     const snapshot = { words: [], subcategories: [], rules: [] };
+    // One snapshot per thing, taken before anything has touched it. Two
+    // accepted proposals can name the same word under different flags, and
+    // capturing it again after the first had already changed it made undo
+    // restore the mutated state (Codex, 20 Sep 2026).
+    const kept = new Set();
     const keepWord = async (key) => {
+      if (kept.has(`w:${key}`)) return;
+      kept.add(`w:${key}`);
       const { rows } = await client.query(
         "select namespace, key, decision, points_at, active from taxonomy_labels where namespace = 'google' and key = $1", [key]);
       if (rows[0]) snapshot.words.push(rows[0]);
     };
     const keepSub = async (key) => {
+      if (kept.has(`s:${key}`)) return;
+      kept.add(`s:${key}`);
       const { rows } = await client.query(
         'select key, label, category_key, active from shelf_subcategories where key = $1', [key]);
       if (rows[0]) snapshot.subcategories.push(rows[0]);
+    };
+    /** Every word pointing at a drawer, before a fold moves them all. */
+    const keepPointers = async (subKey) => {
+      const { rows } = await client.query(
+        "select namespace, key, decision, points_at, active from taxonomy_labels where points_at = $1", [subKey]);
+      for (const r of rows) {
+        if (kept.has(`w:${r.key}`)) continue;
+        kept.add(`w:${r.key}`);
+        snapshot.words.push(r);
+      }
     };
     const keepRules = async (where, args) => {
       const { rows } = await client.query(`select * from shelf_rules where ${where}`, args);
@@ -294,6 +334,8 @@ export async function apply({ auditId, by = null }) {
           const { rows: [target] } = await client.query(
             'select key from shelf_subcategories where label = $1 or key = $1', [p.proposed]);
           if (!target) { advisory += 1; continue; }
+          // The words pointing here move too, so they are kept before they do.
+          await keepPointers(p.subject);
           await client.query('update shelf_rules set subcategory = $2, updated_at = now() where subcategory = $1',
             [p.subject, target.key]);
           await client.query(

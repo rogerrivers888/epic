@@ -23,6 +23,23 @@ const sub = (key, action, proposed, because, extra = {}) => ({
   action, now_value: null, proposed, because, numbers: extra, moves: 0,
 });
 
+/**
+ * The two halves of the Landmarks split, and the words that go to each.
+ *
+ * Named here rather than left for somebody to type, because the owner named
+ * them (20 Sep 2026) and a split whose halves are already decided is an
+ * instruction rather than advice.
+ */
+export const LANDMARK_SPLIT = {
+  from: 'landmarks',
+  halves: [
+    { key: 'monuments-memorials', label: 'Monuments & memorials',
+      words: ['monument', 'memorial', 'statue', 'war_memorial'] },
+    { key: 'landmarks-you-can-see', label: 'Landmarks',
+      words: ['lighthouse', 'pier', 'tower', 'viaduct', 'observation_wheel', 'ferris_wheel'] },
+  ],
+};
+
 /** Map furniture. A road bridge is on the map because maps need it. */
 export const STRUCTURAL = [
   'arch_bridge', 'bridge', 'footbridge', 'railway_bridge', 'road_bridge',
@@ -37,10 +54,14 @@ export const DELIVERY_OUT = ['food_delivery', 'meal_delivery', 'pizza_delivery']
 
 /** New subcategories the brief asks for, with the category each belongs to. */
 export const NEW_SUBCATEGORIES = [
+  // The owner corrected his own brief, 20 Sep 2026: "Notable structures is
+  // lifeless, and it was also wrong of me to put lighthouses and piers under
+  // memorials — a lighthouse isn't a memorial… 'Landmarks' is what a household
+  // would actually say."
   { key: 'monuments-memorials', label: 'Monuments & memorials', category: 'culture',
-    because: 'Landmarks & monuments split: monument, memorial, lighthouse, pier.' },
-  { key: 'notable-structures', label: 'Notable structures', category: 'culture',
-    because: 'Landmarks & monuments split: viaducts and landmark bridges only.' },
+    because: 'Landmarks split, the things raised to remember somebody: monument, memorial, statue, war memorial.' },
+  { key: 'landmarks-you-can-see', label: 'Landmarks', category: 'culture',
+    because: 'Landmarks split, the things you go and look at: lighthouse, pier, tower, viaduct, notable bridges, observation wheels.' },
   { key: 'breweries-distilleries', label: 'Breweries, wineries & distilleries', category: 'food',
     because: 'Rehomed from Days out: distillery, whisky distillery.' },
   { key: 'heritage-railways', label: 'Heritage railways', category: 'fun',
@@ -78,8 +99,8 @@ export function agreed({ have = new Set(), words = new Set() } = {}) {
     ifWord(k, 'exclude', 'Not in Epic',
       'A building, not a visit. Cathedrals, abbeys, minsters and priories stay; individual churches get filed by hand.');
   }
-  ifSub('landmarks', 'split', 'Monuments & memorials  ·  Notable structures',
-    'Junk drawer. Monument, memorial, lighthouse and pier are one thing; viaducts and landmark bridges are another.');
+  ifSub('landmarks', 'split', 'Monuments & memorials  \u00b7  Landmarks',
+    'Junk drawer. What was raised to remember somebody is one thing; what you go and look at is another. A lighthouse is not a memorial.');
   ifSub('days-out', 'retire', null,
     'Retire. Rowing and canoeing venue goes to Rowing, paddling & sailing; distilleries to Breweries, wineries & distilleries; heritage railway to Heritage railways.');
 
@@ -105,6 +126,15 @@ export function agreed({ have = new Set(), words = new Set() } = {}) {
   // ---- smaller -----------------------------------------------------------
   ifWord('yoga_studio', 'exclude', 'Not in Epic',
     'A weekly class near home is not a day out, and it belongs to Hosting.');
+
+  // The owner settled the shops that sit on the line, 20 Sep 2026: "My
+  // exclusion test was about services you book near home — gyms, dentists, nail
+  // bars. A deli or a chocolate shop in a market town is a genuine stop on a
+  // day out." So they stay, and they are filed rather than excluded. That they
+  // should not *lead* a result set is a ranking matter and is not decided here.
+  ifWord('chocolate_shop', 'repoint', 'cafes', 'A stop on the wander, not a service you book. Files under Cafés & bakeries.');
+  ifWord('cake_shop', 'repoint', 'cafes', 'A stop on the wander, not a service you book. Files under Cafés & bakeries.');
+  ifWord('deli', 'repoint', 'farm-shops-delis', 'A stop on the wander. Files under Farm shops & delis.');
 
   // ---- the new drawers ---------------------------------------------------
   for (const n of NEW_SUBCATEGORIES) {

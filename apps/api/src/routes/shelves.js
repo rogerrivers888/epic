@@ -62,6 +62,42 @@ async function centreOf(req) {
 }
 
 /**
+ * Which rule is deciding where a place sits, right now.
+ *
+ * Used to attribute a correction: when somebody moves a place, the thing worth
+ * counting is not that they moved it but *what they disagreed with*. Returns
+ * null where nothing was deciding it — a place sitting where its atlas category
+ * put it has no rule to blame, and saying so is better than blaming the nearest
+ * one.
+ */
+async function decidingRule(ref, rules) {
+  const tax = await taxonomy.taxonomy();
+  // Whatever we know about the place, from wherever we hold it.
+  const { rows: [atlas] } = await query(
+    `select category, kinds, coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref
+       from attractions
+      where venue_ref = $1 or ('wikidata:' || wikidata_id) = $1 or ('osm:' || osm_ref) = $1
+      limit 1`, [ref]);
+  const { rows: [indexed] } = await query(
+    'select category, subcategory, google_types from place_index where venue_ref = $1', [ref]);
+  if (!atlas && !indexed) return null;
+
+  const filed = atlas
+    ? shelvesForAtlas({ ref, category: atlas.category, kinds: atlas.kinds ?? [] }, rules, tax.vocab)
+    : shelvesForVenue({ ref, types: indexed.google_types ?? [] }, rules, tax.vocab);
+  // `because` is the chain that fired, narrowest first. A default has no rule.
+  const top = (filed.because ?? []).find((b) => b && b.scope && b.scope !== 'default') ?? null;
+  return {
+    ruleId: top?.id ?? null,
+    scope: top?.scope ?? null,
+    subject: top?.subject ?? null,
+    subjectLabel: top?.subject_label ?? null,
+    category: filed.category ?? null,
+    subcategory: filed.subcategory ?? null,
+  };
+}
+
+/**
  * One attraction, as the home screen sees it plus the reasoning behind it.
  *
  * `kinds` comes back named and with whatever has been taught about each,
@@ -114,9 +150,16 @@ const namesFor = (rows) => lib.kindsByQid([...new Set(rows.flatMap((r) => r.kind
 
 shelves.get('/', requires('view_library'), async (_req, res, next) => {
   try {
-    const [rules, taught, tax, use] = await Promise.all([
+    const [rules, taught, tax, use, overrides] = await Promise.all([
       shelfRules.rules(), shelfRules.list(), taxonomy.taxonomy(), taxonomy.subcategoryUse(),
+      // How many times a person has moved a place out of where each rule put
+      // it. The owner, 20 Sep 2026: "'This rule has been called wrong 41 times'
+      // is the single most useful number in the system." Counted from the rows
+      // rather than a tally, so the screen can show the places behind it.
+      query(`select rule_id, count(*)::int n, max(at) as last
+               from rule_overrides where rule_id is not null group by rule_id`),
     ]);
+    const wrong = new Map(overrides.rows.map((r) => [r.rule_id, { n: r.n, last: r.last }]));
     res.json({
       // Both levels, straight from the tables, so the screens draw whatever the
       // settings page last said rather than a list compiled into the bundle.
@@ -127,7 +170,11 @@ shelves.get('/', requires('view_library'), async (_req, res, next) => {
       // What a subject falls back to when nothing has been taught about it, so
       // the screen can show the starting point beside the correction.
       defaults: { category: BY_ATLAS_CATEGORY, experience: BY_EXPERIENCE },
-      rules: taught,
+      rules: taught.map((r) => ({
+        ...r,
+        overrides: wrong.get(r.id)?.n ?? 0,
+        overriddenAt: wrong.get(r.id)?.last ?? null,
+      })),
       counts: Object.fromEntries(shelfRules.SCOPES.map((s) => [s, rules[s].size])),
     });
   } catch (err) { next(err); }
@@ -351,6 +398,7 @@ shelves.put('/place', requires('manage_library'), async (req, res, next) => {
     const ref = String(req.body?.ref || '').trim();
     if (!ref) throw bad('Which place?');
     const tax = await taxonomy.taxonomy();
+    const rules = await shelfRules.rules();
 
     const drawer = req.body?.subcategory ? String(req.body.subcategory) : null;
     if (drawer && !tax.subByKey.has(drawer)) throw bad(`There is no subcategory called ${drawer}.`);
@@ -362,6 +410,12 @@ shelves.put('/place', requires('manage_library'), async (req, res, next) => {
       : req.body?.category ? String(req.body.category) : null;
     if (!asked) throw bad('Pick a category or a subcategory.');
     if (!tax.byKey.has(asked)) throw bad(`There is no category called ${asked}.`);
+
+    // Who was deciding this place before somebody disagreed, recorded against
+    // the rule so the Rules screen can say "called wrong 41 times" (owner,
+    // 20 Sep 2026). Read *before* the place rule is taught, or the answer is
+    // the correction itself.
+    const wasFiledBy = await decidingRule(ref, rules);
 
     const rule = await shelfRules.teach({
       scope: 'place',
@@ -381,7 +435,38 @@ shelves.put('/place', requires('manage_library'), async (req, res, next) => {
        values ($1,$2,'shelf.move','shelf_rule',$3,$4,$5)`,
       [req.account?.id ?? null, actorOf(req), rule.id, req.body?.label ?? ref,
        JSON.stringify({ category: asked, subcategory: drawer })]);
-    res.json({ rule, category: asked, subcategory: drawer });
+    // Only when it is actually a disagreement. Moving a place to where it
+    // already was is a confirmation, and counting it as an override would make
+    // the most-corrected rule the one somebody looked at most.
+    const moved = wasFiledBy && (wasFiledBy.category !== asked || wasFiledBy.subcategory !== drawer);
+    if (moved) {
+      await query(
+        `insert into rule_overrides
+           (rule_id, rule_scope, rule_subject, venue_ref, venue_label,
+            from_category, from_subcategory, to_category, to_subcategory, reason, by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [wasFiledBy.ruleId, wasFiledBy.scope, wasFiledBy.subject, ref, req.body?.label ?? null,
+          wasFiledBy.category, wasFiledBy.subcategory, asked, drawer,
+          req.body?.reason?.trim() || null, actorOf(req)]);
+    }
+    res.json({ rule, category: asked, subcategory: drawer, overrode: moved ? wasFiledBy : null });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /rules/:id/overrides — the places behind the number.
+ *
+ * "No household-facing number we cannot show the places behind" applies to the
+ * back office too: a rule called wrong forty-one times is only useful if you
+ * can read the forty-one.
+ */
+shelves.get('/rules/:id/overrides', requires('view_library'), async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `select venue_ref, venue_label, from_category, from_subcategory,
+              to_category, to_subcategory, reason, at, by
+         from rule_overrides where rule_id = $1 order by at desc limit 200`, [req.params.id]);
+    res.json({ overrides: rows, total: rows.length });
   } catch (err) { next(err); }
 });
 

@@ -119,3 +119,76 @@ test('the effect of a set is counted before it is applied', () => {
   assert.equal(e.creating, 1);
   assert.equal(e.retiring, 1);
 });
+
+// --- what Codex found in the apply path, 20 Sep 2026 -----------------------
+
+import { query } from '../src/db.js';
+import { apply, run, undo } from '../src/repositories/taxonomyAudit.js';
+
+const tidy = async () => {
+  await query("delete from taxonomy_labels where key in ('tmp_word','tmp_two')");
+  await query("delete from shelf_subcategories where key like 'tmp-%'");
+  await query("delete from taxonomy_audits where ran_by like 'test:%'");
+};
+
+test('a fold puts back the words it repointed', async (t) => {
+  t.after(tidy);
+  await tidy();
+  await query(`insert into shelf_subcategories (key,label,category_key,active)
+    values ('tmp-src','Temp source','fun',true),('tmp-dst','Temp target','fun',true)
+    on conflict (key) do update set active = true`);
+  await query(`insert into taxonomy_labels (namespace,key,label,points_at)
+    values ('google','tmp_word','Tmp word','tmp-src')
+    on conflict (namespace,key) do update set points_at = 'tmp-src', decision = null, active = true`);
+  const { rows: [a] } = await query("insert into taxonomy_audits (ran_by) values ('test:fold') returning *");
+  await query(`insert into taxonomy_proposals (audit_id,flag,subject_kind,subject,action,proposed,because,state)
+    values ($1,'agreed','subcategory','tmp-src','fold','Temp target','test','accepted')`, [a.id]);
+
+  const points = async () => (await query("select points_at from taxonomy_labels where key = 'tmp_word'")).rows[0].points_at;
+  assert.equal(await points(), 'tmp-src');
+  await apply({ auditId: a.id, by: 'test' });
+  assert.equal(await points(), 'tmp-dst', 'the fold moved it');
+  await undo({ auditId: a.id, by: 'test' });
+  assert.equal(await points(), 'tmp-src', 'and undo put it back');
+  const { rows: [sub] } = await query("select active from shelf_subcategories where key = 'tmp-src'");
+  assert.equal(sub.active, true);
+});
+
+test('an audit cannot be applied twice over its own snapshot', async (t) => {
+  t.after(tidy);
+  await tidy();
+  await query(`insert into shelf_subcategories (key,label,category_key,active)
+    values ('tmp-src','Temp source','fun',true) on conflict (key) do update set active = true, label = 'Temp source'`);
+  const { rows: [a] } = await query("insert into taxonomy_audits (ran_by) values ('test:twice') returning *");
+  await query(`insert into taxonomy_proposals (audit_id,flag,subject_kind,subject,action,proposed,because,state)
+    values ($1,'agreed','subcategory','tmp-src','rename','Renamed','test','accepted'),
+           ($1,'mixed','subcategory','tmp-src','split','a  ·  b','advisory, stays open','accepted')`, [a.id]);
+  await apply({ auditId: a.id, by: 'test' });
+  await assert.rejects(() => apply({ auditId: a.id, by: 'test' }), /already been applied/);
+  await undo({ auditId: a.id, by: 'test' });
+  const { rows: [sub] } = await query("select label from shelf_subcategories where key = 'tmp-src'");
+  assert.equal(sub.label, 'Temp source', 'the first apply is still undoable');
+});
+
+test('a word named by two accepted proposals is snapshotted once, before either', async (t) => {
+  t.after(tidy);
+  await tidy();
+  await query(`insert into shelf_subcategories (key,label,category_key,active)
+    values ('tmp-dst','Temp target','fun',true) on conflict (key) do update set active = true`);
+  await query(`insert into taxonomy_labels (namespace,key,label,points_at,decision,active)
+    values ('google','tmp_two','Tmp two','tmp-dst',null,true)
+    on conflict (namespace,key) do update set points_at = 'tmp-dst', decision = null, active = true`);
+  const { rows: [a] } = await query("insert into taxonomy_audits (ran_by) values ('test:twoflags') returning *");
+  // The same word under two flags, which the unique index allows.
+  await query(`insert into taxonomy_proposals (audit_id,flag,subject_kind,subject,action,proposed,because,state)
+    values ($1,'nobody_goes','word','tmp_two','exclude','Not in Epic','test','accepted'),
+           ($1,'not_visitable','word','tmp_two','exclude','Not in Epic','test','accepted')`, [a.id]);
+  await apply({ auditId: a.id, by: 'test' });
+  const gone = (await query("select decision, active from taxonomy_labels where key = 'tmp_two'")).rows[0];
+  assert.equal(gone.decision, 'aside');
+  await undo({ auditId: a.id, by: 'test' });
+  const back = (await query("select decision, points_at, active from taxonomy_labels where key = 'tmp_two'")).rows[0];
+  assert.equal(back.decision, null, 'restored to what it was, not to the state after the first proposal');
+  assert.equal(back.points_at, 'tmp-dst');
+  assert.equal(back.active, true);
+});
