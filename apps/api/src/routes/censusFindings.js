@@ -17,6 +17,7 @@
 import express from 'express';
 import { requires } from '../access.js';
 import * as findings from '../repositories/censusFindings.js';
+import { sweepOsm, sweepFhrs } from '../sources/groundCounts.js';
 
 const router = express.Router();
 
@@ -68,6 +69,30 @@ router.get('/saturation', requires('view_library'), async (req, res, next) => {
   try {
     const { outcodes, label } = scopeOf(req);
     res.json({ scope: label, ...(await findings.saturation({ outcodes })) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Ask the free sources about tiles the census has finished, now.
+ *
+ * `manage_library` rather than `view_library`: nothing here spends, but it does
+ * make outbound calls to somebody else's machine, and that is a decision rather
+ * than a page load. The loop in `server.js` does the same work slowly in the
+ * background; this is for when a person wants the check on a particular area
+ * before making a taxonomy decision about it.
+ *
+ * Bounded by time rather than by tiles, so the request answers rather than
+ * hanging: what it did not reach this time, the loop will.
+ */
+router.post('/ground', requires('manage_library'), async (req, res, next) => {
+  try {
+    const source = String(req.body?.source ?? 'osm');
+    if (!['osm', 'fhrs', 'both'].includes(source)) throw bad('the ground count is osm, fhrs or both');
+    const tiles = Math.min(50, Math.max(1, Number(req.body?.tiles ?? 8)));
+    const out = { costs: 'free' };
+    if (source === 'osm' || source === 'both') out.osm = await sweepOsm({ limit: tiles, msBudget: 20_000 });
+    if (source === 'fhrs' || source === 'both') out.fhrs = await sweepFhrs({ authorities: 1, msBudget: 20_000 });
+    res.json(out);
   } catch (err) { next(err); }
 });
 

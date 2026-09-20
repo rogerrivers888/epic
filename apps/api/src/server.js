@@ -73,6 +73,7 @@ import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, settleNew } from './repositories/placeIndex.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
+import * as ground from './sources/groundCounts.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
@@ -736,6 +737,30 @@ const advanceCensus = () => (censusPassGoing ? Promise.resolve() : ((censusPassG
   .finally(() => { censusPassGoing = false; })));
 setTimeout(() => { void advanceCensus(); }, RESUME_AFTER_MS + 45_000).unref?.();
 setInterval(() => { void advanceCensus(); }, CENSUS_EVERY_MS).unref?.();
+
+/**
+ * The free count the census is measured against (sources/groundCounts.js).
+ *
+ * The brief asks for the cross-checks "in the same pass" and they run in their
+ * own, a step behind: a tile Google has not finished has no number to be
+ * checked, and a free source that runs ahead of the paid one produces exactly
+ * the misleading comparison the check exists to prevent. So this takes tiles
+ * the census has already closed, and never touches one it has not.
+ *
+ * Slower than the census on purpose. Overpass and the hygiene register are
+ * somebody else's machines, run for nothing, and there is nobody waiting on the
+ * answer — a ground count is a week's question, not a minute's.
+ */
+const GROUND_EVERY_MS = Number(process.env.EPIC_GROUND_EVERY_MS || 5 * 60_000);
+let groundPassGoing = false;
+const checkGround = () => (groundPassGoing ? Promise.resolve() : ((groundPassGoing = true), ground.sweepOsm({ limit: 8, msBudget: 45_000 })
+  .then((r) => { if (r?.tiles) console.log(`epic-api: ground — the open map on ${r.tiles} tile(s), ${r.requests} request(s)${r.problems.length ? `, ${r.problems.length} problem(s)` : ''}`); })
+  .then(() => ground.sweepFhrs({ authorities: 1, msBudget: 45_000 }))
+  .then((r) => { if (r?.authorities) console.log(`epic-api: ground — the hygiene register for ${r.authorities} authority(ies), ${r.tiles} tile(s)`); })
+  .catch((err) => console.error('ground counts', err.message))
+  .finally(() => { groundPassGoing = false; })));
+setTimeout(() => { void checkGround(); }, RESUME_AFTER_MS + 90_000).unref?.();
+setInterval(() => { void checkGround(); }, GROUND_EVERY_MS).unref?.();
 setInterval(() => { void tryResume(false); }, RESUME_EVERY_MS).unref?.();
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`epic-api listening on 0.0.0.0:${port}`);
