@@ -406,6 +406,28 @@ const SECTIONS: Section[] = [
     icon: 'plan',
     decisions: [
       {
+        title: 'How far away it is, measured against real roads rather than assumed',
+        rule: 'Every list in Epic is fenced by one estimate of how long a journey takes, worked out from the distance and a speed that climbs as the journey lengthens. Those speeds are now fitted to 473 real road times rather than assumed: 32.5 km/h through a town, 102 on the open road, and a road 1.4 times the straight line \u2014 the measured figure, not the 1.25 that was there before. Walking, cycling and public transport are untouched, because only driving was measured.',
+        why: 'The old numbers overstated three driving journeys in four \u2014 by five minutes at the median and by as much as thirty-five on a long one. Overstating a journey never shows a household a wrong number; it shows them **fewer places**, because the fence throws away whatever it thinks is out of reach. That is one fault behind two complaints that were treated as separate bugs: Crystal Palace on 6 September (one restaurant on a twenty-mile run) and Bristol on 12 September ("nothing matches" inside an hour). Tested on 393 further pairs from 90 origins the fit never saw: journeys overstated fall from 75% to 41%, and the share wrongly put out of reach at a five-minute allowance from 37% to 10%.',
+        state: 'live',
+        where: 'apps/api/src/domain/travel.js \u00b7 reach-fit2.mjs \u00b7 train.json + holdout.json',
+        said: {
+          who: 'Roger', on: '20 Sep 2026',
+          words: 'It is a household-facing bug fix \u2014 Inspire and Places are under-showing today \u2014 so treat it that way.',
+        },
+      },
+      {
+        title: 'A straight line that crosses water is the one thing the estimate cannot fix',
+        rule: 'About one pair in eight has a road more than 1.8 times its straight line \u2014 the Firth of Clyde, the Wester Ross sea lochs, the estuaries, the islands. Those journeys are understated, sometimes badly: twenty-one minutes for a drive that takes ninety. This is accepted as a known limitation rather than patched.',
+        why: 'A hand-built coastline penalty is a bespoke geometry system that only ever approximates a road network, and the cases are a small, identifiable set. On the planning paths the exact pass buys a real road time for what is about to be shown and drops them; on the browsing paths there is no exact pass, so the number on screen is simply wrong for those places. A road network is the real fix and it is a separate decision.',
+        state: 'partial',
+        where: 'apps/api/src/domain/travel.js \u00b7 speedFor',
+        said: {
+          who: 'Roger', on: '20 Sep 2026',
+          words: 'Accept it, don\u2019t build a crossing penalty \u2014 document them as a known limitation and leave it.',
+        },
+      },
+      {
         title: 'Allergens exclude; dislikes rank',
         rule: 'An allergen takes a place out of the running entirely. A dislike moves it down the list and never removes it. They never share a control, a colour, or a code path.',
         why: 'They are different in kind, not in degree. Treating a dislike as an exclusion loses places the family would happily go to; treating an allergen as a ranking is dangerous.',
