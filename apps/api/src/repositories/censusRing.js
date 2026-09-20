@@ -31,73 +31,143 @@
 
 import { query } from '../db.js';
 
-/** Wider than this and a box can sit on both sides of the ring's edge. */
-const TOO_WIDE_M = 1000;
+/**
+ * How fine a box has to get before it is worth splitting further.
+ *
+ * Not a test of whether a box may be counted — that is the corner test below —
+ * but the floor a re-census stops at. A box this small sits inside one postcode
+ * sector almost everywhere people live.
+ */
+export const FINE_M = 1000;
+
+/** The four corners and the middle: five points that decide whether a box is in. */
+const cornersOf = (box) => [
+  { lat: box.minLat, lng: box.minLng },
+  { lat: box.minLat, lng: box.maxLng },
+  { lat: box.maxLat, lng: box.minLng },
+  { lat: box.maxLat, lng: box.maxLng },
+  { lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 },
+];
+
+const boxFrom = (slice) => {
+  const n = String(slice ?? '').split(',').map(Number);
+  if (n.length !== 4 || n.some((x) => !Number.isFinite(x))) return null;
+  return { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] };
+};
+
+export const widthOf = (box) => (box
+  ? Math.max((box.maxLat - box.minLat) * 111320, (box.maxLng - box.minLng) * 70000)
+  : 0);
+
+/**
+ * Whether a box is wholly inside the ring, wholly outside it, or across its
+ * edge.
+ *
+ * The owner, 20 Sep 2026: "Any slice wider than about a kilometre gets split
+ * until every place lands in a box that sits wholly inside or wholly outside
+ * the ring." The width is not the question — a six-kilometre box in the middle
+ * of a forty-kilometre ring is wholly inside and needs no splitting. Only a box
+ * that crosses the edge is unresolved, and those are the ones a re-census
+ * splits.
+ *
+ * The ring is a set of sector centres, so "inside" means the nearest sector to
+ * that point is one of the ring's. Five points decide it: the four corners and
+ * the middle.
+ */
+export function whereBoxSits(box, { cells, universe }) {
+  if (!box) return 'nowhere';
+  const inRing = cells instanceof Set ? cells : new Set(cells);
+  let ins = 0;
+  for (const p of cornersOf(box)) {
+    let best = null; let bestD = Infinity;
+    for (const u of universe) {
+      const d = (u.lat - p.lat) ** 2 + (u.lng - p.lng) ** 2;
+      if (d < bestD) { bestD = d; best = u; }
+    }
+    if (best && inRing.has(best.code)) ins += 1;
+  }
+  if (ins === 5) return 'inside';
+  if (ins === 0) return 'outside';
+  return 'across';
+}
 
 /**
  * @param cells    the ring's own sectors, from the reachability matrix
  * @param outcodes the districts those sectors sit in — the candidate universe
  */
 export async function censusInRing({ cells = [], outcodes = [] } = {}) {
-  if (!cells.length || !outcodes.length) return { counts: {}, uncertain: {}, placed: { own: 0, slice: 0 }, unplaceable: 0 };
+  const empty = { counts: {}, unresolved: {}, placed: { own: 0, slice: 0 }, unplaceable: 0, boxes: { inside: 0, outside: 0, across: 0 } };
+  if (!cells.length || !outcodes.length) return empty;
   const slugs = outcodes.map((o) => String(o).toLowerCase());
-  const { rows } = await query(`
-    with candidates as (
-      select ps.category, ps.venue_ref, pi.lat, pi.lng, pi.slice
-        from place_subcategories ps
-        join place_index pi on pi.venue_ref = ps.venue_ref
-       where ps.area_slug = any($1)
-    ),
-    placed as (
-      select c.category, c.venue_ref,
-             (c.lat is not null and c.lng is not null) as own,
-             coalesce(c.lat, (split_part(c.slice, ',', 1)::float + split_part(c.slice, ',', 3)::float) / 2) as lat,
-             coalesce(c.lng, (split_part(c.slice, ',', 2)::float + split_part(c.slice, ',', 4)::float) / 2) as lng,
-             case when c.lat is not null then 0
-                  when c.slice is null then null
-                  else greatest(
-                    (split_part(c.slice, ',', 3)::float - split_part(c.slice, ',', 1)::float) * 111320,
-                    (split_part(c.slice, ',', 4)::float - split_part(c.slice, ',', 2)::float) * 70000)
-             end as box_m
-        from candidates c
-    ),
-    -- The nearest sector we hold, out of the ones these districts are made of.
-    -- Bounded on purpose: the universe is the districts the ring touches, so a
-    -- place at the rim is compared against the sectors it could plausibly be
-    -- in, and never against every cell in the country.
-    universe as (
-      select g.code, g.lat, g.lng from geo_cells g where lower(g.outcode) = any($1)
-    ),
-    sited as (
-      select p.*, n.code
-        from placed p
-        left join lateral (
-          select u.code from universe u
-           order by (u.lat - p.lat) * (u.lat - p.lat) + (u.lng - p.lng) * (u.lng - p.lng)
-           limit 1) n on p.lat is not null
-    )
-    select category,
-           count(distinct venue_ref) filter (
-             where code = any($2) and (box_m is not null and box_m <= $3)) as inside,
-           count(distinct venue_ref) filter (
-             where code = any($2) and box_m > $3) as uncertain,
-           count(distinct venue_ref) filter (where own) as own,
-           count(distinct venue_ref) filter (where not own and box_m is not null) as by_slice,
-           count(distinct venue_ref) filter (where lat is null) as nowhere
-      from sited
-     group by category`, [slugs, cells, TOO_WIDE_M]);
 
-  const counts = {};
-  const uncertain = {};
+  // Every sector these districts are made of, once. The corner test runs in
+  // memory against this: a few hundred points, five comparisons per box.
+  const { rows: universe } = await query(
+    'select code, lat, lng from geo_cells where lower(outcode) = any($1)', [slugs]);
+  if (!universe.length) return empty;
+  const inRing = new Set(cells);
+
+  const { rows } = await query(`
+    select ps.category, ps.venue_ref, pi.lat, pi.lng, pi.slice
+      from place_subcategories ps
+      join place_index pi on pi.venue_ref = ps.venue_ref
+     where ps.area_slug = any($1)`, [slugs]);
+
+  // One verdict per distinct box, not per row: the same slice found hundreds of
+  // places and the corner test would otherwise run hundreds of times.
+  const verdicts = new Map();
+  const verdictOf = (slice) => {
+    if (verdicts.has(slice)) return verdicts.get(slice);
+    const v = whereBoxSits(boxFrom(slice), { cells: inRing, universe });
+    verdicts.set(slice, v);
+    return v;
+  };
+  const cellFor = (lat, lng) => {
+    let best = null; let bestD = Infinity;
+    for (const u of universe) {
+      const d = (u.lat - lat) ** 2 + (u.lng - lng) ** 2;
+      if (d < bestD) { bestD = d; best = u; }
+    }
+    return best?.code ?? null;
+  };
+
+  const counted = new Map();
+  const unresolved = new Map();
+  const add = (map, category, ref) => {
+    if (!map.has(category)) map.set(category, new Set());
+    map.get(category).add(ref);
+  };
   let own = 0; let bySlice = 0; let unplaceable = 0;
+  const seenOwn = new Set(); const seenSlice = new Set();
+  const boxes = { inside: 0, outside: 0, across: 0 };
+
   for (const r of rows) {
-    counts[r.category] = Number(r.inside) || 0;
-    uncertain[r.category] = Number(r.uncertain) || 0;
-    own += Number(r.own) || 0;
-    bySlice += Number(r.by_slice) || 0;
-    unplaceable += Number(r.nowhere) || 0;
+    // Its own point beats any box: that is exact.
+    if (r.lat != null && r.lng != null) {
+      if (!seenOwn.has(r.venue_ref)) { seenOwn.add(r.venue_ref); own += 1; }
+      if (inRing.has(cellFor(Number(r.lat), Number(r.lng)))) add(counted, r.category, r.venue_ref);
+      continue;
+    }
+    if (!r.slice) { unplaceable += 1; continue; }
+    if (!seenSlice.has(r.venue_ref)) { seenSlice.add(r.venue_ref); bySlice += 1; }
+    const v = verdictOf(r.slice);
+    if (v === 'inside') add(counted, r.category, r.venue_ref);
+    else if (v === 'across') add(unresolved, r.category, r.venue_ref);
   }
-  return { counts, uncertain, placed: { own, slice: bySlice }, unplaceable, tooWideM: TOO_WIDE_M };
+  for (const v of verdicts.values()) if (boxes[v] != null) boxes[v] += 1;
+
+  return {
+    counts: Object.fromEntries([...counted].map(([k, set]) => [k, set.size])),
+    // Places in a box that crosses the ring's edge: they are in the ring or
+    // they are not, and the only way to know is to census that box finer. Never
+    // dropped — a count that leaves them out silently undercounts, which is the
+    // thing that produced a worse screen than the one it replaced (owner,
+    // 20 Sep 2026: "Do not discard them. Resolve them, then count them").
+    unresolved: Object.fromEntries([...unresolved].map(([k, set]) => [k, set.size])),
+    placed: { own, slice: bySlice },
+    unplaceable,
+    boxes,
+  };
 }
 
 /**

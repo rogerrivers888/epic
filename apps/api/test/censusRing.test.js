@@ -25,7 +25,7 @@ test.after(() => pool.end());
 const IN = 'sector:ZR1 1';
 const OUT = 'sector:ZR2 2';
 const OUTCODES = ['ZR1', 'ZR2'];
-const REFS = ['google:RING-OWN', 'google:RING-SLICE', 'google:RING-WIDE', 'google:RING-OUTSIDE', 'google:RING-BOTH'];
+const REFS = ['google:RING-OWN', 'google:RING-SLICE', 'google:RING-WIDE', 'google:RING-OUTSIDE', 'google:RING-BOTH', 'google:RING-ACROSS'];
 
 const seed = async () => {
   await query('delete from place_subcategories where venue_ref = any($1)', [REFS]);
@@ -43,7 +43,10 @@ const seed = async () => {
             ('google:RING-SLICE','fun','zoos-wildlife', null, null, '51.3990,-0.6320,51.4030,-0.6280', 'GB'),
             ('google:RING-WIDE','fun','days-out', null, null, '51.3800,-0.7000,51.4400,-0.6200', 'GB'),
             ('google:RING-OUTSIDE','fun','theme-parks', null, null, '51.5980,-0.3020,51.6020,-0.2980', 'GB'),
-            ('google:RING-BOTH','sport','swimming', 51.401, -0.631, null, 'GB')`);
+            ('google:RING-BOTH','sport','swimming', 51.401, -0.631, null, 'GB'),
+            -- A box with one corner by each sector: in the ring or not, and the
+            -- row cannot say which.
+            ('google:RING-ACROSS','fun','days-out', null, null, '51.3900,-0.7000,51.6100,-0.2900', 'GB')`);
   // The census files a place under every drawer whose question found it.
   await query(
     `insert into place_subcategories (venue_ref, category, subcategory, area_slug, found_by, found_rank)
@@ -55,7 +58,8 @@ const seed = async () => {
             ('google:RING-OUTSIDE','fun','theme-parks','zr2','amusement_park',1),
             -- and a place filed under two categories, which is not a double count
             ('google:RING-BOTH','sport','swimming','zr1','swimming_pool',1),
-            ('google:RING-BOTH','fun','days-out','zr1','tourist_attraction',9)`);
+            ('google:RING-BOTH','fun','days-out','zr1','tourist_attraction',9),
+            ('google:RING-ACROSS','fun','days-out','zr1','tourist_attraction',11)`);
 };
 
 test('a place with no coordinate is placed by the box the census found it in', async () => {
@@ -71,18 +75,19 @@ test('a place with no coordinate is placed by the box the census found it in', a
 test('one place found by three drawers is one place in that category', async () => {
   await seed();
   const out = await censusInRing({ cells: [IN], outcodes: OUTCODES });
-  // Fun holds: RING-OWN (twice over, one place), RING-SLICE, and RING-BOTH.
-  // RING-WIDE is uncertain and RING-OUTSIDE is outside.
-  assert.equal(out.counts.fun, 3, '135 rows for 65 places was the bug');
+  // Fun holds four places: RING-OWN (found twice over, one place), RING-SLICE,
+  // RING-WIDE and RING-BOTH. RING-OUTSIDE is outside and RING-ACROSS is
+  // unresolved.
+  assert.equal(out.counts.fun, 4, '135 rows for 65 places was the bug');
 });
 
 test('a place filed under two categories counts in both', async () => {
   await seed();
   const out = await censusInRing({ cells: [IN], outcodes: OUTCODES });
   assert.equal(out.counts.sport, 1, 'Sport is its own list');
-  // And the same place is in Fun's three above: fixing the first double count
+  // And the same place is in Fun's four above: fixing the first double count
   // must not break the second.
-  assert.equal(out.counts.fun, 3);
+  assert.equal(out.counts.fun, 4);
 });
 
 test('the ring is sectors, not whole districts', async () => {
@@ -91,13 +96,28 @@ test('the ring is sectors, not whole districts', async () => {
   // ZR2 is in the candidate districts and not in the ring, so the place there
   // is not counted — the whole point of using the matrix.
   const both = await censusInRing({ cells: [IN, OUT], outcodes: OUTCODES });
-  assert.equal(out.counts.fun, 3);
-  assert.equal(both.counts.fun, 4, 'widening the ring to that sector brings it in');
+  assert.equal(out.counts.fun, 4);
+  // Widening to both sectors brings in the one outside *and* resolves the box
+  // that used to cross the edge, because now both its ends are in the ring.
+  assert.equal(both.counts.fun, 6, 'widening the ring brings them in');
+  assert.equal(both.unresolved.fun ?? 0, 0);
 });
 
-test('a box too wide to place is reported, not counted either way', async () => {
+test('a wide box wholly inside the ring is counted, width and all', async () => {
   await seed();
   const out = await censusInRing({ cells: [IN], outcodes: OUTCODES });
-  assert.equal(out.uncertain.fun, 1, 'six kilometres across can straddle the edge');
-  assert.ok(out.counts.fun < out.counts.fun + out.uncertain.fun, 'and it is not in the count');
+  // RING-WIDE sits in a six-kilometre box, and every corner of it is nearest
+  // the ring's own sector. Width was never the question (owner, 20 Sep 2026).
+  assert.ok(out.boxes.inside >= 1);
+  assert.equal(out.counts.fun, 4);
+});
+
+test('a box across the edge is unresolved, and never dropped', async () => {
+  await seed();
+  const out = await censusInRing({ cells: [IN], outcodes: OUTCODES });
+  // RING-ACROSS has a corner by each sector: it is in the ring or it is not,
+  // and only a finer census can say. It is carried as unresolved so the count
+  // can be shown as a floor rather than silently undercounting.
+  assert.equal(out.unresolved.fun, 1);
+  assert.equal(out.boxes.across, 1);
 });

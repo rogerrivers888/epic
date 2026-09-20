@@ -1021,14 +1021,21 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
         key,
         before: before[key] ?? 0,
         after: now.counts[key] ?? 0,
-        uncertain: now.uncertain[key] ?? 0,
+        // Places in a box that crosses the ring's edge. Not dropped: the count
+        // is shown as a floor — "41+" — until a finer census resolves them
+        // (owner, 20 Sep 2026: "Do not discard them. Resolve them, then count
+        // them… A floor is honest").
+        unresolved: now.unresolved[key] ?? 0,
       })),
+      // How the boxes themselves fell: wholly in, wholly out, or across the
+      // edge. The third is the only work a re-census has to do.
+      boxes: now.boxes,
       // How each place was put on the map: its own point, or the box the census
       // asked inside. The second is the census-only population, which counting
       // by `place_cells` would have lost entirely.
       placed: now.placed,
       unplaceable: now.unplaceable,
-      tooWideM: now.tooWideM,
+      fineM: 1000,
     });
   } catch (err) { next(err); }
 });
