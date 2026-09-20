@@ -110,7 +110,7 @@ filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) 
 });
 
 /**
- * Subcategories whose own places disagree with their defaults past the limit.
+ * Subcategories whose own places disagree with their defaults at or past the limit.
  *
  * The Overview counts them and the Rules tab lists them; both read this, so
  * the number and the list can never disagree.
@@ -467,10 +467,10 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
       const now = await effective();
       if (now.mixed) throw bad(`The places here disagree about ${attr.label.toLowerCase()}, so there is no answer to accept.`);
       if (!now.value) throw bad(`There is nothing proposed there to accept.`);
-      // Settling a row that exists, or writing down the proposal that did not.
-      const value = now.stored
-        ? await placeAttributes.settleDefault(key, attribute)
-        : await placeAttributes.setDefault(key, attribute, now.value, { settled: true });
+      // One statement either way: it settles the row that is there, or writes
+      // down the proposal that was not, and never overwrites a value somebody
+      // set while this request was reading.
+      const value = await placeAttributes.acceptDefault(key, attribute, now.value);
       return res.json({ attribute, value, settled: true });
     }
 
@@ -504,11 +504,7 @@ filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), asyn
 
     let accepted = 0;
     for (const a of proposed) {
-      const had = d.defaultsBySub.get(key)?.get(a.key);
-      if (had) await placeAttributes.settleDefault(key, a.key);
-      // A value only the places propose has never been written down; accepting
-      // it is what writes it.
-      else await placeAttributes.setDefault(key, a.key, a.value, { settled: true });
+      await placeAttributes.acceptDefault(key, a.key, a.value);
       accepted += 1;
     }
     placeAttributes.forget();

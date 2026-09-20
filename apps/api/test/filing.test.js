@@ -152,6 +152,21 @@ test('the spread limit is the threshold it is handed, not a number of its own', 
   assert.equal(answer({ attribute: YESNO, refs, valuesByRef: places, spreadLimit: 0.35 }).mixed, false);
 });
 
+test('at exactly the limit a drawer is mixed, and a limit of nought does not make everything mixed', () => {
+  // Twenty places, seven disagreeing, the limit at 0.35: exactly on it.
+  // The prototype flags this, and the drawing is the specification — somebody
+  // setting the limit to a third means a third disagreeing is too many.
+  const refs = Array.from({ length: 20 }, (_, i) => `p${i}`);
+  const valuesByRef = new Map(refs.map((ref, i) => [ref,
+    new Map([['parking', { yesno: i >= 7 }]])]));
+  assert.equal(answer({ attribute: YESNO, refs, valuesByRef, spreadLimit: 0.35 }).mixed, true);
+
+  // And the other end: everything agreeing is never mixed, whatever the limit.
+  const agreed = new Map(refs.map((ref) => [ref, new Map([['parking', { yesno: true }]])]));
+  assert.equal(answer({ attribute: YESNO, refs, valuesByRef: agreed, spreadLimit: 0 }).mixed, false);
+  assert.deepEqual(answer({ attribute: YESNO, refs, valuesByRef: agreed, spreadLimit: 0 }).value, { yesno: true });
+});
+
 test('the eight are proposed the same way, and a nought is a value like any other', () => {
   const a = answer({
     attribute: SCALE,

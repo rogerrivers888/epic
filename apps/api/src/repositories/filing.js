@@ -15,7 +15,7 @@
  * as a fact; it is shown as "no places to read it from".
  *
  * **What the places disagree about is not a default at all.** Where the places
- * in a drawer disagree beyond the spread threshold, the drawer has no honest
+ * in a drawer disagree at or past the spread threshold, the drawer has no honest
  * answer and each place answers for itself. Castles are neither indoors nor
  * out, and a drawer that insists is worse than one that shrugs.
  *
@@ -205,10 +205,21 @@ export function drawerAnswer({ attribute, refs, valuesByRef, defaults, spreadLim
   const agree = value ? said_.filter((v) => sameValue(v, value)).length : 0;
   const spread = said_.length ? (said_.length - agree) / said_.length : 0;
 
-  // A drawer with nothing to read from is not a drawer whose places disagree,
-  // and neither is one whose places all say the same thing: `spread > 0` is
-  // what stops a threshold of nought marking every unanimous answer as mixed
-  // (Codex, 20 Sep 2026). "Past the limit" is read as past it, not at it.
+  /**
+   * Mixed is *at or past* the limit, and the words here say so because the
+   * code does (Codex read "past the limit" above and objected to the `>=`,
+   * rightly — they disagreed).
+   *
+   * `>=` and not `>` because that is what the prototype does, and the drawing
+   * is the specification. A threshold you have to exceed by a hair is also the
+   * more surprising of the two: somebody setting it to 0.35 means a third
+   * disagreeing is too many, not that a third is fine.
+   *
+   * `spread > 0` is separate and is not about the boundary: it stops a limit of
+   * nought marking every unanimous drawer as mixed. A drawer with nothing to
+   * read from is not a drawer whose places disagree, and neither is one whose
+   * places all say the same thing.
+   */
   const mixed = said_.length > 0 && !current?.settled && spread > 0 && spread >= spreadLimit;
 
   return {

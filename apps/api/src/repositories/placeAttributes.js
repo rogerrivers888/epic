@@ -310,6 +310,38 @@ export async function setDefault(subcategoryKey, attributeKey, value, { settled 
 }
 
 /**
+ * Accept what the drawer is showing — whatever it turns out to be by the time
+ * the statement runs.
+ *
+ * Most of what the subcategory screen shows has never been written down: a
+ * proposal read off the places in the drawer has no row behind it, so
+ * accepting one has to *insert* it. But between reading the proposal and
+ * writing it, somebody else may have set that default outright — and a plain
+ * upsert would then overwrite their value with our stale derived one, which
+ * is the opposite of what Accept promises (Codex, 20 Sep 2026).
+ *
+ * One statement settles it, in both senses: insert the proposal if there is
+ * nothing there, and if there is now, mark *that* one settled and leave its
+ * value alone. Accept means "the answer that is there is right", and this is
+ * the only way to say that about a row that might not exist yet.
+ */
+export async function acceptDefault(subcategoryKey, attributeKey, value) {
+  if (!subcategoryKey || !attributeKey) throw bad('Which drawer, and which attribute?');
+  if (!value) throw bad('There is nothing proposed there to accept.');
+  await mustFit(attributeKey, value);
+  const { rows } = await query(
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
+     values ($1, $2, $3, $4, $5, $6, $7, true)
+     on conflict (subcategory_key, attribute_key) do update
+        set settled = true, updated_at = now()
+     returning *`,
+    [subcategoryKey, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null,
+     value.choice ?? null, value.level ?? null]);
+  forget();
+  return valueOf(rows[0]);
+}
+
+/**
  * A person agrees with what was proposed, and nothing about the value changes.
  *
  * This is the Accept on the subcategory screen, and it is its own call rather
