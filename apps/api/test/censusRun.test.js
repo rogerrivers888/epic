@@ -16,6 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleSource } from '../src/sources/google.js';
 import { tileOf, planTiles, startRun, advance, requestStop, resume, rollUpOutcodes } from '../src/sources/censusRun.js';
+import { slicePlan } from '../src/sources/census.js';
 import { query, pool } from '../src/db.js';
 
 test.after(() => pool.end());
@@ -284,4 +285,47 @@ test('a free run that starts costing money stops on the first penny', async (t) 
   const { rows: [after] } = await query(`select state, problem from census_runs where id = $1`, [run.id]);
   assert.equal(after.state, 'paused', 'it waits for a person rather than carrying on');
   assert.match(after.problem ?? '', /free|penny|may not buy/i);
+});
+
+test('a tile interrupted half way keeps what it answered, and the next pass asks only the rest', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test interrupted' });
+  await seedTile(run, 'test/interrupted');
+
+  // Slow enough that the pass runs out of time part way through the plan,
+  // which is what a deploy landing mid-tile looks like from in here.
+  const firstAsked = [];
+  await withCensus(async ({ includedType }) => {
+    firstAsked.push(includedType);
+    await new Promise((r) => setTimeout(r, 12));
+    return { places: [{ id: `ChIJrun_test_i${firstAsked.length}`, rank: 1 }], requests: 1, saturated: false, problem: null };
+  }, () => advance({ runId: run.id, budgetMs: 120 }));
+
+  const { rows: [half] } = await query(`select * from census_tiles where grid_key = 'test/interrupted'`);
+  assert.equal(half.state, 'todo', 'an unfinished tile is work again, not done');
+  assert.ok(half.done_subcategories.length > 0, 'and the drawers it did answer are written down');
+  assert.ok(half.requests > 0, 'with what they cost');
+  const answered = new Set(half.done_subcategories);
+
+  // The second pass must not pay for those drawers again.
+  const secondAsked = [];
+  await withCensus(async ({ includedType }) => {
+    secondAsked.push(includedType);
+    return { places: [], requests: 1, saturated: false, problem: null };
+  }, () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  const plan = await slicePlan();
+  const typesOfAnswered = new Set(plan
+    .filter((p) => answered.has(p.subcategory))
+    .flatMap((p) => p.questions.map((q) => q.type)));
+  const typesOfRest = new Set(plan
+    .filter((p) => !answered.has(p.subcategory))
+    .flatMap((p) => p.questions.map((q) => q.type)));
+  // A type can belong to two drawers, so only the ones that belong to nothing
+  // outstanding prove the point.
+  const shouldNotRecur = [...typesOfAnswered].filter((t2) => !typesOfRest.has(t2));
+  for (const type of shouldNotRecur) {
+    assert.ok(!secondAsked.includes(type), `${type} was answered in the first pass and is not asked again`);
+  }
 });

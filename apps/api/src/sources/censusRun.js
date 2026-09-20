@@ -36,7 +36,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
-import { censusArea, CENSUS_FRESH_DAYS } from './census.js';
+import { censusArea, slicePlan, CENSUS_FRESH_DAYS } from './census.js';
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { whereBoxSits } from '../repositories/censusRing.js';
@@ -270,7 +270,21 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
       return { working: true, reason: 'every tile is claimed', tiles };
     }
 
-    const out = await censusOneTile({ run, tile, pace, remaining: Math.max(0, (fresh?.max_requests ?? run.max_requests) - (fresh?.requests ?? 0)) });
+    const out = await censusOneTile({
+      run, tile, pace,
+      remaining: Math.max(0, (fresh?.max_requests ?? run.max_requests) - (fresh?.requests ?? 0)),
+      // The deadline goes *into* the tile, not around it. A tile of central
+      // London is twenty minutes of asking, and a budget checked only between
+      // tiles meant the pass ran for as long as the tile did — so a deploy
+      // landing in the middle threw away two thousand answered requests that
+      // nothing had written down yet.
+      until,
+      stopping: async () => {
+        const { rows: [now] } = await query(
+          'select stop_requested from census_runs where id = $1', [run.id]);
+        return Boolean(now?.stop_requested);
+      },
+    });
     tiles += 1;
     await refreshProgress(run.id);
 
@@ -302,56 +316,96 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
   return { working: true, tiles };
 }
 
-/** One tile: the drawers it has not done yet, then the checkpoint. */
-async function censusOneTile({ run, tile, pace, remaining }) {
+/**
+ * One tile, a drawer at a time, written down as it goes.
+ *
+ * The checkpoint the brief asks for is "per tile per subcategory", and the
+ * reason is this: a tile of central London is two thousand requests and twenty
+ * minutes of asking. Censusing the whole tile in one call meant nothing was
+ * written until the end, so a deploy in the middle — and deploys land in this
+ * tree every few minutes — threw away every answer it had already been given.
+ * A drawer at a time costs one extra plan query per drawer, which is nothing
+ * beside the several hundred Google calls it saves on a restart.
+ */
+async function censusOneTile({ run, tile, pace, remaining, until = Infinity, stopping = null }) {
   const done = new Set(tile.done_subcategories ?? []);
   const box = {
     minLat: Number(tile.min_lat), minLng: Number(tile.min_lng),
     maxLat: Number(tile.max_lat), maxLng: Number(tile.max_lng),
   };
 
-  let out;
-  try {
-    out = await censusArea({
-      // The tile is the area of record. Its counts are not written to the board
-      // — an outcode is what a person browses, and the roll-up derives those.
-      areaSlug: tile.grid_key,
-      outcode: null,
-      box,
-      maxRequests: Math.max(1, remaining),
-      pace,
-      rollUpCounts: false,
-    });
-  } catch (err) {
+  const plan = await slicePlan();
+  const left = plan.map((p) => p.subcategory).filter((key) => !done.has(key));
+  if (!left.length) {
     await query(
-      `update census_tiles set state = 'failed', problem = $2, claimed_at = null, claimed_by = null where id = $1`,
-      [tile.id, String(err.message).slice(0, 200)]);
-    return { problem: err.message };
+      `update census_tiles set state = 'done', censused_at = coalesce(censused_at, now()),
+                               claimed_at = null, claimed_by = null
+        where id = $1`, [tile.id]);
+    return { requests: 0, places: 0 };
   }
 
-  // Only the drawers that were actually carried through. A run that stopped at
-  // its ceiling used to roll the whole plan up anyway, which wrote nought
-  // against drawers it never reached (Codex, 19 Sep 2026) — here that would
-  // checkpoint them as done and they would never be asked again.
-  for (const key of out.done ?? []) done.add(key);
-  const everything = (out.planned ?? []).every((key) => done.has(key));
+  let spentHere = 0;
+  let refused = null;
+  let ranOut = false;
+  for (const subcategory of left) {
+    if (Date.now() >= until) break;
+    if (spentHere >= remaining) { ranOut = true; break; }
+    if (stopping && await stopping()) break;
 
+    let out;
+    try {
+      out = await censusArea({
+        // The tile is the area of record. Its counts are not written to the
+        // board — an outcode is what a person browses, and `rollUpOutcodes`
+        // derives those from the tiles afterwards.
+        areaSlug: tile.grid_key,
+        outcode: null,
+        box,
+        subcategories: [subcategory],
+        maxRequests: Math.max(1, remaining - spentHere),
+        pace,
+        rollUpCounts: false,
+      });
+    } catch (err) {
+      await query(
+        `update census_tiles set state = 'failed', problem = $2, claimed_at = null, claimed_by = null where id = $1`,
+        [tile.id, String(err.message).slice(0, 200)]);
+      return { problem: err.message, requests: spentHere };
+    }
+
+    spentHere += out.requests ?? 0;
+    // Only a drawer that was actually carried through. A run that stopped at
+    // its ceiling used to roll the whole plan up anyway, which wrote nought
+    // against drawers it never reached (Codex, 19 Sep 2026) — here it would
+    // checkpoint them as done and they would never be asked again.
+    const finished = (out.done ?? []).includes(subcategory);
+    if (finished) done.add(subcategory);
+
+    await query(
+      `update census_tiles
+          set done_subcategories = $2,
+              requests = requests + $3,
+              slices = slices + $4,
+              places = places + $5,
+              saturated = saturated + $6,
+              problem = coalesce($7, problem)
+        where id = $1`,
+      [tile.id, [...done], out.requests ?? 0, out.slices ?? 0, out.noted ?? 0, out.saturated ?? 0,
+        out.problems?.length ? out.problems.slice(0, 2).join(' · ').slice(0, 300) : null]);
+
+    if (out.refused) { refused = out.refused; break; }
+    if (out.stopped) { ranOut = true; break; }
+  }
+
+  const everything = plan.every((p) => done.has(p.subcategory));
   await query(
     `update census_tiles
         set state = $2,
-            done_subcategories = $3,
-            requests = requests + $4,
-            slices = slices + $5,
-            places = greatest(places, $6),
-            saturated = saturated + $7,
-            problem = $8,
             censused_at = case when $2 = 'done' then now() else censused_at end,
             claimed_at = null, claimed_by = null
-      where id = $1`,
-    [tile.id, everything ? 'done' : 'todo', [...done], out.requests ?? 0, out.slices ?? 0,
-      out.noted ?? 0, out.saturated ?? 0, out.problems?.length ? out.problems.slice(0, 3).join(' · ').slice(0, 300) : null]);
+      where id = $1`, [tile.id, everything ? 'done' : 'todo']);
 
-  return { refused: out.refused ?? null, requests: out.requests ?? 0, places: out.noted ?? 0 };
+  return { refused, requests: spentHere, ranOut };
 }
 
 /**
