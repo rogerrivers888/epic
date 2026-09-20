@@ -258,53 +258,21 @@ const asCard = (it, { centre, origin, mode, category }) => ({
 });
 
 /**
- * The ring itself: which cells are within the time, and the box round them.
+ * The ring, from the one resolver.
  *
- * A postcode is its own cell; a point is snapped to the nearest one we hold.
- * Both then read the matrix, which was worked out once — so drawing a ring
- * does no sums and asks nobody.
+ * This route had its own copy, and when the band was added to the shared one —
+ * the sectors actually within the time, as against the finder's ten minutes
+ * past it — the copy went on handing back the old shape and the fence changed
+ * nothing at all (20 Sep 2026). One resolver, in `repositories/reach.js`.
  */
-async function ringFrom(q, { minutes, mode }) {
-  const said = String(q.where ?? '').trim();
-  const slug = said.toLowerCase().replace(/\s+/g, '-');
-  // A full postcode is its own sector. An outward code — SL5 — is not: it is a
-  // district of several, so the ring is drawn from the one nearest its centre,
-  // exactly as the back office draws it.
-  const sector = said ? sectorOf(said.replace(/-/g, ' ')) : null;
-  let cell = sector ? `sector:${sector}` : null;
-  let label = sector ? said.toUpperCase() : null;
-  if (!cell && slug) {
-    const { rows: [area] } = await query(
-      'select name, lat, lng from localities where slug = $1 and lat is not null limit 1', [slug]);
-    if (area) {
-      const at = await reach.cellAt({ lat: Number(area.lat), lng: Number(area.lng) }).catch(() => null);
-      cell = at?.code ?? null;
-      label = area.name ?? said.toUpperCase();
-    }
-  }
-  if (!cell && q.lat != null && q.lng != null) {
-    const at = await reach.cellAt({ lat: Number(q.lat), lng: Number(q.lng) }).catch(() => null);
-    cell = at?.code ?? null;
-    label = String(q.label ?? '').trim() || at?.code || null;
-  }
-  if (!cell) return null;
-  const within = await reach.reachableCells(cell, { minutes, mode });
-  const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
-  if (!codes.length) return null;
-  const { rows } = await query('select code, lat, lng from geo_cells where code = any($1)', [codes]);
-  const box = boxAround(rows);
-  if (!box) return null;
-  // Where the ring is drawn from, so a card can say how long the journey is.
-  // A ring with no point to measure from printed "NaNh drive" (20 Sep 2026).
-  const home = rows.find((r) => r.code === cell) ?? null;
-  const at = q.lat != null && q.lng != null
-    ? { lat: Number(q.lat), lng: Number(q.lng) }
-    : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null;
-  return {
-    cell, label: label ?? cell, cells: codes, box, at,
-    outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
-  };
-}
+const ringFrom = (q, { minutes, mode }) => reach.ringFor({
+  where: q.where ?? null,
+  lat: q.lat ?? null,
+  lng: q.lng ?? null,
+  label: q.label ?? null,
+  minutes,
+  mode,
+});
 
 /**
  * One category's page, ranked the way a household is shown it.
