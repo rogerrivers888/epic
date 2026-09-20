@@ -1007,8 +1007,15 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
       minutes, mode,
     });
     if (!ring) throw bad('Which ring? Pass ?where= or ?lat=&lng=.');
+    // The band, not the finder.
+    //
+    // "5,030+ within 30 minutes" was really "within the finder" — ten minutes
+    // wider — which is the same fault as the spa in Chiswick in a different
+    // room, and it is the number the owner makes collection decisions from
+    // (20 Sep 2026). The finder's allowance exists to stop us hiding reachable
+    // places while searching; it has no business in a count of what is there.
     const [now, before, seen] = await Promise.all([
-      censusInRing({ cells: ring.cells, outcodes: ring.outcodes }),
+      censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes }),
       censusByOutcodeSum(ring.outcodes),
       query('select distinct area_slug from area_counts where area_slug = any($1)',
         [ring.outcodes.map((o) => o.toLowerCase())]),
@@ -1022,7 +1029,11 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
     res.json({
       ring: {
         where: ring.label, minutes, mode,
-        cells: ring.cells.length, outcodes: ring.outcodes.length,
+        // Both, so the difference between the two is legible rather than
+        // something you have to know to ask about.
+        cells: (ring.band ?? ring.cells).length,
+        finderCells: ring.cells.length,
+        outcodes: ring.outcodes.length,
       },
       categories: keys.map((key) => ({
         key,
