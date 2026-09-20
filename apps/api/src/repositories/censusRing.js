@@ -107,11 +107,21 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
   if (!universe.length) return empty;
   const inRing = new Set(cells);
 
+  // Both ways a surfacing is filed. The ring census wrote one row per outcode,
+  // so `area_slug` is the outcode; the big census writes one row per grid tile,
+  // so `area_slug` is a tile key and the tile says which outcodes it covers
+  // (`census_tiles.outcodes`). Reading only the first quietly dropped every
+  // place the tiled run found, which is most of them — and the corner test
+  // below is what decides whether the place is in the ring either way, so
+  // neither filing is trusted further than "it is somewhere around here".
   const { rows } = await query(`
     select ps.category, ps.venue_ref, pi.lat, pi.lng, pi.slice
       from place_subcategories ps
       join place_index pi on pi.venue_ref = ps.venue_ref
-     where ps.area_slug = any($1)`, [slugs]);
+     where ps.area_slug = any($1)
+        or ps.area_slug in (select grid_key from census_tiles
+                             where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s))`,
+  [slugs]);
 
   // One verdict per distinct box, not per row: the same slice found hundreds of
   // places and the corner test would otherwise run hundreds of times.

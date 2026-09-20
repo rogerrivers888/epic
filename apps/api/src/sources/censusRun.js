@@ -37,6 +37,9 @@
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { censusArea, CENSUS_FRESH_DAYS } from './census.js';
+// The same corner test the ring count uses. One piece of arithmetic for "is
+// this box inside this area", not two that can disagree (repositories/censusRing.js).
+import { whereBoxSits } from '../repositories/censusRing.js';
 
 /**
  * The grid.
@@ -362,3 +365,138 @@ export async function list({ limit = 10 } = {}) {
        from census_runs r order by started_at desc limit $1`, [Math.min(50, limit)]);
   return rows;
 }
+
+/**
+ * Tiles back to outcodes, which is what a person browses.
+ *
+ * The brief, §4: "Map results back to outcodes afterwards for reporting." It
+ * has to be *afterwards* and it has to be arithmetic, because the census is
+ * IDs Only: a place has no coordinate of its own until a display search buys
+ * one. What it has is the box it was found in — `place_index.slice`, written
+ * on every place the census sees — and a box can be tested against an outcode
+ * the same way `censusRing` tests one against a ring.
+ *
+ * Three verdicts, and the third is the honest one (owner, 20 Sep 2026: "Do not
+ * discard them. Resolve them, then count them"):
+ *
+ *   · the box sits wholly inside the outcode — counted;
+ *   · wholly outside — not counted;
+ *   · across its edge — **unresolved**, kept in its own column and shown as a
+ *     floor. Splitting the saturated slices is what shrinks it; dropping it
+ *     silently is what makes a board undercount without saying so.
+ *
+ * The coverage goes on the row beside the count, because §5 is not a nicety:
+ * "A count of 2,400 for a subcategory means nothing without knowing what was
+ * covered." A count drawn from four tiles of which one was cut off at sixty is
+ * a different number from the same count out of four clean ones.
+ */
+export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
+  const codes = outcodes?.length
+    ? outcodes.map((c) => String(c).toUpperCase())
+    : (await query(
+      `select distinct unnest(outcodes) as code from census_tiles
+        where censused_at is not null ${runId ? 'and run_id = $1' : ''}`,
+      runId ? [runId] : [])).rows.map((r) => r.code);
+  if (!codes.length) return { outcodes: 0, rows: 0 };
+
+  // Every sector of every outcode these tiles touch. The verdict is a
+  // nearest-sector test, so the candidate set has to include the neighbours —
+  // otherwise every box on the edge of the region reads as inside it.
+  const { rows: universe } = await query(
+    `select code, upper(outcode) as outcode, lat, lng from geo_cells
+      where outcode is not null
+        and upper(outcode) in (
+          select distinct unnest(t.outcodes) from census_tiles t where t.outcodes && $1)`,
+    [codes]);
+  if (!universe.length) return { outcodes: 0, rows: 0 };
+
+  let written = 0;
+  for (const code of codes) {
+    const { rows: tiles } = await query(
+      `select grid_key, saturated, censused_at, state from census_tiles
+        where outcodes @> array[$1] and censused_at is not null`, [code]);
+    if (!tiles.length) continue;
+    const keys = tiles.map((t) => t.grid_key);
+
+    const { rows } = await query(
+      `select ps.category, ps.subcategory, ps.venue_ref, pi.lat, pi.lng, pi.slice
+         from place_subcategories ps
+         join place_index pi on pi.venue_ref = ps.venue_ref
+        where ps.area_slug = any($1)`, [keys]);
+
+    const mine = new Set(universe.filter((u) => u.outcode === code).map((u) => u.code));
+    if (!mine.size) continue;
+
+    const verdicts = new Map();
+    const verdictOf = (slice) => {
+      if (verdicts.has(slice)) return verdicts.get(slice);
+      const v = whereBoxSits(boxFromSlice(slice), { cells: mine, universe });
+      verdicts.set(slice, v);
+      return v;
+    };
+    const nearest = (lat, lng) => {
+      let best = null; let bestD = Infinity;
+      for (const u of universe) {
+        const d = (u.lat - lat) ** 2 + (u.lng - lng) ** 2;
+        if (d < bestD) { bestD = d; best = u; }
+      }
+      return best?.code ?? null;
+    };
+
+    const counted = new Map();
+    const unresolved = new Map();
+    const drawer = new Map();
+    const add = (map, key, ref) => {
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key).add(ref);
+    };
+    for (const r of rows) {
+      const key = `${r.category}/${r.subcategory}`;
+      drawer.set(key, { category: r.category, subcategory: r.subcategory });
+      // Its own point beats any box: that is exact, and a display search will
+      // have bought one for anything a household has actually looked at.
+      if (r.lat != null && r.lng != null) {
+        if (mine.has(nearest(Number(r.lat), Number(r.lng)))) add(counted, key, r.venue_ref);
+        continue;
+      }
+      if (!r.slice) continue;
+      const v = verdictOf(r.slice);
+      if (v === 'inside') add(counted, key, r.venue_ref);
+      else if (v === 'across') add(unresolved, key, r.venue_ref);
+    }
+
+    const censusedAt = tiles.map((t) => new Date(t.censused_at).getTime()).sort((a, b) => a - b);
+    const saturatedTiles = tiles.filter((t) => Number(t.saturated) > 0).length;
+    const complete = tiles.every((t) => t.state === 'done');
+    for (const [key, { category, subcategory }] of drawer) {
+      const refs = counted.get(key) ?? new Set();
+      const { rows: [scored] } = refs.size
+        ? await query('select count(*)::int n from epic_scores where venue_ref = any($1)', [[...refs]])
+        : { rows: [{ n: 0 }] };
+      await query(
+        `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count,
+                                  saturated, censused_at, complete, tiles, tiles_saturated, unresolved)
+         values ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11)
+         on conflict (area_slug, category, subcategory) do update
+            set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count,
+                scored_count = excluded.scored_count, saturated = excluded.saturated,
+                censused_at = excluded.censused_at, complete = excluded.complete,
+                tiles = excluded.tiles, tiles_saturated = excluded.tiles_saturated,
+                unresolved = excluded.unresolved`,
+        [code.toLowerCase(), category, subcategory, refs.size, scored.n, saturatedTiles,
+          // The oldest tile, not the newest: a count is only as fresh as the
+          // stalest ground it is drawn from.
+          new Date(censusedAt[0]), complete,
+          tiles.length, saturatedTiles, unresolved.get(key)?.size ?? 0]);
+      written += 1;
+    }
+  }
+  return { outcodes: codes.length, rows: written };
+}
+
+/** `51.4000,-0.7000,51.4800,-0.5800` back into a box. */
+const boxFromSlice = (slice) => {
+  const n = String(slice ?? '').split(',').map(Number);
+  if (n.length !== 4 || n.some((x) => !Number.isFinite(x))) return null;
+  return { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] };
+};

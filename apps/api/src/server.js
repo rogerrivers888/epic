@@ -71,6 +71,7 @@ import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, settleNew } from './repositories/placeIndex.js';
 import { expireRentedCoordinates } from './sources/census.js';
+import * as censusRun from './sources/censusRun.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
@@ -694,6 +695,41 @@ const resumeTransit = () => transit.resumeHarvest({
   .catch((err) => console.error('stations harvest', err.message));
 setTimeout(() => { void resumeTransit(); }, RESUME_AFTER_MS + 30_000).unref?.();
 setInterval(() => { void resumeTransit(); }, RESUME_EVERY_MS).unref?.();
+
+/**
+ * The big census, a tile at a time (sources/censusRun.js).
+ *
+ * A run of London and the home counties is several hundred thousand requests
+ * and a day or more of wall clock, inside a process somebody deploys over every
+ * few minutes. So it is never "started" here: it is *advanced*. Each pass takes
+ * one claimed tile at a time for under a minute and then hands the process
+ * back, which means a deploy costs at most the tile in flight — and even that
+ * resumes at the drawer it had reached, because the checkpoint is per tile per
+ * subcategory.
+ *
+ * Off the boot path for the same reason as the harvest: a job that begins the
+ * moment the process starts is a job implicated in every failure to start.
+ */
+const CENSUS_EVERY_MS = Number(process.env.EPIC_CENSUS_EVERY_MS || 60_000);
+// One pass at a time in this process. A pass runs for most of the interval, so
+// without this the timer would stack passes on top of each other — harmless for
+// correctness, because a tile is claimed under a lock, and a waste of the rate
+// limit, because each pass paces itself independently and two together would
+// ask Google at twice the rate somebody chose.
+let censusPassGoing = false;
+const advanceCensus = () => (censusPassGoing ? Promise.resolve() : ((censusPassGoing = true), censusRun.resumeInterrupted()
+  .then((back) => {
+    if (back?.resumed) console.log(`epic-api: census — picked up ${back.resumed} interrupted run(s)`);
+    return censusRun.advance();
+  })
+  .then((r) => {
+    if (r?.tiles) console.log(`epic-api: census — ${r.tiles} tile(s) this pass${r.reason ? `, ${r.reason}` : ''}`);
+    else if (r && !r.working && r.reason && r.reason !== 'nothing running') console.log(`epic-api: census — ${r.reason}${r.problem ? `: ${r.problem}` : ''}`);
+  })
+  .catch((err) => console.error('census run', err.message))
+  .finally(() => { censusPassGoing = false; })));
+setTimeout(() => { void advanceCensus(); }, RESUME_AFTER_MS + 45_000).unref?.();
+setInterval(() => { void advanceCensus(); }, CENSUS_EVERY_MS).unref?.();
 setInterval(() => { void tryResume(false); }, RESUME_EVERY_MS).unref?.();
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`epic-api listening on 0.0.0.0:${port}`);

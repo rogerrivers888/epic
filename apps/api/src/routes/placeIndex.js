@@ -26,7 +26,8 @@ import { phoneOf } from '../domain/contact.js';
 import { censusInRing, censusByOutcodeSum } from '../repositories/censusRing.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
-import { OURS_TO_KEEP } from '../sources/census.js';
+import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
+import * as censusRun from '../sources/censusRun.js';
 import { LIVE_ROW } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { searchAreas } from '../sources/areas.js';
@@ -3188,6 +3189,137 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
       // A full postcode is not an area — it is a point, and a point takes a ring.
       postcode: sector ? { sector, cell: `sector:${sector}`, label: q.toUpperCase(), bands: BANDS, modes: MODES } : null,
     });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// the big census run
+// ---------------------------------------------------------------------------
+
+/**
+ * A region, on a grid, over days (sources/censusRun.js).
+ *
+ * Starting one is a decision with consequences — it asks Google several hundred
+ * thousand questions — so it is a person's act with a ceiling and a pace they
+ * choose, and it can be stopped from the same screen. Everything here is IDs
+ * Only and therefore free, and the cost counter beside it is expected to read
+ * nought: **a figure above nought is an alarm**, not an expense.
+ */
+router.get('/census/runs', requires('view_library'), async (req, res, next) => {
+  try {
+    const runs = await censusRun.list({ limit: Number(req.query.limit) || 10 });
+    const going = runs.find((r) => r.state === 'running') ?? null;
+    const { rows: tiles } = going
+      ? await query(
+        `select state, count(*)::int n, coalesce(sum(requests), 0)::int requests
+           from census_tiles where run_id = $1 group by state`, [going.id])
+      : { rows: [] };
+    res.json({
+      runs: runs.map((r) => ({
+        id: r.id,
+        label: r.label,
+        areas: r.areas,
+        state: r.state,
+        tile: `${r.tile_lat}° × ${r.tile_lng}°`,
+        requests: r.requests,
+        maxRequests: r.max_requests,
+        ratePerSec: Number(r.rate_per_sec),
+        places: r.places,
+        slices: r.slices,
+        saturated: r.saturated,
+        tilesTotal: r.tiles_total,
+        tilesDone: r.tiles_done,
+        tilesFailed: r.tiles_failed,
+        problem: r.problem,
+        startedAt: r.started_at,
+        startedBy: r.started_by,
+        lastSeenAt: r.last_seen_at,
+        finishedAt: r.finished_at,
+      })),
+      // What is happening right now, for the one that is going.
+      working: going ? Object.fromEntries(tiles.map((t) => [t.state, t.n])) : null,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * What a run would cost before anybody presses anything.
+ *
+ * The back office shows the price before the click for every paid control, and
+ * a free one still has a size: tiles, questions, and the requests they come to
+ * at the rates two censuses have actually been measured at.
+ */
+router.get('/census/quote', requires('view_library'), async (req, res, next) => {
+  try {
+    const areas = String(req.query.areas ?? '').split(',').map((a) => a.trim()).filter(Boolean);
+    if (!areas.length) throw bad('a quote needs postcode areas');
+    const tiles = await censusRun.planTiles({ areas });
+    const plan = await slicePlan();
+    const questions = plan.reduce((n, p) => n + p.questions.length, 0);
+    const floor = tiles.length * questions;
+    res.json({
+      areas,
+      tiles: tiles.length,
+      outcodes: new Set(tiles.flatMap((t) => t.outcodes)).size,
+      questions,
+      // The floor is what the run costs if nothing is ever cut off. The band is
+      // the floor times what splitting actually cost in the two areas whose
+      // censuses are on the record: SL5 came to 4.1 times its floor, SE1 to
+      // 21.5. A real region is a mix, which is what the calibration measures.
+      requests: { floor, likely: Math.round(floor * 4.1), dense: Math.round(floor * 21.5) },
+      hours: { at5: Math.round(floor * 4.1 / 5 / 3600), at10: Math.round(floor * 4.1 / 10 / 3600) },
+      costGbp: 0,
+    });
+  } catch (err) { next(err); }
+});
+
+router.post('/census/run', requires('manage_library'), async (req, res, next) => {
+  try {
+    const areas = Array.isArray(req.body?.areas) ? req.body.areas : [];
+    const run = await censusRun.startRun({
+      label: req.body?.label,
+      areas,
+      maxRequests: Number(req.body?.maxRequests) || undefined,
+      ratePerSec: Number(req.body?.ratePerSec) || undefined,
+      freshDays: Number(req.body?.freshDays) || undefined,
+      startedBy: actor(req).actorLabel,
+    });
+    await writeAudit({
+      ...actor(req), action: 'census.run', subjectType: 'region', subjectId: run.id,
+      subjectLabel: run.label, after: { areas: run.areas, tiles: run.tiles_total, maxRequests: run.max_requests },
+    });
+    // The loop picks it up; nobody waits on a run of thirty hours.
+    res.json({ started: true, id: run.id, tiles: run.tiles_total });
+  } catch (err) { next(err); }
+});
+
+router.post('/census/run/:id/stop', requires('manage_library'), async (req, res, next) => {
+  try {
+    const out = await censusRun.requestStop(String(req.params.id));
+    await writeAudit({ ...actor(req), action: 'census.stop', subjectType: 'region', subjectId: String(req.params.id) });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+router.post('/census/run/:id/resume', requires('manage_library'), async (req, res, next) => {
+  try {
+    const run = await censusRun.resume(String(req.params.id));
+    if (!run) throw bad('that run is not paused');
+    res.json({ resumed: true, id: run.id });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Put the outcode numbers back together from the tiles.
+ *
+ * Derived, and therefore rebuildable: the record is the tiles and the
+ * surfacings, and this is only the summary a board reads. It costs nothing and
+ * calls nobody.
+ */
+router.post('/census/rollup', requires('manage_library'), async (req, res, next) => {
+  try {
+    const outcodes = Array.isArray(req.body?.outcodes) ? req.body.outcodes : null;
+    res.json(await censusRun.rollUpOutcodes({ outcodes, runId: req.body?.runId ?? null }));
   } catch (err) { next(err); }
 });
 
