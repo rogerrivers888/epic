@@ -71,7 +71,9 @@ export const PURPOSE_CLASSES = {
   'plan.inspire': 'serve',
   'plan.inspire.things': 'serve',
   // The Inspire board's own display searches — marginal, and the household's.
+  // Two purposes: one draws the ring, the other buys the cards inside it.
   'inspire.around': 'serve',
+  'inspire.near': 'serve',
   'plan.tastes': 'serve',
   'plan.tastes.routing': 'serve',
   'trip.along': 'serve',

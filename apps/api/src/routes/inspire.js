@@ -586,6 +586,23 @@ inspire.get('/near', async (req, res, next) => {
       // And into the index: a place a provider told us about is a place we have
       // seen, whether or not it fitted on the page.
       await placeIndex.noteSeen(items).catch(() => null);
+      /**
+       * What the ring cost, written down.
+       *
+       * The same omission `/around` had: this is up to eight paid display
+       * searches per cache miss, reported in `spent` on screen and never
+       * written to `provider_calls` — so it was invisible to the spend ceiling,
+       * to the supplier register and to every cost-per-household figure
+       * (Codex, 20 Sep 2026).
+       *
+       * `inspire.near` is its own purpose rather than `inspire.around`'s:
+       * one draws the ring and the other buys inside it, and a purpose is the
+       * only thing telling the two apart in the ledger. Purposes are stable
+       * strings — added, never renamed.
+       */
+      if (meter.google) {
+        await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.near', meter).catch(() => null);
+      }
       return res.json({ queryId: searchId, ...answer });
     }
 
