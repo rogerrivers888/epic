@@ -121,6 +121,26 @@ test('a banding writes no scored_at, and the board still reads it as the newer o
   assert.equal(out.rows[0].standing, 'top');
 });
 
+test('what we say a place is, in a line, with the markup taken out', async () => {
+  await seed();
+  await query(
+    `update place_records set summary = $1 where venue_ref = 'osm:node/hv-top'`,
+    ['Our wonderfully cool air-conditioned restaurant &amp; bar. The garden is open all summer.']);
+  await query(
+    `update place_records set summary = $1 where venue_ref = 'osm:node/hv-middle'`,
+    ['St. Mary\u2019s is a parish church with a Norman tower. Visitors are welcome.']);
+
+  const out = await index.household(AREA, { subcategory: 'pubs-bars', limit: 10 });
+  const by = Object.fromEntries(out.rows.map((r) => [r.name, r.what]));
+
+  // The first sentence, and the markup gone: "&amp;" is not a word anybody
+  // should be shown.
+  assert.equal(by['The Top One'], 'Our wonderfully cool air-conditioned restaurant & bar.');
+  // A full stop after an abbreviation does not end a sentence, or every church
+  // in the country would be described as "St." (Codex, 20 Sep 2026).
+  assert.equal(by['The Middle One'], 'St. Mary\u2019s is a parish church with a Norman tower.');
+});
+
 test('ten is what a household is shown, and the limit is the last thing applied', async () => {
   await seed();
   const one = await index.household(AREA, { subcategory: 'pubs-bars', limit: 1 });

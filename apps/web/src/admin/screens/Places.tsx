@@ -2254,8 +2254,11 @@ function HouseholdSeen({ data, onPlace }: {
   if (!data) return <Waiting />;
   const columns: Col<HouseholdRow>[] = [
     { key: 'name', label: 'Place', tip: ['The place', 'The name we hold and may show, and under it what we say it is. Both are ours — an owned record, the atlas, or OpenStreetMap.'], grow: true,
+      // Hidden overflow as well as one line: a cell in a column that grows has
+      // no width of its own, so a long line ran straight across the score and
+      // the ticks beside it (20 Sep 2026, on the deployed board).
       cell: (r) => (
-        <View style={styles.nameCell}>
+        <View style={[styles.nameCell, { overflow: 'hidden' }]}>
           <Text style={styles.rowName} numberOfLines={1}>{r.name}</Text>
           <Text style={styles.rowNote} numberOfLines={1}>
             {r.what ?? ([r.cuisines.slice(0, 2).join(' · '), r.chain ? 'a chain' : null].filter(Boolean).join(' · ') || 'nothing written about it yet')}

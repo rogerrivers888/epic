@@ -2437,6 +2437,60 @@ export async function noteSeen(venues = []) {
  *     (owner, 20 Sep 2026). They are counted out loud instead, so the ones held
  *     back are a number on the board rather than a silent gap.
  */
+/**
+ * The entities a venue's own page actually carries, named and numbered.
+ *
+ * Read off a marketing page, "air-conditioned restaurant &amp; bar" is not
+ * English — it is the markup showing through, and it is exactly the kind of
+ * thing nobody should ever be shown (owner, 20 Sep 2026). The numbered forms
+ * are handled by rule rather than by list, because `&#x27;` and `&#8217;` are
+ * as common as the words and no hand-written list ever holds them all (Codex,
+ * 20 Sep 2026).
+ */
+const ENTITY = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: '\u2019', nbsp: ' ',
+  lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201c', rdquo: '\u201d',
+  ndash: '\u2013', mdash: '\u2014', hellip: '\u2026', middot: '\u00b7',
+  pound: '\u00a3', euro: '\u20ac', deg: '\u00b0', eacute: '\u00e9', hyphen: '-',
+};
+const codePoint = (n) => {
+  try { return String.fromCodePoint(n); } catch { return ''; }
+};
+export const decodeEntities = (text) => String(text)
+  .replace(/&#x([0-9a-f]+);/gi, (m, hex) => codePoint(parseInt(hex, 16)) || m)
+  .replace(/&#(\d+);/g, (m, dec) => codePoint(Number(dec)) || m)
+  .replace(/&([a-z]+);/gi, (m, name) => ENTITY[name.toLowerCase()] ?? m);
+
+/**
+ * Words that end in a full stop without ending a sentence.
+ *
+ * "St. Mary's Church welcomes visitors" is one sentence, and cutting at the
+ * first full stop left the row saying "St." — which is most churches (Codex,
+ * 20 Sep 2026).
+ */
+const NOT_THE_END = /(?:^|\s)(?:st|mr|mrs|ms|dr|no|vs|etc|jr|sr|ave|rd|approx|co|inc|ltd|ft|c|e\.g|i\.e|[A-Z])\.$/i;
+
+/**
+ * What we say a place is, in a line a list can hold.
+ *
+ * The whole account belongs on the place's own page; a row needs the first
+ * sentence of it.
+ */
+const inAWord = (text) => {
+  if (!text) return null;
+  const plain = decodeEntities(text).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!plain) return null;
+  let first = plain;
+  const ends = /[.!?](?=\s|$)/g;
+  for (let m = ends.exec(plain); m; m = ends.exec(plain)) {
+    const upTo = plain.slice(0, m.index + 1);
+    if (NOT_THE_END.test(upTo)) continue;
+    first = upTo;
+    break;
+  }
+  return first.length > 120 ? `${first.slice(0, 117).trimEnd()}\u2026` : first;
+};
+
 export async function household(areaSlug, {
   refs = null, category = null, subcategory = null, limit = 10,
 } = {}) {
@@ -2560,7 +2614,7 @@ export async function household(areaSlug, {
       // provider's and were never written down (§13.10).
       standing: r.crowd_band ?? null, howMany: r.count_band ?? null,
       chain: r.chain === true, cuisines: r.cuisines ?? [], accolades: r.accolades ?? [],
-      what: r.summary ?? null, website: r.website ?? null,
+      what: inAWord(r.summary), website: r.website ?? null,
       hours: Boolean(r.opening_hours), menu: r.menu_read === true,
       picture: r.picture ?? null,
       lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng),
