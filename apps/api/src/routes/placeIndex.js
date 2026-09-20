@@ -903,6 +903,37 @@ router.get('/places', requires('view_library'), async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * The same scope, as a household would be shown it: the first ten.
+ *
+ * Every other lens on these boards answers how complete our data is. This one
+ * answers what somebody would actually see — our own order, our own fields, and
+ * nothing nameless (owner, 20 Sep 2026). Nothing is asked of a provider: every
+ * field comes from a table we may keep, so it is free and it is instant.
+ */
+router.get('/household', requires('view_library'), async (req, res, next) => {
+  try {
+    const scope = await resolveWhere(req.query);
+    if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
+    const sub = req.query.sub ? String(req.query.sub) : null;
+    const out = await index.household(scope.kind === 'area' ? scope.area.slug : null, {
+      refs: scope.kind === 'ring' ? scope.refs : null,
+      category: req.query.cat ? String(req.query.cat) : null,
+      subcategory: sub,
+      // Ten is what a household is shown first (data policy, 19 Sep 2026); the
+      // board may ask for more when somebody wants to read further down.
+      // Whole places only: `?limit=1.5` reached the database as a decimal and
+      // came back a 500 (Codex, 20 Sep 2026).
+      limit: Math.min(50, Math.max(1, Math.trunc(Number(req.query.limit)) || 10)),
+    });
+    res.json({
+      ...(await head(scope)),
+      stats: await statsOf(scope, { category: req.query.cat ? String(req.query.cat) : '', subcategory: sub ?? '' }),
+      ...out,
+    });
+  } catch (err) { next(err); }
+});
+
 // ---------------------------------------------------------------------------
 // one place
 // ---------------------------------------------------------------------------

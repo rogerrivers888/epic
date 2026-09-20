@@ -29,15 +29,16 @@
  * no name here at all, and the nameless row *is* the finding.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
+import { useSession } from '../../hooks/useSession';
 import { asFlag, asNumber, asOneOf, asText, useQueryState, useRouter } from '../../router';
 import { api, type PlaceLevel, type PlaceStats, type PlaceCountry, type PlaceAreaRow, type PlaceCoverageRow,
-  type PlaceCategory, type PlaceSourceDef, type PlaceSourceRow, type PlaceQuality, type DemandRow, type DemandTotals,
+  type PlaceCategory, type HouseholdRow, type PlaceSourceDef, type PlaceSourceRow, type PlaceQuality, type DemandRow, type DemandTotals,
   type PlaceRing, type PlaceRow, type PlaceDetail, type PictureIndex, type ReadyBars, type BarEffect, type BarFact,
   type CompareColumn, type CompareRow, type RawSource, type PlaceHistoryRow, type FactDef, type PlaceLabel, type PlaceCensusRow } from '../../api';
 import { AdminPage, Dropdown, ago, day, pounds, since } from '../kit';
@@ -92,9 +93,93 @@ const intoArea = (kind: string) => (kind === 'postcode' ? { lens: 'category' as 
 /** The phone draws its own board rather than a squeeze of this one (BO2l). */
 const PHONE = 900;
 
+// ---------------------------------------------------------------------------
+// coming back is not a new question
+// ---------------------------------------------------------------------------
+
+/**
+ * What each board answered last time, so going back draws it at once.
+ *
+ * Opening a place replaces the board with the place, and closing it built the
+ * board again from nothing: a waiting state, four requests, and a second or two
+ * of a screen that looks like it is doing research (owner, 20 Sep 2026: "When I
+ * click back after going into a venue, it should be instant. At the moment
+ * there's a big delay, so it looks like it's researching").
+ *
+ * So every board draws its last answer immediately and asks again quietly
+ * behind it. Nothing here is a provider's: these are our own boards' replies,
+ * they live in the tab and go when it does, and anything that changes a place
+ * clears the lot (`forgetBoards`) rather than leaving a board insisting on what
+ * was true a moment ago.
+ */
+const ANSWERED = new Map<string, unknown>();
+/** Enough for a session's worth of going in and out; the oldest goes first. */
+const ANSWERED_MAX = 60;
+const rememberAnswer = (key: string, value: unknown) => {
+  ANSWERED.delete(key);
+  ANSWERED.set(key, value);
+  while (ANSWERED.size > ANSWERED_MAX) ANSWERED.delete(ANSWERED.keys().next().value as string);
+};
+/** Anything that changes a place: the boards have to ask again. */
+const forgetBoards = () => ANSWERED.clear();
+
+/**
+ * The last answer first, then the true one.
+ *
+ * `key` is the whole question — every parameter that changes the answer — so
+ * two different boards never read each other's reply. A board that has never
+ * been asked waits exactly as it did before.
+ */
+function useFresh<T>(key: string, get: () => Promise<T>, onError?: (e: any) => void): [T | null, () => void] {
+  const [value, setValue] = useState<T | null>(() => (ANSWERED.get(key) as T) ?? null);
+  const [asked, askAgain] = useReducer((n: number) => n + 1, 0);
+  // Held in a ref so a fetch written inline in the render does not count as a
+  // change: the key says what is being asked, and the key is the dependency.
+  const getRef = React.useRef(get);
+  getRef.current = get;
+  const errRef = React.useRef(onError);
+  errRef.current = onError;
+  useEffect(() => {
+    const had = (ANSWERED.get(key) as T) ?? null;
+    setValue(had);
+    let live = true;
+    getRef.current()
+      // Only if this is still the question being asked. A reply that arrives
+      // after the board has moved on — or after something changed the place and
+      // the refresh already landed — must not write itself down as the answer,
+      // or going back draws what was true before the change (Codex, 20 Sep
+      // 2026).
+      .then((d) => { if (!live) return; rememberAnswer(key, d); setValue(d); })
+      // A board showing last time's answer keeps it when the refresh fails:
+      // blanking a page that is on the screen and correct, because the second
+      // ask timed out, is worse than the stale minute it saves.
+      //
+      // Unless the answer is that it is not ours to see or not there any more.
+      // A 401, 403 or 404 is not a bad line — it is the true answer, and
+      // holding the old page up against it shows a place that has been deleted
+      // or a board somebody's roles no longer open (Codex, 20 Sep 2026).
+      .catch((e: any) => {
+        if (!live) return;
+        const settled = [401, 403, 404].includes(Number(e?.status));
+        if (settled) ANSWERED.delete(key);
+        if (settled || !had) { setValue(null); errRef.current?.(e); }
+      });
+    return () => { live = false; };
+  }, [key, asked]);
+  return [value, askAgain];
+}
+
 export function Places({ canManage }: { canManage: boolean }) {
   const { width } = useViewport();
   const phone = width < PHONE;
+
+  // Whose boards these are. The answers a board keeps are one account's — sign
+  // out and sign in as somebody else in the same tab and the last account's
+  // reply would be drawn, for a moment, to somebody whose roles may not open it
+  // (Codex, 20 Sep 2026). Changing who is signed in forgets the lot.
+  const { account, isOwner } = useSession();
+  const who = account?.id ?? (isOwner ? 'owner' : 'nobody');
+  useEffect(() => { forgetBoards(); }, [who]);
 
   const [where, setWhere] = useQueryState<string>('where', '', asText);
   const [within, setWithin] = useQueryState<number | null>('within', null, asNumber(null));
@@ -285,7 +370,6 @@ function Level(props: {
   onPictures: () => void; onBar: (sub: string) => void; onUp: () => void;
 }) {
   const { where, within, mode, ring, lens, cat, sub, phone } = props;
-  const [level, setLevel] = useState<PlaceLevel | null>(null);
   // In the address: "the places here missing a menu" is a piece of work, and a
   // piece of work is a link you can send somebody (17 Sep 2026, the
   // verification audit — it was component state and nothing could set it).
@@ -309,12 +393,15 @@ function Level(props: {
    * thing the page offers.
    */
   const [noSuchArea, setNoSuchArea] = useState<string | null>(null);
-  useEffect(() => {
-    setLevel(null); setNoSuchArea(null);
-    api.adminPlaceArea(scoped as any)
-      .then((l) => { setLevel(l); setNoSuchArea(null); })
-      .catch((e: any) => setNoSuchArea(e?.body?.message ?? 'Nothing here by that name yet.'));
-  }, [scoped]);
+  const [level, refreshLevel] = useFresh(
+    JSON.stringify(['area', scoped]),
+    () => api.adminPlaceArea(scoped as any).then((l) => { setNoSuchArea(null); return l; }),
+    (e: any) => setNoSuchArea(e?.body?.message ?? 'Nothing here by that name yet.'),
+  );
+  // A name we could not find belongs to the address that was typed, not to the
+  // next one: without this, a board drawn straight out of the cache still wore
+  // the last address's "nothing here by that name" until its refresh landed.
+  useEffect(() => { setNoSuchArea(null); }, [scoped]);
 
   // An address that says nothing about how far out gets the default, and says
   // so. Every way of *picking* an outcode already writes the band (`intoArea`);
@@ -1009,17 +1096,15 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
   onNames: (n: { cat?: string; sub?: string; subs?: number; needs?: string[] }) => void;
   onWiden: (m: number) => void; within: number | null;
 }) {
-  const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCategories>> | null>(null);
   const [hideFull, setHideFull] = useState(false);
   // Subcategories, or every provider's own word for a kind of place. Both are
   // driven by the vocabulary rather than by the data, so an empty one is the
   // finding either way.
   const [by, setBy] = useQueryState<'subcategories' | 'labels'>('words', 'subcategories', asOneOf(['subcategories', 'labels'] as const, 'subcategories'));
-  useEffect(() => {
-    setData(null);
-    api.adminPlaceCategories({ ...q, cat: cat || undefined, words: by === 'labels' ? 'labels' : undefined })
-      .then(setData).catch(() => setData(null));
-  }, [q, cat, by]);
+  const [data] = useFresh(
+    JSON.stringify(['categories', q, cat, by]),
+    () => api.adminPlaceCategories({ ...q, cat: cat || undefined, words: by === 'labels' ? 'labels' : undefined }),
+  );
 
   // The words the boards use: "a picture, what it is, opening hours".
   const factLabel = useMemo(() => new Map(Object.entries(NEEDS_WORD)), []);
@@ -1888,6 +1973,18 @@ const ACTION_WORD: Record<FieldAction, string> = {
   write: 'Write', find: 'Find', read: 'Read', ask: `Ask · ${pounds(3)}`,
 };
 
+/**
+ * The two ways of reading a subcategory, and the default is the household's.
+ *
+ * Owner, 20 Sep 2026: "I want the default view to be what the user sees… if I
+ * switch to user view, then I should just see the first 10." Everything we hold
+ * is the other one — the board this screen has always drawn, which is the index
+ * rather than a list anybody is shown.
+ */
+const VIEWS = ['household', 'everything'] as const;
+type PlaceView = typeof VIEWS[number];
+const VIEW_LABEL: Record<PlaceView, string> = { household: 'What a household sees', everything: 'Everything we hold' };
+
 const SHOW = ['not-ready', 'ready', 'all'] as const;
 const SHOW_LABEL: Record<string, string> = { 'not-ready': 'Not ready', ready: 'Ready', all: 'All' };
 
@@ -1897,7 +1994,6 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
   onNames: (n: { cat?: string; sub?: string; subs?: number; needs?: string[] }) => void;
   onWiden: (m: number) => void; within: number | null;
 }) {
-  const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceList>> | null>(null);
   // In the address, all three: what is shown, what it is sorted by, and which
   // way round — so a piece of work is a link somebody can be sent.
   const [show, setShow] = useQueryState<typeof SHOW[number]>('show', 'not-ready', asOneOf(SHOW, 'not-ready'));
@@ -1908,16 +2004,27 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
   const [busy, setBusy] = useState<string | null>(null);
   /** Names fetched from a provider for this screen alone. Never stored. */
   const [fetched, setFetched] = useState<Record<string, string>>({});
-  const [bar, setBar] = useState<ReadyBars['subcategories'][number] | null>(null);
-  useEffect(() => { api.adminReadyBars().then((b) => setBar(b.subcategories.find((x) => x.key === sub) ?? null)).catch(() => setBar(null)); }, [sub]);
+  const [bars] = useFresh(JSON.stringify(['ready-bars']), () => api.adminReadyBars());
+  const bar = bars?.subcategories.find((x) => x.key === sub) ?? null;
   useEffect(() => { onNames({ sub: bar?.label ?? sub, cat: bar?.categoryLabel, needs: bar?.facts.filter((f) => f.required).map((f) => f.fact) }); }, [bar, sub, onNames]);
 
-  const reload = useCallback(() => {
-    setData(null);
-    api.adminPlaceList({ ...q, cat: cat || undefined, sub, show, q: query || undefined, missing: missing || undefined, sort, desc: desc ? undefined : '0' })
-      .then(setData).catch(() => setData(null));
-  }, [q, cat, sub, show, query, missing, sort, desc]);
-  useEffect(reload, [reload]);
+  const [view, setView] = useQueryState<PlaceView>('view', 'household', asOneOf(VIEWS, 'household'));
+
+  // Each view asks its own question, and only the one being read: the
+  // household's ten and the whole index are different boards, and asking both
+  // every time would double the work to draw one of them.
+  const [data, reload] = useFresh<Awaited<ReturnType<typeof api.adminPlaceList>> | null>(
+    JSON.stringify(['places', q, cat, sub, show, query, missing, sort, desc, view]),
+    () => (view === 'everything'
+      ? api.adminPlaceList({ ...q, cat: cat || undefined, sub, show, q: query || undefined, missing: missing || undefined, sort, desc: desc ? undefined : '0' })
+      : Promise.resolve(null)),
+  );
+  const [seen] = useFresh<Awaited<ReturnType<typeof api.adminHouseholdView>> | null>(
+    JSON.stringify(['household', q, cat, sub, view]),
+    () => (view === 'household'
+      ? api.adminHouseholdView({ ...q, cat: cat || undefined, sub, limit: 10 })
+      : Promise.resolve(null)),
+  );
 
   const counted = data?.counted ?? [];
   const facts: FactDef[] = data?.facts ?? [];
@@ -1928,11 +2035,17 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
       cell: (r) => <Box on={picked.has(r.ref)} onPress={() => setPicked(toggle(picked, r.ref))} label={r.name ?? r.ref} /> },
     { key: 'name', label: 'Place', tip: 'placeRow', grow: true,
       // A nameless row is the finding: Google is the only source that has ever
-      // seen this place, so there is no name we are allowed to hold.
+      // seen this place, so there is no name we are allowed to hold. It is said
+      // in words, with the identifier as the note under it — printed as the
+      // name, a row read as a place called ChIJnVzfWQCBdkgRt1-Lo8I5wII (owner,
+      // 20 Sep 2026: "we're not displaying random strings"). The household's
+      // own view leaves these out altogether.
       cell: (r) => (
         <View style={styles.nameCell}>
-          <Text style={[styles.rowName, !(r.name ?? fetched[r.ref]) && styles.refName]} numberOfLines={1}>{r.name ?? fetched[r.ref] ?? r.ref}</Text>
-          {!r.name && fetched[r.ref] ? <Text style={styles.rowNote}>fetched · not kept</Text> : null}
+          <Text style={[styles.rowName, !(r.name ?? fetched[r.ref]) && styles.refName]} numberOfLines={1}>
+            {r.name ?? fetched[r.ref] ?? 'No name we may show'}
+          </Text>
+          {!r.name ? <Text style={styles.rowNote} numberOfLines={1}>{fetched[r.ref] ? 'fetched · not kept' : r.ref}</Text> : null}
         </View>
       ) },
     { key: 'unseen', label: 'Unseen by', tip: 'unseenBy', width: 104, align: 'left', sort: 'unseen',
@@ -1975,6 +2088,25 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
   const notReady = data?.rows.filter((r) => !r.ready).length ?? 0;
   return (
     <>
+      {/* Which of the two boards this is. First on the page, above the reading
+          that follows from it, and two words rather than a box — the back
+          office picks from a control, never a tile (12 Sep 2026). */}
+      <View style={styles.subRow}>
+        <View style={styles.lensLeft}>
+          <Kicker tip={['Reading', 'What a household sees is our own order over what we hold — the first ten, nothing nameless, and no provider asked. Everything we hold is the index itself: every place any source has ever seen here, however little we know about it.']}>Reading</Kicker>
+          <View style={styles.lenses}>
+            {VIEWS.map((v) => (
+              <Press key={v} effect="none" onPress={() => setView(v)} accessibilityRole="tab"
+                     accessibilityState={{ selected: view === v }} accessibilityLabel={VIEW_LABEL[v]}
+                     style={[styles.lens, view === v && styles.lensOn]}>
+                <Text style={[styles.lensWord, view === v && styles.lensWordOn]}>{VIEW_LABEL[v]}</Text>
+              </Press>
+            ))}
+          </View>
+        </View>
+      </View>
+      {view === 'household' ? <HouseholdSeen data={seen} onPlace={onPlace} /> : (
+      <>
       <View style={styles.subRow}>
         <View style={styles.lensLeft}>
           <Kicker tip="sectionShow">Show</Kicker>
@@ -2026,7 +2158,7 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
                   phoneRow={(r) => ({
                     name: r.standIn
                       ? <Explain tip="standInName"><Text style={[styles.rowName, styles.refName]}>{`Unnamed ${String(r.name ?? '').replace(/^\(|\)$/g, '')}`}</Text></Explain>
-                      : <Text style={[styles.rowName, !r.name && styles.refName]}>{r.name ?? r.ref}</Text>,
+                      : <Text style={[styles.rowName, !r.name && styles.refName]}>{r.name ?? 'No name we may show'}</Text>,
                     note: [r.outcode, r.unseenBy?.length ? `unseen by ${r.unseenBy.length}` : null]
                       .filter(Boolean).join(' · '),
                     chips: [
@@ -2048,6 +2180,8 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
                   empty={<Word muted>Nothing here that is {show === 'ready' ? 'ready' : 'not ready'}.</Word>} />
         </>
       ) : <Waiting />}
+      </>
+      )}
       <Footer left={
         <View style={{ flexDirection: 'row', gap: spacing.md, alignItems: 'center', flexWrap: 'wrap' }}>
           {picked.size ? <Text style={styles.selected}>{`${picked.size} selected`}</Text> : null}
@@ -2059,9 +2193,15 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
         {q.within != null && widerThan(within)
           ? <Act label={`Widen to ${bandLabel(widerThan(within) as number)}`} tone="secondary" onPress={() => onWiden(widerThan(within) as number)} />
           : null}
+        {/* Both act on rows ticked in the index table, so they belong to that
+            view: the household's list has nothing to tick, and two disabled
+            buttons under it would be dead controls about somebody else's
+            board. */}
+        {view === 'everything' ? (
+        <>
         <Act label={busy === 'curate' ? 'Curating…' : picked.size ? `Curate these ${picked.size} · free` : 'Curate them · free'} tone="secondary"
              disabled={!canManage || !picked.size || busy != null}
-             onPress={() => { setBusy('curate'); api.adminCuratePlaces([...picked]).finally(() => { setBusy(null); setPicked(new Set()); reload(); }); }} />
+             onPress={() => { setBusy('curate'); api.adminCuratePlaces([...picked]).finally(() => { setBusy(null); setPicked(new Set()); forgetBoards(); reload(); }); }} />
         {/* Fetching a name is the one thing on this board that spends, and the
             button says what it costs before it is pressed. Only the rows we hold
             no name for cost anything: the rest are already ours to print. */}
@@ -2076,12 +2216,105 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
                  // is rented, and the row it fills stops being a bare id only
                  // while you are looking at it.
                  .then((r) => setFetched((f) => ({ ...f, ...Object.fromEntries(r.names.map((n) => [n.ref, n.name])) })))
-                 .finally(() => { setBusy(null); setPicked(new Set()); reload(); });
+                 .finally(() => { setBusy(null); setPicked(new Set()); forgetBoards(); reload(); });
              }} />
+        </>
+        ) : null}
       </Footer>
     </>
   );
 }
+
+/**
+ * BO2s — the first ten, as a household would be shown them.
+ *
+ * The board this screen has always drawn answers "how complete is our data",
+ * which is not a question anybody outside this building asks. This one answers
+ * the owner's (20 Sep 2026): "I want the default view to be what the user
+ * sees… if I switch to user view, then I should just see the first 10."
+ *
+ * Three things make it that list rather than a prettier index:
+ *
+ *   · **Our own order.** The Epic score — ours, derived, and the only ranking
+ *     that survives a provider going (data policy, 19 Sep 2026). A place nobody
+ *     has scored sorts below one that has and says "not scored" rather than
+ *     printing a nought, because we do not know is not a low mark.
+ *   · **Nothing nameless.** A `google:` reference we own nothing about has no
+ *     name we may hold, and it is not a row a household may ever see. The count
+ *     held back is printed instead, so the gap is a number rather than silence.
+ *   · **No picture in the row, on purpose.** The owner: "I don't need to see the
+ *     picture… When I click into it, I should be able to see the picture." The
+ *     column says whether there is one; the place's own Pictures tab is where
+ *     they are.
+ */
+function HouseholdSeen({ data, onPlace }: {
+  data: Awaited<ReturnType<typeof api.adminHouseholdView>> | null;
+  onPlace: (ref: string) => void;
+}) {
+  if (!data) return <Waiting />;
+  const columns: Col<HouseholdRow>[] = [
+    { key: 'name', label: 'Place', tip: ['The place', 'The name we hold and may show, and under it what we say it is. Both are ours — an owned record, the atlas, or OpenStreetMap.'], grow: true,
+      cell: (r) => (
+        <View style={styles.nameCell}>
+          <Text style={styles.rowName} numberOfLines={1}>{r.name}</Text>
+          <Text style={styles.rowNote} numberOfLines={1}>
+            {r.what ?? ([r.cuisines.slice(0, 2).join(' · '), r.chain ? 'a chain' : null].filter(Boolean).join(' · ') || 'nothing written about it yet')}
+          </Text>
+        </View>
+      ) },
+    { key: 'epic', label: 'Our score', width: 96, align: 'right',
+      tip: ['The Epic score', 'Ours, and derived: Google\u2019s rating and review count with our own signals — visits, household ratings, rank and recency. Never a stored copy of anybody\u2019s number.'],
+      cell: (r) => (r.epicScore == null ? <Word muted>not scored</Word> : <ScoreCell v={r.epicScore} strong />) },
+    { key: 'standing', label: 'Standing', width: 96, align: 'left',
+      tip: ['What the crowd says', 'A band, never a rating: the figure it was made from is a provider\u2019s and was never written down.'],
+      cell: (r) => (r.standing ? <Word>{STANDING_WORD[r.standing] ?? r.standing}</Word> : <Blank />) },
+    { key: 'been', label: 'How many', width: 92, align: 'left',
+      tip: ['How many have been', 'A band, from the review count. The count itself is a provider\u2019s and is not kept.'],
+      cell: (r) => (r.howMany ? <Word muted>{beenWord(r.howMany)}</Word> : <Blank />) },
+    { key: 'where', label: 'Where', tip: 'wherePlace', width: 74, align: 'left', cell: (r) => <Word muted>{r.outcode ?? '—'}</Word> },
+    { key: 'picture', label: 'Picture', width: 74, align: 'centre',
+      tip: ['A picture we may show', 'Whether we hold one that is ours to publish. Open the place to see it — the Pictures tab holds every one we have.'],
+      cell: (r) => <Tick on={Boolean(r.picture)} /> },
+    { key: 'hours', label: 'Hours', width: 66, align: 'centre', tip: ['Opening hours', 'Ours, from the venue\u2019s own page or the open map.'], cell: (r) => <Tick on={r.hours} /> },
+    { key: 'menu', label: 'Menu', width: 66, align: 'centre', tip: ['A menu we have read', 'Read from the venue\u2019s own page — menu, order, stars is the path this feeds.'], cell: (r) => <Tick on={r.menu} /> },
+    { key: 'go', label: '', width: 28, align: 'right', cell: () => <Icon name="more" size={15} strokeWidth={2} color={colors.inkMuted} /> },
+  ];
+  return (
+    <>
+      <View style={{ paddingBottom: 6 }}>
+        {/* What the ten were chosen from, what was held back, and what it cost:
+            nothing. The board says the last one out loud because every other
+            way of seeing a place as a household sees it goes to a provider. */}
+        <Text style={styles.rowNote}>
+          {[
+            data.rows.length ? `The first ${data.rows.length} of ${data.named.toLocaleString()}` : 'Nothing here a household could be shown yet',
+            data.nameless ? `${data.nameless.toLocaleString()} with no name we may show ${data.nameless === 1 ? 'is' : 'are'} not here` : null,
+            data.unscored ? `${data.unscored.toLocaleString()} not scored yet` : null,
+            'nothing asked of a provider',
+          ].filter(Boolean).join(' · ')}
+        </Text>
+      </View>
+      <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.ref} onRow={(r) => onPlace(r.ref)}
+              phoneRow={(r) => ({
+                name: r.name,
+                note: r.what ?? r.outcode ?? '',
+                chips: [
+                  { key: 'epic', word: r.epicScore == null ? 'not scored' : `score ${r.epicScore}`, lead: true },
+                  ...(r.standing ? [{ key: 'standing', word: STANDING_WORD[r.standing] ?? r.standing }] : []),
+                  ...(r.picture ? [] : [{ key: 'picture', word: 'no picture' }]),
+                ],
+              })}
+              empty={<Word muted>
+                {data.nameless
+                  ? `Nothing here has a name we may show. ${data.nameless.toLocaleString()} ${data.nameless === 1 ? 'place is' : 'places are'} known here by a provider\u2019s identifier alone.`
+                  : 'Nothing here yet.'}
+              </Word>} />
+    </>
+  );
+}
+
+/** Our word for the crowd, the same four the sweep uses. */
+const STANDING_WORD: Record<string, string> = { top: 'Top', high: 'High', good: 'Good', mixed: 'Mixed' };
 
 /** "A playground", "A restaurant" — the kind of place, said the way a sentence needs it. */
 const kindWord = (label: string) => {
@@ -2296,15 +2529,18 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   // the window (CLAUDE.md).
   const { width } = useViewport();
   const narrow = width < PHONE;
-  const [place, setPlace] = useState<PlaceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [curating, setCurating] = useState(false);
   const [asking, setAsking] = useState(false);
-  const load = useCallback(() => {
-    setPlace(null); setError(null);
-    api.adminPlace(refId).then(setPlace).catch((e: any) => setError(e?.body?.message ?? 'Nothing indexed under that ref yet.'));
-  }, [refId]);
-  useEffect(load, [load]);
+  const [place, refresh] = useFresh(
+    JSON.stringify(['place', refId]),
+    () => api.adminPlace(refId).then((p) => { setError(null); return p; }),
+    (e: any) => setError(e?.body?.message ?? 'Nothing indexed under that ref yet.'),
+  );
+  // Anything that changes this place changes the boards behind it, so the
+  // reload the drawer's own buttons call forgets what they were told.
+  const load = useCallback(() => { forgetBoards(); refresh(); }, [refresh]);
+  useEffect(() => { setError(null); }, [refId]);
 
   if (error) {
     return (
@@ -2331,7 +2567,7 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
         </Press>
         {place.areas.map((a, i) => <Text key={`${a.slug}-${i}`} style={styles.trailNote}>{`· ${a.name}`}</Text>)}
       </View>
-      <Band kicker={kicker} title={place.name ?? place.ref} stats={
+      <Band kicker={kicker} title={place.name ?? 'No name we may show'} stats={
         tab === 'score' ? null : (
           // BO2h's four and BO2r's five, which are the same drawer: DATA
           // SCORE · READY · OLDEST FACT · SEEN BY, plus what BO2r adds. Ready

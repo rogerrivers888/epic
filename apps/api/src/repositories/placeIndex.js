@@ -2413,6 +2413,165 @@ export async function noteSeen(venues = []) {
   return noteMany(rows, { source: null }).catch(() => ({ noted: 0 }));
 }
 
+/**
+ * The first ten, as a household would be shown them.
+ *
+ * Every other read on these boards answers "how complete is our data"; this one
+ * answers "what would somebody actually see", which is a different order and a
+ * different set of fields (owner, 20 Sep 2026: "I want the default view to be
+ * what the user sees… I should just see the first 10").
+ *
+ * Two rules make it a household's list rather than the index's:
+ *
+ *   · **Ranked by the Epic score**, which is ours — Google's rating and review
+ *     count plus our own signals, derived and written down, never a stored copy
+ *     of anybody's number (data policy, 19 Sep 2026). Nothing is asked of a
+ *     provider here: every field comes from a table we may keep, which is what
+ *     makes it instant. A place we have not scored yet sorts below one we have
+ *     rather than above it, because "we do not know" is not a high mark.
+ *   · **Nothing nameless, and no stand-ins.** A `google:` reference nobody owns
+ *     has no name we may hold, and the sweep writes the search term that found
+ *     it — "(wildlife park)" — while it waits for an open one. Both are
+ *     findings on the index's own board and neither is a place a household may
+ *     be shown: "we're not displaying random strings to users on our website"
+ *     (owner, 20 Sep 2026). They are counted out loud instead, so the ones held
+ *     back are a number on the board rather than a silent gap.
+ */
+export async function household(areaSlug, {
+  refs = null, category = null, subcategory = null, limit = 10,
+} = {}) {
+  const args = [];
+  const where = [];
+  if (refs) { args.push(refs); where.push(`pi.venue_ref = any($${args.length})`); }
+  else { args.push(lower(areaSlug)); where.push(`exists (select 1 from place_areas pa where pa.venue_ref = pi.venue_ref and pa.area_slug = $${args.length})`); }
+  if (category) { args.push(category); where.push(`pi.category = $${args.length}`); }
+  if (subcategory) { args.push(subcategory); where.push(`pi.subcategory = $${args.length}`); }
+
+  // The same name rule as `namesFor`, in SQL, because it decides which rows
+  // exist at all here — and a filter applied after the limit would take ten and
+  // then show four.
+  const NAME = `coalesce(r.name, case when a.display_source is distinct from 'google' then a.name end,
+                         case when pi.venue_ref like 'osm:%' or pi.venue_ref like 'atlas:%'
+                                   or pi.venue_ref like 'wikidata:%' or pi.venue_ref like 'own:%'
+                              then sp.name end)`;
+  // The freshest score, not the first one found. Both places a score is kept
+  // are written by `rescoreOne`, but the lookup's own banding writes the owned
+  // record alone — so a place swept in June and re-banded last night had two,
+  // and reading the sweep's first ranked the board on the older of them
+  // (Codex, 20 Sep 2026).
+  // When the owned record's score was last worked out. The lookup's banding
+  // stamps `banded_at` and the scorer stamps `scored_at`, so reading one of
+  // them alone called a score written last night older than a sweep in June
+  // (Codex, 20 Sep 2026). A tie goes to the owned record: it is the layer we
+  // curate on purpose.
+  const OWN_SCORED = "coalesce(greatest(r.scored_at, r.banded_at), to_timestamp(0))";
+  /** When the owned record's *bands* were last worked out, which is its own act. */
+  const OWN_BANDED = "coalesce(r.banded_at, to_timestamp(0))";
+  const SCORE = `case
+    when sp.epic_score is null then coalesce(r.epic_score, a.epic_score)
+    when r.epic_score is null then sp.epic_score
+    when ${OWN_SCORED} >= coalesce(sp.scored_at, to_timestamp(0)) then r.epic_score
+    else sp.epic_score end`;
+  args.push(limit);
+  const sql = (select, tail) => `
+    select ${select}
+      from place_index pi
+      left join place_records r on r.venue_ref = pi.venue_ref
+      left join lateral (
+        select a2.* from attractions a2
+         where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+           and a2.state <> 'hidden'
+         order by a2.last_seen desc, a2.id limit 1) a on true
+      left join lateral (
+        select s2.* from scout_places s2 where s2.venue_ref = pi.venue_ref
+         order by s2.last_seen desc limit 1) sp on true
+      left join lateral (
+        select d2.* from attraction_details d2 where d2.attraction_id = a.id limit 1) d on true
+     where ${where.join(' and ')}${tail}`;
+
+  const { rows } = await query(sql(`
+    pi.venue_ref, pi.category, pi.subcategory, pi.data_score, pi.ready, pi.ownership,
+    ${NAME} as name,
+    ${SCORE} as epic_score,
+    greatest(sp.scored_at, r.scored_at, r.banded_at) as scored_at, sp.rank,
+    -- A band from wherever it was last worked out: the sweep keeps one, so does
+    -- an owned record that has been collected, and so does an attraction from
+    -- the atlas harvest. Reading the sweep's alone left a place we own but have
+    -- never swept with no standing at all (Codex, 20 Sep 2026).
+    -- A band has its own stamp. Rescoring an owned record moves scored_at and
+    -- leaves the bands exactly as they were, so choosing them on the score's
+    -- freshness handed back a band from last spring as this morning's evidence
+    -- (Codex, 20 Sep 2026). And an atlas attraction keeps its standing in
+    -- "band": "crowd_band" there belongs to the activity sweep, and reading
+    -- that alone left every harvested attraction with no standing at all.
+    case when ${OWN_BANDED} >= coalesce(sp.scored_at, to_timestamp(0)) then coalesce(r.crowd_band, sp.crowd_band, a.crowd_band, a.band)
+         else coalesce(sp.crowd_band, r.crowd_band, a.crowd_band, a.band) end as crowd_band,
+    case when ${OWN_BANDED} >= coalesce(sp.scored_at, to_timestamp(0)) then coalesce(r.count_band, sp.count_band, a.count_band)
+         else coalesce(sp.count_band, r.count_band, a.count_band) end as count_band,
+    -- An empty list is not an answer. Both of these default to '[]' on the
+    -- sweep's row, so a place swept before anybody looked at its food lost the
+    -- cuisines its owned record holds (Codex, 20 Sep 2026).
+    sp.chain,
+    coalesce(nullif(sp.cuisines, '[]'::jsonb), nullif(r.cuisines, '[]'::jsonb)) as cuisines,
+    coalesce(nullif(sp.accolades, '[]'::jsonb), nullif(a.accolades, '[]'::jsonb)) as accolades,
+    -- The curation writes its description under "what" (sources/curate.js's
+    -- own schema); reading "summary" alone said nothing had been written about
+    -- a place we had written four paragraphs about (Codex, 20 Sep 2026). Both
+    -- keys are read, because older rows hold the other one.
+    -- Ours first: a hand-written summary, then what we curated from the venue's
+    -- own pages, and the encyclopedia's only if we have written nothing. The
+    -- atlas ahead of the curation meant a place we had written four paragraphs
+    -- about still read as Wikipedia's first line (Codex, 20 Sep 2026).
+    coalesce(r.summary, r.curation->>'what', r.curation->>'summary', a.summary) as summary,
+    coalesce(r.website, a.website, sp.website) as website,
+    -- The same two places the readiness bar counts hours in, so the tick here
+    -- and the tick on the index board are about the same fact.
+    coalesce(r.opening_hours, d.visit->>'openingHours') as opening_hours,
+    coalesce(r.lat, sp.lat, a.lat) as lat, coalesce(r.lng, sp.lng, a.lng) as lng,
+    (select upper(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
+      where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode,
+    (select li.image_id from image_links li join image_assets ia on ia.id = li.image_id
+      where ia.may_store and ia.moderation = 'approved'
+        and ((li.subject_type = 'place' and li.subject_id = pi.venue_ref)
+          or (li.subject_type = 'attraction' and li.subject_id = a.id::text))
+      order by li.position limit 1) as picture,
+    (select m.state = 'read' from place_menus m where m.venue_ref = pi.venue_ref order by m.read_at desc nulls last limit 1) as menu_read`,
+    ` and ${NAME} is not null
+      order by ${SCORE} desc nulls last, sp.rank asc nulls last, pi.data_score desc nulls last, pi.venue_ref
+      limit $${args.length}`), args);
+
+  // What the ten were chosen from, and what was held back for having no name we
+  // may show. Both are counted over the same scope, so the board can say "ten
+  // of forty-one, twelve held back" without a second idea of where it is.
+  const { rows: [counted] } = await query(sql(`
+    count(*) filter (where ${NAME} is not null)::int as named,
+    count(*) filter (where ${NAME} is null)::int as nameless,
+    count(*) filter (where ${NAME} is not null and ${SCORE} is null)::int as unscored`, ''), args.slice(0, -1));
+
+  return {
+    rows: rows.map((r) => ({
+      ref: r.venue_ref, name: r.name,
+      category: r.category, subcategory: r.subcategory, outcode: r.outcode ?? null,
+      // Ours, and said to one decimal place because that is the precision it is
+      // kept to; a place nobody has scored says so rather than printing a nought.
+      epicScore: r.epic_score == null ? null : Math.round(Number(r.epic_score) * 10) / 10,
+      scoredAt: r.scored_at ?? null, rank: r.rank ?? null,
+      // Bands, never a rating: the figures the band was made from are a
+      // provider's and were never written down (§13.10).
+      standing: r.crowd_band ?? null, howMany: r.count_band ?? null,
+      chain: r.chain === true, cuisines: r.cuisines ?? [], accolades: r.accolades ?? [],
+      what: r.summary ?? null, website: r.website ?? null,
+      hours: Boolean(r.opening_hours), menu: r.menu_read === true,
+      picture: r.picture ?? null,
+      lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng),
+      dataScore: r.data_score, ready: r.ready, ownership: r.ownership,
+    })),
+    named: counted?.named ?? 0,
+    nameless: counted?.nameless ?? 0,
+    unscored: counted?.unscored ?? 0,
+  };
+}
+
 export async function namesFor(refs) {
   const out = new Map();
   if (!refs?.length) return out;
@@ -2463,5 +2622,5 @@ export async function namesFor(refs) {
 export default {
   SOURCES, bars, seedBars, setBar, reindex, rescore, note, noteMany, refreshStats, statsAge,
   statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll, settleClaims,
-  sources, quality, places, namesFor, labels, noteSeen,
+  sources, quality, places, household, namesFor, labels, noteSeen,
 };

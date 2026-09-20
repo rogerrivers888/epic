@@ -1518,6 +1518,25 @@ export type PlaceRow = {
   unseenBy: string[]; seenBy: string[];
 };
 
+/**
+ * One row of the household view: what somebody would actually be shown.
+ *
+ * A band, never a rating — the figures a band was made from are a provider's
+ * and were never written down (§13.10). `epicScore` is ours, derived, and on
+ * the scale the sweep prints (tenths, 0–10).
+ */
+export type HouseholdRow = {
+  ref: string; name: string; category: string | null; subcategory: string | null; outcode: string | null;
+  epicScore: number | null; scoredAt: string | null; rank: number | null;
+  standing: string | null; howMany: string | null; chain: boolean;
+  cuisines: string[]; accolades: string[];
+  what: string | null; website: string | null; hours: boolean; menu: boolean;
+  /** The picture a household would see, if we hold one we may show. */
+  picture: string | null;
+  lat: number | null; lng: number | null;
+  dataScore: number | null; ready: boolean; ownership: string;
+};
+
 export type PlaceField = {
   key: string; label: string; value: string | null; source: string | null; checked: string | null;
   /** What the column has no room for: it belongs in the row when it is opened. */
@@ -2591,6 +2610,12 @@ export const api = {
   /** BO2q — the places themselves. */
   adminPlaceList: (p: PlaceWhere & { cat?: string | null; sub?: string | null; show?: string; q?: string; missing?: string; sort?: string; desc?: string }) =>
     request<PlaceLevel & { rows: PlaceRow[]; facts: FactDef[]; bar: BarFact[]; counted: string[]; notReady: number }>(`/api/admin/place-index/places${qs(p)}`),
+  /**
+   * The same scope as a household would be shown it — our order, our fields,
+   * nothing nameless. Free: no provider is asked anything.
+   */
+  adminHouseholdView: (p: PlaceWhere & { cat?: string | null; sub?: string | null; limit?: number }) =>
+    request<PlaceLevel & { rows: HouseholdRow[]; named: number; nameless: number; unscored: number }>(`/api/admin/place-index/household${qs(p)}`),
   /** BO2h / BO2r — one place, every field, and what nobody has asked yet. */
   adminPlace: (ref: string) => request<PlaceDetail>(`/api/admin/place-index/place${qs({ ref })}`),
   /** BO2h — ours beside each provider's. Spends: one detail call per place. */
