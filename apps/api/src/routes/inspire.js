@@ -282,7 +282,7 @@ const ringFrom = (q, { minutes, mode }) => reach.ringFor({
  * the other way round: their order is a fact about their index, ours is a
  * judgement about the place (data policy, 19 Sep 2026).
  */
-async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving' }) {
+async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
   const got = await categoryPage({
     /**
      * The ring, not its size.
@@ -326,8 +326,12 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
    * with itself: no more spa in Chiswick, forty minutes away, on a thirty
    * minute ring (owner, 20 Sep 2026).
    */
-  const from = ring.at ?? null;
-  const within = (v) => !from || v.lat == null || estimateTravelMinutes(from, v, mode) <= minutes;
+  // Measured from the same point the card prints from, or the screen contradicts
+  // itself by a minute at the edge: two places came back saying "31 min drive"
+  // on a thirty-minute ring because the fence measured from the ring's centre
+  // and the card from where the family sets off (20 Sep 2026).
+  const start = from ?? ring.at ?? null;
+  const within = (v) => !start || v.lat == null || estimateTravelMinutes(start, v, mode) <= minutes;
 
   // The fence is the ring, and the question was the category.
   //
@@ -446,7 +450,7 @@ inspire.get('/around', async (req, res, next) => {
     const categories = [];
     let requests = 0;
     const asked = await Promise.all(wantedCats.map(async (key) =>
-      [key, await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id, minutes, mode })]));
+      [key, await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id, minutes, mode, from: ring.at })]));
     for (const [key, got] of asked) {
       requests += got.requests;
       categories.push({
@@ -580,7 +584,7 @@ inspire.get('/near', async (req, res, next) => {
       // each other; a page's own next page still does, because the token comes
       // from the page before it.
       const asked = await Promise.all(Object.keys(ASKED).map(async (key) =>
-        [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id, minutes, mode })]));
+        [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id, minutes, mode, from: origin })]));
       for (const [key, got] of asked) {
         requests += got.requests;
         moods.push({
