@@ -40,7 +40,7 @@ import { api, type PlaceLevel, type PlaceStats, type PlaceCountry, type PlaceAre
   type PlaceCategory, type PlaceSourceDef, type PlaceSourceRow, type PlaceQuality, type DemandRow, type DemandTotals,
   type PlaceRing, type PlaceRow, type PlaceDetail, type PictureIndex, type ReadyBars, type BarEffect, type BarFact,
   type CompareColumn, type CompareRow, type RawSource, type PlaceHistoryRow, type FactDef, type PlaceLabel, type PlaceCensusRow } from '../../api';
-import { AdminPage, ago, day, pounds, since } from '../kit';
+import { AdminPage, Dropdown, ago, day, pounds, since } from '../kit';
 import { Explain, type TipKey } from '../explain';
 import { Ladder, Num, Word, Blank, NotAsked, NoMatch, Na, Tick, Pct, ScoreCell, Bar, Progress, Act, Footer, Kicker, Stat, type Col } from '../table';
 
@@ -65,10 +65,29 @@ const BY = ['county', 'city', 'postcode'] as const;
 type By = typeof BY[number];
 const BY_LABEL: Record<By, string> = { county: 'County', city: 'City or town', postcode: 'Postcode district' };
 
-const BANDS = [30, 60, 90];
+// How far to look around a postcode, and the first of them is what a postcode
+// board opens on (owner, 20 Sep 2026: "5 minutes, which should be the
+// default"). Five is the tightest the matrix can honestly answer: it is read
+// with the edge allowance the sector centres need (EDGE_MINUTES, five minutes
+// either way), so this band is the sector and its immediate neighbours rather
+// than a precise five-minute drive.
+const BANDS = [5, 30, 60, 90];
 const MODES = ['drive', 'walk', 'transit'] as const;
 const MODE_LABEL: Record<string, string> = { drive: 'Car', walk: 'Walk', transit: 'Transit' };
-const bandLabel = (m: number) => (m === 60 ? '1 hour' : `${m} min`);
+const bandLabel = (m: number) => (m === 60 ? '1 hour' : `${m} minutes`);
+/** The next band out, or nothing when the board is already at the widest. */
+const widerThan = (m: number | null) => BANDS.find((b) => b > (m ?? BANDS[0])) ?? null;
+
+/**
+ * How an outcode is opened, from wherever it is picked.
+ *
+ * Its categories, because nothing is filed under an outcode; the first band,
+ * because that is what a postcode board opens on; and by car, because the
+ * chooser has to say how you are travelling for the band to mean anything.
+ * Written into the address at the moment of the move, so the page says what it
+ * draws rather than leaving the default to be inferred from an absence.
+ */
+const intoArea = (kind: string) => (kind === 'postcode' ? { lens: 'category' as Lens, within: BANDS[0], by: 'drive' } : undefined);
 
 /** The phone draws its own board rather than a squeeze of this one (BO2l). */
 const PHONE = 900;
@@ -105,7 +124,10 @@ export function Places({ canManage }: { canManage: boolean }) {
   // it is how you are travelling, and on a level it is what the rows are. They
   // never appear together — a ring has no county breakdown — so one word in the
   // address covers both and neither is ever ambiguous.
-  const ring = within != null;
+  // `?within=0` is how the address spells "this postcode on its own": the
+  // dropdown offers it beside the bands, and it has to be a value rather than
+  // an absence because a postcode with nothing said opens on the first band.
+  const ring = within != null && within > 0;
   const mode = ring ? ((MODES as readonly string[]).includes(by) ? by : 'drive') : 'drive';
   const breakdownBy = !ring ? (((BY as readonly string[]).includes(by) ? by : 'county') as By) : 'county';
 
@@ -258,7 +280,7 @@ function Level(props: {
   where: string; within: number | null; mode: string; ring: boolean; breakdownBy: By;
   lens: Lens; cat: string; sub: string; phone: boolean; canManage: boolean;
   onWhere: (slug: string, opts?: { within?: number | null; by?: string; lens?: Lens }) => void;
-  onLens: (l: Lens) => void; onBy: (b: string) => void; onWithin: (m: number | null) => void;
+  onLens: (l: Lens) => void; onBy: (b: string) => void; onWithin: (m: number | null, opts?: { replace?: boolean }) => void;
   onCat: (c: string) => void; onSub: (s: string) => void; onPlace: (ref: string) => void;
   onPictures: () => void; onBar: (sub: string) => void; onUp: () => void;
 }) {
@@ -270,7 +292,7 @@ function Level(props: {
   const [missing, setMissing] = useQueryState<string>('missing', '', asText);
   const [names, setNames] = useState<{ cat?: string; sub?: string; subs?: number; needs?: string[] }>({});
 
-  const q = useMemo(() => ({ where, within: within ?? undefined, by: ring ? mode : undefined }), [where, within, ring, mode]);
+  const q = useMemo(() => ({ where, within: ring ? within ?? undefined : undefined, by: ring ? mode : undefined }), [where, within, ring, mode]);
   // The five numbers follow how far down the ladder the board is standing: a
   // category prints the category's, a subcategory prints the subcategory's
   // (Codex, 17 Sep 2026).
@@ -293,6 +315,16 @@ function Level(props: {
       .then((l) => { setLevel(l); setNoSuchArea(null); })
       .catch((e: any) => setNoSuchArea(e?.body?.message ?? 'Nothing here by that name yet.'));
   }, [scoped]);
+
+  // An address that says nothing about how far out gets the default, and says
+  // so. Every way of *picking* an outcode already writes the band (`intoArea`);
+  // this is the one that was typed, bookmarked or shared before the band
+  // existed. It replaces rather than pushes, because it is how the page is set
+  // rather than a move (routes law, §13.14) — and it writes `0` when the
+  // district itself is what is wanted, so this never fights the chooser.
+  useEffect(() => {
+    if (level?.areaKind === 'postcode' && within == null) props.onWithin(BANDS[0], { replace: true });
+  }, [level, within, props.onWithin]);
 
   if (noSuchArea) {
     return (
@@ -324,12 +356,22 @@ function Level(props: {
   // back button (owner, 18 Sep 2026 — SL5 pasted in showed an empty board).
   // The same shape as the rule above, where naming a category *is* choosing the
   // category lens.
-  const lensHere: Lens = lens === 'coverage' && level?.areaKind === 'postcode' ? 'category' : lens;
+  // A ring drawn round an outcode is still standing on the outcode, so the two
+  // rules below hold inside it as well — they read `areaKind`, which a ring
+  // answers 'ring' to (20 Sep 2026, when the first band became the default and
+  // every outcode became a ring).
+  const onAPostcode = level?.areaKind === 'postcode' || (level?.areaKind === 'ring' && (level?.fromKind ?? 'postcode') === 'postcode');
+  const lensHere: Lens = lens === 'coverage' && onAPostcode ? 'category' : lens;
+
 
   const body = (() => {
     if (lensHere === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
     if (lensHere === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} areaKind={level.areaKind} />;
-    if (lensHere === 'census') return <CensusBoard where={level.slug} />;
+    // The census is of the postcode district, whatever ring is drawn round it:
+    // a ring's own slug is the matrix cell (`sector:SL5 0`), and the census
+    // board reads its `where` as an outcode, so it drew a blank board for every
+    // ring (20 Sep 2026).
+    if (lensHere === 'census') return <CensusBoard where={level.areaKind === 'ring' ? where : level.slug} />;
     if (lensHere === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lensHere === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lensHere === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
@@ -374,13 +416,13 @@ function Level(props: {
           thing you came to do. */}
       <LensRow lens={lensHere} onLens={props.onLens}
                right={ring || level.areaKind === 'postcode'
-                 ? <RingChooser minutes={within} mode={mode} onMinutes={props.onWithin}
+                 ? <RingChooser minutes={ring ? within : 0} here={level.name} mode={mode} onMinutes={props.onWithin}
                                 /* How you are travelling only means something inside a
                                    ring, so choosing it draws one at the first band —
                                    the same act as picking a way to travel in the search
                                    box, which has always drawn the ring. Otherwise the
                                    word lights nothing and the board does not move. */
-                                onMode={(m) => { props.onBy(m); if (within == null) props.onWithin(BANDS[0]); }}
+                                onMode={(m) => { props.onBy(m); if (!ring) props.onWithin(BANDS[0]); }}
                                 cells={level.cells} modesBuilt={level.modesBuilt} />
                  : <AreaSearch onWhere={props.onWhere} onPlace={props.onPlace} />} />
       {body}
@@ -575,60 +617,68 @@ function LensRow({ lens, onLens, right }: { lens: Lens; onLens: (l: Lens) => voi
 }
 
 /** 30 min · 1 hour · 90 min, by car, walking or transit. */
-function RingChooser({ minutes, mode, onMinutes, onMode, cells, modesBuilt }: {
+function RingChooser({ minutes, here, mode, onMinutes, onMode, cells, modesBuilt }: {
   /**
-   * The band in force, or null on a postcode nobody has drawn a ring from yet.
+   * The band in force, or 0 on a board showing the postcode district itself.
    *
-   * Nothing is lit then, and the board is the outcode's own places. Lighting 30
-   * by default would say the board was showing a half-hour's drive when it was
-   * showing SL5 — and the two are 2,571 places and 92.
+   * A list rather than three words, and the first band rather than nothing, is
+   * the owner's (20 Sep 2026): "instead of it being 30 minutes, 1 hour, 90
+   * minutes, can it please be a dropdown then… 5 minutes, which should be the
+   * default". The district on its own is kept as the first choice in the list,
+   * because it is the only way back to the census's own count — SL5 is 92
+   * places and five minutes' drive of it is 113.
    */
   minutes: number | null;
+  /** What the board is standing on, so the first choice can name it. */
+  here: string;
   mode: string; onMinutes: (m: number) => void; onMode: (m: string) => void; cells: number | null;
   /** Which ways of getting about the matrix can answer here; undefined means "do not know, offer them all". */
   modesBuilt?: string[];
 }) {
+  const ring = minutes != null && minutes > 0;
+  const chosen = ring ? bandLabel(minutes as number) : `${here} only`;
   return (
-    <Explain tip={['How far out', cells == null || minutes == null
-      ? 'How far to look around this place. The driving time between every postcode area is worked out once, so answering this does no sums.'
-      : `${cells.toLocaleString()} postcode areas are within ${minutes} minutes of here. That was worked out once, so answering this does no sums.`]}>
-      <View style={styles.chooser}>
-        <View style={styles.segment}>
-          {BANDS.map((b) => (
-            <Press key={b} effect="none" onPress={() => onMinutes(b)} accessibilityRole="button"
-                   accessibilityState={{ selected: minutes === b }} accessibilityLabel={bandLabel(b)}
-                   style={[styles.segItem, minutes === b && styles.segItemOn]}>
-              <Text style={[styles.segWord, minutes === b && styles.segWordOn]}>{bandLabel(b)}</Text>
-            </Press>
-          ))}
-        </View>
-        <View style={styles.segment}>
-          {MODES.map((m) => {
-            // A way of getting about the matrix has not been built here cannot
-            // answer, and a ring drawn in it comes back empty with nothing to
-            // say why. The word stays — removing a control is the owner's call
-            // — and says what it is waiting for (17 Sep 2026).
-            const built = !modesBuilt || modesBuilt.includes(m);
-            // Lit only once there is a ring, for the same reason the bands are.
-            // With no band chosen the board is the outcode's own places, and a
-            // lit Car said it was half an hour's drive — 92 places drawn under
-            // the chooser for 2,815 (owner, 20 Sep 2026: "a minute ago there
-            // were a lot more … now suddenly it's reduced significantly").
-            const on = minutes != null && mode === m;
-            return (
-              <Explain key={m} tip={built ? null : (['Not worked out yet', `The reachability matrix has not been built for ${MODE_LABEL[m].toLowerCase()} here. It is a free run, on Runs.`] as const)}>
-                <Press effect="none" onPress={() => (built ? onMode(m) : undefined)} accessibilityRole="button"
-                       disabled={!built}
-                       accessibilityState={{ selected: on, disabled: !built }} accessibilityLabel={MODE_LABEL[m]}
-                       style={[styles.segItem, on && styles.segItemOn]}>
-                  <Text style={[styles.segWord, on && styles.segWordOn, !built && styles.segWordOff]}>{MODE_LABEL[m]}</Text>
-                </Press>
-              </Explain>
-            );
-          })}
-        </View>
+    <View style={styles.chooser}>
+      <Explain tip={['How far out', !ring || cells == null
+        ? 'How far to look around this place. The driving time between every postcode area is worked out once, so answering this does no sums.'
+        : `${cells.toLocaleString()} postcode areas are within ${bandLabel(minutes as number)} of here. That was worked out once, so answering this does no sums.`]}>
+        <Dropdown label="How far" value={chosen} width={200}
+                  options={[
+                    // Named, not "no ring": a list whose first line is an
+                    // absence reads as a way of clearing the control rather
+                    // than as a place to stand.
+                    { key: '0', label: `${here} only`, on: !ring },
+                    ...BANDS.map((b) => ({ key: String(b), label: bandLabel(b), on: minutes === b, group: 'Look around it' })),
+                  ]}
+                  onPick={(k) => onMinutes(Number(k))} />
+      </Explain>
+      <View style={styles.segment}>
+        {MODES.map((m) => {
+          // A way of getting about the matrix has not been built here cannot
+          // answer, and a ring drawn in it comes back empty with nothing to
+          // say why. The word stays — removing a control is the owner's call
+          // — and says what it is waiting for (17 Sep 2026).
+          const built = !modesBuilt || modesBuilt.includes(m);
+          // Lit only once there is a ring, for the same reason the list says
+          // the district's own name rather than a band: with no ring the board
+          // is the district's own places, and a lit Car said it was half an
+          // hour's drive — 92 places drawn under the chooser for 2,815 (owner,
+          // 20 Sep 2026: "a minute ago there were a lot more … now suddenly
+          // it's reduced significantly").
+          const on = ring && mode === m;
+          return (
+            <Explain key={m} tip={built ? null : (['Not worked out yet', `The reachability matrix has not been built for ${MODE_LABEL[m].toLowerCase()} here. It is a free run, on Runs.`] as const)}>
+              <Press effect="none" onPress={() => (built ? onMode(m) : undefined)} accessibilityRole="button"
+                     disabled={!built}
+                     accessibilityState={{ selected: on, disabled: !built }} accessibilityLabel={MODE_LABEL[m]}
+                     style={[styles.segItem, on && styles.segItemOn]}>
+                <Text style={[styles.segWord, on && styles.segWordOn, !built && styles.segWordOff]}>{MODE_LABEL[m]}</Text>
+              </Press>
+            </Explain>
+          );
+        })}
       </View>
-    </Explain>
+    </View>
   );
 }
 
@@ -640,7 +690,7 @@ function AreaSearch({ onWhere, onPlace }: {
 }) {
   const [q, setQ] = useState('');
   const [out, setOut] = useState<Awaited<ReturnType<typeof api.adminPlaceSearch>> | null>(null);
-  const [band, setBand] = useState(30);
+  const [band, setBand] = useState(BANDS[0]);
   const [mode] = useState<string>('drive');
   useEffect(() => {
     if (q.trim().length < 2) { setOut(null); return; }
@@ -694,7 +744,7 @@ function AreaSearch({ onWhere, onPlace }: {
           ) : null}
           {out.areas.map((a) => (
             <Press key={a.slug} effect="none" accessibilityRole="button" accessibilityLabel={a.name}
-                   onPress={() => { setQ(''); setOut(null); onWhere(a.slug, a.kind === 'postcode' ? { lens: 'category' } : undefined); }} style={styles.suggestRow}>
+                   onPress={() => { setQ(''); setOut(null); onWhere(a.slug, intoArea(a.kind)); }} style={styles.suggestRow}>
               <Text style={styles.suggestName}>{a.name}</Text>
               <Text style={styles.suggestKind}>
                 {[a.parent ? `${a.kind} · ${a.parent}` : a.kind,
@@ -812,7 +862,7 @@ function BreakdownBoard({ q, by, onBy, onWhere, onCollectIn, canManage }: {
       </View>
       {data ? (
         <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug}
-                onRow={(r) => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)}
+                onRow={(r) => onWhere(r.slug, intoArea(r.kind))}
                 highlight={(r) => r.slug === worst?.slug}
                 /* The address writes `sort=empty.desc` and the column is keyed
                    `empty`, so the header compared the two and never matched —
@@ -894,7 +944,7 @@ function CoverageBoard({ q, onWhere, onCollect }: {
       </View>
       {data ? (
         <Ladder columns={columns} rows={data.rows} keyOf={(r) => r.slug}
-                onRow={(r) => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)}
+                onRow={(r) => onWhere(r.slug, intoArea(r.kind))}
                 /* "County" was printed whatever the level was, so an outcode
                    was told nothing was indexed under a county (owner, 18 Sep
                    2026: "SL5 is not a county, it is a postcode"). */
@@ -991,8 +1041,8 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
           </>
         ) : <Waiting />}
         <Footer>
-          {q.within != null && (within ?? 30) < 90
-            ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
+          {q.within != null && widerThan(within)
+            ? <Act label={`Widen to ${bandLabel(widerThan(within) as number)}`} tone="secondary" onPress={() => onWiden(widerThan(within) as number)} />
             : null}
           {c ? <Act label={`Collect ${c.label.toLowerCase()} places here`} icon="download" disabled={!canManage} onPress={onCollect} /> : null}
         </Footer>
@@ -1097,8 +1147,8 @@ function CategoryBoard({ q, cat, onCat, onSub, canManage, onNames, onWiden, with
         {!ring && !hideFull && flat.length - withPlaces > 0
           ? <Act label={`Show me just the ${flat.length - withPlaces}`} tone="secondary" onPress={() => setHideFull(true)} />
           : null}
-        {q.within != null && (within ?? 30) < 90
-          ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
+        {q.within != null && widerThan(within)
+          ? <Act label={`Widen to ${bandLabel(widerThan(within) as number)}`} tone="secondary" onPress={() => onWiden(widerThan(within) as number)} />
           : null}
         <Act label={q.within != null ? 'Collect in this ring' : 'Collect here'} icon="download" disabled={!canManage} onPress={onCollect} />
       </Footer>
@@ -1792,7 +1842,7 @@ function RingBoard({ q, onSub, onLens, onWithin }: {
         </View>
       </View>
       <Footer>
-        {(q.within ?? 30) < 90 ? <Act label={`Widen to ${bandLabel((q.within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWithin((q.within ?? 30) === 30 ? 60 : 90)} /> : null}
+        {widerThan(q.within ?? null) ? <Act label={`Widen to ${bandLabel(widerThan(q.within ?? null) as number)}`} tone="secondary" onPress={() => onWithin(widerThan(q.within ?? null) as number)} /> : null}
         <Act label="Collect in this ring" icon="download" onPress={() => onLens('collect')} />
       </Footer>
     </>
@@ -1984,8 +2034,8 @@ function PlacesBoard({ q, cat, sub, onPlace, onBar, canManage, missing, onMissin
           </Press>
         </View>
       }>
-        {q.within != null && (within ?? 30) < 90
-          ? <Act label={`Widen to ${bandLabel((within ?? 30) === 30 ? 60 : 90)}`} tone="secondary" onPress={() => onWiden((within ?? 30) === 30 ? 60 : 90)} />
+        {q.within != null && widerThan(within)
+          ? <Act label={`Widen to ${bandLabel(widerThan(within) as number)}`} tone="secondary" onPress={() => onWiden(widerThan(within) as number)} />
           : null}
         <Act label={busy === 'curate' ? 'Curating…' : picked.size ? `Curate these ${picked.size} · free` : 'Curate them · free'} tone="secondary"
              disabled={!canManage || !picked.size || busy != null}
@@ -3326,7 +3376,7 @@ function PlacesPhone({ level, q, lens, onLens, onWhere, onUp }: {
       </ScrollView>
 
       {!data ? <Waiting /> : data.rows.map((r, i) => (
-        <Press key={r.slug} effect="none" onPress={() => onWhere(r.slug, r.kind === 'postcode' ? { lens: 'category' } : undefined)} accessibilityRole="button"
+        <Press key={r.slug} effect="none" onPress={() => onWhere(r.slug, intoArea(r.kind))} accessibilityRole="button"
                accessibilityLabel={r.name} style={[styles.phoneRow, i === data.rows.length - 1 && { borderBottomWidth: 0 }]}>
           <View style={{ gap: 2 }}>
             <Text style={styles.rowName}>{r.name}</Text>
@@ -3423,7 +3473,7 @@ const styles = StyleSheet.create({
   suggest: { borderWidth: 1, borderTopWidth: 0, borderColor: colors.ruleMuted, backgroundColor: colors.surface },
   suggestRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: 13, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   suggestPostcode: { paddingHorizontal: 13, paddingVertical: 9, gap: 7, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
-  suggestBands: { flexDirection: 'row', gap: 6 },
+  suggestBands: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   suggestBand: { borderWidth: 1, borderColor: colors.ruleMuted, paddingHorizontal: 11, paddingVertical: 5 },
   suggestName: { ...type.small, fontSize: 13.5, fontWeight: '700', color: colors.ink },
   suggestKind: { ...type.tiny, color: colors.inkMuted },

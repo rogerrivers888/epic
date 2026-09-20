@@ -229,8 +229,14 @@ const TA_UNITS_PER_VIEW = 2;
 const taCost = (places) =>
   Math.round(places * TA_UNITS_PER_VIEW * PRICE_PER_UNIT_USD.tripadvisor * 100 * USD_TO_GBP);
 
-/** The ring chooser's three steps, and the three ways of getting there. */
-export const BANDS = [30, 60, 90];
+/**
+ * The ring chooser's steps, and the three ways of getting there.
+ *
+ * The first is what a postcode board opens on (owner, 20 Sep 2026: "5 minutes,
+ * which should be the default"). Kept in step with the same list on the board
+ * itself — apps/web/src/admin/screens/Places.tsx.
+ */
+export const BANDS = [5, 30, 60, 90];
 const MODES = ['drive', 'walk', 'transit'];
 
 /**
