@@ -185,10 +185,15 @@ router.get('/customers', requires('view_accounts'), async (req, res, next) => {
     return res.json({
       mock,
       period,
-      customers: money ? c : {
-        ...c,
-        households: c.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
-        payingMrr: null,
+      customers: {
+        // Rule 4: origin slices everything, so the split travels with the list
+        // it slices rather than only with the reporting model.
+        origins: model.estate.origins ?? null,
+        ...(money ? c : {
+          ...c,
+          households: c.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
+          payingMrr: null,
+        }),
       },
       gaps: model.gaps ?? {},
       withheld: money ? [] : ['view_financials'],
@@ -338,7 +343,15 @@ router.post('/subscriptions/publish', requires('manage_plans'), async (req, res,
  * failure denominator** — a failure rate whose numerator moves and whose
  * denominator does not is worse than no figure.
  */
-router.get('/supplier/:key', requires('view_reporting'), async (req, res, next) => {
+/**
+ * `view_financials`, not `view_reporting`.
+ *
+ * The record carries the rate, its whole history, spend, expected spend, the
+ * variance and twelve months of cost — every one of which `withhold()` takes
+ * out of the main answer for a caller without money access. Leaving this route
+ * on `view_reporting` was a way round its own redaction (Codex, 20 Sep 2026).
+ */
+router.get('/supplier/:key', requires('view_financials'), async (req, res, next) => {
   try {
     const period = periodOf(req);
     if (wantsMock(req)) {

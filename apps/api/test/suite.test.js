@@ -22,6 +22,7 @@ import { annualPence } from '../src/repositories/pricing.js';
 import { PURPOSE_CLASSES, backOfficeActorExpression, classOf } from '../src/domain/costClass.js';
 import { change } from '../src/repositories/suite.js';
 import { listCounterparties, setAdapter } from '../src/repositories/counterparties.js';
+import { readStanding, readTiers, setPrice } from '../src/repositories/pricing.js';
 import { withhold } from '../src/routes/suite.js';
 import { enabledSources, loadSourceSettings, setSourceOff, sourceKeys, sourceOff } from '../src/sources/index.js';
 import { pool, query } from '../src/db.js';
@@ -326,6 +327,42 @@ test('a swept session does not turn a household’s call into research', () => {
   // the conservative default.
   assert.ok(sql.indexOf('api_sessions') < sql.indexOf('c.household_id'));
   assert.match(sql, /true\)$/);
+});
+
+test('a household keeps the price it was sold at when the price goes up', async () => {
+  /**
+   * The Subscriptions panel says "changing a price writes a new price row;
+   * existing subscriptions keep the row they were sold on", and MRR used to
+   * value every account at the plan's *current* price — so the promise was
+   * false the moment the price changed (Codex, 20 Sep 2026).
+   *
+   * Exercised against a real account rather than asserted about the SQL,
+   * because the fault was in what the query returned and not in what it said.
+   */
+  const { rows: [a] } = await query('select id, plan, status from accounts order by created_at limit 1');
+  const was = { plan: a.plan, status: a.status };
+  const { rows: [price] } = await query(
+    "select amount_pence, annual_discount_pct from plan_prices where plan_key='household' and channel='web' and effective_to is null");
+  try {
+    await query("update accounts set plan = 'household' where id = $1", [a.id]);
+    await query(
+      "insert into account_plan_history (account_id, plan, status, price_pence) values ($1, 'household', $2, 899)",
+      [a.id, a.status]);
+    assert.equal((await readStanding()).mrrPence, 899, 'sold at £8.99');
+
+    await setPrice({ planKey: 'household', channel: 'web', amountPence: 1199, discountPct: 7, by: 'a test' });
+    // The price on the tier moved…
+    assert.equal((await readTiers()).find((t) => t.key === 'household').webPence, 1199);
+    // …and what this household is worth did not.
+    assert.equal((await readStanding()).mrrPence, 899, 'grandfathered');
+  } finally {
+    await setPrice({
+      planKey: 'household', channel: 'web',
+      amountPence: price.amount_pence, discountPct: Number(price.annual_discount_pct), by: 'a test, putting it back',
+    });
+    await query('delete from account_plan_history where account_id = $1', [a.id]);
+    await query('update accounts set plan = $2, status = $3 where id = $1', [a.id, was.plan, was.status]);
+  }
 });
 
 // ---------------------------------------------------------------------------

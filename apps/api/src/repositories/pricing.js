@@ -263,7 +263,30 @@ export async function readChannels() {
 export async function readStanding() {
   const tiers = await readTiers();
   const paying = tiers.reduce((n, t) => n + t.subscribers, 0);
-  const mrrPence = tiers.reduce((n, t) => n + t.subscribers * (t.webPence ?? 0), 0);
+  /**
+   * What each account is actually on, not the tier's current price times the
+   * number of them.
+   *
+   * `subscribers × webPence` valued every grandfathered account at whatever the
+   * price was raised to this morning — while the panel above it promised the
+   * opposite (Codex, 20 Sep 2026). The history row's own price is what each one
+   * is worth; the tier's cache is the fallback where there is no history, which
+   * is what `estimated` reports elsewhere.
+   */
+  const { rows: [sum] } = await query(
+    `select coalesce(sum(coalesce(
+              (select ph.price_pence from account_plan_history ph
+                where ph.account_id = a.id and ph.price_pence is not null
+                order by ph.from_at desc limit 1),
+              p.price_pence
+            )), 0)::int as pence
+       from accounts a
+       join households h on h.id = a.household_id
+       join plans p on p.key = a.plan
+      where a.status <> 'suspended' and h.origin <> 'guest_invite' and p.key = any($1::text[])`,
+    [TIERS],
+  );
+  const mrrPence = int(sum.pence);
   return {
     mrrPence,
     mrrDelta: null,

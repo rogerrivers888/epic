@@ -106,7 +106,13 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    * used to read the whole reporting model and answer 403).
    */
   { key: 'customers', label: 'Customers', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'Reporting' },
-  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_reporting', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
+  /**
+   * Suppliers is money end to end — spend, a rate, a variance — so it asks for
+   * the money capability rather than the reporting one. Advertising it to a
+   * reader who would get an empty screen is the fault Customers had the other
+   * way round (Codex, 20 Sep 2026).
+   */
+  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_financials', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
   { key: 'behaviour', label: 'Behaviour', icon: 'inspire', needs: 'view_reporting', sub: 'What households actually do, and whether they come back', group: 'Reporting' },
   /**
    * Data. Five screens that were each bound to a different table became three
@@ -205,7 +211,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'money' ? <Money canSeeMoney={can('view_financials')} /> : null}
       {screen === 'subscriptions'
         ? <Subscriptions canSeeMoney={can('view_financials')} canManage={can('manage_plans')} /> : null}
-      {screen === 'customers' ? <Customers canSeeMoney={can('view_financials')} /> : null}
+      {screen === 'customers' ? <Customers canSeeMoney={can('view_financials')} canManage={can('manage_accounts')} /> : null}
       {screen === 'suppliers'
         ? <Suppliers canSeeMoney={can('view_financials')} canManage={can('manage_settings')} /> : null}
       {screen === 'behaviour' ? <Behaviour /> : null}

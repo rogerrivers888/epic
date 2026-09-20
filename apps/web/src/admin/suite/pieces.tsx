@@ -272,7 +272,12 @@ export function MeasureTile({ label, value, gap, delta, deltaDown, sub, series, 
       {value == null
         ? <View style={{ paddingVertical: 6 }}><Gap says={gap} /></View>
         : <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>}
-      {delta || sub ? (
+      {/*
+        A tile with no figure says nothing else.
+        "No hotel booking provider" over "on the window before" claims a
+        comparison with a window in which there was also nothing (20 Sep 2026).
+      */}
+      {value != null && (delta || sub) ? (
         <View style={styles.tileMeta}>
           {delta ? <Text style={[styles.tileDelta, deltaDown && styles.tileDeltaDown]}>{delta}</Text> : null}
           {sub ? <Text style={styles.tileSub} numberOfLines={2}>{sub}</Text> : null}
@@ -560,12 +565,14 @@ export function Standing({ items }: {
           <Text style={styles.tileKicker}>{s.label.toUpperCase()}</Text>
           <View style={styles.standingLine}>
             {s.value == null
-              // The reason wraps inside the column it sits in rather than
-              // running into the figure beside it: "No payment provider" was
-              // clipped to "No payment provide" (20 Sep 2026).
-              ? <View style={{ flexShrink: 1, minWidth: 0 }}><Gap says={s.gap} /></View>
+              // The reason takes the whole column rather than sharing the line
+              // with a figure that is not there: `flexShrink` alone still left
+              // "No payment provider" clipped to "No payment provide" (20 Sep
+              // 2026, reading the real-mode screen).
+              ? <View style={{ flexBasis: '100%', minWidth: 0 }}><Gap says={s.gap} /></View>
               : <Text style={styles.standingValue}>{s.value}</Text>}
-            {s.delta ? <Text style={styles.tileDelta}>{s.delta}</Text> : null}
+            {/* A change is a change *in* something; there is nothing to change. */}
+            {s.value != null && s.delta ? <Text style={styles.tileDelta}>{s.delta}</Text> : null}
           </View>
           {s.sub ? <Text style={styles.tileSub} numberOfLines={2}>{s.sub}</Text> : null}
         </View>
@@ -733,12 +740,19 @@ export function Cell({ children, strong, muted, lime, alarm, gap, left }: {
 }
 
 /** Two lines in one cell — a household's name over its area. */
-export function TwoLine({ top, bottom }: { top: string; bottom?: string | null }) {
+export function TwoLine({ top, bottom, muted }: { top: string; bottom?: string | null; muted?: boolean }) {
   return (
     // Always left: this is the row's name, and a name is the one thing on a
     // table that a reader scans down rather than compares across.
     <View style={{ minWidth: 0, width: '100%' }}>
-      <Text numberOfLines={1} style={[styles.td, styles.tdLeft, { fontWeight: '700', color: colors.ink }]}>{top}</Text>
+      <Text
+        numberOfLines={1}
+        // `muted` is a whole row that has gone quiet — a cancelled household —
+        // at the handoff's own `#cfcac7`, which is `mutedOnInk` here.
+        style={[styles.td, styles.tdLeft, { fontWeight: '700', color: muted ? colors.mutedOnInk : colors.ink }]}
+      >
+        {top}
+      </Text>
       {bottom ? <Text numberOfLines={1} style={[styles.tdSub, styles.tdLeft]}>{bottom}</Text> : null}
     </View>
   );

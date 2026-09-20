@@ -248,7 +248,15 @@ async function subscriptionRevenue(from, to) {
        from priced`,
     [from, to],
   );
-  return { pence: int(r.pence), estimated: int(r.estimated_rows) === int(r.rows_total) && int(r.rows_total) > 0 };
+  /**
+   * Estimated as soon as **any** of it is.
+   *
+   * It used to need every row to be estimated, so a window holding one legacy
+   * account beside twenty with history presented itself as exact (Codex, 20 Sep
+   * 2026). A figure that is partly worked out from today's price is not exact,
+   * and the screen's warning is what says so.
+   */
+  return { pence: int(r.pence), estimated: int(r.estimated_rows) > 0 };
 }
 
 /** Monthly recurring revenue as it stands, by plan — a rate, never scaled. */
@@ -260,9 +268,29 @@ async function mrr() {
      * counted and still summed (Codex, 20 Sep 2026). The exclusion belongs in
      * the aggregate's own filter, where it actually excludes.
      */
+    /**
+     * Two faults, both Codex's, 20 Sep 2026:
+     *
+     *  · `h.origin <> 'guest_invite'` in the LEFT JOIN condition only made `h`
+     *    null for a guest — it did not drop the account row — so guests were
+     *    still counted and still summed. The exclusion belongs in the
+     *    aggregate's own filter, where it actually excludes.
+     *  · **MRR valued every account at the plan's current price.** So the
+     *    moment `/subscriptions/price` raised the Household price, every
+     *    existing Household account was worth the new one — while the panel
+     *    beside it promised that existing subscriptions keep the row they were
+     *    sold on. It reads each account's own latest history price now, and
+     *    falls back to the plan's cache only where there is no history, which
+     *    is what `estimated` reports.
+     */
     `select p.key, p.label, p.price_pence,
             count(a.id) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite')::int as households,
-            coalesce(sum(p.price_pence) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite'), 0)::int as pence
+            coalesce(sum(coalesce(
+              (select ph.price_pence from account_plan_history ph
+                where ph.account_id = a.id and ph.price_pence is not null
+                order by ph.from_at desc limit 1),
+              p.price_pence
+            )) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite'), 0)::int as pence
        from plans p
        left join accounts a on a.plan = p.key
        left join households h on h.id = a.household_id
@@ -542,23 +570,43 @@ async function history(now) {
 
   // Revenue, month by month, from the plan each account was on during it.
   const { rows: revenueRows } = await query(
+    /**
+     * The same rule as `subscriptionRevenue`, and it was missing here.
+     *
+     * This series is what "Open the chart" draws, and it recomputed every one
+     * of the twelve months from the account's *current* status and the plan's
+     * *current* price — so suspending somebody erased them from last year and
+     * changing a price repriced it (Codex, 20 Sep 2026). `account_plan_history`
+     * carries a `status` and a `price_pence` per row for exactly this, and they
+     * are what each bucket reads.
+     */
     `with span as (
        select generate_series(date_trunc('month', $1::timestamptz), date_trunc('month', now()), '1 month') as month
      ),
      state as (
-       select s.month, a.id as account_id, a.status,
-              coalesce((select ph.plan from account_plan_history ph
-                         where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
-                         order by ph.from_at desc limit 1), a.plan) as plan,
-              (a.created_at < s.month + interval '1 month') as existed
+       select s.month, a.id as account_id,
+              (select ph.plan from account_plan_history ph
+                where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
+                order by ph.from_at desc limit 1)                            as held_plan,
+              (select ph.price_pence from account_plan_history ph
+                where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
+                order by ph.from_at desc limit 1)                            as held_pence,
+              (select ph.status from account_plan_history ph
+                where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
+                order by ph.from_at desc limit 1)                            as held_status,
+              a.plan                                                          as now_plan,
+              a.status                                                        as now_status,
+              (a.created_at < s.month + interval '1 month')                   as existed
          from span s
          left join accounts a on true
          left join households h on h.id = a.household_id
         where a.id is null or h.origin <> 'guest_invite'
      )
      select to_char(st.month, 'YYYY-MM') as month,
-            coalesce(sum(p.price_pence) filter (where st.existed and st.status <> 'suspended'), 0)::int as pence
-       from state st left join plans p on p.key = st.plan
+            coalesce(sum(coalesce(st.held_pence, p.price_pence))
+              filter (where st.existed and coalesce(st.held_status, st.now_status) <> 'suspended'), 0)::int as pence
+       from state st
+       left join plans p on p.key = coalesce(st.held_plan, st.now_plan)
       group by 1 order by 1`,
     [first],
   );
@@ -1272,14 +1320,17 @@ export async function readSuite(period, { now = new Date() } = {}) {
       key: 'subscriptions', label: 'Subscriptions', revenue, cost: null, margin: null, marginPct: null,
       growth: change(subNow.pence, subPrev.pence), perSub: est.paying ? Math.round((mrrPence / 100 / est.paying) * 100) / 100 : null,
       units: est.paying, unitName: 'subscriptions',
-      avgUnit: est.paying ? `£${(mrrPence / 100 / est.paying).toFixed(2)}` : null,
+      avgUnit: est.paying ? Math.round((mrrPence / 100 / est.paying) * 100) / 100 : null,
       churn: null, series: hist.series.subscriptions, estimated: subNow.estimated,
+      // The channels a subscription was sold through are not recorded, so there
+      // is nothing to indent under it yet (`pricing.readChannels`).
+      details: null,
     },
     { key: 'hotel', label: 'Hotel upsell', revenue: null, cost: null, margin: null, marginPct: null, growth: null, perSub: null, units: null, unitName: 'bookings', avgUnit: null, churn: null, series: null, gap: GAPS.hotel },
     {
       key: 'hosting', label: 'Hosting commission', revenue: null, cost: null, margin: null, marginPct: null,
       growth: null, perSub: null, units: bookNow.count, unitName: 'bookings',
-      avgUnit: bookNow.count ? `£${(bookNow.grossPence / 100 / bookNow.count).toFixed(2)}` : null,
+      avgUnit: bookNow.count ? Math.round((bookNow.grossPence / 100 / bookNow.count) * 100) / 100 : null,
       churn: null, series: hist.series.attended, gap: GAPS.commission,
     },
     { key: 'activity', label: 'Activity upsell', revenue: null, cost: null, margin: null, marginPct: null, growth: null, perSub: null, units: null, unitName: 'bookings', avgUnit: null, churn: null, series: null, gap: GAPS.activity },
