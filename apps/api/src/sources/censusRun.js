@@ -273,6 +273,23 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
     const out = await censusOneTile({ run, tile, pace, remaining: Math.max(0, (fresh?.max_requests ?? run.max_requests) - (fresh?.requests ?? 0)) });
     tiles += 1;
     await refreshProgress(run.id);
+
+    // The ledger, read rather than trusted.
+    //
+    // §4: "Ledger everything in `provider_calls` as usual, with the expectation
+    // that the cost column reads zero — and alert if it does not, because a
+    // non-zero figure means something is running at the wrong field mask." At a
+    // hundred thousand requests the difference between the free tier and Pro is
+    // the difference between nothing and three thousand pounds, so this is not
+    // a warning to log: the run stops on the first penny and waits for a
+    // person. The alarm is checked after each tile because a tile is the most
+    // that can be spent before somebody could have noticed.
+    const spent = await spentSince(run.started_at);
+    if (spent > 0) {
+      await finish(run.id, 'paused',
+        `stopped on the first penny: the census ledgered $${spent.toFixed(4)}, and IDs Only is free — something is asking Google for a field the census may not buy`);
+      return { working: false, reason: 'billed', spent, tiles };
+    }
     if (out.refused) {
       // A refusal is the provider telling the whole run to stop, not one tile
       // failing. The first ring census fired 9,321 doomed requests past a daily
@@ -335,6 +352,21 @@ async function censusOneTile({ run, tile, pace, remaining }) {
       out.noted ?? 0, out.saturated ?? 0, out.problems?.length ? out.problems.slice(0, 3).join(' · ').slice(0, 300) : null]);
 
   return { refused: out.refused ?? null, requests: out.requests ?? 0, places: out.noted ?? 0 };
+}
+
+/**
+ * What the census has been charged since a moment, in dollars.
+ *
+ * Only the census's own purpose. Households are searching and paying for
+ * display calls the whole time this runs, and reading the whole ledger would
+ * see their spending and stop a run that had cost nothing.
+ */
+async function spentSince(startedAt) {
+  const { rows: [row] } = await query(
+    `select coalesce(sum(estimated_cost_usd), 0)::float as usd
+       from provider_calls
+      where purpose = 'census.slice' and created_at >= $1`, [startedAt]);
+  return Number(row?.usd ?? 0);
 }
 
 async function finish(id, state, problem) {

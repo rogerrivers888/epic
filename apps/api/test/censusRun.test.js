@@ -261,3 +261,27 @@ test('a run can be three districts, which is what calibrating before committing 
       'and naming a district is not a way of accidentally censusing its whole postcode area');
   }
 });
+
+test('a free run that starts costing money stops on the first penny', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from provider_calls where purpose = 'census.slice' and household_id is null and ms = -4242`);
+    await clean();
+  });
+  const run = await startTestRun({ label: 'test billed' });
+  await seedTile(run, 'test/billed');
+
+  // What a wrong field mask looks like from the outside: the census's own
+  // purpose, with money against it. At a hundred thousand requests the gap
+  // between Essentials and Pro is the gap between nothing and thousands of
+  // pounds, so this is not a warning to log.
+  await query(
+    `insert into provider_calls (provider, purpose, estimated_cost_usd, ms, created_at)
+     values ('google', 'census.slice', 0.032, -4242, now())`);
+
+  const out = await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 10_000 }));
+  assert.equal(out.reason, 'billed');
+  const { rows: [after] } = await query(`select state, problem from census_runs where id = $1`, [run.id]);
+  assert.equal(after.state, 'paused', 'it waits for a person rather than carrying on');
+  assert.match(after.problem ?? '', /free|penny|may not buy/i);
+});
