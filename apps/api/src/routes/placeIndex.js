@@ -3257,18 +3257,39 @@ router.get('/census/quote', requires('view_library'), async (req, res, next) => 
     const tiles = await censusRun.planTiles({ areas, outcodes });
     const plan = await slicePlan();
     const questions = plan.reduce((n, p) => n + p.questions.length, 0);
-    const floor = tiles.length * questions;
+
+    // How many postcode sectors sit in each tile, which is the density the
+    // splitting follows. Counted here rather than guessed, because the whole
+    // point of §3 is not to start 1,250 outcodes blind.
+    const { rows: density } = await query(
+      `select t.k, count(g.code)::int as sectors
+         from unnest($1::text[], $2::float8[], $3::float8[], $4::float8[], $5::float8[])
+              as t(k, min_lat, min_lng, max_lat, max_lng)
+         left join geo_cells g
+           on g.lat >= t.min_lat and g.lat < t.max_lat and g.lng >= t.min_lng and g.lng < t.max_lng
+        group by t.k`,
+      [tiles.map((t) => t.gridKey), tiles.map((t) => t.minLat), tiles.map((t) => t.minLng),
+        tiles.map((t) => t.maxLat), tiles.map((t) => t.maxLng)]);
+
+    // Measured, not assumed (20 Sep 2026). Three calibration tiles: rural north
+    // Norfolk 272 requests, Ascot 274, and central London — 57 sectors — 1,500.
+    // So a tile costs its questions, and nothing more until there is enough in
+    // it to cut a slice off at sixty; past about eight sectors each one adds
+    // roughly 25 requests of splitting. The brief's estimate of 800–1,000 per
+    // outcode was an artefact of iterating overlapping outcode boxes.
+    const SPLIT_FROM = 8;
+    const PER_SECTOR = 25;
+    const requests = density.reduce((n, d) => n + questions + PER_SECTOR * Math.max(0, d.sectors - SPLIT_FROM), 0);
     res.json({
       areas: [...areas, ...outcodes],
       tiles: tiles.length,
       outcodes: new Set(tiles.flatMap((t) => t.outcodes)).size,
+      sectors: density.reduce((n, d) => n + d.sectors, 0),
       questions,
-      // The floor is what the run costs if nothing is ever cut off. The band is
-      // the floor times what splitting actually cost in the two areas whose
-      // censuses are on the record: SL5 came to 4.1 times its floor, SE1 to
-      // 21.5. A real region is a mix, which is what the calibration measures.
-      requests: { floor, likely: Math.round(floor * 4.1), dense: Math.round(floor * 21.5) },
-      hours: { at5: Math.round(floor * 4.1 / 5 / 3600), at10: Math.round(floor * 4.1 / 10 / 3600) },
+      requests,
+      floor: tiles.length * questions,
+      hours: { at5: Math.round(requests / 5 / 360) / 10, at10: Math.round(requests / 10 / 360) / 10 },
+      // Nought, and the run stops itself on the first penny if it ever is not.
       costGbp: 0,
     });
   } catch (err) { next(err); }

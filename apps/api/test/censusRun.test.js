@@ -378,3 +378,18 @@ test('re-censusing a tile counts what is there now, not what was there last time
     `select distinct venue_ref from place_subcategories where area_slug = 'test/recensus'`);
   assert.equal(kept.length, 2, 'and the one that is gone is still on the record, not deleted');
 });
+
+test('the squares between the sectors we hold are censused too', async () => {
+  const bare = await planTiles({ areas: ['SL', 'GU'], padKm: 0 });
+  if (!bare.length) return;
+  const padded = await planTiles({ areas: ['SL', 'GU'] });
+  assert.ok(padded.length > bare.length, 'a grid with no holes is bigger than one with holes');
+  // geo_cells is a sample — about 6,300 sectors against the 11,000 there are —
+  // so a square can sit in the middle of a town and hold none of the ones we
+  // have. A square nobody censuses is a hole no count ever mentions, which is
+  // the failure §5 is written against.
+  const added = padded.filter((t) => !bare.some((b) => b.gridKey === t.gridKey));
+  assert.ok(added.every((t) => t.outcodes.length),
+    'a padded square still says which outcodes it reports to, or it could never be reported at all');
+  assert.ok(added.length < bare.length, 'and padding fills gaps rather than doubling the run');
+});

@@ -54,6 +54,17 @@ import { whereBoxSits } from '../repositories/censusRing.js';
 export const TILE_LAT = Number(process.env.EPIC_CENSUS_TILE_LAT || 0.08);
 export const TILE_LNG = Number(process.env.EPIC_CENSUS_TILE_LNG || 0.12);
 
+/**
+ * How far past a known postcode sector a tile is still censused.
+ *
+ * One tile. `geo_cells` holds about 6,300 sectors of the roughly 11,000 there
+ * are, so a square can sit in the middle of a town and contain none of the ones
+ * we have — and a square nobody censuses is a hole no count ever mentions.
+ * Padding costs about a sixth more tiles on London and the home counties, all
+ * of them cheap ones, and buys a grid with no silent gaps in it.
+ */
+export const PAD_KM = Number(process.env.EPIC_CENSUS_PAD_KM || 8);
+
 /** How long one pass of the loop works before handing the process back. */
 const SLICE_MS = Number(process.env.EPIC_CENSUS_SLICE_MS || 55_000);
 
@@ -84,7 +95,7 @@ export const tileOf = (lat, lng, dLat = TILE_LAT, dLng = TILE_LNG) => {
  * of those sectors are written onto the tile, which is how a tile census is
  * reported by outcode afterwards without anybody having to guess.
  */
-export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dLng = TILE_LNG } = {}) {
+export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM } = {}) {
   if (!areas.length && !outcodes.length) return [];
   // Either the whole postcode area or named districts. The second is what a
   // calibration run needs — three areas before committing to a thousand — and
@@ -96,12 +107,47 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
           or ($2::text[] <> '{}' and upper(outcode) = any($2)))`,
     [areas.map((a) => a.toUpperCase()), outcodes.map((o) => o.toUpperCase())],
   );
+  const points = rows.map((r) => ({ lat: Number(r.lat), lng: Number(r.lng), outcode: String(r.outcode).toUpperCase() }));
   const tiles = new Map();
-  for (const r of rows) {
-    const t = tileOf(Number(r.lat), Number(r.lng), dLat, dLng);
-    const existing = tiles.get(t.gridKey) ?? { ...t, outcodes: new Set() };
-    existing.outcodes.add(String(r.outcode).toUpperCase());
-    tiles.set(t.gridKey, existing);
+  const put = (key, tile, outcode) => {
+    const existing = tiles.get(key) ?? { ...tile, outcodes: new Set() };
+    if (outcode) existing.outcodes.add(outcode);
+    tiles.set(key, existing);
+  };
+  for (const p of points) {
+    const t = tileOf(p.lat, p.lng, dLat, dLng);
+    put(t.gridKey, t, p.outcode);
+  }
+
+  // The squares between the sectors we happen to hold.
+  //
+  // `geo_cells` is a sample, not the whole postcode file — about 6,300 sectors
+  // against the roughly 11,000 there are — so a square can be in the middle of
+  // a town and contain none of the ones we have. Keeping only squares with a
+  // sector in them would leave holes in the grid that nothing ever reports,
+  // which is the one failure §5 is written against: a count is worthless
+  // unless it says what ground it covers, and a hole says nothing at all.
+  //
+  // So a square touching the region is censused too, and takes the outcodes of
+  // the sectors it is near for reporting. Eight kilometres is one tile: it
+  // fills the gaps between sampled sectors and does not walk off into the sea.
+  if (padKm > 0) {
+    const km = (a, b) => Math.hypot((a.lat - b.lat) * 111.32, (a.lng - b.lng) * 69.4);
+    for (const key of [...tiles.keys()]) {
+      const t = tiles.get(key);
+      for (const di of [-1, 0, 1]) {
+        for (const dj of [-1, 0, 1]) {
+          if (!di && !dj) continue;
+          const centre = { lat: t.minLat + dLat * (di + 0.5), lng: t.minLng + dLng * (dj + 0.5) };
+          const n = tileOf(centre.lat, centre.lng, dLat, dLng);
+          if (tiles.has(n.gridKey)) continue;
+          const near = points.filter((p) => km(p, centre) <= padKm);
+          if (!near.length) continue;
+          put(n.gridKey, n, null);
+          for (const p of near) put(n.gridKey, n, p.outcode);
+        }
+      }
+    }
   }
   return [...tiles.values()].map((t) => ({ ...t, outcodes: [...t.outcodes].sort() }));
 }
@@ -115,7 +161,7 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
  */
 export async function startRun({
   label, areas = [], outcodes = [], maxRequests = 250_000, ratePerSec = 5, freshDays = CENSUS_FRESH_DAYS,
-  dLat = TILE_LAT, dLng = TILE_LNG, startedBy = null,
+  dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM, startedBy = null,
 } = {}) {
   if (!areas?.length && !outcodes?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
@@ -125,7 +171,7 @@ export async function startRun({
   if (going.length) {
     throw Object.assign(new Error(`“${going[0].label}” is already running; stop it before starting another`), { status: 409 });
   }
-  const tiles = await planTiles({ areas, outcodes, dLat, dLng });
+  const tiles = await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
 
   const { rows: [run] } = await query(
